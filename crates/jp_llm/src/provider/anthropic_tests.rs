@@ -114,7 +114,7 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, is_structured) = create_request(&model, query, true, &beta).unwrap();
+    let (request, is_structured, _) = create_request(&model, query, true, &beta).unwrap();
     assert!(!is_structured);
 
     // Verify adaptive thinking is used
@@ -164,7 +164,7 @@ fn test_opus_4_6_max_effort_mapping() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
 
     // Verify Max effort is used
     assert!(request.output_config.is_some());
@@ -199,7 +199,7 @@ fn test_opus_4_5_uses_budgetted_thinking() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
 
     // Verify budget-based thinking is used (not adaptive)
     assert!(matches!(
@@ -249,7 +249,7 @@ fn test_structured_output_sets_format() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, is_structured) = create_request(&model, query, true, &beta).unwrap();
+    let (request, is_structured, _) = create_request(&model, query, true, &beta).unwrap();
 
     assert!(is_structured);
     assert!(request.output_config.is_some());
@@ -320,7 +320,7 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (_, is_structured) = create_request(&model, query, true, &beta).unwrap();
+    let (_, is_structured, _) = create_request(&model, query, true, &beta).unwrap();
     assert!(!is_structured);
 }
 
@@ -358,7 +358,7 @@ fn test_adaptive_thinking_with_structured_output() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, is_structured) = create_request(&model, query, true, &beta).unwrap();
+    let (request, is_structured, _) = create_request(&model, query, true, &beta).unwrap();
 
     assert!(is_structured);
     assert_eq!(request.thinking, Some(types::ExtendedThinking::Adaptive));
@@ -375,6 +375,230 @@ fn test_adaptive_thinking_with_structured_output() {
         Some(JsonOutputFormat::JsonSchema {
             schema: expected_schema
         })
+    );
+}
+
+/// When reasoning is enabled and `tool_choice` is forced, `create_request`
+/// should downgrade to auto + system prompt nudge, and return a
+/// `ForcedToolFallback` so `call()` can retry with forced `tool_choice`
+/// and thinking disabled.
+#[test]
+fn test_forced_tool_with_reasoning_returns_fallback() {
+    use crate::tool::{ToolDefinition, ToolDocs};
+
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: Some("Claude Sonnet 4.5".to_string()),
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec![],
+    };
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![ToolDefinition {
+            name: "my_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: IndexMap::new(),
+        }],
+        tool_choice: ToolChoice::Function("my_tool".into()),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+
+    // tool_choice should have been downgraded to auto.
+    assert!(
+        matches!(request.tool_choice, Some(types::ToolChoice::Auto { .. })),
+        "Expected Auto tool_choice, got {:?}",
+        request.tool_choice
+    );
+
+    // Single tool + Function gets normalized to Required (→ Any).
+    let fallback = fallback.expect("Expected ForcedToolFallback to be Some");
+    assert!(
+        matches!(fallback.tool_choice, types::ToolChoice::Any { .. }),
+        "Expected Any (Required) tool_choice in fallback, got {:?}",
+        fallback.tool_choice
+    );
+
+    // System prompt should contain the nudge.
+    let system = request.system.as_ref().expect("Expected system prompt");
+    let system_text = match system {
+        types::System::Content(parts) => parts
+            .iter()
+            .map(|p| match p {
+                types::SystemContent::Text(t) => t.text.as_str(),
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        types::System::String(s) => s.clone(),
+    };
+    assert!(
+        system_text.contains("MUST"),
+        "System prompt should contain tool forcing nudge"
+    );
+}
+
+/// With multiple tools, `Function("specific")` is NOT normalized to
+/// `Required` and the fallback should carry `Tool { name }` so the
+/// retry targets that specific tool.
+#[test]
+fn test_forced_tool_function_multi_tool_preserves_name() {
+    use crate::tool::{ToolDefinition, ToolDocs};
+
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: Some("Claude Sonnet 4.5".to_string()),
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec![],
+    };
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![
+            ToolDefinition {
+                name: "read_file".into(),
+                docs: ToolDocs::default(),
+                parameters: IndexMap::new(),
+            },
+            ToolDefinition {
+                name: "commit".into(),
+                docs: ToolDocs::default(),
+                parameters: IndexMap::new(),
+            },
+        ],
+        tool_choice: ToolChoice::Function("commit".into()),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+
+    assert!(
+        matches!(request.tool_choice, Some(types::ToolChoice::Auto { .. })),
+        "Expected Auto tool_choice, got {:?}",
+        request.tool_choice
+    );
+
+    let fallback = fallback.expect("Expected ForcedToolFallback to be Some");
+    assert!(
+        matches!(fallback.tool_choice, types::ToolChoice::Tool { ref name, .. } if name == "commit"),
+        "Expected Tool {{ name: \"commit\" }} in fallback, got {:?}",
+        fallback.tool_choice
+    );
+
+    // is_satisfied_by should only accept the specific tool.
+    assert!(!fallback.is_satisfied_by(&[]));
+    assert!(!fallback.is_satisfied_by(&["read_file".into()]));
+    assert!(fallback.is_satisfied_by(&["commit".into()]));
+    assert!(fallback.is_satisfied_by(&["read_file".into(), "commit".into()]));
+}
+
+/// `is_satisfied_by` for `Any` (Required) accepts any tool call.
+#[test]
+fn test_fallback_any_satisfied_by_any_tool() {
+    let fb = ForcedToolFallback {
+        tool_choice: types::ToolChoice::any(),
+    };
+    assert!(!fb.is_satisfied_by(&[]));
+    assert!(fb.is_satisfied_by(&["whatever".into()]));
+}
+
+/// Without reasoning, forced `tool_choice` should NOT produce a fallback.
+#[test]
+fn test_forced_tool_without_reasoning_no_fallback() {
+    use crate::tool::{ToolDefinition, ToolDocs};
+
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-3-haiku-20240307").try_into().unwrap(),
+        display_name: Some("Claude 3 Haiku".to_string()),
+        context_window: Some(200_000),
+        max_output_tokens: Some(4_096),
+        reasoning: Some(ReasoningDetails::unsupported()),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec![],
+    };
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![ToolDefinition {
+            name: "my_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: IndexMap::new(),
+        }],
+        tool_choice: ToolChoice::Required,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+
+    // No fallback needed - tool_choice should stay as forced (any).
+    assert!(fallback.is_none(), "Expected no fallback without reasoning");
+    assert!(
+        matches!(request.tool_choice, Some(types::ToolChoice::Any { .. })),
+        "Expected Any tool_choice, got {:?}",
+        request.tool_choice
+    );
+}
+
+/// With reasoning + auto `tool_choice`, no fallback should be produced.
+#[test]
+fn test_auto_tool_choice_with_reasoning_no_fallback() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: Some("Claude Sonnet 4.5".to_string()),
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec![],
+    };
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (_, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+
+    assert!(
+        fallback.is_none(),
+        "Expected no fallback with auto tool_choice"
     );
 }
 
@@ -510,7 +734,7 @@ fn test_continue_injected_when_prefill_unsupported() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
 
     // Last message should be the synthetic continue message.
     let last = request.messages.last().unwrap();
@@ -557,7 +781,7 @@ fn test_prefill_preserved_for_supported_models() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
 
     // Last message should be the assistant message (prefill), not a synthetic user message.
     let last = request.messages.last().unwrap();
@@ -595,7 +819,7 @@ fn test_no_injection_when_last_message_is_user() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
 
     let last = request.messages.last().unwrap();
     assert_eq!(last.role, types::MessageRole::User);
@@ -1109,7 +1333,7 @@ mod thinking_signature_recovery {
             ]),
         ]);
 
-        // Unparseable position in error, falls back to oldest thinking block.
+        // Unparsable position in error, falls back to oldest thinking block.
         let error = StreamError::other(
             "api error: invalid_request_error: Invalid `signature` in `thinking` block",
         );
