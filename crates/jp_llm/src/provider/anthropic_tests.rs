@@ -378,9 +378,9 @@ fn test_adaptive_thinking_with_structured_output() {
     );
 }
 
-/// When reasoning is enabled and tool_choice is forced, `create_request`
+/// When reasoning is enabled and `tool_choice` is forced, `create_request`
 /// should downgrade to auto + system prompt nudge, and return a
-/// `ForcedToolFallback` so `call()` can retry with forced tool_choice
+/// `ForcedToolFallback` so `call()` can retry with forced `tool_choice`
 /// and thinking disabled.
 #[test]
 fn test_forced_tool_with_reasoning_returns_fallback() {
@@ -436,9 +436,8 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
     let system_text = match system {
         types::System::Content(parts) => parts
             .iter()
-            .filter_map(|p| match p {
-                types::SystemContent::Text(t) => Some(t.text.as_str()),
-                _ => None,
+            .map(|p| match p {
+                types::SystemContent::Text(t) => t.text.as_str(),
             })
             .collect::<Vec<_>>()
             .join(" "),
@@ -524,7 +523,7 @@ fn test_fallback_any_satisfied_by_any_tool() {
     assert!(fb.is_satisfied_by(&["whatever".into()]));
 }
 
-/// Without reasoning, forced tool_choice should NOT produce a fallback.
+/// Without reasoning, forced `tool_choice` should NOT produce a fallback.
 #[test]
 fn test_forced_tool_without_reasoning_no_fallback() {
     use crate::tool::{ToolDefinition, ToolDocs};
@@ -568,7 +567,7 @@ fn test_forced_tool_without_reasoning_no_fallback() {
     );
 }
 
-/// With reasoning + auto tool_choice, no fallback should be produced.
+/// With reasoning + auto `tool_choice`, no fallback should be produced.
 #[test]
 fn test_auto_tool_choice_with_reasoning_no_fallback() {
     let model = ModelDetails {
@@ -735,7 +734,7 @@ fn test_continue_injected_when_prefill_unsupported() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
 
     // Last message should be the synthetic continue message.
     let last = request.messages.last().unwrap();
@@ -782,7 +781,7 @@ fn test_prefill_preserved_for_supported_models() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
 
     // Last message should be the assistant message (prefill), not a synthetic user message.
     let last = request.messages.last().unwrap();
@@ -820,7 +819,7 @@ fn test_no_injection_when_last_message_is_user() {
     };
 
     let beta = BetaFeatures(vec![]);
-    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
 
     let last = request.messages.last().unwrap();
     assert_eq!(last.role, types::MessageRole::User);
@@ -1334,7 +1333,7 @@ mod thinking_signature_recovery {
             ]),
         ]);
 
-        // Unparseable position in error, falls back to oldest thinking block.
+        // Unparsable position in error, falls back to oldest thinking block.
         let error = StreamError::other(
             "api error: invalid_request_error: Invalid `signature` in `thinking` block",
         );
