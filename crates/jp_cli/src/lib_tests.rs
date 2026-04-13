@@ -303,3 +303,37 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
 
     unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_FILE") };
 }
+
+/// Verify that `resolve_config` consumes `default_id` so it doesn't leak
+/// into the runtime `AppConfig`.
+#[test]
+fn resolve_config_consumes_default_id() {
+    use jp_config::conversation::DefaultConversationId;
+
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    let mut workspace = Workspace::new(root);
+    workspace.load_conversation_index();
+
+    // Inject default_id into the base partial — no filesystem needed.
+    let mut base = PartialAppConfig::new_test();
+    base.conversation.default_id = Some(DefaultConversationId::LastActivated);
+
+    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let (config, _handles) = resolve_config(
+        &cli.command,
+        base,
+        &cli.globals.config,
+        &mut workspace,
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert!(
+        config.conversation.default_id.is_none(),
+        "default_id should be consumed by resolve_config, got: {:?}",
+        config.conversation.default_id,
+    );
+}

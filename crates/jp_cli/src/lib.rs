@@ -38,7 +38,7 @@ use crossterm::style::Stylize as _;
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
-    PartialAppConfig,
+    AppConfig, PartialAppConfig,
     assignment::KvAssignment,
     fs::user_global_config_dir,
     util::{
@@ -418,57 +418,16 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // individual conversations, this is done lazily as needed.
     workspace.load_conversation_index();
 
-    // Config Loading Phase 1: Load static sources (files + env + --cfg) once.
     let base = load_base_partial(fs_backend.as_deref())?;
-    let pipeline = ConfigPipeline::new(
+    let (config, handles) = resolve_config(
+        &cli.command,
         base,
         &cli.globals.config,
-        Some(&workspace),
+        &mut workspace,
+        session.as_ref(),
         fs_backend.as_deref(),
     )?;
-
-    // Extract default_id for conversation resolution. This builds a temporary
-    // partial (base + --cfg + command-CLI) without the per-conversation layer.
-    let default_id = {
-        let mut cfg = pipeline.partial_without_conversation()?;
-        cfg = cli
-            .command
-            .apply_cli_config(Some(&workspace), cfg, None)
-            .map_err(|error| Error::CliConfig(error.to_string()))?;
-
-        cfg.conversation.default_id.take().unwrap_or_default()
-    };
-
-    let request = cli.command.conversation_load_request();
-    let handles = resolve_request(&request, &workspace, session.as_ref(), default_id)?;
-
-    // Config Loading Phase 2: Build final config with per-conversation layer.
-    let config_handle = request.config_conversation.and_then(|idx| handles.get(idx));
-    if let Some(handle) = config_handle
-        && let Err(error) = workspace.eager_load_conversation(handle)
-    {
-        tracing::warn!(error = ?error, "Failed to eager-load conversation.");
-    }
-
-    let conversation_partial = config_handle
-        .map(|handle| {
-            cli.command
-                .apply_conversation_config(&workspace, PartialAppConfig::default(), None, handle)
-                .map_err(|error| Error::CliConfig(error.to_string()))
-        })
-        .transpose()?;
-
-    let mut partial = match conversation_partial {
-        Some(conversation_config) => pipeline.partial_with_conversation(conversation_config)?,
-        None => pipeline.partial_without_conversation()?,
-    };
-
-    partial = cli
-        .command
-        .apply_cli_config(Some(&workspace), partial, None)
-        .map_err(|error| Error::CliConfig(error.to_string()))?;
-
-    let config = Arc::new(build(partial)?);
+    let config = Arc::new(config);
     let runtime = build_runtime(cli.root.threads, "jp-worker")?;
     let mut ctx = Ctx::new(
         workspace,
@@ -609,6 +568,70 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
     });
 
     (code.into(), error)
+}
+
+/// Resolve the final [`AppConfig`] and conversation handles.
+///
+/// Takes a pre-loaded base partial (from config files + env) and runs the
+/// full config pipeline:
+/// 1. Extract `default_id` for conversation resolution (loading-time only).
+/// 2. Resolve conversation handles from the command's load request.
+/// 3. Merge per-conversation config layer.
+/// 4. Apply CLI flag overrides via [`IntoPartialAppConfig`].
+/// 5. Consume `default_id` so it doesn't leak into the runtime config.
+/// 6. Build the final [`AppConfig`].
+pub(crate) fn resolve_config(
+    command: &Commands,
+    base: PartialAppConfig,
+    cfg_overrides: &[KeyValueOrPath],
+    workspace: &mut Workspace,
+    session: Option<&jp_workspace::session::Session>,
+    fs: Option<&FsStorageBackend>,
+) -> Result<(AppConfig, Vec<jp_workspace::ConversationHandle>)> {
+    let pipeline = ConfigPipeline::new(base, cfg_overrides, Some(workspace), fs)?;
+
+    // Extract default_id — a loading-time concern consumed here, not
+    // propagated to the runtime config.
+    let default_id = pipeline
+        .partial_without_conversation()?
+        .conversation
+        .default_id
+        .unwrap_or_default();
+
+    let request = command.conversation_load_request();
+    let handles = resolve_request(&request, workspace, session, default_id)?;
+
+    // Phase 2: per-conversation layer.
+    let config_handle = request.config_conversation.and_then(|idx| handles.get(idx));
+    if let Some(handle) = config_handle
+        && let Err(error) = workspace.eager_load_conversation(handle)
+    {
+        tracing::warn!(error = ?error, "Failed to eager-load conversation.");
+    }
+
+    let conversation_partial = config_handle
+        .map(|handle| {
+            command
+                .apply_conversation_config(workspace, PartialAppConfig::default(), None, handle)
+                .map_err(|error| Error::CliConfig(error.to_string()))
+        })
+        .transpose()?;
+
+    let mut partial = match conversation_partial {
+        Some(conversation_config) => pipeline.partial_with_conversation(conversation_config)?,
+        None => pipeline.partial_without_conversation()?,
+    };
+
+    // Phase 3: CLI flag overrides.
+    partial = command
+        .apply_cli_config(Some(workspace), partial, None, &handles)
+        .map_err(|error| Error::CliConfig(error.to_string()))?;
+
+    // Consume default_id so it doesn't appear in the runtime config.
+    partial.conversation.default_id.take();
+
+    let config = build(partial)?;
+    Ok((config, handles))
 }
 
 /// Load the base partial config from files and environment variables.

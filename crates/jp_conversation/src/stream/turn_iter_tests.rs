@@ -30,6 +30,38 @@ fn single_turn() {
 }
 
 #[test]
+fn turn_index() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
+        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
+    ]);
+
+    let turns: Vec<_> = stream.iter_turns().collect();
+    assert_eq!(turns[0].index(), 0);
+    assert_eq!(turns[1].index(), 1);
+    assert_eq!(turns[2].index(), 2);
+}
+
+#[test]
+fn turn_index_with_implicit_leading_turn() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(ChatRequest::from("orphan"), ts(0, 0, 0)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 1, 1)),
+    ]);
+
+    let turns: Vec<_> = stream.iter_turns().collect();
+    assert_eq!(turns[0].index(), 0); // implicit turn
+    assert_eq!(turns[1].index(), 1);
+}
+
+#[test]
 fn multiple_turns() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![

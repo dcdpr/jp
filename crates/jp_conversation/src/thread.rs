@@ -168,6 +168,7 @@ impl Thread {
             system_parts.push(section.render());
         }
 
+        events.apply_projection();
         events.retain(|e| e.kind.is_provider_visible());
 
         ThreadParts {

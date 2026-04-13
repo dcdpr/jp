@@ -47,10 +47,15 @@ impl IntoPartialAppConfig for Attachment {
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
+        handles: &[jp_workspace::ConversationHandle],
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match &self.command {
-            Commands::Add(args) => args.apply_cli_config(workspace, partial, merged_config),
-            Commands::Remove(args) => args.apply_cli_config(workspace, partial, merged_config),
+            Commands::Add(args) => {
+                args.apply_cli_config(workspace, partial, merged_config, handles)
+            }
+            Commands::Remove(args) => {
+                args.apply_cli_config(workspace, partial, merged_config, handles)
+            }
             Commands::List(_) | Commands::Print(_) => Ok(partial),
         }
     }

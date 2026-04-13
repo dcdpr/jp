@@ -23,6 +23,7 @@ impl IntoPartialAppConfig for Rm {
         workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,
+        _handles: &[jp_workspace::ConversationHandle],
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         let mut attachments = vec![];
 
