@@ -74,22 +74,26 @@ impl SessionMapping {
 impl Workspace {
     /// Get the active conversation ID for the given session.
     ///
-    /// Returns `None` if no session mapping exists, the session is unknown, or
-    /// user storage is not configured.
+    /// Returns `None` if no session mapping exists, the session is unknown,
+    /// user storage is not configured, or the referenced conversation no
+    /// longer exists in the workspace index.
     #[must_use]
     pub fn session_active_conversation(&self, session: &Session) -> Option<ConversationId> {
         self.load_session_mapping(session)
             .and_then(|m| m.active_conversation_id())
+            .filter(|id| self.state.conversations.contains_key(id))
     }
 
     /// Get the previous conversation ID for the given session.
     ///
     /// This is the conversation that was active before the current one, similar
-    /// to `cd -` in a shell.
+    /// to `cd -` in a shell. Returns `None` if the referenced conversation no
+    /// longer exists in the workspace index.
     #[must_use]
     pub fn session_previous_conversation(&self, session: &Session) -> Option<ConversationId> {
         self.load_session_mapping(session)
             .and_then(|m| m.previous_conversation_id())
+            .filter(|id| self.state.conversations.contains_key(id))
     }
 
     /// Get all conversation IDs from the session's history.
@@ -197,7 +201,9 @@ impl Workspace {
             //
             // For Env sources we can't check liveness, so we fall back to
             // the conversation-existence heuristic.
-            let should_remove = match is_session_process_liveness(&mapping.source, session_key) {
+            let liveness = is_session_process_liveness(&mapping.source, session_key);
+
+            let should_remove = match liveness {
                 Liveness::Alive => false,
                 Liveness::Dead => {
                     debug!(
@@ -208,10 +214,10 @@ impl Workspace {
                     true
                 }
                 Liveness::Unknown => {
-                    let has_live = mapping
-                        .history
-                        .iter()
-                        .any(|entry| conversation_ids.contains(&entry.id));
+                    let has_live = mapping.history.iter().any(|entry| {
+                        conversation_ids.contains(&entry.id)
+                            || storage.is_conversation_locked(&entry.id.to_string())
+                    });
 
                     if !has_live {
                         debug!(
@@ -225,6 +231,48 @@ impl Workspace {
 
             if should_remove {
                 drop(fs::remove_file(&path));
+                continue;
+            }
+
+            // Prune individual history entries that reference deleted
+            // conversations. An entry is safe to remove when the conversation
+            // is absent from disk AND no other process holds its write lock
+            // (which would indicate a mid-persist race).
+            let original_count = mapping.history.len();
+            let pruned: Vec<_> = mapping
+                .history
+                .iter()
+                .filter(|entry| {
+                    if conversation_ids.contains(&entry.id) {
+                        return true;
+                    }
+                    // Not on disk — check if another process holds the lock. If
+                    // locked, keep the entry (mid-persist). If unlocked (or no
+                    // lock file), the conversation is genuinely gone.
+                    storage.is_conversation_locked(&entry.id.to_string())
+                })
+                .cloned()
+                .collect();
+
+            if pruned.len() < original_count {
+                let removed = original_count - pruned.len();
+                debug!(
+                    path = path.to_string(),
+                    removed, "Pruned dead entries from session history."
+                );
+
+                let pruned_mapping = SessionMapping {
+                    history: pruned,
+                    source: mapping.source,
+                };
+
+                if let Err(error) = storage.save_session_data(session_key, &pruned_mapping) {
+                    warn!(
+                        path = path.to_string(),
+                        error = error.to_string(),
+                        "Failed to rewrite session mapping after pruning."
+                    );
+                }
             }
         }
     }

@@ -137,10 +137,19 @@ impl super::Storage {
         conversation_id: &str,
         session: Option<&str>,
     ) -> Result<Option<ConversationFileLock>> {
-        let base = self.user.as_deref().unwrap_or(&self.root);
-        let path = base.join(LOCKS_DIR).join(format!("{conversation_id}.lock"));
-
+        let path = self.lock_file_path(conversation_id).unwrap_or_else(|p| p);
         ConversationFileLock::try_acquire(path, session)
+    }
+
+    /// Check whether a conversation's write lock is currently held by
+    /// another process.
+    ///
+    /// Returns `false` if no lock file exists or the lock is not held.
+    /// Does not create lock files — only probes existing ones.
+    #[must_use]
+    pub fn is_conversation_locked(&self, conversation_id: &str) -> bool {
+        self.lock_file_path(conversation_id)
+            .is_ok_and(|path| !is_orphaned_lock(&path))
     }
 
     /// Read lock holder info for a conversation.
@@ -149,17 +158,36 @@ impl super::Storage {
     /// Checks user storage first, then workspace storage.
     #[must_use]
     pub fn read_conversation_lock_info(&self, conversation_id: &str) -> Option<LockInfo> {
-        let lock_file = format!("{conversation_id}.lock");
+        let path = self.lock_file_path(conversation_id).ok()?;
+        read_lock_info(&path)
+    }
 
-        if let Some(user) = self.user.as_deref() {
-            let path = user.join(LOCKS_DIR).join(&lock_file);
-            if let Some(info) = read_lock_info(&path) {
-                return Some(info);
+    /// Resolve the lock file path for a conversation.
+    ///
+    /// Returns `Ok(path)` if a lock file already exists (checking user
+    /// storage first, then workspace storage), or `Err(path)` with the
+    /// preferred write location if no lock file exists.
+    fn lock_file_path(
+        &self,
+        conversation_id: &str,
+    ) -> std::result::Result<Utf8PathBuf, Utf8PathBuf> {
+        let name = format!("{conversation_id}.lock");
+        let base = self.user.as_deref().unwrap_or(&self.root);
+        let preferred = base.join(LOCKS_DIR).join(&name);
+
+        if preferred.exists() {
+            return Ok(preferred);
+        }
+
+        // Check the other location if user storage is configured.
+        if self.user.is_some() {
+            let fallback = self.root.join(LOCKS_DIR).join(&name);
+            if fallback.exists() {
+                return Ok(fallback);
             }
         }
 
-        let path = self.root.join(LOCKS_DIR).join(&lock_file);
-        read_lock_info(&path)
+        Err(preferred)
     }
 }
 
