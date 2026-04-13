@@ -34,10 +34,13 @@ fn setup() -> (Utf8TempDir, Workspace) {
 
 #[test]
 fn activate_creates_new_mapping() {
-    let (_tmp, ws) = setup();
+    let (_tmp, mut ws) = setup();
     let session = test_session();
     let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
     let now = datetime!(2025-07-19 14:30:00 Z);
+
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+    ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
 
     ws.activate_session_conversation(&session, id, now).unwrap();
 
@@ -47,10 +50,18 @@ fn activate_creates_new_mapping() {
 
 #[test]
 fn activate_deduplicates_history() {
-    let (_tmp, ws) = setup();
+    let (_tmp, mut ws) = setup();
     let session = test_session();
     let id1 = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
     let id2 = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+    ws.create_conversation_with_id(
+        id1,
+        jp_conversation::Conversation::default(),
+        config.clone(),
+    );
+    ws.create_conversation_with_id(id2, jp_conversation::Conversation::default(), config);
 
     ws.activate_session_conversation(&session, id1, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
@@ -229,7 +240,7 @@ fn cleanup_removes_stale_getsid_session() {
 
 #[cfg(unix)]
 #[test]
-fn cleanup_keeps_getsid_session_when_process_alive() {
+fn cleanup_keeps_getsid_session_file_but_prunes_ghost_entries() {
     let (_tmp, ws) = setup();
 
     // Use our own PID as the session key — guaranteed to be alive.
@@ -239,18 +250,25 @@ fn cleanup_keeps_getsid_session_when_process_alive() {
         source: SessionSource::Getsid,
     };
 
-    // Reference a conversation that does NOT exist on disk or in memory.
-    // With the old logic this would trigger "no live conversations" deletion.
-    // With the new logic the alive process takes precedence.
+    // Reference a conversation that does NOT exist on disk or in memory,
+    // and has no active lock. The session file should survive (alive
+    // process), but the ghost entry should be pruned (unlocked + absent).
     let ghost_id = ConversationId::try_from(datetime!(2025-07-19 18:00:00 Z)).unwrap();
     ws.activate_session_conversation(&session, ghost_id, datetime!(2025-07-19 18:00:00 Z))
         .unwrap();
 
     ws.cleanup_stale_files();
 
+    // Session file survives (process is alive).
+    let mapping = ws.load_session_mapping(&session);
     assert!(
-        ws.session_active_conversation(&session).is_some(),
-        "Getsid session with alive process must survive cleanup even without live conversations"
+        mapping.is_some(),
+        "Getsid session file must survive cleanup when process is alive"
+    );
+    // But the ghost entry was pruned (not on disk, not locked).
+    assert!(
+        mapping.unwrap().history.is_empty(),
+        "Ghost entry should be pruned when conversation is absent and unlocked"
     );
 }
 
@@ -364,10 +382,15 @@ fn cleanup_keeps_session_referencing_conversation_created_after_index_load() {
     // Cleanup must NOT delete session_b — the conversation exists on disk.
     ws.cleanup_stale_files();
 
+    // The conversation isn't in the in-memory index, so
+    // session_active_conversation correctly returns None. Verify the
+    // session file survives via load_session_mapping.
+    let mapping = ws.load_session_mapping(&session_b);
     assert!(
-        ws.session_active_conversation(&session_b).is_some(),
+        mapping.is_some(),
         "Session referencing a conversation created by another process should survive cleanup"
     );
+    assert_eq!(mapping.unwrap().active_conversation_id(), Some(conv_other),);
 }
 
 #[test]
@@ -398,8 +421,168 @@ fn cleanup_keeps_env_session_with_live_conversations() {
 
     ws.cleanup_stale_files();
 
+    // The conversation isn't in the in-memory index, so
+    // session_active_conversation correctly returns None. Verify the
+    // session file survives via load_session_mapping.
+    let mapping = ws.load_session_mapping(&session);
     assert!(
-        ws.session_active_conversation(&session).is_some(),
+        mapping.is_some(),
         "Env session with live conversations should not be cleaned up"
     );
+    assert_eq!(mapping.unwrap().active_conversation_id(), Some(id));
+}
+
+#[test]
+fn active_conversation_returns_none_for_deleted_conversation() {
+    let (_tmp, mut ws) = setup();
+    let session = test_session();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
+    ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+
+    assert_eq!(ws.session_active_conversation(&session), Some(id));
+
+    // Remove the conversation from the in-memory index to simulate deletion.
+    ws.state.conversations.remove(&id);
+
+    assert_eq!(
+        ws.session_active_conversation(&session),
+        None,
+        "Must return None when the referenced conversation no longer exists"
+    );
+
+    // The raw mapping still has the entry.
+    let mapping = ws.load_session_mapping(&session).unwrap();
+    assert_eq!(mapping.active_conversation_id(), Some(id));
+}
+
+#[test]
+fn previous_conversation_returns_none_for_deleted_conversation() {
+    let (_tmp, mut ws) = setup();
+    let session = test_session();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+
+    let id1 = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let id2 = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(
+        id1,
+        jp_conversation::Conversation::default(),
+        config.clone(),
+    );
+    ws.create_conversation_with_id(id2, jp_conversation::Conversation::default(), config);
+
+    ws.activate_session_conversation(&session, id1, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.activate_session_conversation(&session, id2, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+
+    assert_eq!(ws.session_previous_conversation(&session), Some(id1));
+
+    // Remove id1 to simulate deletion.
+    ws.state.conversations.remove(&id1);
+
+    assert_eq!(
+        ws.session_previous_conversation(&session),
+        None,
+        "Must return None when the previous conversation no longer exists"
+    );
+}
+
+#[test]
+fn cleanup_skips_pruning_locked_conversations() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+    let fixture_storage = jp_storage::Storage::new(&storage_path).unwrap();
+
+    let mut ws = Workspace::new(tmp.path())
+        .persisted_at(&storage_path)
+        .unwrap()
+        .with_local_storage_at(&user_root, "test-ws", "abc")
+        .unwrap();
+    ws.disable_persistence();
+
+    let session = Session {
+        id: SessionId::new("lock-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+
+    let live_id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let locked_id = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+    let dead_id = ConversationId::try_from(datetime!(2025-07-19 16:00:00 Z)).unwrap();
+
+    // live_id exists on disk, locked_id is absent but locked, dead_id is gone.
+    fixture_storage.write_test_conversation(&live_id, &jp_conversation::Conversation::default());
+    let _lock = ws
+        .storage
+        .as_ref()
+        .unwrap()
+        .try_lock_conversation(&locked_id.to_string(), None)
+        .unwrap()
+        .expect("should acquire lock");
+
+    ws.activate_session_conversation(&session, dead_id, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.activate_session_conversation(&session, locked_id, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+    ws.activate_session_conversation(&session, live_id, datetime!(2025-07-19 16:00:00 Z))
+        .unwrap();
+
+    // Before cleanup: 3 entries.
+    let mapping = ws.load_session_mapping(&session).unwrap();
+    assert_eq!(mapping.history.len(), 3);
+
+    ws.cleanup_stale_files();
+
+    // dead_id pruned, locked_id kept (lock held), live_id kept (on disk).
+    let mapping = ws.load_session_mapping(&session).unwrap();
+    assert_eq!(mapping.history.len(), 2);
+    assert_eq!(mapping.history[0].id, live_id);
+    assert_eq!(mapping.history[1].id, locked_id);
+}
+
+#[test]
+fn cleanup_prunes_dead_entries_from_session_history() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+    let fixture_storage = jp_storage::Storage::new(&storage_path).unwrap();
+
+    let mut ws = Workspace::new(tmp.path())
+        .persisted_at(&storage_path)
+        .unwrap()
+        .with_local_storage_at(&user_root, "test-ws", "abc")
+        .unwrap();
+    ws.disable_persistence();
+
+    let session = Session {
+        id: SessionId::new("env-session").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+
+    let live_id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let dead_id = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+
+    // Only write the live conversation to disk.
+    fixture_storage.write_test_conversation(&live_id, &jp_conversation::Conversation::default());
+
+    // Activate both: dead first, then live (so live is history[0]).
+    ws.activate_session_conversation(&session, dead_id, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.activate_session_conversation(&session, live_id, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+
+    // Before cleanup: both entries in history.
+    let mapping = ws.load_session_mapping(&session).unwrap();
+    assert_eq!(mapping.history.len(), 2);
+
+    ws.cleanup_stale_files();
+
+    // After cleanup: dead entry pruned, live entry remains.
+    let mapping = ws.load_session_mapping(&session).unwrap();
+    assert_eq!(mapping.history.len(), 1);
+    assert_eq!(mapping.active_conversation_id(), Some(live_id));
 }
