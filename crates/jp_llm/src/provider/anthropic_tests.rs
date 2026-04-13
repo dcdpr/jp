@@ -453,6 +453,7 @@ fn test_find_merge_point_edge_cases() {
         }),
     ]);
 
+    let min_overlap = 5;
     for (
         name,
         TestCase {
@@ -463,10 +464,142 @@ fn test_find_merge_point_edge_cases() {
         },
     ) in cases
     {
-        let pos = find_merge_point(left, right, max_search);
+        let pos = find_merge_point(left, right, max_search, min_overlap);
         let result = format!("{left}{}", &right[pos..]);
         assert_eq!(result, expected, "Failed test case: {name}");
     }
+}
+
+/// When the last event is an assistant message and the model does NOT have
+/// the "prefill" feature, a synthetic user "continue" message is appended.
+#[test]
+fn test_continue_injected_when_prefill_unsupported() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        // No "prefill" feature.
+        features: vec!["adaptive-thinking"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn(ChatRequest {
+        content: "Tell me about X".into(),
+        schema: None,
+    });
+    events
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("X is a topic that was first"))
+        .build()
+        .unwrap();
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+
+    // Last message should be the synthetic continue message.
+    let last = request.messages.last().unwrap();
+    assert_eq!(last.role, types::MessageRole::User);
+    assert_eq!(request.messages.len(), 3); // user, assistant, synthetic user
+}
+
+/// When the model HAS the "prefill" feature, no synthetic message is injected
+/// even if the last event is an assistant message.
+#[test]
+fn test_prefill_preserved_for_supported_models() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec!["interleaved-thinking", "prefill"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn(ChatRequest {
+        content: "Tell me about X".into(),
+        schema: None,
+    });
+    events
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("X is a topic that was first"))
+        .build()
+        .unwrap();
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+
+    // Last message should be the assistant message (prefill), not a synthetic user message.
+    let last = request.messages.last().unwrap();
+    assert_eq!(last.role, types::MessageRole::Assistant);
+    assert_eq!(request.messages.len(), 2); // user, assistant
+}
+
+/// Normal flow: last event is a user message. No injection needed regardless
+/// of prefill support.
+#[test]
+fn test_no_injection_when_last_message_is_user() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec!["adaptive-thinking"],
+    };
+
+    let events = ConversationStream::new_test().with_turn("What is 2+2?");
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _) = create_request(&model, query, true, &beta).unwrap();
+
+    let last = request.messages.last().unwrap();
+    assert_eq!(last.role, types::MessageRole::User);
+    assert_eq!(request.messages.len(), 1); // just the user message
 }
 
 mod transform_schema {

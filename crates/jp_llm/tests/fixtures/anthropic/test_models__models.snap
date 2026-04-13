@@ -109,6 +109,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "prefill",
         ],
     },
     ModelDetails {
@@ -145,6 +146,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "prefill",
         ],
     },
     ModelDetails {
@@ -181,6 +183,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "prefill",
         ],
     },
     ModelDetails {
@@ -217,6 +220,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "prefill",
         ],
     },
     ModelDetails {
@@ -253,6 +257,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "prefill",
         ],
     },
     ModelDetails {
@@ -289,6 +294,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "prefill",
         ],
     },
     ModelDetails {
@@ -324,6 +330,8 @@ expression: v
         structured_output: Some(
             false,
         ),
-        features: [],
+        features: [
+            "prefill",
+        ],
     },
 ]

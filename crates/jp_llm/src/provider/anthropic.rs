@@ -40,7 +40,7 @@ use crate::{
     event_builder::EventBuilder,
     model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
-    stream::EventStream,
+    stream::{EventStream, chain::find_merge_point},
     tool::ToolDefinition,
 };
 
@@ -80,6 +80,18 @@ const SUPPORTED_STRING_FORMATS: &[&str] = &[
     "ipv6",
     "uuid",
 ];
+
+/// Synthetic user message injected when the conversation ends with an assistant
+/// message and the model does not support assistant prefill.
+///
+/// This replaces the prefill technique (where an assistant message as the last
+/// event causes the model to continue from that point) for models that require
+/// conversations to end with a user message.
+const CONTINUE_MESSAGE: &str = "Continue your response exactly from where you left off. Do not \
+                                repeat content you already produced.";
+
+/// Default minimum overlap for merge point detection during chaining.
+const CHAIN_MIN_OVERLAP: usize = 5;
 
 #[derive(Debug, Clone)]
 pub struct Anthropic {
@@ -364,7 +376,8 @@ fn chain(
             // previous response, and we want to avoid duplicating that.
             if let Some(content) = event.as_part_mut().and_then(EventPart::as_text_mut) {
                 if should_merge {
-                    let merge_point = find_merge_point(&previous_content, content, 500);
+                    let merge_point =
+                        find_merge_point(&previous_content, content, 500, CHAIN_MIN_OVERLAP);
                     content.replace_range(..merge_point, "");
                 }
 
@@ -378,36 +391,6 @@ fn chain(
 
         return;
     }))
-}
-
-/// Finds the merge point between two text chunks by detecting overlapping
-/// content.
-///
-/// Returns the number of bytes to skip from the start of `right` to merge it
-/// seamlessly with `left`.
-fn find_merge_point(left: &str, right: &str, max_search: usize) -> usize {
-    const MIN_OVERLAP: usize = 5;
-
-    let max_overlap = left.len().min(right.len()).min(max_search);
-
-    // Try progressively smaller overlaps, but stop at minimum threshold
-    for overlap in (MIN_OVERLAP..=max_overlap).rev() {
-        let left_start = left.len() - overlap;
-
-        // Only attempt comparison if both positions are valid UTF-8 char
-        // boundaries
-        if left.is_char_boundary(left_start) && right.is_char_boundary(overlap) {
-            let left_suffix = &left[left_start..];
-            let right_prefix = &right[..overlap];
-
-            if left_suffix == right_prefix {
-                return overlap;
-            }
-        }
-    }
-
-    // No overlap found (or overlap was below minimum threshold)
-    0
 }
 
 /// Returns `true` if the error is an Anthropic `invalid_request_error`
@@ -736,6 +719,24 @@ fn create_request(
         builder.cache_control(types::CacheControl::default());
     }
 
+    // Models that don't support assistant prefill require the conversation to
+    // end with a user message. When the last message is from the assistant
+    // (e.g. after an interrupt or retry that flushed partial content), inject a
+    // synthetic "continue" message so the model picks up where it left off.
+    if messages
+        .last()
+        .is_some_and(|m| m.role == types::MessageRole::Assistant)
+        && !model.supports_prefill()
+    {
+        debug!("Injecting synthetic continue message (model does not support prefill).");
+        messages.push(types::Message {
+            role: types::MessageRole::User,
+            content: types::MessageContentList(vec![types::MessageContent::Text(
+                CONTINUE_MESSAGE.into(),
+            )]),
+        });
+    }
+
     builder.model(model.id.name.clone()).messages(messages);
 
     // Explicit breakpoints are allocated to stable content, in request
@@ -990,7 +991,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: Some(true),
-            features: vec!["interleaved-thinking", "context-editing"],
+            features: vec!["interleaved-thinking", "context-editing", "prefill"],
         },
         "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
@@ -1001,7 +1002,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: Some(true),
-            features: vec!["interleaved-thinking", "context-editing"],
+            features: vec!["interleaved-thinking", "context-editing", "prefill"],
         },
         "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
@@ -1016,7 +1017,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: Some(true),
-            features: vec!["interleaved-thinking", "context-editing"],
+            features: vec!["interleaved-thinking", "context-editing", "prefill"],
         },
         "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
@@ -1027,7 +1028,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: Some(true),
-            features: vec!["interleaved-thinking", "context-editing"],
+            features: vec!["interleaved-thinking", "context-editing", "prefill"],
         },
         "claude-opus-4-0" | "claude-opus-4-20250514" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
@@ -1038,7 +1039,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: Some(false),
-            features: vec!["interleaved-thinking", "context-editing"],
+            features: vec!["interleaved-thinking", "context-editing", "prefill"],
         },
         "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
@@ -1053,7 +1054,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: Some(false),
-            features: vec!["interleaved-thinking", "context-editing"],
+            features: vec!["interleaved-thinking", "context-editing", "prefill"],
         },
         "claude-3-haiku-20240307" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
@@ -1067,7 +1068,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 4, 20).unwrap()),
             )),
             structured_output: Some(false),
-            features: vec![],
+            features: vec!["prefill"],
         },
         id => {
             debug!(model = id, ?model, "Missing model details.");

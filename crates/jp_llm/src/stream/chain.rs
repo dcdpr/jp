@@ -338,7 +338,12 @@ fn trim_event_start(event: &mut Event, count: usize) {
 ///
 /// Returns the number of bytes to skip from the start of `right` to merge it
 /// seamlessly with `left`.
-fn find_merge_point(left: &str, right: &str, max_search: usize, min_overlap: usize) -> usize {
+pub(crate) fn find_merge_point(
+    left: &str,
+    right: &str,
+    max_search: usize,
+    min_overlap: usize,
+) -> usize {
     let max_overlap = left.len().min(right.len()).min(max_search);
 
     // Try progressively smaller overlaps, but stop at minimum threshold

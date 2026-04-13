@@ -37,6 +37,7 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
+            "prefill",
         ],
     },
 ]
