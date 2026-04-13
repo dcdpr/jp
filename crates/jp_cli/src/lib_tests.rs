@@ -229,6 +229,57 @@ fn test_load_cli_cfg_args_key_value_still_works() {
 }
 
 #[test]
+fn test_load_cli_cfg_json_object() {
+    let partial = PartialAppConfig::empty();
+    let overrides =
+        vec![KeyValueOrPath::from_str(r#"{"assistant": {"name": "from-json"}}"#).unwrap()];
+
+    let result = build_cfg(partial, &overrides, None).unwrap();
+    assert_eq!(result.assistant.name.as_deref(), Some("from-json"));
+}
+
+#[test]
+fn test_load_cli_cfg_json_nested_object() {
+    let partial = PartialAppConfig::empty();
+    let json = r#"{"conversation": {"start_local": true}}"#;
+    let overrides = vec![KeyValueOrPath::from_str(json).unwrap()];
+
+    let result = build_cfg(partial, &overrides, None).unwrap();
+    assert_eq!(result.conversation.start_local, Some(true));
+}
+
+#[test]
+fn test_load_cli_cfg_json_combined_with_key_value() {
+    let partial = PartialAppConfig::empty();
+    let overrides = vec![
+        KeyValueOrPath::from_str(r#"{"assistant": {"name": "json-name"}}"#).unwrap(),
+        KeyValueOrPath::from_str("conversation.start_local=true").unwrap(),
+    ];
+
+    let result = build_cfg(partial, &overrides, None).unwrap();
+    assert_eq!(result.assistant.name.as_deref(), Some("json-name"));
+    assert_eq!(result.conversation.start_local, Some(true));
+}
+
+#[test]
+fn test_load_cli_cfg_json_invalid_json_errors() {
+    let result = KeyValueOrPath::from_str("{not valid json");
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_load_cli_cfg_json_overrides_earlier_values() {
+    let partial = PartialAppConfig::empty();
+    let overrides = vec![
+        KeyValueOrPath::from_str("assistant.name=first").unwrap(),
+        KeyValueOrPath::from_str(r#"{"assistant": {"name": "second"}}"#).unwrap(),
+    ];
+
+    let result = build_cfg(partial, &overrides, None).unwrap();
+    assert_eq!(result.assistant.name.as_deref(), Some("second"));
+}
+
+#[test]
 #[serial(env_vars)]
 fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
     let tmp = tempdir().unwrap();

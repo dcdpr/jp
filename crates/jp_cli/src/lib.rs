@@ -211,6 +211,19 @@ impl FromStr for KeyValueOrPath {
             return Ok(Self::Path(Utf8PathBuf::from(s.trim())));
         }
 
+        // A JSON object is treated as a root-level config assignment that
+        // merges each top-level key individually.
+        if s.starts_with('{') {
+            let value: serde_json::Value =
+                serde_json::from_str(s).map_err(|e| Error::CliConfig(e.to_string()))?;
+            if !value.is_object() {
+                return Err(Error::CliConfig(
+                    "--cfg JSON value must be an object".into(),
+                ));
+            }
+            return Ok(Self::KeyValue(KvAssignment::root_json(value)));
+        }
+
         // String without `=` is always a path.
         if !s.contains('=') {
             return Ok(Self::Path(Utf8PathBuf::from(s.trim())));
