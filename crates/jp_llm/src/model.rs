@@ -62,6 +62,12 @@ impl ModelDetails {
         self.structured_output.unwrap_or(false)
     }
 
+    /// Returns `true` if the model supports assistant prefill.
+    #[must_use]
+    pub fn supports_prefill(&self) -> bool {
+        self.features.contains(&"prefill")
+    }
+
     #[must_use]
     pub fn name(&self) -> &str {
         self.display_name.as_deref().unwrap_or(&self.id.name)
