@@ -67,6 +67,13 @@ expression: v
           }
         }
       },
+      "compaction": {
+        "rules": {
+          "value": [],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
       "attachments": {
         "value": [],
         "strategy": "replace",

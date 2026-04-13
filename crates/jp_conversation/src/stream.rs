@@ -8,12 +8,14 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 use tracing::error;
 
+mod projection;
 pub mod turn_iter;
 pub mod turn_mut;
 pub use turn_iter::{IterTurns, Turn};
 pub use turn_mut::TurnMut;
 
 use crate::{
+    Compaction,
     compat::deserialize_partial_config,
     event::{ChatRequest, ConversationEvent, EventKind, InquiryId, ToolCallResponse, TurnStart},
     storage::{decode_event_value, encode_event},
@@ -40,6 +42,10 @@ enum InternalEvent {
     ConfigDelta(ConfigDelta),
     /// An event in the conversation stream.
     Event(Box<ConversationEvent>),
+    /// A compaction overlay that modifies how preceding events are projected
+    /// when building the LLM request. Does not modify or delete any existing
+    /// events.
+    Compaction(Compaction),
 }
 
 impl Serialize for InternalEvent {
@@ -68,6 +74,21 @@ impl Serialize for InternalEvent {
                 encode_event(&mut value, &event.kind);
                 value.serialize(serializer)
             }
+            Self::Compaction(compaction) => {
+                #[derive(Serialize)]
+                struct Tagged<'a> {
+                    #[serde(rename = "type")]
+                    tag: &'static str,
+                    #[serde(flatten)]
+                    inner: &'a Compaction,
+                }
+
+                Tagged {
+                    tag: "compaction",
+                    inner: compaction,
+                }
+                .serialize(serializer)
+            }
         }
     }
 }
@@ -79,7 +100,7 @@ impl InternalEvent {
     fn into_event(self) -> Option<ConversationEvent> {
         match self {
             Self::Event(event) => Some(*event),
-            Self::ConfigDelta(_) => None,
+            Self::ConfigDelta(_) | Self::Compaction(_) => None,
         }
     }
 
@@ -88,7 +109,7 @@ impl InternalEvent {
     fn as_event(&self) -> Option<&ConversationEvent> {
         match self {
             Self::Event(event) => Some(event),
-            Self::ConfigDelta(_) => None,
+            Self::ConfigDelta(_) | Self::Compaction(_) => None,
         }
     }
 }
@@ -270,7 +291,7 @@ impl ConversationStream {
         let mut partial = self.base_config.to_partial();
         let iter = self.events.iter().filter_map(|event| match event {
             InternalEvent::ConfigDelta(delta) => Some(delta.clone()),
-            InternalEvent::Event(_) => None,
+            InternalEvent::Event(_) | InternalEvent::Compaction(_) => None,
         });
 
         for delta in iter {
@@ -324,6 +345,45 @@ impl ConversationStream {
     pub fn with_config_delta(mut self, delta: impl Into<ConfigDelta>) -> Self {
         self.add_config_delta(delta);
         self
+    }
+
+    /// Add a compaction overlay to the stream.
+    pub fn add_compaction(&mut self, compaction: Compaction) {
+        self.events.push(InternalEvent::Compaction(compaction));
+    }
+
+    /// Remove all compaction events from the stream.
+    ///
+    /// Returns the number of compaction events removed.
+    pub fn remove_compactions(&mut self) -> usize {
+        let before = self.events.len();
+        self.events
+            .retain(|e| !matches!(e, InternalEvent::Compaction(_)));
+        before - self.events.len()
+    }
+
+    /// Returns an iterator over the [`Compaction`] events in the stream.
+    pub fn compactions(&self) -> impl Iterator<Item = &Compaction> {
+        self.events.iter().filter_map(|e| match e {
+            InternalEvent::Compaction(c) => Some(c),
+            _ => None,
+        })
+    }
+
+    /// Apply compaction projection to the stream.
+    ///
+    /// Reads all compaction overlays and transforms the event list so that
+    /// the projected view reflects the compaction policies. After this call,
+    /// the stream's conversation events represent what the LLM should see.
+    ///
+    /// This is a no-op when no compaction events are present.
+    ///
+    /// This method is called by [`Thread::into_parts()`] before provider
+    /// visibility filtering.
+    ///
+    /// [`Thread::into_parts()`]: crate::thread::Thread::into_parts
+    pub fn apply_projection(&mut self) {
+        projection::apply(&mut self.events);
     }
 
     /// Start a new turn with the given chat request.
@@ -492,7 +552,7 @@ impl ConversationStream {
             .rev()
             .find_map(|event| match event {
                 InternalEvent::Event(event) => Some(f(event)),
-                InternalEvent::ConfigDelta(_) => None,
+                InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => None,
             })
             .unwrap_or(false)
         {
@@ -504,10 +564,10 @@ impl ConversationStream {
 
     /// Retains only the [`ConversationEvent`]s that pass the predicate.
     ///
-    /// This does NOT remove the [`ConfigDelta`]s.
+    /// This does NOT remove [`ConfigDelta`]s or [`Compaction`] events.
     pub fn retain(&mut self, mut f: impl FnMut(&ConversationEvent) -> bool) {
         self.events.retain(|event| match event {
-            InternalEvent::ConfigDelta(_) => true,
+            InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => true,
             InternalEvent::Event(event) => f(event),
         });
     }
@@ -574,7 +634,7 @@ impl ConversationStream {
                 return true;
             }
             match event {
-                InternalEvent::ConfigDelta(_) => true,
+                InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => true,
                 InternalEvent::Event(e) => e.is_turn_start(),
             }
         });
@@ -801,6 +861,38 @@ impl ConversationStream {
         IterTurns::new(self.iter())
     }
 
+    /// Returns the number of turns in the stream.
+    ///
+    /// A turn is delimited by [`TurnStart`] events. A stream with no events
+    /// has 0 turns. A stream with events but no `TurnStart` has 1 implicit
+    /// turn.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    #[must_use]
+    pub fn turn_count(&self) -> usize {
+        self.iter_turns().len()
+    }
+
+    /// Returns the turn that was active at the given time.
+    ///
+    /// Finds the last turn whose starting timestamp is ≤ `dt`. Returns `None`
+    /// if the stream has no turns, or if `dt` is before the first turn.
+    ///
+    /// Use [`Turn::index()`] on the result to get the 0-based turn index.
+    #[must_use]
+    pub fn turn_at_time(&self, dt: DateTime<Utc>) -> Option<Turn<'_>> {
+        let mut result = None;
+        for turn in self.iter_turns() {
+            let start = turn.iter().next()?.event.timestamp;
+            if start <= dt {
+                result = Some(turn);
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
     /// Retain only the last `n` turns, dropping earlier ones.
     ///
     /// A turn is delimited by a [`TurnStart`] event. If there are `n` or
@@ -952,6 +1044,7 @@ impl Iterator for IntoIter {
                         config: self.current_config.clone(),
                     });
                 }
+                InternalEvent::Compaction(_) => {}
             }
         }
     }
@@ -963,10 +1056,10 @@ impl DoubleEndedIterator for IntoIter {
             let event = self.inner_iter.next_back()?;
 
             match event {
-                InternalEvent::ConfigDelta(_) => {
-                    // A delta at the very end of the list affects nothing that
-                    // follows it (because nothing follows it), and it doesn't
-                    // affect previous items. We simply discard it.
+                InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => {
+                    // A delta/compaction at the very end of the list affects
+                    // nothing that follows it, and it doesn't affect previous
+                    // items. We simply discard it.
                 }
                 InternalEvent::Event(event) => {
                     // Start with the state currently at the front of the line
@@ -1028,6 +1121,7 @@ impl<'a> Iterator for Iter<'a> {
                         config: self.front_config.clone(),
                     });
                 }
+                InternalEvent::Compaction(_) => {}
             }
         }
 
@@ -1087,6 +1181,7 @@ impl<'a> Iterator for IterMut<'a> {
                         config: self.front_config.clone(),
                     });
                 }
+                InternalEvent::Compaction(_) => {}
             }
         }
 
@@ -1399,6 +1494,12 @@ impl<'de> Deserialize<'de> for InternalEvent {
 
         if tag == "config_delta" {
             return Ok(Self::ConfigDelta(deserialize_config_delta(&value)));
+        }
+
+        if tag == "compaction" {
+            return serde_json::from_value(value)
+                .map(Self::Compaction)
+                .map_err(serde::de::Error::custom);
         }
 
         // Decode base64-encoded storage fields before deserializing.

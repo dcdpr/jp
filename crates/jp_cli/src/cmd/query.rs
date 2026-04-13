@@ -273,6 +273,10 @@ pub(crate) struct Query {
     /// Disable tool use by the assistant.
     #[arg(short = 'U', long = "no-tool-use")]
     no_tool_use: bool,
+
+    /// Compact the conversation before querying.
+    #[command(flatten)]
+    compact: crate::cmd::compact_flag::CompactFlag,
 }
 
 impl Query {
@@ -303,6 +307,11 @@ impl Query {
         if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
             lock.as_mut()
                 .update_events(|events| events.add_config_delta(delta));
+        }
+
+        // Compact the conversation before querying, if requested.
+        if self.compact.should_compact() {
+            self.apply_pre_query_compaction(&lock, &cfg, ctx).await?;
         }
 
         let mut mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
@@ -745,6 +754,41 @@ impl Query {
             .or_else(|| Some(Duration::new(0, 0)))
     }
 
+    /// Apply compaction before the query turn starts.
+    ///
+    /// Applies all compaction rules from the resolved config and appends
+    /// the compaction events to the conversation.
+    async fn apply_pre_query_compaction(
+        &self,
+        lock: &ConversationLock,
+        cfg: &AppConfig,
+        ctx: &Ctx,
+    ) -> Result<()> {
+        let events = lock.events().clone();
+
+        let compactions = super::conversation::compact::build_compaction_events_from_config(
+            &events,
+            cfg,
+            None,
+            None,
+            &ctx.printer,
+        )
+        .await?;
+
+        for compaction in compactions {
+            let from = compaction.from_turn;
+            let to = compaction.to_turn;
+
+            lock.as_mut()
+                .update_events(|stream| stream.add_compaction(compaction));
+
+            ctx.printer
+                .println(format!("Compacted turns {from}..={to}."));
+        }
+
+        Ok(())
+    }
+
     async fn acquire_lock(
         &self,
         ctx: &mut Ctx,
@@ -946,6 +990,7 @@ impl IntoPartialAppConfig for Query {
         workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
+        _handles: &[jp_workspace::ConversationHandle],
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         let Self {
             model,
@@ -970,6 +1015,7 @@ impl IntoPartialAppConfig for Query {
             expires_in: _,
             target: _,
             fork: _,
+            compact,
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
@@ -1005,6 +1051,8 @@ impl IntoPartialAppConfig for Query {
         if *hide_tool_calls {
             partial.style.tool_call.show = Some(false);
         }
+
+        compact.apply_to_config(&mut partial);
 
         Ok(partial)
     }

@@ -1,6 +1,7 @@
 //! Conversation-specific configuration for Jean-Pierre.
 
 pub mod attachment;
+pub mod compaction;
 pub mod title;
 pub mod tool;
 
@@ -19,6 +20,7 @@ use crate::{
     },
     conversation::{
         attachment::{AttachmentConfig, PartialAttachmentConfig},
+        compaction::{CompactionConfig, PartialCompactionConfig},
         title::{PartialTitleConfig, TitleConfig},
         tool::{PartialToolsConfig, ToolsConfig},
     },
@@ -45,6 +47,13 @@ pub struct ConversationConfig {
     /// This section configures tool usage within conversations.
     #[setting(nested)]
     pub tools: ToolsConfig,
+
+    /// Compaction configuration.
+    ///
+    /// Controls how conversation compaction works, including rules for
+    /// stripping reasoning, tool calls, and summarization.
+    #[setting(nested)]
+    pub compaction: CompactionConfig,
 
     /// Attachment configuration.
     ///
@@ -86,6 +95,7 @@ impl AssignKeyValue for PartialConversationConfig {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("title") => self.title.assign(kv)?,
             _ if kv.p("tools") => self.tools.assign(kv)?,
+            _ if kv.p("compaction") => self.compaction.assign(kv)?,
             _ if kv.p("attachments") => kv.try_vec_of_nested(self.attachments.as_mut())?,
             _ if kv.p("inquiry") => self.inquiry.assign(kv)?,
             _ if kv.p("start_local") => self.start_local = kv.try_some_bool()?,
@@ -102,6 +112,7 @@ impl PartialConfigDelta for PartialConversationConfig {
         Self {
             title: self.title.delta(next.title),
             tools: self.tools.delta(next.tools),
+            compaction: self.compaction.delta(next.compaction),
             attachments: {
                 next.attachments
                     .into_iter()
@@ -121,6 +132,7 @@ impl FillDefaults for PartialConversationConfig {
         Self {
             title: self.title.fill_from(defaults.title),
             tools: self.tools.fill_from(defaults.tools),
+            compaction: self.compaction.fill_from(defaults.compaction),
             attachments: self.attachments.fill_from(defaults.attachments),
             inquiry: self.inquiry.fill_from(defaults.inquiry),
             start_local: self.start_local.or(defaults.start_local),
@@ -136,6 +148,7 @@ impl ToPartial for ConversationConfig {
         Self::Partial {
             title: self.title.to_partial(),
             tools: self.tools.to_partial(),
+            compaction: self.compaction.to_partial(),
             attachments: vec_to_mergeable_partial(&self.attachments),
             inquiry: self.inquiry.to_partial(),
             start_local: partial_opt(&self.start_local, defaults.start_local),

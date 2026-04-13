@@ -79,6 +79,7 @@ expression: "AppConfig::fields()"
     "conversation.inquiry.assistant.system_prompt",
     "conversation.inquiry.assistant.system_prompt_sections",
     "conversation.inquiry.assistant.tool_choice",
+    "conversation.compaction.rules",
     "assistant.instructions",
     "assistant.name",
     "assistant.system_prompt",

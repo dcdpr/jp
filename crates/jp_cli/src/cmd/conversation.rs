@@ -1,8 +1,10 @@
-use jp_workspace::ConversationHandle;
+use jp_config::PartialAppConfig;
+use jp_workspace::{ConversationHandle, Workspace};
 
 use super::{ConversationLoadRequest, Output};
-use crate::ctx::Ctx;
+use crate::ctx::{Ctx, IntoPartialAppConfig};
 
+pub(crate) mod compact;
 mod edit;
 pub(crate) mod fork;
 mod grep;
@@ -11,6 +13,7 @@ mod path;
 mod print;
 mod rm;
 mod show;
+pub(crate) mod summarize;
 mod use_;
 
 #[derive(Debug, clap::Args)]
@@ -25,7 +28,8 @@ impl Conversation {
             Commands::Show(args) => args.run(ctx, handles),
             Commands::Remove(args) => args.run(ctx, handles).await,
             Commands::Edit(args) => args.run(ctx, handles).await,
-            Commands::Fork(args) => args.run(ctx, &handles),
+            Commands::Fork(args) => args.run(ctx, &handles).await,
+            Commands::Compact(args) => args.run(ctx, handles).await,
             Commands::Grep(args) => args.run(ctx, handles),
             Commands::Print(args) => args.run(ctx, &handles),
             Commands::Path(args) => args.run(ctx, handles),
@@ -43,6 +47,7 @@ impl Conversation {
             Commands::Remove(args) => args.conversation_load_request(),
             Commands::Edit(args) => args.conversation_load_request(),
             Commands::Fork(args) => args.conversation_load_request(),
+            Commands::Compact(args) => args.conversation_load_request(),
             Commands::Grep(args) => args.conversation_load_request(),
             Commands::Print(args) => args.conversation_load_request(),
             Commands::Path(args) => args.conversation_load_request(),
@@ -78,6 +83,14 @@ enum Commands {
     #[command(name = "fork", visible_alias = "f")]
     Fork(fork::Fork),
 
+    /// Compact a conversation to reduce context size.
+    ///
+    /// Appends a compaction overlay that instructs the LLM projection layer
+    /// to strip reasoning blocks and/or tool call content from the specified
+    /// range. The original events are preserved.
+    #[command(name = "compact")]
+    Compact(compact::Compact),
+
     /// Search through conversation history.
     #[command(name = "grep", alias = "rg", visible_alias = "g")]
     Grep(grep::Grep),
@@ -94,4 +107,24 @@ enum Commands {
 
     // /// Rollback a conversation.
     // Rollback(rollback::Rollback),
+}
+
+impl IntoPartialAppConfig for Conversation {
+    fn apply_cli_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: PartialAppConfig,
+        merged_config: Option<&PartialAppConfig>,
+        handles: &[jp_workspace::ConversationHandle],
+    ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+        match &self.command {
+            Commands::Compact(args) => {
+                args.apply_cli_config(workspace, partial, merged_config, handles)
+            }
+            Commands::Fork(args) => {
+                args.apply_cli_config(workspace, partial, merged_config, handles)
+            }
+            _ => Ok(partial),
+        }
+    }
 }

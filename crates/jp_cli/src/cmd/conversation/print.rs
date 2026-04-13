@@ -27,6 +27,11 @@ pub(crate) struct Print {
     /// config for all turns.
     #[arg(long, default_value_t = false)]
     current_config: bool,
+
+    /// Print the compacted view (what the LLM sees) instead of the full
+    /// history.
+    #[arg(long)]
+    compacted: bool,
 }
 
 impl Print {
@@ -44,7 +49,7 @@ impl Print {
         };
 
         for handle in handles {
-            Self::print_conversation(ctx, handle, &selection, self.current_config)?;
+            Self::print_conversation(ctx, handle, &selection, self.current_config, self.compacted)?;
         }
         ctx.printer.println("");
         ctx.printer.flush();
@@ -56,8 +61,13 @@ impl Print {
         handle: &ConversationHandle,
         selection: &TurnSelection,
         current_config: bool,
+        compacted: bool,
     ) -> Output {
-        let events = ctx.workspace.events(handle)?.clone();
+        let mut events = ctx.workspace.events(handle)?.clone();
+
+        if compacted {
+            events.apply_projection();
+        }
         let cfg = ctx.config();
 
         let root = ctx
