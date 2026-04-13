@@ -36,7 +36,7 @@ use crate::{
         Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
         looks_like_quota_error,
     },
-    event::{Event, EventMatcher, EventPart, EventPatch, FinishReason, PatchAction},
+    event::{Event, EventMatcher, EventPart, EventPatch, FinishReason, PatchAction, ToolCallPart},
     event_builder::EventBuilder,
     model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
@@ -156,7 +156,7 @@ impl Provider for Anthropic {
             .parameters
             .max_tokens;
 
-        let (request, is_structured) = create_request(model, query, true, &self.beta)?;
+        let (request, is_structured, forced_tool) = create_request(model, query, true, &self.beta)?;
 
         // Chaining is disabled for structured output — the provider guarantees
         // schema compliance so the response won't hit max_tokens for a
@@ -173,7 +173,40 @@ impl Provider for Anthropic {
             "Request payload."
         );
 
-        Ok(call(client, request, chain_on_max_tokens, is_structured))
+        Ok(call(
+            client,
+            request,
+            chain_on_max_tokens,
+            is_structured,
+            forced_tool,
+        ))
+    }
+}
+
+/// Context for retrying with forced tool use when an initial soft-forced
+/// request (reasoning enabled + `tool_choice: auto` with a system prompt nudge)
+/// completes without the model calling any tool.
+///
+/// See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
+#[derive(Debug, Clone)]
+struct ForcedToolFallback {
+    /// The Anthropic API `tool_choice` to use on the retry request (the
+    /// original forced value before we downgraded it to `auto`).
+    tool_choice: types::ToolChoice,
+}
+
+impl ForcedToolFallback {
+    /// Check whether the forced tool constraint is satisfied by the tool calls
+    /// observed so far.
+    ///
+    /// - `Any` — any tool call satisfies the constraint.
+    /// - `Tool { name }` — only a call to that specific tool counts.
+    fn is_satisfied_by(&self, tool_names_called: &[String]) -> bool {
+        match &self.tool_choice {
+            types::ToolChoice::Tool { name, .. } => tool_names_called.iter().any(|n| n == name),
+            types::ToolChoice::Any { .. } => !tool_names_called.is_empty(),
+            types::ToolChoice::None | types::ToolChoice::Auto { .. } => true,
+        }
     }
 }
 
@@ -184,6 +217,12 @@ impl Provider for Anthropic {
 /// continue from where it left off and the caller to receive the full response
 /// as a single stream of events.
 ///
+/// If `forced_tool_fallback` is `Some`, the model was asked to call a tool but
+/// the API restriction on reasoning + forced tool use required us to downgrade
+/// to `auto`. If the response completes without any tool call, a follow-up
+/// request is issued with thinking disabled and the original forced
+/// `tool_choice` restored.
+///
 /// If the API rejects the request due to an invalid thinking-block signature,
 /// emits [`Event::Patch`] instructions to fix the conversation stream and
 /// finishes with [`FinishReason::Retry`] so the caller can rebuild and retry.
@@ -192,12 +231,18 @@ fn call(
     request: types::CreateMessagesRequest,
     chain_on_max_tokens: bool,
     is_structured: bool,
+    forced_tool_fallback: Option<ForcedToolFallback>,
 ) -> EventStream {
     Box::pin(try_stream!({
         // Buffer flushed ConversationEvents for chaining. When MaxTokens hits,
         // these are passed to chain() to build the continuation request. We use
         // EventBuilder to accumulate streaming parts into complete events with
         // merged metadata (needed for thinking signatures).
+        //
+        // The same buffer is used for the forced-tool fallback: if the model
+        // finishes without calling a tool, we need the accumulated events to
+        // build the assistant message for the retry request.
+        let needs_event_buffer = chain_on_max_tokens || forced_tool_fallback.is_some();
         let mut chain_builder = EventBuilder::new();
         let mut chain_events = vec![];
 
@@ -205,6 +250,11 @@ fn call(
         // Anthropic API expects the response to a tool call to contain the tool
         // result.
         let mut tool_calls_requested = false;
+
+        // Track which tool names were called, so the forced-tool fallback can
+        // check whether the *specific* required tool was invoked (not just any
+        // tool).
+        let mut tool_names_called: Vec<String> = vec![];
 
         let stream = client
             .messages()
@@ -250,6 +300,36 @@ fn call(
                     }
                     return;
                 }
+
+                // The model finished without calling the required tool, but the
+                // caller originally requested a forced tool call that was
+                // downgraded due to the reasoning + tool_choice API
+                // restriction. Retry with thinking disabled and the real forced
+                // tool_choice.
+                Event::Finished(FinishReason::Completed)
+                    if let Some(fallback) = forced_tool_fallback
+                        .as_ref()
+                        .filter(|fb| !fb.is_satisfied_by(&tool_names_called)) =>
+                {
+                    info!(
+                        "Model did not call the required tool during soft-forced request. \
+                         Retrying with thinking disabled and forced tool_choice."
+                    );
+
+                    chain_events.extend(chain_builder.drain());
+                    for await event in force_tool_retry(
+                        client.clone(),
+                        request.clone(),
+                        chain_events,
+                        fallback,
+                        is_structured,
+                    ) {
+                        yield event?;
+                    }
+
+                    return;
+                }
+
                 done @ Event::Finished(_) => {
                     yield done;
                     return;
@@ -259,9 +339,12 @@ fn call(
                     part,
                     metadata,
                 } => {
-                    if part.is_tool_call() {
+                    if let EventPart::ToolCall(ToolCallPart::Start { name, .. }) = &part {
                         tool_calls_requested = true;
-                    } else if chain_on_max_tokens {
+                        tool_names_called.push(name.clone());
+                    } else if part.is_tool_call() {
+                        tool_calls_requested = true;
+                    } else if needs_event_buffer {
                         chain_builder.handle_part(index, part.clone(), metadata.clone());
                     }
 
@@ -285,7 +368,7 @@ fn call(
 
                     // Flush the chain builder so accumulated parts become
                     // complete ConversationEvents with merged metadata.
-                    if chain_on_max_tokens && let Event::Flush { index, metadata } = &flush {
+                    if needs_event_buffer && let Event::Flush { index, metadata } = &flush {
                         chain_events.extend(chain_builder.handle_flush(*index, metadata.clone()));
                     }
 
@@ -354,7 +437,7 @@ fn chain(
     });
 
     Box::pin(try_stream!({
-        for await event in call(client, request, true, is_structured) {
+        for await event in call(client, request, true, is_structured, None) {
             let mut event = event?;
 
             // When chaining new events, the reasoning content is irrelevant, as
@@ -384,6 +467,85 @@ fn chain(
                 // After receiving the first content event, we can
                 // stop merging.
                 should_merge = false;
+            }
+
+            yield event;
+        }
+
+        return;
+    }))
+}
+
+/// Retry with thinking disabled and forced `tool_choice` after the initial
+/// soft-forced request (reasoning + `tool_choice: auto`) completed without
+/// producing a tool call.
+///
+/// Appends the first response's content as an assistant message, adds a user
+/// message requesting the tool call, then issues a new request with thinking
+/// disabled and the original forced `tool_choice`.
+fn force_tool_retry(
+    client: Client,
+    mut request: types::CreateMessagesRequest,
+    events: Vec<ConversationEvent>,
+    fallback: &ForcedToolFallback,
+    is_structured: bool,
+) -> EventStream {
+    // Append the assistant's response from the first request.
+    let message = events
+        .into_iter()
+        .filter_map(|event| convert_event(event, true).map(|v| v.1))
+        .fold(
+            types::Message {
+                role: types::MessageRole::Assistant,
+                ..Default::default()
+            },
+            |mut message, content| {
+                message.content.push(content);
+                message
+            },
+        );
+
+    request.messages.push(message);
+
+    // Ask the model to call the required tool.
+    let prompt = match &fallback.tool_choice {
+        types::ToolChoice::Tool { name, .. } => {
+            format!(
+                "You did not call the required tool. You MUST call the tool named '{name}' now. \
+                 Do not respond with text."
+            )
+        }
+        _ => "You did not call any tool. You MUST call at least one tool now. Do not respond with \
+              text."
+            .to_string(),
+    };
+
+    request.messages.push(types::Message {
+        role: types::MessageRole::User,
+        content: types::MessageContentList(vec![types::MessageContent::Text(prompt.into())]),
+    });
+
+    // Disable thinking and restore the original forced tool_choice.
+    request.thinking = Some(types::ExtendedThinking::Disabled);
+    request.tool_choice = Some(fallback.tool_choice.clone());
+
+    // Remove effort from output config since thinking is disabled.
+    if let Some(ref mut config) = request.output_config {
+        config.effort = None;
+        if config.format.is_none() {
+            request.output_config = None;
+        }
+    }
+
+    Box::pin(try_stream!({
+        // Pass `None` for forced_tool_fallback to prevent infinite retries.
+        for await event in call(client, request, false, is_structured, None) {
+            let event = event?;
+
+            // Skip reasoning (shouldn't appear with thinking disabled, but
+            // be defensive).
+            if event.as_part().is_some_and(EventPart::is_reasoning) {
+                continue;
             }
 
             yield event;
@@ -592,7 +754,11 @@ fn create_request(
     query: ChatQuery,
     stream: bool,
     beta: &BetaFeatures,
-) -> Result<(types::CreateMessagesRequest, bool)> {
+) -> Result<(
+    types::CreateMessagesRequest,
+    bool,
+    Option<ForcedToolFallback>,
+)> {
     let ChatQuery {
         thread,
         tools,
@@ -797,12 +963,23 @@ fn create_request(
     let reasoning_config = model.custom_reasoning_config(parameters.reasoning);
 
     // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
-    if reasoning_config.is_some() && tool_choice.is_forced_call() {
+    //
+    // Anthropic does not support forced tool_choice with extended thinking.
+    // We downgrade to auto + a system prompt nudge, and if the model still
+    // doesn't call a tool, `call()` retries with thinking disabled and the
+    // real forced tool_choice.
+    let forced_tool_fallback = if reasoning_config.is_some() && tool_choice.is_forced_call() {
         info!(
             ?tool_choice,
             "Anthropic API does not support reasoning when tool_choice forces tool use. Switching \
-             to soft-force mode."
+             to soft-force mode with forced-tool fallback."
         );
+
+        // Capture the original forced choice for the fallback before
+        // downgrading to auto.
+        let fallback = ForcedToolFallback {
+            tool_choice: convert_tool_choice(tool_choice.clone()),
+        };
 
         // Build the system prompt nudge.
         let text = if let Some(tool) = tool_choice.function_name() {
@@ -821,7 +998,11 @@ fn create_request(
             text,
             cache_control: None,
         }));
-    }
+
+        Some(fallback)
+    } else {
+        None
+    };
 
     let tool_choice = convert_tool_choice(tool_choice);
 
@@ -937,7 +1118,7 @@ fn create_request(
 
     builder
         .build()
-        .map(|req| (req, is_structured))
+        .map(|req| (req, is_structured, forced_tool_fallback))
         .map_err(Into::into)
 }
 
