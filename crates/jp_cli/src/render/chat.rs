@@ -26,8 +26,9 @@
 //! | `Truncate(N)` | Render first N characters, then "..." |
 //! | `Progress` | Show "reasoning..." then dots |
 //! | `Static` | Show "reasoning..." once |
+//! | `Timer` | Show a running timer, erase when done |
 
-use std::sync::Arc;
+use std::{fmt::Write as _, sync::Arc, time::Duration};
 
 use jp_config::style::{
     StyleConfig,
@@ -39,6 +40,9 @@ use jp_md::{
     format::{BackgroundFill, DefaultBackground, Formatter, SavedHighlightState, TerminalOptions},
 };
 use jp_printer::{PrintableExt as _, Printer};
+use tokio_util::sync::CancellationToken;
+
+use crate::timer::spawn_line_timer;
 
 /// The kind of content last pushed into the renderer.
 ///
@@ -66,6 +70,8 @@ pub struct ChatRenderer {
     reasoning_chars_count: usize,
     /// Saved highlighting state for the current fenced code block, if any.
     code_highlight: Option<SavedHighlightState>,
+    /// Active reasoning timer token, used by `Timer` display mode.
+    reasoning_timer: Option<CancellationToken>,
 }
 
 impl ChatRenderer {
@@ -80,6 +86,7 @@ impl ChatRenderer {
             last_content_kind: None,
             reasoning_chars_count: 0,
             code_highlight: None,
+            reasoning_timer: None,
         }
     }
 
@@ -182,17 +189,33 @@ impl ChatRenderer {
                 if self.last_content_kind == Some(ContentKind::Reasoning) {
                     self.printer.eprint(".");
                 } else {
-                    self.flush();
-                    self.last_content_kind = Some(ContentKind::Reasoning);
+                    self.flush_on_transition(ContentKind::Reasoning);
                     self.printer.eprint("reasoning...");
                 }
             }
 
             ReasoningDisplayConfig::Static => {
                 if self.last_content_kind != Some(ContentKind::Reasoning) {
-                    self.flush();
-                    self.last_content_kind = Some(ContentKind::Reasoning);
+                    self.flush_on_transition(ContentKind::Reasoning);
                     self.printer.eprintln("reasoning...\n");
+                }
+            }
+
+            ReasoningDisplayConfig::Timer => {
+                if self.last_content_kind != Some(ContentKind::Reasoning) {
+                    self.flush_on_transition(ContentKind::Reasoning);
+
+                    if let Some((token, _handle)) = spawn_line_timer(
+                        self.printer.clone(),
+                        self.printer.pretty_printing_enabled(),
+                        Duration::from_millis(300),
+                        Duration::from_millis(100),
+                        |secs| {
+                            format!("\r\x1b[K\x1b[2m\u{23f1} Reasoning\u{2026} {secs:.1}s\x1b[22m")
+                        },
+                    ) {
+                        self.reasoning_timer = Some(token);
+                    }
                 }
             }
 
@@ -330,6 +353,7 @@ impl ChatRenderer {
     }
 
     pub fn flush(&mut self) {
+        self.cancel_reasoning_timer();
         // If we're mid-code-block, the stream ended without a closing fence.
         // Emit what we have as raw text.
         if self.code_highlight.is_some() {
@@ -337,6 +361,17 @@ impl ChatRenderer {
         }
         if let Some(remaining) = self.buffer.flush() {
             self.print_block(&remaining);
+        }
+    }
+
+    /// Cancel the reasoning timer if one is running.
+    ///
+    /// Cancels the token (so the background task stops ticking) and
+    /// clears the timer line on stderr immediately.
+    fn cancel_reasoning_timer(&mut self) {
+        if let Some(token) = self.reasoning_timer.take() {
+            token.cancel();
+            let _ = write!(self.printer.err_writer(), "\r\x1b[K");
         }
     }
 
@@ -352,6 +387,7 @@ impl ChatRenderer {
     /// content in the buffer has already been captured by the event builder,
     /// so it's safe to discard.
     pub fn reset(&mut self) {
+        self.cancel_reasoning_timer();
         self.buffer = Buffer::new();
         let pretty = self.printer.pretty_printing_enabled();
         self.formatter = formatter_from_config(&self.config, pretty);
