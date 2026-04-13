@@ -107,6 +107,48 @@ fn test_progress_reasoning_shows_dots() {
     assert_eq!(*err.lock(), "reasoning.....");
 }
 
+#[tokio::test]
+async fn test_timer_reasoning_suppresses_output() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Timer;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First chunk\n\n".into(),
+    });
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Second chunk\n\n".into(),
+    });
+
+    renderer.printer.flush();
+    assert_eq!(
+        *out.lock(),
+        "",
+        "timer reasoning should not produce stdout output"
+    );
+}
+
+#[tokio::test]
+async fn test_timer_reasoning_then_message() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Timer;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking hard\n\n".into(),
+    });
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer\n\n".into(),
+    });
+
+    renderer.printer.flush();
+    assert_eq!(
+        *out.lock(),
+        "Answer\n\n",
+        "message content should render after timer reasoning"
+    );
+}
+
 #[test]
 fn test_truncate_reasoning() {
     let mut config = AppConfig::new_test();

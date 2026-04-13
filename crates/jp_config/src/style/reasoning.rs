@@ -25,6 +25,7 @@ pub struct ReasoningConfig {
     /// - `summary`: Show a summary of the reasoning (requires `summary_model`).
     /// - `static`: Show a static "reasoning..." message.
     /// - `progress`: Show "reasoning..." with animated dots.
+    /// - `timer`: Show a running timer while reasoning.
     /// - `<number>`: Show the first N characters of the reasoning content.
     #[setting(default)]
     pub display: ReasoningDisplayConfig,
@@ -120,6 +121,10 @@ pub enum ReasoningDisplayConfig {
     /// Similar to `Static`, but additional dots are added to indicate that the
     /// assistant is still reasoning.
     Progress,
+
+    /// Show a running timer while the assistant is reasoning. The timer is
+    /// erased when reasoning completes and message content begins streaming.
+    Timer,
 
     /// Reasoning content is displayed as it is generated.
     #[default]
