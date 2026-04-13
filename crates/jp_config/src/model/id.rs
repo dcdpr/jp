@@ -34,6 +34,8 @@ pub enum ModelIdOrAliasConfig {
     ///
     /// The matching [`ModelIdConfig`] can be fetched using
     /// [`LlmProviderConfig::aliases`].
+    ///
+    /// [`LlmProviderConfig::aliases`]: crate::providers::llm::LlmProviderConfig::aliases
     #[setting(with = "alias")]
     Alias(String),
 }

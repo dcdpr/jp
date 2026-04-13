@@ -212,6 +212,39 @@ fn build_resolves_chained_aliases() {
 }
 
 #[test]
+fn compaction_rule_unset_bounds_resolve_to_field_defaults() {
+    use crate::{
+        conversation::{
+            compaction::{PartialCompactionRuleConfig, RuleBound, ToolCallsMode},
+            tool::RunMode,
+        },
+        model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        types::vec::MergeableVec,
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+        provider: Some(ProviderId::Anthropic),
+        name: "claude-opus-4".parse().ok(),
+    });
+
+    // A rule that sets only a tool-call policy, leaving keep_first/keep_last
+    // unset — exactly what `jp c compact -t sreq` produces.
+    partial.conversation.compaction.rules = MergeableVec::Vec(vec![PartialCompactionRuleConfig {
+        tool_calls: Some(ToolCallsMode::StripRequests),
+        ..Default::default()
+    }]);
+
+    let config = build(partial).expect("valid config");
+
+    let rule = &config.conversation.compaction.rules[0];
+    assert_eq!(rule.keep_first, RuleBound::Turns(1));
+    assert_eq!(rule.keep_last, RuleBound::Turns(3));
+}
+
+#[test]
 fn build_rejects_alias_cycle() {
     use crate::{
         conversation::tool::RunMode,

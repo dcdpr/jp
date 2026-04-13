@@ -2261,6 +2261,7 @@ dependencies = [
  "jp_attachment",
  "jp_config",
  "jp_id",
+ "proptest",
  "quick-xml",
  "serde",
  "serde_json",
