@@ -531,7 +531,9 @@ impl ConversationStream {
     ///    [`InquiryRequest`] is missing.
     /// 5. Removes orphaned [`InquiryRequest`]s whose matching
     ///    [`InquiryResponse`] is missing.
-    /// 6. Normalizes [`TurnStart`] events: ensures the stream begins with
+    /// 6. Removes a trailing [`TurnStart`] with no following events
+    ///    (artifact of an interrupted turn).
+    /// 7. Normalizes [`TurnStart`] events: ensures the stream begins with
     ///    exactly one `TurnStart` and re-indexes all turn starts to a
     ///    zero-based sequence.
     ///
@@ -546,6 +548,7 @@ impl ConversationStream {
         self.sanitize_orphaned_tool_calls();
         self.remove_orphaned_inquiry_responses();
         self.remove_orphaned_inquiry_requests();
+        self.trim_trailing_empty_turn();
         self.normalize_turn_starts();
     }
 

@@ -139,6 +139,63 @@ fn test_trim_trailing_empty_turn_keeps_non_empty_turn() {
 }
 
 #[test]
+fn sanitize_removes_trailing_empty_turn_after_popped_chat_request() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("hello");
+
+    // Simulate interrupted turn: pop the ChatRequest, leaving an orphaned TurnStart.
+    let popped = stream.pop_if(ConversationEvent::is_chat_request);
+    assert!(popped.is_some());
+    assert_eq!(stream.len(), 1, "Only TurnStart should remain");
+
+    // Sanitize should clean up the orphaned TurnStart.
+    stream.sanitize();
+    assert_eq!(stream.len(), 0, "Orphaned TurnStart should be removed");
+
+    // Re-adding a turn should produce exactly one TurnStart + ChatRequest.
+    stream.start_turn("hello again");
+    let turn_starts = stream
+        .iter()
+        .filter(|e| e.event.is_turn_start())
+        .count();
+    assert_eq!(turn_starts, 1, "Should have exactly one TurnStart");
+}
+
+/// Regression test: when earlier turns exist, sanitize still removes an
+/// orphaned trailing TurnStart left after popping the last ChatRequest.
+#[test]
+fn sanitize_removes_trailing_empty_turn_with_prior_turns() {
+    let mut stream = ConversationStream::new_test();
+
+    // First turn: complete (has a response).
+    stream.start_turn("first");
+    stream
+        .current_turn_mut()
+        .add_event(ChatResponse::message("reply"))
+        .build()
+        .unwrap();
+
+    // Second turn: interrupted — only TurnStart + ChatRequest.
+    stream.start_turn("second");
+    assert_eq!(stream.len(), 5); // TS + CR + Resp + TS + CR
+
+    // Pop the ChatRequest from the interrupted turn.
+    let popped = stream.pop_if(ConversationEvent::is_chat_request);
+    assert!(popped.is_some());
+    assert_eq!(stream.len(), 4); // TS + CR + Resp + TS
+
+    // Sanitize should remove the trailing orphaned TurnStart.
+    stream.sanitize();
+
+    let turn_starts = stream
+        .iter()
+        .filter(|e| e.event.is_turn_start())
+        .count();
+    assert_eq!(turn_starts, 1, "Only the first turn's TurnStart should remain");
+    assert_eq!(stream.len(), 3); // TS + CR + Resp
+}
+
+#[test]
 fn test_to_parts_from_parts_roundtrip() {
     let mut stream = ConversationStream::new_test();
 
