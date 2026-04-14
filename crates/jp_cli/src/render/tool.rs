@@ -310,7 +310,7 @@ impl ToolRenderer {
         // Render intro header
         if !matches!(inline_results, InlineResults::Off) && max_lines > 0 {
             let lang = ext.as_ref().filter(|e| !e.is_empty());
-            let mut highlighter = lang.and_then(|lang| self.formatter.new_code_highlighter(lang));
+            let mut code_state = lang.map(|lang| self.formatter.begin_code_block(lang));
             let mut output = "\n".to_owned();
 
             if let Some(lang) = ext.as_ref() {
@@ -320,12 +320,15 @@ impl ToolRenderer {
             }
 
             for line in inner_content.lines().take(max_lines) {
-                match highlighter.as_mut().and_then(|hl| hl.highlight(line).ok()) {
-                    Some(highlighted) => output.push_str(&highlighted),
-                    None => output.push_str(line),
+                // highlight_line expects the trailing newline.
+                let with_nl = format!("{line}\n");
+                if let Some(ref mut state) = code_state {
+                    let rendered = self.formatter.render_code_line(&with_nl, state, None);
+                    output.push_str(&rendered);
+                } else {
+                    output.push_str(line);
+                    output.push('\n');
                 }
-
-                output.push('\n');
             }
 
             if ext.is_some() {

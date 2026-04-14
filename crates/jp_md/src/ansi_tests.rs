@@ -20,6 +20,34 @@ fn test_visual_width_wide_chars() {
 }
 
 #[test]
+fn test_visual_width_vs16_emoji() {
+    // U+26A0 WARNING SIGN alone is width 1.
+    assert_eq!(visual_width("\u{26A0}"), 1);
+    // U+26A0 + U+FE0F (VS16) forces emoji presentation = width 2.
+    assert_eq!(visual_width("\u{26A0}\u{FE0F}"), 2);
+    // Mixed with text: 2 + 1 + 7 = 10.
+    assert_eq!(visual_width("\u{26A0}\u{FE0F} warning"), 10);
+    // Multiple VS16 emoji in a string.
+    assert_eq!(visual_width("\u{26A0}\u{FE0F} ok \u{26A0}\u{FE0F}"), 8);
+    // VS16 after an already-wide character is a no-op.
+    assert_eq!(visual_width("\u{2705}\u{FE0F}"), 2);
+    // VS16 inside ANSI escapes.
+    assert_eq!(visual_width("\x1b[1m\u{26A0}\u{FE0F}\x1b[22m"), 2);
+}
+
+#[test]
+fn test_visual_width_zwj_sequences() {
+    // ZWJ family emoji: multiple emoji joined into a single glyph.
+    // U+1F468 + U+200D + U+1F469 + U+200D + U+1F467
+    assert_eq!(
+        visual_width("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"),
+        2
+    );
+    // Woman scientist: U+1F469 + U+200D + U+1F52C
+    assert_eq!(visual_width("\u{1F469}\u{200D}\u{1F52C}"), 2);
+}
+
+#[test]
 fn test_visual_width_with_ansi() {
     assert_eq!(visual_width("\x1b[1mbold\x1b[22m"), 4);
     assert_eq!(visual_width("\x1b[48;5;248m`code`\x1b[49m"), 6);

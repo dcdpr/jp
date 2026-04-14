@@ -280,6 +280,108 @@ fn test_buffer_fenced_code_streaming() {
 }
 
 #[test]
+fn test_buffer_nested_fenced_code() {
+    // Bug: when LLM produces a markdown code block containing an inner code
+    // block with the same backtick count, the inner closing fence prematurely
+    // closes the outer block. Everything after gets misinterpreted.
+    let input =
+        "```markdown\nfoo bar\n\n```rust\nfn main() {}\n```\n\nbaz\n\n```\n\nregular paragraph\n\n";
+
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::FencedCodeStart {
+            language: "markdown".into(),
+            fence_type: FenceType::Backtick,
+            fence_length: 3,
+        },
+        Event::FencedCodeLine("foo bar\n".into()),
+        Event::FencedCodeLine("\n".into()),
+        // Inner fence opening — treated as code content, depth increments.
+        Event::FencedCodeLine("```rust\n".into()),
+        Event::FencedCodeLine("fn main() {}\n".into()),
+        // Inner fence closing — depth decrements, still code content.
+        Event::FencedCodeLine("```\n".into()),
+        Event::FencedCodeLine("\n".into()),
+        Event::FencedCodeLine("baz\n".into()),
+        Event::FencedCodeLine("\n".into()),
+        // Actual closing fence — depth is 0, closes the outer block.
+        Event::FencedCodeEnd("```".into()),
+        Event::Block("regular paragraph\n\n".into()),
+    ]);
+
+    assert_eq!(buf.flush(), None);
+}
+
+#[test]
+fn test_buffer_list_streams_incrementally() {
+    // Bug: lists buffered entirely until a blank line, causing streaming
+    // to stall for the duration of list generation. Now the buffer
+    // flushes at each new top-level item boundary.
+    let mut buf = Buffer::new();
+
+    // Stream in a 4-item list, one line at a time.
+    buf.push("1. First item\n");
+    assert_eq!(buf.by_ref().collect::<Vec<_>>(), vec![]); // needs another item
+
+    buf.push("2. Second item\n");
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(
+        events,
+        vec![Event::Block("1. First item\n".into())],
+        "Should flush first item when second arrives"
+    );
+
+    buf.push("3. Third item\n");
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(
+        events,
+        vec![Event::Block("2. Second item\n".into())],
+        "Should flush second item when third arrives"
+    );
+
+    // Blank line terminates the list.
+    buf.push("\nAfter list\n\n");
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(events, vec![
+        Event::Block("3. Third item\n\n".into()),
+        Event::Block("After list\n\n".into()),
+    ],);
+}
+
+#[test]
+fn test_buffer_list_multiline_items_not_split() {
+    // List items with continuation lines should not be split.
+    let mut buf = Buffer::new();
+    buf.push("1. First item that\n   continues here\n");
+    buf.push("2. Second item\n\n");
+
+    let events: Vec<Event> = buf.by_ref().collect();
+    // First item (with continuation) flushes when second arrives.
+    // Second item flushes at blank line.
+    assert_eq!(events, vec![
+        Event::Block("1. First item that\n   continues here\n".into()),
+        Event::Block("2. Second item\n\n".into()),
+    ]);
+}
+
+#[test]
+fn test_buffer_unordered_list_streams() {
+    let mut buf = Buffer::new();
+    buf.push("- Alpha\n- Beta\n- Gamma\n\n");
+
+    let events: Vec<Event> = buf.by_ref().collect();
+    // Each item streams separately, last one terminated by blank line.
+    assert_eq!(events, vec![
+        Event::Block("- Alpha\n".into()),
+        Event::Block("- Beta\n".into()),
+        Event::Block("- Gamma\n\n".into()),
+    ]);
+}
+
+#[test]
 fn test_buffer_thematic_break() {
     let cases = vec![
         ("simple", TestCase {

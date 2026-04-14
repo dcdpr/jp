@@ -20,11 +20,17 @@ pub enum State {
         /// The type of fence character used.
         fence_type: FenceType,
 
-        /// The length of the fence character.
+        /// The fence length from the source (used for close detection).
         fence_length: usize,
 
-        /// The indentation of the fence character.
+        /// The indentation of the opening fence.
         indent: usize,
+
+        /// Nesting depth of inner fenced code blocks. When an inner fence
+        /// opening (backticks + language tag) is seen, this increments;
+        /// a bare closing fence decrements. The outer block only closes
+        /// when depth reaches 0.
+        depth: usize,
     },
 
     /// We are inside an HTML block.

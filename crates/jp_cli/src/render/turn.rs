@@ -167,8 +167,8 @@ impl TurnRenderer {
         };
 
         let mut style = config.style;
-        style.typewriter.text_delay = DelayDuration::default();
-        style.typewriter.code_delay = DelayDuration::default();
+        style.typewriter.text_delay = DelayDuration::instant();
+        style.typewriter.code_delay = DelayDuration::instant();
 
         self.chat = ChatRenderer::new(self.printer.clone(), style.clone());
         self.structured = StructuredRenderer::new(self.printer.clone());

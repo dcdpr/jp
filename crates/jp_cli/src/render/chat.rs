@@ -36,8 +36,8 @@ use jp_config::style::{
 };
 use jp_conversation::event::ChatResponse;
 use jp_md::{
-    buffer::{Buffer, Event},
-    format::{BackgroundFill, DefaultBackground, Formatter, SavedHighlightState, TerminalOptions},
+    buffer::{Buffer, Event, EventFixup, FenceEscalationFixup, OrphanedFenceFixup},
+    format::{BackgroundFill, CodeBlockState, DefaultBackground, Formatter, TerminalOptions},
 };
 use jp_printer::{PrintableExt as _, Printer};
 use tokio_util::sync::CancellationToken;
@@ -68,10 +68,12 @@ pub struct ChatRenderer {
     config: StyleConfig,
     last_content_kind: Option<ContentKind>,
     reasoning_chars_count: usize,
-    /// Saved highlighting state for the current fenced code block, if any.
-    code_highlight: Option<SavedHighlightState>,
+    /// State for the current streaming fenced code block, if any.
+    code_block: Option<CodeBlockState>,
     /// Active reasoning timer token, used by `Timer` display mode.
     reasoning_timer: Option<CancellationToken>,
+    /// Post-processing fixups for LLM quirks in the event stream.
+    fixups: Vec<Box<dyn EventFixup>>,
 }
 
 impl ChatRenderer {
@@ -85,8 +87,12 @@ impl ChatRenderer {
             config,
             last_content_kind: None,
             reasoning_chars_count: 0,
-            code_highlight: None,
+            code_block: None,
             reasoning_timer: None,
+            fixups: vec![
+                Box::new(OrphanedFenceFixup::new()),
+                Box::new(FenceEscalationFixup),
+            ],
         }
     }
 
@@ -239,55 +245,46 @@ impl ChatRenderer {
 
     /// Flush any complete markdown blocks in the buffer.
     fn flush_buffer_blocks(&mut self) {
-        while let Some(event) = self.buffer.next() {
+        while let Some(raw_event) = self.buffer.next() {
+            // Apply fixups (LLM quirk corrections) to the raw event.
+            let Some(event) = self.apply_fixups(raw_event) else {
+                continue;
+            };
             match event {
                 Event::Block(text) | Event::Flush(text) => self.print_block(&text),
                 Event::FencedCodeStart { ref language, .. } => {
-                    self.begin_code_block(language);
-                    self.print_code(&format!("{event}\n"));
+                    self.code_block = Some(self.formatter.begin_code_block(language));
+                    let bg = self.terminal_options().default_background;
+                    let rendered = self
+                        .formatter
+                        .render_code_fence(&format!("{event}\n"), bg.as_ref());
+                    self.print_code(&rendered);
                 }
                 Event::FencedCodeLine(line) => {
-                    let highlighted = self.highlight_code_line(&line);
-                    self.print_code(&highlighted);
+                    let bg = self.terminal_options().default_background;
+                    let rendered = if let Some(ref mut state) = self.code_block {
+                        self.formatter.render_code_line(&line, state, bg.as_ref())
+                    } else {
+                        line
+                    };
+                    self.print_code(&rendered);
                 }
                 Event::FencedCodeEnd(fence) => {
-                    self.print_code(&format!("{fence}\n"));
-                    self.end_code_block();
+                    let bg = self.terminal_options().default_background;
+                    let rendered = self
+                        .formatter
+                        .render_closing_fence(&format!("{fence}\n"), bg.as_ref());
+                    self.print_code(&rendered);
+                    self.code_block = None;
                 }
             }
         }
     }
 
-    /// Set up syntax highlighting state for a new fenced code block.
-    fn begin_code_block(&mut self, language: &str) {
-        self.code_highlight = self
-            .formatter
-            .new_code_highlighter(language)
-            .map(jp_md::format::CodeHighlighter::save);
-    }
-
-    /// Highlight a single code line using the saved highlighting state.
-    ///
-    /// Reconstructs the highlighter from saved state, highlights the line,
-    /// then saves the updated state back. Falls back to the raw line if
-    /// no highlighting state is available or highlighting fails.
-    fn highlight_code_line(&mut self, line: &str) -> String {
-        let Some(saved) = self.code_highlight.take() else {
-            return line.to_string();
-        };
-
-        let mut hl = self.formatter.resume_code_highlighter(saved);
-        let result = hl.highlight(line);
-        self.code_highlight = Some(hl.save());
-        result.unwrap_or_else(|_| line.to_string())
-    }
-
-    /// Clean up after a fenced code block ends.
-    fn end_code_block(&mut self) {
-        self.code_highlight = None;
-    }
-
     /// Print a raw code string with the code typewriter delay.
+    ///
+    /// The content is already highlighted and has background applied by
+    /// the formatter's streaming code block API.
     fn print_code(&self, content: &str) {
         let delay = self.config.typewriter.code_delay;
         self.printer
@@ -303,33 +300,10 @@ impl ChatRenderer {
         }
 
         let opts = self.terminal_options();
-        let mut formatted = self
+        let formatted = self
             .formatter
             .format_terminal_with(block, &opts)
             .unwrap_or_else(|_| block.to_string());
-
-        // The trailing newline creates the blank line between blocks.
-        // When a default background is active, fill the blank line too
-        // so the background is continuous across paragraphs.
-        match opts.default_background {
-            Some(DefaultBackground {
-                ref param,
-                fill: BackgroundFill::Terminal,
-            }) => {
-                formatted.push_str(&format!("\x1b[{param}m\x1b[K\x1b[49m\n"));
-            }
-            Some(DefaultBackground {
-                ref param,
-                fill: BackgroundFill::Column(width),
-            }) => {
-                formatted.push_str(&format!("\x1b[{param}m"));
-                for _ in 0..width {
-                    formatted.push(' ');
-                }
-                formatted.push_str("\x1b[49m\n");
-            }
-            _ => formatted.push('\n'),
-        }
 
         let delay = self.config.typewriter.text_delay;
         self.printer.print(formatted.typewriter(delay.into()));
@@ -356,9 +330,7 @@ impl ChatRenderer {
         self.cancel_reasoning_timer();
         // If we're mid-code-block, the stream ended without a closing fence.
         // Emit what we have as raw text.
-        if self.code_highlight.is_some() {
-            self.end_code_block();
-        }
+        self.code_block = None;
         if let Some(remaining) = self.buffer.flush() {
             self.print_block(&remaining);
         }
@@ -393,7 +365,19 @@ impl ChatRenderer {
         self.formatter = formatter_from_config(&self.config, pretty);
         self.last_content_kind = None;
         self.reasoning_chars_count = 0;
-        self.code_highlight = None;
+        self.code_block = None;
+        self.fixups = vec![
+            Box::new(OrphanedFenceFixup::new()),
+            Box::new(FenceEscalationFixup),
+        ];
+    }
+
+    /// Run the event through all fixups. Returns `None` if suppressed.
+    fn apply_fixups(&mut self, event: Event) -> Option<Event> {
+        self.fixups
+            .iter_mut()
+            .try_fold(event, |ev, fixup| fixup.process(ev).ok_or(()))
+            .ok()
     }
 }
 

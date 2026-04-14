@@ -105,6 +105,41 @@ fn test_terminal_blockquote() {
 }
 
 #[test]
+fn test_terminal_blockquote_continuation_lines_colored() {
+    // Bug: in a multi-line blockquote, the first `>` is rendered in the
+    // blockquote gray, but subsequent `>` markers (from the prefix) are
+    // rendered in the default color because ANSI attributes were restored
+    // AFTER writing the prefix.
+    let input = "> `exclusive` is a property of a specific question, not of a prompt kind. A\n> \
+                 `PromptKind::Tool` question may or may not be exclusive. Permission and \
+                 Result\n> prompts are implicitly exclusive in a different sense\n";
+
+    let formatter = Formatter::with_width(0);
+    let output = formatter.format_terminal(input).unwrap();
+
+    // The blockquote foreground color (from theme gutter_foreground).
+    let bq_fg = "\x1b[38;2;131;148;150m";
+
+    // Every `> ` in the output should be preceded by the blockquote color.
+    // Split on "> " and check that each occurrence (except possibly the
+    // very first line) has the color escape right before it.
+    for line in output.lines() {
+        if !line.contains("> ") {
+            continue;
+        }
+        // The `> ` should appear after the blockquote foreground escape,
+        // not after a reset/default color.
+        let gt_pos = line.find("> ").unwrap();
+        let before = &line[..gt_pos];
+        assert!(
+            before.contains(bq_fg) || before.is_empty(),
+            "Blockquote '> ' should be preceded by foreground color escape.\nLine: {line:?}\nFull \
+             output: {output:?}"
+        );
+    }
+}
+
+#[test]
 fn test_no_escaped_special_characters() {
     let cases = vec![
         ("exclamation_mark", TestCase {
@@ -326,6 +361,291 @@ fn test_default_background_terminal_fill() {
         actual.contains("\x1b[0m"),
         "width=0: Should contain RESET. Got: {actual:?}"
     );
+}
+
+#[test]
+fn test_inline_code_wrap_uses_default_bg_for_fill() {
+    // Bug: when an inline code span wraps across lines with a reasoning
+    // background active, the line-fill (erase to EOL) uses the inline
+    // code background instead of the reasoning background, causing the
+    // code bg to extend to the terminal edge.
+    let reasoning_bg = "48;5;236";
+    let reasoning_esc = format!("\x1b[{reasoning_bg}m");
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: reasoning_bg.into(),
+            fill: BackgroundFill::Terminal,
+        }),
+    };
+
+    // A paragraph with inline code near the wrap boundary.
+    let input = "An empty slice starts with `low = 0` and `high = 0`, so the while condition \
+                 fails immediately.";
+    let actual = Formatter::with_width(40)
+        .format_terminal_with(input, &opts)
+        .unwrap();
+
+    // Every \x1b[K (erase to EOL) should be preceded by the reasoning
+    // background, not the inline code background.
+    for (i, line) in actual.lines().enumerate() {
+        // Find each \x1b[K and check that the bg set just before it
+        // is the reasoning bg, not a code bg.
+        for (pos, _) in line.match_indices("\x1b[K") {
+            let before = &line[..pos];
+            // The last bg escape before \x1b[K should be the reasoning bg.
+            let last_bg_pos = before.rfind("\x1b[48;");
+            if let Some(bg_pos) = last_bg_pos {
+                let bg_escape = &before[bg_pos..];
+                assert!(
+                    bg_escape.starts_with(&reasoning_esc),
+                    "Line {i}: erase-to-EOL should use reasoning bg, not code bg.\nBefore \
+                     \\x1b[K: {bg_escape:?}\nFull line: {line:?}\nFull output: {actual:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_inline_code_wrap_prefix_uses_reasoning_bg() {
+    // Bug: when inline code wraps across lines with reasoning background,
+    // the indentation prefix on the continuation line gets the inline code
+    // background instead of the reasoning background.
+    let reasoning_bg = "48;5;236";
+    let reasoning_esc = format!("\x1b[{reasoning_bg}m");
+    let code_bg = "48;5;248"; // theme code bg
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: reasoning_bg.into(),
+            fill: BackgroundFill::Terminal,
+        }),
+    };
+
+    // List item where the inline code span crosses the wrap boundary.
+    // At width=35, "1. Begin " (9) + "`some long code " (16) = 25,
+    // then "that " wraps. The wrap happens INSIDE the code span.
+    let input = "1. Begin `some long code that crosses the wrap boundary` end.\n";
+    let actual = Formatter::with_width(35)
+        .format_terminal_with(input, &opts)
+        .unwrap();
+
+    let lines: Vec<&str> = actual.lines().collect();
+    assert!(lines.len() >= 2, "Expected wrapping. Got: {actual:?}");
+
+    let cont = lines[1];
+    assert!(
+        !cont.starts_with(&format!("\x1b[{code_bg}m")),
+        "Continuation line prefix should NOT have inline code bg.\nLine: {cont:?}\nFull output: \
+         {actual:?}"
+    );
+    assert!(
+        cont.starts_with(&reasoning_esc),
+        "Continuation line prefix should start with reasoning bg.\nLine: {cont:?}\nFull output: \
+         {actual:?}"
+    );
+}
+
+#[test]
+fn test_inline_code_wrap_preserves_code_bg_on_content() {
+    // When inline code wraps across lines, the code CONTENT on the
+    // continuation line must keep the inline code background. Only the
+    // prefix and line-fill should use the reasoning (default) bg.
+    let reasoning_bg = "48;5;236";
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: reasoning_bg.into(),
+            fill: BackgroundFill::Terminal,
+        }),
+    };
+
+    // Same input as prefix test — wrap happens inside the code span.
+    let input = "1. Begin `some long code that crosses the wrap boundary` end.\n";
+    let actual = Formatter::with_width(35)
+        .format_terminal_with(input, &opts)
+        .unwrap();
+
+    let lines: Vec<&str> = actual.lines().collect();
+    assert!(lines.len() >= 2, "Expected wrapping. Got: {actual:?}");
+
+    // The continuation line should have at least two bg escapes:
+    // one for reasoning (prefix) and one for inline code (content).
+    // The continuation line should have at least two DIFFERENT bg escapes:
+    // reasoning bg for the prefix and code bg for the content.
+    let cont = lines[1];
+    let bg_escapes: Vec<_> = cont
+        .match_indices("\x1b[48;")
+        .map(|(pos, _)| {
+            let rest = &cont[pos..];
+            let end = rest.find('m').unwrap_or(rest.len());
+            &cont[pos..=pos + end]
+        })
+        .collect();
+    assert!(
+        bg_escapes.len() >= 2,
+        "Continuation should have at least 2 bg escapes.\nFound: {bg_escapes:?}\nLine: \
+         {cont:?}\nFull output: {actual:?}"
+    );
+    // The first bg should be reasoning, a later one should differ (code bg).
+    let has_different = bg_escapes.windows(2).any(|w| w[0] != w[1]);
+    assert!(
+        has_different,
+        "Continuation should have different bg for prefix vs content.\nAll bg escapes are \
+         identical: {bg_escapes:?}\nLine: {cont:?}\nFull output: {actual:?}"
+    );
+}
+
+#[test]
+fn test_code_block_inherits_default_background() {
+    // Bug: when rendering with a default background (reasoning mode),
+    // syntax-highlighted code blocks didn't get the background because
+    // write_raw bypassed the background management.
+    let bg_param = "48;5;236";
+    let bg_esc = format!("\x1b[{bg_param}m");
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Terminal,
+        }),
+    };
+
+    let input = "```rust\nfn main() {}\n```\n";
+    let actual = Formatter::with_width(0)
+        .format_terminal_with(input, &opts)
+        .unwrap();
+
+    // Every line should have the background escape.
+    // (syntect inserts color escapes between tokens, so search for "fn".)
+    for line in actual.lines() {
+        assert!(
+            line.contains(&bg_esc),
+            "Every line should have default background.\nLine: {line:?}\nFull output: {actual:?}"
+        );
+    }
+}
+
+#[test]
+fn test_list_continuation_has_background_on_prefix() {
+    // Bug: when rendering a list with a default background (e.g. reasoning),
+    // wrapped continuation lines had the background on the text but NOT on
+    // the indentation prefix spaces. The prefix should also be background-
+    // colored so there's no gap.
+    let bg_param = "48;5;236";
+    let bg_escape = format!("\x1b[{bg_param}m");
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Terminal,
+        }),
+    };
+
+    // A list item long enough to wrap at width=40.
+    let input = "1. This is a list item that is long enough to wrap onto a second line\n";
+    let actual = Formatter::with_width(40)
+        .format_terminal_with(input, &opts)
+        .unwrap();
+
+    // Each continuation line should have the background escape BEFORE
+    // the prefix spaces, not after.
+    let lines: Vec<&str> = actual.lines().collect();
+    assert!(lines.len() >= 2, "Expected wrapped output, got {lines:?}");
+
+    // The continuation line (second line) should start with the bg escape
+    // followed by prefix spaces.
+    let cont = lines[1];
+    assert!(
+        cont.starts_with(&bg_escape),
+        "Continuation line should start with background escape.\nLine: {cont:?}\nFull output: \
+         {actual:?}"
+    );
+}
+
+#[test]
+fn test_blockquote_with_code_block_has_prefix_on_fences() {
+    // Inside a blockquote, the code fence lines and blank separator lines
+    // should have the "> " prefix. The code content lines should NOT.
+    let input = "> Some text\n>\n> ```rust\n> fn main() {}\n> ```\n>\n> More text\n";
+
+    let formatter = Formatter::with_width(0);
+    let actual = formatter.format_terminal(input).unwrap();
+
+    // Strip ANSI for easier inspection.
+    let plain = strip_ansi_for_test(&actual);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    // Fences and blank lines should have "> " prefix.
+    assert!(lines[0].starts_with("> "), "line 0: {lines:?}");
+    assert_eq!(lines[1], "> ", "blank line before fence: {lines:?}");
+    assert!(lines[2].starts_with("> ```"), "opening fence: {lines:?}");
+    // Code content should NOT have "> " prefix.
+    assert!(
+        !lines[3].starts_with("> "),
+        "code content should not have prefix: {lines:?}"
+    );
+    assert!(lines[3].contains("fn main"), "code content: {lines:?}");
+    // Closing fence and after.
+    assert!(lines[4].starts_with("> ```"), "closing fence: {lines:?}");
+    assert_eq!(lines[5], "> ", "blank line after fence: {lines:?}");
+    assert!(lines[6].starts_with("> "), "text after code: {lines:?}");
+}
+
+#[test]
+fn test_terminal_list_last_item_gets_separator() {
+    // Bug: the last list item (ending with \n\n from the buffer) is
+    // parsed by comrak as a tight single-item list. ends_with_tight_list
+    // returns true and suppresses the separator, so the paragraph after
+    // the list has no blank line in front of it.
+    let fmt = Formatter::with_width(0);
+
+    // Simulate what the buffer produces: terminal item ends with \n\n.
+    let last_item = "5. Fifth item\n\n";
+    let output = fmt
+        .format_terminal_with(last_item, &TerminalOptions::default())
+        .unwrap();
+    let plain = strip_ansi_for_test(&output);
+
+    // The formatted output should end with a blank line (separator)
+    // so the next block has spacing.
+    assert!(
+        plain.ends_with("\n\n"),
+        "Terminal list item should have trailing separator.\nPlain: {plain:?}\nOutput: {output:?}"
+    );
+}
+
+#[test]
+fn test_terminal_list_mid_item_no_separator() {
+    // Mid-list items (ending with \n, no blank line) should NOT get
+    // a separator, so consecutive items render tight.
+    let fmt = Formatter::with_width(0);
+
+    let mid_item = "1. First item\n";
+    let output = fmt
+        .format_terminal_with(mid_item, &TerminalOptions::default())
+        .unwrap();
+    let plain = strip_ansi_for_test(&output);
+
+    // Should end with exactly one newline, not two.
+    assert!(
+        plain.ends_with('\n') && !plain.ends_with("\n\n"),
+        "Mid-list item should NOT have trailing separator.\nPlain: {plain:?}\nOutput: {output:?}"
+    );
+}
+
+/// Strip ANSI escapes for readable test assertions.
+fn strip_ansi_for_test(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_escape = false;
+    for c in s.chars() {
+        if in_escape {
+            if c.is_ascii_alphabetic() || c == '~' {
+                in_escape = false;
+            }
+        } else if c == '\x1b' {
+            in_escape = true;
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[test]
