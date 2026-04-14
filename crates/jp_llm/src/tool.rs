@@ -383,6 +383,16 @@ pub async fn run_tool_command(
         cmd
     };
 
+    // Isolate the child from JP's process group so terminal signals
+    // (Ctrl+C / SIGINT) don't kill it. JP manages tool lifecycle via
+    // the cancellation token, not Unix signals.
+    #[cfg(unix)]
+    cmd.process_group(0);
+
+    // Ensure the child is killed when the tokio task is aborted on
+    // cancellation. Without this the process would be orphaned.
+    cmd.kill_on_drop(true);
+
     let child = cmd
         .current_dir(root.as_std_path())
         .stdout(Stdio::piped())
