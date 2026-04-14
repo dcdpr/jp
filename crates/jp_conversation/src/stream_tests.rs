@@ -154,10 +154,7 @@ fn sanitize_removes_trailing_empty_turn_after_popped_chat_request() {
 
     // Re-adding a turn should produce exactly one TurnStart + ChatRequest.
     stream.start_turn("hello again");
-    let turn_starts = stream
-        .iter()
-        .filter(|e| e.event.is_turn_start())
-        .count();
+    let turn_starts = stream.iter().filter(|e| e.event.is_turn_start()).count();
     assert_eq!(turn_starts, 1, "Should have exactly one TurnStart");
 }
 
@@ -187,11 +184,11 @@ fn sanitize_removes_trailing_empty_turn_with_prior_turns() {
     // Sanitize should remove the trailing orphaned TurnStart.
     stream.sanitize();
 
-    let turn_starts = stream
-        .iter()
-        .filter(|e| e.event.is_turn_start())
-        .count();
-    assert_eq!(turn_starts, 1, "Only the first turn's TurnStart should remain");
+    let turn_starts = stream.iter().filter(|e| e.event.is_turn_start()).count();
+    assert_eq!(
+        turn_starts, 1,
+        "Only the first turn's TurnStart should remain"
+    );
     assert_eq!(stream.len(), 3); // TS + CR + Resp
 }
 
