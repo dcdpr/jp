@@ -8,6 +8,12 @@ examples = """
 ```json
 {"url": "https://docs.rs/tokio/latest/tokio/"}
 ```
+```json
+{"url": "https://docs.rs/tokio/latest/tokio/", "list_sections": true}
+```
+```json
+{"url": "https://docs.rs/tokio/latest/tokio/", "sections": ["modules", "macros"]}
+```
 """
 
 [conversation.tools.web_fetch.style]
@@ -19,3 +25,22 @@ results_file_link = "full"
 type = "string"
 required = true
 summary = "The URL of the web page to fetch."
+
+[conversation.tools.web_fetch.parameters.list_sections]
+type = "boolean"
+required = false
+summary = """return a compact listing of all headed sections on the page"""
+description = """\
+Each entry includes the section's anchor ID, heading level, title, and a short content preview. \
+Use the anchor IDs with the `sections` parameter to fetch specific sections.\
+"""
+
+[conversation.tools.web_fetch.parameters.sections]
+type = "array"
+required = false
+items.type = "string"
+summary = "List of section anchor IDs to fetch."
+description = """\
+Only the content under those headings will be returned, significantly reducing output size. Use \
+`list_sections` first to discover available IDs.\
+"""

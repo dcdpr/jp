@@ -15,7 +15,14 @@ const SUMMARIZE_THRESHOLD: usize = 200_000;
 const HAIKU_MODEL: &str = "claude-haiku-4-5";
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 
-pub(crate) async fn web_fetch(url: Url) -> ToolResult {
+/// Max chars of preview text per section in the listing.
+const PREVIEW_MAX: usize = 120;
+
+pub(crate) async fn web_fetch(
+    url: Url,
+    list_sections: bool,
+    sections: Option<Vec<String>>,
+) -> ToolResult {
     let response = http_client().get(url.clone()).send().await?;
 
     let content_type = response
@@ -33,14 +40,24 @@ pub(crate) async fn web_fetch(url: Url) -> ToolResult {
 
     let body = response.text().await?;
 
+    if !content_type.contains("html") {
+        return Ok(truncate(&body, SUMMARIZE_THRESHOLD).into());
+    }
+
+    if list_sections {
+        return Ok(format_section_listing(&body).into());
+    }
+
+    if let Some(ids) = sections {
+        let html = extract_sections(&body, &ids);
+        let md = html_to_markdown(&html)?;
+        return Ok(truncate(&md, SUMMARIZE_THRESHOLD).into());
+    }
+
     let body = match url.fragment() {
         Some(fragment) => extract_anchor_html(&body, fragment).unwrap_or(body),
         None => body,
     };
-
-    if !content_type.contains("html") {
-        return Ok(truncate(&body, SUMMARIZE_THRESHOLD).into());
-    }
 
     let md = html_to_markdown(&body)?;
 
@@ -54,6 +71,13 @@ pub(crate) async fn web_fetch(url: Url) -> ToolResult {
     }
 
     Ok(truncate(&md, SUMMARIZE_THRESHOLD).into())
+}
+
+struct SectionHeader {
+    id: String,
+    level: u8,
+    text: String,
+    preview: String,
 }
 
 fn html_to_markdown(html: &str) -> Result<String, Error> {
@@ -291,6 +315,240 @@ fn escape_css_value(s: &str) -> String {
         }
     }
     out
+}
+
+/// Build an XML listing of all headed sections on the page.
+fn format_section_listing(html: &str) -> String {
+    let headers = list_section_headers(html);
+    if headers.is_empty() {
+        return "No sections with anchors found on this page.".to_owned();
+    }
+
+    let mut out = String::from("<sections>\n");
+    for h in &headers {
+        let preview = if h.preview.is_empty() {
+            h.text.clone()
+        } else {
+            format!("{} - {}", h.text, h.preview)
+        };
+        out.push_str(&format!(
+            "  <s id=\"{}\" level=\"{}\">{}</s>\n",
+            h.id, h.level, preview
+        ));
+    }
+    out.push_str("</sections>");
+    out
+}
+
+/// Discover all heading elements that have an associated anchor ID.
+fn list_section_headers(html: &str) -> Vec<SectionHeader> {
+    let doc = Html::parse_document(html);
+    let heading_sel = Selector::parse("h1, h2, h3, h4, h5, h6").unwrap();
+    let mut seen_ids = std::collections::HashSet::new();
+    let mut headers = Vec::new();
+
+    for heading in doc.select(&heading_sel) {
+        let Some(level) = heading_level(heading.value().name()) else {
+            continue;
+        };
+
+        let id = resolve_heading_id(&heading);
+        let id = match id {
+            Some(id) if !id.is_empty() && seen_ids.insert(id.clone()) => id,
+            _ => continue,
+        };
+
+        let text = clean_heading_text(&heading);
+        let preview = extract_preview_after_heading(&heading);
+
+        headers.push(SectionHeader {
+            id,
+            level,
+            text,
+            preview,
+        });
+    }
+
+    headers
+}
+
+/// Resolve the anchor ID for a heading, trying multiple patterns:
+///
+/// 1. `id` attribute on the heading itself
+/// 2. `id` attribute on a parent element (e.g. `<section id="..."><h3>`)
+/// 3. `href="#id"` on a child anchor (permalink pattern)
+/// 4. `id` attribute on a child element (e.g. `<h3><div id="...">`)
+/// 5. `id` or `name` on the immediately preceding sibling element
+fn resolve_heading_id(heading: &ElementRef<'_>) -> Option<String> {
+    // Pattern 1: id on heading
+    if let Some(id) = heading.value().attr("id") {
+        return Some(id.to_owned());
+    }
+
+    // Pattern 2: id on ancestor (walk up through non-heading parents)
+    {
+        let mut node = heading.parent();
+        while let Some(n) = node {
+            if let Some(el) = ElementRef::wrap(n) {
+                if is_heading(el.value().name()) {
+                    break;
+                }
+                if let Some(id) = el.value().attr("id") {
+                    return Some(id.to_owned());
+                }
+            }
+            node = n.parent();
+        }
+    }
+
+    // Pattern 3: child anchor with href="#..."
+    if let Ok(sel) = Selector::parse("a[href^='#']")
+        && let Some(anchor) = heading.select(&sel).next()
+        && let Some(href) = anchor.value().attr("href")
+    {
+        let fragment = href.trim_start_matches('#');
+        if !fragment.is_empty() {
+            return Some(fragment.to_owned());
+        }
+    }
+
+    // Pattern 4: child element with id
+    if let Ok(sel) = Selector::parse("[id]")
+        && let Some(child) = heading.select(&sel).next()
+        && let Some(id) = child.value().attr("id")
+    {
+        return Some(id.to_owned());
+    }
+
+    // Pattern 5: preceding sibling anchor with id or name
+    for sib in heading.prev_siblings() {
+        if let Some(el) = ElementRef::wrap(sib) {
+            if el.value().name() == "a"
+                && let Some(id) = el.value().attr("id").or_else(|| el.value().attr("name"))
+            {
+                return Some(id.to_owned());
+            }
+
+            // Only check the immediately preceding element
+            break;
+        }
+
+        // Skip text nodes (whitespace between elements)
+        if let Some(text) = sib.value().as_text()
+            && text.trim().is_empty()
+        {
+            continue;
+        }
+
+        break;
+    }
+
+    None
+}
+
+/// Get plain heading text, stripping permalink symbols like "¶".
+fn clean_heading_text(heading: &ElementRef<'_>) -> String {
+    let raw = heading.text().collect::<String>();
+    raw.trim()
+        .trim_end_matches('¶')
+        .trim_end_matches('#')
+        .trim()
+        .to_owned()
+}
+
+/// Collect a short plain-text preview from content after the heading.
+fn extract_preview_after_heading(heading: &ElementRef<'_>) -> String {
+    let mut text = String::new();
+    let level = heading_level(heading.value().name()).unwrap_or(0);
+
+    for sib in heading.next_siblings() {
+        if let Some(el) = ElementRef::wrap(sib) {
+            // Stop at next heading of same or higher level
+            if let Some(l) = heading_level(el.value().name())
+                && l <= level
+            {
+                break;
+            }
+
+            let chunk: String = el.text().collect();
+            if !text.is_empty() && !chunk.is_empty() {
+                text.push(' ');
+            }
+
+            text.push_str(chunk.trim());
+        } else if let Some(t) = sib.value().as_text() {
+            let t = t.trim();
+            if !t.is_empty() {
+                if !text.is_empty() {
+                    text.push(' ');
+                }
+                text.push_str(t);
+            }
+        }
+        if text.len() >= PREVIEW_MAX {
+            break;
+        }
+    }
+
+    truncate_str(&text, PREVIEW_MAX)
+}
+
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_owned();
+    }
+    let end = s.floor_char_boundary(max);
+
+    format!("{}...", &s[..end])
+}
+
+/// Extract multiple sections by anchor ID and combine into one HTML document.
+fn extract_sections(html: &str, ids: &[String]) -> String {
+    let doc = Html::parse_document(html);
+
+    let head_html = Selector::parse("head")
+        .ok()
+        .and_then(|s| doc.select(&s).next())
+        .map(|el| el.html())
+        .unwrap_or_default();
+
+    let mut body_parts = Vec::new();
+    for id in ids {
+        if let Some(section) = extract_section_html_from_doc(&doc, id) {
+            body_parts.push(section);
+        }
+    }
+
+    if body_parts.is_empty() {
+        return html.to_owned();
+    }
+
+    format!(
+        "<html>{head_html}<body>{}</body></html>",
+        body_parts.join("\n")
+    )
+}
+
+/// Extract a single section from an already-parsed document.
+fn extract_section_html_from_doc(doc: &Html, anchor: &str) -> Option<String> {
+    let selector = Selector::parse(&format!("[id=\"{}\"]", escape_css_value(anchor))).ok()?;
+    let target = doc.select(&selector).next()?;
+
+    if is_heading(target.value().name()) {
+        return Some(extract_heading_section(&target));
+    }
+
+    if let Some(heading) = find_heading_ancestor(&target) {
+        return Some(extract_heading_section(&heading));
+    }
+
+    // Check if the element contains a heading (e.g. <section id="..."><h3>...)
+    let heading_sel = Selector::parse("h1, h2, h3, h4, h5, h6").ok()?;
+    if let Some(inner_heading) = target.select(&heading_sel).next() {
+        return Some(extract_heading_section(&inner_heading));
+    }
+
+    Some(target.html())
 }
 
 #[cfg(test)]
