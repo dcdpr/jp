@@ -77,6 +77,19 @@ user-id = 6741
 user-login = "Darksonn"
 user-name = "Alice Ryhl"
 
+[[publisher.cargo-platform]]
+version = "0.3.2"
+when = "2025-12-11"
+user-id = 55123
+user-login = "rust-lang-owner"
+
+[[publisher.cargo_metadata]]
+version = "0.23.1"
+when = "2025-11-12"
+user-id = 1471
+user-login = "oli-obk"
+user-name = "Oli Scherer"
+
 [[publisher.caseless]]
 version = "0.2.2"
 when = "2024-12-30"
@@ -559,6 +572,13 @@ when = "2023-07-17"
 user-id = 2915
 user-login = "Amanieu"
 user-name = "Amanieu d'Antras"
+
+[[publisher.semver]]
+version = "1.0.28"
+when = "2026-04-04"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
 
 [[publisher.serde-untagged]]
 version = "0.1.9"

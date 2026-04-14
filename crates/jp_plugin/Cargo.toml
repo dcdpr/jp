@@ -1,0 +1,29 @@
+[package]
+name = "jp_plugin"
+
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+camino = { workspace = true, features = ["serde1"] }
+chrono = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

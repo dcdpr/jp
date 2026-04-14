@@ -170,6 +170,10 @@ expression: v
           "base_url": "https://openrouter.ai"
         }
       }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
     }
   },
   "events": [

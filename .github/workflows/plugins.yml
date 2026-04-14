@@ -1,0 +1,157 @@
+name: plugins
+on:
+  # Allow to run this workflow manually from the Actions tab
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/plugins/**'
+      - 'crates/internal/build-registry/**'
+      - 'docs/registry/**'
+env:
+  CARGO_TERM_COLOR: always
+  JUST_TIMESTAMP: true
+  JUST_COLOR: always
+  JUST_EXPLAIN: true
+  JUST_VERBOSE: 4
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name_suffix: " (macos arm64)"
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name_suffix: " (macos x86_64)"
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name_suffix: " (linux x86_64)"
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name_suffix: " (windows x86_64)"
+    runs-on: ${{ matrix.os }}
+    name: plugins ${{ matrix.name_suffix }}
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+      - uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
+        id: restore-cache
+        with:
+          path: |
+            ~/.rustup
+          key: plugins-${{ matrix.target }}
+      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
+      - uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
+        with:
+          key: plugins-${{ matrix.target }}
+          cache-bin: false
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: rustup target add ${{ matrix.target }}
+      - run: just plugin-build ${{ matrix.target }}
+      # Rename binaries to include target triple for the release.
+      - name: Stage binaries
+        shell: bash
+        run: |
+          mkdir -p staged
+          for bin in target/${{ matrix.target }}/release/jp-*; do
+            [ -f "$bin" ] || continue
+            # Skip .d (dep-info) and .pdb files.
+            case "$bin" in *.d|*.pdb) continue;; esac
+            name=$(basename "$bin")
+            cp "$bin" "staged/${name}-${{ matrix.target }}"
+          done
+          ls -la staged/
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v4
+        with:
+          name: plugins-${{ matrix.target }}
+          path: staged/
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+      - uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
+        with:
+          key: plugins-publish
+          cache-bin: false
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: actions/download-artifact@484a0b528fb4d7bd804637ccb632e47a0e638317 # v4
+        with:
+          path: artifacts/
+      # Build checksums file from all platform artifacts.
+      - name: Compute checksums
+        run: |
+          for dir in artifacts/plugins-*/; do
+            target=$(basename "$dir" | sed 's/^plugins-//')
+            for binary in "$dir"/jp-*; do
+              [ -f "$binary" ] || continue
+              # Extract plugin id: jp-<id>-<target> -> <id>
+              name=$(basename "$binary")
+              id=$(echo "$name" | sed "s/^jp-//; s/-${target}$//")
+              sha=$(shasum -a 256 "$binary" | cut -d' ' -f1)
+              echo "$id $target $sha" >> checksums.txt
+            done
+          done
+          echo "=== checksums.txt ==="
+          cat checksums.txt
+      # Generate plugins.json with checksums and download URLs.
+      - name: Build registry
+        run: |
+          cargo run --quiet -p build-registry -- \
+            --groups docs/registry/groups.toml \
+            --checksums checksums.txt \
+            > plugins.json
+          echo "=== plugins.json ==="
+          cat plugins.json
+      # Upload binaries to the rolling "plugins" GitHub Release.
+      - name: Upload binaries to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view plugins >/dev/null 2>&1 \
+            || gh release create plugins --prerelease \
+                 --title "Plugin Binaries" \
+                 --notes "Auto-updated plugin binaries. Do not delete this release."
+          for binary in artifacts/*/jp-*; do
+            gh release upload plugins "$binary" --clobber
+          done
+      # Push plugins.json to the orphan branch (with history).
+      - name: Publish registry to orphan branch
+        id: publish-registry
+        run: |
+          git fetch origin plugin-registry || true
+          if git rev-parse --verify origin/plugin-registry >/dev/null 2>&1; then
+            git worktree add /tmp/registry plugin-registry
+          else
+            echo "plugin-registry branch does not exist yet, creating it."
+            mkdir /tmp/registry
+            cd /tmp/registry
+            git init -b plugin-registry
+            cd -
+          fi
+
+          cp plugins.json /tmp/registry/plugins.json
+          cd /tmp/registry
+          git add plugins.json
+
+          if git diff --cached --quiet; then
+            echo "Registry unchanged, skipping commit."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git commit -m "Update plugin registry"
+            git push origin plugin-registry
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Trigger docs rebuild to pick up the new registry.
+      - name: Trigger docs deploy
+        if: steps.publish-registry.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run docs.yml

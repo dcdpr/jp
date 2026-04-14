@@ -692,6 +692,57 @@ install-tools:
 serve-tools CONTEXT TOOL:
     @jp-tools {{quote(CONTEXT)}} {{quote(TOOL)}}
 
+# Build all command plugin binaries for a target (defaults to host).
+[group('plugins')]
+plugin-build TARGET="":
+    #!/usr/bin/env sh
+    set -eu
+    target="${TARGET:-$(rustc -vV | sed -n 's/host: //p')}"
+    for manifest in crates/plugins/command/*/Cargo.toml; do
+        [ -f "$manifest" ] || continue
+        echo "Building $(basename "$(dirname "$manifest")") for $target..."
+        cargo build --release --manifest-path "$manifest" --target "$target"
+    done
+
+# Generate plugins.json from workspace metadata.
+# Without CHECKSUMS, produces a registry with no binary download info.
+[group('plugins')]
+plugin-registry-build CHECKSUMS="":
+    #!/usr/bin/env sh
+    set -eu
+    args="--groups docs/registry/groups.toml"
+    if [ -n "{{CHECKSUMS}}" ]; then
+        args="$args --checksums {{CHECKSUMS}}"
+    fi
+    cargo run --quiet -p build-registry -- $args
+
+# Fetch the latest released plugin registry from GitHub.
+[group('plugins')]
+plugin-registry-fetch:
+    #!/usr/bin/env sh
+    set -eu
+    curl -fL https://raw.githubusercontent.com/dcdpr/jp/plugin-registry/plugins.json \
+        -o docs/registry/plugins.json
+
+# Build plugins for the host and install to the local plugin directory.
+[group('plugins')]
+plugin-build-local: _install-jp (plugin-build "")
+    #!/usr/bin/env sh
+    set -eu
+    target=$(rustc -vV | sed -n 's/host: //p')
+    dir="$(jp path user-local --plugins=command)"
+    mkdir -p "$dir"
+    for manifest in crates/plugins/command/*/Cargo.toml; do
+        [ -f "$manifest" ] || continue
+        id=$(cargo metadata --manifest-path "$manifest" --format-version=1 --no-deps \
+            | jq -r '.packages[0].metadata["jp-registry"].id')
+        src="target/${target}/release/jp-${id}"
+        [ -f "$src" ] || continue
+        cp "$src" "${dir}/jp-${id}"
+        chmod +x "${dir}/jp-${id}"
+        echo "Installed jp-${id} → ${dir}/jp-${id}"
+    done
+
 # Run all ci tasks.
 [group('ci')]
 ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci

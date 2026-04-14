@@ -43,6 +43,7 @@ pub mod fs;
 pub(crate) mod internal;
 pub mod model;
 mod partial;
+pub mod plugins;
 pub mod providers;
 pub mod style;
 pub mod template;
@@ -68,6 +69,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt_vec},
     editor::{EditorConfig, PartialEditorConfig},
     partial::partial_opt,
+    plugins::{PartialPluginsConfig, PluginsConfig},
     providers::{PartialProviderConfig, ProviderConfig},
     style::{PartialStyleConfig, StyleConfig},
     template::{PartialTemplateConfig, TemplateConfig},
@@ -158,6 +160,13 @@ pub struct AppConfig {
     /// (e.g. file attachments, or tool call results).
     #[setting(nested)]
     pub providers: ProviderConfig,
+
+    /// Plugin configuration.
+    ///
+    /// Controls plugin installation, execution policy, and per-plugin
+    /// options for command plugins (standalone binaries).
+    #[setting(nested)]
+    pub plugins: PluginsConfig,
 }
 
 impl AssignKeyValue for PartialAppConfig {
@@ -180,6 +189,7 @@ impl AssignKeyValue for PartialAppConfig {
             _ if kv.p("editor") => self.editor.assign(kv)?,
             _ if kv.p("template") => self.template.assign(kv)?,
             _ if kv.p("providers") => self.providers.assign(kv)?,
+            _ if kv.p("plugins") => self.plugins.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -212,6 +222,7 @@ impl PartialConfigDelta for PartialAppConfig {
             editor: self.editor.delta(next.editor),
             template: self.template.delta(next.template),
             providers: self.providers.delta(next.providers),
+            plugins: self.plugins.delta(next.plugins),
         }
     }
 }
@@ -228,6 +239,7 @@ impl FillDefaults for PartialAppConfig {
             editor: self.editor.fill_from(defaults.editor),
             template: self.template.fill_from(defaults.template),
             providers: self.providers.fill_from(defaults.providers),
+            plugins: self.plugins.fill_from(defaults.plugins),
         }
     }
 }
@@ -246,6 +258,7 @@ impl ToPartial for AppConfig {
             editor: self.editor.to_partial(),
             template: self.template.to_partial(),
             providers: self.providers.to_partial(),
+            plugins: self.plugins.to_partial(),
         }
     }
 }

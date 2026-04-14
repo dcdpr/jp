@@ -330,6 +330,18 @@ user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2021-01-11"
 end = "2027-02-13"
 
+[[trusted.cargo-platform]]
+criteria = "safe-to-deploy"
+user-id = 55123 # rust-lang-owner
+start = "2023-07-13"
+end = "2027-04-08"
+
+[[trusted.cargo_metadata]]
+criteria = "safe-to-deploy"
+user-id = 1471 # Oli Scherer (oli-obk)
+start = "2019-03-12"
+end = "2027-04-08"
+
 [[trusted.caseless]]
 criteria = "safe-to-deploy"
 user-id = 1139 # Manish Goregaokar (Manishearth)

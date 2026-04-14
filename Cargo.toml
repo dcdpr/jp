@@ -1,6 +1,11 @@
 [workspace]
-members = ["crates/*", "crates/contrib/grizzly", "crates/contrib/json_edit", ".config/jp/tools/"]
-exclude = ["crates/contrib"]
+members = [
+    ".config/jp/tools/",
+    "crates/contrib/*",
+    "crates/internal/*",
+    "crates/jp_*",
+    "crates/plugins/command/*",
+]
 resolver = "3"
 
 [workspace.dependencies]
@@ -21,6 +26,7 @@ jp_macro = { path = "crates/jp_macro" }
 jp_mcp = { path = "crates/jp_mcp" }
 jp_md = { path = "crates/jp_md" }
 jp_openrouter = { path = "crates/jp_openrouter" }
+jp_plugin = { path = "crates/jp_plugin" }
 jp_printer = { path = "crates/jp_printer" }
 jp_storage = { path = "crates/jp_storage" }
 jp_task = { path = "crates/jp_task" }
@@ -40,6 +46,7 @@ backon = { git = "https://github.com/JeanMertz/backon", default-features = false
 base64 = { version = "0.22", default-features = false }
 camino = { version = "1", default-features = false }
 camino-tempfile = { version = "1", default-features = false }
+cargo_metadata = { version = "0.23", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
 clap = { version = "4", default-features = false }
 clean-path = { version = "0.2", default-features = false }

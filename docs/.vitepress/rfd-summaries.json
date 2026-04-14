@@ -274,5 +274,9 @@
   "069-guard-scoped-persistence-for-conversations.md": {
     "hash": "e1d6df1cea707200a0d30db63401279639e8e8b064c5a70b216372ce644b8bd3",
     "summary": "Conversation data auto-persists when ConversationMut drops via Arc<RwLock>, ensuring atomicity with file locks."
+  },
+  "072-command-plugin-system.md": {
+    "hash": "ba499a02d408881ee6b9828f78239297cd01e72e75e762711ee92793938d9f70",
+    "summary": "JSON-lines protocol enabling standalone binaries to extend JP with new subcommands in any language."
   }
 }

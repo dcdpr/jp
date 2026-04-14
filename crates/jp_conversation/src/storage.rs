@@ -77,7 +77,8 @@ pub fn encode_event(value: &mut Value, kind: &EventKind) {
 /// Decode base64-encoded storage fields from a raw event JSON value.
 ///
 /// This uses the `type` tag to determine which fields to decode, mirroring the
-/// encoding in [`encode_event`].
+/// encoding in [`encode_event`]. Unknown event types (including `config_delta`)
+/// are silently ignored.
 pub fn decode_event_value(value: &mut Value) {
     let Some(obj) = value.as_object_mut() else {
         return;
@@ -101,9 +102,9 @@ pub fn decode_event_value(value: &mut Value) {
                 decode_string(v);
             }
         }
-        "turn_start" | "chat_request" | "chat_response" | "inquiry_request"
-        | "inquiry_response" => {}
-        _ => panic!("unknown event kind: {tag}"),
+        // All other event types (turn_start, chat_request, chat_response,
+        // inquiry_*, config_delta, etc.) have no base64 fields.
+        _ => {}
     }
 }
 

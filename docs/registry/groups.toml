@@ -1,0 +1,6 @@
+[[group]]
+id = "serve"
+command = ["serve"]
+description = "JP server components"
+official = true
+suggests = ["serve web"]

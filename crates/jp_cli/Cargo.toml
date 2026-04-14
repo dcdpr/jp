@@ -30,6 +30,7 @@ jp_macro = { workspace = true }
 jp_mcp = { workspace = true }
 jp_md = { workspace = true }
 jp_openrouter = { workspace = true }
+jp_plugin = { workspace = true }
 jp_printer = { workspace = true }
 jp_storage = { workspace = true }
 jp_task = { workspace = true }
@@ -72,6 +73,7 @@ schemars = { workspace = true }
 schematic = { workspace = true, features = ["schema_serde", "renderer_template", "toml"] }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = { workspace = true }
 strip-ansi-escapes = { workspace = true }
 syntect = { workspace = true, features = ["regex-fancy", "default-themes", "default-syntaxes"] }
 thiserror = { workspace = true }
@@ -98,7 +100,7 @@ which = { workspace = true, features = ["real-sys"] }
 libc = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_System_Console"] }
+windows-sys = { workspace = true, features = ["Win32_System_Console", "Win32_System_Threading", "Win32_Foundation"] }
 
 [build-dependencies]
 chrono = { workspace = true }
