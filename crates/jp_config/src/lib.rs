@@ -163,6 +163,8 @@ pub struct AppConfig {
 impl AssignKeyValue for PartialAppConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
+            // Root-level JSON object: merge each top-level key individually.
+            "" => return kv.try_merge_object(self),
             "inherit" => self.inherit = kv.try_some_bool()?,
             _ if kv.p("config_load_paths") => {
                 let parser = |kv: KvAssignment| match kv.value.clone().into_value() {

@@ -192,6 +192,26 @@ impl KvAssignment {
         matches!(self.strategy, Strategy::Merge)
     }
 
+    /// Create a root-level JSON assignment with an empty key.
+    ///
+    /// When assigned via [`AssignKeyValue::assign`], the object's top-level
+    /// keys are iterated and each is assigned individually via
+    /// [`try_merge_object`](Self::try_merge_object). This allows
+    /// `--cfg '{"assistant": {"name": "dev"}}'` to work like
+    /// `--cfg assistant.name=dev`.
+    #[must_use]
+    pub const fn root_json(value: Value) -> Self {
+        Self {
+            key: KvKey {
+                path: String::new(),
+                delim: KeyDelim::Dot,
+                full_path: String::new(),
+            },
+            value: KvValue::Json(value),
+            strategy: Strategy::Set,
+        }
+    }
+
     /// Trim the start of the key, if it matches `segment`.
     ///
     /// See [`KvKey::trim_prefix`].

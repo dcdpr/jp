@@ -419,3 +419,7 @@ impl From<u32> for Tokens {
         Self(v)
     }
 }
+
+#[cfg(test)]
+#[path = "parameters_tests.rs"]
+mod tests;
