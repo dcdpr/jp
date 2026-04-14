@@ -159,7 +159,7 @@ fn sanitize_removes_trailing_empty_turn_after_popped_chat_request() {
 }
 
 /// Regression test: when earlier turns exist, sanitize still removes an
-/// orphaned trailing TurnStart left after popping the last ChatRequest.
+/// orphaned trailing `TurnStart` left after popping the last `ChatRequest`.
 #[test]
 fn sanitize_removes_trailing_empty_turn_with_prior_turns() {
     let mut stream = ConversationStream::new_test();
