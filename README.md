@@ -4,7 +4,7 @@
 > programmer. Built to integrate into your existing workflows, providing a
 > secure, powerful and flexible pair-programming experience with LLMs.
 
-Visit [**https://jp.computer/**] to learn more.
+Visit [jp.computer](https://jp.computer/) to learn more.
 
 > [!NOTE]
 > This project is in active development. Expect breaking changes. What is
@@ -36,13 +36,13 @@ just software that serves its users.
 JP is in active development. Install from source:
 
 ```sh
-cargo install --locked --git https://github.com/dcdpr/jp.git
+% cargo install --locked --git https://github.com/dcdpr/jp.git
 ```
 
 Initiate a new workspace in an existing directory:
 
 ```sh
-jp init .
+% jp init
 > Confirm before running tools?
 Yes (safest option)
 > Which LLM model do you want to use?
@@ -51,21 +51,30 @@ ollama/qwen3
 Initialized workspace at current directory
 ```
 
-Run your first query:
+Run your first queries, noting that you get back to the command line every time, but `jp q` is easy to type:
 
 ```sh
-jp query "Is this thing on?"
-Hello there! I am Jean-pierre, how can I help you today?
+% jp query --new "Is this thing on?"
+Hello there! I am Jean-Pierre, how can I help you today?
+% jp q Make me a sandwich.
+I wish I could [...]
+```
+
+List and select conversations:
+
+```sh
+% jp conversation ls
+% jp conversation use
 ```
 
 Configure your JP workspace:
 
 ```sh
-open .jp/config.toml
+% open .jp/config.toml
 ```
 
 See what else you can do:
 
 ```sh
-jp help
+% jp help
 ```
