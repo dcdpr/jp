@@ -47,7 +47,7 @@ pub(crate) struct Grep {
 
 impl Grep {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_none(&self.target.ids)
+        ConversationLoadRequest::explicit_or_none(&self.target)
     }
 
     #[expect(clippy::needless_pass_by_value)]

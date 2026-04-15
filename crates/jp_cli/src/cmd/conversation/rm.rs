@@ -70,7 +70,7 @@ impl Rm {
         if self.from.is_some() || self.until.is_some() {
             ConversationLoadRequest::none()
         } else {
-            ConversationLoadRequest::explicit_or_session(&self.target.ids)
+            ConversationLoadRequest::explicit_or_session(&self.target)
         }
     }
 }

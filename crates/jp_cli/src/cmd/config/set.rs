@@ -85,7 +85,7 @@ impl Set {
     }
 
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_none(&self.conversation.ids)
+        ConversationLoadRequest::explicit_or_none(&self.conversation)
     }
 }
 

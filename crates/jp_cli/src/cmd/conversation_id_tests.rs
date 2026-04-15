@@ -37,19 +37,19 @@ struct TestFlagSingle {
 #[test]
 fn positional_multi_no_args() {
     let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi"]).unwrap();
-    assert!(cmd.target.ids.is_empty());
+    assert!(cmd.target.ids().is_empty());
 }
 
 #[test]
 fn positional_multi_one_keyword() {
-    let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", "last"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::LastActivated]);
+    let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", "latest"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Latest]);
 }
 
 #[test]
 fn positional_multi_session_keyword() {
-    let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", "session"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::Session]);
+    let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", "+session"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Session]);
 }
 
 #[test]
@@ -60,33 +60,33 @@ fn positional_multi_multiple_ids() {
         "jp-c17000000001",
     ])
     .unwrap();
-    assert_eq!(cmd.target.ids.len(), 2);
-    assert!(matches!(cmd.target.ids[0], ConversationTarget::Id(_)));
-    assert!(matches!(cmd.target.ids[1], ConversationTarget::Id(_)));
+    assert_eq!(cmd.target.ids().len(), 2);
+    assert!(matches!(cmd.target.ids()[0], ConversationTarget::Id(_)));
+    assert!(matches!(cmd.target.ids()[1], ConversationTarget::Id(_)));
 }
 
 #[test]
 fn positional_multi_rejects_keyword_in_multi() {
     let err =
-        TestPositionalMulti::try_parse_from(["test-positional-multi", "last", "jp-c17000000000"]);
+        TestPositionalMulti::try_parse_from(["test-positional-multi", "latest", "jp-c17000000000"]);
     assert!(err.is_err());
 }
 
 #[test]
 fn positional_single_no_args() {
     let cmd = TestPositionalSingle::try_parse_from(["test-positional-single"]).unwrap();
-    assert!(cmd.target.ids.is_empty());
+    assert!(cmd.target.ids().is_empty());
 }
 
 #[test]
 fn positional_single_one_keyword() {
-    let cmd = TestPositionalSingle::try_parse_from(["test-positional-single", "last"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::LastActivated]);
+    let cmd = TestPositionalSingle::try_parse_from(["test-positional-single", "latest"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Latest]);
 }
 
 #[test]
 fn positional_single_rejects_session() {
-    let err = TestPositionalSingle::try_parse_from(["test-positional-single", "session"]);
+    let err = TestPositionalSingle::try_parse_from(["test-positional-single", "+session"]);
     assert!(err.is_err());
 }
 
@@ -103,27 +103,27 @@ fn positional_single_rejects_two_values() {
 #[test]
 fn flag_multi_no_flag() {
     let cmd = TestFlagMulti::try_parse_from(["test-flag-multi"]).unwrap();
-    assert!(cmd.target.ids.is_empty());
+    assert!(cmd.target.ids().is_empty());
 }
 
 #[test]
 fn flag_multi_bare_flag_is_picker() {
     let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::Picker(
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Picker(
         PickerFilter::default()
     )]);
 }
 
 #[test]
 fn flag_multi_keyword() {
-    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "last"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::LastActivated]);
+    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "latest"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Latest]);
 }
 
 #[test]
 fn flag_multi_short_flag() {
-    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "-i", "prev"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::Previous]);
+    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "-i", "session"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::SessionPrevious]);
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn flag_multi_comma_separated() {
         "jp-c17000000000,jp-c17000000001",
     ])
     .unwrap();
-    assert_eq!(cmd.target.ids.len(), 2);
+    assert_eq!(cmd.target.ids().len(), 2);
 }
 
 #[test]
@@ -147,68 +147,93 @@ fn flag_multi_repeated() {
         "jp-c17000000001",
     ])
     .unwrap();
-    assert_eq!(cmd.target.ids.len(), 2);
+    assert_eq!(cmd.target.ids().len(), 2);
 }
 
 #[test]
 fn flag_multi_session_keyword() {
-    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "session"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::Session]);
+    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "+session"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Session]);
 }
 
 #[test]
 fn flag_multi_rejects_keyword_in_multi() {
-    let err = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "last,jp-c17000000000"]);
+    let err = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "latest,jp-c17000000000"]);
     assert!(err.is_err());
 }
 
 #[test]
 fn flag_single_no_flag() {
     let cmd = TestFlagSingle::try_parse_from(["test-flag-single"]).unwrap();
-    assert!(cmd.target.ids.is_empty());
+    assert!(cmd.target.ids().is_empty());
 }
 
 #[test]
 fn flag_single_bare_is_picker() {
     let cmd = TestFlagSingle::try_parse_from(["test-flag-single", "--id"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::Picker(
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Picker(
         PickerFilter::default()
     )]);
 }
 
 #[test]
 fn flag_single_keyword() {
-    let cmd = TestFlagSingle::try_parse_from(["test-flag-single", "--id", "last"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::LastActivated]);
+    let cmd = TestFlagSingle::try_parse_from(["test-flag-single", "--id", "latest"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Latest]);
 }
 
 #[test]
 fn flag_single_rejects_session() {
-    let err = TestFlagSingle::try_parse_from(["test-flag-single", "--id", "session"]);
+    let err = TestFlagSingle::try_parse_from(["test-flag-single", "--id", "+session"]);
     assert!(err.is_err());
 }
 
 #[test]
 fn keyword_aliases() {
     for (input, expected) in [
-        ("l", ConversationTarget::LastActivated),
-        ("last", ConversationTarget::LastActivated),
-        ("last-active", ConversationTarget::LastActivated),
-        ("last-activated", ConversationTarget::LastActivated),
-        ("p", ConversationTarget::Previous),
-        ("prev", ConversationTarget::Previous),
-        ("previous", ConversationTarget::Previous),
-        ("c", ConversationTarget::Current),
-        ("current", ConversationTarget::Current),
-        ("last-created", ConversationTarget::LastCreated),
-        ("session", ConversationTarget::Session),
+        ("l", ConversationTarget::Latest),
+        ("latest", ConversationTarget::Latest),
+        ("n", ConversationTarget::Newest),
+        ("newest", ConversationTarget::Newest),
+        ("s", ConversationTarget::SessionPrevious),
+        ("session", ConversationTarget::SessionPrevious),
+        ("p", ConversationTarget::LatestPinned),
+        ("pinned", ConversationTarget::LatestPinned),
+        ("+session", ConversationTarget::Session),
+        ("+s", ConversationTarget::Session),
+        ("+pinned", ConversationTarget::Pinned),
+        ("+p", ConversationTarget::Pinned),
         (
-            "pinned",
-            ConversationTarget::Picker(PickerFilter { pinned: true }),
+            "?p",
+            ConversationTarget::Picker(PickerFilter {
+                pinned: true,
+                ..PickerFilter::default()
+            }),
+        ),
+        (
+            "?pinned",
+            ConversationTarget::Picker(PickerFilter {
+                pinned: true,
+                ..PickerFilter::default()
+            }),
+        ),
+        (
+            "?s",
+            ConversationTarget::Picker(PickerFilter {
+                session: true,
+                ..PickerFilter::default()
+            }),
+        ),
+        (
+            "?session",
+            ConversationTarget::Picker(PickerFilter {
+                session: true,
+                ..PickerFilter::default()
+            }),
         ),
     ] {
         let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", input]).unwrap();
-        assert_eq!(cmd.target.ids, vec![expected], "failed for input: {input}");
+        assert_eq!(cmd.target.ids(), &[expected], "failed for input: {input}");
     }
 }
 
@@ -225,10 +250,9 @@ fn help_text_without_session_omits_session_keyword() {
     let cmd = TestPositionalSingle::command();
     let arg = cmd.get_arguments().find(|a| a.get_id() == "id").unwrap();
     let long = arg.get_long_help().unwrap().to_string();
-    // The `session` keyword line should not appear, but other mentions of
-    // "session" (e.g. "current session's") are fine.
+    // All session-related lines should be stripped.
     assert!(
-        !long.contains("  session "),
-        "long_help should not list the session keyword: {long}"
+        !long.contains("session"),
+        "long_help should not mention session: {long}"
     );
 }

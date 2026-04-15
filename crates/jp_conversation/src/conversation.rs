@@ -30,11 +30,16 @@ pub struct Conversation {
     #[serde(default, rename = "local", skip_serializing_if = "std::ops::Not::not")]
     pub user: bool,
 
-    /// Whether the conversation is pinned.
+    /// When the conversation was pinned, or `None` if not pinned.
     ///
     /// Pinned conversations are displayed prominently in listings and pickers.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub pinned: bool,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::serialize_dt_opt",
+        deserialize_with = "crate::deserialize_dt_opt"
+    )]
+    pub pinned_at: Option<DateTime<Utc>>,
 
     /// When the conversation expires.
     ///
@@ -69,7 +74,7 @@ impl Default for Conversation {
             last_activated_at: Utc::now(),
             title: None,
             user: false,
-            pinned: false,
+            pinned_at: None,
             expires_at: None,
             last_event_at: None,
             events_count: 0,
@@ -106,6 +111,12 @@ impl Conversation {
     pub const fn with_last_activated_at(mut self, last_activated_at: DateTime<Utc>) -> Self {
         self.last_activated_at = last_activated_at;
         self
+    }
+
+    /// Returns whether the conversation is pinned.
+    #[must_use]
+    pub const fn is_pinned(&self) -> bool {
+        self.pinned_at.is_some()
     }
 }
 

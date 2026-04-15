@@ -15,9 +15,10 @@
 //! manually. The const generics control parser selection, help text, and
 //! validation.
 
-use std::ffi::OsStr;
+use std::{borrow::Cow, ffi::OsStr};
 
 use clap::{Arg, ArgAction, ArgMatches, Command, FromArgMatches, builder::TypedValueParser};
+use crossterm::style::Stylize as _;
 
 use super::target::ConversationTarget;
 
@@ -30,7 +31,14 @@ use super::target::ConversationTarget;
 /// - `MULTI`: accept multiple IDs (when false, at most one is allowed)
 #[derive(Debug, Default)]
 pub(crate) struct PositionalIds<const SESSION: bool, const MULTI: bool> {
-    pub ids: Vec<ConversationTarget>,
+    ids: Vec<ConversationTarget>,
+}
+
+#[cfg(test)]
+impl<const SESSION: bool, const MULTI: bool> PositionalIds<SESSION, MULTI> {
+    pub fn from_targets(ids: Vec<ConversationTarget>) -> Self {
+        Self { ids }
+    }
 }
 
 /// Flag-based conversation ID arguments: `-i/--id/--ids`
@@ -44,15 +52,51 @@ pub(crate) struct PositionalIds<const SESSION: bool, const MULTI: bool> {
 /// - `MULTI`: accept multiple IDs via comma separation or repeated `--id`
 #[derive(Debug, Default)]
 pub(crate) struct FlagIds<const SESSION: bool, const MULTI: bool> {
-    pub ids: Vec<ConversationTarget>,
+    ids: Vec<ConversationTarget>,
+}
+
+#[cfg(test)]
+impl<const SESSION: bool, const MULTI: bool> FlagIds<SESSION, MULTI> {
+    pub fn from_targets(ids: Vec<ConversationTarget>) -> Self {
+        Self { ids }
+    }
+}
+
+/// Common interface for conversation ID argument types.
+pub(crate) trait ConversationIds {
+    /// The parsed conversation targets.
+    fn ids(&self) -> &[ConversationTarget];
+
+    /// Whether this argument type accepts multiple targets.
+    fn is_multi(&self) -> bool;
+}
+
+impl<const SESSION: bool, const MULTI: bool> ConversationIds for PositionalIds<SESSION, MULTI> {
+    fn ids(&self) -> &[ConversationTarget] {
+        &self.ids
+    }
+
+    fn is_multi(&self) -> bool {
+        MULTI
+    }
+}
+
+impl<const SESSION: bool, const MULTI: bool> ConversationIds for FlagIds<SESSION, MULTI> {
+    fn ids(&self) -> &[ConversationTarget] {
+        &self.ids
+    }
+
+    fn is_multi(&self) -> bool {
+        MULTI
+    }
 }
 
 impl<const SESSION: bool, const MULTI: bool> clap::Args for PositionalIds<SESSION, MULTI> {
     fn augment_args(cmd: Command) -> Command {
         let mut arg = Arg::new("id")
             .value_parser(TargetParser::<SESSION>)
-            .help(short_help(SESSION))
-            .long_help(long_help(SESSION));
+            .help(short_help())
+            .long_help(long_help(SESSION, MULTI));
 
         if MULTI {
             arg = arg.action(ArgAction::Append);
@@ -89,8 +133,8 @@ impl<const SESSION: bool, const MULTI: bool> clap::Args for FlagIds<SESSION, MUL
             .long("id")
             .visible_alias("ids")
             .value_parser(TargetParser::<SESSION>)
-            .help(short_help(SESSION))
-            .long_help(long_help(SESSION))
+            .help(short_help())
+            .long_help(long_help(SESSION, MULTI))
             .num_args(0..=1)
             .default_missing_value("");
 
@@ -172,13 +216,12 @@ impl<const SESSION: bool> TypedValueParser for TargetParser<SESSION> {
             .to_str()
             .ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
 
-        let target = ConversationTarget::parse(s)
-            .map_err(|e| clap::Error::raw(clap::error::ErrorKind::InvalidValue, e.to_string()))?;
+        let target = ConversationTarget::parse(s);
 
-        if !SESSION && matches!(target, ConversationTarget::Session) {
+        if !SESSION && target.requires_session() {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,
-                "the 'session' keyword is not supported by this command\n",
+                "session-based targets are not supported by this command\n",
             ));
         }
 
@@ -186,31 +229,102 @@ impl<const SESSION: bool> TypedValueParser for TargetParser<SESSION> {
     }
 }
 
-fn short_help(session: bool) -> &'static str {
-    if session {
-        "Conversation ID, keyword, or session target"
-    } else {
-        "Conversation ID or keyword"
-    }
+fn short_help() -> &'static str {
+    "Conversation ID or keyword"
 }
 
-fn long_help(session: bool) -> String {
-    let header = if session {
-        "Conversation ID, keyword, or session target."
-    } else {
-        "Conversation ID or keyword."
-    };
-    let mut s = format!("{header}\n\nKeywords:\n");
-    s.push_str("  last, last-active, l     Most recently activated conversation\n");
-    s.push_str("  last-created             Most recently created conversation\n");
-    s.push_str("  previous, prev, p        Session's previously active conversation\n");
-    s.push_str("  current, c               Current session's active conversation\n");
-    if session {
-        s.push_str("  session                  All conversations in current session\n");
+fn long_help(session: bool, multi: bool) -> String {
+    let header = "Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.";
+    let mut s = format!("{header}\n\n");
+    s.push_str(&keyword_help(session, false));
+
+    if multi {
+        s.push_str("\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
     }
-    s.push_str("  pinned                   Pick from pinned conversations only\n");
-    s.push_str("\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
+
     s
+}
+
+fn keyword_help(session: bool, ansi: bool) -> String {
+    let t = |text: &'static str| -> Cow<'static, str> {
+        if !ansi {
+            return text.into();
+        }
+
+        text.yellow().bold().to_string().into()
+    };
+
+    let h = |text: &'static str| -> Cow<'static, str> {
+        if !ansi {
+            return text.into();
+        }
+
+        format!("# {text}").dim().to_string().into()
+    };
+
+    let picker = t("Interactive Filter/Picker");
+    let aliases = t("Conversation Aliases");
+    let multi_target = t("Multi-Target Keywords");
+
+    let h_pick_all = h("select from all");
+    let h_pick_pinned = h("select from pinned");
+    let h_pick_session = h("select from session");
+
+    let h_alias_latest = h("target latest active in workspace");
+    let h_alias_newest = h("target newest created");
+    let h_alias_pinned = h("target latest pinned");
+    let h_alias_session = h("target previous active in session");
+
+    let h_multi_pinned = h("target all pinned");
+    let h_multi_session = h("target all activated in session");
+
+    let help = indoc::formatdoc! {"
+        {picker}:
+          ?                             {h_pick_all}
+          ?p, ?pinned                   {h_pick_pinned}
+          ?s, ?session                  {h_pick_session}
+
+        {aliases}:
+          l, latest                     {h_alias_latest}
+          n, newest                     {h_alias_newest}
+          p, pinned                     {h_alias_pinned}
+          s, session                    {h_alias_session}
+
+        {multi_target}:
+          +p, +pinned                   {h_multi_pinned}
+          +s, +session                  {h_multi_session}
+    "};
+
+    if session {
+        return help;
+    }
+
+    // Strip session-related lines for commands that don't support it.
+    help.lines()
+        .filter(|l| !l.contains("session"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn format_target_help(session: bool, ansi: bool) -> String {
+    let mut header: Cow<'_, str> = "Conversation Targeting".into();
+    if ansi {
+        header = header.bold().to_string().into();
+    }
+
+    let mut example_id: Cow<'_, str> = "jp-c17761673600".into();
+    if ansi {
+        example_id = example_id.bold().to_string().into();
+    }
+
+    indoc::formatdoc! {"
+        {header}
+
+        Use a conversation ID (e.g. {example_id}), a keyword, or any text to
+        fuzzy-search by title.
+
+        {}
+    ", keyword_help(session, ansi)}
 }
 
 #[cfg(test)]

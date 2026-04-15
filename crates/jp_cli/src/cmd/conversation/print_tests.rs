@@ -82,9 +82,7 @@ fn prints_user_message() {
     )]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -105,9 +103,7 @@ fn prints_assistant_message() {
     )]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -134,9 +130,7 @@ fn prints_reasoning_full() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -164,9 +158,7 @@ fn hides_reasoning_when_hidden() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -196,9 +188,7 @@ fn truncates_reasoning() {
         )]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -237,9 +227,7 @@ fn prints_tool_call_and_result() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -265,9 +253,7 @@ fn prints_structured_data() {
     )]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -293,9 +279,7 @@ fn turn_separators_between_turns() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -317,9 +301,7 @@ fn prints_conversation_by_id() {
     )]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -340,9 +322,7 @@ fn empty_conversation_produces_no_content() {
     let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -392,9 +372,7 @@ fn full_conversation_round_trip() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -432,9 +410,7 @@ fn last_prints_only_last_turn() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: Some(1),
         current_config: false,
     };
@@ -473,9 +449,7 @@ fn last_two_with_three_turns() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: Some(2),
         current_config: false,
     };
@@ -502,9 +476,7 @@ fn last_exceeding_turn_count_prints_all() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: Some(5),
         current_config: false,
     };
@@ -547,9 +519,7 @@ fn blank_line_between_tool_calls_and_message() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -600,9 +570,7 @@ fn blank_line_between_message_and_tool_calls() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -669,9 +637,7 @@ fn no_extra_blank_line_between_consecutive_tool_calls() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
         current_config: false,
     };
@@ -706,9 +672,7 @@ fn last_zero_prints_nothing() {
     ]);
 
     let print = Print {
-        target: PositionalIds {
-            ids: vec![ConversationTarget::Id(id)],
-        },
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: Some(0),
         current_config: false,
     };

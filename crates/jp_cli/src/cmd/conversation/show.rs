@@ -30,7 +30,7 @@ impl Show {
                 .with_event_count(events.len())
                 .with_title(conversation.title.as_ref())
                 .with_last_activated_at(Some(conversation.last_activated_at))
-                .with_pinned_flag(conversation.pinned)
+                .with_pinned_flag(conversation.is_pinned())
                 .with_local_flag(conversation.user)
                 .with_active_conversation(active_id.unwrap_or(id))
                 .with_expires_at(conversation.expires_at)
@@ -42,6 +42,6 @@ impl Show {
     }
 
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_session(&self.target.ids)
+        ConversationLoadRequest::explicit_or_session(&self.target)
     }
 }
