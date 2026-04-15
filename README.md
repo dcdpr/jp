@@ -15,14 +15,14 @@ Visit [jp.computer](https://jp.computer/) to learn more.
 
 ## Philosophy
 
-JP is built to be **[provider-agnostic][1]**, your workflow shouldn't be coupled
+JP is built to be: **[provider-agnostic][1]**, because your workflow shouldn't be coupled
 to any single LLM backend; **[private and secure by default][2]**, with no
 implicit network access or silent tool execution; a **[proper Unix
-citizen][3]**, a single static binary that composes with pipes, respects your
-shell, and stays out of your way; **[extensible][4]** through sandboxed plugins
-and **[configurable][5]** where it matters; **[open-source and
-independent][6]**, funded without VC money, no allegiance to any LLM provider,
-just software that serves its users.
+citizen][3]** as a single static binary that composes with pipes, respects your
+shell, and stays out of your way; **[extensible][4]** through sandboxed plugins;
+**[configurable][5]** where it matters; and finally, **[open-source and
+independent][6]**, holding no allegiance to any LLM provider, funded without 
+the enshittification of VC money, just striving to be great — thanks to and for its users.
 
 [1]: docs/README/providers.md
 [2]: docs/README/privacy-and-security.md
