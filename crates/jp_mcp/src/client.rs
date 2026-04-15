@@ -266,6 +266,13 @@ impl Client {
                 let mut cmd = Command::new(&config.command);
                 cmd.args(&config.arguments);
 
+                // Put the MCP server in its own process group so terminal
+                // signals (Ctrl+C / SIGINT) don't kill it. JP manages the
+                // server lifecycle through the MCP protocol and
+                // kill-on-drop, not through Unix signals.
+                #[cfg(unix)]
+                cmd.process_group(0);
+
                 // Add environment variables
                 for (key, value) in vars {
                     cmd.env(key, value);
