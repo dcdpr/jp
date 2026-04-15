@@ -147,6 +147,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.103.6 -> 0.103.10"
 
+[[audits.rustls-webpki]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.103.10 -> 0.103.12"
+
 [[audits.schemars]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
