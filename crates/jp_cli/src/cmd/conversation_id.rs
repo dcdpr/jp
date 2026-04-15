@@ -270,13 +270,13 @@ fn keyword_help(session: bool, ansi: bool) -> String {
     let h_pick_pinned = h("select from pinned");
     let h_pick_session = h("select from session");
 
-    let h_alias_newest = h("target newest created");
     let h_alias_latest = h("target latest active in workspace");
+    let h_alias_newest = h("target newest created");
     let h_alias_pinned = h("target latest pinned");
     let h_alias_session = h("target previous active in session");
 
-    let h_multi_session = h("target all activated in session");
     let h_multi_pinned = h("target all pinned");
+    let h_multi_session = h("target all activated in session");
 
     let help = indoc::formatdoc! {"
         {picker}:
@@ -285,14 +285,14 @@ fn keyword_help(session: bool, ansi: bool) -> String {
           ?s, ?session                  {h_pick_session}
 
         {aliases}:
-          n, newest                     {h_alias_newest}
           l, latest                     {h_alias_latest}
+          n, newest                     {h_alias_newest}
           p, pinned                     {h_alias_pinned}
           s, session                    {h_alias_session}
 
         {multi_target}:
-          +s, +session                  {h_multi_session}
           +p, +pinned                   {h_multi_pinned}
+          +s, +session                  {h_multi_session}
     "};
 
     if session {
