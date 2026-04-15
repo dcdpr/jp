@@ -255,149 +255,149 @@ impl ConversationTarget {
     /// Empty string triggers picker mode. Recognized keywords resolve to their
     /// respective variants. Anything else is parsed as a conversation ID.
     pub(crate) fn parse(s: &str) -> Self {
-    match s {
-        // Interactive pickers
-        "?" | "" => Self::Picker(PickerFilter::default()),
-        "?p" | "?pinned" => Self::Picker(PickerFilter {
-            pinned: true,
-            ..Default::default()
-        }),
-        "?s" | "?session" => Self::Picker(PickerFilter {
-            session: true,
-            ..Default::default()
-        }),
+        match s {
+            // Interactive pickers
+            "?" | "" => Self::Picker(PickerFilter::default()),
+            "?p" | "?pinned" => Self::Picker(PickerFilter {
+                pinned: true,
+                ..Default::default()
+            }),
+            "?s" | "?session" => Self::Picker(PickerFilter {
+                session: true,
+                ..Default::default()
+            }),
 
-        // Conversation aliases (single target)
-        "newest" | "n" => Self::Newest,
-        "latest" | "l" => Self::Latest,
-        "pinned" | "p" => Self::LatestPinned,
-        "session" | "s" => Self::SessionPrevious,
+            // Conversation aliases (single target)
+            "newest" | "n" => Self::Newest,
+            "latest" | "l" => Self::Latest,
+            "pinned" | "p" => Self::LatestPinned,
+            "session" | "s" => Self::SessionPrevious,
 
-        // Multi-target keywords
-        "+session" | "+s" => Self::Session,
-        "+pinned" | "+p" => Self::Pinned,
+            // Multi-target keywords
+            "+session" | "+s" => Self::Session,
+            "+pinned" | "+p" => Self::Pinned,
 
-        "help" => Self::Help,
+            "help" => Self::Help,
 
-        // Try as conversation ID, fall back to fuzzy picker.
-        _ => s.parse::<ConversationId>().map_or_else(
-            |_| {
-                Self::Picker(PickerFilter {
-                    query: Some(s.to_owned()),
-                    ..Default::default()
-                })
-            },
-            Self::Id,
-        ),
+            // Try as conversation ID, fall back to fuzzy picker.
+            _ => s.parse::<ConversationId>().map_or_else(
+                |_| {
+                    Self::Picker(PickerFilter {
+                        query: Some(s.to_owned()),
+                        ..Default::default()
+                    })
+                },
+                Self::Id,
+            ),
+        }
     }
-}
 
     /// Whether this target requires session state to resolve.
     pub(crate) fn requires_session(&self) -> bool {
-    matches!(
-        self,
-        Self::SessionPrevious
-            | Self::Session
-            | Self::Picker(PickerFilter { session: true, .. })
-    )
-}
+        matches!(
+            self,
+            Self::SessionPrevious
+                | Self::Session
+                | Self::Picker(PickerFilter { session: true, .. })
+        )
+    }
 
     /// The keyword name for this target, if it is a keyword.
     pub(crate) fn keyword_name(&self) -> Option<&'static str> {
-    match self {
-        Self::Picker(f) if f.pinned => Some("pinned"),
-        Self::Id(_) | Self::Picker(_) | Self::Help => None,
-        Self::Newest => Some("newest"),
-        Self::Latest => Some("latest"),
-        Self::LatestPinned => Some("pinned"),
-        Self::SessionPrevious => Some("session"),
-        Self::Session => Some("+session"),
-        Self::Pinned => Some("+pinned"),
+        match self {
+            Self::Picker(f) if f.pinned => Some("pinned"),
+            Self::Id(_) | Self::Picker(_) | Self::Help => None,
+            Self::Newest => Some("newest"),
+            Self::Latest => Some("latest"),
+            Self::LatestPinned => Some("pinned"),
+            Self::SessionPrevious => Some("session"),
+            Self::Session => Some("+session"),
+            Self::Pinned => Some("+pinned"),
+        }
     }
-}
 
     /// Resolve this target to concrete conversation IDs.
     ///
     /// Returns an empty vec for `Picker` — the caller must handle interactive
     /// selection separately. Returns multiple IDs for `Session`.
     pub(crate) fn resolve(
-    &self,
-    workspace: &Workspace,
-    session: Option<&Session>,
-) -> Result<Vec<ConversationId>> {
-    match self {
-        Self::Id(id) => Ok(vec![*id]),
-        Self::Latest => {
-            let id = workspace
-                .conversations()
-                .max_by_key(|(_, c)| c.last_activated_at)
-                .map(|(id, _)| *id)
-                .ok_or_else(|| {
-                    Error::NotFound("conversation", "no conversations exist".into())
-                })?;
-            Ok(vec![id])
-        }
-        Self::Newest => {
-            let id = workspace
-                .conversations()
-                .max_by_key(|(id, _)| id.timestamp())
-                .map(|(id, _)| *id)
-                .ok_or_else(|| {
-                    Error::NotFound("conversation", "no conversations exist".into())
-                })?;
-            Ok(vec![id])
-        }
-        Self::LatestPinned => {
-            let id = workspace
-                .conversations()
-                .filter(|(_, c)| c.is_pinned())
-                .max_by_key(|(_, c)| c.pinned_at)
-                .map(|(id, _)| *id)
-                .ok_or_else(|| {
-                    Error::NotFound("conversation", "no pinned conversations".into())
-                })?;
-            Ok(vec![id])
-        }
-        Self::SessionPrevious => {
-            let id = session
-                .and_then(|s| workspace.session_previous_conversation(s))
-                .ok_or_else(|| {
-                    Error::NotFound(
+        &self,
+        workspace: &Workspace,
+        session: Option<&Session>,
+    ) -> Result<Vec<ConversationId>> {
+        match self {
+            Self::Id(id) => Ok(vec![*id]),
+            Self::Latest => {
+                let id = workspace
+                    .conversations()
+                    .max_by_key(|(_, c)| c.last_activated_at)
+                    .map(|(id, _)| *id)
+                    .ok_or_else(|| {
+                        Error::NotFound("conversation", "no conversations exist".into())
+                    })?;
+                Ok(vec![id])
+            }
+            Self::Newest => {
+                let id = workspace
+                    .conversations()
+                    .max_by_key(|(id, _)| id.timestamp())
+                    .map(|(id, _)| *id)
+                    .ok_or_else(|| {
+                        Error::NotFound("conversation", "no conversations exist".into())
+                    })?;
+                Ok(vec![id])
+            }
+            Self::LatestPinned => {
+                let id = workspace
+                    .conversations()
+                    .filter(|(_, c)| c.is_pinned())
+                    .max_by_key(|(_, c)| c.pinned_at)
+                    .map(|(id, _)| *id)
+                    .ok_or_else(|| {
+                        Error::NotFound("conversation", "no pinned conversations".into())
+                    })?;
+                Ok(vec![id])
+            }
+            Self::SessionPrevious => {
+                let id = session
+                    .and_then(|s| workspace.session_previous_conversation(s))
+                    .ok_or_else(|| {
+                        Error::NotFound(
+                            "conversation",
+                            "no previous conversation in this session".into(),
+                        )
+                    })?;
+                Ok(vec![id])
+            }
+            Self::Session => {
+                let ids = session
+                    .map(|s| workspace.session_conversation_ids(s))
+                    .unwrap_or_default();
+                if ids.is_empty() {
+                    return Err(Error::NotFound(
                         "conversation",
-                        "no previous conversation in this session".into(),
-                    )
-                })?;
-            Ok(vec![id])
-        }
-        Self::Session => {
-            let ids = session
-                .map(|s| workspace.session_conversation_ids(s))
-                .unwrap_or_default();
-            if ids.is_empty() {
-                return Err(Error::NotFound(
-                    "conversation",
-                    "no conversations in this session".into(),
-                ));
+                        "no conversations in this session".into(),
+                    ));
+                }
+                Ok(ids)
             }
-            Ok(ids)
-        }
-        Self::Pinned => {
-            let ids: Vec<_> = workspace
-                .conversations()
-                .filter(|(_, c)| c.is_pinned())
-                .map(|(id, _)| *id)
-                .collect();
-            if ids.is_empty() {
-                return Err(Error::NotFound(
-                    "conversation",
-                    "no pinned conversations".into(),
-                ));
+            Self::Pinned => {
+                let ids: Vec<_> = workspace
+                    .conversations()
+                    .filter(|(_, c)| c.is_pinned())
+                    .map(|(id, _)| *id)
+                    .collect();
+                if ids.is_empty() {
+                    return Err(Error::NotFound(
+                        "conversation",
+                        "no pinned conversations".into(),
+                    ));
+                }
+                Ok(ids)
             }
-            Ok(ids)
+            Self::Picker(_) | Self::Help => Ok(vec![]),
         }
-        Self::Picker(_) | Self::Help => Ok(vec![]),
     }
-}
 }
 
 /// Resolve parsed targets into concrete conversation IDs.
