@@ -49,19 +49,67 @@ description: "Source: document"
         "#### Unordered Lists\n",
     ),
     Block(
-        "- Item A\n- Item B\n  - Nested Item B.1\n  - Nested Item B.2\n    - Deeply nested item\n- Item C\n- Alternative bullet\n- Another item\n- Plus bullet\n- Final item\n",
+        "- Item A\n",
+    ),
+    Block(
+        "- Item B\n",
+    ),
+    Block(
+        "  - Nested Item B.1\n",
+    ),
+    Block(
+        "  - Nested Item B.2\n    - Deeply nested item\n",
+    ),
+    Block(
+        "- Item C\n",
+    ),
+    Block(
+        "- Alternative bullet\n",
+    ),
+    Block(
+        "- Another item\n",
+    ),
+    Block(
+        "- Plus bullet\n",
+    ),
+    Block(
+        "- Final item\n",
     ),
     Block(
         "#### Ordered Lists\n",
     ),
     Block(
-        "1. First item\n2. Second item\n   1. Sub-item 1\n   2. Sub-item 2\n3. Third item\n",
+        "1. First item\n",
+    ),
+    Block(
+        "2. Second item\n",
+    ),
+    Block(
+        "   1. Sub-item 1\n",
+    ),
+    Block(
+        "   2. Sub-item 2\n",
+    ),
+    Block(
+        "3. Third item\n",
     ),
     Block(
         "#### Task Lists\n",
     ),
     Block(
-        "- [x] Implement Rust CLI parser\n- [x] Integrate LLM API\n- [ ] Add unit tests for `git` module\n- [ ] Refactor context loading\n- [ ] Documentation update\n-----\n",
+        "- [x] Implement Rust CLI parser\n",
+    ),
+    Block(
+        "- [x] Integrate LLM API\n",
+    ),
+    Block(
+        "- [ ] Add unit tests for `git` module\n",
+    ),
+    Block(
+        "- [ ] Refactor context loading\n",
+    ),
+    Block(
+        "- [ ] Documentation update\n-----\n",
     ),
     Block(
         "### 4\\. Links and Images\n",
@@ -244,7 +292,13 @@ description: "Source: document"
         "The core module handles the main loop and signal handling.\n\n",
     ),
     Block(
-        "- `src/main.rs`: Entry point.\n- `src/cli.rs`: Command line argument parsing using `clap`.\n- `src/error.rs`: Custom error types for the toolkit.\n",
+        "- `src/main.rs`: Entry point.\n",
+    ),
+    Block(
+        "- `src/cli.rs`: Command line argument parsing using `clap`.\n",
+    ),
+    Block(
+        "- `src/error.rs`: Custom error types for the toolkit.\n",
     ),
     Block(
         "#### Developer Notes: Module `llm`\n",
@@ -253,7 +307,13 @@ description: "Source: document"
         "Interface for multiple providers.\n\n",
     ),
     Block(
-        "1. OpenAI\n2. Anthropic\n3. Local (Ollama)\n\n",
+        "1. OpenAI\n",
+    ),
+    Block(
+        "2. Anthropic\n",
+    ),
+    Block(
+        "3. Local (Ollama)\n\n",
     ),
     FencedCodeStart {
         language: "rust",
@@ -282,7 +342,106 @@ description: "Source: document"
         "#### Extended Task List for Beta Release\n",
     ),
     Block(
-        "- [x] Fix memory leak in `tokenizer`\n- [x] Update dependencies\n- [x] Implement `--dry-run`\n- [ ] Profile async runtime\n- [ ] Add telemetry opt-out\n- [ ] Create man pages\n- [ ] Benchmarking suite\n- [ ] Refactor `PromptManager`\n- [ ] Support YAML configs\n- [ ] Implement retry logic\n- [ ] Add progress bars\n- [ ] Optimize build size\n- [ ] Update README examples\n- [ ] Security audit\n- [ ] License check\n- [ ] CI/CD optimization\n- [ ] Dockerfile creation\n- [ ] Shell completions (Zsh)\n- [ ] Shell completions (Fish)\n- [ ] Shell completions (Bash)\n- [ ] Error message clarity review\n- [ ] Logging verbosity levels\n- [ ] Environment variable overrides\n- [ ] Configuration merging logic\n- [ ] Plugin API stabilization\n- [ ] Metadata extraction\n- [ ] Context window management\n- [ ] Token counting utility\n- [ ] Stream response handling\n- [ ] Keyboard interrupt handling\n- [ ] Terminal color support\n- [ ] Windows support validation\n- [ ] macOS support validation\n- [ ] Linux support validation\n",
+        "- [x] Fix memory leak in `tokenizer`\n",
+    ),
+    Block(
+        "- [x] Update dependencies\n",
+    ),
+    Block(
+        "- [x] Implement `--dry-run`\n",
+    ),
+    Block(
+        "- [ ] Profile async runtime\n",
+    ),
+    Block(
+        "- [ ] Add telemetry opt-out\n",
+    ),
+    Block(
+        "- [ ] Create man pages\n",
+    ),
+    Block(
+        "- [ ] Benchmarking suite\n",
+    ),
+    Block(
+        "- [ ] Refactor `PromptManager`\n",
+    ),
+    Block(
+        "- [ ] Support YAML configs\n",
+    ),
+    Block(
+        "- [ ] Implement retry logic\n",
+    ),
+    Block(
+        "- [ ] Add progress bars\n",
+    ),
+    Block(
+        "- [ ] Optimize build size\n",
+    ),
+    Block(
+        "- [ ] Update README examples\n",
+    ),
+    Block(
+        "- [ ] Security audit\n",
+    ),
+    Block(
+        "- [ ] License check\n",
+    ),
+    Block(
+        "- [ ] CI/CD optimization\n",
+    ),
+    Block(
+        "- [ ] Dockerfile creation\n",
+    ),
+    Block(
+        "- [ ] Shell completions (Zsh)\n",
+    ),
+    Block(
+        "- [ ] Shell completions (Fish)\n",
+    ),
+    Block(
+        "- [ ] Shell completions (Bash)\n",
+    ),
+    Block(
+        "- [ ] Error message clarity review\n",
+    ),
+    Block(
+        "- [ ] Logging verbosity levels\n",
+    ),
+    Block(
+        "- [ ] Environment variable overrides\n",
+    ),
+    Block(
+        "- [ ] Configuration merging logic\n",
+    ),
+    Block(
+        "- [ ] Plugin API stabilization\n",
+    ),
+    Block(
+        "- [ ] Metadata extraction\n",
+    ),
+    Block(
+        "- [ ] Context window management\n",
+    ),
+    Block(
+        "- [ ] Token counting utility\n",
+    ),
+    Block(
+        "- [ ] Stream response handling\n",
+    ),
+    Block(
+        "- [ ] Keyboard interrupt handling\n",
+    ),
+    Block(
+        "- [ ] Terminal color support\n",
+    ),
+    Block(
+        "- [ ] Windows support validation\n",
+    ),
+    Block(
+        "- [ ] macOS support validation\n",
+    ),
+    Block(
+        "- [ ] Linux support validation\n",
     ),
     Block(
         "#### Sample Configuration Example\n",
@@ -394,16 +553,43 @@ description: "Source: document"
         "Repeating the logic of the toolkit:\n\n",
     ),
     Block(
-        "1. Initialize the environment.\n2. Read the configuration file.\n3. Parse the command line arguments.\n4. Execute the requested subcommand.\n5. Return the result to the user.\nDetailed Step 1: Initialize the environment.\n\n",
+        "1. Initialize the environment.\n",
     ),
     Block(
-        "- Check for required environment variables.\n- Initialize the logger.\n- Set up panic handlers.\nDetailed Step 2: Read configuration.\n\n",
+        "2. Read the configuration file.\n",
     ),
     Block(
-        "- Look for `~/.config/jp/config.toml`.\n- Look for `.jp.toml` in current directory.\n- Merge configurations.\nDetailed Step 3: Parse arguments.\n\n",
+        "3. Parse the command line arguments.\n",
     ),
     Block(
-        "- Use `clap` for efficient parsing.\n- Validate inputs.\n",
+        "4. Execute the requested subcommand.\n",
+    ),
+    Block(
+        "5. Return the result to the user.\nDetailed Step 1: Initialize the environment.\n\n",
+    ),
+    Block(
+        "- Check for required environment variables.\n",
+    ),
+    Block(
+        "- Initialize the logger.\n",
+    ),
+    Block(
+        "- Set up panic handlers.\nDetailed Step 2: Read configuration.\n\n",
+    ),
+    Block(
+        "- Look for `~/.config/jp/config.toml`.\n",
+    ),
+    Block(
+        "- Look for `.jp.toml` in current directory.\n",
+    ),
+    Block(
+        "- Merge configurations.\nDetailed Step 3: Parse arguments.\n\n",
+    ),
+    Block(
+        "- Use `clap` for efficient parsing.\n",
+    ),
+    Block(
+        "- Validate inputs.\n",
     ),
     Block(
         "#### Extended Table for Formatting Test\n",
@@ -415,7 +601,28 @@ description: "Source: document"
         "#### More Nested Lists\n",
     ),
     Block(
-        "- Systems\n  - Hardware\n    - CPU\n    - RAM\n    - Storage\n  - Software\n    - OS\n      - Kernel\n      - Drivers\n    - User Space\n      - Shell\n      - Utilities\n- Development\n  - Language: Rust\n  - Framework: Tokio\n  - Library: Serde\n  - Library: Anyhow\n",
+        "- Systems\n",
+    ),
+    Block(
+        "  - Hardware\n    - CPU\n    - RAM\n    - Storage\n",
+    ),
+    Block(
+        "  - Software\n    - OS\n      - Kernel\n      - Drivers\n    - User Space\n      - Shell\n      - Utilities\n",
+    ),
+    Block(
+        "- Development\n",
+    ),
+    Block(
+        "  - Language: Rust\n",
+    ),
+    Block(
+        "  - Framework: Tokio\n",
+    ),
+    Block(
+        "  - Library: Serde\n",
+    ),
+    Block(
+        "  - Library: Anyhow\n",
     ),
     Block(
         "#### Code Snippet: File I/O\n",
@@ -474,7 +681,46 @@ description: "Source: document"
         "#### Final Summary List\n",
     ),
     Block(
-        "- [x] Headings\n- [x] Text styles\n- [x] Nested lists\n- [x] Code blocks\n- [x] Tables\n- [x] Blockquotes\n- [x] Horizontal rules\n- [x] Images\n- [x] Links\n- [x] Task lists\n- [x] Footnotes\n- [x] Math\n- [x] HTML Entities\n- [x] Escaping\n",
+        "- [x] Headings\n",
+    ),
+    Block(
+        "- [x] Text styles\n",
+    ),
+    Block(
+        "- [x] Nested lists\n",
+    ),
+    Block(
+        "- [x] Code blocks\n",
+    ),
+    Block(
+        "- [x] Tables\n",
+    ),
+    Block(
+        "- [x] Blockquotes\n",
+    ),
+    Block(
+        "- [x] Horizontal rules\n",
+    ),
+    Block(
+        "- [x] Images\n",
+    ),
+    Block(
+        "- [x] Links\n",
+    ),
+    Block(
+        "- [x] Task lists\n",
+    ),
+    Block(
+        "- [x] Footnotes\n",
+    ),
+    Block(
+        "- [x] Math\n",
+    ),
+    Block(
+        "- [x] HTML Entities\n",
+    ),
+    Block(
+        "- [x] Escaping\n",
     ),
     Block(
         "#### Footer Information\n",

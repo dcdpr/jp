@@ -4,6 +4,7 @@ use std::fmt;
 
 use comrak::{
     Arena,
+    nodes::{NodeList, NodeValue},
     options::{Extension, ListStyleType, Render},
 };
 use syntect::highlighting::Theme;
@@ -212,7 +213,7 @@ impl Formatter {
     /// Returns an error if `fmt::Error` is returned when formatting the
     /// markdown.
     pub fn format_terminal(&self, text: &str) -> Result<String, fmt::Error> {
-        self.format_terminal_with(text, &TerminalOptions::default())
+        self.render_terminal(text, &TerminalOptions::default(), false)
     }
 
     /// Like [`format_terminal`](Self::format_terminal), but with per-call
@@ -226,6 +227,17 @@ impl Formatter {
         &self,
         text: &str,
         options: &TerminalOptions,
+    ) -> Result<String, fmt::Error> {
+        self.render_terminal(text, options, true)
+    }
+
+    /// Core terminal rendering. When `auto_separator` is true, appends
+    /// an inter-block blank line unless the AST ends with a tight list.
+    fn render_terminal(
+        &self,
+        text: &str,
+        options: &TerminalOptions,
+        auto_separator: bool,
     ) -> Result<String, fmt::Error> {
         let comrak_options = self.parse_options();
         let arena = Arena::new();
@@ -247,6 +259,16 @@ impl Formatter {
             self.inline_code_bg.as_ref(),
             &mut buf,
         )?;
+
+        // In streaming mode, append inter-block separator. Suppress
+        // only for mid-list items: tight list AND no trailing blank
+        // line in the source (the buffer ends terminal items with
+        // "\n\n" but mid-list items with just "\n").
+        let is_mid_list = ends_with_tight_list(ast) && !text.ends_with("\n\n");
+        if auto_separator && !is_mid_list {
+            buf.push_str(&render_separator(options.default_background.as_ref()));
+        }
+
         Ok(buf)
     }
 
@@ -290,12 +312,58 @@ impl Formatter {
         }
     }
 
-    /// Creates a new code highlighter for the given language.
+    /// Begin a streaming code block for the given language.
     ///
-    /// This is useful for streaming code blocks where you want to highlight
-    /// each line as it arrives, rather than waiting for the entire block.
+    /// Returns a [`CodeBlockState`] that tracks syntax highlighting across
+    /// lines. Pass it to [`render_code_line`](Self::render_code_line) for
+    /// each line.
     #[must_use]
-    pub fn new_code_highlighter(&self, language: &str) -> Option<CodeHighlighter<'_>> {
+    pub fn begin_code_block(&self, language: &str) -> CodeBlockState {
+        let highlight = self
+            .new_code_highlighter(language)
+            .map(CodeHighlighter::save);
+        CodeBlockState { highlight }
+    }
+
+    /// Render a single code line with syntax highlighting and optional
+    /// background.
+    pub fn render_code_line(
+        &self,
+        line: &str,
+        state: &mut CodeBlockState,
+        background: Option<&DefaultBackground>,
+    ) -> String {
+        let highlighted = if let Some(saved) = state.highlight.take() {
+            let mut hl = self.resume_code_highlighter(saved);
+            let result = hl.highlight(line).unwrap_or_else(|_| line.to_string());
+            state.highlight = Some(hl.save());
+            result
+        } else {
+            line.to_string()
+        };
+        apply_line_background(&highlighted, background)
+    }
+
+    /// Apply optional background to a code fence line.
+    #[must_use]
+    pub fn render_code_fence(&self, fence: &str, background: Option<&DefaultBackground>) -> String {
+        apply_line_background(fence, background)
+    }
+
+    /// Render a closing code fence with a trailing blank separator line.
+    #[must_use]
+    pub fn render_closing_fence(
+        &self,
+        fence: &str,
+        background: Option<&DefaultBackground>,
+    ) -> String {
+        let mut out = apply_line_background(fence, background);
+        out.push_str(&render_separator(background));
+        out
+    }
+
+    /// Creates a new code highlighter for the given language.
+    fn new_code_highlighter(&self, language: &str) -> Option<CodeHighlighter<'_>> {
         let ss = syntax::extra_newlines();
         let syntax = ss.find_syntax_by_token(language)?;
         Some(CodeHighlighter {
@@ -304,23 +372,83 @@ impl Formatter {
     }
 
     /// Reconstruct a [`CodeHighlighter`] from previously saved state.
-    ///
-    /// This re-borrows the formatter's theme, so the returned highlighter
-    /// has a fresh lifetime tied to `&self`.
-    #[must_use]
-    pub fn resume_code_highlighter(&self, saved: SavedHighlightState) -> CodeHighlighter<'_> {
+    fn resume_code_highlighter(&self, saved: SavedHighlightState) -> CodeHighlighter<'_> {
         CodeHighlighter::from_saved(&self.theme, saved)
     }
 }
 
+/// Opaque state for a streaming code block.
+///
+/// Created by [`Formatter::begin_code_block`], passed to
+/// [`Formatter::render_code_line`] for each line. Tracks syntax
+/// highlighting across lines without exposing internal types.
+pub struct CodeBlockState {
+    /// Saved highlighting state, if the language was recognized.
+    highlight: Option<SavedHighlightState>,
+}
+
+/// Check if the last top-level node in a comrak AST is a tight list.
+///
+/// Used to suppress the inter-block separator for streaming mid-list
+/// items, which are each rendered as standalone single-item lists.
+fn ends_with_tight_list<'a>(root: &'a comrak::nodes::AstNode<'a>) -> bool {
+    let Some(last) = root.last_child() else {
+        return false;
+    };
+    matches!(
+        last.data().value,
+        NodeValue::List(NodeList { tight: true, .. })
+    )
+}
+
+/// Render an inter-block separator (blank line) with optional background
+/// fill. Used between blocks and after closing code fences.
+#[must_use]
+pub fn render_separator(background: Option<&DefaultBackground>) -> String {
+    match background {
+        Some(bg) if matches!(bg.fill, BackgroundFill::Terminal) => {
+            format!("\x1b[{}m\x1b[K\x1b[49m\n", bg.param)
+        }
+        Some(bg) if let BackgroundFill::Column(width) = bg.fill => {
+            let mut s = format!("\x1b[{}m", bg.param);
+            for _ in 0..width {
+                s.push(' ');
+            }
+            s.push_str("\x1b[49m\n");
+            s
+        }
+        _ => "\n".to_string(),
+    }
+}
+
+/// Apply an optional default background to content, injecting the
+/// background escape at the start of each line and line-fill before
+/// each newline.
+#[must_use]
+pub fn apply_line_background(content: &str, background: Option<&DefaultBackground>) -> String {
+    let Some(bg) = background else {
+        return content.to_string();
+    };
+    let bg_esc = format!("\x1b[{}m", bg.param);
+    let use_erase = matches!(bg.fill, BackgroundFill::Terminal);
+
+    let mut out = String::new();
+    for (i, line) in content.split('\n').enumerate() {
+        if i > 0 {
+            if use_erase {
+                out.push_str("\x1b[K");
+            }
+            out.push_str("\x1b[0m\n");
+        }
+        out.push_str(&bg_esc);
+        out.push_str(line);
+    }
+    out
+}
+
 /// Saved state from a [`CodeHighlighter`], allowing it to be suspended and
 /// resumed across borrow boundaries.
-///
-/// This is useful when the highlighter borrows from a struct field and
-/// cannot be stored alongside it. Call [`CodeHighlighter::save`] to obtain
-/// this, and [`Formatter::resume_code_highlighter`] to reconstruct the
-/// highlighter with a fresh theme borrow.
-pub struct SavedHighlightState {
+struct SavedHighlightState {
     /// The syntect highlight state (styling context).
     highlight_state: syntect::highlighting::HighlightState,
     /// The syntect parse state (grammar context).
@@ -328,32 +456,23 @@ pub struct SavedHighlightState {
 }
 
 /// A stateful syntax highlighter for code blocks.
-pub struct CodeHighlighter<'a> {
+struct CodeHighlighter<'a> {
     /// The syntect highlighter.
     hl: syntect::easy::HighlightLines<'a>,
 }
 
 impl<'a> CodeHighlighter<'a> {
     /// Highlight a single line of code.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if `syntect::Error` is returned.
-    pub fn highlight(&mut self, line: &str) -> Result<String, syntect::Error> {
+    fn highlight(&mut self, line: &str) -> Result<String, syntect::Error> {
         let ss = syntax::extra_newlines();
-        // highlight_line expects the line to include the newline if one is present.
         let ranges = self.hl.highlight_line(line, &ss)?;
         let mut escaped = syntect::util::as_24_bit_terminal_escaped(&ranges, false);
         escaped.push_str("\x1b[0m");
         Ok(escaped)
     }
 
-    /// Decompose this highlighter into owned state that can be stored
-    /// without borrowing the theme.
-    ///
-    /// Use [`Formatter::resume_code_highlighter`] to reconstruct it later.
-    #[must_use]
-    pub fn save(self) -> SavedHighlightState {
+    /// Decompose into owned state that can be stored without borrowing.
+    fn save(self) -> SavedHighlightState {
         let (highlight_state, parse_state) = self.hl.state();
         SavedHighlightState {
             highlight_state,
@@ -361,7 +480,7 @@ impl<'a> CodeHighlighter<'a> {
         }
     }
 
-    /// Reconstruct a highlighter from previously saved state.
+    /// Reconstruct from previously saved state.
     fn from_saved(theme: &'a Theme, saved: SavedHighlightState) -> Self {
         Self {
             hl: syntect::easy::HighlightLines::from_state(

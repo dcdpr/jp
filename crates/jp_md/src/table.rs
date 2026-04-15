@@ -278,14 +278,12 @@ fn wrap_to_visual_width(content: &str, max_width: usize) -> Vec<String> {
 
     let mut lines: Vec<String> = Vec::new();
     let mut current = String::new();
-    let mut current_vw: usize = 0;
 
     // State committed to `current` — updated only when a word is flushed.
     let mut state = AnsiState::default();
 
     // Accumulate the current word (visible chars + interspersed ANSI).
     let mut word = String::new();
-    let mut word_vw: usize = 0;
 
     let mut in_escape = false;
     let mut escape_buf = String::new();
@@ -311,47 +309,28 @@ fn wrap_to_visual_width(content: &str, max_width: usize) -> Vec<String> {
 
         if c == ' ' {
             // Flush the pending word.
-            flush_word(
-                &mut lines,
-                &mut current,
-                &mut current_vw,
-                &mut state,
-                &word,
-                word_vw,
-                max_width,
-            );
+            flush_word(&mut lines, &mut current, &mut state, &word, max_width);
             word.clear();
-            word_vw = 0;
 
             // Add space separator if room remains on the line.
-            if current_vw > 0 && current_vw < max_width {
+            let vw = ansi::visual_width(&current);
+            if vw > 0 && vw < max_width {
                 current.push(' ');
-                current_vw += 1;
-            } else if current_vw >= max_width {
+            } else if vw >= max_width {
                 // Line is full — break before the space.
                 finalize_line(&mut lines, &mut current, &state);
                 current = state.restore_sequence();
-                current_vw = 0;
             }
             continue;
         }
 
         // Visible character.
         word.push(c);
-        word_vw += unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
     }
 
     // Flush any remaining word.
-    if !word.is_empty() || word_vw > 0 {
-        flush_word(
-            &mut lines,
-            &mut current,
-            &mut current_vw,
-            &mut state,
-            &word,
-            word_vw,
-            max_width,
-        );
+    if !word.is_empty() {
+        flush_word(&mut lines, &mut current, &mut state, &word, max_width);
     }
 
     if !current.is_empty() {
@@ -367,15 +346,19 @@ fn wrap_to_visual_width(content: &str, max_width: usize) -> Vec<String> {
 }
 
 /// Flush a completed word onto the current line, breaking if needed.
+///
+/// Uses `visual_width` on accumulated strings rather than per-character
+/// tracking, so multi-codepoint sequences (VS16 emoji, ZWJ) are measured
+/// correctly.
 fn flush_word(
     lines: &mut Vec<String>,
     current: &mut String,
-    current_vw: &mut usize,
     state: &mut AnsiState,
     word: &str,
-    word_vw: usize,
     max_width: usize,
 ) {
+    let word_vw = ansi::visual_width(word);
+
     if word_vw == 0 {
         // Word contains only ANSI escapes — append without consuming width.
         current.push_str(word);
@@ -383,10 +366,11 @@ fn flush_word(
         return;
     }
 
+    let current_vw = ansi::visual_width(current);
+
     // Case 1: word fits on the current line.
-    if *current_vw + word_vw <= max_width {
+    if current_vw + word_vw <= max_width {
         current.push_str(word);
-        *current_vw += word_vw;
         state.update_from_str(word);
         return;
     }
@@ -397,27 +381,24 @@ fn flush_word(
         if current.ends_with(' ') {
             current.pop();
         }
-        if *current_vw > 0 {
+        if current_vw > 0 {
             finalize_line(lines, current, state);
             *current = state.restore_sequence();
-            *current_vw = 0;
         }
         current.push_str(word);
-        *current_vw = word_vw;
         state.update_from_str(word);
         return;
     }
 
     // Case 3: single word exceeds max_width — hard-break it.
-    if *current_vw > 0 {
+    if current_vw > 0 {
         if current.ends_with(' ') {
             current.pop();
         }
         finalize_line(lines, current, state);
         *current = state.restore_sequence();
-        *current_vw = 0;
     }
-    hard_break_into(lines, current, current_vw, state, word, max_width);
+    hard_break_into(lines, current, state, word, max_width);
 }
 
 /// Close the current line: emit a reset if ANSI state is active, then push the
@@ -431,10 +412,12 @@ fn finalize_line(lines: &mut Vec<String>, current: &mut String, state: &AnsiStat
 
 /// Hard-break a word that exceeds `max_width` across multiple lines, preserving
 /// ANSI escape state.
+///
+/// Uses `visual_width` on the accumulated line to decide break points, so
+/// multi-codepoint emoji sequences are measured correctly.
 fn hard_break_into(
     lines: &mut Vec<String>,
     current: &mut String,
-    current_vw: &mut usize,
     state: &mut AnsiState,
     word: &str,
     max_width: usize,
@@ -461,15 +444,13 @@ fn hard_break_into(
             continue;
         }
 
-        let cw = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
-        if cw > 0 && *current_vw + cw > max_width {
+        current.push(c);
+        if ansi::visual_width(current) > max_width {
+            current.pop();
             finalize_line(lines, current, state);
             *current = state.restore_sequence();
-            *current_vw = 0;
+            current.push(c);
         }
-
-        current.push(c);
-        *current_vw += cw;
     }
 }
 

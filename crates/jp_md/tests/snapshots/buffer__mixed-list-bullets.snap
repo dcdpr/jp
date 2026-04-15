@@ -9,7 +9,16 @@ description: "Source: mixed-list-bullets"
     Block(
         "The architecture focuses on low latency and extensibility. Users can define custom prompts within the\n`config.toml` file to suit specific project needs. For further details, check the [repository](https://github.com/).\n\n",
     ),
+    Block(
+        "- Core functionalities:\n",
+    ),
+    Block(
+        "  * Automated code review.\n",
+    ),
+    Block(
+        "  * Unit test generation.\n    + Support for `cargo test`.\n    + Mocking complex dependencies.\n",
+    ),
     Flush(
-        "- Core functionalities:\n  * Automated code review.\n  * Unit test generation.\n    + Support for `cargo test`.\n    + Mocking complex dependencies.\n  * Refactoring suggestions.\n",
+        "  * Refactoring suggestions.\n",
     ),
 ]

@@ -3,9 +3,11 @@
 
 use std::fmt;
 
+pub use fixup::{EventFixup, FenceEscalationFixup, FixupChain, OrphanedFenceFixup};
 pub use state::FenceType;
 use state::{HtmlBlockRule, HtmlType1Tag, HtmlType6Tag, State};
 
+pub mod fixup;
 mod state;
 
 /// Type 2 start tag.
@@ -170,6 +172,7 @@ impl Buffer {
                     fence_type,
                     fence_length,
                     indent: indent_len,
+                    depth: 0,
                 },
             );
         }
@@ -192,9 +195,19 @@ impl Buffer {
 
     /// Handles `BufferingParagraph`: we're in a paragraph-like block. We need
     /// to find its terminator.
+    ///
+    /// For list-like content (first line starts with a list marker), this
+    /// also flushes at new top-level item boundaries so that list items
+    /// stream incrementally rather than buffering the entire list.
     fn handle_buffering_paragraph(&mut self) -> (Option<Event>, State) {
         let mut terminator_pos: Option<usize> = None;
         let mut flush_len: usize = 0;
+
+        // Check if the content starts with a list marker. If so, we'll
+        // flush at new top-level item boundaries for streaming.
+        let first_line = self.buffer.lines().next().unwrap_or("");
+        let (first_indent, first_content) = get_indent(first_line);
+        let in_list = first_indent <= 3 && is_list_marker(first_content);
 
         // Iterate over all newlines in the buffer to find a terminator.
         for (idx, _) in self.buffer.match_indices('\n') {
@@ -243,12 +256,18 @@ impl Buffer {
                 break;
             }
 
-            // Otherwise, this is just another line of the paragraph. Continue
-            // searching.
+            // List streaming: when we're in a list and see a new top-level
+            // item marker, flush everything before it so items stream
+            // incrementally.
+            if in_list && next_line_indent <= 3 && is_list_marker(next_line_content) {
+                terminator_pos = Some(idx);
+                flush_len = line_after_start;
+                break;
+            }
         }
 
         if terminator_pos.is_some() {
-            let block = self.buffer.drain(..flush_len).collect();
+            let block: String = self.buffer.drain(..flush_len).collect();
             (Some(Event::Block(block)), State::AtBoundary)
         } else {
             (None, State::BufferingParagraph)
@@ -353,16 +372,22 @@ impl Buffer {
     }
 
     /// Handles `InFencedCode`: we process one line at a time.
+    ///
+    /// Tracks nesting depth so that inner fenced code blocks (which LLMs
+    /// frequently produce inside markdown code blocks) don't prematurely
+    /// close the outer block.
     fn handle_in_fenced_code(
         &mut self,
         fence_type: FenceType,
         fence_length: usize,
         indent: usize,
+        depth: usize,
     ) -> (Option<Event>, State) {
         let current_state = State::InFencedCode {
             fence_type,
             fence_length,
             indent,
+            depth,
         };
 
         // We need at least one newline to have a full line
@@ -370,45 +395,61 @@ impl Buffer {
             return (None, current_state);
         };
 
-        let line_content_slice = &self.buffer[..line_end]; // without newline for inspection
+        let line_content_slice = &self.buffer[..line_end];
         let (indent_len, content) = get_indent(line_content_slice);
 
         let expected_char = fence_type.as_char();
 
-        // Check for closing fence:
-        // 1. Less than 4 spaces of indent.
-        // 2. Starts with the correct fence character.
-        if indent_len < 4 && content.starts_with(expected_char) {
-            // 3. Is at least as long as the opening fence.
-            let closing_fence_len = content.chars().take_while(|&c| c == expected_char).count();
-            if closing_fence_len >= fence_length {
-                // 4. Has no other characters after the fence (except whitespace).
-                let after_fence = &content[closing_fence_len..];
-                if after_fence.trim().is_empty() {
-                    // Found closing fence. Drain line and switch state.
+        // Check if this line looks like a fence (opening or closing).
+        let fence_on_line = if indent_len < 4 && content.starts_with(expected_char) {
+            let run = content.chars().take_while(|&c| c == expected_char).count();
+            if run >= fence_length {
+                let after = &content[run..];
+                Some((run, after.trim()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some((_run, after)) = fence_on_line {
+            if after.is_empty() {
+                // Bare closing fence.
+                if depth == 0 {
+                    // This closes the outer block.
                     let _drained = self.buffer.drain(..=line_end);
                     let fence = expected_char.to_string().repeat(fence_length);
-
                     return (Some(Event::FencedCodeEnd(fence)), State::AtBoundary);
                 }
+
+                // Closes an inner block — decrement depth, emit as code.
+                let mut raw_line = self.buffer.drain(..=line_end).collect::<String>();
+                strip_indent(&mut raw_line, indent);
+                let next = State::InFencedCode {
+                    fence_type,
+                    fence_length,
+                    indent,
+                    depth: depth - 1,
+                };
+                return (Some(Event::FencedCodeLine(raw_line)), next);
             }
+
+            // Has content after the backticks — looks like a nested opening.
+            let mut raw_line = self.buffer.drain(..=line_end).collect::<String>();
+            strip_indent(&mut raw_line, indent);
+            let next = State::InFencedCode {
+                fence_type,
+                fence_length,
+                indent,
+                depth: depth + 1,
+            };
+            return (Some(Event::FencedCodeLine(raw_line)), next);
         }
 
-        // It is a code line.
+        // Regular code line.
         let mut raw_line = self.buffer.drain(..=line_end).collect::<String>();
-
-        // Strip up to `indent` spaces from the beginning of the line
-        // if they exist.
-        //
-        // Note: `raw_line` contains the newline.
-
-        // Count leading spaces
-        let leading_spaces = raw_line.chars().take_while(|&c| c == ' ').count();
-        let spaces_to_strip = std::cmp::min(leading_spaces, indent);
-
-        if spaces_to_strip > 0 {
-            raw_line.drain(..spaces_to_strip);
-        }
+        strip_indent(&mut raw_line, indent);
 
         (Some(Event::FencedCodeLine(raw_line)), current_state)
     }
@@ -470,7 +511,8 @@ impl Iterator for Buffer {
                     fence_type,
                     fence_length,
                     indent,
-                } => self.handle_in_fenced_code(fence_type, fence_length, indent),
+                    depth,
+                } => self.handle_in_fenced_code(fence_type, fence_length, indent, depth),
                 State::InHtmlBlock { block_type } => self.handle_in_html_block(block_type),
             };
 
@@ -492,6 +534,35 @@ impl Iterator for Buffer {
             // we did not get a complete block back, we loop again to
             // immediately process in the new state.
         }
+    }
+}
+
+/// Check if content (after indent stripping) starts with a list marker.
+///
+/// Matches unordered (`- `, `* `, `+ `) and ordered (`1. `, `2) `) markers.
+fn is_list_marker(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    // Unordered: `- `, `* `, `+ `
+    if matches!(bytes, [b'-' | b'*' | b'+', b' ', ..]) {
+        return true;
+    }
+    // Ordered: one or more digits followed by `.` or `)` then space.
+    let digit_count = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
+    if digit_count > 0 && digit_count < bytes.len() {
+        let after = bytes[digit_count];
+        if (after == b'.' || after == b')') && bytes.get(digit_count + 1) == Some(&b' ') {
+            return true;
+        }
+    }
+    false
+}
+
+/// Strip up to `max_strip` leading spaces from `line`.
+fn strip_indent(line: &mut String, max_strip: usize) {
+    let leading = line.chars().take_while(|&c| c == ' ').count();
+    let strip = leading.min(max_strip);
+    if strip > 0 {
+        line.drain(..strip);
     }
 }
 

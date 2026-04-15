@@ -161,13 +161,14 @@ impl AnsiState {
 
 /// Calculate the visual width of a string, ignoring ANSI escape sequences.
 ///
-/// Uses Unicode width rules (UAX #11) so that wide characters such as CJK
-/// ideographs and emoji are correctly counted as 2 columns. Control characters
-/// and escape sequences contribute zero width.
+/// Strips ANSI escape sequences, then delegates to
+/// `UnicodeWidthStr::width()` which correctly handles multi-codepoint
+/// sequences like emoji presentation (VS16), ZWJ sequences, and
+/// script-specific ligatures.
 pub fn visual_width(s: &str) -> usize {
-    use unicode_width::UnicodeWidthChar as _;
+    use unicode_width::UnicodeWidthStr as _;
 
-    let mut len = 0;
+    let mut plain = String::new();
     let mut in_escape = false;
     for c in s.chars() {
         if in_escape {
@@ -177,10 +178,10 @@ pub fn visual_width(s: &str) -> usize {
         } else if c == '\x1b' {
             in_escape = true;
         } else {
-            len += c.width().unwrap_or(0);
+            plain.push(c);
         }
     }
-    len
+    plain.width()
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ use std::{
 
 use crate::{
     ansi::{self, AnsiState, RESET},
-    format::{BackgroundFill, DefaultBackground},
+    format::{self, BackgroundFill, DefaultBackground},
 };
 
 /// ANSI-aware terminal writer with word-wrapping support.
@@ -282,7 +282,10 @@ impl<'w> TerminalWriter<'w> {
                 }
             }
             BackgroundFill::Terminal => {
-                self.write_escape("\x1b[K")?;
+                // Ensure the default background is active before erase,
+                // so a temporary background (e.g. inline code) doesn't
+                // bleed to the terminal edge.
+                self.write_escape(&format!("\x1b[{}m\x1b[K", bg.param))?;
             }
         }
         Ok(())
@@ -300,6 +303,9 @@ impl<'w> TerminalWriter<'w> {
             BackgroundFill::Column(target) => {
                 let pad = target.saturating_sub(self.column);
                 if pad > 0 {
+                    // Set default bg before padding so inline code
+                    // background doesn't bleed into the padding.
+                    self.output.write_str(&format!("\x1b[{}m", bg.param))?;
                     for _ in 0..pad {
                         self.output.write_char(' ')?;
                     }
@@ -307,13 +313,17 @@ impl<'w> TerminalWriter<'w> {
                 }
             }
             BackgroundFill::Terminal => {
-                self.output.write_str("\x1b[K")?;
+                // Set default bg before erase so inline code background
+                // doesn't bleed to the terminal edge.
+                self.output
+                    .write_str(&format!("\x1b[{}m\x1b[K", bg.param))?;
             }
         }
         Ok(())
     }
 
     /// Output visible text with optional wrapping support.
+    #[expect(clippy::too_many_lines)]
     pub(crate) fn output(&mut self, s: &str, wrap: bool) -> fmt::Result {
         let bytes = s.as_bytes();
         let wrap = self.allow_wrap && wrap && !self.no_linebreaks;
@@ -337,11 +347,11 @@ impl<'w> TerminalWriter<'w> {
             } else {
                 self.write_visible("\n")?;
                 if self.need_cr > 1 {
-                    self.write_prefix()?;
                     if self.pending_attr_restore {
                         self.restore_attrs_after_prefix()?;
                         self.pending_attr_restore = false;
                     }
+                    self.write_prefix()?;
                     self.column = self.prefix_width();
                 }
             }
@@ -352,12 +362,14 @@ impl<'w> TerminalWriter<'w> {
 
         while let Some((i, c)) = it.next() {
             if self.begin_line {
-                self.write_prefix()?;
-                self.column = self.prefix_width();
                 if self.pending_attr_restore {
+                    // Restore ANSI attributes before the prefix so visible
+                    // prefix characters (e.g. blockquote '>') get styled.
                     self.restore_attrs_after_prefix()?;
                     self.pending_attr_restore = false;
                 }
+                self.write_prefix()?;
+                self.column = self.prefix_width();
             }
 
             let nextb = bytes.get(i + 1);
@@ -381,6 +393,9 @@ impl<'w> TerminalWriter<'w> {
             } else {
                 let cs = c.to_string();
                 self.write_visible(&cs)?;
+                // Per-char width: O(1). May be off by 1 for VS16/ZWJ
+                // sequences, but using visual_width(&wrap_buffer) here
+                // would be O(n) per char → O(n²) per line.
                 self.column += unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
                 self.begin_line = false;
                 self.begin_content = self.begin_content && bytes[i].is_ascii_digit();
@@ -412,12 +427,30 @@ impl<'w> TerminalWriter<'w> {
                 self.wrap_buffer.clear();
                 self.escapes.clear();
 
-                self.wrap_buffer.push_str(&self.prefix);
                 if self.attrs.is_active() {
-                    let prefix_len = self.prefix.len();
-                    self.escapes
-                        .push((prefix_len, self.attrs.restore_sequence()));
+                    let has_temp_bg = self.default_background.is_some()
+                        && self.attrs.background
+                            != self.default_background.as_ref().map(|bg| bg.param.clone());
+
+                    if has_temp_bg {
+                        // The prefix gets the default (reasoning) bg so
+                        // inline code bg doesn't bleed into indentation.
+                        let mut prefix_attrs = self.attrs.clone();
+                        prefix_attrs.background =
+                            self.default_background.as_ref().map(|bg| bg.param.clone());
+                        self.escapes.push((0, prefix_attrs.restore_sequence()));
+                    } else {
+                        self.escapes.push((0, self.attrs.restore_sequence()));
+                    }
+
+                    // After the prefix, restore the actual attrs (including
+                    // any temporary bg like inline code) for the content.
+                    if has_temp_bg {
+                        self.escapes
+                            .push((self.prefix.len(), self.attrs.restore_sequence()));
+                    }
                 }
+                self.wrap_buffer.push_str(&self.prefix);
                 self.wrap_buffer.push_str(&rest);
                 self.column = self.prefix_width() + ansi::visual_width(&rest);
                 self.last_breakable = 0;
@@ -445,20 +478,45 @@ impl<'w> TerminalWriter<'w> {
     /// Flushes any pending wrap buffer content first, emits pending newlines,
     /// then writes `s` directly. Resets line tracking state afterward (column,
     /// `begin_line`, window).
+    ///
+    /// When a default background is active, the background escape is injected
+    /// at the start of each line and line-fill is applied before each newline,
+    /// so syntax-highlighted code blocks inherit the reasoning background.
     pub(crate) fn write_raw(&mut self, s: &str) -> fmt::Result {
         if !self.wrap_buffer.is_empty() {
             self.flush_wrap_buffer()?;
         }
+
+        // Emit pending newlines with line fill when background is active.
         while self.need_cr > 0 {
+            if self.default_background.is_some() {
+                self.emit_line_fill_direct()?;
+                if self.attrs.is_active() {
+                    self.output.write_str(RESET)?;
+                }
+            }
             self.output.write_str("\n")?;
             self.need_cr -= 1;
         }
-        self.output.write_str(s)?;
+
+        if let Some(ref bg) = self.default_background {
+            let with_bg = format::apply_line_background(s, Some(bg));
+            self.output.write_str(&with_bg)?;
+        } else {
+            self.output.write_str(s)?;
+        }
+
         self.column = 0;
         self.begin_line = true;
         self.begin_content = true;
         self.window.clear();
         self.window.push(b'\n');
+
+        // The raw content likely ends with RESET, so subsequent output
+        // calls need to re-establish active attrs.
+        if self.attrs.is_active() {
+            self.pending_attr_restore = true;
+        }
 
         Ok(())
     }
