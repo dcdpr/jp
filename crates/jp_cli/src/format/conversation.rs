@@ -20,6 +20,9 @@ pub struct DetailsFmt {
     /// The number of messages in the conversation.
     pub message_count: usize,
 
+    /// Whether the conversation is pinned. If `None`, the details are not shown.
+    pub pinned: Option<bool>,
+
     /// Whether the conversation is local. If `None`, the details are not shown.
     pub local: Option<bool>,
 
@@ -47,6 +50,7 @@ impl DetailsFmt {
             assistant_name: None,
             title: None,
             message_count: 0,
+            pinned: None,
             local: None,
             active_conversation: None,
             last_message_at: None,
@@ -84,6 +88,14 @@ impl DetailsFmt {
     pub fn with_title(mut self, title: Option<impl Into<String>>) -> Self {
         self.title = title.map(Into::into);
         self
+    }
+
+    #[must_use]
+    pub fn with_pinned_flag(self, pinned: bool) -> Self {
+        Self {
+            pinned: Some(pinned),
+            ..self
+        }
     }
 
     #[must_use]
@@ -154,6 +166,17 @@ impl DetailsFmt {
                     "On Deactivation".to_string()
                 } else {
                     DateTimeFmt::new(expires_at).to_string()
+                },
+            ));
+        }
+
+        if let Some(pinned) = self.pinned {
+            map.push((
+                "Pinned".to_owned(),
+                if pinned {
+                    "Yes".bold().blue().to_string()
+                } else {
+                    "No".to_string()
                 },
             ));
         }

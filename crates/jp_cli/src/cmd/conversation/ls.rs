@@ -51,6 +51,7 @@ enum Sort {
 struct Details {
     id: ConversationId,
     active: bool,
+    pinned: bool,
     title: Option<String>,
     messages: usize,
     last_event_at: Option<DateTime<Utc>>,
@@ -86,6 +87,7 @@ impl Ls {
             .map(|(id, conversation)| Details {
                 id: *id,
                 active: active_conversation_id == Some(*id),
+                pinned: conversation.pinned,
                 title: conversation.title.clone(),
                 messages: conversation.events_count,
                 last_event_at: conversation.last_event_at.or(Some(id.timestamp())),
@@ -97,18 +99,30 @@ impl Ls {
         let count = conversations.len();
         let skip = count.saturating_sub(limit);
 
-        conversations.sort_by(|a, b| match self.sort {
+        let sort_cmp = |a: &Details, b: &Details| match self.sort {
             Some(Sort::Created) => a.id.timestamp().cmp(&b.id.timestamp()),
             Some(Sort::Messages) => a.messages.cmp(&b.messages),
             Some(Sort::Activity) => a.last_event_at.cmp(&b.last_event_at),
             Some(Sort::Expires) => a.expires_at.cmp(&b.expires_at),
             Some(Sort::Local) => a.local.cmp(&b.local),
             _ => a.id.cmp(&b.id),
-        });
+        };
 
-        if self.descending {
-            conversations.reverse();
-        }
+        conversations.sort_by(|a, b| {
+            // Active is always last, pinned conversations come right before it.
+            match (a.active, b.active) {
+                (true, false) => return std::cmp::Ordering::Greater,
+                (false, true) => return std::cmp::Ordering::Less,
+                _ => {}
+            }
+            match (a.pinned, b.pinned) {
+                (true, false) => return std::cmp::Ordering::Greater,
+                (false, true) => return std::cmp::Ordering::Less,
+                _ => {}
+            }
+            let ord = sort_cmp(a, b);
+            if self.descending { ord.reverse() } else { ord }
+        });
 
         let conversations: Vec<_> = conversations.into_iter().skip(skip).collect();
         let (expires_at_column, local_column, title_column, header) =
@@ -151,6 +165,7 @@ impl Ls {
         let Details {
             id,
             active,
+            pinned,
             title,
             messages,
             last_event_at: last_message_at,
@@ -160,6 +175,8 @@ impl Ls {
 
         let mut id_fmt = if active {
             id.to_string().bold().yellow().to_string()
+        } else if pinned {
+            id.to_string().bold().blue().to_string()
         } else {
             id.to_string()
         };

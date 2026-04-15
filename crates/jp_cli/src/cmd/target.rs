@@ -127,7 +127,7 @@ impl ConversationLoadRequest {
         if targets.is_empty() {
             Self::explicit(vec![
                 ConversationTarget::Previous,
-                ConversationTarget::Picker,
+                ConversationTarget::Picker(PickerFilter::default()),
             ])
         } else {
             Self::explicit(targets.to_vec())
@@ -186,8 +186,29 @@ pub(crate) enum ConversationTarget {
     /// `session`
     Session,
 
-    /// Interactive picker (bare `--id` or no positional arg).
-    Picker,
+    /// Interactive picker, optionally filtered.
+    /// `?`, `""`, `pinned`
+    Picker(PickerFilter),
+}
+
+/// Filters applied to the interactive conversation picker.
+///
+/// New fields can be added here as more filter keywords are introduced
+/// (e.g. `archived`, `local`). All fields default to `false` (no filter).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct PickerFilter {
+    /// Show only pinned conversations.
+    pub pinned: bool,
+}
+
+impl PickerFilter {
+    /// Test whether a conversation passes this filter.
+    fn matches(&self, c: &jp_conversation::Conversation) -> bool {
+        if self.pinned && !c.pinned {
+            return false;
+        }
+        true
+    }
 }
 
 impl ConversationTarget {
@@ -197,12 +218,13 @@ impl ConversationTarget {
     /// respective variants. Anything else is parsed as a conversation ID.
     pub(crate) fn parse(s: &str) -> Result<Self> {
         match s {
-            "?" | "" => Ok(Self::Picker),
+            "?" | "" => Ok(Self::Picker(PickerFilter::default())),
             "last" | "last-active" | "last-activated" | "l" => Ok(Self::LastActivated),
             "last-created" => Ok(Self::LastCreated),
             "previous" | "prev" | "p" => Ok(Self::Previous),
             "current" | "c" => Ok(Self::Current),
             "session" => Ok(Self::Session),
+            "pinned" => Ok(Self::Picker(PickerFilter { pinned: true })),
             _ => Ok(Self::Id(s.parse::<ConversationId>()?)),
         }
     }
@@ -210,7 +232,8 @@ impl ConversationTarget {
     /// The keyword name for this target, if it is a keyword.
     pub(crate) fn keyword_name(&self) -> Option<&'static str> {
         match self {
-            Self::Id(_) | Self::Picker => None,
+            Self::Picker(f) if f.pinned => Some("pinned"),
+            Self::Id(_) | Self::Picker(_) => None,
             Self::LastActivated => Some("last"),
             Self::LastCreated => Some("last-created"),
             Self::Previous => Some("previous"),
@@ -284,7 +307,7 @@ impl ConversationTarget {
                 }
                 Ok(ids)
             }
-            Self::Picker => Ok(vec![]),
+            Self::Picker(_) => Ok(vec![]),
         }
     }
 }
@@ -335,8 +358,11 @@ fn resolve_targets(
     for target in targets {
         match target.resolve(workspace, session) {
             Ok(v) if v.is_empty() => {
-                // Picker — resolve interactively.
-                return resolve_picker(workspace, session).map(|id| vec![id]);
+                let filter = match target {
+                    ConversationTarget::Picker(f) => f,
+                    _ => &PickerFilter::default(),
+                };
+                return resolve_picker(workspace, session, filter).map(|id| vec![id]);
             }
             Ok(v) => return Ok(v),
             Err(e) => last_err = Some(e),
@@ -361,7 +387,7 @@ fn resolve_from_session_or_picker(
         return Ok(id);
     }
 
-    resolve_picker(workspace, session)
+    resolve_picker(workspace, session, &PickerFilter::default())
 }
 
 /// Resolve the `conversation.default_id` config value to a concrete ID.
@@ -386,13 +412,16 @@ fn resolve_default_id(
     target.resolve(workspace, session).ok()?.into_iter().next()
 }
 
-/// Show the interactive picker, or error if non-interactive.
-fn resolve_picker(workspace: &Workspace, session: Option<&Session>) -> Result<ConversationId> {
+fn resolve_picker(
+    workspace: &Workspace,
+    session: Option<&Session>,
+    filter: &PickerFilter,
+) -> Result<ConversationId> {
     if !io::stdin().is_terminal() {
         return Err(Error::NoConversationTarget);
     }
 
-    pick_conversation(workspace, session).ok_or(Error::NoConversationTarget)
+    pick_conversation(workspace, session, filter).ok_or(Error::NoConversationTarget)
 }
 
 /// Show an interactive conversation picker.
@@ -402,9 +431,14 @@ fn resolve_picker(workspace: &Workspace, session: Option<&Session>) -> Result<Co
 ///
 /// Returns `Some(id)` on selection, `None` if the list is empty or the
 /// user cancels.
-fn pick_conversation(workspace: &Workspace, session: Option<&Session>) -> Option<ConversationId> {
+fn pick_conversation(
+    workspace: &Workspace,
+    session: Option<&Session>,
+    filter: &PickerFilter,
+) -> Option<ConversationId> {
     let mut items: Vec<_> = workspace
         .conversations()
+        .filter(|(_, c)| filter.matches(c))
         .map(|(id, c)| {
             let label = match &c.title {
                 Some(t) => format!("{id}  {t}"),
@@ -418,15 +452,21 @@ fn pick_conversation(workspace: &Workspace, session: Option<&Session>) -> Option
         return None;
     }
 
-    // Sort most-recently-activated first.
+    // Sort most-recently-activated first, with pinned conversations at the top.
     let meta: HashMap<_, _> = workspace
         .conversations()
-        .map(|(id, c)| (*id, c.last_activated_at))
+        .map(|(id, c)| (*id, (c.last_activated_at, c.pinned)))
         .collect();
 
-    items.sort_by(|a, b| meta[&b.0].cmp(&meta[&a.0]));
+    items.sort_by(|a, b| {
+        let (_, a_pinned) = meta[&a.0];
+        let (_, b_pinned) = meta[&b.0];
+        b_pinned
+            .cmp(&a_pinned)
+            .then_with(|| meta[&b.0].0.cmp(&meta[&a.0].0))
+    });
 
-    // Pin the session's active conversation to the top.
+    // Pin the session's active conversation to the very top.
     if let Some(s) = session
         && let Some(active) = workspace.session_active_conversation(s)
         && let Some(pos) = items.iter().position(|(id, _)| *id == active)

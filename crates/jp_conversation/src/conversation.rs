@@ -30,6 +30,12 @@ pub struct Conversation {
     #[serde(default, rename = "local", skip_serializing_if = "std::ops::Not::not")]
     pub user: bool,
 
+    /// Whether the conversation is pinned.
+    ///
+    /// Pinned conversations are displayed prominently in listings and pickers.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
+
     /// When the conversation expires.
     ///
     /// An expired conversation that is not active, may be garbage collected by
@@ -63,6 +69,7 @@ impl Default for Conversation {
             last_activated_at: Utc::now(),
             title: None,
             user: false,
+            pinned: false,
             expires_at: None,
             last_event_at: None,
             events_count: 0,
