@@ -4,7 +4,7 @@
 > programmer. Built to integrate into your existing workflows, providing a
 > secure, powerful and flexible pair-programming experience with LLMs.
 
-Visit [**jp.computer**] to learn more.
+Visit [jp.computer](https://jp.computer/) to learn more.
 
 > [!NOTE]
 > This project is in active development. Expect breaking changes. What is
@@ -15,14 +15,18 @@ Visit [**jp.computer**] to learn more.
 
 ## Philosophy
 
-JP is built to be **[provider-agnostic][1]**, your workflow shouldn't be coupled
+JP is built to be: **[provider-agnostic][1]**, because your workflow shouldn't be coupled
 to any single LLM backend; **[private and secure by default][2]**, with no
 implicit network access or silent tool execution; a **[proper Unix
-citizen][3]**, a single static binary that composes with pipes, respects your
-shell, and stays out of your way; **[extensible][4]** through sandboxed plugins
-and **[configurable][5]** where it matters; **[open-source and
-independent][6]**, funded without VC money, no allegiance to any LLM provider,
-just software that serves its users.
+citizen][3]** as a single static binary that composes with pipes, respects your
+shell, and stays out of your way; **[extensible][4]** through sandboxed plugins;
+**[configurable][5]** where it matters; and finally, **[open-source and
+independent][6]**, holding no allegiance to any LLM provider, funded without 
+the enshittification of VC money, just striving to be great — thanks to and for its users.
+
+When you adapt your programming tooling and workflow to JP, you are ensuring that
+you will have access to all of the frontier models, all of the local-first open source 
+inference runtimes, and all of the major inference aggregation services.  
 
 [1]: docs/README/providers.md
 [2]: docs/README/privacy-and-security.md
@@ -36,13 +40,13 @@ just software that serves its users.
 JP is in active development. Install from source:
 
 ```sh
-cargo install --locked --git https://github.com/dcdpr/jp.git
+% cargo install --locked --git https://github.com/dcdpr/jp.git
 ```
 
 Initiate a new workspace in an existing directory:
 
 ```sh
-jp init .
+% jp init
 > Confirm before running tools?
 Yes (safest option)
 > Which LLM model do you want to use?
@@ -51,21 +55,30 @@ ollama/qwen3
 Initialized workspace at current directory
 ```
 
-Run your first query:
+Run your first queries, noting that you get back to the command line every time, but `jp q` is easy to type:
 
 ```sh
-jp query "Is this thing on?"
-Hello there! I am Jean-pierre, how can I help you today?
+% jp query --new "Is this thing on?"
+Hello there! I am Jean-Pierre, how can I help you today?
+% jp q Make me a sandwich.
+I wish I could [...]
+```
+
+List and select conversations:
+
+```sh
+% jp conversation ls
+% jp conversation use
 ```
 
 Configure your JP workspace:
 
 ```sh
-open .jp/config.toml
+% open .jp/config.toml
 ```
 
 See what else you can do:
 
 ```sh
-jp help
+% jp help
 ```
