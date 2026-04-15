@@ -1,6 +1,7 @@
 use clap::{CommandFactory, Parser};
 
 use super::*;
+use crate::cmd::target::PickerFilter;
 
 // Helper: derive a top-level command that flattens the shared type.
 // This is the pattern commands will use.
@@ -108,7 +109,9 @@ fn flag_multi_no_flag() {
 #[test]
 fn flag_multi_bare_flag_is_picker() {
     let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::Picker]);
+    assert_eq!(cmd.target.ids, vec![ConversationTarget::Picker(
+        PickerFilter::default()
+    )]);
 }
 
 #[test]
@@ -168,7 +171,9 @@ fn flag_single_no_flag() {
 #[test]
 fn flag_single_bare_is_picker() {
     let cmd = TestFlagSingle::try_parse_from(["test-flag-single", "--id"]).unwrap();
-    assert_eq!(cmd.target.ids, vec![ConversationTarget::Picker]);
+    assert_eq!(cmd.target.ids, vec![ConversationTarget::Picker(
+        PickerFilter::default()
+    )]);
 }
 
 #[test]
@@ -197,6 +202,10 @@ fn keyword_aliases() {
         ("current", ConversationTarget::Current),
         ("last-created", ConversationTarget::LastCreated),
         ("session", ConversationTarget::Session),
+        (
+            "pinned",
+            ConversationTarget::Picker(PickerFilter { pinned: true }),
+        ),
     ] {
         let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", input]).unwrap();
         assert_eq!(cmd.target.ids, vec![expected], "failed for input: {input}");

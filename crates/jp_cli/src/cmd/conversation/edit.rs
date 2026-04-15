@@ -44,6 +44,13 @@ pub(crate) struct Edit {
     #[arg(long, group = "property")]
     local: Option<Option<bool>>,
 
+    /// Toggle pinning of the conversation.
+    ///
+    /// Pinned conversations are displayed prominently in listings and pickers.
+    /// Without a value, toggles the current pin state.
+    #[arg(long, group = "property")]
+    pin: Option<Option<bool>>,
+
     /// Toggle or set the expiration time of the conversation.
     ///
     /// Without a value, toggles: removes expiration if set, or sets it to
@@ -94,6 +101,7 @@ impl Edit {
     /// Whether any property mutation flag is set.
     fn has_property_flags(&self) -> bool {
         self.local.is_some()
+            || self.pin.is_some()
             || self.expires_at.is_some()
             || self.no_expires_at
             || self.title.is_some()
@@ -148,6 +156,10 @@ impl Edit {
             let conv = lock.into_mut();
             if let Some(user) = self.local {
                 conv.update_metadata(|m| m.user = user.unwrap_or(!m.user));
+            }
+
+            if let Some(pinned) = self.pin {
+                conv.update_metadata(|m| m.pinned = pinned.unwrap_or(!m.pinned));
             }
 
             if let Some(ref title) = self.title {

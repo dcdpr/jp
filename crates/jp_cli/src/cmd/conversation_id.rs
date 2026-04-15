@@ -208,6 +208,7 @@ fn long_help(session: bool) -> String {
     if session {
         s.push_str("  session                  All conversations in current session\n");
     }
+    s.push_str("  pinned                   Pick from pinned conversations only\n");
     s.push_str("\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
     s
 }
