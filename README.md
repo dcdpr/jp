@@ -24,6 +24,10 @@ shell, and stays out of your way; **[extensible][4]** through sandboxed plugins;
 independent][6]**, holding no allegiance to any LLM provider, funded without 
 the enshittification of VC money, just striving to be great — thanks to and for its users.
 
+When you adapt your programming tooling and workflow to JP, you are ensuring that
+you will have access to all of the frontier models, all of the local-first open source 
+inference runtimes, and all of the major inference aggregation services.  
+
 [1]: docs/README/providers.md
 [2]: docs/README/privacy-and-security.md
 [3]: docs/README/workflow-integration.md
