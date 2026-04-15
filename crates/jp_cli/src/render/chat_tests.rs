@@ -413,7 +413,7 @@ fn test_fenced_code_block_syntax_highlighting() {
     // so each line ends with a \x1b[0m reset before the next line's
     // escape sequences begin.
     let expected = concat!(
-        "```rust\n",
+        "`````rust\n",
         "\x1b[38;2;102;217;239mfn",
         "\x1b[38;2;248;248;242m ",
         "\x1b[38;2;166;226;46mmain",
@@ -436,7 +436,9 @@ fn test_fenced_code_block_syntax_highlighting() {
         "\x1b[38;2;248;248;242m}",
         "\x1b[38;2;248;248;242m\n",
         "\x1b[0m",
-        "```\n",
+        "`````\n",
+        // render_closing_fence appends a block separator after the fence
+        "\n",
     );
     assert_eq!(output, expected);
 }
