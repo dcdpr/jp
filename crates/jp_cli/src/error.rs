@@ -113,4 +113,8 @@ pub(crate) enum Error {
 
     #[error("No conversation targeted")]
     NoConversationTarget,
+
+    /// The user requested conversation target help.
+    #[error("target help")]
+    TargetHelp,
 }

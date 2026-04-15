@@ -27,7 +27,7 @@ pub(crate) struct Path {
 
 impl Path {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_session(&self.target.ids)
+        ConversationLoadRequest::explicit_or_session(&self.target)
     }
 
     pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {

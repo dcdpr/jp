@@ -15,6 +15,7 @@ use jp_workspace::Workspace;
 use serde_json::Value;
 pub(crate) use target::ConversationLoadRequest;
 
+use super::cmd::conversation_id::format_target_help;
 use crate::{Ctx, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Subcommand)]
@@ -309,6 +310,7 @@ impl From<(u8, Vec<(String, Value)>)> for Error {
 }
 
 impl From<crate::error::Error> for Error {
+    #[expect(clippy::too_many_lines)]
     fn from(error: crate::error::Error) -> Self {
         use crate::error::Error::*;
 
@@ -366,20 +368,26 @@ impl From<crate::error::Error> for Error {
                 ),
             ]
             .into(),
-            NoConversationTarget => [
-                (
-                    "message",
-                    "No conversation targeted. Use one of the following:".to_owned(),
-                ),
-                (
-                    "suggestion",
-                    "--id=<id>    target a specific conversation\n--id=last    continue the most \
-                     recently active conversation\n--new        start a new \
-                     conversation\n$JP_SESSION  set a session identity for automatic tracking"
-                        .to_owned(),
-                ),
-            ]
-            .into(),
+            TargetHelp => {
+                return Self {
+                    code: NonZeroU8::new(1).expect("non-zero"),
+                    message: Some(format_target_help(true, true)),
+                    metadata: vec![],
+                    disable_persistence: false,
+                };
+            }
+            NoConversationTarget => {
+                let help = super::cmd::conversation_id::format_target_help(true, true);
+                return Self {
+                    code: NonZeroU8::new(1).expect("non-zero"),
+                    message: Some(format!(
+                        "No conversation targeted.\n\nUse --id=<target> to target a conversation, \
+                         or --new to start a new one.\n\n{help}"
+                    )),
+                    metadata: vec![],
+                    disable_persistence: false,
+                };
+            }
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }

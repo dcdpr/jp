@@ -54,7 +54,7 @@ fn parse_duration(s: &str) -> Result<DateTime<Utc>, String> {
 
 impl Fork {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_session(&self.target.ids)
+        ConversationLoadRequest::explicit_or_session(&self.target)
     }
 
     pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {

@@ -51,7 +51,7 @@ enum Sort {
 struct Details {
     id: ConversationId,
     active: bool,
-    pinned: bool,
+    pinned_at: Option<DateTime<Utc>>,
     title: Option<String>,
     messages: usize,
     last_event_at: Option<DateTime<Utc>>,
@@ -61,7 +61,7 @@ struct Details {
 
 impl Ls {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_none(&self.target.ids)
+        ConversationLoadRequest::explicit_or_none(&self.target)
     }
 
     #[expect(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
@@ -87,7 +87,7 @@ impl Ls {
             .map(|(id, conversation)| Details {
                 id: *id,
                 active: active_conversation_id == Some(*id),
-                pinned: conversation.pinned,
+                pinned_at: conversation.pinned_at,
                 title: conversation.title.clone(),
                 messages: conversation.events_count,
                 last_event_at: conversation.last_event_at.or(Some(id.timestamp())),
@@ -115,10 +115,11 @@ impl Ls {
                 (false, true) => return std::cmp::Ordering::Less,
                 _ => {}
             }
-            match (a.pinned, b.pinned) {
-                (true, false) => return std::cmp::Ordering::Greater,
-                (false, true) => return std::cmp::Ordering::Less,
-                _ => {}
+            match (a.pinned_at, b.pinned_at) {
+                (Some(_), None) => return std::cmp::Ordering::Greater,
+                (None, Some(_)) => return std::cmp::Ordering::Less,
+                (Some(a_pin), Some(b_pin)) => return a_pin.cmp(&b_pin),
+                (None, None) => {}
             }
             let ord = sort_cmp(a, b);
             if self.descending { ord.reverse() } else { ord }
@@ -165,7 +166,7 @@ impl Ls {
         let Details {
             id,
             active,
-            pinned,
+            pinned_at,
             title,
             messages,
             last_event_at: last_message_at,
@@ -175,7 +176,7 @@ impl Ls {
 
         let mut id_fmt = if active {
             id.to_string().bold().yellow().to_string()
-        } else if pinned {
+        } else if pinned_at.is_some() {
             id.to_string().bold().blue().to_string()
         } else {
             id.to_string()

@@ -60,6 +60,6 @@ impl Use {
     }
 
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_previous(&self.target.ids)
+        ConversationLoadRequest::explicit_or_previous(&self.target)
     }
 }

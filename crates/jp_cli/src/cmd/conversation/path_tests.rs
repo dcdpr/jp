@@ -51,7 +51,7 @@ fn prints_conversation_directory() {
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
 
     let path_cmd = Path {
-        target: PositionalIds { ids: vec![] },
+        target: PositionalIds::from_targets(vec![]),
         events: false,
         metadata: false,
         base_config: false,
@@ -73,7 +73,7 @@ fn prints_events_path() {
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
 
     let path_cmd = Path {
-        target: PositionalIds { ids: vec![] },
+        target: PositionalIds::from_targets(vec![]),
         events: true,
         metadata: false,
         base_config: false,
@@ -93,7 +93,7 @@ fn prints_metadata_path() {
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
 
     let path_cmd = Path {
-        target: PositionalIds { ids: vec![] },
+        target: PositionalIds::from_targets(vec![]),
         events: false,
         metadata: true,
         base_config: false,
@@ -113,7 +113,7 @@ fn prints_base_config_path() {
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
 
     let path_cmd = Path {
-        target: PositionalIds { ids: vec![] },
+        target: PositionalIds::from_targets(vec![]),
         events: false,
         metadata: false,
         base_config: true,
@@ -133,7 +133,7 @@ fn prints_multiple_file_paths() {
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
 
     let path_cmd = Path {
-        target: PositionalIds { ids: vec![] },
+        target: PositionalIds::from_targets(vec![]),
         events: true,
         metadata: true,
         base_config: false,

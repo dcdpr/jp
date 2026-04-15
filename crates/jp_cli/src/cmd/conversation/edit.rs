@@ -87,7 +87,7 @@ pub(crate) struct Edit {
 
 impl Edit {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        ConversationLoadRequest::explicit_or_session(&self.target.ids)
+        ConversationLoadRequest::explicit_or_session(&self.target)
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
@@ -159,7 +159,10 @@ impl Edit {
             }
 
             if let Some(pinned) = self.pin {
-                conv.update_metadata(|m| m.pinned = pinned.unwrap_or(!m.pinned));
+                conv.update_metadata(|m| {
+                    let pin = pinned.unwrap_or(!m.is_pinned());
+                    m.pinned_at = if pin { Some(Utc::now()) } else { None };
+                });
             }
 
             if let Some(ref title) = self.title {

@@ -218,9 +218,7 @@ fn test_grep_with_specific_id() {
     // Search only in id1
     let grep = Grep {
         pattern: "unique-marker".into(),
-        target: FlagIds {
-            ids: vec![ConversationTarget::Id(id1)],
-        },
+        target: FlagIds::from_targets(vec![ConversationTarget::Id(id1)]),
         ..Default::default()
     };
     let h = ctx.workspace.acquire_conversation(&id1).unwrap();

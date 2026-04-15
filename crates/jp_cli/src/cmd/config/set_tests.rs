@@ -319,9 +319,7 @@ fn load_request_none_when_no_ids() {
 fn load_request_explicit_when_ids_present() {
     let set = Set {
         file_target: FileTarget::default(),
-        conversation: FlagIds {
-            ids: vec![crate::cmd::target::ConversationTarget::LastActivated],
-        },
+        conversation: FlagIds::from_targets(vec![crate::cmd::target::ConversationTarget::Latest]),
     };
     let req = set.conversation_load_request();
     assert!(req.targets.is_some());

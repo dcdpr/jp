@@ -473,7 +473,7 @@ impl Query {
             return ConversationLoadRequest::none();
         }
 
-        ConversationLoadRequest::explicit_or_session_with_config(&self.target.ids)
+        ConversationLoadRequest::explicit_or_session_with_config(&self.target)
     }
 
     /// Build the chat request for this query.
