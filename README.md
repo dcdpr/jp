@@ -4,7 +4,7 @@
 > programmer. Built to integrate into your existing workflows, providing a
 > secure, powerful and flexible pair-programming experience with LLMs.
 
-Visit [**jp.computer**] to learn more.
+Visit [**https://jp.computer/**] to learn more.
 
 > [!NOTE]
 > This project is in active development. Expect breaking changes. What is
