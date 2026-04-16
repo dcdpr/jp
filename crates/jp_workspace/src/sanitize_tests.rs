@@ -3,7 +3,7 @@ use std::sync::Arc;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use datetime_literal::datetime;
 use jp_conversation::{Conversation, ConversationId};
-use jp_storage::backend::FsStorageBackend;
+use jp_storage::backend::{FsStorageBackend, LockBackend};
 use test_log::test;
 
 use crate::Workspace;
@@ -158,6 +158,38 @@ fn test_empty_workspace_no_conversations_dir() {
     let (_tmp, _fs, mut ws) = setup();
     let report = ws.sanitize().unwrap();
     assert!(!report.has_repairs());
+}
+
+#[test]
+fn test_locked_invalid_conversation_is_not_trashed() {
+    let (_tmp, fs, mut ws) = setup();
+
+    let id = ConversationId::try_from(datetime!(2024-01-01 00:00:00 Z)).unwrap();
+
+    // Create an empty directory (no metadata.json) — normally trashed.
+    fs.create_test_conversation_dir(&id.to_dirname(None));
+
+    // Acquire a lock on this conversation, simulating a process that has
+    // created the directory (e.g. for QUERY_MESSAGE.md) but hasn't persisted
+    // managed files yet.
+    let lock = fs.try_lock(&id.to_string(), None).unwrap().unwrap();
+
+    let report = ws.sanitize().unwrap();
+
+    // The conversation should NOT be trashed because it's locked.
+    assert!(
+        report.trashed.is_empty(),
+        "locked conversation should not be trashed"
+    );
+
+    // After releasing the lock, it should be trashed.
+    drop(lock);
+    let report = ws.sanitize().unwrap();
+    assert_eq!(
+        report.trashed.len(),
+        1,
+        "unlocked invalid conversation should be trashed"
+    );
 }
 
 #[test]
