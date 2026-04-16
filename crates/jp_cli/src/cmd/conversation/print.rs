@@ -13,8 +13,12 @@ pub(crate) struct Print {
     target: PositionalIds<true, true>,
 
     /// Print only the last N turns. Without a value, prints the last turn.
-    #[arg(long, num_args = 0..=1, default_missing_value = "1")]
+    #[arg(long, num_args = 0..=1, default_missing_value = "1", conflicts_with = "turn")]
     last: Option<usize>,
+
+    /// Print a specific turn by number (1-based). Stable across new turns.
+    #[arg(long, conflicts_with = "last")]
+    turn: Option<usize>,
 
     /// Use the current workspace config instead of the per-turn config.
     ///
@@ -31,8 +35,16 @@ impl Print {
     }
 
     pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+        let selection = match self.turn {
+            Some(n) => TurnSelection::Index(n),
+            None => match self.last {
+                Some(n) => TurnSelection::Last(n),
+                None => TurnSelection::All,
+            },
+        };
+
         for handle in handles {
-            Self::print_conversation(ctx, handle, self.last, self.current_config)?;
+            Self::print_conversation(ctx, handle, &selection, self.current_config)?;
         }
         ctx.printer.println("");
         ctx.printer.flush();
@@ -42,7 +54,7 @@ impl Print {
     fn print_conversation(
         ctx: &mut Ctx,
         handle: &ConversationHandle,
-        last: Option<usize>,
+        selection: &TurnSelection,
         current_config: bool,
     ) -> Output {
         let events = ctx.workspace.events(handle)?.clone();
@@ -73,16 +85,46 @@ impl Print {
             source,
         );
 
-        let turns = events.iter_turns();
-        let skip = last.map_or(0, |n| turns.len().saturating_sub(n));
+        let mut turns = events.iter_turns();
+        let count = turns.len();
 
-        for turn in turns.skip(skip) {
-            renderer.render_turn(&turn);
+        match selection {
+            TurnSelection::All => {
+                for turn in turns {
+                    renderer.render_turn(&turn);
+                }
+            }
+            TurnSelection::Last(n) => {
+                let skip = count.saturating_sub(*n);
+                for turn in turns.skip(skip) {
+                    renderer.render_turn(&turn);
+                }
+            }
+            TurnSelection::Index(n) => {
+                if *n == 0 || *n > count {
+                    return Err(
+                        format!("turn {n} out of range (conversation has {count} turns)").into(),
+                    );
+                }
+                if let Some(turn) = turns.nth(n - 1) {
+                    renderer.render_turn(&turn);
+                }
+            }
         }
 
         renderer.flush();
         Ok(())
     }
+}
+
+/// How to select which turns to print.
+enum TurnSelection {
+    /// Print all turns.
+    All,
+    /// Print the last N turns.
+    Last(usize),
+    /// Print a specific turn by 1-based index.
+    Index(usize),
 }
 
 #[cfg(test)]

@@ -85,6 +85,7 @@ fn prints_user_message() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -106,6 +107,7 @@ fn prints_assistant_message() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -133,6 +135,7 @@ fn prints_reasoning_full() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -161,6 +164,7 @@ fn hides_reasoning_when_hidden() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -191,6 +195,7 @@ fn truncates_reasoning() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -230,6 +235,7 @@ fn prints_tool_call_and_result() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -256,6 +262,7 @@ fn prints_structured_data() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -282,6 +289,7 @@ fn turn_separators_between_turns() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -304,6 +312,7 @@ fn prints_conversation_by_id() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -325,6 +334,7 @@ fn empty_conversation_produces_no_content() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -375,6 +385,7 @@ fn full_conversation_round_trip() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -413,6 +424,7 @@ fn last_prints_only_last_turn() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: Some(1),
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -452,6 +464,7 @@ fn last_two_with_three_turns() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: Some(2),
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -479,6 +492,7 @@ fn last_exceeding_turn_count_prints_all() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: Some(5),
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -522,6 +536,7 @@ fn blank_line_between_tool_calls_and_message() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -573,6 +588,7 @@ fn blank_line_between_message_and_tool_calls() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -640,6 +656,7 @@ fn no_extra_blank_line_between_consecutive_tool_calls() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: None,
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -675,6 +692,7 @@ fn last_zero_prints_nothing() {
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
         last: Some(0),
+        turn: None,
         current_config: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
@@ -688,4 +706,85 @@ fn last_zero_prints_nothing() {
         trimmed.is_empty(),
         "--last 0 should produce no content, got: {trimmed:?}"
     );
+}
+
+#[test]
+fn turn_prints_specific_turn() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("First question"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::message("First answer.\n\n"), ts(0, 0, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Second question"), ts(0, 1, 1)),
+        ConversationEvent::new(ChatResponse::message("Second answer.\n\n"), ts(0, 1, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(ChatRequest::from("Third question"), ts(0, 2, 1)),
+        ConversationEvent::new(ChatResponse::message("Third answer.\n\n"), ts(0, 2, 2)),
+    ]);
+
+    // Print only turn 2.
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: Some(2),
+        current_config: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    assert!(
+        !output.contains("First"),
+        "turn 1 should be excluded, got: {output}"
+    );
+    assert!(
+        output.contains("Second question"),
+        "turn 2 should be present, got: {output}"
+    );
+    assert!(
+        output.contains("Second answer."),
+        "turn 2 response should be present, got: {output}"
+    );
+    assert!(
+        !output.contains("Third"),
+        "turn 3 should be excluded, got: {output}"
+    );
+}
+
+#[test]
+fn turn_out_of_range_errors() {
+    let (mut ctx, id, _out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Only turn"), ts(0, 0, 1)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: Some(5),
+        current_config: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    assert!(result.is_err(), "should error for out-of-range turn");
+}
+
+#[test]
+fn turn_zero_errors() {
+    let (mut ctx, id, _out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Only turn"), ts(0, 0, 1)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: Some(0),
+        current_config: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    assert!(result.is_err(), "should error for turn 0");
 }

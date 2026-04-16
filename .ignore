@@ -25,3 +25,4 @@ docs/yarn.lock
 /tmp
 **/fixtures/
 docs2/
+lcov.info

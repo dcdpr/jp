@@ -4,7 +4,7 @@
 //! shell scripts and automation. All paths come from the host's `init`
 //! message, so this plugin has no platform-specific logic.
 //!
-//! See: `docs/rfd/D17-command-plugin-system.md`
+//! See: `docs/rfd/072-command-plugin-system.md`
 
 use std::io::{self, BufRead, BufReader, IsTerminal as _, Write};
 

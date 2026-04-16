@@ -4,7 +4,7 @@
 //! lists available plugins with their platform-specific download URLs
 //! and checksums.
 //!
-//! See: `docs/rfd/D17-command-plugin-system.md`
+//! See: `docs/rfd/072-command-plugin-system.md`
 
 use std::collections::BTreeMap;
 

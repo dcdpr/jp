@@ -4,7 +4,7 @@
 //! - `jp plugin list|install|update` management subcommands
 //! - External plugin dispatch (spawning `jp-<name>` binaries)
 //!
-//! See: `docs/rfd/D17-command-plugin-system.md`
+//! See: `docs/rfd/072-command-plugin-system.md`
 
 pub(crate) mod dispatch;
 mod install;
