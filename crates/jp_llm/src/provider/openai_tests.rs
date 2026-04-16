@@ -1,3 +1,118 @@
+mod enforce_strict_object_structure {
+    use serde_json::json;
+
+    use super::super::enforce_strict_object_structure;
+
+    #[test]
+    fn no_required_adds_all_properties() {
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string" },
+                "age": { "type": "integer" }
+            }
+        });
+
+        enforce_strict_object_structure(&mut schema);
+
+        assert_eq!(schema["additionalProperties"], json!(false));
+        assert_eq!(schema["required"], json!(["name", "age"]));
+        // Both were newly required, so both become nullable.
+        assert_eq!(
+            schema["properties"]["name"]["type"],
+            json!(["string", "null"])
+        );
+        assert_eq!(
+            schema["properties"]["age"]["type"],
+            json!(["integer", "null"])
+        );
+    }
+
+    #[test]
+    fn partial_required_expanded_and_optional_made_nullable() {
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "old": { "type": "string" },
+                "new": { "type": "string" },
+                "paths": { "type": "array", "items": { "type": "string" } }
+            },
+            "required": ["old", "new"]
+        });
+
+        enforce_strict_object_structure(&mut schema);
+
+        assert_eq!(schema["required"], json!(["old", "new", "paths"]));
+        // old and new were already required, types unchanged.
+        assert_eq!(schema["properties"]["old"]["type"], json!("string"));
+        assert_eq!(schema["properties"]["new"]["type"], json!("string"));
+        // paths was optional, now nullable.
+        assert_eq!(
+            schema["properties"]["paths"]["type"],
+            json!(["array", "null"])
+        );
+    }
+
+    #[test]
+    fn already_nullable_not_doubled() {
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "value": { "type": ["string", "null"] }
+            }
+        });
+
+        enforce_strict_object_structure(&mut schema);
+
+        // Should not add a second "null".
+        assert_eq!(
+            schema["properties"]["value"]["type"],
+            json!(["string", "null"])
+        );
+    }
+
+    #[test]
+    fn nested_object_in_array_items() {
+        let mut schema = json!({
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "a": { "type": "string" },
+                    "b": { "type": "integer" }
+                },
+                "required": ["a"]
+            }
+        });
+
+        enforce_strict_object_structure(&mut schema);
+
+        let items = &schema["items"];
+        assert_eq!(items["required"], json!(["a", "b"]));
+        assert_eq!(items["properties"]["a"]["type"], json!("string"));
+        assert_eq!(items["properties"]["b"]["type"], json!(["integer", "null"]));
+    }
+
+    #[test]
+    fn all_required_stays_unchanged() {
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "x": { "type": "string" },
+                "y": { "type": "string" }
+            },
+            "required": ["x", "y"]
+        });
+
+        enforce_strict_object_structure(&mut schema);
+
+        assert_eq!(schema["required"], json!(["x", "y"]));
+        // Both were already required, types stay as-is.
+        assert_eq!(schema["properties"]["x"]["type"], json!("string"));
+        assert_eq!(schema["properties"]["y"]["type"], json!("string"));
+    }
+}
+
 mod transform_schema {
     use serde_json::{Map, Value, json};
 

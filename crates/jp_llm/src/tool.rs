@@ -17,7 +17,7 @@ use jp_mcp::{
     id::{McpServerId, McpToolId},
 };
 use jp_tool::{Action, Outcome, Question};
-use minijinja::Environment;
+use minijinja::{AutoEscape, Environment};
 use serde_json::{Map, Value, json};
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
@@ -350,7 +350,9 @@ pub async fn run_tool_command(
         shell,
     } = command;
 
-    let tmpl = Arc::new(Environment::new());
+    let mut env = Environment::new();
+    env.set_auto_escape_callback(|_| AutoEscape::Json);
+    let tmpl = Arc::new(env);
 
     let program = tmpl
         .render_str(&program, &ctx)

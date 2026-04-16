@@ -565,3 +565,56 @@ fn test_split_trims_whitespace() {
     assert_eq!(s, "hello");
     assert_eq!(d, None);
 }
+
+/// Exercises the real `run_tool_command` pipeline with null argument
+/// values. The command template renders `{{tool}}` through minijinja
+/// and `echo` captures the output. Without `AutoEscape::Json` on the
+/// environment, null values render as `none` (Jinja2 convention)
+/// producing invalid JSON — the exact bug seen in production with
+/// OpenAI's strict mode.
+#[tokio::test]
+#[cfg(unix)]
+async fn test_run_tool_command_renders_null_args_as_valid_json() {
+    use jp_config::conversation::tool::ToolCommandConfig;
+
+    let ctx = json!({
+        "tool": {
+            "name": "cargo_test",
+            "arguments": {
+                "package": "jp_workspace",
+                "backtrace": null,
+                "testname": null,
+            },
+            "answers": {},
+            "options": {},
+        },
+        "context": {
+            "action": "run",
+            "root": "/tmp",
+        },
+    });
+
+    let command = ToolCommandConfig {
+        program: "echo".to_owned(),
+        args: vec!["{{tool}}".to_owned()],
+        shell: false,
+    };
+
+    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new())
+        .await
+        .unwrap();
+
+    let stdout = match result {
+        CommandResult::RawOutput { stdout, .. } => stdout,
+        other => panic!("Expected RawOutput, got: {other:?}"),
+    };
+
+    // The rendered output must be valid JSON with proper `null` values.
+    let parsed: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
+        panic!("run_tool_command produced invalid JSON: {e}\n\nOutput: {stdout}")
+    });
+
+    assert_eq!(parsed["arguments"]["package"], "jp_workspace");
+    assert_eq!(parsed["arguments"]["backtrace"], Value::Null);
+    assert_eq!(parsed["name"], "cargo_test");
+}
