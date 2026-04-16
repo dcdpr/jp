@@ -254,11 +254,14 @@ pub enum ReasoningDetails {
     /// Adaptive reasoning support.
     ///
     /// The model dynamically decides when and how much to think based on
-    /// task complexity. Uses effort levels (low/medium/high/max) instead of
-    /// token budgets.
+    /// task complexity. Uses effort levels (low/medium/high/xhigh/max)
+    /// instead of token budgets.
     ///
     /// Currently only supported by Claude Opus 4.6+.
     Adaptive {
+        /// Whether the model supports `xhigh` (extra high) effort level.
+        xhigh: bool,
+
         /// Whether the model supports `max` effort level.
         max: bool,
     },
@@ -294,8 +297,8 @@ impl ReasoningDetails {
     }
 
     #[must_use]
-    pub fn adaptive(max: bool) -> Self {
-        Self::Adaptive { max }
+    pub fn adaptive(xhigh: bool, max: bool) -> Self {
+        Self::Adaptive { xhigh, max }
     }
 
     #[must_use]
