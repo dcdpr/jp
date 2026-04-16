@@ -137,12 +137,6 @@ struct Globals {
     quiet: bool,
 
     /// The output format.
-    ///
-    /// - `auto`: Automatically detect based on terminal.
-    /// - `text`: Plain text, no ANSI colors or unicode decorations.
-    /// - `text-pretty`: Rich text with ANSI colors and hyperlinks.
-    /// - `json`: Compact JSON output.
-    /// - `json-pretty`: Pretty-printed JSON output.
     #[arg(
         short = 'F',
         long = "format",

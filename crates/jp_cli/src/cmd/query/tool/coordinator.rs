@@ -949,7 +949,9 @@ impl ToolCoordinator {
         if let Some(cancel_msg) = cancellation_response {
             for &i in &cancelled_indices {
                 if let Some(response) = responses.get_mut(i) {
-                    response.result = Ok(cancel_msg.clone());
+                    response.result = Ok(format!(
+                        "Tool run cancelled by user with a custom message:\n\n{cancel_msg}"
+                    ));
                 }
             }
         }

@@ -73,15 +73,15 @@ pub(crate) struct Edit {
     no_title: bool,
 
     /// Open `events.json` in `$EDITOR`.
-    #[arg(long, group = "file", conflicts_with = "property")]
+    #[arg(long, short = 'e', group = "file", conflicts_with = "property")]
     events: bool,
 
     /// Open `metadata.json` in `$EDITOR`.
-    #[arg(long, group = "file", conflicts_with = "property")]
+    #[arg(long, short = 'm', group = "file", conflicts_with = "property")]
     metadata: bool,
 
     /// Open `base_config.json` in `$EDITOR`.
-    #[arg(long, group = "file", conflicts_with = "property")]
+    #[arg(long, short = 'b', group = "file", conflicts_with = "property")]
     base_config: bool,
 }
 

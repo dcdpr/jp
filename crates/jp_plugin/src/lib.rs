@@ -4,7 +4,7 @@
 //! JP over a JSON-lines protocol on stdin/stdout. This crate defines the
 //! message types used by both sides.
 //!
-//! See: `docs/rfd/D17-command-plugin-system.md`
+//! See: `docs/rfd/072-command-plugin-system.md`
 
 pub mod message;
 mod protocol;

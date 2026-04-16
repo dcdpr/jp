@@ -2,7 +2,7 @@
 //!
 //! Controls plugin installation, execution policy, and per-plugin options.
 //!
-//! See: `docs/rfd/D17-command-plugin-system.md`
+//! See: `docs/rfd/072-command-plugin-system.md`
 
 pub mod command;
 
