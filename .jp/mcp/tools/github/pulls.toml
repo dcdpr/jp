@@ -18,7 +18,7 @@ Get a PR with file diffs:
 ```
 """
 
-[conversation.tools.fs_grep_files.style]
+[conversation.tools.github_pulls.style]
 inline_results = "off"
 results_file_link = "off"
 parameters = "function_call"

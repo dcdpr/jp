@@ -1,8 +1,10 @@
 //! Post-processing fixups for buffer events.
 //!
 //! Fixups are stateful transformers that sit between the [`Buffer`] iterator
-//! and the consumer. They handle LLM-specific quirks that don't belong in
-//! the core markdown parsing logic.
+//! and the consumer. They handle LLM-specific quirks that don't belong in the
+//! core markdown parsing logic.
+//!
+//! [`Buffer`]: super::Buffer
 
 use super::Event;
 
