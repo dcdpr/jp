@@ -173,6 +173,39 @@ fn test_response_format_variants() {
 }
 
 #[test]
+fn test_keepalive_event() {
+    let json = r#"{"type": "keepalive", "sequence_number": 12}"#;
+    let event: StreamEvent = serde_json::from_str(json).unwrap();
+    assert!(matches!(event, StreamEvent::Keepalive { .. }));
+    assert_eq!(event.sequence_number(), 12);
+    assert_eq!(event.event_type(), "keepalive");
+}
+
+#[test]
+fn test_keepalive_event_without_sequence_number() {
+    let json = r#"{"type": "keepalive"}"#;
+    let event: StreamEvent = serde_json::from_str(json).unwrap();
+    assert!(matches!(event, StreamEvent::Keepalive { .. }));
+    assert_eq!(event.sequence_number(), 0);
+}
+
+#[test]
+fn test_ping_event() {
+    let json = r#"{"type": "ping", "sequence_number": 1}"#;
+    let event: StreamEvent = serde_json::from_str(json).unwrap();
+    assert!(matches!(event, StreamEvent::Ping { .. }));
+    assert_eq!(event.event_type(), "ping");
+}
+
+#[test]
+fn test_unknown_event_type() {
+    let json = r#"{"type": "some_future_event", "data": "whatever"}"#;
+    let event: StreamEvent = serde_json::from_str(json).unwrap();
+    assert!(matches!(event, StreamEvent::Unknown));
+    assert_eq!(event.event_type(), "unknown");
+}
+
+#[test]
 fn test_plugin_variants() {
     let moderation = Plugin::Moderation;
     let json = serde_json::to_string(&moderation).unwrap();

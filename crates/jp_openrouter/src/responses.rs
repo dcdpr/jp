@@ -1322,6 +1322,24 @@ pub enum StreamEvent {
         param: Option<String>,
         sequence_number: u32,
     },
+
+    /// Emitted periodically to keep the connection alive during long processing.
+    #[serde(rename = "keepalive")]
+    Keepalive {
+        #[serde(default)]
+        sequence_number: u32,
+    },
+
+    /// Connection health check event.
+    #[serde(rename = "ping")]
+    Ping {
+        #[serde(default)]
+        sequence_number: u32,
+    },
+
+    /// Catch-all for event types not yet supported by this crate.
+    #[serde(other)]
+    Unknown,
 }
 
 impl StreamEvent {
@@ -1411,7 +1429,14 @@ impl StreamEvent {
             }
             | Error {
                 sequence_number, ..
+            }
+            | Keepalive {
+                sequence_number, ..
+            }
+            | Ping {
+                sequence_number, ..
             } => *sequence_number,
+            Unknown => 0,
         }
     }
 
@@ -1462,6 +1487,9 @@ impl StreamEvent {
             }
             StreamEvent::ImageGenCallCompleted { .. } => "response.image_generation_call.completed",
             StreamEvent::Error { .. } => "error",
+            StreamEvent::Keepalive { .. } => "keepalive",
+            StreamEvent::Ping { .. } => "ping",
+            StreamEvent::Unknown => "unknown",
         }
     }
 
