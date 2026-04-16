@@ -87,6 +87,7 @@ fn prints_user_message() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -109,6 +110,7 @@ fn prints_assistant_message() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -137,6 +139,7 @@ fn prints_reasoning_full() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -166,6 +169,7 @@ fn hides_reasoning_when_hidden() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -197,6 +201,7 @@ fn truncates_reasoning() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -237,6 +242,7 @@ fn prints_tool_call_and_result() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -264,6 +270,7 @@ fn prints_structured_data() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -291,6 +298,7 @@ fn turn_separators_between_turns() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -314,6 +322,7 @@ fn prints_conversation_by_id() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -336,6 +345,7 @@ fn empty_conversation_produces_no_content() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -387,6 +397,7 @@ fn full_conversation_round_trip() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -426,6 +437,7 @@ fn last_prints_only_last_turn() {
         last: Some(1),
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -466,6 +478,7 @@ fn last_two_with_three_turns() {
         last: Some(2),
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -494,6 +507,7 @@ fn last_exceeding_turn_count_prints_all() {
         last: Some(5),
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -538,6 +552,7 @@ fn blank_line_between_tool_calls_and_message() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -590,6 +605,7 @@ fn blank_line_between_message_and_tool_calls() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -658,6 +674,7 @@ fn no_extra_blank_line_between_consecutive_tool_calls() {
         last: None,
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -694,6 +711,7 @@ fn last_zero_prints_nothing() {
         last: Some(0),
         turn: None,
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -728,6 +746,7 @@ fn turn_prints_specific_turn() {
         last: None,
         turn: Some(2),
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -765,6 +784,7 @@ fn turn_out_of_range_errors() {
         last: None,
         turn: Some(5),
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -783,8 +803,160 @@ fn turn_zero_errors() {
         last: None,
         turn: Some(0),
         current_config: false,
+        style: None,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
     assert!(result.is_err(), "should error for turn 0");
+}
+
+#[test]
+fn style_brief_hides_reasoning_and_tool_details() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+
+    let (mut ctx, id, out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Explain Rust"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me think deeply about this...\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("src/main.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("fn main() {}".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("Rust is a systems language.\n\n"),
+            ts(0, 0, 5),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: Some(PrintStyle::Brief),
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    let chrome = strip_ansi(&err.lock());
+
+    // Reasoning should be hidden.
+    assert!(
+        !output.contains("think deeply"),
+        "reasoning should be hidden in brief mode, got: {output}"
+    );
+
+    // Tool call header should still show, but without arguments.
+    assert!(
+        chrome.contains("Calling tool read_file"),
+        "tool header should still appear, got: {chrome}"
+    );
+    assert!(
+        !chrome.contains("src/main.rs"),
+        "tool arguments should be hidden in brief mode, got: {chrome}"
+    );
+
+    // Tool results should not appear.
+    assert!(
+        !chrome.contains("fn main()"),
+        "tool results should be hidden in brief mode, got: {chrome}"
+    );
+
+    // Assistant message should still be visible.
+    assert!(
+        output.contains("Rust is a systems language."),
+        "message content should still show, got: {output}"
+    );
+}
+
+#[test]
+fn style_full_shows_reasoning_and_untruncated_results() {
+    let mut config = AppConfig::new_test();
+    // Start with reasoning hidden and results truncated to 1 line.
+    config.style.reasoning.display = ReasoningDisplayConfig::Hidden;
+
+    let (mut ctx, id, out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Check the file"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me reason about this carefully.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("src/lib.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("line 1\nline 2\nline 3\nline 4\nline 5".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("Here are the contents.\n\n"),
+            ts(0, 0, 5),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: Some(PrintStyle::Full),
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    let chrome = strip_ansi(&err.lock());
+
+    // Reasoning should be visible despite config hiding it.
+    assert!(
+        output.contains("reason about this carefully"),
+        "reasoning should be shown in full mode, got: {output}"
+    );
+
+    // Tool arguments should be visible.
+    assert!(
+        chrome.contains("src/lib.rs"),
+        "tool arguments should be shown in full mode, got: {chrome}"
+    );
+
+    // All result lines should be visible (not truncated).
+    assert!(
+        chrome.contains("line 5"),
+        "all result lines should be shown in full mode, got: {chrome}"
+    );
+
+    // Message still visible.
+    assert!(
+        output.contains("Here are the contents."),
+        "message should still show, got: {output}"
+    );
 }

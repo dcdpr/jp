@@ -9,7 +9,7 @@ use std::{collections::HashMap, sync::Arc};
 use camino::Utf8PathBuf;
 use jp_config::{
     AppConfig, PartialAppConfig,
-    conversation::tool::ToolsConfig,
+    conversation::tool::{ToolConfigWithDefaults, ToolsConfig, style::ParametersStyle},
     style::{StyleConfig, typewriter::DelayDuration},
 };
 use jp_conversation::{EventKind, stream::turn_iter::Turn};
@@ -112,19 +112,24 @@ impl TurnRenderer {
                 EventKind::ToolCallRequest(req) => {
                     self.tool_names.insert(req.id.clone(), req.name.clone());
 
+                    let default_style = &self.tools_config.defaults.style;
                     let tool_cfg = self.tools_config.get(&req.name);
-                    if !tool_cfg.as_ref().is_some_and(|c| c.style().hidden) {
+                    let style = tool_cfg
+                        .as_ref()
+                        .map_or(default_style, ToolConfigWithDefaults::style);
+
+                    if !style.hidden {
                         self.chat.flush();
                         self.chat.transition_to_tool_call();
-                        let params_style = tool_cfg
-                            .as_ref()
-                            .map(|c| c.style().parameters.clone())
-                            .unwrap_or_default();
                         self.tool
-                            .render_tool_call(&req.name, &req.arguments, &params_style);
+                            .render_tool_call(&req.name, &req.arguments, &style.parameters);
 
-                        // Show stored custom-formatter output if available.
-                        if let Some(rendered) = get_rendered_arguments(event_with_cfg.event) {
+                        // Show stored custom-formatter output when replaying
+                        // a tool call that was originally rendered with a
+                        // Custom parameters style.
+                        if matches!(style.parameters, ParametersStyle::Custom(_))
+                            && let Some(rendered) = get_rendered_arguments(event_with_cfg.event)
+                        {
                             self.tool.render_formatted_arguments(&rendered);
                         }
                     }
@@ -132,17 +137,18 @@ impl TurnRenderer {
 
                 EventKind::ToolCallResponse(resp) => {
                     let name = self.tool_names.get(&resp.id);
+                    let default_style = &self.tools_config.defaults.style;
                     let tool_cfg = name.and_then(|n| self.tools_config.get(n));
-                    if !tool_cfg.as_ref().is_some_and(|c| c.style().hidden) {
-                        let inline = tool_cfg
-                            .as_ref()
-                            .map(|c| c.style().inline_results.clone())
-                            .unwrap_or_default();
-                        let link = tool_cfg
-                            .as_ref()
-                            .map(|c| c.style().results_file_link.clone())
-                            .unwrap_or_default();
-                        self.tool.render_result(resp, &inline, &link);
+                    let style = tool_cfg
+                        .as_ref()
+                        .map_or(default_style, ToolConfigWithDefaults::style);
+
+                    if !style.hidden {
+                        self.tool.render_result(
+                            resp,
+                            &style.inline_results,
+                            &style.results_file_link,
+                        );
                     }
                 }
 

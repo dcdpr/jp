@@ -129,6 +129,11 @@ impl ToolsConfig {
         })
     }
 
+    /// Iterate tool configurations mutably.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&str, &mut ToolConfig)> {
+        self.tools.iter_mut().map(|(k, v)| (k.as_str(), v))
+    }
+
     /// Insert a tool configuration.
     pub fn insert(&mut self, name: String, tool: ToolConfig) {
         self.tools.insert(name, tool);
