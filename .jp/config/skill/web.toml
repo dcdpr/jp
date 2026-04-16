@@ -1,13 +1,15 @@
 [[assistant.system_prompt_sections]]
 tag = "web_skill"
-title = "Skill: Web Acccess"
+title = "Skill: Web Access"
 content = """\
 You have been given the web-access skill. You can now fetch the raw HTML content of any web page, \
 search using the Kagi search engine, and ask Kagi to summarize web pages for you.
 
 The following tools help you with this:
 
-- web_fetch: Read the contents of a web page.
+- web_fetch: Read the contents of a web page. Automatically tries the `.md` variant of a URL \
+  first; falls back to HTML. Supports listing and extracting sections by heading ID for both \
+  markdown and HTML sources.
 - fs_list_files: List the files in the project.
 - fs_grep_files: Search through the project's files.
 - fs_grep_user_docs: Search through the project's documentation.
