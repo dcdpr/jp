@@ -448,9 +448,8 @@ fn test_json_auto_escape_fixes_null_rendering() {
         !fixed.contains("none"),
         "JSON env should not render 'none': {fixed}"
     );
-    let parsed: Value = serde_json::from_str(&fixed).unwrap_or_else(|e| {
-        panic!("JSON env output should be valid JSON: {e}\n\nOutput: {fixed}")
-    });
+    let parsed: Value = serde_json::from_str(&fixed)
+        .unwrap_or_else(|e| panic!("JSON env output should be valid JSON: {e}\n\nOutput: {fixed}"));
     assert_eq!(parsed["arguments"]["backtrace"], Value::Null);
     assert_eq!(parsed["arguments"]["package"], "jp_workspace");
 }
