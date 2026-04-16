@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 
@@ -62,11 +63,33 @@ export default {
         const summaries = loadSummaries()
 
         // Only numbered RFDs require summaries; drafts are excluded.
-        const missing = numbered.filter(f => !summaries[f]?.summary)
+        const missing = []
+        const stale = []
+        for (const f of numbered) {
+            const entry = summaries[f]
+            if (!entry?.summary) {
+                missing.push(f)
+                continue
+            }
+            const content = readFileSync(resolve(rfdDir, f))
+            const hash = createHash('sha256').update(content).digest('hex')
+            if (hash !== entry.hash) {
+                stale.push(f)
+            }
+        }
+
+        const problems = []
         if (missing.length > 0) {
             const nums = missing.map(f => f.match(/^(\d+)/)?.[1]).join(', ')
+            problems.push(`Missing summaries for: ${nums}`)
+        }
+        if (stale.length > 0) {
+            const nums = stale.map(f => f.match(/^(\d+)/)?.[1]).join(', ')
+            problems.push(`Stale summaries for: ${nums}`)
+        }
+        if (problems.length > 0) {
             throw new Error(
-                `Missing RFD summaries for: ${nums}. Run \`just rfd-summaries\` to generate them.`
+                `${problems.join('. ')}. Run \`just rfd-summaries\` to update.`
             )
         }
 

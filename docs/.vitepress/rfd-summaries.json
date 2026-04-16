@@ -252,12 +252,12 @@
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
   },
   "064-non-destructive-conversation-compaction.md": {
-    "hash": "66901f99e90942de48cb1dfb2033ac3b36c8e58fd8c99f1131155eed78e4bc2d",
+    "hash": "120eefa19a2055ca80931a37555a13a4c467bb07de0e603073a7bac5023514c1",
     "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {
-    "hash": "7240c6c6cbb722da0e2c39d8cae4b05f6aed7e4035c3cc4f25d7eb332cd38d71",
-    "summary": "Replace opaque attachments with typed resources carrying canonical URIs, MIME types, and metadata aligned with MCP."
+    "hash": "5eb2ab696b999ee13051c6ae257c350f6298b928aa44de6ee3965383feece220",
+    "summary": "Replace opaque attachments with typed MCP-aligned resources on ChatRequest at attachment turn, enabling deduplication and preventing cache invalidation."
   },
   "066-content-addressable-blob-store.md": {
     "hash": "a048ebb16802936e30d5433279c8adc812e7ea47036e87e3c213c5809d873ccb",
@@ -276,11 +276,11 @@
     "summary": "Conversation data auto-persists when ConversationMut drops via Arc<RwLock>, ensuring atomicity with file locks."
   },
   "072-command-plugin-system.md": {
-    "hash": "ba499a02d408881ee6b9828f78239297cd01e72e75e762711ee92793938d9f70",
+    "hash": "6c5e9bf8de691ced4585a57f5f8d38ca9de676f666a8ae66f32f58f8ef4e2ad9",
     "summary": "JSON-lines protocol enabling standalone binaries to extend JP with new subcommands in any language."
   },
   "073-layered-storage-backend-for-workspaces.md": {
-    "hash": "9f65b33af911d8e558796eb62e4b8c81a2fe4b7c62d0545a41c568dd257fecf6",
+    "hash": "9597be5a43865651fd8712e60d0cd1662f4ada77121319d9ead17433be1b30d2",
     "summary": "Replace Workspace's optional Storage with four focused trait objects (Persist, Load, Lock, Session) for cleaner polymorphism."
   }
 }

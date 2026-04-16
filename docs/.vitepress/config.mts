@@ -1,3 +1,6 @@
+import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+
 import { defineConfig } from 'vitepress'
 import abnfGrammar from './grammars/abnf.tmLanguage.json'
 
@@ -18,6 +21,18 @@ export default defineConfig({
                 return `<code>${escaped}</code>`
             }
         },
+    },
+    async buildEnd(siteConfig) {
+        // Copy raw .md source files into the output directory so every page
+        // is also reachable at its .md URL (e.g. /getting-started.md).
+        // This lets LLMs and tools fetch clean markdown without parsing HTML.
+        for (const page of siteConfig.pages) {
+            const src = resolve(siteConfig.srcDir, page)
+            const dest = resolve(siteConfig.outDir, page)
+            if (!existsSync(src)) continue
+            mkdirSync(dirname(dest), { recursive: true })
+            copyFileSync(src, dest)
+        }
     },
     lang: 'en-US',
     base: '/', // https://jp.computer
