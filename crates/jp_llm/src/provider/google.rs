@@ -197,9 +197,11 @@ fn create_request(
     // Add thinking config if the model supports it.
     let thinking_config = if let Some(details) = model.reasoning.filter(|_| supports_thinking) {
         if let Some(config) = reasoning {
-            // Reasoning is enabled — configure thinking accordingly.
+            // Reasoning is enabled — always include thoughts so they're
+            // captured in the conversation. The display layer handles
+            // visibility.
             Some(types::ThinkingConfig {
-                include_thoughts: !config.exclude,
+                include_thoughts: true,
                 thinking_budget: if details.is_leveled() {
                     None
                 } else {

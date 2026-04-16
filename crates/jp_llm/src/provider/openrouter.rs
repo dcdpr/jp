@@ -494,9 +494,11 @@ fn build_request(
             // we use `effort: minimal` + `exclude: true` instead of
             // `effort: none`, because some models (e.g. gpt-5-mini) reject
             // fully disabled reasoning.
+            // Always capture reasoning tokens. The display layer handles
+            // visibility.
             reasoning: Some(match reasoning {
                 Some(r) => request::Reasoning {
-                    exclude: r.exclude,
+                    exclude: false,
                     effort: match r
                         .effort
                         .abs_to_rel(model.max_output_tokens)

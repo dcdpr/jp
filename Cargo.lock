@@ -155,7 +155,7 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 [[package]]
 name = "async-anthropic"
 version = "0.6.0"
-source = "git+https://github.com/JeanMertz/async-anthropic#77f293a03793a11415a4657db72e027d4d39475e"
+source = "git+https://github.com/JeanMertz/async-anthropic#0e43aa9cd967d29997e0b4281d9c69e10e28b1b1"
 dependencies = [
  "backon",
  "derive_builder",

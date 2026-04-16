@@ -118,7 +118,12 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
     assert!(!is_structured);
 
     // Verify adaptive thinking is used
-    assert_eq!(request.thinking, Some(types::ExtendedThinking::Adaptive));
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::Adaptive {
+            display: Some(types::ThinkingDisplay::Summarized),
+        })
+    );
 
     // Verify output_config has effort set (defaults to High)
     assert!(request.output_config.is_some());
@@ -166,7 +171,12 @@ fn test_opus_4_7_xhigh_effort_mapping() {
     let beta = BetaFeatures(vec![]);
     let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
 
-    assert_eq!(request.thinking, Some(types::ExtendedThinking::Adaptive));
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::Adaptive {
+            display: Some(types::ThinkingDisplay::Summarized),
+        })
+    );
     let output_config = request.output_config.unwrap();
     assert_eq!(output_config.effort, Some(Effort::XHigh));
 }
@@ -448,7 +458,12 @@ fn test_adaptive_thinking_with_structured_output() {
     let (request, is_structured, _) = create_request(&model, query, true, &beta).unwrap();
 
     assert!(is_structured);
-    assert_eq!(request.thinking, Some(types::ExtendedThinking::Adaptive));
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::Adaptive {
+            display: Some(types::ThinkingDisplay::Summarized),
+        })
+    );
 
     let output_config = request.output_config.unwrap();
     // Both effort and format should be present.
