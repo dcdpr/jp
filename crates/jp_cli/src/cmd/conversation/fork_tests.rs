@@ -16,7 +16,10 @@ use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
 use super::*;
-use crate::{Globals, cmd::conversation_id::PositionalIds};
+use crate::{
+    Globals,
+    cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds},
+};
 
 #[test]
 #[expect(clippy::too_many_lines)]
@@ -36,6 +39,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -78,6 +82,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -130,6 +135,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -184,6 +190,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -237,6 +244,7 @@ fn test_conversation_fork() {
                 until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
                 last: None,
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -290,6 +298,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: Some(None),
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -367,6 +376,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: Some(Some(2)),
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -443,6 +453,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: Some(Some(10)),
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -487,6 +498,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: Some(Some(1)),
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -527,6 +539,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: None,
+                compact: CompactFlag::default(),
                 title: Some("my custom title".to_owned()),
             },
             setup: |ctx| {
@@ -558,6 +571,7 @@ fn test_conversation_fork() {
                 until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()),
                 last: None,
                 title: None,
+                compact: CompactFlag::default(),
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -650,7 +664,10 @@ fn test_conversation_fork() {
         ctx.set_now(DateTime::<Utc>::UNIX_EPOCH + Duration::from_secs(1));
 
         let source_handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
-        case.args.run(&mut ctx, &[source_handle]).unwrap();
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(case.args.run(&mut ctx, &[source_handle]))
+            .unwrap();
         ctx.printer.flush();
         assert_eq!(*out.lock(), "Conversation forked.\n");
 
@@ -764,10 +781,14 @@ fn fork_targets_correct_source() {
         from: None,
         until: None,
         last: None,
+        compact: CompactFlag::default(),
         title: Some("forked-from-b".to_owned()),
     };
     let handle_b = ctx.workspace.acquire_conversation(&id_b).unwrap();
-    fork.run(&mut ctx, &[handle_b]).unwrap();
+    tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(fork.run(&mut ctx, &[handle_b]))
+        .unwrap();
 
     // Should now have 3 conversations: A, B, and the fork.
     let all: Vec<_> = ctx

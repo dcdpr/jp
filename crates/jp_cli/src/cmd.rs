@@ -1,4 +1,5 @@
 mod attachment;
+pub(crate) mod compact_flag;
 mod config;
 mod conversation;
 pub(crate) mod conversation_id;
@@ -123,15 +124,22 @@ impl IntoPartialAppConfig for Commands {
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
+        handles: &[jp_workspace::ConversationHandle],
     ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match self {
-            Commands::Query(args) => args.apply_cli_config(workspace, partial, merged_config),
-            Commands::Attachment(args) => args.apply_cli_config(workspace, partial, merged_config),
+            Commands::Query(args) => {
+                args.apply_cli_config(workspace, partial, merged_config, handles)
+            }
+            Commands::Attachment(args) => {
+                args.apply_cli_config(workspace, partial, merged_config, handles)
+            }
             Commands::AttachmentAdd(args) => {
-                args.apply_cli_config(workspace, partial, merged_config)
+                args.apply_cli_config(workspace, partial, merged_config, handles)
+            }
+            Commands::Conversation(args) => {
+                args.apply_cli_config(workspace, partial, merged_config, handles)
             }
             Commands::Config(_)
-            | Commands::Conversation(_)
             | Commands::Init(_)
             | Commands::Plugin(_)
             | Commands::External(_) => Ok(partial),
@@ -390,6 +398,7 @@ impl From<crate::error::Error> for Error {
                     disable_persistence: false,
                 };
             }
+            Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }
