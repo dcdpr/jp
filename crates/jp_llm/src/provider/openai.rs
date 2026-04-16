@@ -94,6 +94,7 @@ impl Provider for Openai {
         Ok(self
             .client
             .stream(request)
+            .filter_map(skip_unknown_events)
             .or_else(map_error)
             .map_ok(move |v| stream::iter(map_event(v, is_structured, reasoning_enabled)))
             .try_flatten()
@@ -772,6 +773,23 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     };
 
     Ok(details)
+}
+
+/// Filter out unknown event types from the OpenAI SSE stream.
+///
+/// OpenAI may introduce new streaming event types (e.g., `keepalive`) that the
+/// `openai_responses` crate doesn't know about yet. These cause deserialization
+/// failures. Rather than killing the stream, we silently skip them.
+async fn skip_unknown_events(
+    result: std::result::Result<types::Event, OpenaiStreamError>,
+) -> Option<std::result::Result<types::Event, OpenaiStreamError>> {
+    if let Err(OpenaiStreamError::Parsing(e)) = &result
+        && e.to_string().starts_with("unknown variant")
+    {
+        trace!("Skipping unknown OpenAI streaming event: {e}");
+        return None;
+    }
+    Some(result)
 }
 
 /// Convert an OpenAI [`OpenaiStreamError`] into a [`StreamError`].

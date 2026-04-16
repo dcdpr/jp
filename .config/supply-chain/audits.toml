@@ -86,12 +86,6 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.1.6"
 
-[[audits.openai_responses]]
-who = "Jean Mertz <git@jeanmertz.com>"
-criteria = "safe-to-deploy"
-delta = "0.1.6 -> 0.1.6@git:1f5761a9c7361f5bc56725d15c1309c72f52af5e"
-importable = false
-
 [[audits.pastey]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
