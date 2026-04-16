@@ -10,7 +10,6 @@ config_load_paths = [
 
 [providers.llm]
 anthropic.beta_headers = [
-    "context-1m-2025-08-07",
     "interleaved-thinking-2025-05-14",
     "context-management-2025-06-27",
 ]
@@ -20,7 +19,7 @@ anthropic.beta_headers = [
 anthropic = "anthropic/claude-sonnet-4-6"
 claude = "anthropic/claude-sonnet-4-6"
 sonnet = "anthropic/claude-sonnet-4-6"
-opus = "anthropic/claude-opus-4-6"
+opus = "anthropic/claude-opus-4-7"
 haiku = "anthropic/claude-haiku-4-5"
 # OpenAI aliases
 openai = "openai/gpt-5.4"

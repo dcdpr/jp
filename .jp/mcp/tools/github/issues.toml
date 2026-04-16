@@ -18,7 +18,7 @@ Get details for a specific issue:
 ```
 """
 
-[conversation.tools.fs_grep_files.style]
+[conversation.tools.github_issues.style]
 inline_results = "off"
 results_file_link = "off"
 parameters = "function_call"
