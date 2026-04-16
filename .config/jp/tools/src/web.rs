@@ -14,6 +14,7 @@ pub async fn run(_: Context, t: Tool) -> ToolResult {
                 t.req("url")?,
                 t.opt("list_sections")?.unwrap_or(false),
                 t.opt("sections")?,
+                &t.options,
             )
             .await
         }

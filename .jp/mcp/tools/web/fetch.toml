@@ -16,6 +16,27 @@ examples = """
 ```
 """
 
+# Fetch strategy configuration.
+#
+# The tool tries the markdown variant of a URL (`{url}.md`) before falling back
+# to HTML. This works automatically for Mintlify, GitBook, Fumadocs, and similar
+# doc platforms that publish a markdown twin for every page.
+#
+# `strategy`: default for all requests. One of:
+#   - "auto"     Try `.md` first; fall back to HTML on failure. (default)
+#   - "markdown" Fetch only the `.md` variant; error if unavailable.
+#   - "html"     Fetch HTML directly, skipping the `.md` probe.
+#
+# `domains`: per-host overrides. Keys are hostnames; values are strategy
+# strings. Supported key patterns:
+#   - exact match, e.g. "docs.anthropic.com"
+#   - suffix wildcard, e.g. "*.mintlify.app" (matches the apex too)
+# The first matching rule wins.
+options.strategy = "auto"
+options.domains."github.com" = "html" # no .md convention on github.com
+options.domains."docs.rs" = "html" # already well-structured rustdoc HTML
+options.domains."crates.io" = "html"
+
 [conversation.tools.web_fetch.style]
 parameters = "function_call"
 inline_results = "off"
@@ -32,7 +53,8 @@ required = false
 summary = """return a compact listing of all headed sections on the page"""
 description = """\
 Each entry includes the section's anchor ID, heading level, title, and a short content preview. \
-Use the anchor IDs with the `sections` parameter to fetch specific sections.\
+Use the anchor IDs with the `sections` parameter to fetch specific sections. Works for both HTML \
+and markdown sources.\
 """
 
 [conversation.tools.web_fetch.parameters.sections]
@@ -42,5 +64,6 @@ items.type = "string"
 summary = "List of section anchor IDs to fetch."
 description = """\
 Only the content under those headings will be returned, significantly reducing output size. Use \
-`list_sections` first to discover available IDs.\
+`list_sections` first to discover available IDs. IDs are consistent across markdown and HTML \
+fetches (GitHub-style heading slugs).\
 """
