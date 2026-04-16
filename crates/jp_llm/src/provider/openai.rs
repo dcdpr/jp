@@ -1144,18 +1144,48 @@ pub(crate) fn parameters_with_strict_mode(
 
 /// Recursively sets `additionalProperties: false` and ensures nested objects
 /// have all their properties marked as required.
+///
+/// Properties that were not originally required are made nullable so the
+/// model can send `null` to omit them.
 fn enforce_strict_object_structure(schema: &mut Value) {
     match schema {
         Value::Object(map) => {
             if is_object_type(map.get("type")) {
                 map.insert("additionalProperties".to_owned(), false.into());
 
-                // Nested objects must have ALL properties required
-                if let Some(Value::Object(props)) = map.get("properties")
-                    && !map.contains_key("required")
-                {
-                    let keys: Vec<Value> = props.keys().map(|k| k.clone().into()).collect();
-                    map.insert("required".to_owned(), Value::Array(keys));
+                if let Some(Value::Object(props)) = map.get("properties") {
+                    // Collect which properties were originally required.
+                    let prev_required: Vec<String> = map
+                        .get("required")
+                        .and_then(Value::as_array)
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::to_owned)
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    // Find properties that need to become nullable.
+                    let newly_required: Vec<String> = props
+                        .keys()
+                        .filter(|k| !prev_required.iter().any(|r| r == *k))
+                        .cloned()
+                        .collect();
+
+                    // ALL properties must be in `required` for strict mode.
+                    let all_keys: Vec<Value> =
+                        props.keys().map(|k| Value::String(k.clone())).collect();
+                    map.insert("required".to_owned(), Value::Array(all_keys));
+
+                    // Make previously-optional properties nullable.
+                    if let Some(Value::Object(props)) = map.get_mut("properties") {
+                        for key in &newly_required {
+                            if let Some(prop_schema) = props.get_mut(key) {
+                                make_schema_nullable(prop_schema);
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1180,6 +1210,30 @@ fn is_object_type(type_value: Option<&Value>) -> bool {
         Some(Value::String(s)) => s == "object",
         Some(Value::Array(arr)) => arr.iter().any(|v| v.as_str() == Some("object")),
         _ => false,
+    }
+}
+
+/// Injects nullability into a raw JSON schema value's `type` field.
+///
+/// Used by [`enforce_strict_object_structure`] for properties that were
+/// optional but must now appear in `required`.
+fn make_schema_nullable(schema: &mut Value) {
+    if let Value::Object(map) = schema {
+        match map.get("type") {
+            Some(Value::String(t)) if t != "null" => {
+                let original = t.clone();
+                map.insert(
+                    "type".to_owned(),
+                    Value::Array(vec![original.into(), "null".into()]),
+                );
+            }
+            Some(Value::Array(arr)) if !arr.iter().any(|v| v.as_str() == Some("null")) => {
+                let mut arr = arr.clone();
+                arr.push("null".into());
+                map.insert("type".to_owned(), Value::Array(arr));
+            }
+            _ => {}
+        }
     }
 }
 
