@@ -25,8 +25,8 @@ use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{
     backend::{
-        InMemoryStorageBackend, LoadBackend, LockBackend, NoopLockGuard, NullPersistBackend,
-        PersistBackend, SessionBackend,
+        InMemoryStorageBackend, LoadBackend, LockBackend, NullPersistBackend, PersistBackend,
+        SessionBackend,
     },
     lock::LockInfo,
 };
@@ -557,6 +557,8 @@ impl Workspace {
     #[doc(hidden)]
     #[must_use]
     pub fn test_lock(&self, handle: ConversationHandle) -> ConversationLock {
+        use jp_storage::backend::NoopLockGuard;
+
         let id = handle.id();
 
         if let Some(cell) = self.state.conversations.get(&id) {

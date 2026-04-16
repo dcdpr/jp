@@ -69,6 +69,9 @@ pub(crate) trait ConversationIds {
 
     /// Whether this argument type accepts multiple targets.
     fn is_multi(&self) -> bool;
+
+    /// Whether the command supports session-based keywords.
+    fn supports_session(&self) -> bool;
 }
 
 impl<const SESSION: bool, const MULTI: bool> ConversationIds for PositionalIds<SESSION, MULTI> {
@@ -79,6 +82,10 @@ impl<const SESSION: bool, const MULTI: bool> ConversationIds for PositionalIds<S
     fn is_multi(&self) -> bool {
         MULTI
     }
+
+    fn supports_session(&self) -> bool {
+        SESSION
+    }
 }
 
 impl<const SESSION: bool, const MULTI: bool> ConversationIds for FlagIds<SESSION, MULTI> {
@@ -88,6 +95,10 @@ impl<const SESSION: bool, const MULTI: bool> ConversationIds for FlagIds<SESSION
 
     fn is_multi(&self) -> bool {
         MULTI
+    }
+
+    fn supports_session(&self) -> bool {
+        SESSION
     }
 }
 
@@ -182,6 +193,22 @@ fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), c
         ));
     }
 
+    // Reject multi-target keywords (+session, +pinned) on single-target commands.
+    if !MULTI {
+        for target in ids {
+            if matches!(
+                target,
+                ConversationTarget::AllSession | ConversationTarget::AllPinned
+            ) {
+                let kw = target.keyword_name().expect("multi-target has keyword");
+                return Err(clap::Error::raw(
+                    clap::error::ErrorKind::InvalidValue,
+                    format!("multi-target keyword '{kw}' is not supported by this command\n"),
+                ));
+            }
+        }
+    }
+
     if ids.len() > 1 {
         for target in ids {
             if let Some(kw) = target.keyword_name() {
@@ -234,9 +261,13 @@ fn short_help() -> &'static str {
 }
 
 fn long_help(session: bool, multi: bool) -> String {
-    let header = "Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword.";
+    let header = if multi {
+        "Conversation ID, Interactive Filter/Picker, Alias, or Multi-Target Keyword."
+    } else {
+        "Conversation ID, Interactive Filter/Picker, or Alias."
+    };
     let mut s = format!("{header}\n\n");
-    s.push_str(&keyword_help(session, false));
+    s.push_str(&keyword_help(session, multi, false));
 
     if multi {
         s.push_str("\nWhen multiple IDs are given, only literal conversation IDs are accepted.");
@@ -245,7 +276,7 @@ fn long_help(session: bool, multi: bool) -> String {
     s
 }
 
-fn keyword_help(session: bool, ansi: bool) -> String {
+fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
     let t = |text: &'static str| -> Cow<'static, str> {
         if !ansi {
             return text.into();
@@ -264,8 +295,6 @@ fn keyword_help(session: bool, ansi: bool) -> String {
 
     let picker = t("Interactive Filter/Picker");
     let aliases = t("Conversation Aliases");
-    let multi_target = t("Multi-Target Keywords");
-
     let h_pick_all = h("select from all");
     let h_pick_pinned = h("select from pinned");
     let h_pick_session = h("select from session");
@@ -275,10 +304,7 @@ fn keyword_help(session: bool, ansi: bool) -> String {
     let h_alias_pinned = h("target latest pinned");
     let h_alias_session = h("target previous active in session");
 
-    let h_multi_pinned = h("target all pinned");
-    let h_multi_session = h("target all activated in session");
-
-    let help = indoc::formatdoc! {"
+    let mut help = indoc::formatdoc! {"
         {picker}:
           ?                             {h_pick_all}
           ?p, ?pinned                   {h_pick_pinned}
@@ -289,11 +315,18 @@ fn keyword_help(session: bool, ansi: bool) -> String {
           n, newest                     {h_alias_newest}
           p, pinned                     {h_alias_pinned}
           s, session                    {h_alias_session}
-
-        {multi_target}:
-          +p, +pinned                   {h_multi_pinned}
-          +s, +session                  {h_multi_session}
     "};
+
+    if multi {
+        let multi_target = t("Multi-Target Keywords");
+        let h_multi_pinned = h("target all pinned");
+        let h_multi_session = h("target all activated in session");
+        help.push_str(&indoc::formatdoc! {"
+            \n{multi_target}:
+              +p, +pinned                   {h_multi_pinned}
+              +s, +session                  {h_multi_session}
+        "});
+    }
 
     if session {
         return help;
@@ -306,7 +339,7 @@ fn keyword_help(session: bool, ansi: bool) -> String {
         .join("\n")
 }
 
-pub(crate) fn format_target_help(session: bool, ansi: bool) -> String {
+pub(crate) fn format_target_help(session: bool, multi: bool, ansi: bool) -> String {
     let mut header: Cow<'_, str> = "Conversation Targeting".into();
     if ansi {
         header = header.bold().to_string().into();
@@ -324,7 +357,7 @@ pub(crate) fn format_target_help(session: bool, ansi: bool) -> String {
         fuzzy-search by title.
 
         {}
-    ", keyword_help(session, ansi)}
+    ", keyword_help(session, multi, ansi)}
 }
 
 #[cfg(test)]

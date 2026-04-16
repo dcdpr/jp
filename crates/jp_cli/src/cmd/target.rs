@@ -52,6 +52,12 @@ pub(crate) struct ConversationLoadRequest {
     /// When true, `?` opens a multi-select picker instead of a single-select.
     pub multi: bool,
 
+    /// Whether the command supports session-based keywords.
+    ///
+    /// Used for help text display — controls whether session-related keywords
+    /// and multi-target keywords are shown.
+    pub session: bool,
+
     /// Which resolved handle (by index) should be used for config loading.
     ///
     /// `None` means no per-conversation config. `Some(0)` is the common case
@@ -65,6 +71,7 @@ impl ConversationLoadRequest {
         Self {
             targets: None,
             multi: false,
+            session: true,
             config_conversation: None,
         }
     }
@@ -74,6 +81,7 @@ impl ConversationLoadRequest {
         Self {
             targets: Some(vec![]),
             multi: false,
+            session: true,
             config_conversation: None,
         }
     }
@@ -83,6 +91,7 @@ impl ConversationLoadRequest {
         Self {
             targets: Some(vec![]),
             multi: false,
+            session: true,
             config_conversation: Some(0),
         }
     }
@@ -92,6 +101,7 @@ impl ConversationLoadRequest {
         Self {
             targets: Some(targets),
             multi: false,
+            session: true,
             config_conversation: None,
         }
     }
@@ -101,6 +111,7 @@ impl ConversationLoadRequest {
         Self {
             targets: Some(targets),
             multi: false,
+            session: true,
             config_conversation: Some(0),
         }
     }
@@ -113,6 +124,7 @@ impl ConversationLoadRequest {
         } else {
             let mut req = Self::explicit(args.ids().to_vec());
             req.multi = args.is_multi();
+            req.session = args.supports_session();
             req
         }
     }
@@ -125,6 +137,7 @@ impl ConversationLoadRequest {
         } else {
             let mut req = Self::explicit_with_config(args.ids().to_vec());
             req.multi = args.is_multi();
+            req.session = args.supports_session();
             req
         }
     }
@@ -136,6 +149,7 @@ impl ConversationLoadRequest {
         } else {
             let mut req = Self::explicit(args.ids().to_vec());
             req.multi = args.is_multi();
+            req.session = args.supports_session();
             req
         }
     }
@@ -151,6 +165,7 @@ impl ConversationLoadRequest {
         } else {
             let mut req = Self::explicit(args.ids().to_vec());
             req.multi = args.is_multi();
+            req.session = args.supports_session();
             req
         }
     }
@@ -172,7 +187,14 @@ pub(crate) fn resolve_request(
         return Ok(vec![]);
     };
 
-    let ids = resolve_targets(targets, workspace, session, default_id, request.multi)?;
+    let ids = resolve_targets(
+        targets,
+        workspace,
+        session,
+        default_id,
+        request.multi,
+        request.session,
+    )?;
 
     ids.iter()
         .map(|id| workspace.acquire_conversation(id).map_err(Into::into))
@@ -205,11 +227,11 @@ pub(crate) enum ConversationTarget {
 
     /// All conversations in the current session's history.
     /// `+session`, `+s`
-    Session,
+    AllSession,
 
     /// All pinned conversations.
     /// `+pinned`, `+p`
-    Pinned,
+    AllPinned,
 
     /// Interactive picker, optionally filtered.
     /// `?`, `?p`, `?pinned`, `?s`, `?session`
@@ -274,8 +296,8 @@ impl ConversationTarget {
             "session" | "s" => Self::SessionPrevious,
 
             // Multi-target keywords
-            "+session" | "+s" => Self::Session,
-            "+pinned" | "+p" => Self::Pinned,
+            "+session" | "+s" => Self::AllSession,
+            "+pinned" | "+p" => Self::AllPinned,
 
             "help" => Self::Help,
 
@@ -297,7 +319,7 @@ impl ConversationTarget {
         matches!(
             self,
             Self::SessionPrevious
-                | Self::Session
+                | Self::AllSession
                 | Self::Picker(PickerFilter { session: true, .. })
         )
     }
@@ -311,15 +333,15 @@ impl ConversationTarget {
             Self::Latest => Some("latest"),
             Self::LatestPinned => Some("pinned"),
             Self::SessionPrevious => Some("session"),
-            Self::Session => Some("+session"),
-            Self::Pinned => Some("+pinned"),
+            Self::AllSession => Some("+session"),
+            Self::AllPinned => Some("+pinned"),
         }
     }
 
     /// Resolve this target to concrete conversation IDs.
     ///
     /// Returns an empty vec for `Picker` — the caller must handle interactive
-    /// selection separately. Returns multiple IDs for `Session`.
+    /// selection separately. Returns multiple IDs for `AllSession`.
     pub(crate) fn resolve(
         &self,
         workspace: &Workspace,
@@ -369,7 +391,7 @@ impl ConversationTarget {
                     })?;
                 Ok(vec![id])
             }
-            Self::Session => {
+            Self::AllSession => {
                 let ids = session
                     .map(|s| workspace.session_conversation_ids(s))
                     .unwrap_or_default();
@@ -381,7 +403,7 @@ impl ConversationTarget {
                 }
                 Ok(ids)
             }
-            Self::Pinned => {
+            Self::AllPinned => {
                 let ids: Vec<_> = workspace
                     .conversations()
                     .filter(|(_, c)| c.is_pinned())
@@ -411,6 +433,7 @@ fn resolve_targets(
     session: Option<&Session>,
     default_id: DefaultConversationId,
     multi: bool,
+    supports_session: bool,
 ) -> Result<Vec<ConversationId>> {
     if targets.is_empty() {
         let id = resolve_from_session_or_picker(workspace, session, default_id)?;
@@ -446,7 +469,10 @@ fn resolve_targets(
     let mut last_err = None;
     for target in targets {
         if matches!(target, ConversationTarget::Help) {
-            return Err(Error::TargetHelp);
+            return Err(Error::TargetHelp {
+                session: supports_session,
+                multi,
+            });
         }
 
         match target.resolve(workspace, session) {

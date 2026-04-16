@@ -21,6 +21,13 @@ struct TestPositionalSingle {
 }
 
 #[derive(Debug, Parser)]
+#[command(name = "test-positional-session-single")]
+struct TestPositionalSessionSingle {
+    #[command(flatten)]
+    target: PositionalIds<true, false>,
+}
+
+#[derive(Debug, Parser)]
 #[command(name = "test-flag-multi")]
 struct TestFlagMulti {
     #[command(flatten)]
@@ -49,7 +56,7 @@ fn positional_multi_one_keyword() {
 #[test]
 fn positional_multi_session_keyword() {
     let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", "+session"]).unwrap();
-    assert_eq!(cmd.target.ids(), &[ConversationTarget::Session]);
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::AllSession]);
 }
 
 #[test]
@@ -153,7 +160,7 @@ fn flag_multi_repeated() {
 #[test]
 fn flag_multi_session_keyword() {
     let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "+session"]).unwrap();
-    assert_eq!(cmd.target.ids(), &[ConversationTarget::Session]);
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::AllSession]);
 }
 
 #[test]
@@ -199,10 +206,10 @@ fn keyword_aliases() {
         ("session", ConversationTarget::SessionPrevious),
         ("p", ConversationTarget::LatestPinned),
         ("pinned", ConversationTarget::LatestPinned),
-        ("+session", ConversationTarget::Session),
-        ("+s", ConversationTarget::Session),
-        ("+pinned", ConversationTarget::Pinned),
-        ("+p", ConversationTarget::Pinned),
+        ("+session", ConversationTarget::AllSession),
+        ("+s", ConversationTarget::AllSession),
+        ("+pinned", ConversationTarget::AllPinned),
+        ("+p", ConversationTarget::AllPinned),
         (
             "?p",
             ConversationTarget::Picker(PickerFilter {
@@ -238,6 +245,27 @@ fn keyword_aliases() {
 }
 
 #[test]
+fn positional_session_single_accepts_session_previous() {
+    let cmd = TestPositionalSessionSingle::try_parse_from(["test-positional-session-single", "s"])
+        .unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::SessionPrevious]);
+}
+
+#[test]
+fn positional_session_single_rejects_multi_target_session() {
+    let err =
+        TestPositionalSessionSingle::try_parse_from(["test-positional-session-single", "+session"]);
+    assert!(err.is_err());
+}
+
+#[test]
+fn positional_session_single_rejects_multi_target_pinned() {
+    let err =
+        TestPositionalSessionSingle::try_parse_from(["test-positional-session-single", "+pinned"]);
+    assert!(err.is_err());
+}
+
+#[test]
 fn help_text_with_session_mentions_session() {
     let cmd = TestPositionalMulti::command();
     let arg = cmd.get_arguments().find(|a| a.get_id() == "id").unwrap();
@@ -250,9 +278,30 @@ fn help_text_without_session_omits_session_keyword() {
     let cmd = TestPositionalSingle::command();
     let arg = cmd.get_arguments().find(|a| a.get_id() == "id").unwrap();
     let long = arg.get_long_help().unwrap().to_string();
-    // All session-related lines should be stripped.
     assert!(
         !long.contains("session"),
         "long_help should not mention session: {long}"
+    );
+}
+
+#[test]
+fn help_text_multi_shows_multi_target_section() {
+    let cmd = TestPositionalMulti::command();
+    let arg = cmd.get_arguments().find(|a| a.get_id() == "id").unwrap();
+    let long = arg.get_long_help().unwrap().to_string();
+    assert!(
+        long.contains("Multi-Target Keywords"),
+        "long_help should contain multi-target section: {long}"
+    );
+}
+
+#[test]
+fn help_text_single_omits_multi_target_section() {
+    let cmd = TestPositionalSessionSingle::command();
+    let arg = cmd.get_arguments().find(|a| a.get_id() == "id").unwrap();
+    let long = arg.get_long_help().unwrap().to_string();
+    assert!(
+        !long.contains("Multi-Target"),
+        "long_help should not contain multi-target section: {long}"
     );
 }
