@@ -11,7 +11,7 @@ use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use relative_path::RelativePath;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use tracing::error;
+use tracing::{debug, error};
 
 use super::{
     ConversationLockGuard, LoadBackend, LockBackend, PersistBackend, SanitizeReport,
@@ -223,6 +223,22 @@ impl LoadBackend for FsStorageBackend {
         let mut report = SanitizeReport::default();
 
         for entry in validation.invalid {
+            // Skip conversations that are actively locked by another process.
+            // This prevents a race where process A creates a conversation
+            // directory (e.g. for QUERY_MESSAGE.md while the editor is open)
+            // but hasn't persisted the managed files yet, and process B's
+            // validation trashes it because metadata.json is missing.
+            if let Ok(id) = ConversationId::try_from_dirname(&entry.dirname)
+                && self.storage.is_conversation_locked(&id.to_string())
+            {
+                debug!(
+                    dirname = entry.dirname,
+                    error = %entry.error,
+                    "Skipping locked conversation during sanitization."
+                );
+                continue;
+            }
+
             if let Err(e) = trash_invalid_conversation(&entry) {
                 error!(
                     dirname = entry.dirname,

@@ -152,6 +152,18 @@ impl super::Storage {
         read_lock_info(&path)
     }
 
+    /// Check whether a conversation is currently locked by another process.
+    ///
+    /// Returns `true` if a lock file exists and is held (not orphaned).
+    /// Returns `false` if no lock file exists or the lock is orphaned.
+    #[must_use]
+    pub fn is_conversation_locked(&self, conversation_id: &str) -> bool {
+        match self.lock_file_path(conversation_id) {
+            Ok(path) => !is_orphaned_lock(&path),
+            Err(_) => false,
+        }
+    }
+
     /// Resolve the lock file path for a conversation.
     ///
     /// Returns `Ok(path)` if a lock file already exists (checking user
