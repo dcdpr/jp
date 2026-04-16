@@ -16,4 +16,4 @@ pub use error::{Error, StreamError, StreamErrorKind, ToolError};
 pub use provider::Provider;
 pub use retry::exponential_backoff;
 pub use stream::{EventStream, chain::EventChain};
-pub use tool::{CommandResult, ExecutionOutcome, run_tool_command};
+pub use tool::{CommandResult, ExecutionOutcome, ToolTrace, run_tool_command};
