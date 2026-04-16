@@ -18,7 +18,8 @@ when:
       "max_tokens": 64000,
       "thinking": {
         "type": "enabled",
-        "budget_tokens": 12800
+        "budget_tokens": 12800,
+        "display": "summarized"
       },
       "stream": true,
       "tool_choice": {

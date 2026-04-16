@@ -1018,7 +1018,12 @@ fn create_request(
                 xhigh: supports_xhigh,
                 max: supports_max,
             }) => {
-                builder.thinking(types::ExtendedThinking::Adaptive);
+                // Always request summarized thinking so reasoning is
+                // captured in the conversation. The display layer handles
+                // visibility.
+                builder.thinking(types::ExtendedThinking::Adaptive {
+                    display: Some(types::ThinkingDisplay::Summarized),
+                });
 
                 effort = match config
                     .effort
@@ -1067,6 +1072,7 @@ fn create_request(
                         .to_tokens(max_tokens)
                         .max(min_tokens)
                         .min(max_budget),
+                    display: Some(types::ThinkingDisplay::Summarized),
                 });
             }
 

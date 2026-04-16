@@ -24,7 +24,7 @@ when:
       "previous_response_id": null,
       "reasoning": {
         "effort": "minimal",
-        "summary": null
+        "summary": "auto"
       },
       "service_tier": null,
       "store": false,

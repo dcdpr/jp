@@ -17,7 +17,8 @@ when:
       "model": "claude-opus-4-6",
       "max_tokens": 64000,
       "thinking": {
-        "type": "adaptive"
+        "type": "adaptive",
+        "display": "summarized"
       },
       "stream": true,
       "output_config": {

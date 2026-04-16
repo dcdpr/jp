@@ -18,7 +18,8 @@ when:
       "max_tokens": 1152,
       "thinking": {
         "type": "enabled",
-        "budget_tokens": 1024
+        "budget_tokens": 1024,
+        "display": "summarized"
       },
       "stream": true,
       "cache_control": {
@@ -270,7 +271,8 @@ when:
       "max_tokens": 1152,
       "thinking": {
         "type": "enabled",
-        "budget_tokens": 1024
+        "budget_tokens": 1024,
+        "display": "summarized"
       },
       "stream": true,
       "cache_control": {
@@ -557,7 +559,8 @@ when:
       "max_tokens": 1152,
       "thinking": {
         "type": "enabled",
-        "budget_tokens": 1024
+        "budget_tokens": 1024,
+        "display": "summarized"
       },
       "stream": true,
       "cache_control": {
@@ -834,7 +837,8 @@ when:
       "max_tokens": 1152,
       "thinking": {
         "type": "enabled",
-        "budget_tokens": 1024
+        "budget_tokens": 1024,
+        "display": "summarized"
       },
       "stream": true,
       "cache_control": {

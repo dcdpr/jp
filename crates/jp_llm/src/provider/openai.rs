@@ -1355,12 +1355,10 @@ fn convert_reasoning(
     reasoning: CustomReasoningConfig,
     max_tokens: Option<u32>,
 ) -> types::ReasoningConfig {
+    // Always request reasoning summaries so they're captured in the
+    // conversation. The display layer handles visibility.
     types::ReasoningConfig {
-        summary: if reasoning.exclude {
-            None
-        } else {
-            Some(SummaryConfig::Auto)
-        },
+        summary: Some(SummaryConfig::Auto),
         effort: match reasoning
             .effort
             .abs_to_rel(max_tokens)
