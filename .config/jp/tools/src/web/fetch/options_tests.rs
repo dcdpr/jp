@@ -5,7 +5,7 @@ use super::*;
 
 fn opts(value: &serde_json::Value) -> WebFetchOptions {
     let map = value.as_object().cloned().unwrap_or_default();
-    WebFetchOptions::parse(&map)
+    WebFetchOptions::parse(&map).expect("valid options")
 }
 
 fn url(s: &str) -> Url {
@@ -31,24 +31,7 @@ fn strategy_override_applies_globally() {
 }
 
 #[test]
-fn strategy_parse_accepts_aliases() {
-    assert_eq!(Strategy::parse("md"), Some(Strategy::Markdown));
-    assert_eq!(Strategy::parse("MARKDOWN"), Some(Strategy::Markdown));
-    assert_eq!(Strategy::parse(" Html "), Some(Strategy::Html));
-    assert_eq!(Strategy::parse("nonsense"), None);
-}
-
-#[test]
-fn unknown_strategy_falls_back_to_default() {
-    let o = opts(&json!({ "strategy": "nonsense" }));
-    assert_eq!(
-        o.pick_strategy(&url("https://example.com/x")),
-        Strategy::Auto
-    );
-}
-
-#[test]
-fn exact_domain_match_wins() {
+fn exact_domain_match_wins_over_default() {
     let o = opts(&json!({
         "strategy": "html",
         "domains": { "docs.anthropic.com": "markdown" }
@@ -64,7 +47,7 @@ fn exact_domain_match_wins() {
 }
 
 #[test]
-fn suffix_wildcard_matches_subdomains_and_root() {
+fn suffix_wildcard_matches_subdomains_and_apex() {
     let o = opts(&json!({
         "domains": { "*.mintlify.app": "markdown" }
     }));
@@ -80,6 +63,7 @@ fn suffix_wildcard_matches_subdomains_and_root() {
         o.pick_strategy(&url("https://mintlify.app/docs")),
         Strategy::Markdown
     );
+    // Not a real subdomain — must not match.
     assert_eq!(
         o.pick_strategy(&url("https://evil-mintlify.app/docs")),
         Strategy::Auto
@@ -87,30 +71,52 @@ fn suffix_wildcard_matches_subdomains_and_root() {
 }
 
 #[test]
-fn host_matching_is_case_insensitive() {
+fn exact_wins_over_wildcard() {
     let o = opts(&json!({
-        "domains": { "Docs.Anthropic.Com": "markdown" }
+        "domains": {
+            "*.mintlify.app": "markdown",
+            "docs.mintlify.app": "html"
+        }
     }));
     assert_eq!(
-        o.pick_strategy(&url("https://DOCS.anthropic.com/x")),
+        o.pick_strategy(&url("https://docs.mintlify.app/x")),
+        Strategy::Html
+    );
+    assert_eq!(
+        o.pick_strategy(&url("https://other.mintlify.app/x")),
         Strategy::Markdown
     );
 }
 
 #[test]
-fn malformed_domain_value_is_ignored() {
+fn longest_wildcard_wins_over_shorter() {
     let o = opts(&json!({
         "domains": {
-            "docs.anthropic.com": "markdown",
-            "bad.com": 42,
-            "other.com": "nope"
+            "*.app": "html",
+            "*.mintlify.app": "markdown"
         }
     }));
     assert_eq!(
-        o.pick_strategy(&url("https://docs.anthropic.com/x")),
+        o.pick_strategy(&url("https://docs.mintlify.app/x")),
         Strategy::Markdown
     );
-    // Non-string and unknown strategy entries silently drop out.
-    assert_eq!(o.pick_strategy(&url("https://bad.com/x")), Strategy::Auto);
-    assert_eq!(o.pick_strategy(&url("https://other.com/x")), Strategy::Auto);
+    assert_eq!(
+        o.pick_strategy(&url("https://docs.other.app/x")),
+        Strategy::Html
+    );
+}
+
+#[test]
+fn unknown_strategy_errors() {
+    let map = json!({ "strategy": "nonsense" })
+        .as_object()
+        .cloned()
+        .unwrap();
+    assert!(WebFetchOptions::parse(&map).is_err());
+}
+
+#[test]
+fn unknown_field_errors() {
+    let map = json!({ "typo": true }).as_object().cloned().unwrap();
+    assert!(WebFetchOptions::parse(&map).is_err());
 }

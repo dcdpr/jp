@@ -24,7 +24,13 @@ pub(crate) async fn web_fetch(
     sections: Option<Vec<String>>,
     options: &Map<String, Value>,
 ) -> ToolResult {
-    let options = WebFetchOptions::parse(options);
+    let options = match WebFetchOptions::parse(options) {
+        Ok(options) => options,
+        Err(error) => {
+            eprintln!("Error parsing options: {error}");
+            WebFetchOptions::default()
+        }
+    };
 
     match options.pick_strategy(&url) {
         Strategy::Html => html::fetch(&url, list_sections, sections).await,
