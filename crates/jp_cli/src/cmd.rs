@@ -370,16 +370,16 @@ impl From<crate::error::Error> for Error {
                 ),
             ]
             .into(),
-            TargetHelp => {
+            TargetHelp { session, multi } => {
                 return Self {
                     code: NonZeroU8::new(1).expect("non-zero"),
-                    message: Some(format_target_help(true, true)),
+                    message: Some(format_target_help(session, multi, true)),
                     metadata: vec![],
                     disable_persistence: false,
                 };
             }
             NoConversationTarget => {
-                let help = super::cmd::conversation_id::format_target_help(true, true);
+                let help = super::cmd::conversation_id::format_target_help(true, true, true);
                 return Self {
                     code: NonZeroU8::new(1).expect("non-zero"),
                     message: Some(format!(

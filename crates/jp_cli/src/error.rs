@@ -116,5 +116,5 @@ pub(crate) enum Error {
 
     /// The user requested conversation target help.
     #[error("target help")]
-    TargetHelp,
+    TargetHelp { session: bool, multi: bool },
 }

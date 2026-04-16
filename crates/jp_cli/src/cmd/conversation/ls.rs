@@ -177,7 +177,7 @@ impl Ls {
         let mut id_fmt = if active {
             id.to_string().bold().yellow().to_string()
         } else if pinned_at.is_some() {
-            id.to_string().bold().blue().to_string()
+            id.to_string().blue().to_string()
         } else {
             id.to_string()
         };
