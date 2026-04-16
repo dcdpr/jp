@@ -78,7 +78,7 @@ tool_choice = "git_list_patches"
 
 [assistant.model]
 id = "sonnet"
-parameters.reasoning.effort = "auto"
+parameters.reasoning.effort = "medium"
 
 [[assistant.instructions]]
 title = "Git Staging: Research Changes First"
