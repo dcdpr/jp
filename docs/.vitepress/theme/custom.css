@@ -3,6 +3,22 @@
     --vp-c-brand-2: #747bff;
 }
 
+/* ── Page actions (view source / copy markdown) ───────────────────── */
+
+.page-actions {
+    display: flex;
+    justify-content: flex-end;
+    font-size: 0.8rem;
+    margin-bottom: 0.25rem;
+}
+.page-actions-link {
+    color: var(--vp-c-text-3);
+    text-decoration: none;
+}
+.page-actions-link:hover {
+    color: var(--vp-c-brand-1);
+}
+
 .heading .text {
     max-width: 800px !important;
 }

@@ -661,6 +661,11 @@ per-type policies let users tailor the operation.
 
 - **Conversation merging.** Combining two conversations into one.
 
+- **Interactive stream editing.** A `$EDITOR`-based workflow for manually
+  removing or reordering events in the raw stream (similar to `git rebase -i`).
+  This is a separate, destructive operation on the stored events — distinct from
+  compaction's non-destructive overlay model — and warrants its own RFD.
+
 ## Risks and Open Questions
 
 - **Summarization prompt design.** The summary needs to preserve the right
