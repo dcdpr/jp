@@ -282,5 +282,9 @@
   "073-layered-storage-backend-for-workspaces.md": {
     "hash": "9f65b33af911d8e558796eb62e4b8c81a2fe4b7c62d0545a41c568dd257fecf6",
     "summary": "Replace Workspace's optional Storage with four focused trait objects (Persist, Load, Lock, Session) for cleaner polymorphism."
+  },
+  "070-negative-config-deltas.md": {
+    "hash": "11a2589c1ac456f6ecbbcad7b97b14808610a8cb5325b02a4936c8c13689e3dd",
+    "summary": "Introduces `-C` flag to selectively revert previously applied config sources using provenance tracking via claims maps."
   }
 }
