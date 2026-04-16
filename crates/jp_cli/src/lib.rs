@@ -182,6 +182,24 @@ struct Globals {
     /// file regardless of this flag.
     #[arg(long, global = true, value_name = "PATH")]
     log_file: Option<String>,
+
+    /// Filter log output by target and level.
+    ///
+    /// Accepts a comma-separated list of `target=level` pairs. Levels are
+    /// one of: off, error, warn, info, debug, trace. Targets match path
+    /// prefixes.
+    ///
+    /// Examples:
+    ///   --log=tool::stderr=trace        Show stderr output from local tools.
+    ///   --log=mcp::stderr=debug         Show stderr from MCP servers.
+    ///   --log='jp_llm=trace,plugin=off' Trace jp_llm internals, silence plugins.
+    ///
+    /// Composes with `-v`: verbosity sets the baseline for jp's own
+    /// modules; `--log` adds or overrides specific targets. Passing
+    /// `--log` without `-v` still enables stderr log output.
+    #[allow(clippy::doc_markdown)]
+    #[arg(long, global = true, value_name = "DIRECTIVE")]
+    log: Option<String>,
 }
 
 /// The format used for log output on stderr.
@@ -328,6 +346,7 @@ pub fn run() -> ExitCode {
         cli.globals.log_format,
         format,
         cli.globals.log_file.as_deref(),
+        cli.globals.log.as_deref(),
     );
 
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
@@ -778,6 +797,7 @@ fn configure_logging(
     log_format: LogFormat,
     output_format: OutputFormat,
     log_file: Option<&str>,
+    log_filter: Option<&str>,
 ) -> Option<TracingGuard> {
     use tracing::level_filters::LevelFilter;
     use tracing_subscriber::{fmt, prelude::*};
@@ -835,8 +855,11 @@ fn configure_logging(
     //
     // `-v` implies stderr output (the user wants to see logs).
     // `--log-file=-` is an explicit opt-in.
+    // `--log` is an explicit opt-in (otherwise the flag would silently do
+    // nothing without also passing `-v`).
     // `--quiet` suppresses stderr output regardless.
-    let log_to_stderr = !quiet && (verbose > 0 || log_file.is_some_and(|f| f == "-"));
+    let log_to_stderr =
+        !quiet && (verbose > 0 || log_filter.is_some() || log_file.is_some_and(|f| f == "-"));
 
     if log_to_stderr {
         let mut term_filter: Vec<_> = match more {
@@ -849,6 +872,11 @@ fn configure_logging(
         }
         // Plugin stderr and protocol log messages.
         term_filter.push(format!("plugin={level}"));
+        // User-supplied directives come last so they override the baseline
+        // for any targets they mention.
+        if let Some(directive) = log_filter {
+            term_filter.push(directive.to_owned());
+        }
         let term_env_filter = tracing_subscriber::EnvFilter::new(term_filter.join(","));
 
         let use_json = match log_format {
