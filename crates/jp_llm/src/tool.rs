@@ -19,7 +19,10 @@ use jp_mcp::{
 use jp_tool::{Action, Outcome, Question};
 use minijinja::{AutoEscape, Environment};
 use serde_json::{Map, Value, json};
-use tokio::process::Command;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
+    process::Command,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{info, trace};
 
@@ -329,6 +332,17 @@ impl CommandResult {
     }
 }
 
+/// Identity of a tool invocation, used to tag stderr lines forwarded to
+/// tracing.
+///
+/// Pass `None` to disable stderr forwarding (e.g. for argument-formatting
+/// invocations where stderr is not meaningful to the user).
+#[derive(Debug, Clone, Copy)]
+pub struct ToolTrace<'a> {
+    pub id: &'a str,
+    pub name: &'a str,
+}
+
 /// Run a tool command asynchronously with cancellation support.
 ///
 /// This is the **single entry point** for running tool commands (both execution
@@ -338,11 +352,19 @@ impl CommandResult {
 /// 2. Process spawning via Tokio's [`Command`]
 /// 3. Cancellation via [`CancellationToken`]
 /// 4. Parsing stdout as [`jp_tool::Outcome`]
+/// 5. Forwarding the child's stderr to tracing (when `trace_as` is `Some`)
+///
+/// # Panics
+///
+/// Panics if tokio fails to attach the piped stdout/stderr handles to the
+/// spawned child. Both are requested via `Stdio::piped()`, so this is not
+/// expected to happen in practice.
 pub async fn run_tool_command(
     command: ToolCommandConfig,
     ctx: Value,
     root: &Utf8Path,
     cancellation_token: CancellationToken,
+    trace_as: Option<ToolTrace<'_>>,
 ) -> Result<CommandResult, ToolError> {
     let ToolCommandConfig {
         program,
@@ -395,7 +417,7 @@ pub async fn run_tool_command(
     // cancellation. Without this the process would be orphaned.
     cmd.kill_on_drop(true);
 
-    let child = cmd
+    let mut child = cmd
         .current_dir(root.as_std_path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -413,35 +435,71 @@ pub async fn run_tool_command(
             error,
         })?;
 
-    let wait_handle = tokio::spawn(async move { child.wait_with_output().await });
-    let abort_handle = wait_handle.abort_handle();
+    let stdout = child.stdout.take().expect("stdout piped");
+    let stderr = child.stderr.take().expect("stderr piped");
+
+    let run = async {
+        tokio::try_join!(
+            read_all(stdout),
+            forward_stderr(stderr, trace_as),
+            child.wait(),
+        )
+    };
 
     tokio::select! {
         biased;
-        () = cancellation_token.cancelled() => {
-            abort_handle.abort();
-            Ok(CommandResult::Cancelled)
+        () = cancellation_token.cancelled() => Ok(CommandResult::Cancelled),
+        result = run => Ok(match result {
+            Ok((stdout, stderr, status)) => {
+                parse_command_output(&stdout, &stderr, status.success())
+            }
+            Err(error) => CommandResult::RawOutput {
+                stdout: String::new(),
+                stderr: error.to_string(),
+                success: false,
+            },
+        }),
+    }
+}
+
+/// Drain a child pipe into a byte buffer.
+async fn read_all(mut pipe: impl tokio::io::AsyncRead + Unpin) -> std::io::Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    pipe.read_to_end(&mut buf).await?;
+    Ok(buf)
+}
+
+/// Drain a child's stderr into a byte buffer, optionally forwarding each line
+/// to tracing as it arrives.
+///
+/// Uses byte-level line reading so non-UTF-8 stderr doesn't terminate the
+/// forwarder.
+async fn forward_stderr(
+    pipe: impl tokio::io::AsyncRead + Unpin,
+    trace_as: Option<ToolTrace<'_>>,
+) -> std::io::Result<Vec<u8>> {
+    let mut reader = BufReader::new(pipe);
+    let mut all = Vec::new();
+    let mut line = Vec::new();
+
+    loop {
+        line.clear();
+        if reader.read_until(b'\n', &mut line).await? == 0 {
+            break;
         }
-        result = wait_handle => {
-            match result {
-                Ok(Ok(output)) => Ok(parse_command_output(
-                    &output.stdout,
-                    &output.stderr,
-                    output.status.success(),
-                )),
-                Ok(Err(error)) => Ok(CommandResult::RawOutput {
-                    stdout: String::new(),
-                    stderr: error.to_string(),
-                    success: false,
-                }),
-                Err(join_error) => Ok(CommandResult::RawOutput {
-                    stdout: String::new(),
-                    stderr: format!("Task panicked: {join_error}"),
-                    success: false,
-                }),
+
+        if let Some(ToolTrace { id, name }) = trace_as {
+            let text = String::from_utf8_lossy(&line);
+            let trimmed = text.trim_end_matches(['\n', '\r']);
+            if !trimmed.is_empty() {
+                trace!(target: "tool::stderr", tool_id = id, tool_name = name, "{trimmed}");
             }
         }
+
+        all.extend_from_slice(&line);
     }
+
+    Ok(all)
 }
 
 /// Parse raw command output into a [`CommandResult`].
@@ -631,7 +689,9 @@ impl ToolDefinition {
             return Err(ToolError::MissingCommand);
         };
 
-        match run_tool_command(command, ctx, root, cancellation_token).await? {
+        let trace_as = ToolTrace { id: &id, name };
+
+        match run_tool_command(command, ctx, root, cancellation_token, Some(trace_as)).await? {
             CommandResult::Success(content) => Ok(ExecutionOutcome::Completed {
                 id,
                 result: Ok(content),

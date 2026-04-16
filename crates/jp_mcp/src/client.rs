@@ -19,7 +19,13 @@ use rmcp::{
 };
 use sha1::{Digest as _, Sha1};
 use sha2::Sha256;
-use tokio::{process::Command, runtime::Handle, sync::RwLock, task::JoinSet};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::{ChildStderr, Command},
+    runtime::Handle,
+    sync::RwLock,
+    task::JoinSet,
+};
 use tracing::{trace, warn};
 
 use crate::{
@@ -278,15 +284,21 @@ impl Client {
                     cmd.env(key, value);
                 }
 
-                // Create the child process transport
+                // Create the child process transport. Stderr is piped so we
+                // can forward it to tracing; dropping it would close the pipe
+                // and the child would see EPIPE on writes.
                 let cmd_name = cmd.as_std().get_program().to_string_lossy().to_string();
-                let (child_process, _stderr) = TokioChildProcess::builder(cmd)
-                    .stderr(Stdio::null())
+                let (child_process, stderr) = TokioChildProcess::builder(cmd)
+                    .stderr(Stdio::piped())
                     .spawn()
                     .map_err(|error| Error::CannotSpawnProcess {
                         cmd: cmd_name.clone(),
                         error,
                     })?;
+
+                if let Some(stderr) = stderr {
+                    spawn_stderr_forwarder(stderr, id.clone());
+                }
 
                 // Create a timeout for the connection
                 let timeout = Duration::from_mins(1);
@@ -321,6 +333,45 @@ impl Client {
             }
         })
     }
+}
+
+/// Spawn a background task that forwards an MCP server's stderr to tracing.
+///
+/// Each line is emitted under `target: "mcp::stderr"` tagged with the server
+/// id, so users can opt in via e.g. `RUST_LOG=mcp::stderr=trace`. Uses
+/// byte-level line reading so non-UTF-8 output doesn't terminate the
+/// forwarder. The task exits when the pipe closes (child exit).
+fn spawn_stderr_forwarder(stderr: ChildStderr, server: McpServerId) {
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr);
+        let mut line = Vec::new();
+
+        loop {
+            line.clear();
+            match reader.read_until(b'\n', &mut line).await {
+                Ok(0) => break,
+                Ok(_) => {
+                    let text = String::from_utf8_lossy(&line);
+                    let trimmed = text.trim_end_matches(['\n', '\r']);
+                    if !trimmed.is_empty() {
+                        trace!(
+                            target: "mcp::stderr",
+                            server = %server,
+                            "{trimmed}"
+                        );
+                    }
+                }
+                Err(error) => {
+                    warn!(
+                        server = %server,
+                        error = %error,
+                        "Error reading MCP server stderr"
+                    );
+                    break;
+                }
+            }
+        }
+    });
 }
 
 pub fn verify_file_checksum(

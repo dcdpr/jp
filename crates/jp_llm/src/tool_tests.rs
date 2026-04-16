@@ -600,7 +600,7 @@ async fn test_run_tool_command_renders_null_args_as_valid_json() {
         shell: false,
     };
 
-    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new())
+    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
         .await
         .unwrap();
 

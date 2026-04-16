@@ -592,7 +592,7 @@ async fn format_args_custom(
         },
     });
 
-    let result = run_tool_command(cmd.clone(), ctx, root, CancellationToken::new())
+    let result = run_tool_command(cmd.clone(), ctx, root, CancellationToken::new(), None)
         .await
         .map_err(|e| {
             warn!(
