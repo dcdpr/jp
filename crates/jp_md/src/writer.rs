@@ -242,8 +242,9 @@ impl<'w> TerminalWriter<'w> {
             self.wrap_buffer.push_str(&self.prefix);
         }
         self.window.clear();
-        self.window
-            .extend_from_slice(&self.prefix.as_bytes()[self.prefix.len() - 2..]);
+        let prefix_bytes = self.prefix.as_bytes();
+        let start = prefix_bytes.len().saturating_sub(2);
+        self.window.extend_from_slice(&prefix_bytes[start..]);
         Ok(())
     }
 
@@ -553,3 +554,7 @@ impl Write for TerminalWriter<'_> {
         self.output(s, false)
     }
 }
+
+#[cfg(test)]
+#[path = "writer_tests.rs"]
+mod tests;
