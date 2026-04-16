@@ -58,7 +58,7 @@ async fn test_opus_4_6_adaptive_thinking() -> Result {
 
     // Configure model to use adaptive thinking (Opus 4.6 feature)
     if let Some(details) = request.as_model_details_mut() {
-        details.reasoning = Some(ReasoningDetails::adaptive(true));
+        details.reasoning = Some(ReasoningDetails::adaptive(false, true));
         details.features = vec!["adaptive-thinking"];
     }
 
@@ -80,7 +80,7 @@ async fn test_opus_4_6_max_effort() -> Result {
 
     // Configure model to use adaptive thinking with max effort support (Opus 4.6 feature)
     if let Some(details) = request.as_model_details_mut() {
-        details.reasoning = Some(ReasoningDetails::adaptive(true));
+        details.reasoning = Some(ReasoningDetails::adaptive(false, true));
         details.features = vec!["adaptive-thinking"];
     }
 
@@ -95,7 +95,7 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
         display_name: Some("Claude Opus 4.6".to_string()),
         context_window: Some(200_000),
         max_output_tokens: Some(128_000),
-        reasoning: Some(ReasoningDetails::adaptive(true)),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
@@ -127,6 +127,93 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
     assert_eq!(output_config.format, None);
 }
 
+/// Unit test: Verify `XHigh` effort maps to `Effort::XHigh` for Opus 4.7.
+#[test]
+fn test_opus_4_7_xhigh_effort_mapping() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-opus-4-7").try_into().unwrap(),
+        display_name: Some("Claude Opus 4.7".to_string()),
+        context_window: Some(200_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(true, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec!["adaptive-thinking"],
+    };
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Custom(
+        PartialCustomReasoningConfig {
+            effort: Some(ReasoningEffort::XHigh),
+            exclude: Some(false),
+        },
+    ));
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    assert_eq!(request.thinking, Some(types::ExtendedThinking::Adaptive));
+    let output_config = request.output_config.unwrap();
+    assert_eq!(output_config.effort, Some(Effort::XHigh));
+}
+
+/// Unit test: Verify `XHigh` effort falls back to `High` for Opus 4.6 (no xhigh support).
+#[test]
+fn test_opus_4_6_xhigh_falls_back_to_high() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
+        display_name: Some("Claude Opus 4.6".to_string()),
+        context_window: Some(200_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec!["adaptive-thinking"],
+    };
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Custom(
+        PartialCustomReasoningConfig {
+            effort: Some(ReasoningEffort::XHigh),
+            exclude: Some(false),
+        },
+    ));
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    let output_config = request.output_config.unwrap();
+    assert_eq!(output_config.effort, Some(Effort::High));
+}
+
 /// Unit test: Verify Max effort maps to `Effort::Max` for Opus 4.6.
 #[test]
 fn test_opus_4_6_max_effort_mapping() {
@@ -135,7 +222,7 @@ fn test_opus_4_6_max_effort_mapping() {
         display_name: Some("Claude Opus 4.6".to_string()),
         context_window: Some(200_000),
         max_output_tokens: Some(128_000),
-        reasoning: Some(ReasoningDetails::adaptive(true)), // supports max
+        reasoning: Some(ReasoningDetails::adaptive(false, true)), // supports max
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
@@ -332,7 +419,7 @@ fn test_adaptive_thinking_with_structured_output() {
         display_name: Some("Claude Opus 4.6".to_string()),
         context_window: Some(200_000),
         max_output_tokens: Some(128_000),
-        reasoning: Some(ReasoningDetails::adaptive(true)),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(true),
@@ -703,7 +790,7 @@ fn test_continue_injected_when_prefill_unsupported() {
         display_name: None,
         context_window: Some(200_000),
         max_output_tokens: Some(128_000),
-        reasoning: Some(ReasoningDetails::adaptive(true)),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
@@ -798,7 +885,7 @@ fn test_no_injection_when_last_message_is_user() {
         display_name: None,
         context_window: Some(200_000),
         max_output_tokens: Some(128_000),
-        reasoning: Some(ReasoningDetails::adaptive(true)),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,

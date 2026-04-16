@@ -108,7 +108,7 @@ pub struct Anthropic {
 impl Provider for Anthropic {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let model = self.client.models().get(name).await?;
-        map_model(model, &self.beta)
+        map_model(model)
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
@@ -135,10 +135,7 @@ impl Provider for Anthropic {
             }
         }
 
-        all_models
-            .into_iter()
-            .map(|v| map_model(v, &self.beta))
-            .collect::<Result<_>>()
+        all_models.into_iter().map(map_model).collect::<Result<_>>()
     }
 
     async fn chat_completion_stream(
@@ -737,11 +734,6 @@ impl BetaFeatures {
         self.0.iter().any(|h| h == "context-editing-2025-06-27")
     }
 
-    /// See: <https://docs.claude.com/en/api/rate-limits#long-context-rate-limits>
-    fn context_1m(&self) -> bool {
-        self.0.iter().any(|h| h == "context-1m-2025-08-07")
-    }
-
     /// See: <https://platform.claude.com/docs/en/build-with-claude/structured-outputs>
     fn structured_outputs(&self) -> bool {
         self.0.iter().any(|h| h == "structured-outputs-2025-10-27")
@@ -1022,7 +1014,10 @@ fn create_request(
     if let Some(config) = reasoning_config {
         match model.reasoning {
             // Adaptive thinking for Opus 4.6+
-            Some(ReasoningDetails::Adaptive { max: supports_max }) => {
+            Some(ReasoningDetails::Adaptive {
+                xhigh: supports_xhigh,
+                max: supports_max,
+            }) => {
                 builder.thinking(types::ExtendedThinking::Adaptive);
 
                 effort = match config
@@ -1031,6 +1026,9 @@ fn create_request(
                     .unwrap_or(ReasoningEffort::Auto)
                 {
                     ReasoningEffort::Max if supports_max => Some(Effort::Max),
+                    ReasoningEffort::Max | ReasoningEffort::XHigh if supports_xhigh => {
+                        Some(Effort::XHigh)
+                    }
                     ReasoningEffort::Max
                     | ReasoningEffort::XHigh
                     | ReasoningEffort::High
@@ -1123,18 +1121,29 @@ fn create_request(
 }
 
 #[expect(clippy::too_many_lines)]
-fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
+fn map_model(model: types::Model) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
+        "claude-opus-4-7" | "claude-opus-4-7-20260416" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
+            context_window: Some(1_000_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::adaptive(true, true)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: Some(true),
+            features: vec![
+                "interleaved-thinking",
+                "context-editing",
+                "adaptive-thinking",
+            ],
+        },
         "claude-sonnet-4-6" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
-            context_window: if beta.context_1m() {
-                Some(1_000_000)
-            } else {
-                Some(200_000)
-            },
+            context_window: Some(1_000_000),
             max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::adaptive(true)),
+            reasoning: Some(ReasoningDetails::adaptive(false, true)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: Some(true),
@@ -1147,13 +1156,9 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         "claude-opus-4-6" | "claude-opus-4-6-20260205" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
-            context_window: if beta.context_1m() {
-                Some(1_000_000)
-            } else {
-                Some(200_000)
-            },
+            context_window: Some(1_000_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::adaptive(true)),
+            reasoning: Some(ReasoningDetails::adaptive(false, true)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 5, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: Some(true),
@@ -1188,11 +1193,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
-            context_window: if beta.context_1m() {
-                Some(1_000_000)
-            } else {
-                Some(200_000)
-            },
+            context_window: Some(1_000_000),
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
@@ -1225,11 +1226,7 @@ fn map_model(model: types::Model, beta: &BetaFeatures) -> Result<ModelDetails> {
         "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
-            context_window: if beta.context_1m() {
-                Some(1_000_000)
-            } else {
-                Some(200_000)
-            },
+            context_window: Some(1_000_000),
             max_output_tokens: Some(64_000),
             reasoning: Some(ReasoningDetails::budgetted(1024, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),

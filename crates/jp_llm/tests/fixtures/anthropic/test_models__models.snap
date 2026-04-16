@@ -14,13 +14,14 @@ expression: v
             "Claude Sonnet 4.6",
         ),
         context_window: Some(
-            200000,
+            1000000,
         ),
         max_output_tokens: Some(
             64000,
         ),
         reasoning: Some(
             Adaptive {
+                xhigh: false,
                 max: true,
             },
         ),
@@ -50,13 +51,14 @@ expression: v
             "Claude Opus 4.6",
         ),
         context_window: Some(
-            200000,
+            1000000,
         ),
         max_output_tokens: Some(
             128000,
         ),
         reasoning: Some(
             Adaptive {
+                xhigh: false,
                 max: true,
             },
         ),
@@ -160,7 +162,7 @@ expression: v
             "Claude Sonnet 4.5",
         ),
         context_window: Some(
-            200000,
+            1000000,
         ),
         max_output_tokens: Some(
             64000,
@@ -271,7 +273,7 @@ expression: v
             "Claude Sonnet 4",
         ),
         context_window: Some(
-            200000,
+            1000000,
         ),
         max_output_tokens: Some(
             64000,

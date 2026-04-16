@@ -23,7 +23,7 @@ url = "https://raw.githubusercontent.com/mozilla/supply-chain/main/audits.toml"
 url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/audits.toml"
 
 [policy.async-anthropic]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy."backon:1.5.1@git:341ea10a868218c5b1bcdfdd168df71b5e7e8c67"]
 audit-as-crates-io = true
@@ -79,10 +79,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.assert-json-diff]]
 version = "2.0.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-anthropic]]
-version = "0.6.0@git:5edba470a3aa912de2c9e815bdd71dfc20fdf54f"
 criteria = "safe-to-deploy"
 
 [[exemptions.async-fn-stream]]
