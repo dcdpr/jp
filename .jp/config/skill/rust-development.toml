@@ -18,38 +18,152 @@ cargo_expand = { enable = true, run = "unattended", result = "unattended", style
 cargo_format = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 
 [[assistant.instructions]]
-title = "Rust Best Practices"
+title = "Rust Project Conventions"
 items = [
     """\
-    **Follow Community Conventions**: Adhere to Rust Style Guide: \
-    https://doc.rust-lang.org/stable/style-guide\
+    Handle errors with `Result` and `?`. Avoid unwrapping `Option` or `Result` without clear \
+    justification.\
     """,
     """\
-    Write idiomatic Rust. Use standard library features, enums for state management, and traits \
-    for polymorphism.\
-    """,
-    """\
-    Handle errors robustly. Use `Result` and `?` for error propagation. Avoid unwrapping `Option` \
-    or `Result` without clear justification.\
-    """,
-    """\
-    Adhere to the project's existing coding style and conventions. Use `cargo fmt` and `cargo \
-    clippy` to ensure consistency.\
-    """,
-    """\
-    Write comprehensive documentation. Add doc comments (`///`) for all public APIs and clarify \
-    complex logic with inline comments (`//`).\
-    """,
-    """\
-    Favor `use` over qualified paths (e.g. `use crate::foo::bar; bar()` instead of \
-    `crate::foo::bar()`).
+    Add doc comments (`///`) for all public APIs and clarify complex logic with inline comments \
+    (`//`).\
     """,
     """\
     Unit tests should be isolated into a separate file named with the `_tests` suffix, using the \
-    `path` attribute to specify the file path next to the under-test module.
+    `path` attribute to specify the file path next to the under-test module.\
+    """,
+    "Run `cargo fmt` and `cargo clippy` to ensure consistency.",
+]
+
+[[assistant.instructions]]
+title = "Rust Code Style Rules"
+description = """\
+These are hard rules for Rust code style in this project. Violating any of these is a bug. Apply \
+them in ALL generated code.\
+"""
+position = 1
+items = [
+    """\
+    **Import at the top, never inline.** All `use` statements MUST appear at the top of the file, \
+    grouped together. Never place `use` inside function bodies or blocks. The only exception is \
+    `use` inside conditionally compiled code (e.g. `#[cfg(windows)]`).\
     """,
     """\
-    `use` statements should be grouped together at the top of the file, not scattered throughout \
-    the code.\
+    **Use imports, not qualified paths.** Always import types and functions via `use` and refer to \
+    them by their short name. Do NOT use fully qualified paths like \
+    `jp_storage::backend::FsStorageBackend::new(...)` in function bodies. The one exception: `std` \
+    modules like `std::fs` or `std::io` are imported as the module (`use std::fs;`) and called as \
+    `fs::read_to_string(...)`, not by importing individual items.\
+    """,
+    """\
+    **Let `?` do the conversion.** When the `?` operator already calls `From::from` on the error, \
+    do not wrap the error manually. Write `.ok_or("msg")?` not `.ok_or_else(|| \
+    Error::from("msg"))?`. This applies to all similar patterns: `map_err`, `ok_or`, `ok_or_else` \
+    — if `?` can do the conversion, let it.\
+    """,
+    """\
+    **Use expression-oriented style.** Prefer `let x = if cond { a } else { b };` over declaring a \
+    mutable variable and assigning inside branches. Applies to `match`, `if let`, and other \
+    expressions too.\
+    """,
+    """\
+    **Never start a match arm pattern with `|`.** Write `Foo | Bar => ...` not `| Foo | Bar => \
+    ...`.\
+    """,
+    """\
+    **Single `#[derive(...)]` attribute.** Combine all derives into one attribute. Write \
+    `#[derive(Debug, Clone, Serialize)]` not separate `#[derive(Debug)]` `#[derive(Clone)]` lines.\
+    """,
+    """\
+    **Prefer `//` over `/* */`.** Use line comments for regular comments and `///` for doc \
+    comments. Avoid block comments.\
+    """,
+    """\
+    **Reserved words as identifiers.** When a name collides with a keyword, use a trailing \
+    underscore (`crate_`, `type_`) or a raw identifier (`r#type`). Never misspell the word (e.g. \
+    `krate` is wrong).\
     """,
 ]
+
+[[assistant.instructions.examples]]
+good = """\
+use jp_storage::backend::FsStorageBackend;
+
+let backend = FsStorageBackend::new(path);\
+"""
+bad = """\
+let backend = jp_storage::backend::FsStorageBackend::new(path);\
+"""
+reason = "Import at the top, use the short name in code."
+
+[[assistant.instructions.examples]]
+good = """\
+use std::fs;
+
+let content = fs::read_to_string(path)?;\
+"""
+bad = """\
+use std::fs::read_to_string;
+
+let content = read_to_string(path)?;\
+"""
+reason = "For std modules, import the module itself, not individual items."
+
+[[assistant.instructions.examples]]
+good = """\
+let store = config.store.ok_or("no store configured")?;\
+"""
+bad = """\
+let store = config.store.ok_or_else(|| Error::from("no store configured"))?;\
+"""
+reason = "The ? operator already calls From::from. Don't do it manually."
+
+[[assistant.instructions.examples]]
+good = """\
+use std::collections::HashMap;
+use anyhow::Result;
+
+use crate::config::AppConfig;
+
+fn load(path: &str) -> Result<AppConfig> {
+    let raw = fs::read_to_string(path)?;
+    // ...
+}\
+"""
+bad = """\
+fn load(path: &str) -> anyhow::Result<crate::config::AppConfig> {
+    use std::collections::HashMap;
+    let raw = std::fs::read_to_string(path)?;
+    // ...
+}\
+"""
+reason = "All use statements at the top. No inline imports, no qualified paths in signatures."
+
+[[assistant.instructions.examples]]
+good = """\
+let x = if condition { foo() } else { bar() };\
+"""
+bad = """\
+let x;
+if condition {
+    x = foo();
+} else {
+    x = bar();
+}\
+"""
+reason = "Use Rust's expression-oriented nature. Avoids mutability and is more concise."
+
+[[assistant.instructions.examples]]
+good = """\
+match val {
+    Foo | Bar => handle(),
+    Baz => other(),
+}\
+"""
+bad = """\
+match val {
+    | Foo | Bar => handle(),
+    | Baz => other(),
+}\
+"""
+reason = "Never start a match arm pattern with |."

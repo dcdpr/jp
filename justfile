@@ -80,8 +80,8 @@ commit *ARGS: _install-jp
     args="$@"
     msg="Give me a commit message"
 
-    starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
-    contains() { case $2 in *"$1"*) true;; *) false;; esac; }
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
     if starts_with "-- " "$@"; then
     elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
@@ -102,8 +102,8 @@ stage *ARGS: _install-jp
     msg="Find related changes in the git diff and stage ONE set of changes in preparation for a \
     commit using the 'git_stage_patch' tool. Follow your prompt instructions carefully."
 
-    starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
-    contains() { case $2 in *"$1"*) true;; *) false;; esac; }
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
     if starts_with "-- " "$@"; then
     elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
@@ -139,8 +139,8 @@ rfd-this *ARGS: _install-jp
     args="$@"
     msg="I gave you the RFD skill, use it to codify all that we just discussed and concluded in a feature request RFD."
 
-    starts_with() { case $2 in "$1"*) true;; *) false;; esac; }
-    contains() { case $2 in *"$1"*) true;; *) false;; esac; }
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
     if starts_with "-- " "$@"; then
     elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
@@ -151,6 +151,49 @@ rfd-this *ARGS: _install-jp
     fi
 
     jp query --cfg=skill/rfd $args
+
+# Review an RFD. Accepts a permanent number (41, 041) or a draft ID (D01).
+[group('rfd')]
+[positional-arguments]
+rfd-review NNN *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    args="$@"
+    msg="Please review the attached RFD"
+
+    arg="{{NNN}}"
+    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
+        draft_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
+        file=$(ls docs/rfd/${draft_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No draft RFD found with ID ${draft_id}." >&2; exit 1
+        fi
+    elif echo "$arg" | grep -qE '^[0-9]+$'; then
+        n=$(echo "$arg" | sed 's/^0*//')
+        num=$(printf "%03d" "${n:-0}")
+        file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No RFD found with number ${num}." >&2; exit 1
+        fi
+    else
+        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
+    fi
+
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
+        args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
+    elif [ -z "$args" ]; then
+        args="$msg"
+    fi
+
+    printf "Reviewing $file\n\n" >&2
+    jp query --attach "$file" --new --cfg=personas/rfd-reviewer $args
 
 # Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
 # Drafts are created as DNN-slug.md — a permanent number is assigned at Discussion.
@@ -776,7 +819,12 @@ coverage-ci: _coverage-setup _install_ci_matchers
     cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info --profile=coverage
 
-_coverage-setup: (_rustup_component "llvm-tools") (_install "cargo-llvm-cov@" + llvm_cov_version + " cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
+_coverage-setup: (_rustup_component "llvm-tools") _install-llvm-cov (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
+
+# cargo-llvm-cov disables the QuickInstall strategy in its binstall metadata,
+# so `--only-signed` can never be satisfied. Install separately without it.
+@_install-llvm-cov: _install-binstall
+    cargo binstall {{quiet_flag}} --locked --disable-telemetry --no-confirm cargo-llvm-cov@{{llvm_cov_version}}
 
 # Check for security vulnerabilities on CI.
 [group('ci')]

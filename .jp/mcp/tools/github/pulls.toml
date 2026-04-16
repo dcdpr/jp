@@ -1,7 +1,6 @@
 [conversation.tools.github_pulls]
 enable = false
 run = "unattended"
-style.inline_results = "off"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
@@ -18,6 +17,11 @@ Get a PR with file diffs:
 {"number": 15, "file_diffs": ["crates/jp_llm/src/builtin.rs"]}
 ```
 """
+
+[conversation.tools.fs_grep_files.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
 
 [conversation.tools.github_pulls.parameters.number]
 type = "integer"
