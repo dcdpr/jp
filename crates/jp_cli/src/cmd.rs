@@ -364,7 +364,9 @@ impl From<crate::error::Error> for Error {
                 ),
                 (
                     "suggestion",
-                    "Use --no-persist to skip locking, or set $JP_LOCK_DURATION".to_owned(),
+                    "Use --no-persist to skip locking, or set $JP_LOCK_DURATION to increase the \
+                     timeout."
+                        .to_owned(),
                 ),
             ]
             .into(),
@@ -601,6 +603,11 @@ impl From<jp_workspace::Error> for Error {
             ]
             .into(),
             MissingStorage => [("message", "Missing storage directory".into())].into(),
+            LockFailed(id) => [(
+                "message",
+                format!("Failed to lock conversation {id}").into(),
+            )]
+            .into(),
             MissingHome => [("message", "Missing home directory".into())].into(),
             NotFound(target, id) => [
                 ("message", "Not found".into()),

@@ -18,7 +18,9 @@ use jp_config::{
     fs::{load_partial, user_global_config_path},
     util::{find_file_in_load_path, load_partial_at_path},
 };
+use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
+use relative_path::RelativePath;
 use tracing::{debug, error};
 
 use super::KeyValueOrPath;
@@ -59,8 +61,9 @@ impl ConfigPipeline {
         base: PartialAppConfig,
         overrides: &[KeyValueOrPath],
         workspace: Option<&Workspace>,
+        fs: Option<&FsStorageBackend>,
     ) -> Result<Self> {
-        let cfg_args = resolve_cfg_args(overrides, &base, workspace)?;
+        let cfg_args = resolve_cfg_args(overrides, &base, workspace, fs)?;
         Ok(Self { base, cfg_args })
     }
 
@@ -93,6 +96,7 @@ fn resolve_cfg_args(
     overrides: &[KeyValueOrPath],
     base: &PartialAppConfig,
     workspace: Option<&Workspace>,
+    fs: Option<&FsStorageBackend>,
 ) -> Result<Vec<ResolvedCfgArg>> {
     let home = std::env::home_dir().and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
     let mut resolved = Vec::with_capacity(overrides.len());
@@ -122,8 +126,10 @@ fn resolve_cfg_args(
                 if let Some(w) = workspace {
                     roots.push(w.root().to_owned());
                 }
-                if let Some(user_ws_dir) = workspace.and_then(Workspace::user_storage_path) {
-                    roots.push(user_ws_dir.join("config"));
+                if let Some(path) =
+                    fs.and_then(|f| f.user_storage_with_path(RelativePath::new("config")))
+                {
+                    roots.push(path);
                 }
 
                 let mut matches: Vec<PartialAppConfig> = Vec::new();
@@ -219,6 +225,7 @@ pub(crate) fn build_partial_from_cfg_args(
     args: &[KeyValueOrPath],
     base: &PartialAppConfig,
     workspace: Option<&Workspace>,
+    fs: Option<&FsStorageBackend>,
 ) -> Result<PartialAppConfig> {
     if args.is_empty() {
         return Err(Error::CliConfig(
@@ -226,7 +233,7 @@ pub(crate) fn build_partial_from_cfg_args(
         ));
     }
 
-    let resolved = resolve_cfg_args(args, base, workspace)?;
+    let resolved = resolve_cfg_args(args, base, workspace, fs)?;
     apply_cfg_args(PartialAppConfig::empty(), &resolved)
 }
 

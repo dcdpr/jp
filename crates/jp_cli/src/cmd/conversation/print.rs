@@ -49,7 +49,6 @@ impl Print {
         let cfg = ctx.config();
 
         let root = ctx
-            .workspace
             .storage_path()
             .unwrap_or(ctx.workspace.root())
             .to_path_buf();

@@ -1,3 +1,4 @@
+pub mod backend;
 pub mod error;
 pub mod lock;
 pub mod value;
@@ -18,7 +19,6 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 pub use error::Error;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 pub use load::LoadError;
-use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use relative_path::RelativePath;
 use tracing::{trace, warn};
 
@@ -30,7 +30,7 @@ const BASE_CONFIG_FILE: &str = "base_config.json";
 pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
 
 #[derive(Debug, Clone)]
-pub struct Storage {
+struct Storage {
     /// The path to the original storage directory.
     root: Utf8PathBuf,
 
@@ -44,6 +44,8 @@ pub struct Storage {
 }
 
 impl Storage {
+    const SESSIONS_DIR: &'static str = "sessions";
+
     /// Creates a new Storage instance by creating a temporary directory and
     /// copying the contents of `root` into it.
     pub fn new(root: impl Into<Utf8PathBuf>) -> Result<Self> {
@@ -160,9 +162,8 @@ impl Storage {
 
     /// Return the absolute path to the given relative path, starting from the
     /// storage root.
-    #[expect(clippy::missing_panics_doc)]
     #[must_use]
-    pub fn root_with_path(&self, path: &RelativePath) -> Utf8PathBuf {
+    pub(crate) fn root_with_path(&self, path: &RelativePath) -> Utf8PathBuf {
         Utf8PathBuf::from_path_buf(path.to_logical_path(&self.root))
             .expect("relative path is Unicode, as is the root")
     }
@@ -214,9 +215,9 @@ impl Storage {
         metadata: &Conversation,
         events: &ConversationStream,
     ) -> Result<()> {
-        let conversations_dir = self.root.join(CONVERSATIONS_DIR);
-        let user = self.user.as_deref().unwrap_or(&self.root);
-        let user_conversations_dir = user.join(CONVERSATIONS_DIR);
+        let conversations_path = RelativePath::new(CONVERSATIONS_DIR);
+        let conversations_dir = self.root_with_path(conversations_path);
+        let user_conversations_dir = self.user_or_root_with_path(conversations_path);
 
         let dir_name = id.to_dirname(metadata.title.as_deref());
         let parent_dir = if metadata.user {
@@ -294,9 +295,9 @@ impl Storage {
     /// Removes all directories matching the conversation ID in both workspace
     /// and user storage.
     pub fn remove_conversation(&self, id: &ConversationId) -> Result<()> {
-        let conversations_dir = self.root.join(CONVERSATIONS_DIR);
-        let user = self.user.as_deref().unwrap_or(&self.root);
-        let user_conversations_dir = user.join(CONVERSATIONS_DIR);
+        let conversations_path = RelativePath::new(CONVERSATIONS_DIR);
+        let conversations_dir = self.root_with_path(conversations_path);
+        let user_conversations_dir = self.user_or_root_with_path(conversations_path);
         let prefix = id.to_dirname(None);
 
         for dir in [&conversations_dir, &user_conversations_dir] {
@@ -316,8 +317,6 @@ impl Storage {
         Ok(())
     }
 
-    const SESSIONS_DIR: &'static str = "sessions";
-
     /// Load a session mapping from user storage.
     ///
     /// Returns `Ok(None)` if user storage is not configured or the mapping
@@ -326,13 +325,12 @@ impl Storage {
         &self,
         session_key: &str,
     ) -> Result<Option<T>> {
-        let Some(user) = self.user.as_deref() else {
+        let Some(sessions_dir) = self.user_storage_with_path(RelativePath::new(Self::SESSIONS_DIR))
+        else {
             return Ok(None);
         };
 
-        let path = user
-            .join(Self::SESSIONS_DIR)
-            .join(format!("{session_key}.json"));
+        let path = sessions_dir.join(format!("{session_key}.json"));
 
         if !path.is_file() {
             return Ok(None);
@@ -350,14 +348,11 @@ impl Storage {
         session_key: &str,
         data: &T,
     ) -> Result<()> {
-        let user = self
-            .user
-            .as_deref()
+        let sessions_dir = self
+            .user_storage_with_path(RelativePath::new(Self::SESSIONS_DIR))
             .ok_or(Error::NotDir(Utf8PathBuf::from("<no user storage>")))?;
 
-        let path = user
-            .join(Self::SESSIONS_DIR)
-            .join(format!("{session_key}.json"));
+        let path = sessions_dir.join(format!("{session_key}.json"));
 
         write_json(&path, data)?;
         Ok(())
@@ -370,11 +365,10 @@ impl Storage {
     /// orphaned and its path is returned.
     #[must_use]
     pub fn list_orphaned_lock_files(&self) -> Vec<Utf8PathBuf> {
-        let Some(user) = self.user.as_deref() else {
+        let Some(locks_dir) = self.user_storage_with_path(RelativePath::new(lock::LOCKS_DIR))
+        else {
             return vec![];
         };
-
-        let locks_dir = user.join(lock::LOCKS_DIR);
         dir_entries(&locks_dir)
             .filter_map(|entry| {
                 let path = entry.into_path();
@@ -402,13 +396,14 @@ impl Storage {
         title: Option<&str>,
         user: bool,
     ) -> Utf8PathBuf {
-        let root = if user {
-            self.user.as_ref().unwrap_or(&self.root)
+        let conversations_path = RelativePath::new(CONVERSATIONS_DIR);
+        let base = if user {
+            self.user_or_root_with_path(conversations_path)
         } else {
-            &self.root
+            self.root_with_path(conversations_path)
         };
 
-        root.join(CONVERSATIONS_DIR).join(id.to_dirname(title))
+        base.join(id.to_dirname(title))
     }
 
     /// Find the directory path for a conversation by ID.
@@ -446,11 +441,10 @@ impl Storage {
     /// List session mapping files in user storage.
     #[must_use]
     pub fn list_session_files(&self) -> Vec<Utf8PathBuf> {
-        let Some(user) = self.user.as_deref() else {
+        let Some(sessions_dir) = self.user_storage_with_path(RelativePath::new(Self::SESSIONS_DIR))
+        else {
             return vec![];
         };
-
-        let sessions_dir = user.join(Self::SESSIONS_DIR);
         dir_entries(&sessions_dir)
             .filter_map(|entry| {
                 let path = entry.into_path();
@@ -461,43 +455,6 @@ impl Storage {
                 }
             })
             .collect()
-    }
-
-    /// Remove all ephemeral conversations, except the active one.
-    pub fn remove_ephemeral_conversations(&self, skip: &[ConversationId]) {
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
-
-            let path = root.join(CONVERSATIONS_DIR);
-            dir_entries(&path)
-                .collect::<Vec<_>>()
-                .into_par_iter()
-                .filter_map(|entry| {
-                    let id = load_conversation_id_from_entry(&entry)?;
-                    if skip.contains(&id) {
-                        return None;
-                    }
-
-                    let path = entry.into_path();
-                    let expiring_ts = get_expiring_timestamp(&path)?;
-                    if expiring_ts > Utc::now() {
-                        return None;
-                    }
-
-                    Some(path)
-                })
-                .for_each(|path| {
-                    if let Err(error) = fs::remove_dir_all(&path) {
-                        warn!(
-                            path = %path,
-                            error = error.to_string(),
-                            "Failed to remove ephemeral conversation."
-                        );
-                    }
-                });
-        }
     }
 }
 

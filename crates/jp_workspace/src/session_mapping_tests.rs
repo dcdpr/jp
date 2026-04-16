@@ -1,6 +1,9 @@
+use std::sync::Arc;
+
 use camino_tempfile::{Utf8TempDir, tempdir};
 use datetime_literal::datetime;
 use jp_conversation::ConversationId;
+use jp_storage::backend::{FsStorageBackend, LockBackend};
 use test_log::test;
 
 use super::*;
@@ -17,24 +20,26 @@ fn test_session() -> Session {
 }
 
 /// Create a workspace with both workspace and user storage configured.
-fn setup() -> (Utf8TempDir, Workspace) {
+fn setup() -> (Utf8TempDir, Workspace, Option<Arc<FsStorageBackend>>) {
     let tmp = tempdir().unwrap();
     let storage_path = tmp.path().join("storage");
     let user_root = tmp.path().join("user");
 
-    let mut ws = Workspace::new(tmp.path())
-        .persisted_at(&storage_path)
-        .unwrap()
-        .with_local_storage_at(&user_root, "test-ws", "abc")
-        .unwrap();
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, "test-ws", "abc")
+            .unwrap(),
+    );
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
 
-    (tmp, ws)
+    (tmp, ws, Some(fs))
 }
 
 #[test]
 fn activate_creates_new_mapping() {
-    let (_tmp, mut ws) = setup();
+    let (_tmp, mut ws, _fs) = setup();
     let session = test_session();
     let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
     let now = datetime!(2025-07-19 14:30:00 Z);
@@ -50,7 +55,7 @@ fn activate_creates_new_mapping() {
 
 #[test]
 fn activate_deduplicates_history() {
-    let (_tmp, mut ws) = setup();
+    let (_tmp, mut ws, _fs) = setup();
     let session = test_session();
     let id1 = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
     let id2 = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
@@ -85,7 +90,7 @@ fn activate_deduplicates_history() {
 
 #[test]
 fn load_returns_none_when_missing() {
-    let (_tmp, ws) = setup();
+    let (_tmp, ws, _fs) = setup();
     let session = test_session();
 
     assert!(ws.session_active_conversation(&session).is_none());
@@ -103,7 +108,7 @@ fn previous_conversation_id_with_single_entry() {
 
 #[test]
 fn env_source_roundtrips_through_json() {
-    let (_tmp, ws) = setup();
+    let (_tmp, ws, _fs) = setup();
     let session = Session {
         id: SessionId::new("my-session").unwrap(),
         source: SessionSource::env("JP_SESSION"),
@@ -126,9 +131,8 @@ fn no_user_storage_returns_none() {
     let storage_path = tmp.path().join("storage");
 
     // Workspace without user storage.
-    let mut ws = Workspace::new(tmp.path())
-        .persisted_at(&storage_path)
-        .unwrap();
+    let fs = Arc::new(FsStorageBackend::new(&storage_path).unwrap());
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs);
     ws.disable_persistence();
 
     let session = test_session();
@@ -140,9 +144,8 @@ fn no_user_storage_returns_error_on_write() {
     let tmp = tempdir().unwrap();
     let storage_path = tmp.path().join("storage");
 
-    let mut ws = Workspace::new(tmp.path())
-        .persisted_at(&storage_path)
-        .unwrap();
+    let fs = Arc::new(FsStorageBackend::new(&storage_path).unwrap());
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs);
     ws.disable_persistence();
 
     let session = test_session();
@@ -212,7 +215,7 @@ fn hwnd_with_unparseable_key_is_unknown() {
 #[cfg(unix)]
 #[test]
 fn cleanup_removes_stale_getsid_session() {
-    let (_tmp, mut ws) = setup();
+    let (_tmp, mut ws, fs) = setup();
     let session = Session {
         id: SessionId::new("2000000000").unwrap(), // nonexistent PID
         source: SessionSource::Getsid,
@@ -230,7 +233,7 @@ fn cleanup_removes_stale_getsid_session() {
 
     // Cleanup should remove it because PID 2000000000 is dead,
     // even though the conversation still exists.
-    ws.cleanup_stale_files();
+    ws.cleanup_stale_files(fs.as_deref());
 
     assert!(
         ws.session_active_conversation(&session).is_none(),
@@ -241,7 +244,7 @@ fn cleanup_removes_stale_getsid_session() {
 #[cfg(unix)]
 #[test]
 fn cleanup_keeps_getsid_session_file_but_prunes_ghost_entries() {
-    let (_tmp, ws) = setup();
+    let (_tmp, ws, fs) = setup();
 
     // Use our own PID as the session key — guaranteed to be alive.
     let own_pid = std::process::id().to_string();
@@ -257,7 +260,7 @@ fn cleanup_keeps_getsid_session_file_but_prunes_ghost_entries() {
     ws.activate_session_conversation(&session, ghost_id, datetime!(2025-07-19 18:00:00 Z))
         .unwrap();
 
-    ws.cleanup_stale_files();
+    ws.cleanup_stale_files(fs.as_deref());
 
     // Session file survives (process is alive).
     let mapping = ws.load_session_mapping(&session);
@@ -275,7 +278,7 @@ fn cleanup_keeps_getsid_session_file_but_prunes_ghost_entries() {
 #[cfg(windows)]
 #[test]
 fn cleanup_removes_stale_hwnd_session() {
-    let (_tmp, mut ws) = setup();
+    let (_tmp, mut ws, fs) = setup();
     let session = Session {
         id: SessionId::new("57005").unwrap(), // 0xDEAD — unlikely to be a valid HWND
         source: SessionSource::Hwnd,
@@ -290,7 +293,7 @@ fn cleanup_removes_stale_hwnd_session() {
     assert!(ws.session_active_conversation(&session).is_some());
 
     // Cleanup should remove it because HWND 0xDEAD is not a valid window.
-    ws.cleanup_stale_files();
+    ws.cleanup_stale_files(fs.as_deref());
 
     assert!(
         ws.session_active_conversation(&session).is_none(),
@@ -300,7 +303,7 @@ fn cleanup_removes_stale_hwnd_session() {
 
 #[test]
 fn all_active_conversation_ids_across_sessions() {
-    let (_tmp, mut ws) = setup();
+    let (_tmp, mut ws, _fs) = setup();
     let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
 
     let session_a = Session {
@@ -338,7 +341,7 @@ fn all_active_conversation_ids_across_sessions() {
 
 #[test]
 fn all_active_conversation_ids_empty_when_no_sessions() {
-    let (_tmp, ws) = setup();
+    let (_tmp, ws, _fs) = setup();
     assert!(ws.all_active_conversation_ids().is_empty());
 }
 
@@ -347,14 +350,16 @@ fn cleanup_keeps_session_referencing_conversation_created_after_index_load() {
     let tmp = tempdir().unwrap();
     let storage_path = tmp.path().join("storage");
     let user_root = tmp.path().join("user");
-    let fixture_storage = jp_storage::Storage::new(&storage_path).unwrap();
 
-    let mut ws = Workspace::new(tmp.path())
-        .persisted_at(&storage_path)
-        .unwrap()
-        .with_local_storage_at(&user_root, "test-ws", "abc")
-        .unwrap();
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, "test-ws", "abc")
+            .unwrap(),
+    );
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
+    let fs = Some(fs);
 
     // Session B references a conversation that exists on disk but was NOT in
     // the workspace's in-memory index (simulates a conversation created by
@@ -365,9 +370,11 @@ fn cleanup_keeps_session_referencing_conversation_created_after_index_load() {
     };
     let conv_other = ConversationId::try_from(datetime!(2025-07-19 16:00:00 Z)).unwrap();
 
-    // Write the conversation to disk directly via a separate Storage handle,
-    // bypassing the in-memory state. This is what another `jp` process would do.
-    fixture_storage.write_test_conversation(&conv_other, &jp_conversation::Conversation::default());
+    // Write the conversation to disk directly, bypassing the in-memory state.
+    // This simulates another `jp` process persisting a conversation.
+    fs.as_ref()
+        .unwrap()
+        .write_test_conversation(&conv_other, &jp_conversation::Conversation::default());
 
     // Write a session mapping pointing at that conversation.
     ws.activate_session_conversation(&session_b, conv_other, datetime!(2025-07-19 16:00:00 Z))
@@ -380,7 +387,7 @@ fn cleanup_keeps_session_referencing_conversation_created_after_index_load() {
     );
 
     // Cleanup must NOT delete session_b — the conversation exists on disk.
-    ws.cleanup_stale_files();
+    ws.cleanup_stale_files(fs.as_deref());
 
     // The conversation isn't in the in-memory index, so
     // session_active_conversation correctly returns None. Verify the
@@ -398,14 +405,16 @@ fn cleanup_keeps_env_session_with_live_conversations() {
     let tmp = tempdir().unwrap();
     let storage_path = tmp.path().join("storage");
     let user_root = tmp.path().join("user");
-    let fixture_storage = jp_storage::Storage::new(&storage_path).unwrap();
 
-    let mut ws = Workspace::new(tmp.path())
-        .persisted_at(&storage_path)
-        .unwrap()
-        .with_local_storage_at(&user_root, "test-ws", "abc")
-        .unwrap();
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, "test-ws", "abc")
+            .unwrap(),
+    );
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
+    let fs = Some(fs);
 
     let session = Session {
         id: SessionId::new("my-ci-session").unwrap(),
@@ -414,12 +423,14 @@ fn cleanup_keeps_env_session_with_live_conversations() {
     let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
 
     // Write conversation to disk so the disk-based cleanup scan finds it.
-    fixture_storage.write_test_conversation(&id, &jp_conversation::Conversation::default());
+    fs.as_ref()
+        .unwrap()
+        .write_test_conversation(&id, &jp_conversation::Conversation::default());
 
     ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
 
-    ws.cleanup_stale_files();
+    ws.cleanup_stale_files(fs.as_deref());
 
     // The conversation isn't in the in-memory index, so
     // session_active_conversation correctly returns None. Verify the
@@ -434,7 +445,7 @@ fn cleanup_keeps_env_session_with_live_conversations() {
 
 #[test]
 fn active_conversation_returns_none_for_deleted_conversation() {
-    let (_tmp, mut ws) = setup();
+    let (_tmp, mut ws, _fs) = setup();
     let session = test_session();
     let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
 
@@ -461,7 +472,7 @@ fn active_conversation_returns_none_for_deleted_conversation() {
 
 #[test]
 fn previous_conversation_returns_none_for_deleted_conversation() {
-    let (_tmp, mut ws) = setup();
+    let (_tmp, mut ws, _fs) = setup();
     let session = test_session();
     let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
 
@@ -496,13 +507,14 @@ fn cleanup_skips_pruning_locked_conversations() {
     let tmp = tempdir().unwrap();
     let storage_path = tmp.path().join("storage");
     let user_root = tmp.path().join("user");
-    let fixture_storage = jp_storage::Storage::new(&storage_path).unwrap();
 
-    let mut ws = Workspace::new(tmp.path())
-        .persisted_at(&storage_path)
-        .unwrap()
-        .with_local_storage_at(&user_root, "test-ws", "abc")
-        .unwrap();
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, "test-ws", "abc")
+            .unwrap(),
+    );
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
 
     let session = Session {
@@ -515,12 +527,9 @@ fn cleanup_skips_pruning_locked_conversations() {
     let dead_id = ConversationId::try_from(datetime!(2025-07-19 16:00:00 Z)).unwrap();
 
     // live_id exists on disk, locked_id is absent but locked, dead_id is gone.
-    fixture_storage.write_test_conversation(&live_id, &jp_conversation::Conversation::default());
-    let _lock = ws
-        .storage
-        .as_ref()
-        .unwrap()
-        .try_lock_conversation(&locked_id.to_string(), None)
+    fs.write_test_conversation(&live_id, &jp_conversation::Conversation::default());
+    let _lock = fs
+        .try_lock(&locked_id.to_string(), None)
         .unwrap()
         .expect("should acquire lock");
 
@@ -535,7 +544,7 @@ fn cleanup_skips_pruning_locked_conversations() {
     let mapping = ws.load_session_mapping(&session).unwrap();
     assert_eq!(mapping.history.len(), 3);
 
-    ws.cleanup_stale_files();
+    ws.cleanup_stale_files(Some(&fs));
 
     // dead_id pruned, locked_id kept (lock held), live_id kept (on disk).
     let mapping = ws.load_session_mapping(&session).unwrap();
@@ -549,13 +558,14 @@ fn cleanup_prunes_dead_entries_from_session_history() {
     let tmp = tempdir().unwrap();
     let storage_path = tmp.path().join("storage");
     let user_root = tmp.path().join("user");
-    let fixture_storage = jp_storage::Storage::new(&storage_path).unwrap();
 
-    let mut ws = Workspace::new(tmp.path())
-        .persisted_at(&storage_path)
-        .unwrap()
-        .with_local_storage_at(&user_root, "test-ws", "abc")
-        .unwrap();
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, "test-ws", "abc")
+            .unwrap(),
+    );
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
 
     let session = Session {
@@ -567,7 +577,7 @@ fn cleanup_prunes_dead_entries_from_session_history() {
     let dead_id = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
 
     // Only write the live conversation to disk.
-    fixture_storage.write_test_conversation(&live_id, &jp_conversation::Conversation::default());
+    fs.write_test_conversation(&live_id, &jp_conversation::Conversation::default());
 
     // Activate both: dead first, then live (so live is history[0]).
     ws.activate_session_conversation(&session, dead_id, datetime!(2025-07-19 14:00:00 Z))
@@ -579,7 +589,7 @@ fn cleanup_prunes_dead_entries_from_session_history() {
     let mapping = ws.load_session_mapping(&session).unwrap();
     assert_eq!(mapping.history.len(), 2);
 
-    ws.cleanup_stale_files();
+    ws.cleanup_stale_files(Some(&fs));
 
     // After cleanup: dead entry pruned, live entry remains.
     let mapping = ws.load_session_mapping(&session).unwrap();

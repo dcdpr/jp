@@ -2399,6 +2399,7 @@ dependencies = [
  "parking_lot",
  "rayon",
  "serde",
+ "serde_json",
  "test-log",
  "thiserror 2.0.18",
  "tracing",

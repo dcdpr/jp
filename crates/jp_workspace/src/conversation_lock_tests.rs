@@ -1,10 +1,48 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_storage::backend::{NoopLockGuard, NullPersistBackend, PersistBackend};
 use parking_lot::RwLock;
 
 use super::*;
-use crate::{handle::ConversationHandle, persist::MockPersistBackend};
+use crate::handle::ConversationHandle;
+
+/// Mock persistence backend that records all write/remove calls.
+#[derive(Debug, Default)]
+struct MockPersistBackend {
+    writes: Mutex<Vec<(ConversationId, Conversation, ConversationStream)>>,
+    removes: Mutex<Vec<ConversationId>>,
+}
+
+impl MockPersistBackend {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    fn writes(&self) -> Vec<(ConversationId, Conversation, ConversationStream)> {
+        self.writes.lock().unwrap().clone()
+    }
+}
+
+impl PersistBackend for MockPersistBackend {
+    fn write(
+        &self,
+        id: &ConversationId,
+        metadata: &Conversation,
+        events: &ConversationStream,
+    ) -> Result<(), jp_storage::Error> {
+        self.writes
+            .lock()
+            .unwrap()
+            .push((*id, metadata.clone(), events.clone()));
+        Ok(())
+    }
+
+    fn remove(&self, id: &ConversationId) -> Result<(), jp_storage::Error> {
+        self.removes.lock().unwrap().push(*id);
+        Ok(())
+    }
+}
 
 fn test_id() -> ConversationId {
     ConversationId::try_from(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH).unwrap()
@@ -20,8 +58,8 @@ fn test_lock_with_mock() -> (ConversationLock, Arc<MockPersistBackend>) {
         test_handle(),
         Arc::new(RwLock::new(Conversation::default())),
         Arc::new(RwLock::new(ConversationStream::new_test())),
-        Some(Arc::clone(&mock) as _),
-        None,
+        Arc::clone(&mock) as _,
+        Box::new(NoopLockGuard),
     );
     (lock, mock)
 }
@@ -31,8 +69,8 @@ fn test_lock_no_writer() -> ConversationLock {
         test_handle(),
         Arc::new(RwLock::new(Conversation::default())),
         Arc::new(RwLock::new(ConversationStream::new_test())),
-        None,
-        None,
+        Arc::new(NullPersistBackend),
+        Box::new(NoopLockGuard),
     )
 }
 

@@ -47,6 +47,8 @@ pub(crate) fn run_plugin(
     binary: &Utf8Path,
     args: &[String],
     workspace: &Workspace,
+    storage_path: Option<&Utf8Path>,
+    user_storage_path: Option<&Utf8Path>,
     config: &Arc<AppConfig>,
     signals: &SignalPair,
     log_level: u8,
@@ -63,9 +65,7 @@ pub(crate) fn run_plugin(
         .cloned()
         .unwrap_or_default();
 
-    let storage_path = workspace
-        .storage_path()
-        .ok_or_else(|| cmd::Error::from("workspace has no storage configured"))?;
+    let storage_path = storage_path.ok_or("workspace has no storage configured")?;
 
     let home = std::env::home_dir().and_then(|p| camino::Utf8PathBuf::from_path_buf(p).ok());
 
@@ -79,7 +79,7 @@ pub(crate) fn run_plugin(
         paths: PathsInfo {
             user_data: jp_workspace::user_data_dir().ok(),
             user_config: jp_config::fs::user_global_config_path(home.as_deref()),
-            user_workspace: workspace.user_storage_path().map(ToOwned::to_owned),
+            user_workspace: user_storage_path.map(ToOwned::to_owned),
         },
         config: config_json.clone(),
         options,
@@ -854,7 +854,7 @@ fn unknown_subcommand_error(name: &str) -> cmd::Error {
 pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
     let (subcommand, plugin_args) = args
         .split_first()
-        .ok_or_else(|| cmd::Error::from("no subcommand provided for plugin dispatch"))?;
+        .ok_or("no subcommand provided for plugin dispatch")?;
 
     // Handle help without downloading or approval.
     if plugin_args.iter().any(|a| a == "-h" || a == "--help") {
@@ -880,6 +880,8 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
         &binary,
         plugin_args,
         &ctx.workspace,
+        ctx.storage_path(),
+        ctx.user_storage_path(),
         &config,
         &ctx.signals,
         ctx.term.args.verbose,

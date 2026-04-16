@@ -1,6 +1,7 @@
 use camino::Utf8PathBuf;
 use jp_conversation::ConversationId;
-use jp_workspace::{ConversationHandle, Workspace};
+use jp_storage::backend::FsStorageBackend;
+use jp_workspace::ConversationHandle;
 
 use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
@@ -31,15 +32,14 @@ impl Path {
     }
 
     pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        let fs = ctx
+            .fs_backend
+            .as_deref()
+            .ok_or("no filesystem storage configured")?;
+
         for handle in handles {
             let id = handle.id();
-            let paths = resolve_paths(
-                &ctx.workspace,
-                &id,
-                self.events,
-                self.metadata,
-                self.base_config,
-            )?;
+            let paths = resolve_paths(fs, &id, self.events, self.metadata, self.base_config)?;
 
             for path in paths {
                 ctx.printer.println(path.as_str());
@@ -55,7 +55,7 @@ impl Path {
 /// When no file flags are set, returns the directory path. Otherwise returns
 /// the path to each requested file.
 pub(crate) fn resolve_paths(
-    workspace: &Workspace,
+    fs: &FsStorageBackend,
     id: &ConversationId,
     events: bool,
     metadata: bool,
@@ -64,34 +64,22 @@ pub(crate) fn resolve_paths(
     let not_found = || format!("Conversation directory not found for {id}");
 
     if !events && !metadata && !base_config {
-        let dir = workspace.conversation_dir(id).ok_or_else(not_found)?;
+        let dir = fs.find_conversation_dir(id).ok_or_else(not_found)?;
         return Ok(vec![dir]);
     }
 
     let mut paths = Vec::new();
 
     if events {
-        paths.push(
-            workspace
-                .conversation_events_path(id)
-                .ok_or_else(not_found)?,
-        );
+        paths.push(fs.conversation_events_path(id).ok_or_else(not_found)?);
     }
 
     if metadata {
-        paths.push(
-            workspace
-                .conversation_metadata_path(id)
-                .ok_or_else(not_found)?,
-        );
+        paths.push(fs.conversation_metadata_path(id).ok_or_else(not_found)?);
     }
 
     if base_config {
-        paths.push(
-            workspace
-                .conversation_base_config_path(id)
-                .ok_or_else(not_found)?,
-        );
+        paths.push(fs.conversation_base_config_path(id).ok_or_else(not_found)?);
     }
 
     Ok(paths)

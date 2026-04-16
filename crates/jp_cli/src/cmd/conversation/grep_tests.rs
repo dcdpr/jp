@@ -37,6 +37,7 @@ fn setup_ctx_with_conversations(
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
         workspace,
+        None,
         Runtime::new().unwrap(),
         Globals::default(),
         config,
@@ -90,6 +91,7 @@ fn setup_ctx_with_conversations_and_format(
     let (printer, out, _err) = Printer::memory(format);
     let mut ctx = Ctx::new(
         workspace,
+        None,
         Runtime::new().unwrap(),
         Globals::default(),
         config,

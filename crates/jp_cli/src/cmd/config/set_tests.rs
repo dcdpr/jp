@@ -1,15 +1,23 @@
-use std::{fs, time::Duration};
+use std::{fs, sync::Arc, time::Duration};
 
 use camino_tempfile::tempdir;
 use chrono::{DateTime, Utc};
-use jp_config::{AppConfig, PartialAppConfig, assignment::KvAssignment};
+use jp_config::{
+    AppConfig, PartialAppConfig, assignment::KvAssignment, conversation::DefaultConversationId,
+};
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer};
+use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
 use super::*;
-use crate::{Globals, KeyValueOrPath, cmd::conversation_id::FlagIds, ctx::Ctx};
+use crate::{
+    Globals, KeyValueOrPath,
+    cmd::{conversation_id::FlagIds, target::ConversationTarget},
+    config_pipeline::build_partial_from_cfg_args,
+    ctx::Ctx,
+};
 
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + Duration::from_secs(secs)).unwrap()
@@ -30,11 +38,12 @@ fn setup(
     let user = tmp.path().join("user");
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(tmp.path())
-        .persisted_at(&storage)
+    let fs = FsStorageBackend::new(&storage)
         .unwrap()
-        .with_local_storage_at(&user, "test", "abc")
+        .with_user_storage(&user, "test", "abc")
         .unwrap();
+    let fs = Arc::new(fs);
+    let mut workspace = Workspace::new(tmp.path()).with_backend(fs.clone());
     workspace.load_conversation_index();
 
     for &id in conversation_ids {
@@ -46,8 +55,10 @@ fn setup(
         config: cfg_args,
         ..Default::default()
     };
+    let fs_backend = Some(fs);
     let ctx = Ctx::new(
         workspace,
+        fs_backend,
         Runtime::new().unwrap(),
         globals,
         config,
@@ -61,7 +72,7 @@ fn setup(
 #[test]
 fn build_partial_errors_when_no_args() {
     let base = PartialAppConfig::default();
-    let result = crate::config_pipeline::build_partial_from_cfg_args(&[], &base, None);
+    let result = build_partial_from_cfg_args(&[], &base, None, None);
     assert!(result.is_err());
 }
 
@@ -69,7 +80,7 @@ fn build_partial_errors_when_no_args() {
 fn build_partial_applies_key_value() {
     let base = PartialAppConfig::default();
     let args = vec![kv("conversation.start_local=true")];
-    let partial = crate::config_pipeline::build_partial_from_cfg_args(&args, &base, None).unwrap();
+    let partial = build_partial_from_cfg_args(&args, &base, None, None).unwrap();
     assert_eq!(partial.conversation.start_local, Some(true));
 }
 
@@ -80,11 +91,11 @@ fn build_partial_applies_multiple_key_values() {
         kv("conversation.start_local=true"),
         kv("conversation.default_id=last"),
     ];
-    let partial = crate::config_pipeline::build_partial_from_cfg_args(&args, &base, None).unwrap();
+    let partial = build_partial_from_cfg_args(&args, &base, None, None).unwrap();
     assert_eq!(partial.conversation.start_local, Some(true));
     assert_eq!(
         partial.conversation.default_id,
-        Some(jp_config::conversation::DefaultConversationId::LastActivated)
+        Some(DefaultConversationId::LastActivated)
     );
 }
 
@@ -96,7 +107,7 @@ fn build_partial_loads_toml_file() {
 
     let base = PartialAppConfig::default();
     let args = vec![KeyValueOrPath::Path(file)];
-    let partial = crate::config_pipeline::build_partial_from_cfg_args(&args, &base, None).unwrap();
+    let partial = build_partial_from_cfg_args(&args, &base, None, None).unwrap();
     assert_eq!(partial.conversation.start_local, Some(true));
 }
 
@@ -111,11 +122,11 @@ fn build_partial_merges_file_and_kv() {
         KeyValueOrPath::Path(file),
         kv("conversation.default_id=last"),
     ];
-    let partial = crate::config_pipeline::build_partial_from_cfg_args(&args, &base, None).unwrap();
+    let partial = build_partial_from_cfg_args(&args, &base, None, None).unwrap();
     assert_eq!(partial.conversation.start_local, Some(true));
     assert_eq!(
         partial.conversation.default_id,
-        Some(jp_config::conversation::DefaultConversationId::LastActivated)
+        Some(DefaultConversationId::LastActivated)
     );
 }
 
@@ -123,7 +134,7 @@ fn build_partial_merges_file_and_kv() {
 fn build_partial_errors_on_missing_file() {
     let base = PartialAppConfig::default();
     let args = vec![KeyValueOrPath::Path("/nonexistent/path.toml".into())];
-    let result = crate::config_pipeline::build_partial_from_cfg_args(&args, &base, None);
+    let result = build_partial_from_cfg_args(&args, &base, None, None);
     assert!(result.is_err());
 }
 
@@ -319,7 +330,7 @@ fn load_request_none_when_no_ids() {
 fn load_request_explicit_when_ids_present() {
     let set = Set {
         file_target: FileTarget::default(),
-        conversation: FlagIds::from_targets(vec![crate::cmd::target::ConversationTarget::Latest]),
+        conversation: FlagIds::from_targets(vec![ConversationTarget::Latest]),
     };
     let req = set.conversation_load_request();
     assert!(req.targets.is_some());

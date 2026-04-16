@@ -1,10 +1,16 @@
-use std::{collections::HashSet, fs, io::BufReader};
+use std::{
+    collections::HashSet,
+    fs,
+    io::{self, BufReader},
+    time::Duration,
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use jp_conversation::{Conversation, ConversationId, ConversationStream, StreamError};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, de::DeserializeOwned};
+use serde_json::value::RawValue;
 use tracing::warn;
 
 use crate::{
@@ -26,6 +32,14 @@ pub struct LoadError {
 }
 
 impl LoadError {
+    /// Create a new `LoadError` with the given path and inner error.
+    pub fn new(path: impl Into<Utf8PathBuf>, error: LoadErrorInner) -> Self {
+        Self {
+            path: path.into(),
+            error,
+        }
+    }
+
     /// Gets the underlying [`LoadErrorInner`] that provides more details on
     /// what went wrong.
     #[must_use]
@@ -47,7 +61,7 @@ impl LoadError {
 #[derive(Debug, thiserror::Error)]
 pub enum LoadErrorInner {
     #[error(transparent)]
-    IO(#[from] std::io::Error),
+    IO(#[from] io::Error),
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -132,7 +146,7 @@ fn scan_conversation_ids(path: &Utf8Path) -> Vec<ConversationId> {
     // is nanoseconds, so 10 × 1ms is extremely generous.
     let mut ids: HashSet<_> = normal;
     for _ in 0..10 {
-        std::thread::sleep(std::time::Duration::from_millis(1));
+        std::thread::sleep(Duration::from_millis(1));
 
         let found: Vec<_> = dir_entries(path)
             .filter_map(|e| load_conversation_id_from_entry(&e))
@@ -168,8 +182,8 @@ impl Storage {
             let base_config_path = conv_dir.join(BASE_CONFIG_FILE);
             if base_config_path.is_file() {
                 // New format: separate `base_config.json` and `events.json`.
-                let base_config = self.read_json(&base_config_path)?;
-                let events = self.read_json(&events_path)?;
+                let base_config = load_json(&base_config_path)?;
+                let events = load_json(&events_path)?;
 
                 return ConversationStream::from_parts(base_config, events)
                     .map(|stream| stream.with_created_at(id.timestamp()))
@@ -180,7 +194,7 @@ impl Storage {
             }
 
             // Legacy format: base config packed as first element in events.json.
-            let events = self.read_json(&events_path)?;
+            let events = load_json(&events_path)?;
             match ConversationStream::from_legacy_events(events) {
                 Ok(Some(stream)) => return Ok(stream),
                 Ok(None) => {
@@ -221,7 +235,7 @@ impl Storage {
                 continue;
             }
 
-            let mut conversation: Conversation = self.read_json(&path)?;
+            let mut conversation: Conversation = load_json(&path)?;
             conversation.user = Some(root) == self.user.as_ref();
             (conversation.events_count, conversation.last_event_at) =
                 load_count_and_timestamp_events(&conv_dir).unwrap_or((0, None));
@@ -234,58 +248,26 @@ impl Storage {
             error: LoadErrorInner::MissingConversationMetadata(*id),
         })
     }
+}
 
-    // #[must_use]
-    // pub fn load_all_conversations_details(&self) -> HashMap<ConversationId, Conversation> {
-    //     let mut conversations = HashMap::new();
-    //     for root in [Some(&self.root), self.user.as_ref()] {
-    //         let Some(root) = root else {
-    //             continue;
-    //         };
-    //
-    //         let path = root.join(CONVERSATIONS_DIR);
-    //         let details = dir_entries(&path)
-    //             .collect::<Vec<_>>()
-    //             .into_par_iter()
-    //             .filter_map(|entry| {
-    //                 let (id, mut conversation) = load_conversation_metadata(&entry)?;
-    //                 conversation.user = Some(root) == self.user.as_ref();
-    //                 (conversation.events_count, conversation.last_event_at) =
-    //                     load_count_and_timestamp_events(&entry.path()).unwrap_or((0, None));
-    //
-    //                 Some((id, conversation))
-    //             })
-    //             .collect::<Vec<_>>();
-    //
-    //         conversations.extend(details);
-    //     }
-    //     conversations
-    // }
-    //
-    //
+/// Read and deserialize a JSON file, mapping errors to [`LoadError`].
+pub(crate) fn load_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
+    let file = fs::File::open(path).map_err(|error| LoadError {
+        path: path.to_path_buf(),
+        error: error.into(),
+    })?;
 
-    // FIXME: This can't be relative since we sometimes need to read JSON from
-    // the workspace or user storage. Optionally we split the storage types
-    // between workspace and user, and have dedicated read_json methods, but
-    // that seems perhaps a bit overkill?
-    pub fn read_json<T: DeserializeOwned>(&self, path: &Utf8Path) -> Result<T> {
-        let file = fs::File::open(path).map_err(|error| LoadError {
-            path: path.to_path_buf(),
-            error: error.into(),
-        })?;
-
-        let reader = BufReader::new(file);
-        serde_json::from_reader(reader).map_err(|error| LoadError {
-            path: path.to_path_buf(),
-            error: error.into(),
-        })
-    }
+    let reader = BufReader::new(file);
+    serde_json::from_reader(reader).map_err(|error| LoadError {
+        path: path.to_path_buf(),
+        error: error.into(),
+    })
 }
 
 fn load_count_and_timestamp_events(root: &Utf8Path) -> Option<(usize, Option<DateTime<Utc>>)> {
-    #[derive(serde::Deserialize)]
+    #[derive(Deserialize)]
     struct RawEvent {
-        timestamp: Box<serde_json::value::RawValue>,
+        timestamp: Box<RawValue>,
     }
     let path = root.join(EVENTS_FILE);
     let file = fs::File::open(&path).ok()?;

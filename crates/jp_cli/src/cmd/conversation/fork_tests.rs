@@ -1,4 +1,7 @@
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use std::{
+    panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
+    sync::Arc,
+};
 
 use camino_tempfile::tempdir;
 use chrono::TimeZone as _;
@@ -8,6 +11,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_printer::{OutputFormat, Printer};
+use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
@@ -620,13 +624,16 @@ fn test_conversation_fork() {
         let config = AppConfig::new_test();
         let storage = tmp.path().join(".jp");
         let user = tmp.path().join("user");
-        let workspace = Workspace::new(tmp.path())
-            .persisted_at(&storage)
-            .unwrap()
-            .with_local_storage_at(&user, "test", "abc")
-            .unwrap();
+        let fs = Arc::new(
+            FsStorageBackend::new(&storage)
+                .unwrap()
+                .with_user_storage(&user, "test", "abc")
+                .unwrap(),
+        );
+        let workspace = Workspace::new(tmp.path()).with_backend(fs);
         let mut ctx = Ctx::new(
             workspace,
+            None,
             Runtime::new().unwrap(),
             Globals::default(),
             config,
@@ -676,19 +683,23 @@ fn test_conversation_fork() {
 /// Create two conversations with distinct content, fork only one, and verify
 /// the fork carries the source's events (not the other conversation's).
 #[test]
+#[expect(clippy::too_many_lines)]
 fn fork_targets_correct_source() {
     let tmp = tempdir().unwrap();
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let config = AppConfig::new_test();
     let storage = tmp.path().join(".jp");
     let user = tmp.path().join("user");
-    let workspace = Workspace::new(tmp.path())
-        .persisted_at(&storage)
-        .unwrap()
-        .with_local_storage_at(&user, "test", "abc")
-        .unwrap();
+    let fs = std::sync::Arc::new(
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, "test", "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::new(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
         workspace,
+        None,
         Runtime::new().unwrap(),
         Globals::default(),
         config,

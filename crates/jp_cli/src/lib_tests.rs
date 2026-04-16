@@ -31,7 +31,7 @@ fn build_cfg(
     overrides: &[KeyValueOrPath],
     workspace: Option<&Workspace>,
 ) -> Result<PartialAppConfig> {
-    let pipeline = config_pipeline::ConfigPipeline::new(base, overrides, workspace)?;
+    let pipeline = config_pipeline::ConfigPipeline::new(base, overrides, workspace, None)?;
     pipeline.partial_without_conversation()
 }
 
