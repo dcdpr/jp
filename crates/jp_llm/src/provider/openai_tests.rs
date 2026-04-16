@@ -1,5 +1,5 @@
 mod enforce_strict_object_structure {
-    use serde_json::{Value, json};
+    use serde_json::json;
 
     use super::super::enforce_strict_object_structure;
 
