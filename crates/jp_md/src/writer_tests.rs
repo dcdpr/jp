@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use super::*;
 
 /// Regression test: a 1-byte prefix used to underflow in `write_prefix`
