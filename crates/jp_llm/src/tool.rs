@@ -17,7 +17,7 @@ use jp_mcp::{
     id::{McpServerId, McpToolId},
 };
 use jp_tool::{Action, Outcome, Question};
-use minijinja::{AutoEscape, Environment};
+use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
 use serde_json::{Map, Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
@@ -343,6 +343,46 @@ pub struct ToolTrace<'a> {
     pub name: &'a str,
 }
 
+/// Custom minijinja formatter used by [`run_tool_command`].
+///
+/// Scalars (strings, numbers, booleans) render raw — a template like
+/// `{{tool.arguments.title}}` produces the bare string, not a JSON-quoted one.
+/// Composites (sequences, maps, other iterables) serialize as JSON, so
+/// `{{tool}}` and `{{context}}` produce valid JSON blobs without needing an
+/// explicit `| tojson` filter at every call site. `null`/undefined render as
+/// the literal `null`, matching the JSON convention used by tool authors.
+///
+/// Safe strings (e.g. the output of the `tojson` filter) pass through
+/// unchanged so explicit opt-in JSON rendering continues to work.
+fn format_tool_template_value(
+    out: &mut minijinja::Output<'_>,
+    _state: &minijinja::State<'_, '_>,
+    value: &minijinja::value::Value,
+) -> Result<(), minijinja::Error> {
+    if value.is_safe() {
+        return write!(out, "{value}").map_err(Into::into);
+    }
+
+    match value.kind() {
+        ValueKind::None | ValueKind::Undefined => write!(out, "null").map_err(Into::into),
+        ValueKind::String | ValueKind::Bool | ValueKind::Number => {
+            write!(out, "{value}").map_err(Into::into)
+        }
+        // Composites serialize as JSON so tool authors don't have to remember
+        // `| tojson` for every `{{tool}}` / `{{context}}` interpolation.
+        _ => {
+            let json = serde_json::to_string(value).map_err(|error| {
+                minijinja::Error::new(
+                    MinijinjaErrorKind::BadSerialization,
+                    "failed to serialize value as JSON",
+                )
+                .with_source(error)
+            })?;
+            out.write_str(&json).map_err(Into::into)
+        }
+    }
+}
+
 /// Run a tool command asynchronously with cancellation support.
 ///
 /// This is the **single entry point** for running tool commands (both execution
@@ -373,7 +413,7 @@ pub async fn run_tool_command(
     } = command;
 
     let mut env = Environment::new();
-    env.set_auto_escape_callback(|_| AutoEscape::Json);
+    env.set_formatter(format_tool_template_value);
     let tmpl = Arc::new(env);
 
     let program = tmpl
