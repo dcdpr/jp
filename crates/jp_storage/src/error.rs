@@ -1,4 +1,5 @@
 use camino::Utf8PathBuf;
+use jp_conversation::ConversationId;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -24,6 +25,9 @@ pub enum Error {
 
     #[error("invalid TOML data")]
     Toml(#[from] toml::de::Error),
+
+    #[error("conversation not found: {0}")]
+    ConversationNotFound(ConversationId),
 }
 
 #[cfg(test)]

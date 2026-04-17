@@ -233,8 +233,16 @@ pub(crate) enum ConversationTarget {
     /// `+pinned`, `+p`
     AllPinned,
 
+    /// The most recently archived conversation.
+    /// `archived`, `a`
+    Archived,
+
+    /// All archived conversations.
+    /// `+archived`, `+a`
+    AllArchived,
+
     /// Interactive picker, optionally filtered.
-    /// `?`, `?p`, `?pinned`, `?s`, `?session`
+    /// `?`, `?p`, `?pinned`, `?s`, `?session`, `?a`, `?archived`
     Picker(PickerFilter),
 
     /// Print keyword help and exit.
@@ -254,6 +262,9 @@ pub(crate) struct PickerFilter {
     /// Show only conversations from the current session.
     pub session: bool,
 
+    /// Show only archived conversations.
+    pub archived: bool,
+
     /// Pre-populate the picker's filter input with this text.
     pub query: Option<String>,
 }
@@ -267,6 +278,7 @@ impl PickerFilter {
         if self.session && !is_session_conversation {
             return false;
         }
+        // Archived filter is handled at the data source level, not here.
         true
     }
 }
@@ -288,16 +300,22 @@ impl ConversationTarget {
                 session: true,
                 ..Default::default()
             }),
+            "?a" | "?archived" => Self::Picker(PickerFilter {
+                archived: true,
+                ..Default::default()
+            }),
 
             // Conversation aliases (single target)
             "newest" | "n" => Self::Newest,
             "latest" | "l" => Self::Latest,
             "pinned" | "p" => Self::LatestPinned,
             "session" | "s" => Self::SessionPrevious,
+            "archived" | "a" => Self::Archived,
 
             // Multi-target keywords
             "+session" | "+s" => Self::AllSession,
             "+pinned" | "+p" => Self::AllPinned,
+            "+archived" | "+a" => Self::AllArchived,
 
             "help" => Self::Help,
 
@@ -324,17 +342,28 @@ impl ConversationTarget {
         )
     }
 
+    /// Whether this target resolves against the archive partition.
+    pub(crate) fn is_archived(&self) -> bool {
+        matches!(
+            self,
+            Self::Archived | Self::AllArchived | Self::Picker(PickerFilter { archived: true, .. })
+        )
+    }
+
     /// The keyword name for this target, if it is a keyword.
     pub(crate) fn keyword_name(&self) -> Option<&'static str> {
         match self {
             Self::Picker(f) if f.pinned => Some("pinned"),
+            Self::Picker(f) if f.archived => Some("archived"),
             Self::Id(_) | Self::Picker(_) | Self::Help => None,
             Self::Newest => Some("newest"),
             Self::Latest => Some("latest"),
             Self::LatestPinned => Some("pinned"),
             Self::SessionPrevious => Some("session"),
+            Self::Archived => Some("archived"),
             Self::AllSession => Some("+session"),
             Self::AllPinned => Some("+pinned"),
+            Self::AllArchived => Some("+archived"),
         }
     }
 
@@ -417,6 +446,29 @@ impl ConversationTarget {
                 }
                 Ok(ids)
             }
+            Self::Archived => {
+                let id = workspace
+                    .archived_conversations()
+                    .max_by_key(|(_, c)| c.archived_at)
+                    .map(|(id, _)| id)
+                    .ok_or_else(|| {
+                        Error::NotFound("conversation", "no archived conversations".into())
+                    })?;
+                Ok(vec![id])
+            }
+            Self::AllArchived => {
+                let ids: Vec<_> = workspace
+                    .archived_conversations()
+                    .map(|(id, _)| id)
+                    .collect();
+                if ids.is_empty() {
+                    return Err(Error::NotFound(
+                        "conversation",
+                        "no archived conversations".into(),
+                    ));
+                }
+                Ok(ids)
+            }
             Self::Picker(_) | Self::Help => Ok(vec![]),
         }
     }
@@ -481,6 +533,16 @@ fn resolve_targets(
                     ConversationTarget::Picker(f) => f,
                     _ => &PickerFilter::default(),
                 };
+
+                // Archived picker draws from the archive partition.
+                if filter.archived {
+                    return if multi {
+                        resolve_archived_multi_picker(workspace, filter)
+                    } else {
+                        resolve_archived_picker(workspace, filter).map(|id| vec![id])
+                    };
+                }
+
                 return if multi {
                     resolve_multi_picker(workspace, session, filter)
                 } else {
@@ -535,7 +597,7 @@ fn resolve_default_id(
     target.resolve(workspace, session).ok()?.into_iter().next()
 }
 
-fn resolve_picker(
+pub(crate) fn resolve_picker(
     workspace: &Workspace,
     session: Option<&Session>,
     filter: &PickerFilter,
@@ -642,6 +704,110 @@ fn pick_conversation(
         .iter()
         .find(|(_, l)| *l == selected)
         .map(|(id, _)| *id)
+}
+
+/// Build picker items from archived conversations.
+///
+/// Sorted by `archived_at` descending (most recently archived first).
+fn build_archived_picker_items(
+    workspace: &Workspace,
+    _filter: &PickerFilter,
+) -> Vec<(ConversationId, String)> {
+    use chrono::{DateTime, Utc};
+
+    let mut items: Vec<(ConversationId, String, Option<DateTime<Utc>>)> = workspace
+        .archived_conversations()
+        .map(|(id, c)| {
+            let label = match &c.title {
+                Some(t) => format!("{id}  {t}"),
+                None => id.to_string(),
+            };
+            (id, label, c.archived_at)
+        })
+        .collect();
+
+    items.sort_by(|a, b| match (b.2, a.2) {
+        (Some(b_t), Some(a_t)) => b_t.cmp(&a_t),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b.0.cmp(&a.0),
+    });
+
+    items
+        .into_iter()
+        .map(|(id, label, _)| (id, label))
+        .collect()
+}
+
+pub(crate) fn resolve_archived_picker(
+    workspace: &Workspace,
+    filter: &PickerFilter,
+) -> Result<ConversationId> {
+    if !io::stdin().is_terminal() {
+        return Err(Error::NoConversationTarget);
+    }
+
+    let items = build_archived_picker_items(workspace, filter);
+    if items.is_empty() {
+        return Err(Error::NotFound(
+            "conversation",
+            "no archived conversations".into(),
+        ));
+    }
+
+    let labels: Vec<String> = items.iter().map(|(_, l)| l.clone()).collect();
+    let mut writer = io::stderr();
+    let mut prompt = inquire::Select::new("Select an archived conversation", labels);
+    if let Some(query) = &filter.query {
+        prompt = prompt.with_starting_filter_input(query);
+    }
+    let selected = prompt
+        .prompt_with_writer(&mut writer)
+        .map_err(|_| Error::NoConversationTarget)?;
+
+    items
+        .iter()
+        .find(|(_, l)| *l == selected)
+        .map(|(id, _)| *id)
+        .ok_or(Error::NoConversationTarget)
+}
+
+fn resolve_archived_multi_picker(
+    workspace: &Workspace,
+    filter: &PickerFilter,
+) -> Result<Vec<ConversationId>> {
+    if !io::stdin().is_terminal() {
+        return Err(Error::NoConversationTarget);
+    }
+
+    let items = build_archived_picker_items(workspace, filter);
+    if items.is_empty() {
+        return Err(Error::NotFound(
+            "conversation",
+            "no archived conversations".into(),
+        ));
+    }
+
+    let labels: Vec<String> = items.iter().map(|(_, l)| l.clone()).collect();
+    let mut writer = io::stderr();
+    let mut prompt = inquire::MultiSelect::new("Select archived conversations", labels);
+    if let Some(query) = &filter.query {
+        prompt = prompt.with_starting_filter_input(query);
+    }
+    let Ok(selected) = prompt.prompt_with_writer(&mut writer) else {
+        return Err(Error::NoConversationTarget);
+    };
+
+    let ids: Vec<_> = items
+        .iter()
+        .filter(|(_, l)| selected.contains(l))
+        .map(|(id, _)| *id)
+        .collect();
+
+    if ids.is_empty() {
+        return Err(Error::NoConversationTarget);
+    }
+    Ok(ids)
 }
 
 /// Multi-select interactive conversation picker.

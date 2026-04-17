@@ -2,7 +2,9 @@ use chrono::{TimeZone as _, Utc};
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 
 use super::*;
-use crate::backend::{LoadBackend, LockBackend, PersistBackend, SessionBackend};
+use crate::backend::{
+    ConversationFilter, LoadBackend, LockBackend, PersistBackend, SessionBackend,
+};
 
 fn test_id(secs: i64) -> ConversationId {
     ConversationId::try_from(Utc.timestamp_opt(secs, 0).unwrap()).unwrap()
@@ -50,13 +52,17 @@ fn remove_nonexistent_is_ok() {
 }
 
 #[test]
-fn load_all_ids_empty() {
+fn load_ids_empty() {
     let backend = InMemoryStorageBackend::new();
-    assert!(backend.load_all_conversation_ids().is_empty());
+    assert!(
+        backend
+            .load_conversation_ids(ConversationFilter::default())
+            .is_empty()
+    );
 }
 
 #[test]
-fn load_all_ids_sorted() {
+fn load_ids_sorted() {
     let backend = InMemoryStorageBackend::new();
     let id1 = test_id(1_000_000);
     let id2 = test_id(2_000_000);
@@ -77,7 +83,7 @@ fn load_all_ids_sorted() {
         )
         .unwrap();
 
-    let ids = backend.load_all_conversation_ids();
+    let ids = backend.load_conversation_ids(ConversationFilter::default());
     assert_eq!(ids.len(), 2);
     assert!(ids[0] < ids[1], "IDs should be sorted");
 }

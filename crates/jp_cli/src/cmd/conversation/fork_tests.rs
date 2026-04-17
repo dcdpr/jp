@@ -1,10 +1,11 @@
 use std::{
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::Arc,
+    time::Duration,
 };
 
 use camino_tempfile::tempdir;
-use chrono::TimeZone as _;
+use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, ConversationStream,
@@ -180,7 +181,7 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
+                from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap().into()),
                 until: None,
                 last: None,
                 title: None,
@@ -234,7 +235,7 @@ fn test_conversation_fork() {
                 target: PositionalIds::default(),
                 activate: false,
                 from: None,
-                until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
+                until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap().into()),
                 last: None,
                 title: None,
             },
@@ -554,8 +555,8 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()),
-                until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()),
+                from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap().into()),
+                until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap().into()),
                 last: None,
                 title: None,
             },

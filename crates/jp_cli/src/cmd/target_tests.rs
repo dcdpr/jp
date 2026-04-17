@@ -80,3 +80,101 @@ fn invalid_id_returns_none() {
         None
     );
 }
+
+#[test]
+fn parse_archived_keyword() {
+    assert_eq!(
+        ConversationTarget::parse("archived"),
+        ConversationTarget::Archived
+    );
+}
+
+#[test]
+fn parse_archived_short() {
+    assert_eq!(ConversationTarget::parse("a"), ConversationTarget::Archived);
+}
+
+#[test]
+fn parse_all_archived() {
+    assert_eq!(
+        ConversationTarget::parse("+archived"),
+        ConversationTarget::AllArchived
+    );
+}
+
+#[test]
+fn parse_all_archived_short() {
+    assert_eq!(
+        ConversationTarget::parse("+a"),
+        ConversationTarget::AllArchived
+    );
+}
+
+#[test]
+fn parse_archived_picker() {
+    assert_eq!(
+        ConversationTarget::parse("?archived"),
+        ConversationTarget::Picker(PickerFilter {
+            archived: true,
+            ..Default::default()
+        })
+    );
+}
+
+#[test]
+fn parse_archived_picker_short() {
+    assert_eq!(
+        ConversationTarget::parse("?a"),
+        ConversationTarget::Picker(PickerFilter {
+            archived: true,
+            ..Default::default()
+        })
+    );
+}
+
+#[test]
+fn is_archived_returns_true_for_archived_targets() {
+    assert!(ConversationTarget::Archived.is_archived());
+    assert!(ConversationTarget::AllArchived.is_archived());
+    assert!(
+        ConversationTarget::Picker(PickerFilter {
+            archived: true,
+            ..Default::default()
+        })
+        .is_archived()
+    );
+}
+
+#[test]
+fn is_archived_returns_false_for_non_archived_targets() {
+    assert!(!ConversationTarget::Latest.is_archived());
+    assert!(!ConversationTarget::Newest.is_archived());
+    assert!(!ConversationTarget::Picker(PickerFilter::default()).is_archived());
+}
+
+#[test]
+fn archived_keyword_errors_when_no_archived_conversations() {
+    let (ws, _) = workspace_with_conversation();
+    // Active conversations exist, but none are archived.
+    let result = ConversationTarget::Archived.resolve(&ws, None);
+    assert!(result.is_err());
+}
+
+#[test]
+fn all_archived_empty_returns_error() {
+    let ws = Workspace::new(Utf8PathBuf::new());
+    let result = ConversationTarget::AllArchived.resolve(&ws, None);
+    assert!(result.is_err());
+}
+
+#[test]
+fn archived_keyword_name() {
+    assert_eq!(
+        ConversationTarget::Archived.keyword_name(),
+        Some("archived")
+    );
+    assert_eq!(
+        ConversationTarget::AllArchived.keyword_name(),
+        Some("+archived")
+    );
+}

@@ -264,7 +264,9 @@ pub(crate) fn load_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
     })
 }
 
-fn load_count_and_timestamp_events(root: &Utf8Path) -> Option<(usize, Option<DateTime<Utc>>)> {
+pub(crate) fn load_count_and_timestamp_events(
+    root: &Utf8Path,
+) -> Option<(usize, Option<DateTime<Utc>>)> {
     #[derive(Deserialize)]
     struct RawEvent {
         timestamp: Box<RawValue>,

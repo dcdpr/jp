@@ -14,8 +14,8 @@ use serde_json::Value;
 use tracing::{debug, error};
 
 use super::{
-    ConversationLockGuard, LoadBackend, LockBackend, PersistBackend, SanitizeReport,
-    SessionBackend, TrashedConversation,
+    ConversationFilter, ConversationLockGuard, LoadBackend, LockBackend, PersistBackend,
+    SanitizeReport, SessionBackend, TrashedConversation,
 };
 use crate::{
     CONVERSATIONS_DIR, LoadError, Storage, dir_entries,
@@ -172,18 +172,32 @@ impl PersistBackend for FsStorageBackend {
     fn remove(&self, id: &ConversationId) -> Result<()> {
         self.storage.remove_conversation(id)
     }
+
+    fn archive(&self, id: &ConversationId) -> Result<()> {
+        self.storage.archive_conversation(id)
+    }
+
+    fn unarchive(&self, id: &ConversationId) -> Result<()> {
+        self.storage.unarchive_conversation(id)
+    }
 }
 
 impl LoadBackend for FsStorageBackend {
-    fn load_all_conversation_ids(&self) -> Vec<ConversationId> {
-        self.storage.load_all_conversation_ids()
+    fn load_conversation_ids(&self, filter: ConversationFilter) -> Vec<ConversationId> {
+        if filter.archived {
+            self.storage.load_archived_conversation_ids()
+        } else {
+            self.storage.load_all_conversation_ids()
+        }
     }
 
     fn load_conversation_metadata(
         &self,
         id: &ConversationId,
     ) -> std::result::Result<Conversation, LoadError> {
-        self.storage.load_conversation_metadata(id)
+        self.storage
+            .load_conversation_metadata(id)
+            .or_else(|_| self.storage.load_archived_conversation_metadata(id))
     }
 
     fn load_conversation_stream(

@@ -1,12 +1,9 @@
-use std::{str::FromStr as _, time::Duration};
-
-use chrono::{DateTime, Utc};
 use jp_conversation::ConversationStream;
 use jp_workspace::{ConversationHandle, ConversationLock};
 use tracing::debug;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds, time::TimeThreshold},
     ctx::Ctx,
 };
 
@@ -22,15 +19,15 @@ pub(crate) struct Fork {
     ///
     /// Timestamp can be relative (5days, 2mins, etc) or absolute. Can be used
     /// in combination with `--until`.
-    #[arg(long, value_parser = parse_duration)]
-    from: Option<DateTime<Utc>>,
+    #[arg(long)]
+    from: Option<TimeThreshold>,
 
     /// Ignore all conversation events *after* the specified timestamp.
     ///
     /// Timestamp can be relative (5days, 2mins, etc) or absolute. Can be used
     /// in combination with `--until`.
-    #[arg(long, value_parser = parse_duration)]
-    until: Option<DateTime<Utc>>,
+    #[arg(long)]
+    until: Option<TimeThreshold>,
 
     /// Fork the last N turns of the conversation. Defaults to 1.
     #[arg(long, short = 'l')]
@@ -39,17 +36,6 @@ pub(crate) struct Fork {
     /// Set a custom title for the forked conversation.
     #[arg(long, short)]
     title: Option<String>,
-}
-
-fn parse_duration(s: &str) -> Result<DateTime<Utc>, String> {
-    humantime::Duration::from_str(s)
-        .map(|d| Utc::now() - Duration::from(d))
-        .map_err(|e| e.to_string())
-        .or_else(|_| {
-            humantime::parse_rfc3339_weak(s)
-                .map(Into::into)
-                .map_err(|e| e.to_string())
-        })
 }
 
 impl Fork {
@@ -61,8 +47,8 @@ impl Fork {
         for source in handles {
             let lock = fork_conversation(ctx, source, |events| {
                 events.retain(|event| {
-                    self.from.is_none_or(|from| event.timestamp >= from)
-                        && self.until.is_none_or(|until| event.timestamp <= until)
+                    self.from.is_none_or(|t| event.timestamp >= *t)
+                        && self.until.is_none_or(|t| event.timestamp <= *t)
                 });
 
                 if let Some(last) = self.last {

@@ -28,6 +28,7 @@ pub(crate) const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 const BASE_CONFIG_FILE: &str = "base_config.json";
 pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
+pub(crate) const ARCHIVE_DIR: &str = ".archive";
 
 #[derive(Debug, Clone)]
 struct Storage {
@@ -288,6 +289,138 @@ impl Storage {
         }
 
         Ok(())
+    }
+
+    /// Move a conversation directory into the `.archive/` subdirectory.
+    ///
+    /// Searches both workspace and user storage for the conversation, then
+    /// renames it into `conversations/.archive/{dirname}`. Creates the archive
+    /// directory if needed.
+    pub fn archive_conversation(&self, id: &ConversationId) -> Result<()> {
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            let Some(conv_dir) = find_conversation_dir_path(root, id) else {
+                continue;
+            };
+
+            let dirname = conv_dir
+                .file_name()
+                .expect("conversation dir has a name")
+                .to_owned();
+
+            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
+            fs::create_dir_all(&archive_dir)?;
+
+            let target = archive_dir.join(&dirname);
+            if target.exists() {
+                fs::remove_dir_all(&target)?;
+            }
+            fs::rename(&conv_dir, &target)?;
+            return Ok(());
+        }
+
+        Err(Error::ConversationNotFound(*id))
+    }
+
+    /// Move a conversation directory out of `.archive/` back to the active
+    /// conversations directory.
+    pub fn unarchive_conversation(&self, id: &ConversationId) -> Result<()> {
+        let prefix = id.to_dirname(None);
+
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
+            if !archive_dir.is_dir() {
+                continue;
+            }
+
+            let entry = dir_entries(&archive_dir).find(|e| e.file_name().starts_with(&prefix));
+
+            let Some(entry) = entry else {
+                continue;
+            };
+
+            let dirname = entry.file_name().to_owned();
+            let source = entry.into_path();
+            let target = root.join(CONVERSATIONS_DIR).join(&dirname);
+
+            if target.exists() {
+                fs::remove_dir_all(&target)?;
+            }
+            fs::rename(&source, &target)?;
+            return Ok(());
+        }
+
+        Err(Error::ConversationNotFound(*id))
+    }
+
+    /// Scan conversation IDs from `.archive/` directories.
+    #[must_use]
+    pub fn load_archived_conversation_ids(&self) -> Vec<ConversationId> {
+        let mut ids = vec![];
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
+            if !archive_dir.is_dir() {
+                continue;
+            }
+
+            ids.extend(
+                dir_entries(&archive_dir).filter_map(|e| load_conversation_id_from_entry(&e)),
+            );
+        }
+
+        ids.sort();
+        ids
+    }
+
+    /// Load metadata for a conversation in the archive partition.
+    pub fn load_archived_conversation_metadata(
+        &self,
+        id: &ConversationId,
+    ) -> std::result::Result<Conversation, crate::LoadError> {
+        use crate::load::{LoadErrorInner, load_json};
+
+        let prefix = id.to_dirname(None);
+        for root in [Some(&self.root), self.user.as_ref()] {
+            let Some(root) = root else {
+                continue;
+            };
+
+            let archive_dir = root.join(CONVERSATIONS_DIR).join(ARCHIVE_DIR);
+            let entry = dir_entries(&archive_dir).find(|e| e.file_name().starts_with(&prefix));
+
+            let Some(entry) = entry else {
+                continue;
+            };
+
+            let conv_dir = entry.into_path();
+            let path = conv_dir.join(METADATA_FILE);
+            if !path.is_file() {
+                continue;
+            }
+
+            let mut conversation: Conversation = load_json(&path)?;
+            conversation.user = Some(root) == self.user.as_ref();
+            (conversation.events_count, conversation.last_event_at) =
+                crate::load::load_count_and_timestamp_events(&conv_dir).unwrap_or((0, None));
+
+            return Ok(conversation);
+        }
+
+        Err(crate::LoadError::new(
+            build_conversation_dir_prefix(&self.root, id),
+            LoadErrorInner::MissingConversationMetadata(*id),
+        ))
     }
 
     /// Remove a conversation's persisted data from disk.
@@ -645,7 +778,7 @@ fn build_conversation_dir_prefix(root: &Utf8Path, id: &ConversationId) -> Utf8Pa
     root.join(CONVERSATIONS_DIR).join(id.to_dirname(None))
 }
 
-fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationId> {
+pub(crate) fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<ConversationId> {
     if !entry.file_type().ok()?.is_dir() {
         return None;
     }

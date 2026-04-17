@@ -98,7 +98,7 @@ impl Edit {
         self.run_open_editor(ctx, handles)
     }
 
-    /// Whether any property mutation flag is set.
+    /// Whether any metadata mutation flag is set.
     fn has_property_flags(&self) -> bool {
         self.local.is_some()
             || self.pin.is_some()
@@ -149,7 +149,7 @@ impl Edit {
         Ok(())
     }
 
-    /// Mutate conversation properties
+    /// Mutate conversation metadata properties.
     async fn run_property_edit(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         for handle in handles {
             let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {

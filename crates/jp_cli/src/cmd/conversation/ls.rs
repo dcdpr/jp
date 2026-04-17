@@ -1,7 +1,7 @@
 use chrono::{DateTime, FixedOffset, Local, Utc};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
-use jp_conversation::ConversationId;
+use jp_conversation::{Conversation, ConversationId};
 use jp_term::osc::hyperlink;
 use jp_workspace::ConversationHandle;
 
@@ -35,6 +35,10 @@ pub(crate) struct Ls {
     /// Show only local conversations.
     #[arg(long)]
     local: bool,
+
+    /// Show archived conversations instead of active ones.
+    #[arg(long)]
+    archived: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy, clap::ValueEnum)]
@@ -52,6 +56,7 @@ struct Details {
     id: ConversationId,
     active: bool,
     pinned_at: Option<DateTime<Utc>>,
+    archived_at: Option<DateTime<Utc>>,
     title: Option<String>,
     messages: usize,
     last_event_at: Option<DateTime<Utc>>,
@@ -64,8 +69,8 @@ impl Ls {
         ConversationLoadRequest::explicit_or_none(&self.target)
     }
 
-    #[expect(clippy::needless_pass_by_value, clippy::unnecessary_wraps)]
-    pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+    #[expect(clippy::unnecessary_wraps)]
+    pub(crate) fn run(&self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let active_conversation_id = ctx
             .session
             .as_ref()
@@ -79,22 +84,35 @@ impl Ls {
             Some(handles.iter().map(ConversationHandle::id).collect())
         };
 
-        let mut conversations = ctx
-            .workspace
-            .conversations()
-            .filter(|(id, _)| filter_ids.as_ref().is_none_or(|f| f.contains(id)))
-            .filter(|(_, c)| !self.local || c.user)
-            .map(|(id, conversation)| Details {
-                id: *id,
-                active: active_conversation_id == Some(*id),
-                pinned_at: conversation.pinned_at,
-                title: conversation.title.clone(),
-                messages: conversation.events_count,
-                last_event_at: conversation.last_event_at.or(Some(id.timestamp())),
-                expires_at: conversation.expires_at,
-                local: conversation.user,
-            })
-            .collect::<Vec<_>>();
+        let to_details = |id: ConversationId, c: &Conversation| Details {
+            active: active_conversation_id == Some(id),
+            pinned_at: c.pinned_at,
+            archived_at: c.archived_at,
+            title: c.title.clone(),
+            messages: c.events_count,
+            last_event_at: c.last_event_at.or(Some(id.timestamp())),
+            expires_at: c.expires_at,
+            local: c.user,
+            id,
+        };
+
+        let matches_filters = |id: &ConversationId, c: &Conversation| -> bool {
+            filter_ids.as_ref().is_none_or(|f| f.contains(id)) && (!self.local || c.user)
+        };
+
+        let mut conversations: Vec<_> = if self.archived {
+            ctx.workspace
+                .archived_conversations()
+                .filter(|(id, c)| matches_filters(id, c))
+                .map(|(id, c)| to_details(id, &c))
+                .collect()
+        } else {
+            ctx.workspace
+                .conversations()
+                .filter(|(id, c)| matches_filters(id, c))
+                .map(|(id, c)| to_details(*id, &c))
+                .collect()
+        };
 
         let count = conversations.len();
         let skip = count.saturating_sub(limit);
@@ -105,6 +123,7 @@ impl Ls {
             Some(Sort::Activity) => a.last_event_at.cmp(&b.last_event_at),
             Some(Sort::Expires) => a.expires_at.cmp(&b.expires_at),
             Some(Sort::Local) => a.local.cmp(&b.local),
+            None if self.archived => b.archived_at.cmp(&a.archived_at),
             _ => a.id.cmp(&b.id),
         };
 
@@ -172,6 +191,7 @@ impl Ls {
             last_event_at: last_message_at,
             expires_at,
             local,
+            archived_at: _,
         } = details;
 
         let mut id_fmt = if active {

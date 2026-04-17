@@ -32,6 +32,14 @@ impl PersistBackend for NullPersistBackend {
     fn remove(&self, _id: &ConversationId) -> Result<()> {
         Ok(())
     }
+
+    fn archive(&self, _id: &ConversationId) -> Result<()> {
+        Ok(())
+    }
+
+    fn unarchive(&self, _id: &ConversationId) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// A [`LockBackend`] where every lock attempt succeeds immediately.

@@ -3,6 +3,7 @@ use jp_workspace::ConversationHandle;
 use super::{ConversationLoadRequest, Output};
 use crate::ctx::Ctx;
 
+mod archive;
 mod edit;
 pub(crate) mod fork;
 mod grep;
@@ -11,6 +12,7 @@ mod path;
 mod print;
 mod rm;
 mod show;
+mod unarchive;
 mod use_;
 
 #[derive(Debug, clap::Args)]
@@ -29,11 +31,10 @@ impl Conversation {
             Commands::Grep(args) => args.run(ctx, handles),
             Commands::Print(args) => args.run(ctx, &handles),
             Commands::Path(args) => args.run(ctx, handles),
-            Commands::List(args) => args.run(ctx, handles),
-            Commands::Use(args) => args.run(
-                ctx,
-                handles.into_iter().next().expect("Use requires a handle"),
-            ),
+            Commands::List(args) => args.run(ctx, &handles),
+            Commands::Use(args) => args.run(ctx, handles),
+            Commands::Archive(args) => args.run(ctx, handles).await,
+            Commands::Unarchive(args) => args.run(ctx),
         }
     }
 
@@ -48,6 +49,8 @@ impl Conversation {
             Commands::Path(args) => args.conversation_load_request(),
             Commands::List(args) => args.conversation_load_request(),
             Commands::Use(args) => args.conversation_load_request(),
+            Commands::Archive(args) => args.conversation_load_request(),
+            Commands::Unarchive(args) => args.conversation_load_request(),
         }
     }
 }
@@ -89,9 +92,12 @@ enum Commands {
     /// Print the filesystem path to a conversation.
     #[command(name = "path")]
     Path(path::Path),
-    // /// Merge a conversation.
-    // Merge(merge::Merge),
 
-    // /// Rollback a conversation.
-    // Rollback(rollback::Rollback),
+    /// Archive conversations.
+    #[command(name = "archive", visible_alias = "a")]
+    Archive(archive::Archive),
+
+    /// Unarchive conversations.
+    #[command(name = "unarchive", visible_alias = "ua")]
+    Unarchive(unarchive::Unarchive),
 }

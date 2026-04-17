@@ -25,8 +25,8 @@ use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{
     backend::{
-        InMemoryStorageBackend, LoadBackend, LockBackend, NullPersistBackend, PersistBackend,
-        SessionBackend,
+        ConversationFilter, InMemoryStorageBackend, LoadBackend, LockBackend, NullPersistBackend,
+        PersistBackend, SessionBackend,
     },
     lock::LockInfo,
 };
@@ -186,7 +186,9 @@ impl Workspace {
     /// [`sanitize`]: Self::sanitize
     pub fn load_conversation_index(&mut self) {
         trace!("Loading conversation index.");
-        let conversation_ids = self.loader.load_all_conversation_ids();
+        let conversation_ids = self
+            .loader
+            .load_conversation_ids(ConversationFilter::default());
 
         debug!(count = conversation_ids.len(), "Loaded conversation index.");
 
@@ -495,6 +497,90 @@ impl Workspace {
             Arc::clone(&self.persist),
             lock_guard,
         )))
+    }
+
+    /// Archive a conversation, consuming its lock.
+    ///
+    /// Moves the conversation to the archive partition. The conversation is
+    /// removed from the in-memory index and excluded from normal operations.
+    pub fn archive_conversation(&mut self, mut conv: ConversationMut) {
+        let id = conv.id();
+
+        // Stamp archived_at and flush to disk before the rename.
+        // If the rename fails, the conversation stays active with a stale
+        // archived_at — a cosmetic issue, not data loss. Directory location
+        // is the source of truth for archived state.
+        conv.update_metadata(|m| m.archived_at = Some(chrono::Utc::now()));
+        if let Err(e) = conv.flush() {
+            warn!(%id, %e, "Failed to flush archived_at before archiving.");
+        }
+        conv.clear_dirty();
+
+        if let Err(e) = self.persist.archive(&id) {
+            warn!(%id, %e, "Failed to archive conversation.");
+        }
+
+        drop(conv);
+
+        self.state.conversations.remove(&id);
+        self.state.events.remove(&id);
+    }
+
+    /// Restore a conversation from the archive.
+    ///
+    /// Moves the conversation back to the active partition and inserts it into
+    /// the in-memory index. Returns a handle for the restored conversation.
+    pub fn unarchive_conversation(&mut self, id: &ConversationId) -> Result<ConversationHandle> {
+        // Move out of .archive/ first, then clear archived_at through the
+        // normal persist path. If the metadata write fails, the conversation
+        // is active with a stale archived_at — cosmetic, not data loss.
+        self.persist.unarchive(id)?;
+
+        // Insert into the index so it can be loaded.
+        self.state.conversations.entry(*id).or_default();
+        self.state.events.entry(*id).or_default();
+
+        // Clear archived_at and persist. The cells were just inserted above,
+        // so init + get should succeed.
+        let handle = ConversationHandle::new(*id);
+        let meta_cell = &self.state.conversations[id];
+        let events_cell = &self.state.events[id];
+        maybe_init_conversation(&*self.loader, (id, meta_cell));
+        maybe_init_events(&*self.loader, (id, events_cell));
+
+        if let (Some(meta_arc), Some(events_arc)) = (meta_cell.get(), events_cell.get()) {
+            meta_arc.write().archived_at = None;
+            let meta = meta_arc.read();
+            let events = events_arc.read();
+            if let Err(e) = self.persist.write(id, &meta, &events) {
+                warn!(%id, %e, "Failed to clear archived_at after unarchive.");
+            }
+        } else {
+            warn!(%id, "Failed to load conversation after unarchive.");
+        }
+
+        Ok(handle)
+    }
+
+    /// Returns an iterator over archived conversations.
+    ///
+    /// Loads metadata for each archived conversation on demand. This performs
+    /// I/O for every call — it is not cached in the workspace index.
+    pub fn archived_conversations(
+        &self,
+    ) -> impl Iterator<Item = (ConversationId, Conversation)> + '_ {
+        let ids = self
+            .loader
+            .load_conversation_ids(ConversationFilter { archived: true });
+
+        ids.into_iter()
+            .filter_map(|id| match self.loader.load_conversation_metadata(&id) {
+                Ok(meta) => Some((id, meta)),
+                Err(error) => {
+                    warn!(%id, %error, "Failed to load archived conversation metadata.");
+                    None
+                }
+            })
     }
 
     /// Remove a conversation, consuming its lock.

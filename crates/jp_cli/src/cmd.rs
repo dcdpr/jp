@@ -7,6 +7,7 @@ mod lock;
 pub(crate) mod plugin;
 mod query;
 pub(crate) mod target;
+pub(crate) mod time;
 
 use std::{fmt, num::NonZeroU8};
 
@@ -650,6 +651,11 @@ impl From<jp_storage::Error> for Error {
             Error::NotSymlink(path) => [
                 ("message", "Path is not a symlink.".into()),
                 ("path", path.to_string().into()),
+            ]
+            .into(),
+            Error::ConversationNotFound(id) => [
+                ("message", "Conversation not found.".into()),
+                ("id", id.to_string().into()),
             ]
             .into(),
         };
