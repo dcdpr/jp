@@ -172,13 +172,19 @@ with_backends!(archive_and_unarchive, |b| {
 with_backends!(archive_nonexistent_is_not_found, |b| {
     let id = test_id(1_000_000);
     let result = b.archive(&id);
-    assert!(result.is_err(), "archiving a nonexistent conversation should fail");
+    assert!(
+        result.is_err(),
+        "archiving a nonexistent conversation should fail"
+    );
 });
 
 with_backends!(unarchive_nonexistent_is_not_found, |b| {
     let id = test_id(1_000_000);
     let result = b.unarchive(&id);
-    assert!(result.is_err(), "unarchiving a nonexistent conversation should fail");
+    assert!(
+        result.is_err(),
+        "unarchiving a nonexistent conversation should fail"
+    );
 });
 
 with_backends!(load_archived_ids_empty_when_no_archive_dir, |b| {
