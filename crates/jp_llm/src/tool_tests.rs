@@ -566,12 +566,10 @@ fn test_split_trims_whitespace() {
     assert_eq!(d, None);
 }
 
-/// Exercises the real `run_tool_command` pipeline with null argument
-/// values. The command template renders `{{tool}}` through minijinja
-/// and `echo` captures the output. Without `AutoEscape::Json` on the
-/// environment, null values render as `none` (Jinja2 convention)
-/// producing invalid JSON — the exact bug seen in production with
-/// OpenAI's strict mode.
+/// Regression: `{{tool}}` must render as valid JSON, including `null`
+/// for null fields (not Jinja2's `none`). Originally fixed with
+/// `AutoEscape::Json`, now handled by the custom formatter which
+/// JSON-serializes composite values while leaving scalars alone.
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_renders_null_args_as_valid_json() {
@@ -617,4 +615,144 @@ async fn test_run_tool_command_renders_null_args_as_valid_json() {
     assert_eq!(parsed["arguments"]["package"], "jp_workspace");
     assert_eq!(parsed["arguments"]["backtrace"], Value::Null);
     assert_eq!(parsed["name"], "cargo_test");
+}
+
+/// Regression: scalar string interpolation must not be JSON-quoted.
+/// A prior fix for the null-rendering bug set `AutoEscape::Json`
+/// globally, which wrapped every string value in literal `"..."`,
+/// breaking templates like `just rfd-draft {{tool.arguments.title}}`
+/// where tool authors expect the bare value.
+#[tokio::test]
+#[cfg(unix)]
+async fn test_run_tool_command_renders_scalar_strings_raw() {
+    use jp_config::conversation::tool::ToolCommandConfig;
+
+    let ctx = json!({
+        "tool": {
+            "arguments": { "title": "Hello World" },
+        },
+    });
+
+    let command = ToolCommandConfig {
+        program: "echo".to_owned(),
+        args: vec!["{{tool.arguments.title}}".to_owned()],
+        shell: false,
+    };
+
+    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
+        .await
+        .unwrap();
+
+    let stdout = match result {
+        CommandResult::RawOutput { stdout, .. } => stdout,
+        other => panic!("Expected RawOutput, got: {other:?}"),
+    };
+
+    assert_eq!(stdout.trim_end(), "Hello World");
+}
+
+/// Null scalars render as literal `null` (not Jinja2's `none`, and not
+/// an empty string). This keeps the behavior consistent with how null
+/// appears inside JSON-serialized composites.
+#[tokio::test]
+#[cfg(unix)]
+async fn test_run_tool_command_renders_null_scalar_as_literal_null() {
+    use jp_config::conversation::tool::ToolCommandConfig;
+
+    let ctx = json!({
+        "tool": { "arguments": { "maybe": null } },
+    });
+
+    let command = ToolCommandConfig {
+        program: "echo".to_owned(),
+        args: vec!["{{tool.arguments.maybe}}".to_owned()],
+        shell: false,
+    };
+
+    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
+        .await
+        .unwrap();
+
+    let stdout = match result {
+        CommandResult::RawOutput { stdout, .. } => stdout,
+        other => panic!("Expected RawOutput, got: {other:?}"),
+    };
+
+    assert_eq!(stdout.trim_end(), "null");
+}
+
+/// End-to-end sanity check for the rfd-draft regression: with the old
+/// `AutoEscape::Json` behavior, `{{tool.arguments.title}}` rendered as
+/// `"Assistant-Initiated ..."` (literal quotes), which then broke the
+/// downstream `sed` command inside the just recipe. Verify the title
+/// now reaches the subprocess as a clean argument.
+#[tokio::test]
+#[cfg(unix)]
+async fn test_run_tool_command_rfd_draft_title_rendering() {
+    use jp_config::conversation::tool::ToolCommandConfig;
+
+    let ctx = json!({
+        "tool": {
+            "arguments": {
+                "variant": "design",
+                "title": "Assistant-Initiated User Inquiries via an ask_user Builtin",
+            },
+        },
+    });
+
+    // Mimic the real `just rfd-draft {{variant}} {{title}}` template.
+    let command = ToolCommandConfig {
+        program: "printf".to_owned(),
+        args: vec![
+            "%s|%s".to_owned(),
+            "{{tool.arguments.variant}}".to_owned(),
+            "{{tool.arguments.title}}".to_owned(),
+        ],
+        shell: false,
+    };
+
+    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
+        .await
+        .unwrap();
+
+    let stdout = match result {
+        CommandResult::RawOutput { stdout, .. } => stdout,
+        other => panic!("Expected RawOutput, got: {other:?}"),
+    };
+
+    assert_eq!(
+        stdout,
+        "design|Assistant-Initiated User Inquiries via an ask_user Builtin"
+    );
+}
+
+/// The `tojson` filter still works for tool authors who want explicit
+/// JSON-quoted strings (e.g. when hand-crafting a JSON literal).
+/// Safe strings produced by `tojson` must pass through the custom
+/// formatter unchanged — no double-encoding.
+#[tokio::test]
+#[cfg(unix)]
+async fn test_run_tool_command_tojson_filter_on_scalar_still_works() {
+    use jp_config::conversation::tool::ToolCommandConfig;
+
+    let ctx = json!({
+        "tool": { "arguments": { "title": "Hello" } },
+    });
+
+    let command = ToolCommandConfig {
+        program: "echo".to_owned(),
+        args: vec!["{{tool.arguments.title | tojson}}".to_owned()],
+        shell: false,
+    };
+
+    let result = run_tool_command(command, ctx, "/tmp".into(), CancellationToken::new(), None)
+        .await
+        .unwrap();
+
+    let stdout = match result {
+        CommandResult::RawOutput { stdout, .. } => stdout,
+        other => panic!("Expected RawOutput, got: {other:?}"),
+    };
+
+    assert_eq!(stdout.trim_end(), "\"Hello\"");
 }
