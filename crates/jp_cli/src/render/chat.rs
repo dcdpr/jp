@@ -167,7 +167,11 @@ impl ChatRenderer {
 
     fn render_reasoning(&mut self, content: &str) {
         match self.config.reasoning.display {
-            ReasoningDisplayConfig::Hidden => {}
+            // Even though reasoning is hidden, a reasoning block is a
+            // semantic boundary: flush any buffered message content so that
+            // surrounding message chunks render as distinct paragraphs
+            // rather than being glued together by the markdown buffer.
+            ReasoningDisplayConfig::Hidden => self.flush(),
 
             ReasoningDisplayConfig::Full => {
                 self.flush_on_transition(ContentKind::Reasoning);

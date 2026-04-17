@@ -18,6 +18,14 @@ const BRIEF_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     results_file_link: style::LinkStyle::Off,
 };
 
+/// Chat-mode tool display style: tool calls are fully hidden.
+const CHAT_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
+    hidden: true,
+    parameters: ParametersStyle::Off,
+    inline_results: InlineResults::Off,
+    results_file_link: style::LinkStyle::Off,
+};
+
 /// Full-mode tool display style: everything visible, nothing truncated.
 const FULL_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     hidden: false,
@@ -49,6 +57,8 @@ pub(crate) struct Print {
 
     /// Output style preset.
     ///
+    /// - `chat`: Show only user and assistant messages. Hides reasoning
+    ///   and tool calls entirely.
     /// - `brief`: Hide reasoning, tool arguments, and tool results. Shows
     ///   only user messages, assistant messages, and tool call headers.
     /// - `full`: Show everything including reasoning, tool arguments, and
@@ -60,6 +70,9 @@ pub(crate) struct Print {
 /// Output style presets for `jp conversation print`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum PrintStyle {
+    /// Show only user and assistant messages; hide reasoning and tool
+    /// calls entirely.
+    Chat,
     /// Hide reasoning, tool arguments, and tool results.
     Brief,
     /// Show everything: full reasoning, tool arguments, and untruncated
@@ -169,6 +182,7 @@ fn apply_style_preset(
     tools_config: &mut jp_config::conversation::tool::ToolsConfig,
 ) {
     let (reasoning_display, tool_style) = match preset {
+        PrintStyle::Chat => (ReasoningDisplayConfig::Hidden, CHAT_TOOL_STYLE),
         PrintStyle::Brief => (ReasoningDisplayConfig::Hidden, BRIEF_TOOL_STYLE),
         PrintStyle::Full => (ReasoningDisplayConfig::Full, FULL_TOOL_STYLE),
     };
