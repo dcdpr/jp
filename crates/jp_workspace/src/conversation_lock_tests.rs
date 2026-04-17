@@ -42,6 +42,14 @@ impl PersistBackend for MockPersistBackend {
         self.removes.lock().unwrap().push(*id);
         Ok(())
     }
+
+    fn archive(&self, _id: &ConversationId) -> Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn unarchive(&self, _id: &ConversationId) -> Result<(), jp_storage::Error> {
+        Ok(())
+    }
 }
 
 fn test_id() -> ConversationId {

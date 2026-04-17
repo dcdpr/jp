@@ -9,8 +9,8 @@ use camino_tempfile::tempdir;
 use chrono::{TimeZone as _, Utc};
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::backend::{
-    FsStorageBackend, InMemoryStorageBackend, LoadBackend, LockBackend, NullLockBackend,
-    PersistBackend, SessionBackend,
+    ConversationFilter, FsStorageBackend, InMemoryStorageBackend, LoadBackend, LockBackend,
+    NullLockBackend, PersistBackend, SessionBackend,
 };
 
 fn test_id(secs: i64) -> ConversationId {
@@ -104,11 +104,14 @@ with_backends!(load_missing_stream_errors, |b| {
     assert!(b.load_conversation_stream(&id).is_err());
 });
 
-with_backends!(load_all_ids_empty, |b| {
-    assert!(b.load_all_conversation_ids().is_empty());
+with_backends!(load_ids_empty, |b| {
+    assert!(
+        b.load_conversation_ids(ConversationFilter::default())
+            .is_empty()
+    );
 });
 
-with_backends!(load_all_ids_returns_written, |b| {
+with_backends!(load_ids_returns_written, |b| {
     let id1 = test_id(1_000_000);
     let id2 = test_id(2_000_000);
 
@@ -125,10 +128,45 @@ with_backends!(load_all_ids_returns_written, |b| {
     )
     .unwrap();
 
-    let ids = b.load_all_conversation_ids();
+    let ids = b.load_conversation_ids(ConversationFilter::default());
     assert_eq!(ids.len(), 2);
     assert!(ids.contains(&id1));
     assert!(ids.contains(&id2));
+});
+
+with_backends!(archive_and_unarchive, |b| {
+    let id = test_id(1_000_000);
+    b.write(
+        &id,
+        &Conversation::default(),
+        &ConversationStream::new_test(),
+    )
+    .unwrap();
+
+    // After archiving, ID disappears from active, appears in archived.
+    b.archive(&id).unwrap();
+    assert!(
+        b.load_conversation_ids(ConversationFilter::default())
+            .is_empty()
+    );
+    assert_eq!(
+        b.load_conversation_ids(ConversationFilter { archived: true }),
+        vec![id]
+    );
+
+    // Metadata is still loadable.
+    assert!(b.load_conversation_metadata(&id).is_ok());
+
+    // Unarchive restores it.
+    b.unarchive(&id).unwrap();
+    assert_eq!(
+        b.load_conversation_ids(ConversationFilter::default()),
+        vec![id]
+    );
+    assert!(
+        b.load_conversation_ids(ConversationFilter { archived: true })
+            .is_empty()
+    );
 });
 
 with_backends!(load_expired_none_when_no_expiry, |b| {

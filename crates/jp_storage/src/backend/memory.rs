@@ -15,7 +15,8 @@ use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use serde_json::Value;
 
 use super::{
-    ConversationLockGuard, LoadBackend, LockBackend, PersistBackend, SanitizeReport, SessionBackend,
+    ConversationFilter, ConversationLockGuard, LoadBackend, LockBackend, PersistBackend,
+    SanitizeReport, SessionBackend,
 };
 use crate::{LoadError, error::Result, load::LoadErrorInner, lock::LockInfo};
 
@@ -26,6 +27,7 @@ use crate::{LoadError, error::Result, load::LoadErrorInner, lock::LockInfo};
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorageBackend {
     conversations: Arc<Mutex<HashMap<ConversationId, (Conversation, ConversationStream)>>>,
+    archived: Arc<Mutex<HashMap<ConversationId, (Conversation, ConversationStream)>>>,
     locks: Arc<Mutex<HashSet<String>>>,
     sessions: Arc<Mutex<HashMap<String, Value>>>,
 }
@@ -54,19 +56,39 @@ impl PersistBackend for InMemoryStorageBackend {
 
     fn remove(&self, id: &ConversationId) -> Result<()> {
         self.conversations.lock().expect("poisoned").remove(id);
+        self.archived.lock().expect("poisoned").remove(id);
+        Ok(())
+    }
+
+    fn archive(&self, id: &ConversationId) -> Result<()> {
+        let entry = self.conversations.lock().expect("poisoned").remove(id);
+        if let Some(entry) = entry {
+            self.archived.lock().expect("poisoned").insert(*id, entry);
+        }
+        Ok(())
+    }
+
+    fn unarchive(&self, id: &ConversationId) -> Result<()> {
+        let entry = self.archived.lock().expect("poisoned").remove(id);
+        if let Some(entry) = entry {
+            self.conversations
+                .lock()
+                .expect("poisoned")
+                .insert(*id, entry);
+        }
         Ok(())
     }
 }
 
 impl LoadBackend for InMemoryStorageBackend {
-    fn load_all_conversation_ids(&self) -> Vec<ConversationId> {
-        let mut ids: Vec<_> = self
-            .conversations
-            .lock()
-            .expect("poisoned")
-            .keys()
-            .copied()
-            .collect();
+    fn load_conversation_ids(&self, filter: ConversationFilter) -> Vec<ConversationId> {
+        let store = if filter.archived {
+            &self.archived
+        } else {
+            &self.conversations
+        };
+
+        let mut ids: Vec<_> = store.lock().expect("poisoned").keys().copied().collect();
         ids.sort();
         ids
     }
@@ -75,34 +97,44 @@ impl LoadBackend for InMemoryStorageBackend {
         &self,
         id: &ConversationId,
     ) -> std::result::Result<Conversation, LoadError> {
-        self.conversations
-            .lock()
-            .expect("poisoned")
-            .get(id)
-            .map(|(meta, _)| meta.clone())
-            .ok_or_else(|| {
-                LoadError::new(
-                    format!("<memory>/{id}"),
-                    LoadErrorInner::MissingConversationMetadata(*id),
-                )
-            })
+        let convs = self.conversations.lock().expect("poisoned");
+        if let Some((meta, _)) = convs.get(id) {
+            return Ok(meta.clone());
+        }
+        drop(convs);
+
+        let archived = self.archived.lock().expect("poisoned");
+        if let Some((meta, _)) = archived.get(id) {
+            return Ok(meta.clone());
+        }
+        drop(archived);
+
+        Err(LoadError::new(
+            format!("<memory>/{id}"),
+            LoadErrorInner::MissingConversationMetadata(*id),
+        ))
     }
 
     fn load_conversation_stream(
         &self,
         id: &ConversationId,
     ) -> std::result::Result<ConversationStream, LoadError> {
-        self.conversations
-            .lock()
-            .expect("poisoned")
-            .get(id)
-            .map(|(_, events)| events.clone())
-            .ok_or_else(|| {
-                LoadError::new(
-                    format!("<memory>/{id}"),
-                    LoadErrorInner::MissingConversationStream(*id),
-                )
-            })
+        let convs = self.conversations.lock().expect("poisoned");
+        if let Some((_, events)) = convs.get(id) {
+            return Ok(events.clone());
+        }
+        drop(convs);
+
+        let archived = self.archived.lock().expect("poisoned");
+        if let Some((_, events)) = archived.get(id) {
+            return Ok(events.clone());
+        }
+        drop(archived);
+
+        Err(LoadError::new(
+            format!("<memory>/{id}"),
+            LoadErrorInner::MissingConversationStream(*id),
+        ))
     }
 
     fn load_expired_conversation_ids(&self, now: DateTime<Utc>) -> Vec<ConversationId> {
