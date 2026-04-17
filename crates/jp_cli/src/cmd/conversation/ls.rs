@@ -1,7 +1,7 @@
 use chrono::{DateTime, FixedOffset, Local, Utc};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
-use jp_conversation::ConversationId;
+use jp_conversation::{Conversation, ConversationId};
 use jp_term::osc::hyperlink;
 use jp_workspace::ConversationHandle;
 
