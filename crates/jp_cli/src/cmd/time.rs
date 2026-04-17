@@ -61,3 +61,7 @@ impl FromStr for TimeThreshold {
         ))
     }
 }
+
+#[cfg(test)]
+#[path = "time_tests.rs"]
+mod tests;

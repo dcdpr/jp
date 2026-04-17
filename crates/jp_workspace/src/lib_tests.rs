@@ -593,3 +593,161 @@ fn test_lock_new_conversation_errors_on_denial() {
         "in-memory backend should deny second lock on same conversation"
     );
 }
+
+#[test]
+fn test_archive_removes_from_index() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+
+    let fs = FsStorageBackend::new(&storage).unwrap();
+    let mut ws = workspace_with_fs(&root, &fs);
+    let config = Arc::new(AppConfig::new_test());
+
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, Conversation::default(), config);
+
+    // Flush so the conversation exists on disk.
+    let h = ws.acquire_conversation(&id).unwrap();
+    let mut conv = ws.test_lock(h).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+
+    // Archive it.
+    let h = ws.acquire_conversation(&id).unwrap();
+    let lock = ws.test_lock(h);
+    ws.archive_conversation(lock.into_mut());
+
+    // No longer in the active index.
+    assert!(ws.acquire_conversation(&id).is_err());
+    assert_eq!(ws.conversations().count(), 0);
+}
+
+#[test]
+fn test_archive_sets_archived_at() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+
+    let fs = FsStorageBackend::new(&storage).unwrap();
+    let mut ws = workspace_with_fs(&root, &fs);
+    let config = Arc::new(AppConfig::new_test());
+
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, Conversation::default(), config);
+
+    let h = ws.acquire_conversation(&id).unwrap();
+    let mut conv = ws.test_lock(h).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+
+    let before = Utc::now();
+    let h = ws.acquire_conversation(&id).unwrap();
+    let lock = ws.test_lock(h);
+    ws.archive_conversation(lock.into_mut());
+
+    // Metadata loaded from the archive should have archived_at set.
+    let archived: Vec<_> = ws.archived_conversations().collect();
+    assert_eq!(archived.len(), 1);
+    assert_eq!(archived[0].0, id);
+    let archived_at = archived[0]
+        .1
+        .archived_at
+        .expect("archived_at should be set");
+    assert!(archived_at >= before);
+}
+
+#[test]
+fn test_unarchive_restores_to_index() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+
+    let fs = FsStorageBackend::new(&storage).unwrap();
+    let mut ws = workspace_with_fs(&root, &fs);
+    let config = Arc::new(AppConfig::new_test());
+
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, Conversation::default(), config);
+
+    let h = ws.acquire_conversation(&id).unwrap();
+    let mut conv = ws.test_lock(h).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+
+    // Archive then unarchive.
+    let h = ws.acquire_conversation(&id).unwrap();
+    let lock = ws.test_lock(h);
+    ws.archive_conversation(lock.into_mut());
+    assert!(ws.acquire_conversation(&id).is_err());
+
+    let handle = ws.unarchive_conversation(&id).unwrap();
+    assert_eq!(handle.id(), id);
+
+    // Back in the active index.
+    assert!(ws.acquire_conversation(&id).is_ok());
+    assert_eq!(ws.conversations().count(), 1);
+}
+
+#[test]
+fn test_unarchive_clears_archived_at() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+
+    let fs = FsStorageBackend::new(&storage).unwrap();
+    let mut ws = workspace_with_fs(&root, &fs);
+    let config = Arc::new(AppConfig::new_test());
+
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, Conversation::default(), config);
+
+    let h = ws.acquire_conversation(&id).unwrap();
+    let mut conv = ws.test_lock(h).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+
+    // Archive.
+    let h = ws.acquire_conversation(&id).unwrap();
+    let lock = ws.test_lock(h);
+    ws.archive_conversation(lock.into_mut());
+
+    // Verify archived_at is set.
+    let archived: Vec<_> = ws.archived_conversations().collect();
+    assert!(archived[0].1.archived_at.is_some());
+
+    // Unarchive.
+    ws.unarchive_conversation(&id).unwrap();
+
+    // archived_at should be cleared in the active index.
+    let h = ws.acquire_conversation(&id).unwrap();
+    let meta = ws.metadata(&h).unwrap();
+    assert!(
+        meta.archived_at.is_none(),
+        "archived_at should be cleared after unarchive"
+    );
+}
+
+#[test]
+fn test_archived_conversations_returns_empty_when_none() {
+    let ws = Workspace::new(Utf8PathBuf::new());
+    assert_eq!(ws.archived_conversations().count(), 0);
+}
+
+#[test]
+fn test_unarchive_nonexistent_returns_error() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+    fs::create_dir_all(&storage).unwrap();
+
+    let fs_backend = FsStorageBackend::new(&storage).unwrap();
+    let mut ws = workspace_with_fs(&root, &fs_backend);
+
+    let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+    assert!(ws.unarchive_conversation(&id).is_err());
+}

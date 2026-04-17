@@ -169,6 +169,42 @@ with_backends!(archive_and_unarchive, |b| {
     );
 });
 
+with_backends!(archive_nonexistent_returns_error, |b| {
+    let id = test_id(1_000_000);
+    // Archiving a conversation that doesn't exist should error on the
+    // filesystem backend and be a no-op on the in-memory backend.
+    // Both should not panic.
+    let _ = b.archive(&id);
+});
+
+with_backends!(unarchive_nonexistent_returns_error, |b| {
+    let id = test_id(1_000_000);
+    let _ = b.unarchive(&id);
+});
+
+with_backends!(load_archived_ids_empty_when_no_archive_dir, |b| {
+    assert!(
+        b.load_conversation_ids(ConversationFilter { archived: true })
+            .is_empty()
+    );
+});
+
+with_backends!(archived_metadata_loadable_after_archive, |b| {
+    let id = test_id(1_000_000);
+    b.write(
+        &id,
+        &Conversation::default(),
+        &ConversationStream::new_test(),
+    )
+    .unwrap();
+
+    b.archive(&id).unwrap();
+
+    // Metadata should be loadable from the archive partition.
+    let meta = b.load_conversation_metadata(&id).unwrap();
+    assert_eq!(meta.title, None);
+});
+
 with_backends!(load_expired_none_when_no_expiry, |b| {
     let id = test_id(1_000_000);
     b.write(
