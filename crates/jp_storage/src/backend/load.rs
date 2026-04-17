@@ -51,8 +51,8 @@ pub trait LoadBackend: Send + Sync + Debug {
     /// For in-memory backends, data is always structurally valid, so this
     /// returns an empty report.
     ///
-    /// Call this before [`Self::load_all_conversation_ids`] to guarantee the
-    /// store is in a consistent state.
+    /// Call this before [`Self::load_conversation_ids`] to guarantee the store
+    /// is in a consistent state.
     fn sanitize(&self) -> crate::error::Result<SanitizeReport>;
 }
 
