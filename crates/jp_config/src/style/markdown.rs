@@ -9,6 +9,26 @@ use crate::{
     partial::{ToPartial, partial_opt, partial_opts},
 };
 
+/// Controls how colors are rendered in terminal output.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorModeConfig {
+    /// Detect from `COLORTERM` / `TERM` environment variables.
+    #[default]
+    Auto,
+
+    /// Force 24-bit RGB escape sequences.
+    Truecolor,
+
+    /// Force 256-color palette escape sequences.
+    #[serde(rename = "256")]
+    #[variant(value = "256")]
+    Ansi256,
+
+    /// No color escapes — plain text only.
+    Plain,
+}
+
 /// Controls how horizontal rules (`---`) are rendered in terminal output.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "lowercase")]
@@ -62,6 +82,15 @@ pub struct MarkdownConfig {
     ///   [`Self::wrap_width`].
     #[setting(default)]
     pub hr_style: HrStyle,
+
+    /// Color mode for syntax highlighting and theme-derived colors.
+    ///
+    /// - `auto`: detect from `COLORTERM` / `TERM` environment variables.
+    /// - `truecolor`: force 24-bit RGB escape sequences.
+    /// - `256`: force 256-color palette escape sequences.
+    /// - `plain`: no color escapes at all.
+    #[setting(default)]
+    pub color_mode: ColorModeConfig,
 }
 
 impl AssignKeyValue for PartialMarkdownConfig {
@@ -74,6 +103,7 @@ impl AssignKeyValue for PartialMarkdownConfig {
             }
             "theme" => self.theme = kv.try_some_from_str()?,
             "hr_style" => self.hr_style = kv.try_some_from_str()?,
+            "color_mode" => self.color_mode = kv.try_some_from_str()?,
             _ => return missing_key(&kv),
         }
 
@@ -91,6 +121,7 @@ impl PartialConfigDelta for PartialMarkdownConfig {
             ),
             theme: delta_opt(self.theme.as_ref(), next.theme),
             hr_style: delta_opt(self.hr_style.as_ref(), next.hr_style),
+            color_mode: delta_opt(self.color_mode.as_ref(), next.color_mode),
         }
     }
 }
@@ -107,6 +138,7 @@ impl ToPartial for MarkdownConfig {
             ),
             theme: partial_opts(self.theme.as_ref(), defaults.theme),
             hr_style: partial_opt(&self.hr_style, defaults.hr_style),
+            color_mode: partial_opt(&self.color_mode, defaults.color_mode),
         }
     }
 }

@@ -152,10 +152,11 @@ pub(super) async fn run_turn_loop(
     prompt_backend: Arc<dyn PromptBackend>,
     mut tool_coordinator: ToolCoordinator,
     chat_request: ChatRequest,
+    color_mode: jp_md::color::ColorMode,
 ) -> Result<(), Error> {
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request, is_tty);
-    let mut turn_coordinator = TurnCoordinator::new(printer.clone(), cfg.style.clone());
+    let mut turn_coordinator = TurnCoordinator::new(printer.clone(), cfg.style.clone(), color_mode);
     let mut tool_renderer = ToolRenderer::new(
         if cfg.style.tool_call.show && !printer.format().is_json() {
             printer.clone()

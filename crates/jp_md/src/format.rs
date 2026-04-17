@@ -10,6 +10,7 @@ use syntect::highlighting::Theme;
 use two_face::syntax;
 
 use crate::{
+    color::{self, ColorMode},
     render::{self, HrOptions},
     table::TableOptions,
     theme,
@@ -93,6 +94,10 @@ pub struct Formatter {
     /// When set, inline code uses this color instead of the theme's background.
     /// Stored as a pre-resolved `(sgr_param, full_escape)` pair.
     inline_code_bg: Option<(String, String)>,
+
+    /// Terminal color capability — controls whether escape sequences use
+    /// 24-bit RGB or 256-color palette indices.
+    color_mode: ColorMode,
 }
 
 impl fmt::Debug for Formatter {
@@ -104,6 +109,7 @@ impl fmt::Debug for Formatter {
             .field("hr_style", &self.hr_style)
             .field("terminal_width", &self.terminal_width)
             .field("inline_code_bg", &self.inline_code_bg)
+            .field("color_mode", &self.color_mode)
             .finish()
     }
 }
@@ -125,6 +131,7 @@ impl Formatter {
             hr_style: HrStyle::default(),
             terminal_width: None,
             inline_code_bg: None,
+            color_mode: ColorMode::default(),
         }
     }
 
@@ -140,6 +147,7 @@ impl Formatter {
             hr_style: HrStyle::default(),
             terminal_width: None,
             inline_code_bg: None,
+            color_mode: ColorMode::default(),
         }
     }
 
@@ -189,6 +197,16 @@ impl Formatter {
             let escape = format!("\x1b[{p}m");
             (p, escape)
         });
+        self
+    }
+
+    /// Set the terminal color mode.
+    ///
+    /// Controls whether escape sequences use 24-bit RGB (`TrueColor`) or
+    /// 256-color palette indices (`Ansi256`). Defaults to `TrueColor`.
+    #[must_use]
+    pub const fn color_mode(mut self, mode: ColorMode) -> Self {
+        self.color_mode = mode;
         self
     }
 
@@ -245,6 +263,7 @@ impl Formatter {
             &self.theme,
             options.default_background.as_ref(),
             self.inline_code_bg.as_ref(),
+            self.color_mode,
             &mut buf,
         )?;
         Ok(buf)
@@ -300,6 +319,7 @@ impl Formatter {
         let syntax = ss.find_syntax_by_token(language)?;
         Some(CodeHighlighter {
             hl: syntect::easy::HighlightLines::new(syntax, &self.theme),
+            color_mode: self.color_mode,
         })
     }
 
@@ -325,12 +345,16 @@ pub struct SavedHighlightState {
     highlight_state: syntect::highlighting::HighlightState,
     /// The syntect parse state (grammar context).
     parse_state: syntect::parsing::ParseState,
+    /// Color mode carried through save/resume.
+    color_mode: ColorMode,
 }
 
 /// A stateful syntax highlighter for code blocks.
 pub struct CodeHighlighter<'a> {
     /// The syntect highlighter.
     hl: syntect::easy::HighlightLines<'a>,
+    /// Terminal color capability.
+    color_mode: ColorMode,
 }
 
 impl<'a> CodeHighlighter<'a> {
@@ -341,9 +365,8 @@ impl<'a> CodeHighlighter<'a> {
     /// Returns an error if `syntect::Error` is returned.
     pub fn highlight(&mut self, line: &str) -> Result<String, syntect::Error> {
         let ss = syntax::extra_newlines();
-        // highlight_line expects the line to include the newline if one is present.
         let ranges = self.hl.highlight_line(line, &ss)?;
-        let mut escaped = syntect::util::as_24_bit_terminal_escaped(&ranges, false);
+        let mut escaped = color::styled_ranges_to_escaped(&ranges, true, self.color_mode);
         escaped.push_str("\x1b[0m");
         Ok(escaped)
     }
@@ -358,6 +381,7 @@ impl<'a> CodeHighlighter<'a> {
         SavedHighlightState {
             highlight_state,
             parse_state,
+            color_mode: self.color_mode,
         }
     }
 
@@ -369,6 +393,7 @@ impl<'a> CodeHighlighter<'a> {
                 saved.highlight_state,
                 saved.parse_state,
             ),
+            color_mode: saved.color_mode,
         }
     }
 }

@@ -39,6 +39,7 @@ use crate::{
         BG_END, BOLD_END, BOLD_START, FG_END, ITALIC_END, ITALIC_START, STRIKETHROUGH_END,
         STRIKETHROUGH_START, UNDERLINE_END, UNDERLINE_START,
     },
+    color::{self, ColorMode},
     format::{DefaultBackground, HrStyle},
     table,
     writer::TerminalWriter,
@@ -69,6 +70,7 @@ pub fn format_terminal(
     theme: &Theme,
     default_background: Option<&DefaultBackground>,
     inline_code_bg: Option<&(String, String)>,
+    color_mode: ColorMode,
     output: &mut dyn Write,
 ) -> fmt::Result {
     let mut f = TerminalFormatter::new(
@@ -79,6 +81,7 @@ pub fn format_terminal(
         theme,
         default_background,
         inline_code_bg,
+        color_mode,
         output,
     );
     f.format(root)
@@ -107,6 +110,9 @@ pub struct TerminalFormatter<'a, 'w> {
     /// Override background for inline code spans, if configured.
     inline_code_bg: Option<&'w (String, String)>,
 
+    /// Terminal color capability.
+    color_mode: ColorMode,
+
     /// Stack of ordered list start numbers.
     ol_stack: Vec<usize>,
 
@@ -127,6 +133,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         theme: &'w Theme,
         default_background: Option<&DefaultBackground>,
         inline_code_bg: Option<&'w (String, String)>,
+        color_mode: ColorMode,
         output: &'w mut dyn Write,
     ) -> Self {
         Self {
@@ -136,9 +143,10 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             hr_options,
             theme,
             inline_code_bg,
+            color_mode,
             ol_stack: vec![],
             blockquote_depth: 0,
-            blockquote_fg: theme_blockquote_fg(theme),
+            blockquote_fg: theme_blockquote_fg(theme, color_mode),
         }
     }
 
@@ -460,7 +468,8 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         self.writer.cr();
 
         // Content — try syntax highlighting, fall back to plain text.
-        if let Some(highlighted) = highlight_code_block(literal, info, self.theme) {
+        if let Some(highlighted) = highlight_code_block(literal, info, self.theme, self.color_mode)
+        {
             self.writer.write_raw(&highlighted)?;
         } else {
             self.writer.output(literal, false)?;
@@ -570,9 +579,10 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         let numticks = shortest_unused_sequence(literal.as_bytes(), b'`');
 
-        let (bg_param, bg_escape) = self
-            .inline_code_bg
-            .map_or_else(|| theme_bg(self.theme), |(p, e)| (p.clone(), e.clone()));
+        let (bg_param, bg_escape) = self.inline_code_bg.map_or_else(
+            || theme_bg(self.theme, self.color_mode),
+            |(p, e)| (p.clone(), e.clone()),
+        );
         self.writer.attrs.background = Some(bg_param);
         self.writer.write_escape(&bg_escape)?;
 
@@ -801,6 +811,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             self.theme,
             self.writer.default_background.as_ref(),
             self.inline_code_bg,
+            self.color_mode,
         ) {
             self.writer.output(&rendered, false)?;
         }
@@ -904,11 +915,14 @@ fn shortest_unused_sequence(buffer: &[u8], f: u8) -> usize {
 /// background color.
 ///
 /// Falls back to 8-bit gray (color 248) when the theme has no background.
-pub fn theme_bg(theme: &Theme) -> (String, String) {
+pub fn theme_bg(theme: &Theme, color_mode: ColorMode) -> (String, String) {
+    if color_mode == ColorMode::Plain {
+        return (String::new(), String::new());
+    }
     theme.settings.background.map_or_else(
         || ("48;5;248".to_string(), CODE_BG.to_string()),
         |color| {
-            let param = format!("48;2;{};{};{}", color.r, color.g, color.b);
+            let param = color_mode.bg_param(color.r, color.g, color.b);
             let escape = format!("\x1b[{param}m");
             (param, escape)
         },
@@ -919,11 +933,14 @@ pub fn theme_bg(theme: &Theme) -> (String, String) {
 ///
 /// Uses the theme's gutter foreground color if available, falling back to
 /// 8-bit gray (color 248).
-fn theme_blockquote_fg(theme: &Theme) -> (String, String) {
+fn theme_blockquote_fg(theme: &Theme, color_mode: ColorMode) -> (String, String) {
+    if color_mode == ColorMode::Plain {
+        return (String::new(), String::new());
+    }
     theme.settings.gutter_foreground.map_or_else(
         || ("38;5;248".to_string(), "\x1b[38;5;248m".to_string()),
         |color| {
-            let param = format!("38;2;{};{};{}", color.r, color.g, color.b);
+            let param = color_mode.fg_param(color.r, color.g, color.b);
             let escape = format!("\x1b[{param}m");
             (param, escape)
         },
@@ -934,7 +951,12 @@ fn theme_blockquote_fg(theme: &Theme) -> (String, String) {
 ///
 /// Returns `Some(highlighted)` on success, or `None` if the language is
 /// empty or not recognized. The caller should fall back to plain rendering.
-fn highlight_code_block(literal: &str, language: &str, theme: &Theme) -> Option<String> {
+fn highlight_code_block(
+    literal: &str,
+    language: &str,
+    theme: &Theme,
+    color_mode: ColorMode,
+) -> Option<String> {
     if language.is_empty() {
         return None;
     }
@@ -947,7 +969,7 @@ fn highlight_code_block(literal: &str, language: &str, theme: &Theme) -> Option<
 
     for line in syntect::util::LinesWithEndings::from(literal) {
         let ranges = h.highlight_line(line, &ss).ok()?;
-        let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges, false);
+        let escaped = color::styled_ranges_to_escaped(&ranges, true, color_mode);
         buf.push_str(&escaped);
     }
 

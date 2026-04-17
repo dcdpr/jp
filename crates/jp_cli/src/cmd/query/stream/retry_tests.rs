@@ -9,6 +9,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
 };
 use jp_llm::{StreamError, event::Event};
+use jp_md::color::ColorMode;
 use jp_printer::{OutputFormat, Printer};
 use jp_workspace::{ConversationLock, Workspace};
 
@@ -27,7 +28,11 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
 
 fn make_turn_coordinator() -> TurnCoordinator {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
-    TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style)
+    TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    )
 }
 
 /// Create a workspace with a single conversation and return a test lock.

@@ -1,6 +1,7 @@
 use jp_config::AppConfig;
 use jp_conversation::event::ChatResponse;
 use jp_llm::event::FinishReason;
+use jp_md::color::ColorMode;
 use jp_printer::{OutputFormat, Printer};
 use serde_json::{Map, json};
 
@@ -11,7 +12,11 @@ fn test_transitions_to_executing_on_tool_call() {
     let mut _turn_state = TurnState::default();
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
     assert_eq!(coordinator.current_phase(), TurnPhase::Streaming);
@@ -49,7 +54,11 @@ fn test_transitions_to_complete_no_tools() {
     let mut _turn_state = TurnState::default();
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
@@ -70,7 +79,11 @@ fn test_continues_after_tool_execution() {
     let mut _turn_state = TurnState::default();
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     // Drive the coordinator to Executing by simulating a tool call in the
     // stream, then test that handle_tool_responses transitions back to
@@ -106,7 +119,11 @@ fn test_continues_after_tool_execution() {
 fn test_peek_partial_content() {
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
@@ -133,7 +150,11 @@ fn test_buffered_markdown_flushed_before_tool_call() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
-    let mut coordinator = TurnCoordinator::new(Arc::clone(&printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
@@ -171,7 +192,11 @@ fn test_buffered_markdown_flushed_before_tool_call() {
 fn test_prepare_continuation() {
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
@@ -193,7 +218,11 @@ fn test_prepare_continuation() {
 fn test_multi_part_tool_call_deferred_to_flush() {
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
@@ -243,7 +272,11 @@ fn test_structured_output_rendered_as_json_code_fence() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
-    let mut coordinator = TurnCoordinator::new(Arc::clone(&printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest {
         content: "Extract contacts".into(),
@@ -283,7 +316,11 @@ fn test_structured_output_rendered_as_json_code_fence() {
 fn test_structured_output_persisted_with_parsed_json() {
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest {
         content: "Extract contacts".into(),
@@ -313,7 +350,11 @@ fn test_structured_not_routed_to_chat_renderer() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
-    let mut coordinator = TurnCoordinator::new(Arc::clone(&printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 

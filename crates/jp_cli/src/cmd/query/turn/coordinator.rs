@@ -111,7 +111,11 @@ pub struct TurnCoordinator {
 }
 
 impl TurnCoordinator {
-    pub fn new(printer: Arc<Printer>, style: StyleConfig) -> Self {
+    pub fn new(
+        printer: Arc<Printer>,
+        style: StyleConfig,
+        color_mode: jp_md::color::ColorMode,
+    ) -> Self {
         // In JSON mode, the renderer is unused; give it a sink so it doesn't
         // accidentally write anything.
         let (json_emitter, printer) = if printer.format().is_json() {
@@ -123,7 +127,7 @@ impl TurnCoordinator {
         Self {
             state: TurnPhase::Idle,
             event_builder: EventBuilder::new(),
-            chat_renderer: ChatRenderer::new(printer.clone(), style),
+            chat_renderer: ChatRenderer::new(printer.clone(), style, color_mode),
             structured_renderer: StructuredRenderer::new(printer),
             json_emitter,
             pending_tool_calls: Vec::new(),

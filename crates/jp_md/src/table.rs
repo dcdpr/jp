@@ -22,6 +22,7 @@ use syntect::highlighting::Theme;
 
 use crate::{
     ansi::{self, AnsiState, RESET},
+    color::ColorMode,
     format::DefaultBackground,
     render::{HrOptions, TerminalFormatter},
 };
@@ -63,6 +64,7 @@ pub fn format_table(
     theme: &Theme,
     default_background: Option<&DefaultBackground>,
     inline_code_bg: Option<&(String, String)>,
+    color_mode: ColorMode,
 ) -> Option<String> {
     let (alignments, rows) = extract_table(
         node,
@@ -71,6 +73,7 @@ pub fn format_table(
         theme,
         default_background,
         inline_code_bg,
+        color_mode,
     )?;
 
     // Compute visual widths for each column.
@@ -163,6 +166,7 @@ fn extract_table(
     theme: &Theme,
     default_background: Option<&DefaultBackground>,
     inline_code_bg: Option<&(String, String)>,
+    color_mode: ColorMode,
 ) -> Option<(Vec<TableAlignment>, Vec<Vec<RenderedCell>>)> {
     let alignments = match node.data().value {
         NodeValue::Table(ref nt) => nt.alignments.clone(),
@@ -189,6 +193,7 @@ fn extract_table(
                 theme,
                 default_background,
                 inline_code_bg,
+                color_mode,
             );
             cells.push(RenderedCell { rendered });
         }
@@ -208,6 +213,7 @@ fn render_cell_content(
     theme: &Theme,
     default_background: Option<&DefaultBackground>,
     inline_code_bg: Option<&(String, String)>,
+    color_mode: ColorMode,
 ) -> String {
     let mut buf = String::new();
     {
@@ -227,6 +233,7 @@ fn render_cell_content(
             theme,
             default_background,
             inline_code_bg,
+            color_mode,
             &mut buf,
         );
 

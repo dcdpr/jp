@@ -4,6 +4,7 @@ use assert_matches::assert_matches;
 use jp_config::AppConfig;
 use jp_conversation::{ConversationStream, event::ChatRequest};
 use jp_inquire::prompt::{MockPromptBackend, TerminalPromptBackend};
+use jp_md::color::ColorMode;
 use jp_printer::{OutputFormat, Printer};
 
 use super::*;
@@ -15,7 +16,11 @@ fn make_printer() -> Printer {
 
 fn make_turn_coordinator() -> TurnCoordinator {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
-    TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style)
+    TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        ColorMode::default(),
+    )
 }
 
 #[test]

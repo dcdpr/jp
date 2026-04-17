@@ -22,6 +22,7 @@ expression: "AppConfig::fields()"
     "style.reasoning.background",
     "style.reasoning.display",
     "style.reasoning.summary_model",
+    "style.markdown.color_mode",
     "style.markdown.hr_style",
     "style.markdown.table_max_column_width",
     "style.markdown.theme",

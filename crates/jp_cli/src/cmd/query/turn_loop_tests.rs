@@ -39,6 +39,7 @@ use jp_llm::{
         },
     },
 };
+use jp_md::color::ColorMode;
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::Storage;
 use jp_tool::{AnswerType, Question};
@@ -183,6 +184,7 @@ async fn test_quit_during_streaming_persists_content() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
+        ColorMode::default(),
     )
     .await;
 
@@ -255,6 +257,7 @@ async fn test_normal_completion_persists_content() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
+        ColorMode::default(),
     )
     .await
     .unwrap();
@@ -340,6 +343,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
+        ColorMode::default(),
     )
     .await;
 
@@ -440,6 +444,7 @@ async fn test_quit_during_tool_execution_persists() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
+        ColorMode::default(),
     )
     .await;
 
@@ -539,6 +544,7 @@ async fn test_multiple_tool_calls_in_sequence() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
+        ColorMode::default(),
     )
     .await;
 
@@ -629,6 +635,7 @@ async fn test_empty_tool_response_continues_cycle() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
+        ColorMode::default(),
     )
     .await;
 
@@ -741,6 +748,7 @@ async fn test_tool_restart_on_shutdown_signal() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await;
 
@@ -852,6 +860,7 @@ async fn test_merged_stream_exits_after_tool_response() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await;
 
@@ -976,6 +985,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await;
 
@@ -1114,6 +1124,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await;
 
@@ -1256,6 +1267,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await;
 
@@ -1399,6 +1411,7 @@ async fn test_tool_call_with_run_mode_skip() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await;
 
@@ -1595,6 +1608,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await;
 
@@ -1739,6 +1753,7 @@ async fn test_tool_call_returns_error() {
             Arc::new(backend),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await;
 
@@ -1900,6 +1915,7 @@ async fn test_waiting_indicator_shows_during_delay() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await
         .unwrap();
@@ -1980,6 +1996,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await
         .unwrap();
@@ -2055,6 +2072,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await
         .unwrap();
@@ -2233,6 +2251,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await;
 
@@ -2319,6 +2338,7 @@ async fn test_turn_start_event_is_emitted() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
+        ColorMode::default(),
     )
     .await
     .unwrap();
@@ -2381,6 +2401,7 @@ async fn test_turn_start_index_increments_across_turns() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
+        ColorMode::default(),
     )
     .await
     .unwrap();
@@ -2414,6 +2435,7 @@ async fn test_turn_start_index_increments_across_turns() {
         Arc::new(MockPromptBackend::new()),
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
+        ColorMode::default(),
     )
     .await
     .unwrap();
@@ -2503,6 +2525,7 @@ async fn test_markdown_flushed_before_tool_header() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await
         .unwrap();
@@ -2676,6 +2699,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await
         .unwrap();
@@ -2831,6 +2855,7 @@ async fn test_single_tool_call_rendered_with_args() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
+            ColorMode::default(),
         )
         .await
         .unwrap();
@@ -3088,6 +3113,7 @@ async fn test_tool_with_single_inquiry() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
+            ColorMode::default(),
         )
         .await;
 
@@ -3236,6 +3262,7 @@ async fn test_tool_with_multiple_inquiries() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
+            ColorMode::default(),
         )
         .await;
 
@@ -3389,6 +3416,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
+            ColorMode::default(),
         )
         .await;
 
@@ -3535,6 +3563,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
+            ColorMode::default(),
         )
         .await;
 
@@ -3683,6 +3712,7 @@ async fn test_retry_counter_resets_on_successful_event() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
+            ColorMode::default(),
         )
         .await;
 
@@ -3786,6 +3816,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             Arc::new(MockPromptBackend::new()),
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
+            ColorMode::default(),
         )
         .await;
 

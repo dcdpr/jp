@@ -36,6 +36,7 @@ use jp_config::style::{
 use jp_conversation::event::ChatResponse;
 use jp_md::{
     buffer::{Buffer, Event},
+    color::ColorMode,
     format::{BackgroundFill, DefaultBackground, Formatter, SavedHighlightState, TerminalOptions},
 };
 use jp_printer::{PrintableExt as _, Printer};
@@ -62,6 +63,7 @@ pub struct ChatRenderer {
     formatter: Formatter,
     printer: Arc<Printer>,
     config: StyleConfig,
+    color_mode: ColorMode,
     last_content_kind: Option<ContentKind>,
     reasoning_chars_count: usize,
     /// Saved highlighting state for the current fenced code block, if any.
@@ -69,14 +71,15 @@ pub struct ChatRenderer {
 }
 
 impl ChatRenderer {
-    pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
+    pub fn new(printer: Arc<Printer>, config: StyleConfig, color_mode: ColorMode) -> Self {
         let pretty = printer.pretty_printing_enabled();
-        let formatter = formatter_from_config(&config, pretty);
+        let formatter = formatter_from_config(&config, pretty, color_mode);
         Self {
             buffer: Buffer::new(),
             formatter,
             printer,
             config,
+            color_mode,
             last_content_kind: None,
             reasoning_chars_count: 0,
             code_highlight: None,
@@ -320,7 +323,7 @@ impl ChatRenderer {
                     .reasoning
                     .background
                     .map(|color| DefaultBackground {
-                        param: crate::format::color_to_bg_param(color),
+                        param: crate::format::color_to_bg_param(color, self.color_mode),
                         fill: BackgroundFill::Terminal,
                     })
             } else {
@@ -354,16 +357,17 @@ impl ChatRenderer {
     pub fn reset(&mut self) {
         self.buffer = Buffer::new();
         let pretty = self.printer.pretty_printing_enabled();
-        self.formatter = formatter_from_config(&self.config, pretty);
+        self.formatter = formatter_from_config(&self.config, pretty, self.color_mode);
         self.last_content_kind = None;
         self.reasoning_chars_count = 0;
         self.code_highlight = None;
     }
 }
 
-fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
+fn formatter_from_config(config: &StyleConfig, pretty: bool, color_mode: ColorMode) -> Formatter {
     Formatter::with_width(config.markdown.wrap_width)
         .table_max_column_width(config.markdown.table_max_column_width)
+        .color_mode(color_mode)
         .theme(if pretty {
             config.markdown.theme.as_deref()
         } else {
@@ -374,7 +378,7 @@ fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
             config
                 .inline_code
                 .background
-                .map(crate::format::color_to_bg_param),
+                .map(|c| crate::format::color_to_bg_param(c, color_mode)),
         )
 }
 

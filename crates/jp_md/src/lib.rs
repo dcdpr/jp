@@ -29,6 +29,7 @@
 
 mod ansi;
 pub mod buffer;
+pub mod color;
 pub mod format;
 mod render;
 mod table;

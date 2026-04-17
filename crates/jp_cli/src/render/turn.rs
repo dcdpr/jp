@@ -13,6 +13,7 @@ use jp_config::{
     style::{StyleConfig, typewriter::DelayDuration},
 };
 use jp_conversation::{EventKind, stream::turn_iter::Turn};
+use jp_md::color::ColorMode;
 use jp_printer::Printer;
 use tracing::warn;
 
@@ -41,6 +42,7 @@ pub struct TurnRenderer {
     root: Utf8PathBuf,
     is_tty: bool,
     source: ConfigSource,
+    color_mode: ColorMode,
 
     // Sub-renderers (rebuilt per-turn in PerTurn mode).
     chat: ChatRenderer,
@@ -63,15 +65,17 @@ impl TurnRenderer {
         root: Utf8PathBuf,
         is_tty: bool,
         source: ConfigSource,
+        color_mode: ColorMode,
     ) -> Self {
         Self {
-            chat: ChatRenderer::new(printer.clone(), style.clone()),
+            chat: ChatRenderer::new(printer.clone(), style.clone(), color_mode),
             structured: StructuredRenderer::new(printer.clone()),
             tool: ToolRenderer::new(printer.clone(), style, root.clone(), is_tty),
             printer,
             root,
             is_tty,
             source,
+            color_mode,
             tools_config,
             tool_names: HashMap::new(),
             is_first_turn: true,
@@ -170,7 +174,7 @@ impl TurnRenderer {
         style.typewriter.text_delay = DelayDuration::default();
         style.typewriter.code_delay = DelayDuration::default();
 
-        self.chat = ChatRenderer::new(self.printer.clone(), style.clone());
+        self.chat = ChatRenderer::new(self.printer.clone(), style.clone(), self.color_mode);
         self.structured = StructuredRenderer::new(self.printer.clone());
         self.tool = ToolRenderer::new(self.printer.clone(), style, self.root.clone(), self.is_tty);
         self.tools_config = config.conversation.tools;

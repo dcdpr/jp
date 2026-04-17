@@ -89,6 +89,7 @@ PartialAppConfig {
             table_max_column_width: None,
             theme: None,
             hr_style: None,
+            color_mode: None,
         },
         reasoning: PartialReasoningConfig {
             display: None,

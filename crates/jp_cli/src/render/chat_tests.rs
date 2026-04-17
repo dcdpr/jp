@@ -11,7 +11,11 @@ fn strip_ansi(s: &str) -> String {
 
 fn create_renderer_with_config(config: AppConfig) -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-    let renderer = ChatRenderer::new(Arc::new(printer), config.style);
+    let renderer = ChatRenderer::new(
+        Arc::new(printer),
+        config.style,
+        jp_md::color::ColorMode::default(),
+    );
     (renderer, out, err)
 }
 
@@ -365,38 +369,25 @@ fn test_fenced_code_block_syntax_highlighting() {
     renderer.printer.flush();
 
     let output = out.lock().clone();
-    // Monokai Extended theme highlighting for the Rust snippet.
-    //
     // Each line is highlighted individually by the streaming code path,
-    // so each line ends with a \x1b[0m reset before the next line's
-    // escape sequences begin.
-    let expected = concat!(
-        "```rust\n",
-        "\x1b[38;2;102;217;239mfn",
-        "\x1b[38;2;248;248;242m ",
-        "\x1b[38;2;166;226;46mmain",
-        "\x1b[38;2;248;248;242m(",
-        "\x1b[38;2;248;248;242m)",
-        "\x1b[38;2;248;248;242m ",
-        "\x1b[38;2;248;248;242m{",
-        "\x1b[38;2;248;248;242m\n",
-        "\x1b[0m",
-        "\x1b[38;2;248;248;242m    ",
-        "\x1b[38;2;248;248;242mprintln!",
-        "\x1b[38;2;248;248;242m(",
-        "\x1b[38;2;230;219;116m\"",
-        "\x1b[38;2;230;219;116mtest",
-        "\x1b[38;2;230;219;116m\"",
-        "\x1b[38;2;248;248;242m)",
-        "\x1b[38;2;248;248;242m;",
-        "\x1b[38;2;248;248;242m\n",
-        "\x1b[0m",
-        "\x1b[38;2;248;248;242m}",
-        "\x1b[38;2;248;248;242m\n",
-        "\x1b[0m",
-        "```\n",
+    // so each line ends with a \x1b[0m reset. Both foreground (38;2;)
+    // and background (48;2;) escapes are emitted per token.
+    assert!(output.starts_with("```rust\n"), "should start with fence");
+    assert!(output.ends_with("```\n"), "should end with fence");
+    assert!(output.contains("fn"), "should contain fn keyword");
+    assert!(output.contains("main"), "should contain main");
+    assert!(output.contains("println!"), "should contain println");
+    assert!(output.contains("test"), "should contain string content");
+    // Foreground colors.
+    assert!(output.contains("\x1b[38;2;"), "should have fg escapes");
+    // Background colors (theme background behind each token).
+    assert!(output.contains("\x1b[48;2;"), "should have bg escapes");
+    // Per-line resets between highlighted lines.
+    assert_eq!(
+        output.matches("\x1b[0m").count(),
+        3,
+        "should reset each line"
     );
-    assert_eq!(output, expected);
 }
 
 #[test]

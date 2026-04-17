@@ -65,6 +65,8 @@ impl Print {
         style.typewriter.text_delay = DelayDuration::instant();
         style.typewriter.code_delay = DelayDuration::instant();
 
+        let color_mode = crate::format::resolve_color_mode(cfg.style.markdown.color_mode);
+
         let mut renderer = TurnRenderer::new(
             ctx.printer.clone(),
             style,
@@ -72,6 +74,7 @@ impl Print {
             root,
             ctx.term.is_tty,
             source,
+            color_mode,
         );
 
         let turns = events.iter_turns();

@@ -346,10 +346,13 @@ impl Query {
 
         // If we have a query, and it was built from the editor, we print it
         // to the terminal for convenience, formatted as markdown.
+        let color_mode = crate::format::resolve_color_mode(cfg.style.markdown.color_mode);
+
         if query_file.is_some() {
             let pretty = ctx.printer.pretty_printing_enabled();
             let formatter = Formatter::with_width(cfg.style.markdown.wrap_width)
                 .table_max_column_width(cfg.style.markdown.table_max_column_width)
+                .color_mode(color_mode)
                 .theme(if pretty {
                     cfg.style.markdown.theme.as_deref()
                 } else {
@@ -360,7 +363,7 @@ impl Query {
                     cfg.style
                         .inline_code
                         .background
-                        .map(crate::format::color_to_bg_param),
+                        .map(|c| crate::format::color_to_bg_param(c, color_mode)),
                 );
 
             let formatted =
@@ -443,6 +446,7 @@ impl Query {
                 &tools,
                 ctx.printer.clone(),
                 chat_request,
+                color_mode,
             )
             .await
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
@@ -670,6 +674,7 @@ impl Query {
         tools: &[ToolDefinition],
         printer: Arc<Printer>,
         chat_request: ChatRequest,
+        color_mode: jp_md::color::ColorMode,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
@@ -708,6 +713,7 @@ impl Query {
             prompt_backend,
             tool_coordinator,
             chat_request,
+            color_mode,
         )
         .await
     }
