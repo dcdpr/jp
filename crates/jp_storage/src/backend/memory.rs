@@ -62,21 +62,27 @@ impl PersistBackend for InMemoryStorageBackend {
 
     fn archive(&self, id: &ConversationId) -> Result<()> {
         let entry = self.conversations.lock().expect("poisoned").remove(id);
-        if let Some(entry) = entry {
-            self.archived.lock().expect("poisoned").insert(*id, entry);
+        match entry {
+            Some(entry) => {
+                self.archived.lock().expect("poisoned").insert(*id, entry);
+                Ok(())
+            }
+            None => Err(crate::Error::ConversationNotFound(*id)),
         }
-        Ok(())
     }
 
     fn unarchive(&self, id: &ConversationId) -> Result<()> {
         let entry = self.archived.lock().expect("poisoned").remove(id);
-        if let Some(entry) = entry {
-            self.conversations
-                .lock()
-                .expect("poisoned")
-                .insert(*id, entry);
+        match entry {
+            Some(entry) => {
+                self.conversations
+                    .lock()
+                    .expect("poisoned")
+                    .insert(*id, entry);
+                Ok(())
+            }
+            None => Err(crate::Error::ConversationNotFound(*id)),
         }
-        Ok(())
     }
 }
 

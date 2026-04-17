@@ -153,21 +153,9 @@ fn is_archived_returns_false_for_non_archived_targets() {
 }
 
 #[test]
-fn archived_keyword_resolves_most_recently_archived() {
-    let mut ws = Workspace::new(Utf8PathBuf::new());
-    let config = Arc::new(AppConfig::new_test());
-
-    let id1 = ws.create_conversation(Conversation::default(), config.clone());
-    let id2 = ws.create_conversation(Conversation::default(), config.clone());
-
-    // Simulate archived_at timestamps.
-    ws.conversations().for_each(|_| {});
-
-    // Archive both with different archived_at values.
-    // We can't use archive_conversation (needs lock + fs), so test the
-    // resolution logic by checking that Archived resolves against
-    // archived_conversations(). Since we're in-memory without archived
-    // conversations, this should return an error.
+fn archived_keyword_errors_when_no_archived_conversations() {
+    let (ws, _) = workspace_with_conversation();
+    // Active conversations exist, but none are archived.
     let result = ConversationTarget::Archived.resolve(&ws, None);
     assert!(result.is_err());
 }

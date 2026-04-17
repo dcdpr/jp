@@ -169,17 +169,16 @@ with_backends!(archive_and_unarchive, |b| {
     );
 });
 
-with_backends!(archive_nonexistent_returns_error, |b| {
+with_backends!(archive_nonexistent_is_not_found, |b| {
     let id = test_id(1_000_000);
-    // Archiving a conversation that doesn't exist should error on the
-    // filesystem backend and be a no-op on the in-memory backend.
-    // Both should not panic.
-    let _ = b.archive(&id);
+    let result = b.archive(&id);
+    assert!(result.is_err(), "archiving a nonexistent conversation should fail");
 });
 
-with_backends!(unarchive_nonexistent_returns_error, |b| {
+with_backends!(unarchive_nonexistent_is_not_found, |b| {
     let id = test_id(1_000_000);
-    let _ = b.unarchive(&id);
+    let result = b.unarchive(&id);
+    assert!(result.is_err(), "unarchiving a nonexistent conversation should fail");
 });
 
 with_backends!(load_archived_ids_empty_when_no_archive_dir, |b| {

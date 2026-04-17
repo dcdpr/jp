@@ -739,6 +739,47 @@ fn test_archived_conversations_returns_empty_when_none() {
 }
 
 #[test]
+fn test_archived_keyword_resolves_most_recently_archived() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+
+    let fs = FsStorageBackend::new(&storage).unwrap();
+    let mut ws = workspace_with_fs(&root, &fs);
+    let config = Arc::new(AppConfig::new_test());
+
+    let id1 = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
+    let id2 = ConversationId::try_from(datetime!(2024-06-02 00:00:00 Z)).unwrap();
+
+    for id in [id1, id2] {
+        ws.create_conversation_with_id(id, Conversation::default(), config.clone());
+        let h = ws.acquire_conversation(&id).unwrap();
+        let mut conv = ws.test_lock(h).into_mut();
+        conv.update_metadata(|_| {});
+        conv.flush().unwrap();
+        drop(conv);
+    }
+
+    // Archive id1 first, then id2. id2 gets the later archived_at.
+    let h = ws.acquire_conversation(&id1).unwrap();
+    ws.archive_conversation(ws.test_lock(h).into_mut());
+    std::thread::sleep(Duration::from_millis(10));
+    let h = ws.acquire_conversation(&id2).unwrap();
+    ws.archive_conversation(ws.test_lock(h).into_mut());
+
+    // The `archived` keyword should resolve to id2 (most recently archived).
+    let archived: Vec<_> = ws.archived_conversations().collect();
+    assert_eq!(archived.len(), 2);
+
+    let most_recent = archived
+        .iter()
+        .max_by_key(|(_, c)| c.archived_at)
+        .map(|(id, _)| *id)
+        .unwrap();
+    assert_eq!(most_recent, id2);
+}
+
+#[test]
 fn test_unarchive_nonexistent_returns_error() {
     let tmp = tempdir().unwrap();
     let root = tmp.path().join("root");
