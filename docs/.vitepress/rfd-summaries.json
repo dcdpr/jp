@@ -286,5 +286,9 @@
   "070-negative-config-deltas.md": {
     "hash": "11a2589c1ac456f6ecbbcad7b97b14808610a8cb5325b02a4936c8c13689e3dd",
     "summary": "Introduces `-C` flag to selectively revert previously applied config sources using provenance tracking via claims maps."
+  },
+  "071-conversation-archiving.md": {
+    "hash": "ac30ec3193cfe5bc2b2bac3aff28abfa06fc1a9b5309effc6015abc6b6e2ab51",
+    "summary": "Adds conversation archiving to JP, moving inactive conversations to a hidden partition while preserving them."
   }
 }
