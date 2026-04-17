@@ -16,7 +16,7 @@ use chrono::NaiveDate;
 use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
-    assistant::tool_choice::ToolChoice,
+    assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::{
         id::{Name, ProviderId},
         parameters::ReasoningEffort,
@@ -56,6 +56,25 @@ static PROVIDER: ProviderId = ProviderId::Anthropic;
 ///
 /// See: <https://platform.claude.com/docs/en/build-with-claude/prompt-caching#combining-with-block-level-caching>
 const MAX_EXPLICIT_CACHE_CONTROL_COUNT: usize = 3;
+
+/// Map a [`CachePolicy`] to Anthropic's `CacheControl` type.
+///
+/// Returns `None` for `CachePolicy::Off`, which signals callers to skip
+/// all cache annotations.
+fn to_cache_control(policy: CachePolicy) -> Option<types::CacheControl> {
+    let ttl = match policy {
+        CachePolicy::Off => return None,
+        CachePolicy::Short => Some(types::CacheControlTtl::Ttl5Minutes),
+        // Anthropic only supports 5m and 1h. Round to the nearest.
+        CachePolicy::Custom(d) if d.as_secs() <= 300 => Some(types::CacheControlTtl::Ttl5Minutes),
+        CachePolicy::Long | CachePolicy::Custom(_) => Some(types::CacheControlTtl::Ttl1Hour),
+    };
+
+    Some(types::CacheControl {
+        kind: types::CacheControlKind::Ephemeral,
+        ttl,
+    })
+}
 
 const THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
 const REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
@@ -628,14 +647,19 @@ fn create_request(
             schema: transform_schema(schema),
         });
 
-    let mut cache_budget = MAX_EXPLICIT_CACHE_CONTROL_COUNT;
     let config = thread.events.config()?;
+    let cache = to_cache_control(config.assistant.request.cache);
+    let mut cache_budget = if cache.is_some() {
+        MAX_EXPLICIT_CACHE_CONTROL_COUNT
+    } else {
+        0
+    };
 
     let thread_parts = thread.into_parts();
 
     // Build messages from conversation events, then prepend any attachments as
     // native content blocks in the first user message.
-    let mut messages = convert_events(thread_parts.events);
+    let mut messages = convert_events(thread_parts.events, cache);
 
     if !thread_parts.attachments.is_empty() {
         let mut doc_blocks: Vec<_> = thread_parts
@@ -699,7 +723,7 @@ fn create_request(
         if let Some(types::MessageContent::Document(doc)) = doc_blocks.last_mut()
             && cache_budget > 0
         {
-            doc.cache_control = Some(types::CacheControl::default());
+            doc.cache_control = cache;
             cache_budget -= 1;
         }
 
@@ -729,11 +753,11 @@ fn create_request(
         // If we explicitly placed a breakpoint in the messages, we consume 1
         // budget
         cache_budget = cache_budget.saturating_sub(1);
-    } else {
+    } else if let Some(cc) = cache {
         // Automatic caching handles the growing message history. The API places
         // a cache breakpoint on the last cacheable block (the latest message),
         // consuming 1 of the 4 available slots.
-        builder.cache_control(types::CacheControl::default());
+        builder.cache_control(cc);
     }
 
     builder.model(model.id.name.clone()).messages(messages);
@@ -755,7 +779,7 @@ fn create_request(
         .map(|(i, text)| {
             let cache_control = if Some(i) == last_prompt_idx && cache_budget > 0 {
                 cache_budget -= 1;
-                Some(types::CacheControl::default())
+                cache
             } else {
                 None
             };
@@ -768,7 +792,7 @@ fn create_request(
         .collect();
 
     let strict_tools = model.supports_structured_output() && beta.structured_outputs();
-    let tools = convert_tools(tools, strict_tools, &mut cache_budget);
+    let tools = convert_tools(tools, strict_tools, &mut cache_budget, cache);
 
     // From testing, it seems that sending a single tool with the
     // "function" tool choice can result in incorrect API responses from
@@ -1292,6 +1316,7 @@ fn convert_tools(
     tools: Vec<ToolDefinition>,
     strict: bool,
     cache_budget: &mut usize,
+    cache: Option<types::CacheControl>,
 ) -> Vec<types::Tool> {
     let mut tools: Vec<_> = tools
         .into_iter()
@@ -1357,7 +1382,7 @@ fn convert_tools(
             }
         };
 
-        *cache_control = Some(types::CacheControl::default());
+        *cache_control = cache;
         *cache_budget = cache_budget.saturating_sub(1);
     }
 
@@ -1368,7 +1393,10 @@ fn convert_tools(
 ///
 /// Events from the same role are combined into a single message with multiple
 /// content blocks.
-fn convert_events(events: ConversationStream) -> Vec<types::Message> {
+fn convert_events(
+    events: ConversationStream,
+    cache: Option<types::CacheControl>,
+) -> Vec<types::Message> {
     events
         .into_iter()
         .filter_map(|event| {
@@ -1391,7 +1419,7 @@ fn convert_events(events: ConversationStream) -> Vec<types::Message> {
 
             convert_event(event.event, is_anthropic).map(|(role, mut content)| {
                 if has_cache_breakpoint {
-                    apply_cache_control(&mut content);
+                    apply_cache_control(&mut content, cache);
                 }
 
                 (role, content)
@@ -1412,16 +1440,16 @@ fn convert_events(events: ConversationStream) -> Vec<types::Message> {
         })
 }
 
-fn apply_cache_control(content: &mut types::MessageContent) {
+fn apply_cache_control(content: &mut types::MessageContent, cache: Option<types::CacheControl>) {
     match content {
         types::MessageContent::Text(text) => {
-            text.cache_control = Some(types::CacheControl::default());
+            text.cache_control = cache;
         }
         types::MessageContent::ToolUse(tu) => {
-            tu.cache_control = Some(types::CacheControl::default());
+            tu.cache_control = cache;
         }
         types::MessageContent::ToolResult(tr) => {
-            tr.cache_control = Some(types::CacheControl::default());
+            tr.cache_control = cache;
         }
         _ => {}
     }

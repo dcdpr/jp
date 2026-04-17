@@ -58,12 +58,14 @@ when:
             ]
           },
           "cache_control": {
-            "type": "ephemeral"
+            "type": "ephemeral",
+            "ttl": "1h"
           }
         }
       ],
       "cache_control": {
-        "type": "ephemeral"
+        "type": "ephemeral",
+        "ttl": "1h"
       }
     }
 then:
@@ -402,7 +404,8 @@ when:
       },
       "stream": true,
       "cache_control": {
-        "type": "ephemeral"
+        "type": "ephemeral",
+        "ttl": "1h"
       }
     }
 then:

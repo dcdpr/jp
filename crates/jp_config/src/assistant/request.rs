@@ -101,7 +101,7 @@ impl ToPartial for RequestConfig {
 /// Controls whether the provider should apply prompt caching.
 ///
 /// Providers map these values to their native caching mechanisms:
-/// - Anthropic: `cache_control` annotations and automatic caching
+/// - Anthropic: `cache_control` annotations with TTL (`"5m"` or `"1h"`)
 /// - Other providers: provider-specific caching hints
 ///
 /// When `Off`, the provider skips all caching annotations.
@@ -110,11 +110,11 @@ pub enum CachePolicy {
     /// No caching. The provider skips all cache annotations.
     Off,
 
-    /// Standard caching with provider-default TTL (typically ~5 minutes).
-    #[default]
+    /// Standard caching with short TTL (Anthropic: 5 minutes).
     Short,
 
-    /// Extended caching with longer TTL (typically ~1 hour where supported).
+    /// Extended caching with longer TTL (Anthropic: 1 hour, at 2x write cost).
+    #[default]
     Long,
 
     /// Custom duration. Not all providers support arbitrary durations;
