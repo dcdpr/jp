@@ -41,6 +41,18 @@ pub struct Conversation {
     )]
     pub pinned_at: Option<DateTime<Utc>>,
 
+    /// When the conversation was archived, or `None` if not archived.
+    ///
+    /// Set when the conversation is moved to the archive partition, cleared
+    /// when unarchived. Used for sorting archived conversation listings.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::serialize_dt_opt",
+        deserialize_with = "crate::deserialize_dt_opt"
+    )]
+    pub archived_at: Option<DateTime<Utc>>,
+
     /// When the conversation expires.
     ///
     /// An expired conversation that is not active, may be garbage collected by
@@ -75,6 +87,7 @@ impl Default for Conversation {
             title: None,
             user: false,
             pinned_at: None,
+            archived_at: None,
             expires_at: None,
             last_event_at: None,
             events_count: 0,

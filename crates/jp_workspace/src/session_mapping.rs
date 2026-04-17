@@ -12,7 +12,7 @@ use std::{collections::HashSet, fs};
 
 use chrono::{DateTime, Utc};
 use jp_conversation::ConversationId;
-use jp_storage::backend::FsStorageBackend;
+use jp_storage::backend::{ConversationFilter, FsStorageBackend};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
@@ -183,7 +183,7 @@ impl Workspace {
         // them.
         let conversation_ids: HashSet<_> = self
             .loader
-            .load_all_conversation_ids()
+            .load_conversation_ids(ConversationFilter::default())
             .into_iter()
             .collect();
 
