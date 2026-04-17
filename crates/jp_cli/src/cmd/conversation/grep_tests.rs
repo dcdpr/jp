@@ -737,30 +737,330 @@ fn test_context_ranges_single() {
     assert_eq!(ranges, vec![(2, 2)]);
 }
 
+fn collect_lines(kind: &EventKind) -> Vec<String> {
+    event_lines(kind)
+        .into_iter()
+        .map(std::borrow::Cow::into_owned)
+        .collect()
+}
+
 #[test]
 fn test_event_text_content_chat_request() {
     let kind = EventKind::ChatRequest("hello world".into());
-    let texts = event_lines(&kind);
-    assert_eq!(texts, vec!["hello world"]);
+    assert_eq!(collect_lines(&kind), vec!["hello world".to_string()]);
 }
 
 #[test]
 fn test_event_text_content_chat_response_message() {
     let kind = EventKind::ChatResponse(ChatResponse::message("response text"));
-    let texts = event_lines(&kind);
-    assert_eq!(texts, vec!["response text"]);
+    assert_eq!(collect_lines(&kind), vec!["response text".to_string()]);
 }
 
 #[test]
 fn test_event_text_content_chat_response_reasoning() {
     let kind = EventKind::ChatResponse(ChatResponse::reasoning("thinking..."));
-    let texts = event_lines(&kind);
-    assert_eq!(texts, vec!["thinking..."]);
+    assert_eq!(collect_lines(&kind), vec!["thinking...".to_string()]);
 }
 
 #[test]
 fn test_event_text_content_turn_start() {
     let kind = EventKind::TurnStart(jp_conversation::event::TurnStart);
-    let texts = event_lines(&kind);
-    assert!(texts.is_empty());
+    assert!(collect_lines(&kind).is_empty());
+}
+
+#[test]
+fn test_event_scope_mapping() {
+    assert_eq!(
+        event_scope(&EventKind::ChatRequest("x".into())),
+        Some(ConcreteScope::User)
+    );
+    assert_eq!(
+        event_scope(&EventKind::ChatResponse(ChatResponse::message("x"))),
+        Some(ConcreteScope::Assistant)
+    );
+    assert_eq!(
+        event_scope(&EventKind::ChatResponse(ChatResponse::reasoning("x"))),
+        Some(ConcreteScope::Reasoning)
+    );
+    assert_eq!(
+        event_scope(&EventKind::TurnStart(jp_conversation::event::TurnStart)),
+        None
+    );
+}
+
+#[test]
+fn test_expand_scopes_empty_is_all() {
+    let expanded = expand_scopes(&[]);
+    assert_eq!(expanded.len(), ConcreteScope::ALL.len());
+}
+
+#[test]
+fn test_expand_scopes_chat_meta() {
+    let expanded = expand_scopes(&[Scope::Chat]);
+    assert!(expanded.contains(&ConcreteScope::User));
+    assert!(expanded.contains(&ConcreteScope::Assistant));
+    assert!(expanded.contains(&ConcreteScope::Reasoning));
+    assert!(expanded.contains(&ConcreteScope::Structured));
+    assert!(!expanded.contains(&ConcreteScope::Title));
+    assert!(!expanded.contains(&ConcreteScope::ToolCall));
+}
+
+#[test]
+fn test_expand_scopes_tool_meta() {
+    let expanded = expand_scopes(&[Scope::Tool]);
+    assert!(expanded.contains(&ConcreteScope::ToolCall));
+    assert!(expanded.contains(&ConcreteScope::ToolResult));
+    assert!(!expanded.contains(&ConcreteScope::User));
+}
+
+#[test]
+fn test_expand_scopes_mixed() {
+    let expanded = expand_scopes(&[Scope::Title, Scope::User]);
+    assert_eq!(expanded.len(), 2);
+    assert!(expanded.contains(&ConcreteScope::Title));
+    assert!(expanded.contains(&ConcreteScope::User));
+}
+
+#[test]
+fn test_scope_user_only_matches_user_events() {
+    let id = make_id(11_100);
+    let (mut ctx, _, out) = setup_ctx_with_events(vec![(id, vec![
+        ConversationEvent::new(
+            ChatRequest::from("alpha-from-user"),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("alpha-from-assistant"),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
+        ),
+    ])]);
+
+    let grep = Grep {
+        pattern: "alpha".into(),
+        scopes: vec![Scope::User],
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    assert!(output.contains("alpha-from-user"));
+    assert!(!output.contains("alpha-from-assistant"));
+}
+
+#[test]
+fn test_scope_assistant_only_matches_assistant_events() {
+    let id = make_id(11_200);
+    let (mut ctx, _, out) = setup_ctx_with_events(vec![(id, vec![
+        ConversationEvent::new(
+            ChatRequest::from("beta-from-user"),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("beta-from-assistant"),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
+        ),
+    ])]);
+
+    let grep = Grep {
+        pattern: "beta".into(),
+        scopes: vec![Scope::Assistant],
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    assert!(output.contains("beta-from-assistant"));
+    assert!(!output.contains("beta-from-user"));
+}
+
+#[test]
+fn test_scope_title_matches_conversation_title() {
+    let id = make_id(11_300);
+    let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+    let conv = Conversation {
+        title: Some("A fine gamma-title for this chat".into()),
+        ..Default::default()
+    };
+
+    let (mut ctx, _, out) =
+        setup_ctx_with_conversations(vec![(id, conv, vec![ConversationEvent::new(
+            ChatRequest::from("no match here"),
+            ts,
+        )])]);
+
+    let grep = Grep {
+        pattern: "gamma-title".into(),
+        scopes: vec![Scope::Title],
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    assert!(
+        output.contains("gamma-title"),
+        "expected title match: {output}"
+    );
+}
+
+#[test]
+fn test_scope_title_does_not_match_events() {
+    // Only the event text contains the pattern; --scope title should miss it.
+    let id = make_id(11_400);
+    let (mut ctx, _, _out) = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
+        ChatRequest::from("delta-in-request"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    let grep = Grep {
+        pattern: "delta".into(),
+        scopes: vec![Scope::Title],
+        ..Default::default()
+    };
+    assert!(grep.run(&mut ctx, vec![]).is_err());
+}
+
+#[test]
+fn test_scope_tool_searches_arguments() {
+    use jp_conversation::event::ToolCallRequest;
+    use serde_json::{Map, Value};
+
+    let id = make_id(11_500);
+    let mut args = Map::new();
+    args.insert("path".into(), Value::String("/etc/epsilon-file".into()));
+
+    let (mut ctx, _, out) = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
+        ToolCallRequest::new("tc1".into(), "read_file".into(), args),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    let grep = Grep {
+        pattern: "epsilon-file".into(),
+        scopes: vec![Scope::ToolCall],
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    assert!(
+        output.contains("epsilon-file"),
+        "expected tool args match: {output}"
+    );
+}
+
+#[test]
+fn test_scope_chat_meta_matches_reasoning() {
+    let id = make_id(11_600);
+    let (mut ctx, _, out) = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
+        ChatResponse::reasoning("zeta-thinking-content"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    let grep = Grep {
+        pattern: "zeta".into(),
+        scopes: vec![Scope::Chat],
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    assert!(output.contains("zeta-thinking-content"));
+}
+
+#[test]
+fn test_scope_column_shown_when_multiple_scope_flags() {
+    let id = make_id(11_700);
+    let (mut ctx, _, out) = setup_ctx_with_plain(vec![(id, vec![
+        ConversationEvent::new(
+            ChatRequest::from("eta-mark"),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("eta-mark"),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
+        ),
+    ])]);
+
+    let grep = Grep {
+        pattern: "eta-mark".into(),
+        scopes: vec![Scope::User, Scope::Assistant],
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    assert!(
+        output.contains("user") && output.contains("assistant"),
+        "expected scope labels: {output}"
+    );
+}
+
+#[test]
+fn test_scope_column_hidden_when_no_scope_flag() {
+    // Default invocation (no --scope) must keep the pre-scope output shape,
+    // even when hits span multiple scopes.
+    let id = make_id(11_750);
+    let (mut ctx, _, out) = setup_ctx_with_plain(vec![(id, vec![
+        ConversationEvent::new(
+            ChatRequest::from("kappa-mark"),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("kappa-mark"),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
+        ),
+    ])]);
+
+    let grep = Grep {
+        pattern: "kappa-mark".into(),
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    assert!(
+        !output.contains("user:"),
+        "unexpected scope label: {output}"
+    );
+    assert!(!output.contains("assistant:"));
+}
+
+#[test]
+fn test_scope_column_hidden_when_single_scope() {
+    let id = make_id(11_800);
+    let (mut ctx, _, out) = setup_ctx_with_plain(vec![(id, vec![ConversationEvent::new(
+        ChatRequest::from("theta-mark"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    let grep = Grep {
+        pattern: "theta-mark".into(),
+        scopes: vec![Scope::User],
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    assert!(
+        !output.contains("user:"),
+        "unexpected scope label: {output}"
+    );
+}
+
+#[test]
+fn test_json_output_includes_scope() {
+    let id = make_id(11_900);
+    let (mut ctx, _, out) = setup_ctx_with_json(vec![(id, vec![ConversationEvent::new(
+        ChatRequest::from("iota-mark"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    let grep = Grep {
+        pattern: "iota-mark".into(),
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    let parsed: serde_json::Value = serde_json::from_str(&output).unwrap();
+    assert_eq!(parsed[0]["scope"], "user");
 }
