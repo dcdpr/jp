@@ -118,7 +118,16 @@ impl TurnRenderer {
                         .as_ref()
                         .map_or(default_style, ToolConfigWithDefaults::style);
 
-                    if !style.hidden {
+                    if style.hidden {
+                        // Tool call is hidden, but it's still a semantic
+                        // boundary between message blocks. Flush the chat
+                        // buffer so surrounding message chunks render as
+                        // distinct paragraphs, without transitioning to
+                        // ToolCall state (which would add an extra blank
+                        // line on the next message, even though no tool UI
+                        // was rendered).
+                        self.chat.flush();
+                    } else {
                         self.chat.flush();
                         self.chat.transition_to_tool_call();
                         self.tool

@@ -888,6 +888,188 @@ fn style_brief_hides_reasoning_and_tool_details() {
 }
 
 #[test]
+fn style_chat_hides_reasoning_and_tool_calls() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+
+    let (mut ctx, id, out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Explain Rust"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me think deeply about this...\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("src/main.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("fn main() {}".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("Rust is a systems language.\n\n"),
+            ts(0, 0, 5),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: Some(PrintStyle::Chat),
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    let chrome = strip_ansi(&err.lock());
+
+    // Reasoning is hidden.
+    assert!(
+        !output.contains("think deeply"),
+        "reasoning should be hidden in chat mode, got: {output}"
+    );
+
+    // No tool call header at all.
+    assert!(
+        !chrome.contains("Calling tool"),
+        "tool call header should be hidden in chat mode, got: {chrome}"
+    );
+    assert!(
+        !chrome.contains("read_file"),
+        "tool name should not appear in chat mode, got: {chrome}"
+    );
+    assert!(
+        !chrome.contains("fn main()"),
+        "tool results should be hidden in chat mode, got: {chrome}"
+    );
+
+    // User and assistant messages are still visible.
+    assert!(
+        output.contains("Explain Rust"),
+        "user message should show, got: {output}"
+    );
+    assert!(
+        output.contains("Rust is a systems language."),
+        "assistant message should show, got: {output}"
+    );
+}
+
+#[test]
+fn style_chat_separates_messages_across_hidden_reasoning() {
+    // Simulates the common case where the assistant emits
+    //   Message("...first.") -> Reasoning("...") -> Message("Now let me...")
+    // In chat mode, the reasoning block is hidden. Even so, the two
+    // message chunks must not be glued together into the same markdown
+    // paragraph — they should be separated by a blank line so the
+    // transcript reads naturally.
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Explain"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::message("Let me research the codebase first."),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Thinking privately about next steps."),
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("Now let me look at the relevant files."),
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: Some(PrintStyle::Chat),
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+
+    assert!(
+        !output.contains("first.Now let me"),
+        "message chunks should not be glued together across hidden reasoning, got: {output:?}"
+    );
+    assert!(
+        output.contains("first.\n\nNow let me"),
+        "message chunks should be separated by a blank line, got: {output:?}"
+    );
+}
+
+#[test]
+fn style_chat_separates_messages_across_hidden_tool_call() {
+    // Same concern as above, but with a tool call as the hidden boundary.
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Check it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::message("Checking the file first."),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(ChatResponse::message("Here is what I found."), ts(0, 0, 5)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: Some(PrintStyle::Chat),
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+
+    assert!(
+        !output.contains("first.Here is"),
+        "message chunks should not be glued together across hidden tool calls, got: {output:?}"
+    );
+    assert!(
+        output.contains("first.\n\nHere is what I found."),
+        "message chunks should be separated by a single blank line, got: {output:?}"
+    );
+    assert!(
+        !output.contains("first.\n\n\nHere is"),
+        "should not have more than one blank line between chunks, got: {output:?}"
+    );
+}
+
+#[test]
 fn style_full_shows_reasoning_and_untruncated_results() {
     let mut config = AppConfig::new_test();
     // Start with reasoning hidden and results truncated to 1 line.
