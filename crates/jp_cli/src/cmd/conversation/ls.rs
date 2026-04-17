@@ -84,40 +84,34 @@ impl Ls {
             Some(handles.iter().map(ConversationHandle::id).collect())
         };
 
-        let mut conversations = if self.archived {
+        let to_details = |id: ConversationId, c: &Conversation| Details {
+            active: active_conversation_id == Some(id),
+            pinned_at: c.pinned_at,
+            archived_at: c.archived_at,
+            title: c.title.clone(),
+            messages: c.events_count,
+            last_event_at: c.last_event_at.or(Some(id.timestamp())),
+            expires_at: c.expires_at,
+            local: c.user,
+            id,
+        };
+
+        let matches_filters = |id: &ConversationId, c: &Conversation| -> bool {
+            filter_ids.as_ref().is_none_or(|f| f.contains(id)) && (!self.local || c.user)
+        };
+
+        let mut conversations: Vec<_> = if self.archived {
             ctx.workspace
                 .archived_conversations()
-                .filter(|(id, _)| filter_ids.as_ref().is_none_or(|f| f.contains(id)))
-                .filter(|(_, c)| !self.local || c.user)
-                .map(|(id, conversation)| Details {
-                    id,
-                    active: false,
-                    pinned_at: conversation.pinned_at,
-                    archived_at: conversation.archived_at,
-                    title: conversation.title.clone(),
-                    messages: conversation.events_count,
-                    last_event_at: conversation.last_event_at.or(Some(id.timestamp())),
-                    expires_at: conversation.expires_at,
-                    local: conversation.user,
-                })
-                .collect::<Vec<_>>()
+                .filter(|(id, c)| matches_filters(id, c))
+                .map(|(id, c)| to_details(id, &c))
+                .collect()
         } else {
             ctx.workspace
                 .conversations()
-                .filter(|(id, _)| filter_ids.as_ref().is_none_or(|f| f.contains(id)))
-                .filter(|(_, c)| !self.local || c.user)
-                .map(|(id, conversation)| Details {
-                    id: *id,
-                    active: active_conversation_id == Some(*id),
-                    pinned_at: conversation.pinned_at,
-                    archived_at: None,
-                    title: conversation.title.clone(),
-                    messages: conversation.events_count,
-                    last_event_at: conversation.last_event_at.or(Some(id.timestamp())),
-                    expires_at: conversation.expires_at,
-                    local: conversation.user,
-                })
-                .collect::<Vec<_>>()
+                .filter(|(id, c)| matches_filters(id, c))
+                .map(|(id, c)| to_details(*id, &c))
+                .collect()
         };
 
         let count = conversations.len();

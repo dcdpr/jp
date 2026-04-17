@@ -28,9 +28,9 @@ impl Use {
     }
 
     pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        // Archive targets bypass the normal resolution pipeline — the ID
-        // isn't in the workspace index yet. We resolve + unarchive + activate
-        // in one step.
+        // Archive targets bypass the normal resolution pipeline — the ID isn't
+        // in the workspace index yet. We resolve + unarchive + activate in one
+        // step.
         if self.is_archived() {
             return self.run_unarchive(ctx);
         }
@@ -55,19 +55,18 @@ impl Use {
         }
 
         let Some(session) = &ctx.session else {
-            Err((
+            return Err((
                 1,
                 "No session identity available. Set $JP_SESSION or run in a terminal with \
                  automatic session detection."
                     .to_string(),
-            ))?;
-            unreachable!()
+            )
+                .into());
         };
 
-        let now = ctx.now();
         if let Err(error) = ctx
             .workspace
-            .activate_session_conversation(session, id, now)
+            .activate_session_conversation(session, id, ctx.now())
         {
             warn!(%error, "Failed to write session mapping.");
         }
@@ -80,9 +79,11 @@ impl Use {
         let title_suffix = conversation_title(ctx, id)
             .map(|t| format!(": {}", t.yellow()))
             .unwrap_or_default();
+
         ctx.printer.println(format!(
             "Switched active conversation from {from} to {to}{title_suffix}"
         ));
+
         Ok(())
     }
 

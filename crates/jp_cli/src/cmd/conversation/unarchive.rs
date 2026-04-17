@@ -12,9 +12,8 @@ use crate::{
 
 /// Unarchive conversations.
 ///
-/// Without IDs, shows a picker of archived conversations to restore.
-/// With IDs, unarchives each one (non-archived IDs are skipped with a
-/// warning).
+/// Without IDs, shows a picker of archived conversations to restore. With IDs,
+/// unarchives each one (non-archived IDs are skipped with a warning).
 #[derive(Debug, clap::Args)]
 pub(crate) struct Unarchive {
     #[command(flatten)]

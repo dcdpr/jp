@@ -20,12 +20,12 @@ use crate::{
 /// Without IDs, shows a picker of conversations. With IDs, archives each one.
 /// Prompts for confirmation when archiving pinned or active conversations.
 ///
-/// Use `--inactive-since` to archive all conversations that haven't been
-/// used since a given time or duration (e.g. `3w`, `2026-01-01`).
+/// Use `--inactive-since` to archive all conversations that haven't been used
+/// since a given time or duration (e.g. `3w`, `2026-01-01`).
 ///
-/// Archived conversations are hidden from listings and pickers. Use
-/// `jp c ls --archived` to list them, `jp c unarchive` to restore them,
-/// or `jp c use archived` to unarchive and activate.
+/// Archived conversations are hidden from listings and pickers. Use `jp c ls
+/// --archived` to list them, `jp c unarchive` to restore them, or `jp c use
+/// archived` to unarchive and activate.
 #[derive(Debug, clap::Args)]
 pub(crate) struct Archive {
     #[command(flatten)]
@@ -33,9 +33,9 @@ pub(crate) struct Archive {
 
     /// Archive all conversations inactive since a given time.
     ///
-    /// Accepts a relative duration (e.g. `3w`, `30d`, `6h`) or an absolute
-    /// date (e.g. `2026-01-01`). Archives every conversation whose last
-    /// activity is before the computed threshold.
+    /// Accepts a relative duration (e.g. `3w`, `30d`, `6h`) or an absolute date
+    /// (e.g. `2026-01-01`). Archives every conversation whose last activity is
+    /// before the computed threshold.
     #[arg(long, conflicts_with = "id")]
     inactive_since: Option<TimeThreshold>,
 }
