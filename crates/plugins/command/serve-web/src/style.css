@@ -1,0 +1,336 @@
+/* JP Web UI - Mobile-first, dark mode support, no JavaScript */
+
+:root {
+    --bg: #ffffff;
+    --bg-alt: #f5f5f5;
+    --fg: #1a1a1a;
+    --fg-muted: #666666;
+    --border: #e0e0e0;
+    --accent: #2563eb;
+    --user-bg: #e8f0fe;
+    --assistant-bg: #f8f8f8;
+    --reasoning-bg: #fffbeb;
+    --tool-bg: #f0fdf4;
+    --code-bg: #f4f4f5;
+    --radius: 8px;
+    --max-width: 800px;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0d1117;
+        --bg-alt: #161b22;
+        --fg: #e6edf3;
+        --fg-muted: #8b949e;
+        --border: #30363d;
+        --accent: #58a6ff;
+        --user-bg: #1c2d41;
+        --assistant-bg: #161b22;
+        --reasoning-bg: #2d2305;
+        --tool-bg: #0d2818;
+        --code-bg: #1e2228;
+    }
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--fg);
+    background: var(--bg);
+}
+
+a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+/* Page header */
+.page-header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 16px;
+}
+
+.page-header h1 {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+}
+
+.page-header .back {
+    display: inline-block;
+    margin-bottom: 4px;
+    font-size: 0.875rem;
+}
+
+/* Conversation list */
+.conversation-list {
+    padding: 0 16px 16px;
+    max-width: var(--max-width);
+    margin: 0 auto;
+}
+
+.conversation-list ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.conversation-list li {
+    border-bottom: 1px solid var(--border);
+}
+
+.conversation-list li a {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 12px 4px;
+    color: var(--fg);
+}
+
+.conversation-list li a:hover {
+    background: var(--bg-alt);
+    text-decoration: none;
+}
+
+.conversation-list .title {
+    font-weight: 500;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.conversation-list .timestamp {
+    color: var(--fg-muted);
+    font-size: 0.8125rem;
+    flex-shrink: 0;
+}
+
+.conversation-list .empty {
+    padding: 48px 0;
+    text-align: center;
+    color: var(--fg-muted);
+}
+
+/* Conversation detail */
+.conversation-detail {
+    padding: 16px;
+    max-width: var(--max-width);
+    margin: 0 auto;
+}
+
+/* Turn separator */
+.turn-separator {
+    border: none;
+    border-top: 1px dashed var(--border);
+    margin: 24px 0;
+}
+
+/* Messages */
+.message {
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    border-radius: var(--radius);
+}
+
+.message .role {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-muted);
+    margin-bottom: 4px;
+}
+
+.message.user {
+    background: var(--user-bg);
+}
+
+.message.assistant {
+    background: var(--assistant-bg);
+}
+
+.message .content {
+    overflow-wrap: break-word;
+}
+
+.message .content > :first-child {
+    margin-top: 0;
+}
+
+.message .content > :last-child {
+    margin-bottom: 0;
+}
+
+/* Reasoning blocks */
+.reasoning {
+    margin-bottom: 16px;
+    background: var(--reasoning-bg);
+    border-radius: var(--radius);
+    padding: 0;
+}
+
+.reasoning summary {
+    padding: 8px 16px;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.reasoning .content {
+    padding: 0 16px 12px;
+}
+
+/* Tool calls */
+.tool-call {
+    margin-bottom: 16px;
+    background: var(--tool-bg);
+    border-radius: var(--radius);
+}
+
+.tool-call summary {
+    padding: 8px 16px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+
+.tool-call h4 {
+    margin: 8px 0 4px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--fg-muted);
+}
+
+.tool-args,
+.tool-result {
+    padding: 0 16px 12px;
+}
+
+/* Structured output */
+.message.structured pre {
+    margin: 0;
+}
+
+/* Code blocks */
+pre {
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 12px;
+    overflow-x: auto;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+code {
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Menlo, Monaco, Consolas, monospace;
+    font-size: 0.875em;
+}
+
+/* Inline code */
+:not(pre) > code {
+    background: var(--code-bg);
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+/* Tables */
+table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 0.875rem;
+}
+
+th, td {
+    border: 1px solid var(--border);
+    padding: 8px 12px;
+    text-align: left;
+}
+
+th {
+    background: var(--bg-alt);
+    font-weight: 600;
+}
+
+/* Error page */
+.error-page {
+    padding: 48px 16px;
+    text-align: center;
+    max-width: var(--max-width);
+    margin: 0 auto;
+}
+
+.error-page h1 {
+    margin-bottom: 8px;
+}
+
+.error-page p {
+    color: var(--fg-muted);
+    margin-bottom: 24px;
+}
+
+/* Responsive: wider viewports */
+@media (min-width: 768px) {
+    .page-header {
+        padding: 16px 24px;
+    }
+
+    .conversation-list,
+    .conversation-detail {
+        padding: 16px 24px;
+    }
+
+    .page-header h1 {
+        font-size: 1.5rem;
+    }
+}
+
+/* Images */
+.message .content img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 4px;
+}
+
+/* Blockquotes */
+blockquote {
+    border-left: 3px solid var(--border);
+    margin: 16px 0;
+    padding: 4px 16px;
+    color: var(--fg-muted);
+}
+
+blockquote > :first-child { margin-top: 0; }
+blockquote > :last-child { margin-bottom: 0; }
+
+/* Lists inside messages */
+.message .content ul,
+.message .content ol {
+    padding-left: 24px;
+}

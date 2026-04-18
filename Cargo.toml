@@ -42,6 +42,7 @@ assert_matches = { version = "1", default-features = false }
 async-anthropic = { git = "https://github.com/JeanMertz/async-anthropic", default-features = false }
 async-stream = { version = "0.3", default-features = false }
 async-trait = { version = "0.1", default-features = false }
+axum = { version = "0.8", default-features = false }
 backon = { git = "https://github.com/JeanMertz/backon", default-features = false } # <https://github.com/JeanMertz/async-anthropic/blob/5edba470a3aa912de2c9e815bdd71dfc20fdf54f/Cargo.toml#L23-L31>
 base64 = { version = "0.22", default-features = false }
 camino = { version = "1", default-features = false }
@@ -80,6 +81,7 @@ inquire = { git = "https://github.com/JeanMertz/inquire", branch = "merged", def
 insta = { version = "1", default-features = false }
 libc = { version = "0.2", default-features = false }
 linkme = { version = "0.3", default-features = false }
+maud = { version = "0.27", default-features = false }
 minijinja = { version = "2", default-features = false }
 ollama-rs = { version = "0.3", default-features = false }
 open-editor = { version = "1", default-features = false }

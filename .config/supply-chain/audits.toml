@@ -1,6 +1,11 @@
 
 # cargo-vet audits file
 
+[[audits.axum-core]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.5.6"
+
 [[audits.cfb]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -71,6 +76,21 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.36.0+unofficial"
 
+[[audits.matchit]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.8.4"
+
+[[audits.maud]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.27.0"
+
+[[audits.maud_macros]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.27.0"
+
 [[audits.nix]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -90,6 +110,11 @@ version = "0.1.6"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.2.1"
+
+[[audits.proc-macro2-diagnostics]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.10.1"
 
 [[audits.process-wrap]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -304,6 +329,12 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-07-23"
 end = "2027-02-13"
+
+[[trusted.axum]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2026-04-14"
+end = "2027-04-14"
 
 [[trusted.backtrace]]
 criteria = "safe-to-deploy"
