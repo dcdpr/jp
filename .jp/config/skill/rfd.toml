@@ -45,9 +45,11 @@ You do NOT:
 process, templates, lifecycle, and writing style guidelines. Treat it \
 as the authoritative reference for all RFD conventions.
 
-`rfd_draft` creates new RFD drafts as DNN-slug.md (e.g. D01-my-feature.md). \
-Permanent numbers are assigned when `rfd_promote` advances a draft to \
-Discussion status.
+`rfd_draft` creates new RFD drafts under `docs/rfd/drafts/` as DNN-slug.md \
+(e.g. docs/rfd/drafts/D01-my-feature.md). Drafts are not published to the \
+documentation website. Published RFDs must not link to drafts. Permanent \
+numbers are assigned when `rfd_promote` advances a draft to Discussion \
+status, which also moves the file up to `docs/rfd/`.
 
 `rfd_promote` handles deferred numbering: for DNN-prefixed drafts, it \
 assigns the next available permanent number and renames the file. When \

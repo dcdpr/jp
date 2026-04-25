@@ -166,7 +166,7 @@ rfd-review NNN *ARGS: _install-jp
     arg="{{NNN}}"
     if echo "$arg" | grep -qiE '^D[0-9]+$'; then
         draft_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/${draft_id}-*.md 2>/dev/null | head -1)
+        file=$(ls docs/rfd/drafts/${draft_id}-*.md 2>/dev/null | head -1)
         if [ -z "$file" ]; then
             echo "No draft RFD found with ID ${draft_id}." >&2; exit 1
         fi
@@ -196,7 +196,8 @@ rfd-review NNN *ARGS: _install-jp
     jp query --attach "$file" --new --cfg=personas/rfd-reviewer $args
 
 # Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
-# Drafts are created as DNN-slug.md — a permanent number is assigned at Discussion.
+# Drafts are created as docs/rfd/drafts/DNN-slug.md; a permanent number is assigned
+# and the file is moved up to docs/rfd/ at Discussion.
 [group('rfd')]
 rfd-draft CATEGORY +TITLE:
     #!/usr/bin/env sh
@@ -217,7 +218,7 @@ rfd-draft CATEGORY +TITLE:
     next=1
     while [ "$next" -le 99 ]; do
         draft_id=$(printf "D%02d" "$next")
-        if ! ls docs/rfd/${draft_id}-*.md >/dev/null 2>&1; then
+        if ! ls docs/rfd/drafts/${draft_id}-*.md >/dev/null 2>&1; then
             break
         fi
         next=$((next + 1))
@@ -242,8 +243,9 @@ rfd-draft CATEGORY +TITLE:
     cap_category=$(echo "$category" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
 
     # Build the filename slug from the title.
-    slug=$(echo "{{TITLE}}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9-')
-    file="docs/rfd/${draft_id}-${slug}.md"
+    slug=$(echo "{{TITLE}}" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9_-')
+    file="docs/rfd/drafts/${draft_id}-${slug}.md"
+    mkdir -p "$(dirname "$file")"
 
     # Copy the template and fill in metadata.
     sed \
@@ -405,7 +407,7 @@ rfd-promote NNN: _install-jp
     if echo "$arg" | grep -qiE '^D[0-9]+$'; then
         # Draft ID (e.g. D01, D12).
         draft_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/${draft_id}-*.md 2>/dev/null | head -1)
+        file=$(ls docs/rfd/drafts/${draft_id}-*.md 2>/dev/null | head -1)
         if [ -z "$file" ]; then
             echo "No draft RFD found with ID ${draft_id}." >&2; exit 1
         fi
@@ -646,7 +648,7 @@ rfd-list *CATEGORY:
 
     filter="{{CATEGORY}}"
 
-    for file in docs/rfd/[0-9][0-9][0-9]-*.md docs/rfd/D[0-9][0-9]-*.md; do
+    for file in docs/rfd/[0-9][0-9][0-9]-*.md docs/rfd/drafts/D[0-9][0-9]-*.md; do
         [ -f "$file" ] || continue
 
         num=$(basename "$file" | sed 's/-.*//')
