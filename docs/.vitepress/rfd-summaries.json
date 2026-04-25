@@ -1,6 +1,6 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "f05b3f2d28f3f9d49a957a1c0c26182c8e290e258cc4d0f75b47131044cc65ab",
+    "hash": "ad0cfb6c27f1d25c670a7a0695fc7f8cccbc30bbdfe16a859a935829b3d2e72d",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
@@ -290,5 +290,9 @@
   "071-conversation-archiving.md": {
     "hash": "ac30ec3193cfe5bc2b2bac3aff28abfa06fc1a9b5309effc6015abc6b6e2ab51",
     "summary": "Adds conversation archiving to JP, moving inactive conversations to a hidden partition while preserving them."
+  },
+  "079-config-sources-and-load-order.md": {
+    "hash": "d733088df6149a2a5232ad1109c3c85625edca824f854934c4ebfca6edcd318c",
+    "summary": "JP loads configuration from four sources in order, resolving extends directives and environment variable overrides."
   }
 }

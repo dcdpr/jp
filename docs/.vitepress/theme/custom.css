@@ -46,10 +46,6 @@
     background: color-mix(in srgb, #a855f7 20%, transparent);
     color: #7c3aed;
 }
-.rfd-badge--draft {
-    background: color-mix(in srgb, #6b7280 20%, transparent);
-    color: #4b5563;
-}
 .rfd-badge--superseded {
     background: color-mix(in srgb, #f59e0b 20%, transparent);
     color: #d97706;
@@ -69,10 +65,6 @@
 .dark .rfd-badge--discussion {
     background: color-mix(in srgb, #a855f7 25%, transparent);
     color: #d8b4fe;
-}
-.dark .rfd-badge--draft {
-    background: color-mix(in srgb, #6b7280 25%, transparent);
-    color: #d1d5db;
 }
 .dark .rfd-badge--superseded {
     background: color-mix(in srgb, #f59e0b 25%, transparent);

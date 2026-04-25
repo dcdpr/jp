@@ -3,12 +3,24 @@ import { dirname, resolve } from 'node:path'
 
 import { defineConfig } from 'vitepress'
 import abnfGrammar from './grammars/abnf.tmLanguage.json'
+import { joinMultilineInlineCode } from './join-inline-code.mjs'
 
 // https://vitepress.dev/reference/site-config
 
 export default defineConfig({
     markdown: {
         languages: [abnfGrammar],
+        preConfig(md) {
+            // Collapse newlines inside inline backtick spans before any block
+            // parsing runs. See `./join-inline-code.mts` for the full rationale
+            // (short version: `@mdit-vue/plugin-component` treats any unknown
+            // tag at column 0 as a paragraph terminator, which tears apart
+            // inline code that happens to wrap mid-line around a `<name>`-like
+            // placeholder).
+            md.core.ruler.after('normalize', 'join_multiline_inline_code', (state) => {
+                state.src = joinMultilineInlineCode(state.src)
+            })
+        },
         config(md) {
             // Escape {{ }} inside inline code spans so Vue's template compiler
             // doesn't try to evaluate them. Fenced code blocks are already
@@ -39,7 +51,7 @@ export default defineConfig({
     title: "Jean-Pierre",
     description: "An LLM-based Programming Assistant",
     cleanUrls: true,
-    srcExclude: ['README/**'],
+    srcExclude: ['README/**', 'rfd/drafts/**'],
     themeConfig: {
         outline: {
             level: [2, 3]

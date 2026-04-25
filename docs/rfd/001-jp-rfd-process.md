@@ -126,10 +126,17 @@ The author is actively writing the document. It may be incomplete, have open
 questions, or change significantly. Drafts live on a branch and are not yet
 ready for formal review, but early feedback from collaborators is encouraged.
 
-Drafts do not have a permanent number. The file is named `DNN-slug.md` where `D`
-stands for "Draft" and `NN` is a two-digit draft slot (D01–D99). This prevents
-speculative cross-draft dependencies and avoids number gaps from abandoned
-drafts. The permanent number is assigned when the RFD advances to Discussion.
+Drafts do not have a permanent number. They live in `docs/rfd/drafts/` and are
+named `DNN-slug.md`, where `D` stands for "Draft" and `NN` is a two-digit draft
+slot (`D01`–`D99`). This prevents speculative cross-draft dependencies and avoids
+number gaps from abandoned drafts. The permanent number is assigned when the
+RFD advances to Discussion.
+
+Drafts are not published to the documentation site. The `drafts/` directory is
+excluded from the build, so drafts exist in the repository for committing,
+reviewing, and iterating without the pressure of a public page. Abandoned
+drafts cost nothing beyond the disk space they occupy. Published RFDs must not
+link to drafts — any such link would fail the docs build.
 
 ### Discussion
 
@@ -137,7 +144,8 @@ The RFD is complete enough to review. When the author runs `just rfd-promote
 D01` (using the draft ID), the tooling:
 
 1. Assigns the next available sequential permanent number.
-2. Renames the file from `D01-slug.md` to `042-slug.md` (for example).
+2. Moves the file from `docs/rfd/drafts/D01-slug.md` to `docs/rfd/042-slug.md`
+   (for example).
 3. Updates the heading in the file.
 
 A pull request is opened to merge the document into `main`. Discussion happens
@@ -205,13 +213,15 @@ the second paragraph.
 
 ### Filename
 
-Drafts use a `DNN` prefix (`D` for Draft, `NN` a two-digit slot):
+Drafts live under `docs/rfd/drafts/` and use a `DNN` prefix (`D` for Draft,
+`NN` a two-digit slot):
 
 ```
-docs/rfd/D01-short-title.md
+docs/rfd/drafts/D01-short-title.md
 ```
 
-When promoted to Discussion, the tooling assigns a permanent number:
+When promoted to Discussion, the tooling assigns a permanent number and moves
+the file up to `docs/rfd/`:
 
 ```
 docs/rfd/042-short-title.md
@@ -260,10 +270,11 @@ just rfd-draft guide "Attachment Handler Guide" # how-to / reference
 just rfd-draft process "Release Process"        # workflow / policy
 ```
 
-This copies the appropriate template to `docs/rfd/D01-my-feature-title.md` (or
-the next available draft slot), fills in the title, author, date, and category,
-and sets the status to **Draft**. The draft prefix is replaced with a permanent
-number when the RFD is promoted to Discussion.
+This copies the appropriate template to
+`docs/rfd/drafts/D01-my-feature-title.md` (or the next available draft slot),
+fills in the title, author, date, and category, and sets the status to
+**Draft**. The draft prefix is replaced with a permanent number and the file
+moves up to `docs/rfd/` when the RFD is promoted to Discussion.
 
 [`000-design-template.md`]: 000-design-template.md
 [`000-decision-template.md`]: 000-decision-template.md
@@ -323,8 +334,8 @@ remains valid and in effect.
 1. Create a branch for your work.
 2. Run `just rfd-draft CATEGORY Your Title` to generate the file from the
    appropriate template. Category is one of: `design`, `decision`, `guide`,
-   `process`. The file is created as `DNN-your-title.md` (e.g.
-   `D01-your-title.md`).
+   `process`. The file is created under `docs/rfd/drafts/` with a `DNN`
+   prefix (e.g. `docs/rfd/drafts/D01-your-title.md`).
 3. Fill in the sections. Write your proposal.
 4. Push your branch. Iterate until you're ready for feedback.
 
@@ -363,7 +374,7 @@ to see them.
 
 | Command                         | Description                              |
 |---------------------------------|------------------------------------------|
-| `just rfd-draft CATEGORY TITLE` | Create a new draft as `DNN-slug.md`.     |
+| `just rfd-draft CATEGORY TITLE` | Create a new draft under `drafts/`.      |
 | `just rfd-promote NNN`          | Advance status. Draft → Discussion       |
 |                                 | assigns number; Discussion → Accepted    |
 |                                 | creates tracking issue.                  |

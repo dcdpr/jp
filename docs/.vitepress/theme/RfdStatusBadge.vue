@@ -8,13 +8,12 @@ const statusClasses = {
     implemented: 'rfd-badge--implemented',
     accepted: 'rfd-badge--accepted',
     discussion: 'rfd-badge--discussion',
-    draft: 'rfd-badge--draft',
     superseded: 'rfd-badge--superseded',
     abandoned: 'rfd-badge--abandoned',
 }
 
 function applyBadge() {
-    if (!/^\/rfd\/(\d{3}|D\d{2})-/.test(route.path)) return
+    if (!/^\/rfd\/\d{3}-/.test(route.path)) return
 
     const items = document.querySelectorAll('.vp-doc li')
     for (const li of items) {

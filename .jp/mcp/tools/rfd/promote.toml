@@ -5,8 +5,9 @@ source = "local"
 command = "just rfd-promote {{tool.arguments.nnn}}"
 description = """Promote an RFD to the next stage (Draft -> Discussion -> Accepted -> Implemented).
 
-For drafts (DNN-prefixed), assigns a permanent number and renames the file. \
-When promoting to Accepted, creates a GitHub tracking issue via `jp`."""
+For drafts (DNN-prefixed), assigns a permanent number and moves the file \
+from `docs/rfd/drafts/` up to `docs/rfd/`. When promoting to Accepted, \
+creates a GitHub tracking issue via `jp`."""
 
 [conversation.tools.rfd_promote.style]
 inline_results = "full"
