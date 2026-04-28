@@ -2071,6 +2071,7 @@ dependencies = [
  "minijinja",
  "pretty_assertions",
  "quick-xml",
+ "rayon",
  "relative-path",
  "reqwest",
  "schemars",
@@ -2095,7 +2096,6 @@ dependencies = [
  "windows-sys 0.61.0",
 ]
 
- "rayon",
 [[package]]
 name = "jp_config"
 version = "0.1.0"
