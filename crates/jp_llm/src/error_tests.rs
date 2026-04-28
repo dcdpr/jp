@@ -210,6 +210,19 @@ fn text_try_again_in_float() {
 }
 
 #[test]
+fn text_try_again_in_float_with_trailing_period() {
+    // Matches the exact shape of OpenAI's in-stream rate-limit messages:
+    // "...Please try again in 2.398s. Visit ..."
+    let text = "Rate limit reached on tokens per min (TPM): Limit 2000000, \
+                Used 1354056, Requested 725891. Please try again in 2.398s. \
+                Visit https://platform.openai.com/account/rate-limits to learn more.";
+    assert_eq!(
+        extract_retry_from_text(text),
+        Some(Duration::from_secs(3)) // ceil(2.398)
+    );
+}
+
+#[test]
 fn text_retry_after_colon() {
     let text = "Error: retry-after: 15";
     assert_eq!(extract_retry_from_text(text), Some(Duration::from_secs(15)));
