@@ -136,7 +136,7 @@
     "summary": "Route inquiries to cheaper models with stable schemas for 5-25x cost reduction via configurable assistant overrides."
   },
   "035-multi-root-config-load-path-resolution.md": {
-    "hash": "5a18ca4b0f9fbf0758644942e446d90816a9b0f23e60502cb01b75e7760f7ae9",
+    "hash": "b250780d34ede87a18f3c6bec0048a7382a9f442aa00d3ef1693a0407e7362a0",
     "summary": "Extend `--cfg` path resolution to search user-global, workspace, and user-workspace config roots, merging matches."
   },
   "036-conversation-compaction.md": {
