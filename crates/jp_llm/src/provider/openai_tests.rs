@@ -491,3 +491,339 @@ mod transform_schema {
         assert_eq!(out["properties"]["steps"]["items"]["$ref"], "#/$defs/step");
     }
 }
+
+mod map_model {
+    use chrono::{TimeZone as _, Utc};
+
+    use super::super::{
+        ModelResponse, STREAMING_UNSUPPORTED, TEMP_REQUIRES_NO_REASONING, map_model,
+    };
+    use crate::model::{ModelDeprecation, ReasoningDetails};
+
+    fn model(id: &str) -> ModelResponse {
+        ModelResponse {
+            id: id.to_owned(),
+            _object: "model".to_owned(),
+            _created: Utc.with_ymd_and_hms(2026, 4, 23, 0, 0, 0).unwrap(),
+            _owned_by: "openai".to_owned(),
+        }
+    }
+
+    #[test]
+    fn gpt_5_5_uses_latest_metadata() {
+        let details = map_model(model("gpt-5.5")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.5"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true,
+            ))
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2025, 12, 1)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![TEMP_REQUIRES_NO_REASONING]);
+    }
+
+    #[test]
+    fn gpt_5_5_pro_marks_streaming_as_unsupported() {
+        let details = map_model(model("gpt-5.5-pro")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.5 pro"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                false, false, false, true, true, true,
+            ))
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2025, 12, 1)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            STREAMING_UNSUPPORTED
+        ]);
+    }
+}
+
+mod synthesize_non_streaming_output_item_events {
+    use openai_responses::types;
+    use serde_json::{Map, json};
+
+    use super::super::{
+        ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, PHASE_KEY, map_event,
+        synthesize_non_streaming_output_item_events,
+    };
+    use crate::event::Event;
+
+    fn output_item(value: serde_json::Value) -> types::OutputItem {
+        serde_json::from_value(value).unwrap()
+    }
+
+    fn collect_events(
+        index: usize,
+        item: types::OutputItem,
+        is_structured: bool,
+        reasoning_enabled: bool,
+    ) -> Vec<Event> {
+        synthesize_non_streaming_output_item_events(index, item)
+            .into_iter()
+            .flat_map(|event| map_event(event, is_structured, reasoning_enabled))
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn message_item_emits_message_and_flush_metadata() {
+        let events = collect_events(
+            0,
+            output_item(json!({
+                "type": "message",
+                "id": "msg_123",
+                "status": "completed",
+                "role": "assistant",
+                "phase": "final_answer",
+                "content": [{
+                    "type": "output_text",
+                    "annotations": [],
+                    "logprobs": [],
+                    "text": "hello"
+                }]
+            })),
+            false,
+            true,
+        );
+
+        assert_eq!(events, vec![
+            Event::message(0, ""),
+            Event::message(0, "hello"),
+            Event::flush_with_metadata(
+                0,
+                Map::from_iter([
+                    (PHASE_KEY.to_owned(), "final_answer".into()),
+                    (ITEM_ID_KEY.to_owned(), "msg_123".into()),
+                ])
+            ),
+        ]);
+    }
+
+    #[test]
+    fn refusal_item_reuses_message_streaming_path() {
+        let events = collect_events(
+            0,
+            output_item(json!({
+                "type": "message",
+                "id": "msg_456",
+                "status": "completed",
+                "role": "assistant",
+                "content": [{
+                    "type": "refusal",
+                    "refusal": "nope"
+                }]
+            })),
+            false,
+            true,
+        );
+
+        assert_eq!(events, vec![
+            Event::message(0, ""),
+            Event::message(0, "nope"),
+            Event::flush_with_metadata(
+                0,
+                Map::from_iter([(ITEM_ID_KEY.to_owned(), "msg_456".into())])
+            ),
+        ]);
+    }
+
+    #[test]
+    fn reasoning_item_emits_empty_reasoning_and_metadata() {
+        let events = collect_events(
+            1,
+            output_item(json!({
+                "type": "reasoning",
+                "id": "rs_123",
+                "status": "completed",
+                "summary": [],
+                "encrypted_content": "enc"
+            })),
+            false,
+            true,
+        );
+
+        assert_eq!(events, vec![
+            Event::reasoning(1, ""),
+            Event::flush_with_metadata(
+                1,
+                Map::from_iter([
+                    (ITEM_ID_KEY.to_owned(), "rs_123".into()),
+                    (ENCRYPTED_CONTENT_KEY.to_owned(), "enc".into()),
+                ])
+            ),
+        ]);
+    }
+
+    #[test]
+    fn reasoning_item_is_skipped_when_reasoning_is_disabled() {
+        let events = collect_events(
+            1,
+            output_item(json!({
+                "type": "reasoning",
+                "id": "rs_123",
+                "status": "completed",
+                "summary": [],
+                "encrypted_content": "enc"
+            })),
+            false,
+            false,
+        );
+
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn function_call_item_emits_tool_call_events() {
+        let events = collect_events(
+            2,
+            output_item(json!({
+                "type": "function_call",
+                "id": "fc_123",
+                "status": "completed",
+                "arguments": "{\"foo\":\"bar\"}",
+                "call_id": "call_123",
+                "name": "run_me"
+            })),
+            false,
+            true,
+        );
+
+        assert_eq!(events, vec![
+            Event::tool_call_start(2, "call_123", "run_me"),
+            Event::tool_call_args(2, "{\"foo\":\"bar\"}"),
+            Event::flush(2),
+        ]);
+    }
+}
+
+mod map_non_streaming_finish_reason {
+    use openai_responses::types;
+
+    use super::super::map_non_streaming_finish_reason;
+    use crate::event::{Event, FinishReason};
+
+    #[test]
+    fn completed_status_maps_to_completed() {
+        let event =
+            map_non_streaming_finish_reason(types::ResponseStatus::Completed, None).unwrap();
+
+        assert_eq!(event, Event::Finished(FinishReason::Completed));
+    }
+
+    #[test]
+    fn incomplete_max_output_tokens_maps_to_max_tokens() {
+        let event = map_non_streaming_finish_reason(
+            types::ResponseStatus::Incomplete,
+            Some("max_output_tokens".to_owned()),
+        )
+        .unwrap();
+
+        assert_eq!(event, Event::Finished(FinishReason::MaxTokens));
+    }
+}
+
+mod classify_stream_error {
+    use std::time::Duration;
+
+    use openai_responses::types::response;
+
+    use super::super::classify_stream_error;
+    use crate::error::StreamErrorKind;
+
+    fn err(type_: &str, code: Option<&str>, message: &str) -> response::Error {
+        response::Error {
+            r#type: type_.to_owned(),
+            code: code.map(str::to_owned),
+            message: message.to_owned(),
+            param: None,
+        }
+    }
+
+    /// The exact in-stream rate-limit payload reported in the field:
+    /// `type=tokens, code=rate_limit_exceeded`, with a `try again in 2.398s.`
+    /// hint. This used to surface as a non-retryable `Other` error.
+    #[test]
+    fn tpm_rate_limit_with_code_is_classified_as_rate_limit() {
+        let e = err(
+            "tokens",
+            Some("rate_limit_exceeded"),
+            "Rate limit reached for gpt-5.4 (for limit gpt-5.4-long-context) in \
+             organization org-xxx on tokens per min (TPM): Limit 2000000, Used \
+             1354056, Requested 725891. Please try again in 2.398s. Visit \
+             https://platform.openai.com/account/rate-limits to learn more.",
+        );
+
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::RateLimit);
+        assert_eq!(classified.retry_after, Some(Duration::from_secs(3)));
+        assert!(classified.is_retryable());
+    }
+
+    #[test]
+    fn rate_limit_via_type_field() {
+        let e = err("rate_limit_exceeded", None, "too many requests");
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::RateLimit);
+        assert!(classified.is_retryable());
+    }
+
+    #[test]
+    fn insufficient_quota_via_code() {
+        let e = err("tokens", Some("insufficient_quota"), "out of credits");
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::InsufficientQuota);
+        assert!(!classified.is_retryable());
+    }
+
+    #[test]
+    fn server_error_carries_retry_after_hint() {
+        let e = err(
+            "server_error",
+            None,
+            "Upstream hiccup, please try again in 10s.",
+        );
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::Transient);
+        assert_eq!(classified.retry_after, Some(Duration::from_secs(10)));
+    }
+
+    #[test]
+    fn unknown_type_with_retry_hint_becomes_transient() {
+        let e = err("something_new", None, "Please try again in 5s.");
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::Transient);
+        assert_eq!(classified.retry_after, Some(Duration::from_secs(5)));
+        assert!(classified.is_retryable());
+    }
+
+    #[test]
+    fn unknown_type_without_retry_hint_stays_other() {
+        let e = err("something_new", None, "unexpected");
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::Other);
+        assert_eq!(classified.retry_after, None);
+    }
+}

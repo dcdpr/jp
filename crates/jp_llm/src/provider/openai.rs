@@ -31,7 +31,10 @@ use tracing::{debug, trace, warn};
 
 use super::{EventStream, ModelDetails, Provider};
 use crate::{
-    error::{Error, Result, StreamError, StreamErrorKind},
+    error::{
+        Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
+        looks_like_quota_error,
+    },
     event::{Event, FinishReason},
     model::{ModelDeprecation, ReasoningDetails},
     provider::trace_to_tmpfile,
@@ -48,6 +51,9 @@ pub(crate) const PHASE_KEY: &str = "openai_phase";
 /// Feature flag: temperature and `top_p` are only supported when reasoning
 /// effort is `none`. GPT-5 family models have this constraint.
 const TEMP_REQUIRES_NO_REASONING: &str = "temp_requires_no_reasoning";
+
+/// Feature flag: the model only supports non-streaming Responses API requests.
+const STREAMING_UNSUPPORTED: &str = "streaming_unsupported";
 
 #[derive(Debug, Clone)]
 pub struct Openai {
@@ -91,6 +97,13 @@ impl Provider for Openai {
     ) -> Result<EventStream> {
         let (request, is_structured, reasoning_enabled) = create_request(model, query)?;
 
+        if model.features.contains(&STREAMING_UNSUPPORTED) {
+            let response = self.client.create(request).await??;
+            let events = map_non_streaming_response(response, is_structured, reasoning_enabled)?;
+
+            return Ok(stream::iter(events.into_iter().map(Ok::<_, StreamError>)).boxed());
+        }
+
         Ok(self
             .client
             .stream(request)
@@ -100,6 +113,123 @@ impl Provider for Openai {
             .try_flatten()
             .chain(future::ready(Ok(Event::Finished(FinishReason::Completed))).into_stream())
             .boxed())
+    }
+}
+
+fn map_non_streaming_response(
+    response: types::response::Response,
+    is_structured: bool,
+    reasoning_enabled: bool,
+) -> Result<Vec<Event>> {
+    let incomplete_reason = response.incomplete_details.map(|details| details.reason);
+    let mut events = response
+        .output
+        .into_iter()
+        .enumerate()
+        .flat_map(|(index, item)| synthesize_non_streaming_output_item_events(index, item))
+        .flat_map(|event| map_event(event, is_structured, reasoning_enabled))
+        .collect::<std::result::Result<Vec<_>, StreamError>>()?;
+
+    events.push(map_non_streaming_finish_reason(
+        response.status,
+        incomplete_reason,
+    )?);
+
+    Ok(events)
+}
+
+fn synthesize_non_streaming_output_item_events(
+    index: usize,
+    item: types::OutputItem,
+) -> Vec<types::Event> {
+    let output_index = index as u64;
+
+    match item {
+        types::OutputItem::Message(message) => {
+            let mut events = vec![types::Event::OutputItemAdded {
+                item: types::OutputItem::Message(message.clone()),
+                output_index,
+            }];
+
+            for (content_index, content) in message.content.iter().enumerate() {
+                match content {
+                    types::OutputContent::Text { text, .. } => {
+                        events.push(types::Event::OutputTextDelta {
+                            content_index: content_index as u64,
+                            delta: text.clone(),
+                            item_id: message.id.clone(),
+                            output_index,
+                        });
+                    }
+                    types::OutputContent::Refusal { refusal } => {
+                        events.push(types::Event::RefusalDelta {
+                            content_index: content_index as u64,
+                            delta: refusal.clone(),
+                            item_id: message.id.clone(),
+                            output_index,
+                        });
+                    }
+                }
+            }
+
+            events.push(types::Event::OutputItemDone {
+                item: types::OutputItem::Message(message),
+                output_index,
+            });
+            events
+        }
+        types::OutputItem::Reasoning(reasoning) => {
+            let mut events = vec![types::Event::OutputItemAdded {
+                item: types::OutputItem::Reasoning(reasoning.clone()),
+                output_index,
+            }];
+
+            for (summary_index, summary) in reasoning.summary.iter().enumerate() {
+                let types::ReasoningSummary::Text { text } = summary;
+                events.push(types::Event::ReasoningSummaryTextDelta {
+                    delta: text.clone(),
+                    item_id: reasoning.id.clone(),
+                    output_index,
+                    summary_index: summary_index as u64,
+                });
+            }
+
+            events.push(types::Event::OutputItemDone {
+                item: types::OutputItem::Reasoning(reasoning),
+                output_index,
+            });
+            events
+        }
+        types::OutputItem::FunctionCall(function_call) => vec![types::Event::OutputItemDone {
+            item: types::OutputItem::FunctionCall(function_call),
+            output_index,
+        }],
+        types::OutputItem::FileSearch(_)
+        | types::OutputItem::WebSearchResults(_)
+        | types::OutputItem::ComputerToolCall(_) => vec![],
+    }
+}
+
+fn map_non_streaming_finish_reason(
+    status: types::ResponseStatus,
+    incomplete_reason: Option<String>,
+) -> Result<Event> {
+    match status {
+        types::ResponseStatus::Completed => Ok(Event::Finished(FinishReason::Completed)),
+        types::ResponseStatus::Incomplete => {
+            let reason = incomplete_reason.unwrap_or_else(|| "incomplete".to_owned());
+            if reason == "max_output_tokens" || reason == "max_tokens" {
+                return Ok(Event::Finished(FinishReason::MaxTokens));
+            }
+
+            Ok(Event::Finished(FinishReason::Other(reason.into())))
+        }
+        types::ResponseStatus::Failed => Err(Error::InvalidResponse(
+            "OpenAI non-streaming response failed without a structured API error.".to_owned(),
+        )),
+        types::ResponseStatus::InProgress => Err(Error::InvalidResponse(
+            "OpenAI non-streaming response did not complete.".to_owned(),
+        )),
     }
 }
 
@@ -308,6 +438,32 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
 #[expect(clippy::too_many_lines)]
 fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
+        "gpt-5.5" | "gpt-5.5-2026-04-23" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5.5".to_owned()),
+            context_window: Some(1_050_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true,
+            )),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 12, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
+            features: vec![TEMP_REQUIRES_NO_REASONING],
+        },
+        "gpt-5.5-pro" | "gpt-5.5-pro-2026-04-23" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5.5 pro".to_owned()),
+            context_window: Some(1_050_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::leveled(
+                false, false, false, true, true, true,
+            )),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 12, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
+            features: vec![TEMP_REQUIRES_NO_REASONING, STREAMING_UNSUPPORTED],
+        },
         "gpt-5.4" | "gpt-5.4-2026-03-05" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some("GPT-5.4".to_owned()),
@@ -847,6 +1003,11 @@ fn map_event(
             delta,
             output_index,
             ..
+        }
+        | RefusalDelta {
+            delta,
+            output_index,
+            ..
         } => {
             let index = output_index as usize;
             vec![Ok(if is_structured {
@@ -919,9 +1080,25 @@ fn map_event(
 /// Maps well-known error types (quota, rate-limit, auth, server errors)
 /// to the appropriate [`StreamErrorKind`] so the retry and display layers
 /// can handle them correctly.
+///
+/// In-stream errors carry no HTTP headers, so `retry_after` timing comes
+/// solely from message-body parsing (e.g. `"Please try again in 2.398s."`).
+///
+/// Classification checks both `type` and `code` because OpenAI's per-minute
+/// token/request rate-limits arrive as `type=tokens|requests` with
+/// `code=rate_limit_exceeded` — the real signal is in `code`.
 fn classify_stream_error(error: types::response::Error) -> StreamError {
-    match error.r#type.as_str() {
-        "insufficient_quota" => StreamError::new(
+    let retry_after = extract_retry_from_text(&error.message);
+    let code = error.code.as_deref();
+    let type_ = error.r#type.as_str();
+
+    // Quota exhaustion is a hard-stop; check this before rate-limit because
+    // both the type and code can overlap with retryable categories.
+    if code == Some("insufficient_quota")
+        || type_ == "insufficient_quota"
+        || looks_like_quota_error(&error.message)
+    {
+        return StreamError::new(
             StreamErrorKind::InsufficientQuota,
             format!(
                 "Insufficient API quota. Check your plan and billing details \
@@ -929,13 +1106,34 @@ fn classify_stream_error(error: types::response::Error) -> StreamError {
                  ({})",
                 error.message
             ),
-        ),
-        "rate_limit_exceeded" => StreamError::rate_limit(None),
-        "server_error" | "api_error" => StreamError::transient(error.message),
-        _ => StreamError::other(format!(
-            "OpenAI error: type={}, code={:?}, message={}, param={:?}",
-            error.r#type, error.code, error.message, error.param
-        )),
+        );
+    }
+
+    // Rate-limits may signal via either `type` or `code`. OpenAI's TPM/RPM
+    // in-stream limits use `type=tokens|requests` with `code=rate_limit_exceeded`.
+    if code == Some("rate_limit_exceeded") || type_ == "rate_limit_exceeded" {
+        return StreamError::rate_limit(retry_after);
+    }
+
+    if matches!(type_, "server_error" | "api_error") {
+        let err = StreamError::transient(error.message);
+        return match retry_after {
+            Some(d) => err.with_retry_after(d),
+            None => err,
+        };
+    }
+
+    // Catch-all. If the message carries a retry hint we can honor, treat it
+    // as transient so the retry layer still engages; otherwise surface as a
+    // generic error.
+    let display = format!(
+        "OpenAI error: type={}, code={:?}, message={}, param={:?}",
+        error.r#type, error.code, error.message, error.param
+    );
+
+    match retry_after {
+        Some(d) => StreamError::transient(display).with_retry_after(d),
+        None => StreamError::other(display),
     }
 }
 
