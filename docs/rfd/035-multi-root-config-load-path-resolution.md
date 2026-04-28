@@ -247,5 +247,3 @@ This is a single-phase change, localized to `load_cli_cfg_args` in
 - `crates/jp_config/src/fs.rs` — `user_global_config_file` /
   `user_global_config_dir`.
 - `crates/jp_config/src/util.rs` — `find_file_in_load_path`.
-
-[RFD 079]: 079-config-sources-and-load-order.md
