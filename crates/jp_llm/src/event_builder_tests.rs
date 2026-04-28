@@ -386,6 +386,55 @@ fn test_structured_not_included_in_peek_partial_content() {
     assert_eq!(builder.peek_partial_content(), None);
 }
 
+/// Drain emits buffered text for `Reasoning`/`Message`/`Structured` so partial
+/// output isn't lost on stream end, but it MUST drop tool-call buffers — those
+/// only reach drain if the explicit `Flush` (Anthropic `ContentBlockStop`)
+/// never arrived, which means the tool call is structurally incomplete.
+/// Persisting it would create an orphaned `tool_use` block that providers
+/// reject on the next request.
+#[test]
+fn drain_drops_incomplete_tool_call_but_keeps_partial_text() {
+    let mut builder = EventBuilder::new();
+
+    // A tool call that received Start but no ArgumentChunk and no Flush.
+    builder.handle_part(
+        0,
+        EventPart::ToolCall(ToolCallPart::Start {
+            id: "toolu_incomplete".into(),
+            name: "some_tool".into(),
+        }),
+        Map::new(),
+    );
+
+    // A reasoning buffer that's also unflushed — partial reasoning that
+    // should be preserved.
+    builder.handle_part(1, EventPart::Reasoning("thinking…".into()), Map::new());
+
+    // A message buffer with partial content — should be preserved.
+    builder.handle_part(2, EventPart::Message("halfway through".into()), Map::new());
+
+    let drained = builder.drain();
+
+    // Tool call dropped, text preserved.
+    assert_eq!(drained.len(), 2, "expected 2 events, got {drained:?}");
+    assert!(
+        drained.iter().all(|e| e.as_tool_call_request().is_none()),
+        "drain must not emit tool-call requests for unflushed buffers",
+    );
+
+    let kinds: Vec<_> = drained.iter().map(|e| &e.kind).collect();
+    assert!(matches!(
+        kinds.as_slice(),
+        [
+            EventKind::ChatResponse(ChatResponse::Reasoning { .. }),
+            EventKind::ChatResponse(ChatResponse::Message { .. }),
+        ] | [
+            EventKind::ChatResponse(ChatResponse::Message { .. }),
+            EventKind::ChatResponse(ChatResponse::Reasoning { .. }),
+        ]
+    ));
+}
+
 #[test]
 fn test_structured_array_response() {
     let mut builder = EventBuilder::new();

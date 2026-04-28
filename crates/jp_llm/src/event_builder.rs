@@ -227,7 +227,16 @@ impl EventBuilder {
     /// This is used when the stream ends (e.g. on [`Event::Finished`]) to
     /// ensure any partially accumulated events are not silently dropped.
     ///
+    /// Tool-call buffers are an exception: a normally-completed tool call
+    /// always emits an explicit [`Event::Flush`] (e.g. Anthropic's
+    /// `ContentBlockStop`). A buffer that only reaches drain is structurally
+    /// incomplete — the stream ended before the block was closed. Persisting
+    /// it would create an orphaned `tool_use` in the conversation, which
+    /// providers reject on the next request because there's no matching
+    /// `tool_result`. Drop these with a warning.
+    ///
     /// [`Event::Finished`]: crate::event::Event::Finished
+    /// [`Event::Flush`]: crate::event::Event::Flush
     #[expect(
         clippy::needless_collect,
         reason = "collect breaks the borrow on self.buffers"
@@ -236,7 +245,18 @@ impl EventBuilder {
         let indices: Vec<usize> = self.buffers.keys().copied().collect();
         indices
             .into_iter()
-            .filter_map(|index| self.handle_flush(index, Map::new()))
+            .filter_map(|index| {
+                if let Some(IndexBuffer::ToolCall { id, name, .. }) = self.buffers.get(&index) {
+                    warn!(
+                        index,
+                        id, name, "Dropping incomplete tool call buffer at stream end."
+                    );
+                    self.buffers.remove(&index);
+                    self.metadata.remove(&index);
+                    return None;
+                }
+                self.handle_flush(index, Map::new())
+            })
             .collect()
     }
 }
