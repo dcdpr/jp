@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::{ConversationId, EventKind, event::ChatResponse};
 use jp_workspace::ConversationHandle;
+use rayon::prelude::*;
 use serde_json::json;
 use tracing::warn;
 
@@ -70,24 +71,15 @@ impl Grep {
         };
 
         let wanted = expand_scopes(&self.scopes);
-        let needs_events = needs_events_for(&wanted);
 
         // If handles were provided, search only those. Otherwise search all.
-        let workspace_wide = handles.is_empty();
-        let mut ids: Vec<_> = if workspace_wide {
+        let mut ids: Vec<_> = if handles.is_empty() {
             ctx.workspace.conversations().map(|(id, _)| *id).collect()
         } else {
             handles.iter().map(ConversationHandle::id).collect()
         };
 
         self.sort_ids(&mut ids, ctx);
-
-        // For workspace-wide searches that need events, amortize the per-file
-        // disk reads across cores. For narrow targets the sequential lazy load
-        // is cheaper than warming the whole index.
-        if workspace_wide && needs_events {
-            ctx.workspace.ensure_all_events_loaded();
-        }
 
         let hits = self.collect_hits(&ids, &pattern, &wanted, ctx);
 
@@ -104,71 +96,92 @@ impl Grep {
         ids: &[ConversationId],
         pattern: &str,
         wanted: &HashSet<ConcreteScope>,
-        ctx: &mut Ctx,
+        ctx: &Ctx,
     ) -> Vec<Hit> {
         // Any scope other than `Title` is sourced from the event stream.
         // Skipping the event pass entirely when it can't contribute avoids a
         // sequential disk read per conversation.
         let needs_events = needs_events_for(wanted);
+
+        // Each worker produces an independent `Vec<Hit>`. Collecting via
+        // `Vec<Vec<Hit>>` preserves input order (rayon `collect` is
+        // order-preserving, unlike `reduce`); flatten merges per-id results
+        // while keeping the (already-sorted) id order intact.
+        let per_id: Vec<Vec<Hit>> = ids
+            .par_iter()
+            .map(|&id| self.collect_hits_for_id(id, pattern, wanted, needs_events, ctx))
+            .collect();
+
+        per_id.into_iter().flatten().collect()
+    }
+
+    /// Per-conversation hit collection. Pure function over `&Ctx`, so it is
+    /// safe to invoke concurrently from a rayon worker.
+    fn collect_hits_for_id(
+        &self,
+        id: ConversationId,
+        pattern: &str,
+        wanted: &HashSet<ConcreteScope>,
+        needs_events: bool,
+        ctx: &Ctx,
+    ) -> Vec<Hit> {
         let mut hits = Vec::new();
 
-        for &id in ids {
-            let handle = match ctx.workspace.acquire_conversation(&id) {
-                Ok(handle) => handle,
-                Err(error) => {
-                    warn!(%id, %error, "Failed to load conversation");
-                    continue;
-                }
-            };
-
-            if wanted.contains(&ConcreteScope::Title)
-                && let Some(title) = title_for(ctx, &handle)
-            {
-                let lines: Vec<_> = title.lines().collect();
-
-                collect_scope_hits(
-                    &mut hits,
-                    id,
-                    ConcreteScope::Title,
-                    &lines,
-                    pattern,
-                    self.ignore_case,
-                    self.context,
-                );
+        let handle = match ctx.workspace.acquire_conversation(&id) {
+            Ok(handle) => handle,
+            Err(error) => {
+                warn!(%id, %error, "Failed to load conversation");
+                return hits;
             }
+        };
 
-            if !needs_events {
+        if wanted.contains(&ConcreteScope::Title)
+            && let Some(title) = title_for(ctx, &handle)
+        {
+            let lines: Vec<_> = title.lines().collect();
+
+            collect_scope_hits(
+                &mut hits,
+                id,
+                ConcreteScope::Title,
+                &lines,
+                pattern,
+                self.ignore_case,
+                self.context,
+            );
+        }
+
+        if !needs_events {
+            return hits;
+        }
+
+        let events = match ctx.workspace.events(&handle) {
+            Ok(events) => events,
+            Err(error) => {
+                warn!(%id, %error, "Failed to load conversation events");
+                return hits;
+            }
+        };
+
+        for event in events.iter() {
+            let Some(scope) = event_scope(&event.event.kind) else {
+                continue;
+            };
+            if !wanted.contains(&scope) {
                 continue;
             }
 
-            let events = match ctx.workspace.events(&handle) {
-                Ok(events) => events,
-                Err(error) => {
-                    warn!(%id, %error, "Failed to load conversation events");
-                    continue;
-                }
-            };
-
-            for event in events.iter() {
-                let Some(scope) = event_scope(&event.event.kind) else {
-                    continue;
-                };
-                if !wanted.contains(&scope) {
-                    continue;
-                }
-
-                let lines = event_lines(&event.event.kind);
-                let line_refs: Vec<&str> = lines.iter().map(AsRef::as_ref).collect();
-                collect_scope_hits(
-                    &mut hits,
-                    id,
-                    scope,
-                    &line_refs,
-                    pattern,
-                    self.ignore_case,
-                    self.context,
-                );
-            }
+            let lines = event_lines(&event.event.kind);
+            let line_refs: Vec<&str> = lines.iter().map(AsRef::as_ref).collect();
+            collect_scope_hits(
+                &mut hits,
+                id,
+                scope,
+                &line_refs,
+                pattern,
+                self.ignore_case,
+                self.context,
+            );
         }
 
         hits
