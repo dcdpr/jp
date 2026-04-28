@@ -701,13 +701,16 @@ fn parse_human_duration(s: &str) -> Option<u64> {
     if total > 0 { Some(total) } else { None }
 }
 
-/// Parse a token like `"30"`, `"30s"`, `"5.5s"` into whole seconds.
+/// Parse a token like `"30"`, `"30s"`, `"5.5s"`, `"2.398s."` into whole
+/// seconds.
+///
+/// Tolerates trailing sentence punctuation so hints embedded in prose (e.g.
+/// `"Please try again in 2.398s."`) round-trip cleanly after
+/// [`str::split_whitespace`].
 #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn parse_secs_token(s: &str) -> Option<u64> {
-    let s = s
-        .trim_end_matches('s')
-        .trim_end_matches("second")
-        .trim_end_matches(',');
+    let s = s.trim_end_matches(['.', ',', ';', ':', ')', '!', '?']);
+    let s = s.trim_end_matches('s').trim_end_matches("second");
     s.parse::<f64>()
         .ok()
         .filter(|v| *v > 0.0 && v.is_finite())
