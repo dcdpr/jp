@@ -210,7 +210,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         match node.data().value {
             NodeValue::BlockQuote => self.format_block_quote(entering)?,
-            NodeValue::List(..) => self.format_list(node, entering)?,
+            NodeValue::List(..) => self.format_list(node, entering),
             NodeValue::Item(..) => self.format_item(node, entering)?,
             NodeValue::Heading(nh) => self.format_heading(nh, entering)?,
             NodeValue::CodeBlock(ref ncb) => self.format_code_block(node, ncb, entering)?,
@@ -303,7 +303,13 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
     }
 
     /// Format a list node.
-    fn format_list(&mut self, node: Node<'a>, entering: bool) -> fmt::Result {
+    ///
+    /// Note: comrak's CommonMark serializer emits `<!-- end list -->` after a
+    /// list that is immediately followed by another list or an indented code
+    /// block, to disambiguate them on re-parse. The terminal renderer has no
+    /// round-trip obligation — its output is never re-parsed as markdown — so
+    /// we deliberately omit that marker to avoid visual noise.
+    fn format_list(&mut self, node: Node<'a>, entering: bool) {
         let ol_start = match node.data().value {
             NodeValue::List(NodeList {
                 list_type: ListType::Ordered,
@@ -317,25 +323,12 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             if let Some(start) = ol_start {
                 self.ol_stack.push(start);
             }
-
-            return Ok(());
+            return;
         }
 
         if ol_start.is_some() {
             self.ol_stack.pop();
         }
-        if node.next_sibling().is_some_and(|next| {
-            matches!(
-                next.data().value,
-                NodeValue::CodeBlock(..) | NodeValue::List(..)
-            )
-        }) {
-            self.writer.cr();
-            self.writer.output("<!-- end list -->", false)?;
-            self.writer.blankline();
-        }
-
-        Ok(())
     }
 
     /// Format a list item node.
