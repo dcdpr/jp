@@ -4471,6 +4471,7 @@ dependencies = [
  "scraper",
  "serde",
  "serde_json",
+ "sha1",
  "similar",
  "strip-ansi-escapes",
  "test-log",

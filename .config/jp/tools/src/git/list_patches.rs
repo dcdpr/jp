@@ -4,6 +4,7 @@ use camino::Utf8Path;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use super::hunk::{hunk_id, split_hunks};
 use crate::{
     to_simple_xml_with_root,
     util::{
@@ -92,7 +93,8 @@ fn git_list_patches_impl<R: ProcessRunner>(
         }
 
         // See: <https://www.gnu.org/software/diffutils/manual/diffutils.html#Detailed-Unified>
-        let Some((_, tail)) = stdout.split_once("\n@@ ") else {
+        let hunks = split_hunks(&stdout);
+        if hunks.is_empty() {
             if stdout.is_empty() && !root.join(path).exists() {
                 warnings.push(Warning {
                     message: format!("File not found: {path}"),
@@ -101,7 +103,7 @@ fn git_list_patches_impl<R: ProcessRunner>(
 
             // No changes for this file.
             continue;
-        };
+        }
 
         // Read the index (staged) version for context lines. This avoids
         // showing working-tree changes from other hunks as misleading
@@ -114,16 +116,11 @@ fn git_list_patches_impl<R: ProcessRunner>(
             .unwrap_or_default();
         let source_lines: Vec<_> = index_content.lines().collect();
 
-        let mut tail = tail.to_string();
-        tail.insert_str(0, "@@ ");
-
-        for (id, hunk) in tail.split("\n@@ ").enumerate() {
-            let hunk_with_header = format!("@@ {hunk}");
-
+        for hunk_with_header in hunks {
             patches.push(Patch {
                 path: path.to_string(),
-                id: id.to_string(),
-                diff: pretty_print_diff(&hunk_with_header, hunk, &source_lines),
+                id: hunk_id(&hunk_with_header),
+                diff: pretty_print_diff(&hunk_with_header, &source_lines),
             });
         }
     }
@@ -142,7 +139,7 @@ fn git_list_patches_impl<R: ProcessRunner>(
 /// prefix on diff lines. Actual diff lines (`-`/`+`) are prefixed with `[N]`
 /// where N is a sequential index used by `git_stage_patch_lines` to select
 /// individual lines for staging.
-fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) -> String {
+fn pretty_print_diff(hunk_with_header: &str, source_lines: &[&str]) -> String {
     // Parse the header to find coordinates.
     let parts: Vec<_> = hunk_with_header.split_whitespace().collect();
 
@@ -157,8 +154,9 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
         1
     };
 
-    // Count diff lines to determine the padding width for alignment.
-    let diff_line_count = hunk.lines().skip(1).count();
+    // Count diff lines (everything after the header line) to determine the
+    // padding width for alignment.
+    let diff_line_count = hunk_with_header.lines().skip(1).count();
     let max_index = diff_line_count.saturating_sub(1);
     let index_prefix_width = format!("[{max_index}] ").len();
 
@@ -186,11 +184,9 @@ fn pretty_print_diff(hunk_with_header: &str, hunk: &str, source_lines: &[&str]) 
         }
     }
 
-    // Actual changes — number each `-`/`+` line.
-    //
-    // Skip the first line of raw_body, which contains the header info (e.g.,
-    // "-1,1 +1,1 @@").
-    for line in hunk.lines().skip(1) {
+    // Actual changes — number each `-`/`+` line. Skip the first line
+    // (the `@@ ...` header).
+    for line in hunk_with_header.lines().skip(1) {
         let prefix = format!("[{line_index}] ");
         let padding = index_prefix_width - prefix.len();
         result.push_str(&" ".repeat(padding));

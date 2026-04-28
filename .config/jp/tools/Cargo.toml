@@ -37,6 +37,7 @@ reqwest = { workspace = true, features = ["charset", "http2", "json", "rustls-tl
 scraper = { workspace = true }
 serde = { workspace = true, features = ["std", "derive", "alloc"] }
 serde_json = { workspace = true, features = ["std", "preserve_order", "alloc"] }
+sha1 = { workspace = true, features = ["std"] }
 similar = { workspace = true, features = ["text", "unicode", "inline"] }
 strip-ansi-escapes = { workspace = true }
 tokio = { workspace = true, features = ["full"] }

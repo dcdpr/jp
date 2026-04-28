@@ -10,6 +10,7 @@ mod apply;
 mod commit;
 mod diff;
 mod diff_commit;
+mod hunk;
 mod list_patches;
 mod log;
 mod show;
@@ -40,9 +41,9 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
         "stage_patch_lines" => {
             let path: String = t.req("path")?;
-            let patch_id: usize = t.req("patch_id")?;
+            let patch_id: String = t.req("patch_id")?;
             let lines: Vec<Value> = t.req("lines")?;
-            git_stage_patch_lines(&ctx.root, &path, patch_id, lines, opts)
+            git_stage_patch_lines(&ctx.root, &path, &patch_id, lines, opts)
         }
 
         "list_patches" => git_list_patches(&ctx.root, t.opt("files")?, opts),

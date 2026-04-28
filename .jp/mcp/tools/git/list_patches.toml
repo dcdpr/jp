@@ -7,9 +7,17 @@ source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "List all unstaged patches that can be staged with `git_stage_patch`."
 description = """
-Each patch has a unique identifier per file, which can be used in \
-`git_stage_patch` to stage the patch in the repository index. Each diff \
-line is prefixed with `[N]` for use with `git_stage_patch_lines`.
+Each patch has a content-addressed identifier per file (a short hex hash \
+of the hunk text). The ID is stable across index mutations: staging one \
+hunk does not renumber the others. Pass IDs back to `git_stage_patch` or \
+`git_stage_patch_lines` exactly as listed.
+
+Each diff line is prefixed with `[N]` for use with `git_stage_patch_lines`.
+
+If the working tree changes between listing and staging (or a hunk is \
+already staged), its ID disappears from the next listing rather than \
+shifting position. Stale IDs passed to staging tools fail loudly instead \
+of silently aliasing to a different hunk.
 """
 
 examples = """

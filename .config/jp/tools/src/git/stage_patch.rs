@@ -1,8 +1,13 @@
+use std::collections::HashMap;
+
 use jp_tool::{AnswerType, Context, Outcome, Question};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use super::apply::apply_patch_to_index;
+use super::{
+    apply::apply_patch_to_index,
+    hunk::{diff_header, hunk_id, split_hunks},
+};
 use crate::util::{
     OneOrMany, ToolResult,
     runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
@@ -11,7 +16,7 @@ use crate::util::{
 #[derive(Debug, Deserialize)]
 pub struct PatchTarget {
     path: String,
-    ids: OneOrMany<usize>,
+    ids: OneOrMany<String>,
 }
 
 pub(crate) async fn git_stage_patch(
@@ -104,7 +109,7 @@ fn git_stage_patch_impl<R: ProcessRunner>(
 fn build_file_patch<R: ProcessRunner>(
     ctx: &Context,
     path: &str,
-    patch_ids: &[usize],
+    requested_ids: &[String],
     runner: &R,
     env: &[(&str, &str)],
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -153,29 +158,51 @@ fn build_file_patch<R: ProcessRunner>(
     // Preserve the original diff header (everything before the first hunk).
     // This keeps special headers like `deleted file mode` and `+++ /dev/null`
     // that git needs to correctly stage deletions, renames, etc.
-    let Some((header, _)) = stdout.split_once("\n@@ ") else {
-        return Err("No hunks found".into());
-    };
+    let header = diff_header(&stdout).ok_or("No hunks found")?;
 
-    let mut hunks = vec![];
-    for (id, hunk) in stdout.split("\n@@ ").skip(1).enumerate() {
-        if !patch_ids.contains(&id) {
-            continue;
+    // Index hunks by content-addressed ID. Iterating the available hunks
+    // in file order preserves the order in the assembled patch, which
+    // `git apply` requires for multi-hunk patches.
+    let available_hunks = split_hunks(&stdout);
+    let id_to_hunk: HashMap<String, &str> = available_hunks
+        .iter()
+        .map(|h| (hunk_id(h), h.as_str()))
+        .collect();
+
+    let mut missing: Vec<&str> = vec![];
+    for id in requested_ids {
+        if !id_to_hunk.contains_key(id) {
+            missing.push(id.as_str());
         }
-
-        hunks.push(format!("@@ {hunk}"));
     }
 
-    if hunks.is_empty() {
-        let available: Vec<_> = (0..stdout.split("\n@@ ").skip(1).count()).collect();
-        return Err(format!("Patch IDs {patch_ids:?} not found (available: {available:?})").into());
+    if !missing.is_empty() {
+        // Rebuild available IDs in file order for a stable error message.
+        let available_ids: Vec<String> = available_hunks.iter().map(|h| hunk_id(h)).collect();
+        return Err(format!(
+            "Patch IDs not found in current diff: {missing:?}. They may already be staged, or the \
+             working tree changed since `git_list_patches`. Re-run `git_list_patches` and try \
+             again. Available IDs: {available_ids:?}"
+        )
+        .into());
     }
 
-    // Ensure the patch ends with a newline. Non-last hunks lose their
-    // trailing newline during the `\n@@ ` split (the newline becomes part
-    // of the delimiter). `git apply` requires every diff line to be
-    // newline-terminated; without it the patch is rejected as corrupt.
-    let mut patch = format!("{header}\n{}", hunks.join("\n"));
+    // Deduplicate requested IDs and emit hunks in file order to satisfy
+    // `git apply`'s monotonic-line requirement for multi-hunk patches.
+    let requested: std::collections::HashSet<&str> =
+        requested_ids.iter().map(String::as_str).collect();
+    let selected: Vec<&str> = available_hunks
+        .iter()
+        .filter(|h| requested.contains(hunk_id(h).as_str()))
+        .map(String::as_str)
+        .collect();
+
+    // Ensure the patch ends with a newline. Hunks emitted by `split_hunks`
+    // may have lost their trailing newline during splitting (the newline
+    // becomes part of the `\n@@ ` delimiter). `git apply` requires every
+    // diff line to be newline-terminated; without it the patch is rejected
+    // as corrupt.
+    let mut patch = format!("{header}\n{}", selected.join("\n"));
     if !patch.ends_with('\n') {
         patch.push('\n');
     }

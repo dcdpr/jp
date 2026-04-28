@@ -125,6 +125,31 @@ fn commit_then_modify(root: &Utf8Path, path: &str, original: &str, modified: &st
     fs::write(root.join(path), modified).unwrap();
 }
 
+/// Extract content-addressed patch IDs from a `git_list_patches` XML response.
+fn extract_patch_ids(xml: &str) -> Vec<String> {
+    xml.lines()
+        .filter_map(|line| {
+            let l = line.trim();
+            l.strip_prefix("<id>")
+                .and_then(|s| s.strip_suffix("</id>"))
+                .map(str::to_string)
+        })
+        .collect()
+}
+
+/// Fetch the content-addressed patch IDs for a single file in file order.
+///
+/// Tests that need to stage a hunk by position pull the IDs through this
+/// helper, since the staging tools no longer accept positional indices.
+async fn patch_ids(root: &Utf8Path, path: &str) -> Vec<String> {
+    let raw = run_ok(
+        ctx(root),
+        tool("git_list_patches", &json!({"files": [path]})),
+    )
+    .await;
+    extract_patch_ids(&raw)
+}
+
 #[tokio::test]
 async fn add_intent_marks_untracked_file() {
     if !has_git() {
@@ -204,7 +229,7 @@ async fn list_patches_shows_hunks_with_line_indices() {
     .await;
 
     assert!(content.contains("<path>f.rs</path>"));
-    assert!(content.contains("<id>0</id>"));
+    assert_eq!(extract_patch_ids(&content).len(), 1);
     assert!(content.contains("[0] -aaa"));
     assert!(content.contains("[1] +AAA"));
 }
@@ -224,8 +249,9 @@ async fn list_patches_multiple_hunks() {
     )
     .await;
 
-    assert!(content.contains("<id>0</id>"));
-    assert!(content.contains("<id>1</id>"));
+    let ids = extract_patch_ids(&content);
+    assert_eq!(ids.len(), 2);
+    assert_ne!(ids[0], ids[1]);
     assert!(content.contains("[0] -a"));
     assert!(content.contains("[1] +A"));
     assert!(content.contains("[0] -e"));
@@ -342,11 +368,12 @@ async fn stage_deleted_file_via_stage_patch() {
     fs::remove_file(root.join("bye.rs")).unwrap();
 
     // Stage the deletion.
+    let ids = patch_ids(&root, "bye.rs").await;
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "bye.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "bye.rs", "ids": [&ids[0]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -369,11 +396,12 @@ async fn stage_patch_single_hunk() {
     let (_dir, root) = init_repo();
     commit_then_modify(&root, "s.rs", "old\n", "new\n");
 
+    let ids = patch_ids(&root, "s.rs").await;
     let content = run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "s.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "s.rs", "ids": [&ids[0]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -393,11 +421,12 @@ async fn stage_patch_non_last_hunk() {
     commit_then_modify(&root, "nl.rs", "a\nb\nc\nd\ne\n", "A\nb\nc\nd\nE\n");
 
     // Stage only the FIRST hunk (a→A), which is not the last.
+    let ids = patch_ids(&root, "nl.rs").await;
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "nl.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "nl.rs", "ids": [&ids[0]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -416,11 +445,12 @@ async fn stage_patch_selective_hunk() {
     commit_then_modify(&root, "sel.rs", "a\nb\nc\nd\ne\n", "A\nb\nc\nd\nE\n");
 
     // Stage only the second hunk (e→E).
+    let ids = patch_ids(&root, "sel.rs").await;
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "sel.rs", "ids": [1]}]}),
+            &json!({"patches": [{"path": "sel.rs", "ids": [&ids[1]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -438,11 +468,12 @@ async fn stage_patch_needs_input_without_answers() {
     let (_dir, root) = init_repo();
     commit_then_modify(&root, "q.rs", "old\n", "new\n");
 
+    let ids = patch_ids(&root, "q.rs").await;
     let outcome = run_outcome(
         ctx(&root),
         tool(
             "git_stage_patch",
-            &json!({"patches": [{"path": "q.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "q.rs", "ids": [&ids[0]]}]}),
         ),
     )
     .await;
@@ -462,11 +493,12 @@ async fn stage_patch_declined() {
     let (_dir, root) = init_repo();
     commit_then_modify(&root, "no.rs", "old\n", "new\n");
 
+    let ids = patch_ids(&root, "no.rs").await;
     let content = run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "no.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "no.rs", "ids": [&ids[0]]}]}),
             &json!({"stage_changes": false}),
         ),
     )
@@ -487,11 +519,12 @@ async fn stage_patch_lines_partial_hunk() {
 
     // The hunk has 4 lines: [0]-aaa [1]-bbb [2]+AAA [3]+BBB
     // Stage only the first replacement (lines 0 and 2).
+    let ids = patch_ids(&root, "adj.rs").await;
     let content = run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "adj.rs", "patch_id": 0, "lines": [0, 2]}),
+            &json!({"path": "adj.rs", "patch_id": &ids[0], "lines": [0, 2]}),
         ),
     )
     .await;
@@ -510,11 +543,12 @@ async fn stage_patch_lines_second_replacement() {
     commit_then_modify(&root, "adj2.rs", "aaa\nbbb\nccc\n", "AAA\nBBB\nccc\n");
 
     // Stage only the second replacement (lines 1 and 3).
+    let ids = patch_ids(&root, "adj2.rs").await;
     run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "adj2.rs", "patch_id": 0, "lines": [1, 3]}),
+            &json!({"path": "adj2.rs", "patch_id": &ids[0], "lines": [1, 3]}),
         ),
     )
     .await;
@@ -531,11 +565,12 @@ async fn stage_patch_lines_all_lines_same_as_full_hunk() {
     let (_dir, root) = init_repo();
     commit_then_modify(&root, "all.rs", "old\n", "new\n");
 
+    let ids = patch_ids(&root, "all.rs").await;
     run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "all.rs", "patch_id": 0, "lines": [0, 1]}),
+            &json!({"path": "all.rs", "patch_id": &ids[0], "lines": [0, 1]}),
         ),
     )
     .await;
@@ -554,11 +589,12 @@ async fn stage_patch_lines_pure_insertion_into_tracked_file() {
     commit_then_modify(&root, "ins.rs", "aaa\nbbb\nccc\n", "aaa\nbbb\nNEW\nccc\n");
 
     // The diff inserts NEW after line 2: @@ -2,0 +3,1 @@
+    let ids = patch_ids(&root, "ins.rs").await;
     run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "ins.rs", "patch_id": 0, "lines": [0]}),
+            &json!({"path": "ins.rs", "patch_id": &ids[0], "lines": [0]}),
         ),
     )
     .await;
@@ -583,11 +619,12 @@ async fn stage_patch_lines_pure_addition_from_intent_to_add() {
     .await;
 
     // Stage only first two lines.
+    let ids = patch_ids(&root, "new.rs").await;
     run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "new.rs", "patch_id": 0, "lines": [0, 1]}),
+            &json!({"path": "new.rs", "patch_id": &ids[0], "lines": [0, 1]}),
         ),
     )
     .await;
@@ -610,11 +647,12 @@ async fn stage_patch_lines_with_range() {
 
     // Hunk: [0]-aaa [1]-bbb [2]+AAA [3]+BBB
     // Stage all four lines via a single range.
+    let ids = patch_ids(&root, "rng.rs").await;
     run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "rng.rs", "patch_id": 0, "lines": ["0:3"]}),
+            &json!({"path": "rng.rs", "patch_id": &ids[0], "lines": ["0:3"]}),
         ),
     )
     .await;
@@ -633,11 +671,12 @@ async fn stage_patch_lines_mixed_integers_and_ranges() {
 
     // Hunk: [0]-aaa [1]-bbb [2]+AAA [3]+BBB
     // Stage only the first replacement using mixed format: integer 0, range "2:2".
+    let ids = patch_ids(&root, "mix2.rs").await;
     run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "mix2.rs", "patch_id": 0, "lines": [0, "2:2"]}),
+            &json!({"path": "mix2.rs", "patch_id": &ids[0], "lines": [0, "2:2"]}),
         ),
     )
     .await;
@@ -654,11 +693,12 @@ async fn stage_patch_lines_out_of_range_error() {
     let (_dir, root) = init_repo();
     commit_then_modify(&root, "oob.rs", "old\n", "new\n");
 
+    let ids = patch_ids(&root, "oob.rs").await;
     let result = tools::run(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "oob.rs", "patch_id": 0, "lines": [99]}),
+            &json!({"path": "oob.rs", "patch_id": &ids[0], "lines": [99]}),
         ),
     )
     .await;
@@ -675,11 +715,12 @@ async fn stage_patch_lines_empty_lines_error() {
     let (_dir, root) = init_repo();
     commit_then_modify(&root, "empty.rs", "old\n", "new\n");
 
+    let ids = patch_ids(&root, "empty.rs").await;
     let result = tools::run(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "empty.rs", "patch_id": 0, "lines": []}),
+            &json!({"path": "empty.rs", "patch_id": &ids[0], "lines": []}),
         ),
     )
     .await;
@@ -737,11 +778,12 @@ async fn diff_cached_shows_staged_changes() {
     commit_then_modify(&root, "dc.rs", "before\n", "after\n");
 
     // Stage the change.
+    let ids = patch_ids(&root, "dc.rs").await;
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "dc.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "dc.rs", "ids": [&ids[0]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -767,11 +809,12 @@ async fn diff_unstaged_excludes_staged_changes() {
     commit_then_modify(&root, "sep.rs", "before\n", "after\n");
 
     // Stage the change.
+    let ids = patch_ids(&root, "sep.rs").await;
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "sep.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "sep.rs", "ids": [&ids[0]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -801,11 +844,12 @@ async fn unstage_reverts_staged_changes() {
     let (_dir, root) = init_repo();
     commit_then_modify(&root, "u.rs", "old\n", "new\n");
 
+    let ids = patch_ids(&root, "u.rs").await;
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "u.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "u.rs", "ids": [&ids[0]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -828,11 +872,12 @@ async fn commit_staged_changes() {
     let (_dir, root) = init_repo();
     commit_then_modify(&root, "c.rs", "v1\n", "v2\n");
 
+    let ids = patch_ids(&root, "c.rs").await;
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "c.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "c.rs", "ids": [&ids[0]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -881,11 +926,12 @@ async fn full_workflow_add_intent_list_stage_lines_commit() {
     assert!(patches.contains("[2] +fn c() {}"));
 
     // Stage only the first two functions.
+    let ids = extract_patch_ids(&patches);
     run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "feature.rs", "patch_id": 0, "lines": [0, 1]}),
+            &json!({"path": "feature.rs", "patch_id": &ids[0], "lines": [0, 1]}),
         ),
     )
     .await;
@@ -917,11 +963,12 @@ async fn stage_unstage_restage_roundtrip() {
     commit_then_modify(&root, "rt.rs", "v1\n", "v2\n");
 
     // Stage.
+    let ids = patch_ids(&root, "rt.rs").await;
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "rt.rs", "ids": [0]}]}),
+            &json!({"patches": [{"path": "rt.rs", "ids": [&ids[0]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -938,12 +985,15 @@ async fn stage_unstage_restage_roundtrip() {
 
     assert_eq!(staged_content(&root, "rt.rs"), "v1\n");
 
-    // Re-stage via stage_patch_lines this time.
+    // Re-stage via stage_patch_lines this time. Re-list because the index
+    // changed; the new ID is content-addressed and stable across this
+    // round-trip, but we still resolve it through the listing.
+    let ids = patch_ids(&root, "rt.rs").await;
     run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "rt.rs", "patch_id": 0, "lines": [0, 1]}),
+            &json!({"path": "rt.rs", "patch_id": &ids[0], "lines": [0, 1]}),
         ),
     )
     .await;
@@ -1258,12 +1308,16 @@ async fn sequential_staging_across_tools() {
 
     // Hunk 0: a→A, b→B (adjacent, single hunk)
     // Hunk 1: e→E
-    // Stage hunk 1 fully via git_stage_patch.
+    // Stage hunk 1 fully via git_stage_patch. Capture hunk 0's ID up
+    // front: with content-addressed IDs it stays valid after staging
+    // hunk 1, which is part of the point.
+    let ids = patch_ids(&root, "mix.rs").await;
+    let hunk_0_id = ids[0].clone();
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
-            &json!({"patches": [{"path": "mix.rs", "ids": [1]}]}),
+            &json!({"patches": [{"path": "mix.rs", "ids": [&ids[1]]}]}),
             &json!({"stage_changes": true}),
         ),
     )
@@ -1272,13 +1326,14 @@ async fn sequential_staging_across_tools() {
     assert_eq!(staged_content(&root, "mix.rs"), "a\nb\nc\nd\nE\n");
 
     // Now stage only the 'a→A' part of hunk 0 via git_stage_patch_lines.
-    // After staging hunk 1, the remaining diff has hunk 0 as patch_id 0.
+    // The pre-staging ID is still valid because IDs are content-addressed
+    // and hunk 0 itself was untouched by the previous operation.
     // [0] -a [1] -b [2] +A [3] +B — select [0, 2] for just the a→A change.
     run_ok(
         ctx(&root),
         tool(
             "git_stage_patch_lines",
-            &json!({"path": "mix.rs", "patch_id": 0, "lines": [0, 2]}),
+            &json!({"path": "mix.rs", "patch_id": &hunk_0_id, "lines": [0, 2]}),
         ),
     )
     .await;
@@ -1296,13 +1351,15 @@ async fn stage_patch_multiple_files_single_call() {
     commit_then_modify(&root, "a.rs", "old_a\n", "new_a\n");
     commit_then_modify(&root, "b.rs", "old_b\n", "new_b\n");
 
+    let a_ids = patch_ids(&root, "a.rs").await;
+    let b_ids = patch_ids(&root, "b.rs").await;
     run_ok(
         ctx(&root),
         tool_with_answers(
             "git_stage_patch",
             &json!({"patches": [
-                {"path": "a.rs", "ids": [0]},
-                {"path": "b.rs", "ids": [0]}
+                {"path": "a.rs", "ids": [&a_ids[0]]},
+                {"path": "b.rs", "ids": [&b_ids[0]]}
             ]}),
             &json!({"stage_changes": true}),
         ),
