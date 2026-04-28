@@ -78,7 +78,7 @@ pub(crate) fn run_plugin(
         },
         paths: PathsInfo {
             user_data: jp_workspace::user_data_dir().ok(),
-            user_config: jp_config::fs::user_global_config_path(home.as_deref()),
+            user_config: jp_config::fs::user_global_config_dir(home.as_deref()),
             user_workspace: user_storage_path.map(ToOwned::to_owned),
         },
         config: config_json.clone(),

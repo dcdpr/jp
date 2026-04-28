@@ -40,7 +40,7 @@ use error::{Error, Result};
 use jp_config::{
     PartialAppConfig,
     assignment::KvAssignment,
-    fs::user_global_config_path,
+    fs::user_global_config_dir,
     util::{
         build, load_envs, load_partial_at_path, load_partial_at_path_recursive,
         load_partials_with_inheritance,
@@ -631,9 +631,9 @@ fn load_partial_configs_from_files(
     let config_path = RelativePath::new("config.toml");
     let mut partials = vec![];
 
-    // Load `$XDG_CONFIG_HOME/jp/config.{toml,json,yaml}`.
+    // Load the user-global config file (see RFD D20).
     let home = env::home_dir().and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
-    if let Some(user_global_config) = user_global_config_path(home.as_deref())
+    if let Some(user_global_config) = user_global_config_dir(home.as_deref())
         .and_then(|p| load_partial_at_path(p.join("config.toml")).transpose())
         .transpose()?
     {

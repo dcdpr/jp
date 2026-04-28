@@ -1,5 +1,5 @@
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
-use jp_config::fs::{ConfigFile, ConfigLoader, ConfigLoaderError, user_global_config_path};
+use jp_config::fs::{ConfigFile, ConfigLoader, ConfigLoaderError, user_global_config_dir};
 use jp_workspace::ConversationHandle;
 
 use super::{ConversationLoadRequest, Output};
@@ -80,22 +80,12 @@ impl Target {
         if self.user_workspace {
             ctx.user_storage_path().map(|p| loader.load(p)).transpose()
         } else if self.user_global {
-            user_global_config_path(
+            user_global_config_dir(
                 std::env::home_dir()
                     .as_deref()
                     .and_then(|p| Utf8Path::from_path(p)),
             )
-            .map(|mut p| {
-                if p.is_file()
-                    && let Some(stem) = p.file_name()
-                    && let Some(path) = p.parent()
-                {
-                    loader.file_stem = stem.to_owned().into();
-                    p = path.to_path_buf();
-                }
-
-                loader.load(p)
-            })
+            .map(|p| loader.load(p))
             .transpose()
         } else if self.cwd {
             loader.file_stem = ".jp".into();
