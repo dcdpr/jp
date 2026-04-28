@@ -2,6 +2,7 @@
 
 use std::{
     ffi::OsStr,
+    fs,
     path::{Path, PathBuf},
 };
 
@@ -18,6 +19,65 @@ use crate::{
 
 /// Valid file extensions for configuration files.
 const VALID_CONFIG_FILE_EXTS: &[&str] = &["toml", "json", "json5", "yaml", "yml"];
+
+/// Maximum `extends` recursion depth.
+///
+/// The ancestor-stack cycle check is the primary defense against runaway
+/// recursion; this cap is a belt-and-braces safety net for the unlikely case
+/// where path canonicalization fails and lets two logically identical paths
+/// compare unequal.
+const MAX_EXTENDS_DEPTH: u8 = u8::MAX;
+
+/// DFS ancestor stack used to detect `extends` cycles and enforce a depth cap.
+///
+/// Each nested file load pushes its canonicalized path before recursing into
+/// the file's `extends`, and pops on return. Re-entry into a file already on
+/// the stack is a cycle; hitting `max_depth` is a (defensive) overflow.
+struct ExtendsStack {
+    /// Canonicalized paths currently being loaded, outermost first.
+    ancestors: Vec<PathBuf>,
+    /// Hard cap on nesting depth.
+    max_depth: u8,
+}
+
+impl ExtendsStack {
+    /// Create an empty stack with the given depth cap.
+    const fn new(max_depth: u8) -> Self {
+        Self {
+            ancestors: Vec::new(),
+            max_depth,
+        }
+    }
+
+    /// Push `canonical` onto the stack after checking for cycles and depth.
+    ///
+    /// Returns [`Error::ExtendsCycle`] if `canonical` is already on the stack,
+    /// or [`Error::ExtendsDepthExceeded`] if pushing would exceed `max_depth`.
+    fn try_push(&mut self, canonical: PathBuf) -> Result<(), Error> {
+        if self.ancestors.iter().any(|p| p == &canonical) {
+            let mut chain = self.ancestors.clone();
+            chain.push(canonical);
+            return Err(Error::ExtendsCycle { chain });
+        }
+
+        if self.ancestors.len() >= self.max_depth as usize {
+            let mut chain = self.ancestors.clone();
+            chain.push(canonical);
+            return Err(Error::ExtendsDepthExceeded {
+                limit: self.max_depth,
+                chain,
+            });
+        }
+
+        self.ancestors.push(canonical);
+        Ok(())
+    }
+
+    /// Pop the top of the stack, unwinding one level of recursion.
+    fn pop(&mut self) {
+        self.ancestors.pop();
+    }
+}
 
 /// Load multiple partial configurations, starting with the first. Later
 /// partials override earlier ones, until one of the partials disables
@@ -104,8 +164,35 @@ pub fn find_file_in_load_path(
 ///
 /// See `load_config_file_at_path`.
 pub fn load_partial_at_path<P: Into<PathBuf>>(path: P) -> Result<Option<PartialAppConfig>, Error> {
+    // Cycle and depth guarding for `extends` chains is implemented lazily: we
+    // maintain a DFS ancestor stack (see [`ExtendsStack`]), pushing the
+    // canonicalized path of each file before recursing into its `extends` and
+    // popping on the way out. Re-entry into a file already on the stack is a
+    // cycle.
+    //
+    // Future direction: resolve the full `extends` DAG eagerly before any
+    // `ConfigLoader` work happens. Walk each file once to read its `extends`,
+    // expand globs, canonicalize, and build a graph of participating files.
+    // Cycles would then be caught statically (with clearer diagnostics), and
+    // the resolved graph would give `--explain` (RFD 060) a natural home for
+    // per-file provenance. Until then, the lazy approach below keeps the
+    // change surface small and relies on the depth cap as a backstop.
+    load_partial_at_path_with_max_depth(path, MAX_EXTENDS_DEPTH)
+}
+
+/// Testable variant of [`load_partial_at_path`] that takes the `extends` depth
+/// cap by parameter.
+///
+/// # Errors
+///
+/// See [`load_partial_at_path`].
+fn load_partial_at_path_with_max_depth<P: Into<PathBuf>>(
+    path: P,
+    max_depth: u8,
+) -> Result<Option<PartialAppConfig>, Error> {
     let mut loader = ConfigLoader::<AppConfig>::new();
-    match load_config_file_at_path(path, &mut loader, false) {
+    let mut stack = ExtendsStack::new(max_depth);
+    match load_config_file_at_path(path, &mut loader, false, &mut stack) {
         Ok(()) => {}
         Err(Error::Schematic(schematic::ConfigError::MissingFile(_))) => return Ok(None),
         Err(error) => return Err(error),
@@ -221,26 +308,31 @@ fn load_config_file_at_path<P: Into<PathBuf>>(
     path: P,
     loader: &mut ConfigLoader<AppConfig>,
     optional: bool,
+    stack: &mut ExtendsStack,
 ) -> Result<(), Error> {
     let mut path: PathBuf = path.into();
 
     trace!(path = %path.display(), "Trying to open configuration file.");
-    if path.is_file() {
-        info!(path = %path.display(), "Found configuration file.");
-        return load_config_file_with_extends(&path, loader, optional);
+    let found = path.is_file()
+        || VALID_CONFIG_FILE_EXTS.iter().any(|ext| {
+            path.set_extension(ext);
+            path.is_file()
+        });
+
+    if !found {
+        return Err(Error::Schematic(schematic::ConfigError::MissingFile(path)));
     }
 
-    for ext in VALID_CONFIG_FILE_EXTS {
-        path.set_extension(ext);
-        if !path.is_file() {
-            continue;
-        }
+    info!(path = %path.display(), "Found configuration file.");
 
-        info!(path = %path.display(), "Found configuration file.");
-        return load_config_file_with_extends(&path, loader, optional);
-    }
-
-    Err(Error::Schematic(schematic::ConfigError::MissingFile(path)))
+    // Canonicalize so that `./a.toml` and `a.toml` compare equal. If
+    // canonicalization fails we fall back to the raw path; the depth cap in
+    // `ExtendsStack` protects against cycles slipping through in that case.
+    let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+    stack.try_push(canonical)?;
+    let result = load_config_file_with_extends(&path, loader, optional, stack);
+    stack.pop();
+    result
 }
 
 /// Load a configuration file at `path`, assuming it exists.
@@ -250,6 +342,7 @@ fn load_config_file_with_extends(
     path: &Path,
     loader: &mut ConfigLoader<AppConfig>,
     optional: bool,
+    stack: &mut ExtendsStack,
 ) -> Result<(), Error> {
     let root = path.parent().map(Path::to_path_buf);
 
@@ -261,7 +354,7 @@ fn load_config_file_with_extends(
         .flatten()
         .partition(ExtendingRelativePath::is_before);
 
-    load_optional_paths(before, root.as_deref(), loader)?;
+    load_optional_paths(before, root.as_deref(), loader, stack)?;
 
     if optional {
         loader.file_optional(path)?;
@@ -269,7 +362,7 @@ fn load_config_file_with_extends(
         loader.file(path)?;
     }
 
-    load_optional_paths(after, root.as_deref(), loader)?;
+    load_optional_paths(after, root.as_deref(), loader, stack)?;
 
     Ok(())
 }
@@ -279,6 +372,7 @@ fn load_optional_paths(
     extends: impl IntoIterator<Item = ExtendingRelativePath>,
     root: Option<&Path>,
     loader: &mut ConfigLoader<AppConfig>,
+    stack: &mut ExtendsStack,
 ) -> Result<(), Error> {
     for path in extends {
         let Some(root) = &root else {
@@ -305,7 +399,7 @@ fn load_optional_paths(
                 }
             };
 
-            load_config_file_at_path(&path, loader, true)?;
+            load_config_file_at_path(&path, loader, true, stack)?;
         }
     }
 

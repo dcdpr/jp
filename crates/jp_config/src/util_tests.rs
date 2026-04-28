@@ -614,6 +614,129 @@ fn test_load_partial_at_path_recursive() {
 }
 
 #[test]
+fn test_load_partial_at_path_self_extending_cycle() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("config.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["config.toml"]
+            "#
+        ),
+    );
+
+    let err = load_partial_at_path(root.join("config.toml")).unwrap_err();
+    assert_matches!(err, Error::ExtendsCycle { chain } if chain.len() == 2);
+}
+
+#[test]
+fn test_load_partial_at_path_two_node_cycle() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("a.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["b.toml"]
+            "#
+        ),
+    );
+    write_config(
+        &root.join("b.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["a.toml"]
+            "#
+        ),
+    );
+
+    let err = load_partial_at_path(root.join("a.toml")).unwrap_err();
+    assert_matches!(err, Error::ExtendsCycle { chain } if chain.len() == 3);
+}
+
+#[test]
+fn test_load_partial_at_path_depth_cap() {
+    // Four-file linear chain a -> b -> c -> d. With max_depth = 3, pushing the
+    // 4th file (d) exceeds the cap and must return `ExtendsDepthExceeded`.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("a.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["b.toml"]
+            "#
+        ),
+    );
+    write_config(
+        &root.join("b.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["c.toml"]
+            "#
+        ),
+    );
+    write_config(
+        &root.join("c.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["d.toml"]
+            "#
+        ),
+    );
+    write_config(&root.join("d.toml"), "");
+
+    let err = load_partial_at_path_with_max_depth(root.join("a.toml"), 3).unwrap_err();
+    assert_matches!(
+        err,
+        Error::ExtendsDepthExceeded { limit: 3, chain } if chain.len() == 4
+    );
+
+    // With the cap raised to 4, the same chain loads cleanly.
+    load_partial_at_path_with_max_depth(root.join("a.toml"), 4).unwrap();
+}
+
+#[test]
+fn test_load_partial_at_path_diamond_is_not_a_cycle() {
+    // a -> b -> d
+    // a -> c -> d
+    //
+    // `d` appears twice in the overall load graph but never re-enters the
+    // ancestor chain, so this must succeed.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("a.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["b.toml", "c.toml"]
+            "#
+        ),
+    );
+    write_config(
+        &root.join("b.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["d.toml"]
+            "#
+        ),
+    );
+    write_config(
+        &root.join("c.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["d.toml"]
+            "#
+        ),
+    );
+    write_config(&root.join("d.toml"), "assistant.system_prompt = \"d\"");
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap();
+    assert!(partial.is_some());
+}
+
+#[test]
 fn test_vec_dedup_preserves_order() {
     let result = vec_dedup(vec![3, 1, 2, 1, 3, 4], &()).unwrap();
     assert_eq!(result, vec![3, 1, 2, 4]);
