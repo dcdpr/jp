@@ -68,6 +68,7 @@ inquire = { workspace = true, features = ["crossterm"] }
 minijinja = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 relative-path = { workspace = true }
+rayon = { workspace = true }
 reqwest = { workspace = true }
 schemars = { workspace = true }
 schematic = { workspace = true, features = ["schema_serde", "renderer_template", "toml"] }

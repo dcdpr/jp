@@ -635,44 +635,6 @@ impl Workspace {
             }
         }
     }
-
-    /// Eagerly load every conversation's event stream in parallel.
-    ///
-    /// Intended for bulk consumers (e.g. workspace-wide grep) that would
-    /// otherwise pay for N sequential disk reads via [`Self::events`].
-    /// Already-loaded streams are left untouched, so calling this repeatedly
-    /// is cheap.
-    pub fn ensure_all_events_loaded(&self) {
-        let uninitialized: Vec<_> = self
-            .state
-            .events
-            .iter()
-            .filter(|(_, cell)| cell.get().is_none())
-            .map(|(id, _)| *id)
-            .collect();
-
-        if uninitialized.is_empty() {
-            return;
-        }
-
-        let loader = &self.loader;
-        let loaded: Vec<_> = uninitialized
-            .par_iter()
-            .filter_map(|id| match loader.load_conversation_stream(id) {
-                Ok(stream) => Some((*id, stream)),
-                Err(error) => {
-                    warn!(%id, %error, "Failed to load conversation events.");
-                    None
-                }
-            })
-            .collect();
-
-        for (id, stream) in loaded {
-            if let Some(cell) = self.state.events.get(&id) {
-                let _err = cell.set(Arc::new(RwLock::new(stream)));
-            }
-        }
-    }
 }
 
 #[cfg(debug_assertions)]
