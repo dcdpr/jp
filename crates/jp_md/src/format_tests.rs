@@ -707,3 +707,35 @@ fn test_thematic_break_line_style_uses_terminal_width() {
         "Line should not exceed terminal width.\nActual: {actual:?}"
     );
 }
+
+/// Regression: the terminal renderer used to emit `<!-- end list -->` between
+/// adjacent lists (and before indented code blocks) — a CommonMark
+/// round-trip hint borrowed from comrak's serializer that has no business
+/// appearing in terminal output. See also: `format_list` in `render.rs`.
+#[test]
+fn test_terminal_no_end_list_marker_between_adjacent_lists() {
+    let formatter = Formatter::new();
+
+    // Two adjacent bullet lists.
+    let out = formatter.format_terminal("- a\n\n- b\n").unwrap();
+    assert!(
+        !out.contains("end list"),
+        "Unexpected `<!-- end list -->` marker in terminal output: {out:?}"
+    );
+
+    // Bullet list followed by an ordered list.
+    let out = formatter.format_terminal("- a\n\n1. b\n").unwrap();
+    assert!(
+        !out.contains("end list"),
+        "Unexpected `<!-- end list -->` marker in terminal output: {out:?}"
+    );
+
+    // List followed by a fenced code block.
+    let out = formatter
+        .format_terminal("- a\n\n```\ncode\n```\n")
+        .unwrap();
+    assert!(
+        !out.contains("end list"),
+        "Unexpected `<!-- end list -->` marker in terminal output: {out:?}"
+    );
+}
