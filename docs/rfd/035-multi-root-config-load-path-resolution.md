@@ -107,7 +107,7 @@ The change is localized to the `KeyValueOrPath::Path` branch in
 `load_cli_cfg_args` (`crates/jp_cli/src/lib.rs`). The function already receives
 `workspace: Option<&Workspace>`, which provides access to both `root()` and
 `user_storage_path()`. The user-global path is available via
-`user_global_config_path()`.
+`user_global_config_dir()` (see [RFD 079]).
 
 Sketch:
 
@@ -119,7 +119,7 @@ KeyValueOrPath::Path(path) => {
     // Build search roots in precedence order (lowest first).
     let mut roots: Vec<Utf8PathBuf> = Vec::new();
 
-    if let Some(global_dir) = user_global_config_path(home.as_deref()) {
+    if let Some(global_dir) = user_global_config_dir(home.as_deref()) {
         roots.push(global_dir.join("config"));
     }
     if let Some(w) = workspace {
@@ -243,5 +243,8 @@ This is a single-phase change, localized to `load_cli_cfg_args` in
 - [Configuration documentation](../configuration.md) — current `--cfg` and
   `config_load_paths` behavior.
 - `crates/jp_cli/src/lib.rs` — `load_cli_cfg_args`, `load_partial_configs_from_files`.
-- `crates/jp_config/src/fs.rs` — `user_global_config_path`.
+- `crates/jp_config/src/fs.rs` — `user_global_config_file` /
+  `user_global_config_dir` (see [RFD 079]).
 - `crates/jp_config/src/util.rs` — `find_file_in_load_path`.
+
+[RFD 079]: 079-config-sources-and-load-order.md

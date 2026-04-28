@@ -17,8 +17,10 @@ const APPLICATION: &str = "jp";
 /// Valid configuration file extensions.
 pub const CONFIG_FILE_EXTENSIONS: &[&str] = &["toml", "json", "json5", "yaml", "yml"];
 
-/// Environment variable used to specify the path to the global configuration
-const GLOBAL_CONFIG_ENV_VAR: &str = "JP_GLOBAL_CONFIG_FILE";
+/// Environment variable used to override the user-global config directory.
+/// JP looks for `config.{ext}` inside this directory, and uses it as the
+/// user-global search root for deferred loading via `--cfg <name>`.
+const GLOBAL_CONFIG_ENV_VAR: &str = "JP_GLOBAL_CONFIG_DIR";
 
 /// Configuration loader error.
 #[derive(Debug, thiserror::Error)]
@@ -328,9 +330,17 @@ impl ConfigLoader {
     }
 }
 
-/// Get the path to user the global config directory, if it exists.
+/// Get the path to the user-global config directory.
+///
+/// If `JP_GLOBAL_CONFIG_DIR` is set, returns that path (after tilde
+/// expansion). Otherwise returns the platform's default user config
+/// directory for JP.
+///
+/// Callers use this to locate both the user-global config file
+/// (`<dir>/config.{ext}`) and the deferred-loading search root
+/// (`<dir>/config/`).
 #[must_use]
-pub fn user_global_config_path(home: Option<&Utf8Path>) -> Option<Utf8PathBuf> {
+pub fn user_global_config_dir(home: Option<&Utf8Path>) -> Option<Utf8PathBuf> {
     env::var(GLOBAL_CONFIG_ENV_VAR)
         .ok()
         .and_then(|path| expand_tilde(path, home))
@@ -338,7 +348,7 @@ pub fn user_global_config_path(home: Option<&Utf8Path>) -> Option<Utf8PathBuf> {
         .inspect(|path| {
             debug!(
                 path = path.as_str(),
-                "Custom global configuration file path configured."
+                "Custom global configuration directory configured."
             );
         })
         .or_else(|| {

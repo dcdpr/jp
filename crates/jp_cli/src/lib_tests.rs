@@ -64,7 +64,7 @@ fn test_load_cli_cfg_args_user_global_root() {
     let tmp = tempdir().unwrap();
     let global_dir = tmp.path().join("global");
 
-    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_FILE", global_dir.as_str()) };
+    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -87,7 +87,7 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
     let global_dir = tmp.path().join("global");
     let ws_root = tmp.path().join("workspace");
 
-    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_FILE", global_dir.as_str()) };
+    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
     let workspace = Workspace::new(&ws_root);
 
@@ -111,7 +111,7 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
         Some("FROM_WS")
     );
 
-    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_FILE") };
+    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_DIR") };
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
     let global_dir = tmp.path().join("global");
     let ws_root = tmp.path().join("workspace");
 
-    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_FILE", global_dir.as_str()) };
+    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
     let workspace = Workspace::new(&ws_root);
 
@@ -286,7 +286,7 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
     let global_dir = tmp.path().join("global");
     let ws_root = tmp.path().join("workspace");
 
-    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_FILE", global_dir.as_str()) };
+    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
     let workspace = Workspace::new(&ws_root);
 

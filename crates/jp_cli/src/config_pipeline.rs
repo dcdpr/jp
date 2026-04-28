@@ -15,7 +15,7 @@ use camino::Utf8PathBuf;
 use jp_config::{
     PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
-    fs::{load_partial, user_global_config_path},
+    fs::{load_partial, user_global_config_dir},
     util::{find_file_in_load_path, load_partial_at_path},
 };
 use jp_storage::backend::FsStorageBackend;
@@ -120,7 +120,7 @@ fn resolve_cfg_args(
                 // 3. User-workspace: $XDG_DATA_HOME/jp/workspace/<id>/config/
                 let mut roots: Vec<Utf8PathBuf> = Vec::new();
 
-                if let Some(global_dir) = user_global_config_path(home.as_deref()) {
+                if let Some(global_dir) = user_global_config_dir(home.as_deref()) {
                     roots.push(global_dir.join("config"));
                 }
                 if let Some(w) = workspace {
