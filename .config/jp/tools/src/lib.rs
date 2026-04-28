@@ -55,11 +55,10 @@ impl Tool {
     }
 
     fn opt<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
-        if !self.arguments.contains_key(key) {
-            return Ok(None);
+        match self.arguments.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(_) => self.req(key).map(Some),
         }
-
-        self.req(key).map(Some)
     }
 
     fn opt_or_empty<T: serde::de::DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
