@@ -34,17 +34,17 @@ index. You can mix integers and ranges freely.
 examples = """
 Stage specific lines from a patch:
 ```json
-{"path": "src/lib.rs", "patch_id": 0, "lines": [0, 2]}
+{"path": "src/lib.rs", "patch_id": "a3f9c2b18d04", "lines": [0, 2]}
 ```
 
 Stage a large contiguous range of lines:
 ```json
-{"path": "src/lib.rs", "patch_id": 0, "lines": ["0:50"]}
+{"path": "src/lib.rs", "patch_id": "a3f9c2b18d04", "lines": ["0:50"]}
 ```
 
 Mix individual indices and ranges:
 ```json
-{"path": "src/lib.rs", "patch_id": 0, "lines": [0, "2:10", 15]}
+{"path": "src/lib.rs", "patch_id": "a3f9c2b18d04", "lines": [0, "2:10", 15]}
 ```
 """
 
@@ -54,9 +54,9 @@ required = true
 summary = "The file path containing the patch."
 
 [conversation.tools.git_stage_patch_lines.parameters.patch_id]
-type = "integer"
+type = "string"
 required = true
-summary = "The patch identifier from `git_list_patches`."
+summary = "The content-addressed patch identifier from `git_list_patches`."
 
 [conversation.tools.git_stage_patch_lines.parameters.lines]
 type = "array"

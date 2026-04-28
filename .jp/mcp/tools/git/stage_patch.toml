@@ -7,18 +7,27 @@ command = "just serve-tools {{context}} {{tool}}"
 summary = "Apply one or more patches (given their unique identifier) to the git repository index."
 description = """
 Stages patches for one or more files in a single call. Each entry specifies \
-a file path and the patch IDs to stage. Patch IDs come from `git_list_patches`.
+a file path and the patch IDs to stage. Patch IDs come from `git_list_patches` \
+and are content-addressed hex strings.
+
+Batch all hunks for a single file into one call when possible — it is both \
+faster and avoids the lock-contention retry path. Avoid issuing parallel \
+`git_stage_patch` calls for the same file.
+
+If an ID is no longer present in the current `git diff-files` output (because \
+the hunk was already staged or the working tree changed), the call fails \
+with a message instructing you to re-run `git_list_patches`.
 """
 
 examples = """
 Stage patches for a single file:
 ```json
-{"patches": [{"path": "src/lib.rs", "ids": [0, 2]}]}
+{"patches": [{"path": "src/lib.rs", "ids": ["a3f9c2b18d04", "7c4e1209ab55"]}]}
 ```
 
 Stage patches across multiple files:
 ```json
-{"patches": [{"path": "src/lib.rs", "ids": [0]}, {"path": "src/main.rs", "ids": [0, 1]}]}
+{"patches": [{"path": "src/lib.rs", "ids": ["a3f9c2b18d04"]}, {"path": "src/main.rs", "ids": ["de2f7841aa10", "61c08bb392ef"]}]}
 ```
 """
 
@@ -40,6 +49,6 @@ required = true
 
 [conversation.tools.git_stage_patch.parameters.patches.items.properties.ids]
 type = "array"
-items.type = "integer"
-summary = "Patch identifiers from `git_list_patches`."
+items.type = "string"
+summary = "Content-addressed patch identifiers from `git_list_patches`."
 required = true

@@ -132,13 +132,32 @@ fn fetch_hunk_produces_valid_header() {
     "};
 
     let runner = MockProcessRunner::success(diff_output);
-    let hunk = fetch_hunk("/tmp".into(), "test.rs", 0, &runner, &[]).unwrap();
+    let id = super::super::hunk::hunk_id("@@ -1 +1 @@\n-old\n+new");
+    let hunk = fetch_hunk("/tmp".into(), "test.rs", &id, &runner, &[]).unwrap();
 
     assert!(hunk.starts_with("@@ -"), "hunk header was: {hunk}");
 
     let (header, lines) = parse_hunk(&hunk).unwrap();
     assert_eq!(header.old_start, 1);
     assert_eq!(lines.len(), 2);
+}
+
+#[test]
+fn fetch_hunk_unknown_id_fails_with_helpful_message() {
+    let diff_output = indoc::indoc! {"
+        diff --git a/test.rs b/test.rs
+        --- a/test.rs
+        +++ b/test.rs
+        @@ -1 +1 @@
+        -old
+        +new
+    "};
+
+    let runner = MockProcessRunner::success(diff_output);
+    let err = fetch_hunk("/tmp".into(), "test.rs", "deadbeefcafe", &runner, &[]).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("not found"), "got: {msg}");
+    assert!(msg.contains("Re-run `git_list_patches`"), "got: {msg}");
 }
 
 #[test]
@@ -206,7 +225,8 @@ fn fetch_hunk_second_of_two() {
     "};
 
     let runner = MockProcessRunner::success(diff_output);
-    let hunk = fetch_hunk("/tmp".into(), "test.rs", 1, &runner, &[]).unwrap();
+    let id = super::super::hunk::hunk_id("@@ -5 +5 @@\n-e\n+E");
+    let hunk = fetch_hunk("/tmp".into(), "test.rs", &id, &runner, &[]).unwrap();
 
     let (header, lines) = parse_hunk(&hunk).unwrap();
     assert_eq!(header.old_start, 5);

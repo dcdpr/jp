@@ -1,7 +1,10 @@
 use camino::Utf8Path;
 use serde_json::{Map, Value};
 
-use super::apply::{apply_patch_to_index, build_patch};
+use super::{
+    apply::{apply_patch_to_index, build_patch},
+    hunk::{hunk_id, split_hunks},
+};
 use crate::util::{
     ToolResult,
     runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
@@ -10,7 +13,7 @@ use crate::util::{
 pub(crate) fn git_stage_patch_lines(
     root: &Utf8Path,
     path: &str,
-    patch_id: usize,
+    patch_id: &str,
     lines: Vec<Value>,
     options: &Map<String, Value>,
 ) -> ToolResult {
@@ -22,7 +25,7 @@ pub(crate) fn git_stage_patch_lines(
 fn git_stage_patch_lines_impl<R: ProcessRunner>(
     root: &Utf8Path,
     path: &str,
-    patch_id: usize,
+    patch_id: &str,
     lines: &[usize],
     runner: &R,
     env: &[(&str, &str)],
@@ -97,11 +100,15 @@ fn parse_range(range: &str) -> Result<(usize, usize), String> {
     Ok((start, count))
 }
 
-/// Fetch a specific hunk from the working tree diff.
+/// Fetch a specific hunk from the working tree diff by content-addressed ID.
+///
+/// Resolution is done against the live `diff-files` snapshot, so a stale ID
+/// (one that no longer matches any current hunk) fails loudly instead of
+/// silently aliasing to a different hunk at the same position.
 fn fetch_hunk<R: ProcessRunner>(
     root: &Utf8Path,
     path: &str,
-    patch_id: usize,
+    patch_id: &str,
     runner: &R,
     env: &[(&str, &str)],
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
@@ -120,21 +127,16 @@ fn fetch_hunk<R: ProcessRunner>(
         return Err(format!("Failed to get diff for '{path}': {stderr}").into());
     }
 
-    // Split on `\n@@ ` and skip the diff header (everything before the first
-    // hunk). Each segment after skip(1) lacks the `@@ ` prefix, so we re-add
-    // it.
-    stdout
-        .split("\n@@ ")
-        .skip(1)
-        .nth(patch_id)
-        .map(|h| format!("@@ {h}"))
-        .ok_or_else(|| {
-            format!(
-                "Patch {patch_id} not found for '{path}'. Run git_list_patches to see available \
-                 patches."
-            )
-            .into()
-        })
+    let hunks = split_hunks(&stdout);
+    let matched = hunks.into_iter().find(|h| hunk_id(h) == patch_id);
+
+    matched.ok_or_else(|| {
+        format!(
+            "Patch '{patch_id}' not found for '{path}'. It may already be staged, or the working \
+             tree changed since `git_list_patches`. Re-run `git_list_patches` and try again."
+        )
+        .into()
+    })
 }
 
 /// Parse a hunk into its header and individual diff lines.
