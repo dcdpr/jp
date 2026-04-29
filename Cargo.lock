@@ -2008,6 +2008,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp_attachment_internal"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "indoc",
+ "jp_attachment",
+ "jp_conversation",
+ "jp_id",
+ "jp_storage",
+ "jp_workspace",
+ "serde",
+ "serde_json",
+ "test-log",
+ "url",
+]
+
+[[package]]
 name = "jp_attachment_mcp_resources"
 version = "0.1.0"
 dependencies = [
@@ -2049,6 +2067,7 @@ dependencies = [
  "jp_attachment_cmd_output",
  "jp_attachment_file_content",
  "jp_attachment_http_content",
+ "jp_attachment_internal",
  "jp_attachment_mcp_resources",
  "jp_config",
  "jp_conversation",

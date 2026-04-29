@@ -12,6 +12,7 @@ resolver = "3"
 jp_attachment = { path = "crates/jp_attachment" }
 jp_attachment_bear_note = { path = "crates/jp_attachment_bear_note" }
 jp_attachment_cmd_output = { path = "crates/jp_attachment_cmd_output" }
+jp_attachment_internal = { path = "crates/jp_attachment_internal" }
 jp_attachment_file_content = { path = "crates/jp_attachment_file_content" }
 jp_attachment_http_content = { path = "crates/jp_attachment_http_content" }
 jp_attachment_mcp_resources = { path = "crates/jp_attachment_mcp_resources" }

@@ -1,0 +1,36 @@
+[package]
+name = "jp_attachment_internal"
+
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+jp_attachment = { workspace = true }
+jp_conversation = { workspace = true }
+jp_id = { workspace = true }
+jp_workspace = { workspace = true }
+
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+url = { workspace = true }
+
+[dev-dependencies]
+camino = { workspace = true }
+camino-tempfile = { workspace = true }
+indoc = { workspace = true }
+jp_storage = { workspace = true }
+test-log = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
