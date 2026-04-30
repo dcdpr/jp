@@ -756,6 +756,7 @@ const JP_CRATES: &[&str] = &[
     "attachment_cmd_output",
     "attachment_file_content",
     "attachment_http_content",
+    "attachment_internal",
     "attachment_mcp_resources",
     "cli",
     "config",

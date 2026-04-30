@@ -2,6 +2,9 @@ use jp_attachment_bear_note as _;
 use jp_attachment_cmd_output as _;
 use jp_attachment_file_content as _;
 use jp_attachment_http_content as _;
+use jp_attachment_internal::{
+    resolve as resolve_internal_attachment, validate as validate_internal_attachment,
+};
 use jp_attachment_mcp_resources as _;
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
@@ -71,13 +74,21 @@ enum Commands {
     Print(print::Print),
 }
 
+fn attachment_scheme(uri: &Url) -> &str {
+    uri.scheme()
+        .split_once('+')
+        .map_or(uri.scheme(), |(scheme, _)| scheme)
+}
+
 pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
     trace!(%uri, "Validating attachment.");
 
-    let scheme = uri
-        .scheme()
-        .split_once('+')
-        .map_or(uri.scheme(), |(k, _)| k);
+    let scheme = attachment_scheme(uri);
+
+    if scheme == "jp" {
+        validate_internal_attachment(uri).map_err(|e| Error::Attachment(e.to_string()))?;
+        return Ok(());
+    }
 
     if jp_attachment::find_handler_by_scheme(scheme).is_none() {
         return Err(Error::NotFound("Attachment handler", scheme.to_string()));
@@ -92,10 +103,12 @@ pub(crate) async fn register_attachment(
 ) -> Result<Vec<jp_attachment::Attachment>> {
     trace!(uri = uri.as_str(), "Registering attachment.");
 
-    let scheme = uri
-        .scheme()
-        .split_once('+')
-        .map_or(uri.scheme(), |(k, _)| k);
+    let scheme = attachment_scheme(&uri);
+
+    if scheme == "jp" {
+        return resolve_internal_attachment(&ctx.workspace, &uri)
+            .map_err(|e| Error::Attachment(e.to_string()));
+    }
 
     let Some(mut handler) = jp_attachment::find_handler_by_scheme(scheme) else {
         return Err(Error::NotFound("Attachment handler", scheme.to_string()));
