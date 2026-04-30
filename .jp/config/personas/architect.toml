@@ -1,7 +1,11 @@
 extends = [
     "../knowledge/project-structure.toml",
     "../knowledge/architecture.toml",
+    "../knowledge/software-laws.toml",
 ]
+
+[style]
+reasoning.display = "full"
 
 [conversation.tools]
 '*'.run = "unattended"
@@ -39,7 +43,7 @@ principles, not implementation details.
 
 [assistant.model]
 id = "opus"
-parameters.reasoning.effort = "auto"
+parameters.reasoning.effort = "xhigh"
 
 [[assistant.instructions]]
 title = "Architecture Workflow"

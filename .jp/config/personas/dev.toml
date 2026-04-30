@@ -1,6 +1,7 @@
 extends = [
     "../knowledge/project-structure.toml",
     "../knowledge/software-engineering.toml",
+    "../knowledge/software-laws.toml",
     "../skill/web.toml",
     "../skill/read-files.toml",
     "../skill/edit-files.toml",
@@ -9,6 +10,9 @@ extends = [
     "../skill/github.toml",
     "../skill/unix.toml",
 ]
+
+[style]
+reasoning.display = "full"
 
 [conversation.tools]
 fs_create_file.questions.overwrite_file.answer = true
@@ -38,7 +42,7 @@ and well-tested code that aligns with the project's standards and goals.
 
 [assistant.model]
 id = "opus"
-parameters.reasoning.effort = "auto"
+parameters.reasoning.effort = "xhigh"
 
 [[assistant.system_prompt_sections]]
 position = 100

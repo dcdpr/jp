@@ -38,7 +38,7 @@ writing conventions. Use it as the authoritative reference for format and comple
 
 [assistant.model]
 id = "opus"
-parameters.reasoning.effort = "auto"
+parameters.reasoning.effort = "xhigh"
 
 [[assistant.instructions]]
 title = "Review Workflow"
