@@ -7,28 +7,24 @@ use crate::util::runner::MockProcessRunner;
 fn parse_hunk_header_simple() {
     let h = parse_hunk_header("@@ -5 +5 @@").unwrap();
     assert_eq!(h.old_start, 5);
-    assert_eq!(h.new_start, 5);
 }
 
 #[test]
 fn parse_hunk_header_with_counts() {
     let h = parse_hunk_header("@@ -5,3 +5,2 @@").unwrap();
     assert_eq!(h.old_start, 5);
-    assert_eq!(h.new_start, 5);
 }
 
 #[test]
 fn parse_hunk_header_zero_count() {
     let h = parse_hunk_header("@@ -5,0 +5,3 @@").unwrap();
     assert_eq!(h.old_start, 5);
-    assert_eq!(h.new_start, 5);
 }
 
 #[test]
 fn parse_hunk_header_different_old_new_start() {
     let h = parse_hunk_header("@@ -3,0 +4,1 @@").unwrap();
     assert_eq!(h.old_start, 3);
-    assert_eq!(h.new_start, 4);
 }
 
 #[test]

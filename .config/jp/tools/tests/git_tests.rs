@@ -125,6 +125,16 @@ fn commit_then_modify(root: &Utf8Path, path: &str, original: &str, modified: &st
     fs::write(root.join(path), modified).unwrap();
 }
 
+/// 20-line fixture used by the offset-correction regression tests.
+fn lines_1_to_20() -> String {
+    let mut s = String::new();
+    for i in 1..=20 {
+        use std::fmt::Write as _;
+        writeln!(s, "line{i}").unwrap();
+    }
+    s
+}
+
 /// Extract content-addressed patch IDs from a `git_list_patches` XML response.
 fn extract_patch_ids(xml: &str) -> Vec<String> {
     xml.lines()
@@ -1339,6 +1349,103 @@ async fn sequential_staging_across_tools() {
     .await;
 
     assert_eq!(staged_content(&root, "mix.rs"), "A\nb\nc\nd\nE\n");
+}
+
+#[tokio::test]
+async fn stage_patch_addition_with_unrelated_unstaged_removal() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    let original = lines_1_to_20();
+    let modified: String = {
+        let mut lines: Vec<String> = original.lines().map(String::from).collect();
+        for _ in 0..9 {
+            lines.remove(2);
+        }
+        lines.insert(9, "INSERTED".to_string());
+        lines.join("\n") + "\n"
+    };
+
+    fs::write(root.join("sp.rs"), &original).unwrap();
+    git(&root, &["add", "sp.rs"]);
+    git(&root, &["commit", "-m", "init sp"]);
+    fs::write(root.join("sp.rs"), &modified).unwrap();
+
+    let ids = patch_ids(&root, "sp.rs").await;
+    assert_eq!(ids.len(), 2, "expected 2 hunks, got {}", ids.len());
+
+    // Stage only the addition hunk (the second one).
+    run_ok(
+        ctx(&root),
+        tool_with_answers(
+            "git_stage_patch",
+            &json!({"patches": [{"path": "sp.rs", "ids": [&ids[1]]}]}),
+            &json!({"stage_changes": true}),
+        ),
+    )
+    .await;
+
+    let expected: String = {
+        let mut lines: Vec<String> = original.lines().map(String::from).collect();
+        lines.insert(18, "INSERTED".to_string());
+        lines.join("\n") + "\n"
+    };
+    assert_eq!(staged_content(&root, "sp.rs"), expected);
+}
+
+#[tokio::test]
+async fn stage_patch_lines_addition_with_unrelated_unstaged_removal() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+
+    // Original file: 20 lines.
+    let original = lines_1_to_20();
+
+    // Working tree: remove lines 3-11 (9 lines) AND insert "INSERTED" after
+    // old line 18. Two distant unstaged hunks in a single file.
+    let modified: String = {
+        let mut lines: Vec<String> = original.lines().map(String::from).collect();
+        for _ in 0..9 {
+            lines.remove(2);
+        }
+        // After removals: indices 0..=10 hold line1, line2, line12..line20.
+        // Old line 18 is now at index 8. Insert "INSERTED" right after it.
+        lines.insert(9, "INSERTED".to_string());
+        lines.join("\n") + "\n"
+    };
+
+    fs::write(root.join("two_hunk.rs"), &original).unwrap();
+    git(&root, &["add", "two_hunk.rs"]);
+    git(&root, &["commit", "-m", "init two_hunk"]);
+    fs::write(root.join("two_hunk.rs"), &modified).unwrap();
+
+    // Expect two distinct hunks in the listing.
+    let ids = patch_ids(&root, "two_hunk.rs").await;
+    assert_eq!(ids.len(), 2, "expected 2 hunks, got {}", ids.len());
+
+    // Stage just the insertion hunk's only line.
+    run_ok(
+        ctx(&root),
+        tool(
+            "git_stage_patch_lines",
+            &json!({"path": "two_hunk.rs", "patch_id": &ids[1], "lines": [0]}),
+        ),
+    )
+    .await;
+
+    // The index should match HEAD plus exactly one inserted line after
+    // old line 18 — the unrelated removal must remain unstaged.
+    let expected: String = {
+        let mut lines: Vec<String> = original.lines().map(String::from).collect();
+        lines.insert(18, "INSERTED".to_string());
+        lines.join("\n") + "\n"
+    };
+    assert_eq!(staged_content(&root, "two_hunk.rs"), expected);
 }
 
 #[tokio::test]

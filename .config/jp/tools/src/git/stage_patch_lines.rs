@@ -56,10 +56,13 @@ enum DiffLineKind {
 }
 
 /// Parsed hunk header coordinates.
+///
+/// Only `old_start` is tracked: `new_start` from the original full-diff hunk
+/// header is intentionally discarded, since `build_sub_hunk` recomputes the
+/// `+Y` line number from scratch (see the offset-correction comment there).
 #[derive(Debug)]
 struct HunkHeader {
     old_start: usize,
-    new_start: usize,
 }
 
 fn parse_hunk_header(header: &str) -> Result<HunkHeader, String> {
@@ -68,20 +71,11 @@ fn parse_hunk_header(header: &str) -> Result<HunkHeader, String> {
     let old_part = parts
         .get(1)
         .ok_or("Invalid hunk header: missing old range")?;
-    let new_part = parts
-        .get(2)
-        .ok_or("Invalid hunk header: missing new range")?;
 
     let old_range = old_part.trim_start_matches('-');
     let (old_start, _old_count) = parse_range(old_range)?;
 
-    let new_range = new_part.trim_start_matches('+');
-    let (new_start, _new_count) = parse_range(new_range)?;
-
-    Ok(HunkHeader {
-        old_start,
-        new_start,
-    })
+    Ok(HunkHeader { old_start })
 }
 
 fn parse_range(range: &str) -> Result<(usize, usize), String> {
@@ -239,13 +233,26 @@ fn build_sub_hunk(hunk: &str, selected: &[usize]) -> Result<String, String> {
         body.push('\n');
     }
 
-    // Preserve the offset between old and new positions from the original
-    // hunk header. This is critical for pure insertions where new_start
-    // differs from old_start (e.g. @@ -3,0 +4,1 @@ inserts AFTER line 3).
-    #[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
-    let new_start = {
-        let offset = header.new_start as isize - header.old_start as isize;
-        (old_start as isize + offset).max(0) as usize
+    // Compute `new_start` from the sub-hunk's own contents, NOT by
+    // preserving the offset of the original full-diff hunk header.
+    //
+    // The header we received comes from `git diff-files --unified=0` against
+    // the entire working tree, so its `+Y` reflects the cumulative line
+    // shift of every unstaged hunk earlier in the file. Applying a sub-hunk
+    // in isolation against a clean index via `git apply --cached
+    // --unidiff-zero` uses `+Y` to position the change — carrying that
+    // cumulative offset over would land the patch at the wrong line
+    // whenever other unstaged hunks (not part of this staging) shifted
+    // line numbers.
+    let new_start = if found_removal {
+        // Replacement or pure removal: new content starts at the same
+        // position as the first removed line.
+        old_start
+    } else {
+        // Pure insertion: the first new line lands at `old_start + 1`. For
+        // `old_start = 0` (insertion at file start) this naturally yields
+        // `1`.
+        old_start.saturating_add(1)
     };
 
     let hunk_header = format!("@@ -{old_start},{removals} +{new_start},{additions} @@");
