@@ -494,6 +494,69 @@ fn test_inline_code_wrap_preserves_code_bg_on_content() {
     );
 }
 
+/// Regression: when a wrap-break landed between the *last breakable space*
+/// and the start of an inline span (e.g. `**bold**` opened mid-line), the
+/// escapes recorded past the break point were dropped. The continuation
+/// line was then re-stylized using `attrs.restore_sequence()`, which
+/// promoted the style (here: bold) onto text that should have been plain.
+#[test]
+fn test_strong_does_not_bleed_across_wrap() {
+    // Width chosen so:
+    //   - "abcdef" fits before the breakable space,
+    //   - by the time we open `**bold**`, BOLD_START is recorded past the
+    //     last breakable space,
+    //   - emitting the first `*` overflows width=10 and triggers a wrap.
+    let actual = Formatter::with_width(10)
+        .format_terminal("abcdef ghi**bold**\n")
+        .unwrap();
+
+    // Sanity: it actually wrapped.
+    assert!(
+        actual.lines().count() >= 2,
+        "Expected wrapping. Got: {actual:?}"
+    );
+
+    // Walk the output and assert that bold is *not* active at "ghi".
+    let pos = actual.find("ghi").expect("`ghi` should be in the output");
+    let prefix = &actual[..pos];
+    let mut bold = false;
+    for sgr in sgr_params_in_order(prefix) {
+        for tok in sgr.split(';') {
+            match tok {
+                "" | "0" | "22" => bold = false,
+                "1" => bold = true,
+                _ => {}
+            }
+        }
+    }
+    assert!(
+        !bold,
+        "Bold should NOT be active over `ghi` (it sits before `**`).\nFull output: {actual:?}"
+    );
+}
+
+/// Yield the SGR parameter strings (between `\x1b[` and `m`) of `s`, in order.
+fn sgr_params_in_order(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut iter = s.chars();
+    while let Some(c) = iter.next() {
+        if c != '\x1b' || iter.next() != Some('[') {
+            continue;
+        }
+        let mut params = String::new();
+        for nc in iter.by_ref() {
+            if nc.is_ascii_alphabetic() {
+                if nc == 'm' {
+                    out.push(params.clone());
+                }
+                break;
+            }
+            params.push(nc);
+        }
+    }
+    out
+}
+
 #[test]
 fn test_code_block_inherits_default_background() {
     // Bug: when rendering with a default background (reasoning mode),

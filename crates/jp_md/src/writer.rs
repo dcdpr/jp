@@ -71,7 +71,21 @@ pub struct TerminalWriter<'w> {
     pub(crate) width: usize,
 
     /// Currently active ANSI attributes.
+    ///
+    /// This is the renderer's running view of the *intended* state — i.e. the
+    /// state implied by every escape ever pushed since the last full reset.
+    /// It is not necessarily the state the terminal is in right now: some of
+    /// those escapes may still be sitting in [`escapes`](Self::escapes),
+    /// waiting to be flushed.
     pub(crate) attrs: AnsiState,
+
+    /// ANSI state at the start of the current `wrap_buffer` batch.
+    ///
+    /// Replaying every escape in [`escapes`](Self::escapes) on top of this
+    /// state yields [`attrs`](Self::attrs). Used during wrap-break to
+    /// reconstruct the state at an arbitrary byte offset (specifically, at the
+    /// break point) without losing escapes that were recorded past it.
+    batch_initial_attrs: AnsiState,
 
     /// Optional default background color for all content.
     pub(crate) default_background: Option<DefaultBackground>,
@@ -112,6 +126,10 @@ impl<'w> TerminalWriter<'w> {
             allow_wrap: width > 0,
             width,
             attrs,
+            // The terminal starts in default state. The first batch's escapes
+            // (including any default-background setup) are responsible for
+            // bringing it to `attrs`.
+            batch_initial_attrs: AnsiState::default(),
             default_background,
         }
     }
@@ -165,12 +183,110 @@ impl<'w> TerminalWriter<'w> {
     }
 
     /// Flush the entire wrap buffer (with escapes) to the output writer.
+    ///
+    /// Callers are expected to push a trailing `RESET` escape before flushing
+    /// when `attrs` is active, so the terminal state is `default` afterwards.
+    /// `batch_initial_attrs` is reset accordingly.
     fn flush_wrap_buffer(&mut self) -> fmt::Result {
         let len = self.wrap_buffer.len();
         let merged = self.merge_escapes(0, len);
         self.output.write_str(&merged)?;
         self.wrap_buffer.clear();
         self.escapes.clear();
+        self.batch_initial_attrs = AnsiState::default();
+        Ok(())
+    }
+
+    /// Soft-wrap the current wrap buffer at `last_breakable`.
+    ///
+    /// Splits `wrap_buffer` at the last breakable space and starts a fresh
+    /// line with the prefix and the remainder. Escapes are partitioned by
+    /// their offset:
+    ///
+    /// - Escapes at offsets `≤ break_pos` are folded into the *first part*
+    ///   (already done by [`merge_escapes`](Self::merge_escapes)) and replayed
+    ///   onto [`batch_initial_attrs`](Self::batch_initial_attrs) to derive
+    ///   the attribute state at the break point.
+    /// - Escapes at offsets `> break_pos` belong to the *rest* and are
+    ///   re-anchored onto the new buffer at
+    ///   `prefix.len() + (offset - rest_start)`. Dropping them — as a
+    ///   previous version of this code did — caused mid-line attribute
+    ///   changes (e.g. opening `**`) to bleed back to the start of the
+    ///   continuation line.
+    fn wrap_break(&mut self) -> fmt::Result {
+        let break_pos = self.last_breakable;
+        let rest_start = break_pos + 1;
+
+        // Emit everything up to (and including escapes anchored at) break_pos.
+        let first_part = self.merge_escapes(0, break_pos);
+        self.output.write_str(&first_part)?;
+
+        // Partition the escapes:
+        //   - `≤ break_pos`: replay onto attrs_at_break.
+        //   - `> break_pos`:  carry forward onto the new line.
+        let mut attrs_at_break = self.batch_initial_attrs.clone();
+        let mut late_escapes: Vec<(usize, String)> = Vec::new();
+        for (offset, code) in self.escapes.drain(..) {
+            if offset <= break_pos {
+                attrs_at_break.update(&code);
+            } else {
+                let new_offset = self.prefix.len() + (offset - rest_start);
+                late_escapes.push((new_offset, code));
+            }
+        }
+
+        self.emit_line_fill_direct()?;
+        if attrs_at_break.is_active() {
+            self.output.write_str(RESET)?;
+        }
+        self.output.write_str("\n")?;
+
+        let rest = if rest_start < self.wrap_buffer.len() {
+            self.wrap_buffer[rest_start..].to_string()
+        } else {
+            String::new()
+        };
+        self.wrap_buffer.clear();
+
+        // Re-establish the styling that was active at break_pos for the new
+        // line. Late escapes take it from there.
+        if attrs_at_break.is_active() {
+            let has_temp_bg = self.default_background.is_some()
+                && attrs_at_break.background
+                    != self.default_background.as_ref().map(|bg| bg.param.clone());
+
+            if has_temp_bg {
+                // The prefix gets the default (reasoning) bg so a
+                // temporary bg (e.g. inline code) doesn't bleed into the
+                // indentation.
+                let mut prefix_attrs = attrs_at_break.clone();
+                prefix_attrs.background =
+                    self.default_background.as_ref().map(|bg| bg.param.clone());
+                self.escapes.push((0, prefix_attrs.restore_sequence()));
+                // After the prefix, restore the actual attrs (including the
+                // temporary bg) for the content.
+                self.escapes
+                    .push((self.prefix.len(), attrs_at_break.restore_sequence()));
+            } else {
+                self.escapes.push((0, attrs_at_break.restore_sequence()));
+            }
+        }
+
+        self.wrap_buffer.push_str(&self.prefix);
+        self.wrap_buffer.push_str(&rest);
+        self.escapes.extend(late_escapes);
+
+        // The terminal is in default state now (either RESET was emitted, or
+        // attrs_at_break was already inactive). The new batch's escapes
+        // bring it back up to `attrs`.
+        self.batch_initial_attrs = AnsiState::default();
+
+        self.column = self.prefix_width() + ansi::visual_width(&rest);
+        self.last_breakable = 0;
+        self.begin_line = false;
+        self.begin_content = false;
+        self.pending_attr_restore = false;
+
         Ok(())
     }
 
@@ -324,7 +440,6 @@ impl<'w> TerminalWriter<'w> {
     }
 
     /// Output visible text with optional wrapping support.
-    #[expect(clippy::too_many_lines)]
     pub(crate) fn output(&mut self, s: &str, wrap: bool) -> fmt::Result {
         let bytes = s.as_bytes();
         let wrap = self.allow_wrap && wrap && !self.no_linebreaks;
@@ -408,56 +523,7 @@ impl<'w> TerminalWriter<'w> {
                 && !self.begin_line
                 && self.last_breakable > 0
             {
-                let break_pos = self.last_breakable;
-
-                let first_part = self.merge_escapes(0, break_pos);
-                self.output.write_str(&first_part)?;
-                self.emit_line_fill_direct()?;
-                if self.attrs.is_active() {
-                    self.output.write_str(RESET)?;
-                }
-                self.output.write_str("\n")?;
-
-                let rest_start = break_pos + 1;
-                let rest = if rest_start < self.wrap_buffer.len() {
-                    self.wrap_buffer[rest_start..].to_string()
-                } else {
-                    String::new()
-                };
-
-                self.wrap_buffer.clear();
-                self.escapes.clear();
-
-                if self.attrs.is_active() {
-                    let has_temp_bg = self.default_background.is_some()
-                        && self.attrs.background
-                            != self.default_background.as_ref().map(|bg| bg.param.clone());
-
-                    if has_temp_bg {
-                        // The prefix gets the default (reasoning) bg so
-                        // inline code bg doesn't bleed into indentation.
-                        let mut prefix_attrs = self.attrs.clone();
-                        prefix_attrs.background =
-                            self.default_background.as_ref().map(|bg| bg.param.clone());
-                        self.escapes.push((0, prefix_attrs.restore_sequence()));
-                    } else {
-                        self.escapes.push((0, self.attrs.restore_sequence()));
-                    }
-
-                    // After the prefix, restore the actual attrs (including
-                    // any temporary bg like inline code) for the content.
-                    if has_temp_bg {
-                        self.escapes
-                            .push((self.prefix.len(), self.attrs.restore_sequence()));
-                    }
-                }
-                self.wrap_buffer.push_str(&self.prefix);
-                self.wrap_buffer.push_str(&rest);
-                self.column = self.prefix_width() + ansi::visual_width(&rest);
-                self.last_breakable = 0;
-                self.begin_line = false;
-                self.begin_content = false;
-                self.pending_attr_restore = false;
+                self.wrap_break()?;
             }
         }
 
