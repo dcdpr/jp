@@ -6,7 +6,7 @@ use serde_json::{Map, Value};
 
 use super::{
     apply::apply_patch_to_index,
-    hunk::{diff_header, hunk_id, split_hunks},
+    hunk::{diff_header, hunk_id, rewrite_hunk_y, split_hunks},
 };
 use crate::util::{
     OneOrMany, ToolResult,
@@ -189,13 +189,30 @@ fn build_file_patch<R: ProcessRunner>(
 
     // Deduplicate requested IDs and emit hunks in file order to satisfy
     // `git apply`'s monotonic-line requirement for multi-hunk patches.
+    //
+    // Each selected hunk's `+Y` is recomputed: the working-tree diff bakes
+    // in the cumulative line shift of every preceding unstaged hunk, but a
+    // partial stage skips some of those shifts. We track the net effect of
+    // preceding *selected* hunks and rewrite each header accordingly so
+    // `git apply --cached --unidiff-zero` lands the change at the right
+    // line.
     let requested: std::collections::HashSet<&str> =
         requested_ids.iter().map(String::as_str).collect();
-    let selected: Vec<&str> = available_hunks
-        .iter()
-        .filter(|h| requested.contains(hunk_id(h).as_str()))
-        .map(String::as_str)
-        .collect();
+
+    let mut cumulative_offset: isize = 0;
+    let mut selected: Vec<String> = vec![];
+    for hunk in &available_hunks {
+        if !requested.contains(hunk_id(hunk).as_str()) {
+            continue;
+        }
+        let (rewritten, counts) = rewrite_hunk_y(hunk, cumulative_offset)
+            .ok_or_else(|| format!("Malformed hunk header in diff: {hunk}"))?;
+        #[allow(clippy::cast_possible_wrap)]
+        {
+            cumulative_offset += counts.new_count as isize - counts.old_count as isize;
+        }
+        selected.push(rewritten);
+    }
 
     // Ensure the patch ends with a newline. Hunks emitted by `split_hunks`
     // may have lost their trailing newline during splitting (the newline

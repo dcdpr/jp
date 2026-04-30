@@ -61,6 +61,83 @@ pub fn diff_header(diff_stdout: &str) -> Option<&str> {
     diff_stdout.split_once("\n@@ ").map(|(header, _)| header)
 }
 
+/// Parsed counts and start positions extracted from a `@@ ... @@` header.
+#[derive(Debug, Clone, Copy)]
+pub struct HunkCounts {
+    pub old_start: usize,
+    pub old_count: usize,
+    pub new_count: usize,
+}
+
+/// Parse the `-OS,N` and `+Y,M` ranges from a hunk header line.
+///
+/// Accepts both forms with explicit count (`-5,2`) and the implicit
+/// single-line form (`-5`, equivalent to `-5,1`). Anything after the second
+/// `@@` is ignored.
+pub fn parse_hunk_counts(header_line: &str) -> Option<HunkCounts> {
+    let mut parts = header_line.split_whitespace();
+    parts.next()?; // leading `@@`
+    let old_part = parts.next()?.strip_prefix('-')?;
+    let new_part = parts.next()?.strip_prefix('+')?;
+
+    let (old_start, old_count) = parse_range(old_part)?;
+    let (_new_start, new_count) = parse_range(new_part)?;
+
+    Some(HunkCounts {
+        old_start,
+        old_count,
+        new_count,
+    })
+}
+
+fn parse_range(s: &str) -> Option<(usize, usize)> {
+    let mut it = s.split(',');
+    let start: usize = it.next()?.parse().ok()?;
+    let count: usize = it.next().map_or(Some(1), |c| c.parse().ok())?;
+    Some((start, count))
+}
+
+/// Rewrite a hunk's header to use a canonical `+Y` line number.
+///
+/// Hunks emitted by `git diff-files --unified=0` carry `+Y` values that
+/// reflect the cumulative line shift of every preceding unstaged hunk in
+/// the same file. When staging only a subset of those hunks, the `+Y` of
+/// each selected hunk must be recomputed: `git apply --cached
+/// --unidiff-zero` positions changes by `+Y`, so a stale offset places
+/// the patch at the wrong line.
+///
+/// `cumulative_offset` is the net `(additions - removals)` line change
+/// produced by preceding *selected* hunks in the assembled patch, so that
+/// the rewritten `+Y` reflects the source state at the point this hunk
+/// is applied.
+#[allow(clippy::cast_possible_wrap, clippy::cast_sign_loss)]
+pub fn rewrite_hunk_y(hunk: &str, cumulative_offset: isize) -> Option<(String, HunkCounts)> {
+    let (header_line, body) = hunk.split_once('\n')?;
+    let counts = parse_hunk_counts(header_line)?;
+
+    // Canonical `+Y` assuming the hunk applies at its old position to the
+    // source state implied by `cumulative_offset`.
+    let canonical_y = if counts.old_count > 0 {
+        counts.old_start as isize
+    } else {
+        counts.old_start as isize + 1
+    };
+    let new_y = (canonical_y + cumulative_offset).max(0) as usize;
+
+    // Preserve any trailing context after the second `@@`.
+    let trailing = header_line
+        .splitn(4, ' ')
+        .nth(3)
+        .map_or(String::new(), |t| format!(" {t}"));
+
+    let new_header = format!(
+        "@@ -{},{} +{},{} @@{}",
+        counts.old_start, counts.old_count, new_y, counts.new_count, trailing
+    );
+
+    Some((format!("{new_header}\n{body}"), counts))
+}
+
 #[cfg(test)]
 #[path = "hunk_tests.rs"]
 mod tests;
