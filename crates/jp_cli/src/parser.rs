@@ -104,10 +104,14 @@ impl std::str::FromStr for AttachmentUrlOrPath {
 /// literally named `jp-c1234` would still match — prefix it with `./` to
 /// force the path interpretation.
 fn jp_id_shorthand_to_url(s: &str) -> Option<Url> {
-    let (id_part, query) = split_jp_shorthand(s);
+    let (id_part, query) = s
+        .find('?')
+        .map_or((s, None), |idx| (&s[..idx], Some(&s[idx + 1..])));
+
     let Ok(parts) = id_part.parse::<Parts>() else {
         return None;
     };
+
     if !parts.target_id.is_valid() {
         return None;
     }
@@ -118,29 +122,20 @@ fn jp_id_shorthand_to_url(s: &str) -> Option<Url> {
         }
         _ => format!("jp://{id_part}"),
     };
+
     Url::parse(&url_str).ok()
 }
-
-fn split_jp_shorthand(s: &str) -> (&str, Option<&str>) {
-    s.find('?')
-        .map_or((s, None), |idx| (&s[..idx], Some(&s[idx + 1..])))
-}
-
-/// Names of query parameters the `jp://` scheme understands. A shorthand
-/// suffix that starts with one of these (with `=` or `&` or end-of-string)
-/// is passed through verbatim; anything else is treated as the value of an
-/// implicit `select=`.
-const KNOWN_JP_PARAMS: &[&str] = &["select", "raw"];
 
 fn canonicalize_shorthand_query(q: &str) -> String {
     if starts_with_known_param(q) {
         return q.to_owned();
     }
+
     format!("select={q}")
 }
 
 fn starts_with_known_param(q: &str) -> bool {
-    KNOWN_JP_PARAMS.iter().any(|name| {
+    ["select", "raw"].iter().any(|name| {
         q == *name || q.starts_with(&format!("{name}=")) || q.starts_with(&format!("{name}&"))
     })
 }
