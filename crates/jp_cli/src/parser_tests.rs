@@ -83,25 +83,6 @@ fn ordinary_file_paths_round_trip() {
 }
 
 #[test]
-fn looks_like_jp_id_rejects_invalid_shapes() {
-    // Empty target.
-    assert!(!looks_like_jp_id("jp-c"));
-    // Non-lowercase variant.
-    assert!(!looks_like_jp_id("jp-C123"));
-    // Missing prefix.
-    assert!(!looks_like_jp_id("c1234"));
-    // Invalid char in target.
-    assert!(!looks_like_jp_id("jp-c12.34"));
-}
-
-#[test]
-fn looks_like_jp_id_accepts_valid_shapes() {
-    assert!(looks_like_jp_id("jp-c1234"));
-    assert!(looks_like_jp_id("jp-w12abc"));
-    assert!(looks_like_jp_id("jp-c17013123456"));
-}
-
-#[test]
 fn starts_with_known_param_matches_known_names() {
     assert!(starts_with_known_param("select"));
     assert!(starts_with_known_param("select=a"));

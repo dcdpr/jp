@@ -2,17 +2,12 @@ use std::convert::Infallible;
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf, absolute_utf8};
 use clean_path::Clean as _;
+use jp_id::Parts;
 use relative_path::RelativePathBuf;
 use tracing::trace;
 use url::Url;
 
 use crate::error::{Error, Result};
-
-/// Prefix used by every JP ID.
-///
-/// This must stay in sync with `jp_id::ID_PREFIX`. Repeating it here avoids
-/// pulling `jp_id` into the parser hot path just for a constant.
-const JP_ID_PREFIX: &str = "jp-";
 
 #[derive(Debug, Clone)]
 pub(crate) enum AttachmentUrlOrPath {
@@ -105,14 +100,15 @@ impl std::str::FromStr for AttachmentUrlOrPath {
 
 /// Rewrite a JP ID shorthand into a `jp://` URL.
 ///
-/// Returns `None` if `s` doesn't look like a JP ID. The check is intentionally
-/// shallow: the shape `jp-<variant><target>` with `[a-z0-9]` characters is
-/// enough to disambiguate from regular file paths. A directory literally
-/// named `jp-c1234` would still match — prefix it with `./` to force the
-/// path interpretation.
+/// Returns `None` if `s` doesn't parse as a valid JP ID. A directory
+/// literally named `jp-c1234` would still match — prefix it with `./` to
+/// force the path interpretation.
 fn jp_id_shorthand_to_url(s: &str) -> Option<Url> {
     let (id_part, query) = split_jp_shorthand(s);
-    if !looks_like_jp_id(id_part) {
+    let Ok(parts) = id_part.parse::<Parts>() else {
+        return None;
+    };
+    if !parts.target_id.is_valid() {
         return None;
     }
 
@@ -147,26 +143,6 @@ fn starts_with_known_param(q: &str) -> bool {
     KNOWN_JP_PARAMS.iter().any(|name| {
         q == *name || q.starts_with(&format!("{name}=")) || q.starts_with(&format!("{name}&"))
     })
-}
-
-fn looks_like_jp_id(s: &str) -> bool {
-    let Some(rest) = s.strip_prefix(JP_ID_PREFIX) else {
-        return false;
-    };
-    let mut chars = rest.chars();
-    // Variant: a single lowercase ASCII letter.
-    let Some(variant) = chars.next() else {
-        return false;
-    };
-    if !variant.is_ascii_lowercase() {
-        return false;
-    }
-    // Target: at least one alphanumeric, all lowercase ASCII or digits.
-    let target: &str = &rest[variant.len_utf8()..];
-    !target.is_empty()
-        && target
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
 }
 
 #[cfg(test)]
