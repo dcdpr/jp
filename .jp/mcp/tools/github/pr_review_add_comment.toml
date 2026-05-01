@@ -1,0 +1,117 @@
+[conversation.tools.github_pr_review_add_comment]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+# Render the call ahead of the approval prompt: the user sees the comment
+# preview (snippet + body) before deciding whether to post. The formatter
+# is read-only (fetches PR head + file content), so this is safe.
+format = "unattended"
+summary = "Append one inline comment to your draft (PENDING) review on a pull request."
+description = """
+Adds a single inline review comment to the PR's pending review by the
+authenticated user (token from `JP_GITHUB_TOKEN` or `GITHUB_TOKEN`). If no
+pending review exists yet, an empty one is created on the first call. The
+review is left in `PENDING` state and is visible only to the author until
+they explicitly submit it via the GitHub UI.
+
+Each call queues exactly one comment. To add several comments, call this
+tool repeatedly. The order of calls matches the order the comments appear
+in the GitHub UI.
+
+Anchoring rules:
+- `path`: the file's path in the PR (relative to the repo root).
+- `line`: 1-based line number. For a single-line comment, this is the line
+  the comment is anchored to. For a multi-line comment, this is the LAST
+  line of the range.
+- `side`: `RIGHT` (default) anchors to the new file (the lines you'd see
+  with `+` or as context in the diff). `LEFT` anchors to the old file
+  (removed `-` lines, using their old-file line numbers).
+- `start_line` (optional): first line of a multi-line range. Must be `<=
+  line`.
+- `start_side` (optional): side for the start line; defaults to `side`.
+
+The `body` is rendered as GitHub-flavored Markdown.
+"""
+
+examples = """
+A single-line comment on the new file:
+```json
+{
+  "pull_number": 42,
+  "path": "crates/jp_cli/src/cmd/query.rs",
+  "line": 128,
+  "body": "This `unwrap` is reachable when the channel closes early."
+}
+```
+
+A multi-line comment spanning lines 200-215:
+```json
+{
+  "pull_number": 42,
+  "path": "crates/jp_llm/src/provider.rs",
+  "start_line": 200,
+  "line": 215,
+  "side": "RIGHT",
+  "body": "Consider extracting this loop into a helper; it's hard to follow."
+}
+```
+
+A comment on a removed line:
+```json
+{
+  "pull_number": 42,
+  "path": "crates/jp_cli/src/lib.rs",
+  "line": 42,
+  "side": "LEFT",
+  "body": "Why was this removed? It looks load-bearing."
+}
+```
+"""
+
+# Each comment is added one at a time and requires explicit user approval.
+# The custom parameter formatter (the tool itself, in FormatArguments mode)
+# renders a snippet from the PR's HEAD plus the comment body so the user can
+# decide before the comment is posted.
+[conversation.tools.github_pr_review_add_comment.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "off"
+results_file_link = "off"
+
+[conversation.tools.github_pr_review_add_comment.parameters.pull_number]
+type = "integer"
+required = true
+summary = "The pull request number to comment on."
+
+[conversation.tools.github_pr_review_add_comment.parameters.path]
+type = "string"
+required = true
+summary = "Path of the file in the PR, relative to the repository root."
+
+[conversation.tools.github_pr_review_add_comment.parameters.line]
+type = "integer"
+required = true
+summary = "1-based line number for the comment's anchor."
+description = """
+For a single-line comment, this is the line the comment is anchored to.
+For a multi-line comment, this is the LAST line of the range; pair it with
+`start_line` for the first.
+"""
+
+[conversation.tools.github_pr_review_add_comment.parameters.body]
+type = "string"
+required = true
+summary = "Comment text. Rendered as GitHub-flavored Markdown."
+
+[conversation.tools.github_pr_review_add_comment.parameters.side]
+type = "string"
+enum = ["RIGHT", "LEFT"]
+summary = "Diff side. RIGHT = new file (default), LEFT = old file."
+
+[conversation.tools.github_pr_review_add_comment.parameters.start_line]
+type = "integer"
+summary = "First line of a multi-line comment range. Must be <= `line`."
+
+[conversation.tools.github_pr_review_add_comment.parameters.start_side]
+type = "string"
+enum = ["RIGHT", "LEFT"]
+summary = "Diff side for `start_line`. Defaults to `side`."

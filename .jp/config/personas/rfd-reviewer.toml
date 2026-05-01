@@ -4,7 +4,7 @@ extends = [
     "../knowledge/architecture.toml",
     "../skill/read-files.toml",
     "../skill/web.toml",
-    "../skill/github.toml",
+    "../skill/github-reader.toml",
     "../skill/git-reading.toml",
     "../skill/project-discourse.toml",
     "../skill/unix.toml",

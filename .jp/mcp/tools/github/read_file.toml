@@ -39,3 +39,26 @@ summary = "The name of the commit/branch/tag."
 description = '''
 If unspecified, it defaults to the repository's default branch (usually `main`)
 '''
+
+[conversation.tools.github_read_file.parameters.start_line]
+type = "integer"
+summary = "1-based line number to start reading from."
+description = """
+Reads from this line through `end_line` (or the end of the file). If unset,
+reads from line 1.
+"""
+
+[conversation.tools.github_read_file.parameters.end_line]
+type = "integer"
+summary = "1-based line number to stop reading at (inclusive)."
+description = """
+If unset, the tool reads through the end of the file when the file is small
+enough. To keep huge generated files out of the LLM context, files larger
+than 2,000 lines are truncated to 2,000 lines starting from `start_line`
+(or line 1 when also unset) when `end_line` is missing. The response
+appends a marker like `(truncated to lines X-Y of N; pass start_line and
+end_line to read a different range)` so you can re-call to read further.
+
+With an explicit `end_line`, no implicit cap is applied — you get exactly
+the range you asked for.
+"""

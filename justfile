@@ -152,6 +152,91 @@ rfd-this *ARGS: _install-jp
 
     jp query --cfg=skill/rfd $args
 
+# Review a GitHub pull request, queueing inline comments to a draft review.
+#
+# Each comment is added one at a time and prompts you to approve or reject
+# it before it is posted. The review remains PENDING (only visible to the
+# authenticating user, via `JP_GITHUB_TOKEN` or `GITHUB_TOKEN`) until you
+# submit it from the GitHub UI.
+[group('jp')]
+[positional-arguments]
+pr-review NNN *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    case "{{NNN}}" in
+        ''|*[!0-9]*)
+            echo "Invalid PR number '{{NNN}}'. Pass a positive integer." >&2
+            exit 1 ;;
+    esac
+
+    shift # remove NNN from positional params
+    args="$@"
+    msg="Review GitHub pull request #{{NNN}} in dcdpr/jp. Follow your review \
+    workflow: enumerate the PR, read every changed file's diff, cross-reference \
+    where useful, then call github_pr_review_add_comment with pull_number=\
+    {{NNN}} once for EACH finding. After all comments are queued, write a \
+    final markdown overview summarizing your review (counts per category, \
+    overall take, mergeability). Do NOT submit the review yourself — leave \
+    it as a draft."
+
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
+        args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
+    elif [ -z "$args" ]; then
+        args="$msg"
+    fi
+
+    title="pr-review:{{NNN}}"
+
+    # Look up an existing active conversation with this exact title.
+    existing=$(jp -F json conversation ls 2>/dev/null \
+        | jq -r --arg t "$title" 'first(.[] | select(.title == $t) | .id) // empty' \
+        2>/dev/null \
+        || true)
+
+    resume=false
+    if [ -n "$existing" ]; then
+        if [ -t 0 ] && [ -t 1 ]; then
+            printf "Found existing review conversation %s for PR #{{NNN}}.\n" "$existing" >&2
+            printf "  [c]ontinue / [n]ew (archive old) / [q]uit: " >&2
+            read -r choice
+        else
+            choice=c
+        fi
+        case "$choice" in
+            ""|c|C)
+                resume=true ;;
+            n|N)
+                jp conversation archive "$existing" >&2 || true
+                ;;
+            q|Q)
+                exit 0 ;;
+            *)
+                echo "Unknown choice '$choice'; aborting." >&2
+                exit 1 ;;
+        esac
+    fi
+
+    if [ "$resume" = "true" ]; then
+        printf "Resuming review on PR #{{NNN}} (%s)\n\n" "$existing" >&2
+        jp query --id "$existing" --cfg=personas/pr-reviewer \
+            --attach "gh:pull/{{NNN}}/diff" \
+            --attach "gh:pull/{{NNN}}/reviews" \
+            $args
+    else
+        printf "Reviewing PR #{{NNN}}\n\n" >&2
+        jp query --new --title "$title" --cfg=personas/pr-reviewer \
+            --attach "gh:pull/{{NNN}}/diff" \
+            --attach "gh:pull/{{NNN}}/reviews" \
+            $args
+    fi
+    printf "\nDraft review staged on https://github.com/dcdpr/jp/pull/{{NNN}}/files — open the page and submit it when ready.\n" >&2
+
 # Review an RFD. Accepts a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
 [positional-arguments]

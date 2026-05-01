@@ -1,5 +1,5 @@
 [package]
-name = "jp_github"
+name = "jp_attachment_github"
 
 authors.workspace = true
 description.workspace = true
@@ -13,17 +13,16 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-chrono = { workspace = true, features = ["serde"] }
-indoc = { workspace = true }
-reqwest = { workspace = true, features = ["json", "rustls-tls", "http2"] }
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-url = { workspace = true, features = ["serde"] }
+jp_attachment = { workspace = true }
+jp_github = { workspace = true }
+jp_mcp = { workspace = true }
 
-[dev-dependencies]
-jp_test = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+async-trait = { workspace = true }
+camino = { workspace = true }
+glob = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+tracing = { workspace = true }
+url = { workspace = true, features = ["serde"] }
 
 [lints]
 workspace = true
