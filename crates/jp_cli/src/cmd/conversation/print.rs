@@ -65,6 +65,11 @@ pub(crate) struct Print {
     ///   untruncated tool results.
     #[arg(long, short = 's', value_enum)]
     style: Option<PrintStyle>,
+
+    /// Print the compacted view (what the LLM sees) instead of the full
+    /// history.
+    #[arg(long)]
+    compacted: bool,
 }
 
 /// Output style presets for `jp conversation print`.
@@ -95,7 +100,14 @@ impl Print {
         };
 
         for handle in handles {
-            Self::print_conversation(ctx, handle, &selection, self.current_config, self.style)?;
+            Self::print_conversation(
+                ctx,
+                handle,
+                &selection,
+                self.current_config,
+                self.style,
+                self.compacted,
+            )?;
         }
         ctx.printer.println("");
         ctx.printer.flush();
@@ -108,8 +120,13 @@ impl Print {
         selection: &TurnSelection,
         current_config: bool,
         print_style: Option<PrintStyle>,
+        compacted: bool,
     ) -> Output {
-        let events = ctx.workspace.events(handle)?.clone();
+        let mut events = ctx.workspace.events(handle)?.clone();
+
+        if compacted {
+            events.apply_projection();
+        }
         let cfg = ctx.config();
 
         let root = ctx

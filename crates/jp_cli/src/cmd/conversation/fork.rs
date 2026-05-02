@@ -4,7 +4,7 @@ use tracing::debug;
 
 use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds, time::TimeThreshold},
-    ctx::Ctx,
+    ctx::{Ctx, IntoPartialAppConfig},
 };
 
 #[derive(Debug, clap::Args)]
@@ -33,6 +33,10 @@ pub(crate) struct Fork {
     #[arg(long, short = 'l')]
     last: Option<Option<usize>>,
 
+    /// Compact the forked conversation.
+    #[command(flatten)]
+    compact: crate::cmd::compact_flag::CompactFlag,
+
     /// Set a custom title for the forked conversation.
     #[arg(long, short)]
     title: Option<String>,
@@ -43,7 +47,7 @@ impl Fork {
         ConversationLoadRequest::explicit_or_session(&self.target)
     }
 
-    pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         for source in handles {
             let lock = fork_conversation(ctx, source, |events| {
                 events.retain(|event| {
@@ -55,6 +59,23 @@ impl Fork {
                     events.retain_last_turns(last.unwrap_or(1));
                 }
             })?;
+
+            if self.compact.should_compact() {
+                let cfg = ctx.config();
+                let events_snapshot = lock.events().clone();
+                let compactions = super::compact::build_compaction_events_from_config(
+                    &events_snapshot,
+                    &cfg,
+                    None,
+                    None,
+                    &ctx.printer,
+                )
+                .await?;
+                for compaction in compactions {
+                    lock.as_mut()
+                        .update_events(|events| events.add_compaction(compaction));
+                }
+            }
 
             if let Some(title) = &self.title {
                 lock.as_mut().update_metadata(|m| {
@@ -73,6 +94,19 @@ impl Fork {
         }
         ctx.printer.println("Conversation forked.");
         Ok(())
+    }
+}
+
+impl IntoPartialAppConfig for Fork {
+    fn apply_cli_config(
+        &self,
+        _workspace: Option<&jp_workspace::Workspace>,
+        mut partial: jp_config::PartialAppConfig,
+        _merged_config: Option<&jp_config::PartialAppConfig>,
+        _handles: &[jp_workspace::ConversationHandle],
+    ) -> Result<jp_config::PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+        self.compact.apply_to_config(&mut partial);
+        Ok(partial)
     }
 }
 

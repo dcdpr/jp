@@ -88,6 +88,7 @@ fn prints_user_message() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -111,6 +112,7 @@ fn prints_assistant_message() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -140,6 +142,7 @@ fn prints_reasoning_full() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -170,6 +173,7 @@ fn hides_reasoning_when_hidden() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -202,6 +206,7 @@ fn truncates_reasoning() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -243,6 +248,7 @@ fn prints_tool_call_and_result() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -271,6 +277,7 @@ fn prints_structured_data() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -299,6 +306,7 @@ fn turn_separators_between_turns() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -323,6 +331,7 @@ fn prints_conversation_by_id() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -346,6 +355,7 @@ fn empty_conversation_produces_no_content() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -398,6 +408,7 @@ fn full_conversation_round_trip() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -438,6 +449,7 @@ fn last_prints_only_last_turn() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -479,6 +491,7 @@ fn last_two_with_three_turns() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -508,6 +521,7 @@ fn last_exceeding_turn_count_prints_all() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -553,6 +567,7 @@ fn blank_line_between_tool_calls_and_message() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -606,6 +621,7 @@ fn blank_line_between_message_and_tool_calls() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -675,6 +691,7 @@ fn no_extra_blank_line_between_consecutive_tool_calls() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -712,6 +729,7 @@ fn last_zero_prints_nothing() {
         turn: None,
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -747,6 +765,7 @@ fn turn_prints_specific_turn() {
         turn: Some(2),
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -785,6 +804,7 @@ fn turn_out_of_range_errors() {
         turn: Some(5),
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -804,6 +824,7 @@ fn turn_zero_errors() {
         turn: Some(0),
         current_config: false,
         style: None,
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);

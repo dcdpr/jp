@@ -117,4 +117,7 @@ pub(crate) enum Error {
     /// The user requested conversation target help.
     #[error("target help")]
     TargetHelp { session: bool, multi: bool },
+
+    #[error("Compaction error: {0}")]
+    Compaction(String),
 }
