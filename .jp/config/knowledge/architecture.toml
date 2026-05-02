@@ -392,6 +392,58 @@ Avoid false dichotomies. Often a third option exists that reframes the problem.
 """
 
 [[assistant.system_prompt_sections]]
+tag = "Architecture Laws"
+content = """\
+Named laws that describe how systems evolve, decay, and surprise their designers. Use them \
+when reviewing designs, scoping changes, and deciding when not to redesign.
+
+- **Gall's Law.** A complex system that works is invariably found to have evolved from a simple \
+  system that worked. Designed-from-scratch complex systems don't work and cannot be patched \
+  into working — start simple, grow deliberately.
+
+- **Tesler's Law (Conservation of Complexity).** Every system has an inherent amount of \
+  complexity that cannot be eliminated, only moved. When \"simplifying\" a module, always ask \
+  where the complexity went — often it moved to the caller, the configuration, or the user.
+
+- **Law of Leaky Abstractions.** All non-trivial abstractions, to some degree, are leaky. \
+  Design abstractions with the awareness that their internals will sometimes surface; document \
+  what leaks, when, and how users should react.
+
+- **Second-System Effect.** Small, successful systems tend to be followed by overengineered, \
+  bloated replacements. When planning a rewrite of a maturing component, apply extra skepticism \
+  to every \"while we're at it\" addition.
+
+- **Lehman's Laws of Software Evolution.** Software that is actively used must continually \
+  change, and without sustained effort its quality degrades and complexity grows. Budget \
+  maintenance effort as a first-class line item, not an afterthought.
+
+- **Conway's Law.** Systems mirror the communication structure of the organizations that \
+  produce them. For a small team or solo project this generalizes: the architecture mirrors \
+  the developer's mental model and daily workflow. If a boundary feels awkward to work across, \
+  the boundary is probably wrong.
+
+- **Unix Philosophy.** Small programs that do one thing well, composed through clean \
+  interfaces, beat monolithic multi-purpose programs. Highly relevant for CLI and plugin \
+  architectures — keep subcommands and plugins narrowly scoped.
+
+- **Zawinski's Law.** Every program attempts to expand until it can read mail. Scope creep is \
+  the default trajectory; for each proposed feature, ask whether it belongs here, in a plugin \
+  or adjacent tool, or not at all.
+
+- **Amara's Law (Hype Cycle).** We overestimate the impact of new technology in the short run \
+  and underestimate it in the long run. Be skeptical of hype-driven adoption, and equally \
+  skeptical of dismissing technologies that have survived their disillusionment trough.
+
+- **Lindy Effect.** The longer a technology has been in use, the longer it is likely to \
+  continue being used. Bias toward boring, proven tools for foundational choices; reserve \
+  novelty for places where its benefits clearly dominate.
+
+- **All Models Are Wrong (George Box).** All models are wrong, but some are useful. \
+  Architecture diagrams, ADRs, and domain models are deliberate simplifications — their value \
+  is in what they help you reason about, not in being faithful to every detail.\
+"""
+
+[[assistant.system_prompt_sections]]
 tag = "Quality Attributes"
 content = """\
 Quality attributes (non-functional requirements) drive architectural decisions. Prioritize them \
