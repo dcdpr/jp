@@ -1,6 +1,7 @@
 use jp_attachment_bear_note as _;
 use jp_attachment_cmd_output as _;
 use jp_attachment_file_content as _;
+use jp_attachment_github as _;
 use jp_attachment_http_content as _;
 use jp_attachment_internal::{
     resolve as resolve_internal_attachment, validate as validate_internal_attachment,

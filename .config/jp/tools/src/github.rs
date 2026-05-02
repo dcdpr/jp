@@ -9,6 +9,7 @@ mod create_issue_rfd_tracking;
 mod issues;
 mod pulls;
 mod repo;
+mod review;
 
 use create_issue_bug::github_create_issue_bug;
 use create_issue_enhancement::github_create_issue_enhancement;
@@ -16,11 +17,12 @@ use create_issue_rfd_tracking::github_create_issue_rfd_tracking;
 use issues::github_issues;
 use pulls::github_pulls;
 use repo::{github_code_search, github_list_files, github_read_file};
+use review::github_pr_review_add_comment;
 
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
 
-pub async fn run(_: Context, t: Tool) -> ToolResult {
+pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("github_") {
         "issues" => github_issues(t.opt_or_empty("number")?)
             .await
@@ -70,13 +72,33 @@ pub async fn run(_: Context, t: Tool) -> ToolResult {
             .await
             .map(Into::into),
 
+        "pr_review_add_comment" => {
+            github_pr_review_add_comment(
+                ctx,
+                t.req("pull_number")?,
+                t.req("path")?,
+                t.req("line")?,
+                t.req("body")?,
+                t.opt("side")?,
+                t.opt("start_line")?,
+                t.opt("start_side")?,
+            )
+            .await
+        }
+
         "code_search" => github_code_search(t.opt("repository")?, t.req("query")?)
             .await
             .map(Into::into),
 
-        "read_file" => github_read_file(t.opt("repository")?, t.opt("ref")?, t.req("path")?)
-            .await
-            .map(Into::into),
+        "read_file" => github_read_file(
+            t.opt("repository")?,
+            t.opt("ref")?,
+            t.req("path")?,
+            t.opt("start_line")?,
+            t.opt("end_line")?,
+        )
+        .await
+        .map(Into::into),
 
         "list_files" => github_list_files(t.opt("repository")?, t.opt("ref")?, t.opt("path")?)
             .await

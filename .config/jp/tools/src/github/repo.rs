@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use base64::{Engine as _, prelude::BASE64_STANDARD};
 use serde_json::{Value, json};
 
@@ -47,10 +49,19 @@ pub(crate) async fn github_code_search(
     to_xml(CodeMatches { matches })
 }
 
+/// Hard cap on lines returned without an explicit range.
+///
+/// Files larger than this require `start_line` and `end_line`. Picked to
+/// match the kind of "big enough to bloat context" that motivated the
+/// limit, while still leaving room for typical source files.
+const MAX_LINES_WITHOUT_RANGE: usize = 2000;
+
 pub(crate) async fn github_read_file(
     repository: Option<String>,
     ref_: Option<String>,
     path: String,
+    start_line: Option<usize>,
+    end_line: Option<usize>,
 ) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Files {
@@ -66,6 +77,18 @@ pub(crate) async fn github_read_file(
     }
 
     auth().await?;
+
+    // Silently treat 0 as 1 — both bounds are 1-based, but rather than
+    // bouncing the LLM with an error and forcing a re-call, we just round
+    // up to the nearest valid value.
+    let start_line = start_line.map(|v| v.max(1));
+    let end_line = end_line.map(|v| v.max(1));
+
+    if let (Some(s), Some(e)) = (start_line, end_line)
+        && s > e
+    {
+        return Err("`start_line` must be less than or equal to `end_line`".into());
+    }
 
     let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
     let (org, repo) = repository
@@ -89,28 +112,102 @@ pub(crate) async fn github_read_file(
             }
             _ => format!("failed to fetch file: {err:?}"),
         })?
-        .take_items()
-        .into_iter()
-        .map(|item| File {
-            path: item.path,
-            kind: item.r#type.clone(),
-            content: item.content.map(|content| match item.encoding.as_deref() {
-                Some("base64") => BASE64_STANDARD
-                    .decode(
-                        content
-                            .chars()
-                            .filter(|c| !c.is_whitespace())
-                            .collect::<String>(),
-                    )
-                    .map_err(|e| e.to_string())
-                    .and_then(|v| String::from_utf8(v).map_err(|e| e.to_string()))
-                    .unwrap_or_else(|e| format!("Error decoding base64: {e}")),
-                _ => content,
-            }),
-        })
-        .collect();
+        .take_items();
 
-    to_xml(Files { files })
+    let mut out = Vec::with_capacity(files.len());
+    for item in files {
+        let kind = item.r#type.clone();
+        let content = item
+            .content
+            .as_deref()
+            .map(|c| decode_content(c, item.encoding.as_deref()))
+            .map(Cow::into_owned);
+
+        // Apply line range only to file blobs (not directory listings).
+        let content = if kind == "file" {
+            content
+                .map(|text| apply_range(&item.path, &text, start_line, end_line))
+                .transpose()?
+        } else {
+            content
+        };
+
+        out.push(File {
+            path: item.path,
+            kind,
+            content,
+        });
+    }
+
+    to_xml(Files { files: out })
+}
+
+fn decode_content<'a>(content: &'a str, encoding: Option<&str>) -> Cow<'a, str> {
+    match encoding {
+        Some("base64") => Cow::Owned(
+            BASE64_STANDARD
+                .decode(
+                    content
+                        .chars()
+                        .filter(|c| !c.is_whitespace())
+                        .collect::<String>(),
+                )
+                .map_err(|e| e.to_string())
+                .and_then(|v| String::from_utf8(v).map_err(|e| e.to_string()))
+                .unwrap_or_else(|e| format!("Error decoding base64: {e}")),
+        ),
+        _ => Cow::Borrowed(content),
+    }
+}
+
+fn apply_range(
+    path: &str,
+    content: &str,
+    start_line: Option<usize>,
+    end_line: Option<usize>,
+) -> Result<String> {
+    let total = content.split('\n').count();
+
+    if let Some(s) = start_line
+        && s > total
+    {
+        return Err(format!(
+            "`start_line` ({s}) is greater than the number of lines in `{path}` ({total})"
+        )
+        .into());
+    }
+
+    // Cap the implicit upper bound when the caller didn't provide an
+    // explicit `end_line` AND the file is large enough for the cap to
+    // matter. Without this guard, a call like `start_line=1` on a 50k-line
+    // file would return the entire file — silently bypassing the
+    // protection that exists to keep large files out of LLM context.
+    let cap_applied = end_line.is_none() && total > MAX_LINES_WITHOUT_RANGE;
+    let cap_start = start_line.unwrap_or(1);
+    let cap_end = (cap_start + MAX_LINES_WITHOUT_RANGE - 1).min(total);
+    let effective_end = if cap_applied { Some(cap_end) } else { end_line };
+
+    let lines: Vec<&str> = content.split('\n').collect();
+    let from = start_line.unwrap_or(1).saturating_sub(1);
+    let to = effective_end.unwrap_or(total).min(total);
+
+    let mut out = String::new();
+    if let Some(s) = start_line {
+        out.push_str(&format!("... (starting from line #{s}) ...\n"));
+    }
+    out.push_str(&lines[from..to].join("\n"));
+    if cap_applied {
+        out.push_str(&format!(
+            "\n... (truncated to lines {cap_start}-{cap_end} of {total}; pass `start_line` and \
+             `end_line` to read a different range) ..."
+        ));
+    } else if let Some(e) = effective_end
+        && e < total
+    {
+        out.push_str(&format!("\n... (truncated after line #{e}) ..."));
+    }
+
+    Ok(out)
 }
 
 pub(crate) async fn github_list_files(

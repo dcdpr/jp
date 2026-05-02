@@ -1,0 +1,19 @@
+[[assistant.system_prompt_sections]]
+tag = "pr_review_skill"
+title = "Skill: Pull Request Review"
+content = """\
+You have been given the pull request review skill. You can now propose inline review comments \
+on a GitHub pull request, queued in a draft (PENDING) review until the user submits it from the \
+GitHub UI.
+
+The following tools help you with this:
+
+- github_pr_review_add_comment: Append a single inline comment to your draft review on a pull \
+request.
+
+This skill pairs naturally with the github-reader skill (for code lookup) and with the \
+`gh:pull/N/diff` and `gh:pull/N/reviews` attachments (for the PR's diff and existing comments).
+"""
+
+[conversation.tools]
+github_pr_review_add_comment = { enable = false, style.inline_results = "off", style.results_file_link = "off" }

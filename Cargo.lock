@@ -1993,6 +1993,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp_attachment_github"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "camino",
+ "glob",
+ "jp_attachment",
+ "jp_github",
+ "jp_mcp",
+ "serde",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "jp_attachment_http_content"
 version = "0.1.0"
 dependencies = [
@@ -2066,6 +2081,7 @@ dependencies = [
  "jp_attachment_bear_note",
  "jp_attachment_cmd_output",
  "jp_attachment_file_content",
+ "jp_attachment_github",
  "jp_attachment_http_content",
  "jp_attachment_internal",
  "jp_attachment_mcp_resources",
@@ -2184,6 +2200,7 @@ name = "jp_github"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "indoc",
  "jp_test",
  "reqwest",
  "serde",

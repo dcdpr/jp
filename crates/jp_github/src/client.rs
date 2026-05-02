@@ -112,6 +112,76 @@ impl Octocrab {
         self.send_json(request).await
     }
 
+    /// GET a path with a custom `Accept` header, returning the raw response
+    /// body as a string. Used for endpoints that vary their content type by
+    /// `Accept` (e.g. PR diffs via `application/vnd.github.diff`).
+    pub(crate) async fn get_with_accept(&self, path: &str, accept: &str) -> Result<String> {
+        let request = self
+            .inner
+            .client
+            .get(format!("{}{}", self.inner.api_base, path))
+            .header(reqwest::header::ACCEPT, accept);
+
+        let response = request.send().await?;
+        let status = response.status();
+        let body = response.text().await?;
+
+        if status.is_success() {
+            return Ok(body);
+        }
+
+        let message = serde_json::from_str::<Value>(&body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| format!("request failed with status {}", status.as_u16()));
+
+        Err(Error::GitHub {
+            source: GitHubError {
+                status_code: StatusCode::new(status.as_u16()),
+                message,
+            },
+            body: Some(body),
+        })
+    }
+
+    pub(crate) async fn delete_no_content(&self, path: &str) -> Result<()> {
+        let request = self
+            .inner
+            .client
+            .delete(format!("{}{}", self.inner.api_base, path));
+
+        let response = request.send().await?;
+        let status = response.status();
+
+        if status.is_success() {
+            return Ok(());
+        }
+
+        let body = response.text().await?;
+        let message = serde_json::from_str::<Value>(&body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .unwrap_or_else(|| format!("request failed with status {}", status.as_u16()));
+
+        Err(Error::GitHub {
+            source: GitHubError {
+                status_code: StatusCode::new(status.as_u16()),
+                message,
+            },
+            body: Some(body),
+        })
+    }
+
     pub(crate) async fn get_paginated<T: DeserializeOwned>(
         &self,
         path: &str,

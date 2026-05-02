@@ -1,4 +1,4 @@
-use jp_test::mock::{GET, MockServer, POST};
+use jp_test::mock::{DELETE, GET, MockServer, POST};
 use serde_json::{Value, json};
 
 use crate::{Error, Octocrab, params};
@@ -163,6 +163,339 @@ async fn issue_create_serializes_expected_payload() {
         .expect("create issue");
 
     assert_eq!(issue.number, 42);
+    mock.assert();
+}
+
+fn pending_review_json(id: u64, login: &str) -> Value {
+    json!({
+        "id": id,
+        "node_id": format!("nid_{id}"),
+        "user": {"login": login},
+        "body": null,
+        "state": "PENDING",
+        "html_url": format!("https://github.com/acme/widgets/pull/7#pullrequestreview-{id}"),
+        "submitted_at": null,
+        "commit_id": "deadbeef"
+    })
+}
+
+#[tokio::test]
+async fn pulls_add_review_thread_posts_graphql_mutation() {
+    use crate::models::pulls::{DraftReviewComment, Side};
+
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/graphql")
+                .body_includes("addPullRequestReviewThread")
+                .body_includes("\"pullRequestReviewId\":\"R_kgDOABCDEFG\"")
+                .body_includes("\"path\":\"src/lib.rs\"")
+                .body_includes("\"line\":12")
+                .body_includes("\"side\":\"RIGHT\"");
+            then.status(200).json_body(json!({
+                "data": {
+                    "addPullRequestReviewThread": {
+                        "thread": { "id": "PRRT_abc123" }
+                    }
+                }
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    client
+        .pulls("acme", "widgets")
+        .add_review_thread("R_kgDOABCDEFG", &DraftReviewComment {
+            path: "src/lib.rs".to_owned(),
+            body: "this needs fixing".to_owned(),
+            line: 12,
+            side: Some(Side::Right),
+            start_line: None,
+            start_side: None,
+        })
+        .await
+        .expect("add review thread");
+
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_add_review_thread_surfaces_graphql_errors() {
+    use crate::{Error, models::pulls::DraftReviewComment};
+
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/graphql");
+            then.status(200).json_body(json!({
+                "data": null,
+                "errors": [{"message": "Pull request review not found"}]
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let err = client
+        .pulls("acme", "widgets")
+        .add_review_thread("missing", &DraftReviewComment {
+            path: "src/lib.rs".to_owned(),
+            body: "x".to_owned(),
+            line: 1,
+            side: None,
+            start_line: None,
+            start_side: None,
+        })
+        .await
+        .expect_err("GraphQL errors should surface");
+
+    match err {
+        Error::GitHub { source, .. } => {
+            assert!(
+                source.message.contains("Pull request review not found"),
+                "unexpected error message: {}",
+                source.message
+            );
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_create_review_serializes_pending_payload() {
+    use crate::models::pulls::{DraftReviewComment, ReviewState, Side};
+
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST)
+                .path("/repos/acme/widgets/pulls/7/reviews")
+                .json_body(json!({
+                    "body": "Drafted by jp",
+                    "comments": [
+                        {
+                            "path": "src/lib.rs",
+                            "body": "single line",
+                            "line": 12,
+                            "side": "RIGHT"
+                        },
+                        {
+                            "path": "src/main.rs",
+                            "body": "ranged",
+                            "line": 30,
+                            "side": "RIGHT",
+                            "start_line": 25,
+                            "start_side": "RIGHT"
+                        }
+                    ]
+                }));
+            then.status(200).json_body(pending_review_json(99, "alice"));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let review = client
+        .pulls("acme", "widgets")
+        .create_review(7)
+        .body("Drafted by jp")
+        .comments(vec![
+            DraftReviewComment {
+                path: "src/lib.rs".to_owned(),
+                body: "single line".to_owned(),
+                line: 12,
+                side: Some(Side::Right),
+                start_line: None,
+                start_side: None,
+            },
+            DraftReviewComment {
+                path: "src/main.rs".to_owned(),
+                body: "ranged".to_owned(),
+                line: 30,
+                side: Some(Side::Right),
+                start_line: Some(25),
+                start_side: Some(Side::Right),
+            },
+        ])
+        .send()
+        .await
+        .expect("create review");
+
+    assert_eq!(review.id, 99);
+    assert_eq!(review.state, ReviewState::Pending);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_list_reviews_returns_pending_for_user() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/pulls/7/reviews")
+                .query_param("per_page", "100")
+                .query_param("page", "1");
+            then.status(200)
+                .json_body(json!([pending_review_json(11, "alice")]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let page = client
+        .pulls("acme", "widgets")
+        .list_reviews(7)
+        .await
+        .expect("list reviews");
+    let reviews = client.all_pages(page).await.expect("all pages");
+
+    assert_eq!(reviews.len(), 1);
+    assert_eq!(reviews[0].id, 11);
+    assert_eq!(
+        reviews[0].user.as_ref().map(|u| u.login.as_str()),
+        Some("alice")
+    );
+    mock.assert();
+}
+
+#[tokio::test]
+#[allow(clippy::too_many_lines, reason = "large mock fixture")]
+async fn pulls_fetch_review_comments_inherits_thread_side_and_outdated() {
+    use crate::models::pulls::Side;
+
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/graphql");
+            then.status(200).json_body(json!({
+                "data": {
+                    "repository": {
+                        "pullRequest": {
+                            "reviewThreads": {
+                                "nodes": [
+                                    // Live thread on the new file (RIGHT)
+                                    // — `line` is set even though this is a
+                                    // pending review comment.
+                                    {
+                                        "isOutdated": false,
+                                        "diffSide": "RIGHT",
+                                        "startDiffSide": null,
+                                        "comments": {
+                                            "nodes": [
+                                                {
+                                                    "fullDatabaseId": "100",
+                                                    "path": "src/lib.rs",
+                                                    "outdated": false,
+                                                    "line": 12,
+                                                    "startLine": null,
+                                                    "originalLine": 12,
+                                                    "originalStartLine": null,
+                                                    "body": "still here",
+                                                    "createdAt": "2024-01-01T00:00:00Z",
+                                                    "author": { "login": "alice" },
+                                                    "replyTo": null,
+                                                    "pullRequestReview": { "fullDatabaseId": "7" }
+                                                }
+                                            ]
+                                        }
+                                    },
+                                    // Outdated thread on the old file (LEFT),
+                                    // multi-line. `line` is null — caller
+                                    // can fall back to `original_line`.
+                                    {
+                                        "isOutdated": true,
+                                        "diffSide": "LEFT",
+                                        "startDiffSide": "LEFT",
+                                        "comments": {
+                                            "nodes": [
+                                                {
+                                                    "fullDatabaseId": "200",
+                                                    "path": "src/main.rs",
+                                                    "outdated": true,
+                                                    "line": null,
+                                                    "startLine": null,
+                                                    "originalLine": 30,
+                                                    "originalStartLine": 25,
+                                                    "body": "force-pushed",
+                                                    "createdAt": "2024-01-02T00:00:00Z",
+                                                    "author": { "login": "alice" },
+                                                    "replyTo": null,
+                                                    "pullRequestReview": { "fullDatabaseId": "7" }
+                                                },
+                                                {
+                                                    "fullDatabaseId": "201",
+                                                    "path": "src/main.rs",
+                                                    "outdated": true,
+                                                    "line": null,
+                                                    "startLine": null,
+                                                    "originalLine": 30,
+                                                    "originalStartLine": 25,
+                                                    "body": "reply on outdated",
+                                                    "createdAt": "2024-01-03T00:00:00Z",
+                                                    "author": { "login": "bob" },
+                                                    "replyTo": { "fullDatabaseId": "200" },
+                                                    "pullRequestReview": { "fullDatabaseId": "7" }
+                                                }
+                                            ]
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let comments = client
+        .pulls("acme", "widgets")
+        .fetch_review_comments(7)
+        .await
+        .expect("fetch review comments");
+
+    assert_eq!(comments.len(), 3);
+
+    let live = comments.iter().find(|c| c.id == 100).expect("live comment");
+    assert!(!live.outdated);
+    assert_eq!(live.line, Some(12));
+    assert_eq!(live.side, Some(Side::Right));
+    assert_eq!(live.path, "src/lib.rs");
+    assert_eq!(live.user.as_ref().map(|u| u.login.as_str()), Some("alice"));
+
+    let outdated_parent = comments.iter().find(|c| c.id == 200).expect("outdated");
+    assert!(outdated_parent.outdated);
+    assert_eq!(outdated_parent.line, None);
+    assert_eq!(outdated_parent.original_line, Some(30));
+    assert_eq!(outdated_parent.original_start_line, Some(25));
+    assert_eq!(outdated_parent.side, Some(Side::Left));
+    assert_eq!(outdated_parent.start_side, Some(Side::Left));
+
+    let reply = comments.iter().find(|c| c.id == 201).expect("reply");
+    assert!(reply.outdated, "reply inherits the thread's outdated flag");
+    assert_eq!(reply.in_reply_to_id, Some(200));
+    assert_eq!(reply.side, Some(Side::Left));
+
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_delete_review_treats_204_as_success() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(DELETE)
+                .path("/repos/acme/widgets/pulls/7/reviews/11");
+            then.status(204);
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    client
+        .pulls("acme", "widgets")
+        .delete_review(7, 11)
+        .await
+        .expect("delete pending review");
     mock.assert();
 }
 

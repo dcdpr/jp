@@ -21,19 +21,7 @@ pub(crate) async fn fs_create_file(
     content: Option<String>,
 ) -> ToolResult {
     if ctx.action.is_format_arguments() {
-        let lang = match path.split('.').next_back().unwrap_or_default() {
-            "rs" => "rust",
-            "js" => "javascript",
-            "ts" => "typescript",
-            "c" => "c",
-            "cpp" => "cpp",
-            "go" => "go",
-            "php" => "php",
-            "py" => "python",
-            "rb" => "ruby",
-            "md" => "markdown",
-            lang => lang,
-        };
+        let lang = crate::util::lang_from_path(&path);
 
         let mut response = format!("Created file '{}'", path.as_str().bold().blue());
         if let Some(content) = content {
