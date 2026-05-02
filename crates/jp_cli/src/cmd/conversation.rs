@@ -14,8 +14,8 @@ mod path;
 mod print;
 mod rm;
 mod show;
-mod unarchive;
 pub(crate) mod summarize;
+mod unarchive;
 mod use_;
 
 #[derive(Debug, clap::Args)]
