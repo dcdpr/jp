@@ -48,33 +48,7 @@ pub async fn generate_summary(
 
     let model_id = model.id.resolved();
 
-    // Build a stream containing only the events in the target range.
-    let mut summary_stream = events.clone();
-    summary_stream.retain_last_turns(0); // clear events, keep base config
-    let mut turn_idx = 0;
-    let mut in_range = false;
-    let mut range_events: Vec<ConversationEvent> = Vec::new();
-
-    for event_with_cfg in events.iter() {
-        if event_with_cfg.event.is_turn_start() {
-            if turn_idx > 0 || in_range {
-                turn_idx += 1;
-            }
-            in_range = turn_idx >= range_from && turn_idx <= range_to;
-            if !in_range && turn_idx > range_to {
-                break;
-            }
-        }
-
-        // The first TurnStart sets in_range without incrementing.
-        if turn_idx == 0 && event_with_cfg.event.is_turn_start() {
-            in_range = range_from == 0;
-        }
-
-        if in_range {
-            range_events.push(event_with_cfg.event.clone());
-        }
-    }
+    let range_events = collect_range_events(events, range_from, range_to);
 
     // Rebuild a clean stream with just the range events.
     let mut stream = ConversationStream::new(events.base_config());
@@ -152,3 +126,23 @@ pub async fn generate_summary(
 
     Ok(summary)
 }
+
+/// Collect all events in the inclusive turn range `[range_from, range_to]`.
+///
+/// Each covered turn contributes its full event sequence, including the
+/// leading `TurnStart`. Out-of-range and missing turns contribute nothing.
+fn collect_range_events(
+    events: &ConversationStream,
+    range_from: usize,
+    range_to: usize,
+) -> Vec<ConversationEvent> {
+    events
+        .iter_turns()
+        .filter(|turn| turn.index() >= range_from && turn.index() <= range_to)
+        .flat_map(|turn| turn.into_iter().map(|e| e.event.clone()))
+        .collect()
+}
+
+#[cfg(test)]
+#[path = "summarize_tests.rs"]
+mod tests;

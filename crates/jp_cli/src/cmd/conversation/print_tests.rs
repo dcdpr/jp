@@ -870,6 +870,7 @@ fn style_brief_hides_reasoning_and_tool_details() {
         turn: None,
         current_config: false,
         style: Some(PrintStyle::Brief),
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -947,6 +948,7 @@ fn style_chat_hides_reasoning_and_tool_calls() {
         turn: None,
         current_config: false,
         style: Some(PrintStyle::Chat),
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
@@ -1018,6 +1020,7 @@ fn style_chat_separates_messages_across_hidden_reasoning() {
         turn: None,
         current_config: false,
         style: Some(PrintStyle::Chat),
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     print.run(&mut ctx, &[h]).unwrap();
@@ -1069,6 +1072,7 @@ fn style_chat_separates_messages_across_hidden_tool_call() {
         turn: None,
         current_config: false,
         style: Some(PrintStyle::Chat),
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     print.run(&mut ctx, &[h]).unwrap();
@@ -1130,6 +1134,7 @@ fn style_full_shows_reasoning_and_untruncated_results() {
         turn: None,
         current_config: false,
         style: Some(PrintStyle::Full),
+        compacted: false,
     };
     let h = ctx.workspace.acquire_conversation(&id).unwrap();
     let result = print.run(&mut ctx, &[h]);
