@@ -90,7 +90,6 @@ use jp_llm::{
         tool_definitions,
     },
 };
-use jp_md::format::Formatter;
 use jp_printer::Printer;
 use jp_task::task::TitleGeneratorTask;
 use jp_workspace::{ConversationHandle, ConversationLock, Workspace};
@@ -115,6 +114,7 @@ use crate::{
     error::{Error, Result},
     output::print_json,
     parser::AttachmentUrlOrPath,
+    render::TurnView,
     signals::SignalRx,
 };
 
@@ -340,30 +340,6 @@ impl Query {
             return Ok(());
         };
 
-        // If we have a query, and it was built from the editor, we print it
-        // to the terminal for convenience, formatted as markdown.
-        if query_file.is_some() {
-            let pretty = ctx.printer.pretty_printing_enabled();
-            let formatter = Formatter::with_width(cfg.style.markdown.wrap_width)
-                .table_max_column_width(cfg.style.markdown.table_max_column_width)
-                .theme(if pretty {
-                    cfg.style.markdown.theme.as_deref()
-                } else {
-                    None
-                })
-                .pretty_hr(pretty && cfg.style.markdown.hr_style.is_line())
-                .inline_code_bg(
-                    cfg.style
-                        .inline_code
-                        .background
-                        .map(crate::format::color_to_bg_param),
-                );
-
-            let formatted =
-                formatter.format_terminal(&format!("{}\n\n---\n\n", chat_request.content))?;
-            ctx.printer.println(formatted);
-        }
-
         if !editor_provided_config.is_empty() {
             // Resolve any model aliases before storing in the stream so
             // that per-event configs always contain concrete model IDs.
@@ -431,6 +407,23 @@ impl Query {
         // local configs continue the conversation. `None` falls back to a
         // generic label at render time.
         chat_request.author = cfg.user.name.clone();
+
+        // If the query was composed in an editor, the user has lost sight
+        // of what they wrote by the time the editor closes. Echo it back
+        // through the same role-aware rendering machinery used by replay
+        // and live streaming — a labeled user header followed by the
+        // request body — so the boundary between user input and the
+        // forthcoming assistant response is visually clear.
+        if query_file.is_some() {
+            let mut echo = TurnView::new(
+                ctx.printer.clone(),
+                cfg.style.clone(),
+                cfg.assistant.name.clone(),
+                Some(cfg.assistant.model.id.resolved().to_string()),
+            );
+            echo.render_user_request(&chat_request);
+        }
+
         let turn_result = self
             .handle_turn(
                 &cfg,

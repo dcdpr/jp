@@ -27,7 +27,13 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
 
 fn make_turn_coordinator() -> TurnCoordinator {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
-    TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style)
+    TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    )
 }
 
 /// Create a workspace with a single conversation and return a test lock.

@@ -22,7 +22,7 @@ use jp_config::{
 };
 use jp_conversation::{
     Conversation,
-    event::{ChatRequest, InquirySource, TurnStart},
+    event::{ChatRequest, ChatResponse, InquirySource, ToolCallRequest, TurnStart},
 };
 use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{
@@ -277,6 +277,107 @@ async fn test_normal_completion_persists_content() {
     assert!(
         content.contains(response_content),
         "Should contain assistant response.\nFile contents:\n{content}"
+    );
+}
+
+/// Regression: any `ToolCallRequest` already in the stream when a new
+/// `Streaming` cycle starts MUST be sanitized into a stream that's safe to
+/// send to the provider. Otherwise providers like Anthropic reject the request
+/// with `tool_use ids were found without tool_result blocks`.
+///
+/// Reproduces the failure mode from the bug report by injecting an orphaned
+/// `ToolCallRequest` in a prior turn and then running a fresh turn. After the
+/// turn loop completes, the persisted stream must contain a synthetic
+/// "Tool call was interrupted." response for the orphan.
+#[tokio::test]
+async fn orphan_tool_call_is_sanitized_before_provider_request() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let config = AppConfig::new_test();
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    // Inject a "previous turn" with an orphaned ToolCallRequest, simulating
+    // the corrupted state that triggered the original bug. We bypass
+    // `run_turn_loop`'s own start_turn and the top-level `query.rs` sanitize
+    // by mutating the stream directly here.
+    {
+        let mut conv = lock.as_mut();
+        conv.update_events(|stream| {
+            stream.start_turn(ChatRequest::from("earlier query"));
+            stream
+                .current_turn_mut()
+                .add_chat_response(ChatResponse::message("calling a tool"))
+                .add_tool_call_request(ToolCallRequest {
+                    id: "orphan_id".to_string(),
+                    name: "some_tool".to_string(),
+                    arguments: Map::new(),
+                })
+                .build()
+                .expect("orphan setup");
+            // No matching ToolCallResponse — this is the orphan.
+        });
+        conv.flush().unwrap();
+    }
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("ok"));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+    run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &signal_rx,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("new query"),
+    )
+    .await
+    .unwrap();
+
+    // The synthetic response is injected by `sanitize` before the cycle's
+    // provider request. After the turn it should appear in the persisted
+    // events.
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+
+    assert!(
+        content.contains("orphan_id"),
+        "orphan request must remain in the persisted stream:\n{content}"
+    );
+    // The synthetic response content is base64-encoded in the on-disk form
+    // ("Tool call was interrupted." -> VG9vbCBjYWxsIHdhcyBpbnRlcnJ1cHRlZC4=).
+    assert!(
+        content.contains("VG9vbCBjYWxsIHdhcyBpbnRlcnJ1cHRlZC4="),
+        "sanitize must inject a synthetic response for the orphan:\n{content}"
+    );
+    assert!(
+        content.contains("\"is_error\": true"),
+        "synthetic response must be marked as an error:\n{content}"
     );
 }
 
@@ -3647,6 +3748,149 @@ async fn test_retry_counter_resets_on_successful_event() {
             total_calls, 3,
             "Expected 3 provider calls (2 partial + 1 success), got {total_calls}"
         );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// Regression: when the LLM emits a tool call for an unconfigured tool
+/// (which becomes a `Resolved` pending entry) followed by a configured one
+/// (which becomes `Approved`), `build_execution_plan` assigns plan indices
+/// 0 and 1 in stream order. The approved entry then has plan index 1, but
+/// `execute_with_prompting` was sizing its internal `results` vector to
+/// `executors.len()` (= 1) and indexing into it with the plan index — which
+/// panicked with `index out of bounds: the len is 1 but the index is 1`.
+///
+/// The fix re-bases plan indices to contiguous local positions inside
+/// `execute_with_prompting`, then pairs each response back with its
+/// caller-provided plan index on output. The downstream `commit_tool_responses`
+/// uses those plan indices when merging approved + pre-resolved responses,
+/// so they appear in the original stream order.
+#[tokio::test]
+async fn test_unavailable_tool_before_approved_does_not_panic() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // Only `ok_tool` is configured. `missing_tool` will trip
+        // `prepare_one`'s "tool not available" path and become a
+        // pre-resolved error response.
+        config
+            .conversation
+            .tools
+            .insert("ok_tool".to_string(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Unattended),
+                format: None,
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new(),
+                result: None,
+                style: None,
+                questions: IndexMap::new(),
+                options: IndexMap::default(),
+            });
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use both tools");
+
+        // Stream order matters: the unavailable tool MUST come first so
+        // that the surviving approved tool gets plan index 1 (the
+        // out-of-bounds slot in the buggy version).
+        let parallel_events = vec![
+            Event::tool_call_start(0, "call_missing".to_string(), "missing_tool".to_string()),
+            Event::tool_call_start(1, "call_ok".to_string(), "ok_tool".to_string()),
+            Event::flush(0),
+            Event::flush(1),
+            Event::Finished(FinishReason::Completed),
+        ];
+
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                parallel_events,
+                final_message_events("All tools dispatched."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: ModelDetails::empty(id::ModelIdConfig {
+                provider: ProviderId::Test,
+                name: "sparse-index-mock".parse().expect("valid name"),
+            }),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+        // Only `ok_tool` is registered with the executor source; the
+        // `missing_tool` tool call has no executor and falls through to
+        // the unavailable path.
+        let executor_source = TestExecutorSource::new().with_executor("ok_tool", |req| {
+            Box::new(MockExecutor::completed(&req.id, &req.name, "ok output"))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &signal_rx,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+        let tool_responses: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+
+        assert_eq!(
+            tool_responses.len(),
+            2,
+            "Both tool calls should produce a response"
+        );
+
+        // Stream order: missing first, ok second. `commit_tool_responses`
+        // must preserve that ordering when merging approved with
+        // pre-resolved.
+        assert_eq!(tool_responses[0].id, "call_missing");
+        assert!(
+            tool_responses[0].result.is_err(),
+            "Unavailable tool should produce an error response: {:?}",
+            tool_responses[0].result
+        );
+        assert_eq!(tool_responses[1].id, "call_ok");
+        assert_eq!(tool_responses[1].content(), "ok output");
     }))
     .await;
 

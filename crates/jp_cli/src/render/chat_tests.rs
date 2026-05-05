@@ -149,6 +149,44 @@ async fn test_timer_reasoning_then_message() {
     );
 }
 
+/// Regression: tool call → Timer reasoning → tool call must not leave a
+/// stray blank line on stdout.
+///
+/// Timer reasoning is ephemeral chrome on stderr; it produces no
+/// persistent stdout output. The previous implementation routed Timer
+/// through `flush_on_transition`, which eagerly committed a blank-line
+/// separator on stdout when leaving a `ToolCall` block. Subsequent tool
+/// calls (or other ephemeral content) never "earned" that separator
+/// back, leaving an orphan blank line between consecutive tool calls.
+#[tokio::test]
+async fn test_no_separator_for_tool_call_timer_reasoning_tool_call() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Timer;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    // Tool call 1: chat renderer enters ToolCall mode. (The tool
+    // renderer itself writes "Calling tool …" to stderr; nothing on
+    // stdout from this side.)
+    renderer.transition_to_tool_call();
+
+    // Reasoning chunk under Timer style — no persistent stdout output.
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking hard\n\n".into(),
+    });
+
+    // Tool call 2: the real flow flushes (cancelling the timer) before
+    // re-entering ToolCall mode — mirror that here.
+    renderer.flush();
+    renderer.transition_to_tool_call();
+
+    renderer.printer.flush();
+    assert_eq!(
+        *out.lock(),
+        "",
+        "ephemeral Timer reasoning between tool calls must not emit a stray separator"
+    );
+}
+
 #[test]
 fn test_truncate_reasoning() {
     let mut config = AppConfig::new_test();

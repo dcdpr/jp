@@ -3,7 +3,7 @@ use std::sync::Arc;
 use jp_config::style::StyleConfig;
 use jp_conversation::{
     ConversationEvent, ConversationStream,
-    event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
+    event::{ChatRequest, ChatResponse, ToolCallResponse},
 };
 use jp_llm::{
     event::{Event, EventPart, FinishReason, ToolCallPart},
@@ -11,10 +11,7 @@ use jp_llm::{
 };
 use jp_printer::Printer;
 
-use crate::cmd::query::{
-    interrupt::InterruptAction,
-    stream::{ChatRenderer, StructuredRenderer},
-};
+use crate::cmd::query::{interrupt::InterruptAction, stream::TurnView};
 
 /// Phase of the turn state machine.
 ///
@@ -63,12 +60,15 @@ pub enum Action {
     /// Continue processing events (no action needed from shell).
     Continue,
 
-    /// Execute a list of tool calls via `ToolCoordinator`.
+    /// Transition to the executing phase.
     ///
-    /// The tool calls are also available via `take_pending_tool_calls()`.
-    /// The field is included for debugging and testing.
-    #[allow(dead_code)]
-    ExecuteTools(Vec<ToolCallRequest>),
+    /// The actual list of tool calls to execute is derived from the
+    /// conversation stream by [`build_execution_plan`], not carried here.
+    /// The state machine only signals the phase transition; the shell
+    /// derives the work from the durable source of truth.
+    ///
+    /// [`build_execution_plan`]: crate::cmd::query::tool::build_execution_plan
+    ExecuteTools,
 
     /// Send tool responses back to the LLM (starts a new cycle).
     SendFollowUp,
@@ -95,19 +95,17 @@ pub enum Action {
 /// - Perform I/O (delegated to shell via `Action`)
 /// - Execute tools (delegated to `ToolCoordinator`)
 /// - Handle retries
+///
+/// [`ChatRenderer`]: crate::render::ChatRenderer
 pub struct TurnCoordinator {
     state: TurnPhase,
 
     // Components
     event_builder: EventBuilder,
-    chat_renderer: ChatRenderer,
-    structured_renderer: StructuredRenderer,
+    view: TurnView,
 
     /// When set, emit each completed event as NDJSON.
     json_emitter: Option<JsonEmitter>,
-
-    // Accumulators for the current cycle
-    pending_tool_calls: Vec<ToolCallRequest>,
 
     /// Display name to stamp onto interrupt-reply [`ChatRequest`]s for
     /// transcript attribution. `None` means the request stays unattributed.
@@ -117,7 +115,13 @@ pub struct TurnCoordinator {
 }
 
 impl TurnCoordinator {
-    pub fn new(printer: Arc<Printer>, style: StyleConfig) -> Self {
+    pub fn new(
+        printer: Arc<Printer>,
+        style: StyleConfig,
+        author: Option<String>,
+        assistant_name: Option<String>,
+        model_id: Option<String>,
+    ) -> Self {
         // In JSON mode, the renderer is unused; give it a sink so it doesn't
         // accidentally write anything.
         let (json_emitter, printer) = if printer.format().is_json() {
@@ -126,14 +130,14 @@ impl TurnCoordinator {
             (None, printer.clone())
         };
 
+        let view = TurnView::new(printer, style, assistant_name, model_id);
+
         Self {
             state: TurnPhase::Idle,
             event_builder: EventBuilder::new(),
-            chat_renderer: ChatRenderer::new(printer.clone(), style),
-            structured_renderer: StructuredRenderer::new(printer),
+            view,
             json_emitter,
-            pending_tool_calls: Vec::new(),
-            author: None,
+            author,
         }
     }
 
@@ -143,9 +147,16 @@ impl TurnCoordinator {
     /// The turn index is derived from the number of existing `TurnStart`
     /// events in the stream.
     ///
+    /// Does NOT render the user's request to the terminal. The caller (e.g.
+    /// `query.rs` after an editor session) is responsible for echoing the
+    /// request via [`TurnView::render_user_request`] when desired — most
+    /// invocations do not need an echo since the user already saw their
+    /// own input on the terminal.
+    ///
     /// [`TurnStart`]: jp_conversation::event::TurnStart
     pub fn start_turn(&mut self, stream: &mut ConversationStream, request: ChatRequest) {
         self.emit_json(&ConversationEvent::from(request.clone()));
+        self.view.begin_turn();
         stream.start_turn(request);
 
         self.state = TurnPhase::Streaming;
@@ -167,27 +178,24 @@ impl TurnCoordinator {
             } => {
                 match &part {
                     EventPart::ToolCall(ToolCallPart::Start { .. }) => {
-                        // Flush any buffered markdown so it appears before the
-                        // tool-call output rather than being delayed until after.
-                        self.chat_renderer.flush();
-                        self.chat_renderer.transition_to_tool_call();
+                        // Streaming tool calls are always visible (the
+                        // hidden style only suppresses replay rendering).
+                        self.view.enter_tool_call(false);
                     }
                     EventPart::Message(text) => {
-                        self.chat_renderer.render_response(&ChatResponse::Message {
+                        self.view.render_chat_response(&ChatResponse::Message {
                             message: text.clone(),
                         });
                     }
                     EventPart::Reasoning(text) => {
-                        self.chat_renderer
-                            .render_response(&ChatResponse::Reasoning {
-                                reasoning: text.clone(),
-                            });
+                        self.view.render_chat_response(&ChatResponse::Reasoning {
+                            reasoning: text.clone(),
+                        });
                     }
                     EventPart::Structured(chunk) => {
-                        self.structured_renderer
-                            .render_chunk(&ChatResponse::Structured {
-                                data: serde_json::Value::String(chunk.clone()),
-                            });
+                        self.view.render_chat_response(&ChatResponse::Structured {
+                            data: serde_json::Value::String(chunk.clone()),
+                        });
                     }
                     EventPart::ToolCall(ToolCallPart::ArgumentChunk(_)) => {
                         // Forwarded to EventBuilder only; no rendering.
@@ -199,9 +207,6 @@ impl TurnCoordinator {
             }
             Event::Flush { index, metadata } => {
                 if let Some(event) = self.event_builder.handle_flush(index, metadata) {
-                    if let Some(req) = event.as_tool_call_request() {
-                        self.pending_tool_calls.push(req.clone());
-                    }
                     self.push_event(stream, event);
                 }
 
@@ -211,9 +216,8 @@ impl TurnCoordinator {
                 for event in self.event_builder.drain() {
                     self.push_event(stream, event);
                 }
-                self.chat_renderer.flush();
-                self.structured_renderer.flush();
-                self.transition_from_streaming(reason)
+                self.view.flush_all();
+                self.transition_from_streaming(stream, reason)
             }
 
             // Patch is handled by the caller before reaching here.
@@ -221,11 +225,19 @@ impl TurnCoordinator {
         }
     }
 
-    fn transition_from_streaming(&mut self, _reason: FinishReason) -> Action {
-        if !self.pending_tool_calls.is_empty() {
+    fn transition_from_streaming(
+        &mut self,
+        stream: &ConversationStream,
+        _reason: FinishReason,
+    ) -> Action {
+        // Derive "is there work to execute?" from the stream itself, not
+        // from a parallel `pending_tool_calls` cache. Any unresponded
+        // tool-call request in the most recent turn means there's still
+        // work; the shell will derive the actual list via
+        // `build_execution_plan` once it enters the executing phase.
+        if has_unresponded_tool_calls_in_current_turn(stream) {
             self.state = TurnPhase::Executing;
-            let calls = self.pending_tool_calls.clone();
-            return Action::ExecuteTools(calls);
+            return Action::ExecuteTools;
         }
 
         self.state = TurnPhase::Complete;
@@ -260,10 +272,6 @@ impl TurnCoordinator {
         Action::SendFollowUp
     }
 
-    pub fn take_pending_tool_calls(&mut self) -> Vec<ToolCallRequest> {
-        std::mem::take(&mut self.pending_tool_calls)
-    }
-
     pub fn current_phase(&self) -> TurnPhase {
         self.state
     }
@@ -284,8 +292,7 @@ impl TurnCoordinator {
     pub fn prepare_continuation(&mut self) {
         // Clear any partial buffers since we're starting fresh with prefill
         self.event_builder = EventBuilder::new();
-        self.chat_renderer.reset();
-        self.structured_renderer.reset();
+        self.view.reset_for_continuation();
         self.state = TurnPhase::Streaming;
     }
 
@@ -295,13 +302,13 @@ impl TurnCoordinator {
     /// partial content sitting in the renderer's block buffer gets queued
     /// to the printer and becomes visible before the interrupt menu appears.
     pub fn flush_renderer(&mut self) {
-        self.chat_renderer.flush();
+        self.view.flush();
     }
 
     /// Mark that tool calls are about to be rendered, so the next
     /// content chunk gets a blank line separator.
     pub fn transition_to_tool_call(&mut self) {
-        self.chat_renderer.transition_to_tool_call();
+        self.view.enter_tool_call(false);
     }
 
     /// Force transition to Complete phase.
@@ -418,6 +425,33 @@ impl TurnCoordinator {
             emitter.emit(event);
         }
     }
+}
+
+/// Returns `true` if the most recent turn contains any `ToolCallRequest`
+/// that lacks a matching `ToolCallResponse` anywhere in the stream.
+///
+/// Used by the state machine to decide whether to transition into the
+/// executing phase. Looking across all turns for responses (rather than
+/// just the current turn) is intentional: in correct operation responses
+/// always live in the same turn as their request, but the cross-turn check
+/// makes the predicate robust against any future code path that might
+/// commit responses to a different turn.
+fn has_unresponded_tool_calls_in_current_turn(stream: &ConversationStream) -> bool {
+    let responded_ids: std::collections::HashSet<&str> = stream
+        .iter()
+        .filter_map(|e| e.event.as_tool_call_response())
+        .map(|r| r.id.as_str())
+        .collect();
+
+    let Some(current_turn) = stream.iter_turns().next_back() else {
+        return false;
+    };
+
+    current_turn.iter().any(|e| {
+        e.event
+            .as_tool_call_request()
+            .is_some_and(|r| !responded_ids.contains(r.id.as_str()))
+    })
 }
 
 /// Emits [`ConversationEvent`]s as NDJSON lines via the printer.

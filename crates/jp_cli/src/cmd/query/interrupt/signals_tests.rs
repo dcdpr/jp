@@ -15,7 +15,79 @@ fn make_printer() -> Printer {
 
 fn make_turn_coordinator() -> TurnCoordinator {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
-    TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style)
+    TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    )
+}
+
+/// Regression: when the user picks `Continue` (`'c'`) while the LLM stream is
+/// still alive, the action is `Resume` — "keep waiting for the current
+/// stream." The handler must return `LoopAction::Continue` so the existing
+/// `SelectAll` (and the in-flight HTTP stream) stays alive. Returning `Break`
+/// here drops the current stream and forces a redundant new request, which
+/// can land us in inconsistent state and was the root of the
+/// `tool_use without tool_result` follow-up failures.
+#[test]
+fn streaming_signal_resume_continues_without_breaking_loop() {
+    let printer = make_printer();
+    let mut turn_coordinator = make_turn_coordinator();
+    let mut stream = ConversationStream::new_test();
+    turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    // 'c' chosen while the stream is alive maps to InterruptAction::Resume.
+    let backend = MockPromptBackend::new().with_inline_responses(['c']);
+
+    let result = handle_streaming_signal(
+        SignalTo::Shutdown,
+        &mut turn_coordinator,
+        &mut stream,
+        &printer,
+        &backend,
+        false, // stream NOT finished -> stream alive -> Resume path
+    );
+
+    assert!(
+        matches!(result, LoopAction::Continue),
+        "Resume must return Continue (not Break) so the current stream keeps polling; got \
+         {result:?}"
+    );
+    assert_eq!(
+        turn_coordinator.current_phase(),
+        TurnPhase::Streaming,
+        "Resume must leave the phase as Streaming"
+    );
+}
+
+/// When the stream has already finished by the time the menu opens, `'c'`
+/// maps to `Continue` (prefill path). That path needs to break the inner
+/// loop so the outer turn loop issues a fresh request with the partial
+/// content as prefill.
+#[test]
+fn streaming_signal_continue_breaks_for_prefill_request() {
+    let printer = make_printer();
+    let mut turn_coordinator = make_turn_coordinator();
+    let mut stream = ConversationStream::new_test();
+    turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    let backend = MockPromptBackend::new().with_inline_responses(['c']);
+
+    let result = handle_streaming_signal(
+        SignalTo::Shutdown,
+        &mut turn_coordinator,
+        &mut stream,
+        &printer,
+        &backend,
+        true, // stream finished -> dead -> Continue path
+    );
+
+    assert!(
+        matches!(result, LoopAction::Break),
+        "Continue (prefill) must Break so the outer loop issues the next request; got {result:?}"
+    );
 }
 
 #[test]

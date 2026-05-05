@@ -151,7 +151,11 @@ enum ExecutionEvent {
 
 #[derive(Debug)]
 pub struct ExecutionResult {
-    pub responses: Vec<ToolCallResponse>,
+    /// Tool responses paired with the plan index supplied by the caller in
+    /// `executors`. Indices may be sparse when the caller's plan also
+    /// contains pre-resolved tools that bypass execution; merging those
+    /// back into the original stream order is the caller's job.
+    pub responses: Vec<(usize, ToolCallResponse)>,
     pub restart_requested: bool,
 }
 
@@ -702,7 +706,6 @@ impl ToolCoordinator {
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     pub async fn run_permission_phase(
         &mut self,
         prompter: &ToolPrompter,
@@ -778,6 +781,16 @@ impl ToolCoordinator {
             };
         }
 
+        // The caller's `index` values come from the execution plan and may
+        // be sparse (e.g. when some tools in the same plan are
+        // pre-resolved and don't reach this function). We can't use them
+        // as offsets into a `Vec` sized to `executors.len()`, so we
+        // re-base to contiguous local indices for internal bookkeeping
+        // and pair each response back with its plan index on output.
+        let plan_indices: Vec<usize> = executors.iter().map(|(idx, _)| *idx).collect();
+        let executors: Vec<Box<dyn Executor>> =
+            executors.into_iter().map(|(_, exec)| exec).collect();
+
         let total_tools = executors.len();
         let cancellation_token = self.cancellation_token.clone();
         let (event_tx, mut event_rx) = mpsc::channel::<ExecutionEvent>(32);
@@ -786,7 +799,7 @@ impl ToolCoordinator {
         let mut pending_prompts: VecDeque<PendingPrompt> = VecDeque::new();
         let mut prompt_active = false;
 
-        for (index, executor) in executors {
+        for (index, executor) in executors.into_iter().enumerate() {
             let tool_id = executor.tool_id().to_string();
             let tool_name = executor.tool_name().to_string();
             let accumulated_answers = self.static_answers_for_all_questions(&tool_name);
@@ -1072,19 +1085,19 @@ impl ToolCoordinator {
             tool_renderer.clear_progress();
         }
 
-        let mut responses: Vec<ToolCallResponse> = results
+        let mut responses: Vec<(usize, ToolCallResponse)> = plan_indices
             .into_iter()
-            .map(|r| {
+            .zip(results.into_iter().map(|r| {
                 r.unwrap_or_else(|| ToolCallResponse {
                     id: "unknown".to_string(),
                     result: Err("Tool did not complete".to_string()),
                 })
-            })
+            }))
             .collect();
 
         if let Some(cancel_msg) = cancellation_response {
             for &i in &cancelled_indices {
-                if let Some(response) = responses.get_mut(i) {
+                if let Some((_, response)) = responses.get_mut(i) {
                     response.result = Ok(format!(
                         "Tool run cancelled by user with a custom message:\n\n{cancel_msg}"
                     ));

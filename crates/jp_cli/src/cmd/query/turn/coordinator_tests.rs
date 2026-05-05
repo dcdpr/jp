@@ -1,5 +1,5 @@
 use jp_config::AppConfig;
-use jp_conversation::event::ChatResponse;
+use jp_conversation::event::{ChatResponse, ToolCallRequest};
 use jp_llm::event::FinishReason;
 use jp_printer::{OutputFormat, Printer};
 use serde_json::{Map, json};
@@ -11,7 +11,13 @@ fn test_transitions_to_executing_on_tool_call() {
     let mut _turn_state = TurnState::default();
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
     assert_eq!(coordinator.current_phase(), TurnPhase::Streaming);
@@ -35,13 +41,18 @@ fn test_transitions_to_executing_on_tool_call() {
     let action = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
     assert_eq!(coordinator.current_phase(), TurnPhase::Executing);
-    match action {
-        Action::ExecuteTools(calls) => {
-            assert_eq!(calls.len(), 1);
-            assert_eq!(calls[0].id, "call_1");
-        }
-        _ => panic!("Expected ExecuteTools action"),
-    }
+    assert!(
+        matches!(action, Action::ExecuteTools),
+        "expected ExecuteTools, got {action:?}"
+    );
+    // The actual list of tool calls to execute is derived from the stream
+    // (the durable source of truth), not carried in the Action.
+    let tool_calls: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.as_tool_call_request())
+        .collect();
+    assert_eq!(tool_calls.len(), 1);
+    assert_eq!(tool_calls[0].id, "call_1");
 }
 
 #[test]
@@ -49,7 +60,13 @@ fn test_transitions_to_complete_no_tools() {
     let mut _turn_state = TurnState::default();
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
@@ -70,7 +87,13 @@ fn test_continues_after_tool_execution() {
     let mut _turn_state = TurnState::default();
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     // Drive the coordinator to Executing by simulating a tool call in the
     // stream, then test that handle_tool_responses transitions back to
@@ -106,7 +129,13 @@ fn test_continues_after_tool_execution() {
 fn test_peek_partial_content() {
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
@@ -133,7 +162,13 @@ fn test_buffered_markdown_flushed_before_tool_call() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
-    let mut coordinator = TurnCoordinator::new(Arc::clone(&printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
@@ -143,9 +178,15 @@ fn test_buffered_markdown_flushed_before_tool_call() {
         Event::message(0, "Now wire the config into `ChatResponseRenderer`:"),
     );
 
-    // Nothing rendered yet — buffer is waiting for a complete block
+    // The assistant role header is emitted on the first chunk, but the
+    // partial markdown content itself is still in the buffer waiting for
+    // a complete block.
     printer.flush();
-    assert_eq!(*out.lock(), "");
+    assert!(
+        !out.lock().contains("Now wire the config"),
+        "Partial markdown content should still be buffered, got: {:?}",
+        *out.lock()
+    );
 
     // LLM immediately follows with a tool call (no newline in between)
     let tool_call = ToolCallRequest {
@@ -171,7 +212,13 @@ fn test_buffered_markdown_flushed_before_tool_call() {
 fn test_prepare_continuation() {
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
@@ -188,14 +235,29 @@ fn test_prepare_continuation() {
 
 /// Tests the multi-part tool call flow: an initial Part with name+id
 /// (empty arguments) marks the tool as "preparing", and the Flush
-/// after the final Part moves it to `pending_tool_calls`.
+/// after the final Part appends the complete request to the conversation
+/// stream. The state machine transitions to Executing on Finished if any
+/// unresponded tool-call request is in the current turn.
 #[test]
 fn test_multi_part_tool_call_deferred_to_flush() {
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    let tool_call_count = |stream: &ConversationStream| {
+        stream
+            .iter()
+            .filter(|e| e.event.as_tool_call_request().is_some())
+            .count()
+    };
 
     // First Part: name + id (from content_block_start)
     coordinator.handle_event(
@@ -203,8 +265,8 @@ fn test_multi_part_tool_call_deferred_to_flush() {
         Event::tool_call_start(1, "call_99", "fs_create_file"),
     );
 
-    // Not in pending_tool_calls yet (no flush)
-    assert!(coordinator.pending_tool_calls.is_empty());
+    // Not appended to the stream yet (no flush)
+    assert_eq!(tool_call_count(&stream), 0);
 
     // Argument chunks arrive incrementally
     coordinator.handle_event(
@@ -212,30 +274,30 @@ fn test_multi_part_tool_call_deferred_to_flush() {
         Event::tool_call_args(1, r#"{"path": "test.rs"}"#),
     );
 
-    // Still not in pending (no flush yet)
-    assert!(coordinator.pending_tool_calls.is_empty());
+    // Still not in the stream (no flush yet)
+    assert_eq!(tool_call_count(&stream), 0);
 
-    // Flush finalizes the tool call
+    // Flush finalizes the tool call and appends it to the stream
     coordinator.handle_event(&mut stream, Event::flush(1));
-    assert_eq!(coordinator.pending_tool_calls.len(), 1);
-    assert_eq!(coordinator.pending_tool_calls[0].id, "call_99");
-    assert_eq!(coordinator.pending_tool_calls[0].name, "fs_create_file");
-    assert_eq!(
-        coordinator.pending_tool_calls[0].arguments["path"],
-        "test.rs"
-    );
+    let requests: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.as_tool_call_request())
+        .cloned()
+        .collect();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].id, "call_99");
+    assert_eq!(requests[0].name, "fs_create_file");
+    assert_eq!(requests[0].arguments["path"], "test.rs");
 
-    // Finish should transition to Executing
+    // Finish should transition to Executing because there's an unresponded
+    // tool-call request in the current turn.
     let action = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
     assert_eq!(coordinator.current_phase(), TurnPhase::Executing);
-    match action {
-        Action::ExecuteTools(calls) => {
-            assert_eq!(calls.len(), 1);
-            assert_eq!(calls[0].name, "fs_create_file");
-        }
-        _ => panic!("Expected ExecuteTools action"),
-    }
+    assert!(
+        matches!(action, Action::ExecuteTools),
+        "expected ExecuteTools, got {action:?}"
+    );
 }
 
 #[test]
@@ -243,7 +305,13 @@ fn test_structured_output_rendered_as_json_code_fence() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
-    let mut coordinator = TurnCoordinator::new(Arc::clone(&printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest {
         content: "Extract contacts".into(),
@@ -284,7 +352,13 @@ fn test_structured_output_rendered_as_json_code_fence() {
 fn test_structured_output_persisted_with_parsed_json() {
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
-    let mut coordinator = TurnCoordinator::new(Arc::new(printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest {
         content: "Extract contacts".into(),
@@ -315,7 +389,13 @@ fn test_structured_not_routed_to_chat_renderer() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
-    let mut coordinator = TurnCoordinator::new(Arc::clone(&printer), AppConfig::new_test().style);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 

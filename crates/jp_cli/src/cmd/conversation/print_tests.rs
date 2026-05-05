@@ -967,6 +967,187 @@ fn style_chat_hides_reasoning_and_tool_calls() {
 }
 
 #[test]
+fn role_header_renders_user_label_from_author() {
+    let mut req = ChatRequest::from("hello");
+    req.author = Some("alice".into());
+
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![ConversationEvent::new(req, ts(0, 0, 0))]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── alice "),
+        "user header should use the author label, got: {output:?}"
+    );
+}
+
+#[test]
+fn role_header_falls_back_to_user_label_without_author() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![ConversationEvent::new(
+        ChatRequest::from("hello"),
+        ts(0, 0, 0),
+    )]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── user "),
+        "user header should fall back to `user`, got: {output:?}"
+    );
+}
+
+#[test]
+fn role_header_renders_assistant_label_with_model_suffix() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(ChatRequest::from("hello"), ts(0, 0, 0)),
+        ConversationEvent::new(ChatResponse::message("hi"), ts(0, 0, 1)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── jp (anthropic/test) "),
+        "assistant header should include model suffix, got: {output:?}"
+    );
+}
+
+#[test]
+fn role_header_assistant_appears_once_per_turn() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(ChatRequest::from("hello"), ts(0, 0, 0)),
+        ConversationEvent::new(ChatResponse::message("first chunk"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::message("second chunk"), ts(0, 0, 2)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    let occurrences = output.matches("── jp ").count();
+    assert_eq!(
+        occurrences, 1,
+        "assistant header should be emitted exactly once per turn, got {occurrences}: {output:?}"
+    );
+}
+
+#[test]
+fn role_header_assistant_emitted_before_first_tool_call() {
+    // The assistant's first event of the turn is a tool call (no message
+    // first). The header should still appear before it.
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(ChatRequest::from("do it"), ts(0, 0, 0)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 1),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 2),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    // The header writes to stdout (chat renderer), the tool UI to stderr.
+    // Verify the assistant header reached stdout even though the first
+    // assistant event of the turn was a tool call.
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── jp "),
+        "assistant header should appear on stdout before tool call, got: {output:?}"
+    );
+}
+
+#[test]
+fn role_header_does_not_emit_plain_hr_separator() {
+    // Regression: the old renderer emitted a `---` HR after the user
+    // message. The labeled-header design replaces that. Make sure no plain
+    // `---` line shows up between user and assistant content.
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(ChatRequest::from("q"), ts(0, 0, 0)),
+        ConversationEvent::new(ChatResponse::message("a"), ts(0, 0, 1)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    // A bare `---` line (or its line-rule equivalent) should not appear.
+    // The unicode line `───...` IS expected as part of the role headers,
+    // but those start with `── <label>` so a line starting with three
+    // dashes followed by whitespace/eol is what we're guarding against.
+    for line in output.lines() {
+        let trimmed = line.trim();
+        assert_ne!(
+            trimmed, "---",
+            "plain `---` separator should not appear, got line: {line:?}"
+        );
+    }
+}
+
+#[test]
 fn style_chat_separates_messages_across_hidden_reasoning() {
     // Simulates the common case where the assistant emits
     //   Message("...first.") -> Reasoning("...") -> Message("Now let me...")

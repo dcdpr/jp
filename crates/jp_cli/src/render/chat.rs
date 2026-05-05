@@ -30,6 +30,7 @@
 
 use std::{fmt::Write as _, sync::Arc, time::Duration};
 
+use crossterm::style::Stylize as _;
 use jp_config::style::{
     StyleConfig,
     reasoning::{ReasoningDisplayConfig, TruncateChars},
@@ -110,9 +111,10 @@ impl ChatRenderer {
 
     /// Render a user message (`ChatRequest` content).
     ///
-    /// Formats the content with a horizontal rule separator and prints it
-    /// as a complete block. Participates in content-kind transition tracking
-    /// so that spacing between user messages and tool calls is correct.
+    /// Formats the content as a complete markdown block. Callers are
+    /// responsible for emitting any preceding role header via
+    /// [`Self::render_role_header`] — the renderer no longer emits a
+    /// trailing separator on its own.
     pub fn render_request(&mut self, content: &str) {
         self.flush_on_transition(ContentKind::Message);
         self.flush();
@@ -121,25 +123,33 @@ impl ChatRenderer {
             .formatter
             .format_terminal(content.trim_end())
             .unwrap_or_else(|_| content.trim_end().to_owned());
-        self.printer.print(&formatted);
-
-        self.render_separator();
+        self.printer.println(&formatted);
 
         self.last_content_kind = Some(ContentKind::Message);
     }
 
-    /// Render a horizontal rule separator between turns.
+    /// Render a labeled role-boundary header.
     ///
-    /// Routes the `---` through the markdown formatter so it renders as
-    /// a proper HR element in pretty mode.
-    pub fn render_separator(&mut self) {
+    /// Draws a single line with the label embedded near the left and an
+    /// optional dimmed suffix appended after it, with `─` characters
+    /// filling the remaining width. Used by [`TurnRenderer`] to mark which
+    /// participant is speaking next — e.g. `── alice ──…` before a user
+    /// turn, `── jp (anthropic/claude-opus-4-7) ──…` before an assistant
+    /// turn.
+    ///
+    /// Replaces the old plain `---` HR separator and disambiguates JP's
+    /// turn boundaries from any HR markdown the assistant itself emits.
+    ///
+    /// [`TurnRenderer`]: super::TurnRenderer
+    pub fn render_role_header(&mut self, label: &str, suffix: Option<&str>) {
         self.flush();
 
-        let formatted = self
-            .formatter
-            .format_terminal("\n\n---\n\n")
-            .unwrap_or_else(|_| "\n\n---\n\n".to_owned());
-        self.printer.print(format!("\n{formatted}\n"));
+        let pretty = self.printer.pretty_printing_enabled();
+        let line = build_role_header_line(label, suffix, self.config.markdown.wrap_width, pretty);
+
+        self.printer.println("");
+        self.printer.println(&line);
+        self.printer.println("");
 
         self.last_content_kind = None;
     }
@@ -152,7 +162,13 @@ impl ChatRenderer {
     /// content before the transition would only appear after the next
     /// block boundary — which may not arrive until much later (or never,
     /// if a tool call follows).
+    ///
+    /// Always cancels any active ephemeral reasoning chrome (e.g. the
+    /// `Timer` display): persistent content arriving — even of the same
+    /// `ContentKind` as before — must stop the running timer, since the
+    /// timer line and the upcoming content share the terminal row.
     fn flush_on_transition(&mut self, next: ContentKind) {
+        self.cancel_reasoning_timer();
         if let Some(prev) = self.last_content_kind
             && prev != next
         {
@@ -212,8 +228,16 @@ impl ChatRenderer {
             }
 
             ReasoningDisplayConfig::Timer => {
-                if self.last_content_kind != Some(ContentKind::Reasoning) {
-                    self.flush_on_transition(ContentKind::Reasoning);
+                // Timer is ephemeral chrome on stderr: it writes a line
+                // that's erased again on cancel, leaving no persistent
+                // stdout output. Like `Hidden`, it must not go through
+                // `flush_on_transition` — that would commit a blank-line
+                // separator on stdout (when leaving a `ToolCall` block)
+                // that no later content ever "earns" back. Use the timer
+                // token itself for re-entry detection instead of
+                // `last_content_kind`.
+                if self.reasoning_timer.is_none() {
+                    self.flush();
 
                     if let Some((token, _handle)) = spawn_line_timer(
                         self.printer.clone(),
@@ -382,6 +406,34 @@ impl ChatRenderer {
             .iter_mut()
             .try_fold(event, |ev, fixup| fixup.process(ev).ok_or(()))
             .ok()
+    }
+}
+
+/// Build a labeled horizontal rule used as a role-boundary marker.
+///
+/// Layout: `── <label> [(<suffix>)] ──…` filling `width` columns.
+/// In `pretty` mode, the label is bold and the optional suffix is dimmed.
+/// Plain mode emits the same characters without ANSI styling so it
+/// survives ANSI-stripping pipes (e.g. `jp c print | grep`).
+fn build_role_header_line(label: &str, suffix: Option<&str>, width: usize, pretty: bool) -> String {
+    let suffix_part = suffix.map(|s| format!(" ({s})")).unwrap_or_default();
+
+    // Compute fill against the unstyled width so ANSI escapes don't throw
+    // off the column count.
+    let unstyled = format!("── {label}{suffix_part} ");
+    let fill = width.saturating_sub(unstyled.chars().count()).max(3);
+    let dashes = "─".repeat(fill);
+
+    if pretty {
+        let label_styled = label.bold();
+        let suffix_styled = if suffix.is_some() {
+            format!(" {}", suffix_part.trim_start().dim())
+        } else {
+            String::new()
+        };
+        format!("── {label_styled}{suffix_styled} {dashes}")
+    } else {
+        format!("{unstyled}{dashes}")
     }
 }
 
