@@ -6,7 +6,7 @@ use std::{
 
 use crossterm::style::Stylize;
 use jp_md::format::Formatter;
-use jp_tool::{AnswerType, Outcome, Question};
+use jp_tool::{Outcome, Question};
 use serde_json::{Map, Value};
 
 use crate::{
@@ -63,12 +63,8 @@ pub(crate) async fn fs_create_file(
             }
             None => {
                 return Ok(Outcome::NeedsInput {
-                    question: Question {
-                        id: "overwrite_file".to_string(),
-                        text: format!("File '{path}' exists. Overwrite?"),
-                        answer_type: AnswerType::Boolean,
-                        default: Some(Value::Bool(false)),
-                    },
+                    question: Question::boolean("overwrite_file", format!("File '{path}' exists. Overwrite?"))
+                        .with_default(Value::Bool(false)),
                 });
             }
         }

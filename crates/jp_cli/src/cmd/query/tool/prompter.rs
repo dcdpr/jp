@@ -533,6 +533,10 @@ impl ToolPrompter {
     pub fn prompt_question(&self, question: &jp_tool::Question) -> Result<QuestionResult, Error> {
         let mut writer = self.printer.prompt_writer();
 
+        if let Some(pre_amble) = &question.pre_amble {
+            writeln!(writer, "{pre_amble}")?;
+        }
+
         match &question.answer_type {
             AnswerType::Boolean => self.prompt_boolean_git_style(question, &mut writer),
             AnswerType::Select { options } => {
@@ -548,6 +552,7 @@ impl ToolPrompter {
                     default_idx,
                     &mut writer,
                 )?;
+
                 Ok(QuestionResult {
                     answer: Value::String(answer),
                     persist_level: jp_tool::PersistLevel::None,
@@ -559,6 +564,7 @@ impl ToolPrompter {
                 let answer = self
                     .prompt_backend
                     .text(&question.text, default_str, &mut writer)?;
+
                 Ok(QuestionResult {
                     answer: Value::String(answer),
                     persist_level: jp_tool::PersistLevel::None,

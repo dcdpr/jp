@@ -1,7 +1,7 @@
 use std::fs;
 
 use camino::Utf8PathBuf;
-use jp_tool::{AnswerType, Outcome, Question};
+use jp_tool::{Outcome, Question};
 use serde_json::{Map, Value};
 
 use super::utils::is_file_dirty;
@@ -43,12 +43,8 @@ pub(crate) async fn fs_delete_file(
             }
             None => {
                 return Ok(Outcome::NeedsInput {
-                    question: Question {
-                        id: "delete_dirty_file".to_string(),
-                        text: format!("File '{path}' has uncommitted changes. Delete anyway?"),
-                        answer_type: AnswerType::Boolean,
-                        default: Some(Value::Bool(false)),
-                    },
+                    question: Question::boolean("delete_dirty_file", format!("File '{path}' has uncommitted changes. Delete anyway?"))
+                        .with_default(Value::Bool(false)),
                 });
             }
         }

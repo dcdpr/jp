@@ -1,7 +1,7 @@
 use std::fs;
 
 use camino::Utf8PathBuf;
-use jp_tool::{AnswerType, Outcome, Question};
+use jp_tool::{Outcome, Question};
 use serde_json::{Map, Value};
 
 use super::utils::is_file_dirty;
@@ -43,12 +43,8 @@ pub(crate) async fn fs_move_file(
             }
             None => {
                 return Ok(Outcome::NeedsInput {
-                    question: Question {
-                        id: "overwrite_file".to_string(),
-                        text: format!("Destination '{target}' exists. Overwrite?"),
-                        answer_type: AnswerType::Boolean,
-                        default: Some(Value::Bool(false)),
-                    },
+                    question: Question::boolean("overwrite_file", format!("Destination '{target}' exists. Overwrite?"))
+                        .with_default(Value::Bool(false)),
                 });
             }
         }
@@ -64,12 +60,8 @@ pub(crate) async fn fs_move_file(
             }
             None => {
                 return Ok(Outcome::NeedsInput {
-                    question: Question {
-                        id: "move_dirty_file".to_string(),
-                        text: format!("File '{source}' has uncommitted changes. Move anyway?"),
-                        answer_type: AnswerType::Boolean,
-                        default: Some(Value::Bool(false)),
-                    },
+                    question: Question::boolean("move_dirty_file", format!("File '{source}' has uncommitted changes. Move anyway?"))
+                        .with_default(Value::Bool(false)),
                 });
             }
         }
