@@ -426,6 +426,11 @@ impl Query {
             chat_request.schema = schema.as_object().cloned();
         }
 
+        // Stamp the request with the configured user name so transcripts
+        // attribute each turn correctly even when teammates with different
+        // local configs continue the conversation. `None` falls back to a
+        // generic label at render time.
+        chat_request.author = cfg.user.name.clone();
         let turn_result = self
             .handle_turn(
                 &cfg,

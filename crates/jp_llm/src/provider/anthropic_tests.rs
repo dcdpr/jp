@@ -332,6 +332,7 @@ fn test_structured_output_sets_format() {
     let events = ConversationStream::new_test().with_turn(ChatRequest {
         content: "Extract contacts".into(),
         schema: Some(schema),
+        author: None,
     });
 
     let query = ChatQuery {
@@ -390,6 +391,7 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
     events.start_turn(ChatRequest {
         content: "Extract contacts".into(),
         schema: Some(Map::from_iter([("type".into(), json!("object"))])),
+        author: None,
     });
 
     // Then a response (now the last event is not a ChatRequest)
@@ -403,6 +405,7 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
     events.start_turn(ChatRequest {
         content: "Explain what you found".into(),
         schema: None,
+        author: None,
     });
 
     let query = ChatQuery {
@@ -441,6 +444,7 @@ fn test_adaptive_thinking_with_structured_output() {
     let events = ConversationStream::new_test().with_turn(ChatRequest {
         content: "Extract data".into(),
         schema: Some(schema),
+        author: None,
     });
 
     let query = ChatQuery {
@@ -817,6 +821,7 @@ fn test_continue_injected_when_prefill_unsupported() {
     events.start_turn(ChatRequest {
         content: "Tell me about X".into(),
         schema: None,
+        author: None,
     });
     events
         .current_turn_mut()
@@ -864,6 +869,7 @@ fn test_prefill_preserved_for_supported_models() {
     events.start_turn(ChatRequest {
         content: "Tell me about X".into(),
         schema: None,
+        author: None,
     });
     events
         .current_turn_mut()

@@ -6,6 +6,7 @@ expression: "AppConfig::fields()"
     "config_load_paths",
     "extends",
     "inherit",
+    "user.name",
     "template.values",
     "style.typewriter.code_delay",
     "style.typewriter.text_delay",

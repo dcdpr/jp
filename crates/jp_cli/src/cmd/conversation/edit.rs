@@ -243,6 +243,7 @@ async fn generate_titles(
     thread_events.start_turn(ChatRequest {
         content: "Generate titles for this conversation.".into(),
         schema: Some(schema),
+        author: None,
     });
 
     let query = jp_llm::query::ChatQuery {

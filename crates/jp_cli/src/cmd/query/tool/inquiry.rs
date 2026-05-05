@@ -261,6 +261,7 @@ impl InquiryBackend for LlmInquiryBackend {
                 question.text,
             ),
             schema: Some(create_inquiry_schema(question)),
+            author: None,
         });
 
         let thread = Thread {

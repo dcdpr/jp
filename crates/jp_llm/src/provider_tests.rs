@@ -199,6 +199,7 @@ async fn structured_output(provider: ProviderId, test_name: &str) -> Result {
     let request = TestRequest::chat(provider).chat_request(ChatRequest {
         content: "Generate a title for this conversation.".into(),
         schema: Some(schema),
+        author: None,
     });
 
     run_test(provider, test_name, Some(request)).await
