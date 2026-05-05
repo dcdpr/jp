@@ -262,9 +262,9 @@ pub(crate) struct Query {
 
     /// Set a custom title for the conversation.
     ///
-    /// Applied to the resolved conversation (new or resumed) before the turn
-    /// runs. Skips title auto-generation for new conversations — your title
-    /// wins. Mutually exclusive with `--no-title`.
+    /// Applied to the resolved conversation (new, forked, or resumed) before
+    /// the turn runs. Skips title auto-generation for new conversations —
+    /// your title wins. Mutually exclusive with `--no-title`.
     #[arg(long = "title", conflicts_with = "no_title")]
     title: Option<String>,
 
