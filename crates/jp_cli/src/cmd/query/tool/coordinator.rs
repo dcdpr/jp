@@ -718,62 +718,34 @@ impl ToolCoordinator {
         let mut skipped_responses = Vec::new();
 
         for (index, executor) in std::mem::take(&mut self.executors) {
-            let decision = self.decide_permission(executor, is_tty, turn_state);
+            // Funnel through the unified per-tool permission pipeline. The
+            // streaming path in `turn_loop.rs` uses the same call so the
+            // decide → pre-render → prompt → render policy stays in one
+            // place.
+            let decision = self
+                .resolve_tool_call_decision(
+                    executor,
+                    prompter,
+                    mcp_client,
+                    is_tty,
+                    turn_state,
+                    tool_renderer,
+                )
+                .await;
 
             match decision {
-                PermissionDecision::Approved(executor) => {
-                    let id = executor.tool_id().to_owned();
-                    let name = executor.tool_name().to_owned();
-                    let args = executor.arguments().clone();
-                    match self.render_approved_tool(&name, &args, tool_renderer).await {
-                        RenderOutcome::Rendered { content } => {
-                            if let Some(c) = content {
-                                self.rendered_arguments.insert(id, c);
-                            }
-                            approved_executors.push((index, executor));
-                        }
-                        RenderOutcome::Suppressed { error } => {
-                            skipped_responses
-                                .push((index, Self::render_failed_response(id, &name, &error)));
-                        }
+                ToolCallDecision::Approved {
+                    executor,
+                    rendered_arguments,
+                } => {
+                    if let Some(content) = rendered_arguments {
+                        self.rendered_arguments
+                            .insert(executor.tool_id().to_owned(), content);
                     }
+                    approved_executors.push((index, executor));
                 }
-                PermissionDecision::Skipped(response) => {
+                ToolCallDecision::Skipped(response) | ToolCallDecision::Failed(response) => {
                     skipped_responses.push((index, response));
-                }
-                PermissionDecision::NeedsPrompt { executor, info } => {
-                    self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
-                    let result = prompter.prompt_permission(&info, mcp_client).await;
-
-                    match self.apply_permission_result(result, &info, turn_state, executor) {
-                        Ok(executor) => {
-                            let args = executor.arguments().clone();
-                            match self
-                                .render_approved_tool(&info.tool_name, &args, tool_renderer)
-                                .await
-                            {
-                                RenderOutcome::Rendered { content } => {
-                                    if let Some(c) = content {
-                                        self.rendered_arguments.insert(info.tool_id.clone(), c);
-                                    }
-                                    approved_executors.push((index, executor));
-                                }
-                                RenderOutcome::Suppressed { error } => {
-                                    skipped_responses.push((
-                                        index,
-                                        Self::render_failed_response(
-                                            info.tool_id.clone(),
-                                            &info.tool_name,
-                                            &error,
-                                        ),
-                                    ));
-                                }
-                            }
-                        }
-                        Err(response) => {
-                            skipped_responses.push((index, response));
-                        }
-                    }
                 }
             }
         }
