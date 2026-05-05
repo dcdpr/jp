@@ -351,8 +351,8 @@ impl AppConfig {
     ///     "config_load_paths",
     ///     "extends",
     ///     "inherit",
+    ///     "user.name",
     ///     "template.values",
-    ///     "style.typewriter.code_delay",
     /// ]);
     /// ```
     #[must_use]
@@ -394,13 +394,10 @@ impl AppConfig {
     ///     ),
     ///     ("extends".to_owned(), "JP_CFG_EXTENDS".to_owned()),
     ///     ("inherit".to_owned(), "JP_CFG_INHERIT".to_owned()),
+    ///     ("user.name".to_owned(), "JP_CFG_USER_NAME".to_owned()),
     ///     (
     ///         "template.values".to_owned(),
     ///         "JP_CFG_TEMPLATE_VALUES".to_owned()
-    ///     ),
-    ///     (
-    ///         "style.typewriter.code_delay".to_owned(),
-    ///         "JP_CFG_STYLE_TYPEWRITER_CODE_DELAY".to_owned()
     ///     ),
     /// ]);
     /// ```
