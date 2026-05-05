@@ -106,6 +106,9 @@ pub struct TurnCoordinator {
     /// When set, emit each completed event as NDJSON.
     json_emitter: Option<JsonEmitter>,
 
+    // Accumulators for the current cycle
+    pending_tool_calls: Vec<ToolCallRequest>,
+
     /// Display name to stamp onto interrupt-reply [`ChatRequest`]s for
     /// transcript attribution. `None` means the request stays unattributed.
     ///
