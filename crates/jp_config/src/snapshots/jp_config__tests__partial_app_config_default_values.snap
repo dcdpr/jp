@@ -115,6 +115,28 @@ Ok(
                     },
                     tools: {},
                 },
+                compaction: PartialCompactionConfig {
+                    rules: Merged(
+                        MergedVec {
+                            value: [
+                                PartialCompactionRuleConfig {
+                                    keep_first: None,
+                                    keep_last: None,
+                                    reasoning: Some(
+                                        Strip,
+                                    ),
+                                    tool_calls: Some(
+                                        Strip,
+                                    ),
+                                    summary: None,
+                                },
+                            ],
+                            strategy: None,
+                            dedup: None,
+                            discard_when_merged: true,
+                        },
+                    ),
+                },
                 attachments: Merged(
                     MergedVec {
                         value: [],

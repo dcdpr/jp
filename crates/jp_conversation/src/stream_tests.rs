@@ -6,8 +6,13 @@ use jp_config::{
 use serde_json::{Map, Value};
 
 use super::*;
-use crate::event::{
-    ChatResponse, InquiryQuestion, InquiryRequest, InquiryResponse, InquirySource, ToolCallRequest,
+use crate::{
+    Compaction, CompactionRange, RangeBound, ReasoningPolicy, ToolCallPolicy,
+    event::{
+        ChatResponse, InquiryQuestion, InquiryRequest, InquiryResponse, InquirySource,
+        ToolCallRequest,
+    },
+    resolve_range,
 };
 
 #[test]
@@ -726,7 +731,7 @@ fn roundtrip_delta(delta: ConfigDelta) -> ConfigDelta {
     let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
     match deserialized {
         InternalEvent::ConfigDelta(d) => d,
-        InternalEvent::Event(_) => panic!("expected ConfigDelta"),
+        _ => panic!("expected ConfigDelta"),
     }
 }
 
@@ -888,4 +893,369 @@ fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
 
     let result = ConversationStream::from_parts(base_config, events).unwrap();
     assert_eq!(result.len(), 2); // TurnStart + ChatRequest
+}
+
+// --- Compaction event invariant tests ---
+
+fn make_compaction(from: usize, to: usize) -> Compaction {
+    Compaction {
+        timestamp: Utc.with_ymd_and_hms(2025, 7, 1, 12, 0, 0).unwrap(),
+        from_turn: from,
+        to_turn: to,
+        summary: None,
+        reasoning: Some(ReasoningPolicy::Strip),
+        tool_calls: Some(ToolCallPolicy::Strip {
+            request: true,
+            response: true,
+        }),
+    }
+}
+
+#[test]
+fn test_compaction_not_counted_by_len() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    let len_before = stream.len();
+
+    stream.add_compaction(make_compaction(0, 0));
+
+    assert_eq!(stream.len(), len_before);
+}
+
+#[test]
+fn test_compaction_not_counted_by_is_empty() {
+    let mut stream = ConversationStream::new_test();
+    assert!(stream.is_empty());
+
+    stream.add_compaction(make_compaction(0, 0));
+
+    assert!(
+        stream.is_empty(),
+        "Compaction alone should not make stream non-empty"
+    );
+}
+
+#[test]
+fn test_compaction_preserved_by_retain() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 0));
+
+    // Retain nothing — all conversation events removed.
+    stream.retain(|_| false);
+
+    assert_eq!(stream.len(), 0);
+    assert_eq!(
+        stream.compactions().count(),
+        1,
+        "Compaction should survive retain"
+    );
+}
+
+#[test]
+fn test_compaction_skipped_by_iter() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 0));
+    stream.push(ConversationEvent::new(
+        ChatResponse::message("world"),
+        Utc.with_ymd_and_hms(2025, 7, 1, 12, 0, 1).unwrap(),
+    ));
+
+    let events: Vec<_> = stream.iter().collect();
+    // TurnStart + ChatRequest + ChatResponse = 3 events, no compaction.
+    assert_eq!(events.len(), 3);
+    assert!(
+        events
+            .iter()
+            .all(|e| !matches!(&e.event.kind, EventKind::TurnStart(_)) || e.event.is_turn_start()),
+        "Iterator should only yield ConversationEvents"
+    );
+}
+
+#[test]
+fn test_compaction_skipped_by_into_iter() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 0));
+    stream.push(ConversationEvent::new(
+        ChatResponse::message("world"),
+        Utc.with_ymd_and_hms(2025, 7, 1, 12, 0, 1).unwrap(),
+    ));
+
+    assert_eq!(stream.into_iter().count(), 3);
+}
+
+#[test]
+fn test_compaction_preserved_by_sanitize() {
+    let mut stream = ConversationStream::new_test();
+    stream.push(TurnStart);
+    stream.push(ConversationEvent::new(
+        ChatRequest::from("hello"),
+        Utc.with_ymd_and_hms(2025, 7, 1, 12, 0, 0).unwrap(),
+    ));
+    stream.add_compaction(make_compaction(0, 0));
+    stream.push(ConversationEvent::new(
+        ChatResponse::message("hi"),
+        Utc.with_ymd_and_hms(2025, 7, 1, 12, 0, 1).unwrap(),
+    ));
+
+    stream.sanitize();
+
+    assert_eq!(
+        stream.compactions().count(),
+        1,
+        "Compaction should survive sanitize"
+    );
+    assert_eq!(stream.len(), 3); // TurnStart + ChatRequest + ChatResponse
+}
+
+#[test]
+fn test_compaction_roundtrip_via_to_parts_from_parts() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 0));
+
+    let (base_config, events) = stream.to_parts().unwrap();
+
+    // Verify the compaction event is present in serialized form.
+    let compaction_count = events
+        .iter()
+        .filter(|v| v.get("type").and_then(|t| t.as_str()) == Some("compaction"))
+        .count();
+    assert_eq!(compaction_count, 1);
+
+    // Roundtrip.
+    let restored = ConversationStream::from_parts(base_config, events)
+        .unwrap()
+        .with_created_at(stream.created_at);
+
+    assert_eq!(restored.len(), stream.len());
+    assert_eq!(restored.compactions().count(), 1);
+
+    let c = restored.compactions().next().unwrap();
+    assert_eq!(c.from_turn, 0);
+    assert_eq!(c.to_turn, 0);
+    assert_eq!(c.reasoning, Some(ReasoningPolicy::Strip));
+}
+
+#[test]
+fn test_compactions_accessor() {
+    let mut stream = ConversationStream::new_test();
+    assert_eq!(stream.compactions().count(), 0);
+
+    stream.add_compaction(make_compaction(0, 2));
+    stream.add_compaction(make_compaction(3, 5));
+
+    let compactions: Vec<_> = stream.compactions().collect();
+    assert_eq!(compactions.len(), 2);
+    assert_eq!(compactions[0].from_turn, 0);
+    assert_eq!(compactions[0].to_turn, 2);
+    assert_eq!(compactions[1].from_turn, 3);
+    assert_eq!(compactions[1].to_turn, 5);
+}
+
+#[test]
+fn test_compaction_does_not_affect_config() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let config_before = stream.config().unwrap().to_partial();
+    stream.add_compaction(make_compaction(0, 0));
+    let config_after = stream.config().unwrap().to_partial();
+
+    assert_eq!(
+        serde_json::to_value(&config_before).unwrap(),
+        serde_json::to_value(&config_after).unwrap(),
+    );
+}
+
+// --- turn_count, turn_at_time, resolve_compaction_range ---
+
+#[test]
+fn test_turn_count_empty() {
+    let stream = ConversationStream::new_test();
+    assert_eq!(stream.turn_count(), 0);
+}
+
+#[test]
+fn test_turn_count_two_turns() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("hello");
+    stream.push(ConversationEvent::new(
+        ChatResponse::message("hi"),
+        Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 1).unwrap(),
+    ));
+    stream.start_turn("bye");
+    assert_eq!(stream.turn_count(), 2);
+}
+
+#[test]
+fn test_turn_at_time() {
+    let mut stream = ConversationStream::new_test();
+    stream.push(ConversationEvent::new(
+        TurnStart,
+        Utc.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        ChatRequest::from("q1"),
+        Utc.with_ymd_and_hms(2025, 1, 1, 10, 0, 0).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        TurnStart,
+        Utc.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        ChatRequest::from("q2"),
+        Utc.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap(),
+    ));
+
+    let idx = |dt| stream.turn_at_time(dt).map(|t| t.index());
+
+    // Before first turn.
+    assert_eq!(
+        idx(Utc.with_ymd_and_hms(2025, 1, 1, 9, 0, 0).unwrap()),
+        None
+    );
+    // During first turn.
+    assert_eq!(
+        idx(Utc.with_ymd_and_hms(2025, 1, 1, 11, 0, 0).unwrap()),
+        Some(0)
+    );
+    // Exactly at second turn start.
+    assert_eq!(
+        idx(Utc.with_ymd_and_hms(2025, 1, 1, 12, 0, 0).unwrap()),
+        Some(1)
+    );
+    // After second turn.
+    assert_eq!(
+        idx(Utc.with_ymd_and_hms(2025, 1, 1, 15, 0, 0).unwrap()),
+        Some(1)
+    );
+}
+
+#[test]
+fn test_resolve_range_defaults() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b");
+    stream.start_turn("c");
+
+    let range = resolve_range(&stream, None, None).unwrap();
+    assert_eq!(range, CompactionRange {
+        from_turn: 0,
+        to_turn: 2
+    });
+}
+
+#[test]
+fn test_resolve_range_absolute() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b");
+    stream.start_turn("c");
+    stream.start_turn("d");
+
+    let range = resolve_range(
+        &stream,
+        Some(RangeBound::Absolute(1)),
+        Some(RangeBound::Absolute(2)),
+    )
+    .unwrap();
+    assert_eq!(range, CompactionRange {
+        from_turn: 1,
+        to_turn: 2
+    });
+}
+
+#[test]
+fn test_resolve_range_from_end() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b");
+    stream.start_turn("c");
+    stream.start_turn("d"); // turns 0..3
+
+    // FromEnd(1) on `to` means "1 before last" = turn 2.
+    let range = resolve_range(&stream, None, Some(RangeBound::FromEnd(1))).unwrap();
+    assert_eq!(range, CompactionRange {
+        from_turn: 0,
+        to_turn: 2
+    });
+}
+
+#[test]
+fn test_resolve_range_after_last_compaction() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b");
+    stream.start_turn("c");
+    stream.start_turn("d");
+
+    // No compactions yet → AfterLastCompaction resolves to 0.
+    let range = resolve_range(&stream, Some(RangeBound::AfterLastCompaction), None).unwrap();
+    assert_eq!(range.from_turn, 0);
+
+    // Add a compaction covering turns 0..1.
+    stream.add_compaction(make_compaction(0, 1));
+
+    // AfterLastCompaction → to_turn + 1 = 2.
+    let range = resolve_range(&stream, Some(RangeBound::AfterLastCompaction), None).unwrap();
+    assert_eq!(range.from_turn, 2);
+    assert_eq!(range.to_turn, 3);
+}
+
+#[test]
+fn test_resolve_range_empty_stream() {
+    let stream = ConversationStream::new_test();
+    assert!(resolve_range(&stream, None, None).is_none());
+}
+
+#[test]
+fn test_resolve_range_inverted_returns_none() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b");
+
+    // from=1, to=0 → empty range.
+    let range = resolve_range(
+        &stream,
+        Some(RangeBound::Absolute(1)),
+        Some(RangeBound::Absolute(0)),
+    );
+    assert!(range.is_none());
+}
+
+#[test]
+fn test_resolve_range_clamps_beyond_max() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b"); // turns 0..1
+
+    let range = resolve_range(
+        &stream,
+        Some(RangeBound::Absolute(0)),
+        Some(RangeBound::Absolute(99)),
+    )
+    .unwrap();
+    assert_eq!(range.to_turn, 1);
+}
+
+/// Roundtrip a [`Compaction`] through [`InternalEvent`] serialization.
+#[test]
+fn test_internal_event_compaction_roundtrip() {
+    let compaction = make_compaction(0, 5);
+    let event = InternalEvent::Compaction(compaction.clone());
+    let json = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(json["type"], "compaction");
+    assert_eq!(json["from_turn"], 0);
+    assert_eq!(json["to_turn"], 5);
+    assert_eq!(json["reasoning"], "strip");
+
+    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
+    let InternalEvent::Compaction(result) = deserialized else {
+        panic!("expected Compaction");
+    };
+    assert_eq!(result, compaction);
 }

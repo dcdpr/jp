@@ -272,6 +272,7 @@ impl IntoPartialAppConfig for Init {
         _workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,
+        _handles: &[jp_workspace::ConversationHandle],
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         Ok(partial)
     }

@@ -27,6 +27,7 @@
     reason = "we don't host the docs, and use them mainly for LSP integration"
 )]
 
+pub mod compaction;
 mod compat;
 pub mod conversation;
 pub mod error;
@@ -35,6 +36,10 @@ pub(crate) mod storage;
 pub mod stream;
 pub mod thread;
 
+pub use compaction::{
+    Compaction, CompactionRange, RangeBound, ReasoningPolicy, SummaryPolicy, ToolCallPolicy,
+    resolve_range,
+};
 pub use conversation::{Conversation, ConversationId};
 pub use error::Error;
 pub use event::{ConversationEvent, EventKind};

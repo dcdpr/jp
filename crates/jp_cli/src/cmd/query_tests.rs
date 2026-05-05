@@ -46,6 +46,7 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -77,6 +78,7 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -108,6 +110,7 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -137,6 +140,7 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -167,6 +171,7 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -199,6 +204,7 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -233,6 +239,7 @@ fn test_explicit_tool_enabled_by_name() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -260,6 +267,7 @@ fn test_enable_all_and_explicit_by_name() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -291,6 +299,7 @@ fn test_enable_all_skips_unnamed_explicit() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -324,6 +333,7 @@ fn test_interleaved_disable_all_then_enable_named() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -363,6 +373,7 @@ fn test_interleaved_enable_all_then_disable_named() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -397,6 +408,7 @@ fn test_interleaved_disable_all_then_enable_all() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
@@ -437,6 +449,7 @@ fn test_interleaved_three_step_composition() {
         None,
         partial,
         None,
+        &[],
     )
     .unwrap();
 
