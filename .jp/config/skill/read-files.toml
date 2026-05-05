@@ -1,9 +1,7 @@
-[assistant.system_prompt]
-strategy = "append"
-separator = "paragraph"
-value = """
-# Skill: Read Files
-
+[[assistant.system_prompt_sections]]
+tag = "read_files_skill"
+title = "Skill: Read Files"
+content = """\
 You have been given the file-reading skill. You are an expert at listing and reading files in the \
 current project. The following tools help you with this:
 

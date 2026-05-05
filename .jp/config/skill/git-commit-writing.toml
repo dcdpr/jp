@@ -2,12 +2,10 @@ extends = [
     "../knowledge/conventional-commit.toml",
 ]
 
-[assistant.system_prompt]
-strategy = "append"
-separator = "paragraph"
-value = """
-# Skill: Git Commit Writer
-
+[[assistant.system_prompt_sections]]
+tag = "git_commit_writing_skill"
+title = "Skill: Git Commit Writer"
+content = """\
 You have been given the commit-writer skill. You are an expert at writing high-quality commit \
 messages in the Conventional Commit style. The following tools help you with this:
 

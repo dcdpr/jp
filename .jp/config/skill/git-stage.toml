@@ -1,9 +1,6 @@
-[assistant.system_prompt]
-strategy = "append"
-separator = "paragraph"
-value = """
-# Skill: Git Staging
-
+[[assistant.system_prompt_sections]]
+tag = "Skill: Git Staging"
+content = """\
 You have been given the git-staging skill. You are an expert at staging files and hunks in git \
 repositories. The following tools help you with this:
 

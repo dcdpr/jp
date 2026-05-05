@@ -1,9 +1,7 @@
-[assistant.system_prompt]
-strategy = "append"
-separator = "paragraph"
-value = """
-# Skill: Git Reading
-
+[[assistant.system_prompt_sections]]
+tag = "git_reading_skill"
+title = "Skill: Git Reading"
+content = """\
 You have been given the git-reading skill. You are an expert at reading and navigating git history \
 and diffs. The following tools help you with this:
 

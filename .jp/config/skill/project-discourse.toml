@@ -1,9 +1,7 @@
-[assistant.system_prompt]
-strategy = "append"
-separator = "paragraph"
-value = """
-# Skill: Project Discourse Insights
-
+[[assistant.system_prompt_sections]]
+tag = "project_discourse_skill"
+title = "Skill: Project Discourse Insights"
+content = """\
 You have been given the project-discourse skill. You are an expert at reading existing discussions \
 and understanding the context of the project. The following tools help you with this:
 
