@@ -95,7 +95,7 @@ use jp_mcp::Client;
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::ConversationMut;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -188,6 +188,32 @@ pub enum PermissionDecision {
         executor: Box<dyn Executor>,
         info: PermissionInfo,
     },
+}
+
+/// Final outcome of [`ToolCoordinator::resolve_tool_call_decision`] — the
+/// per-tool permission pipeline.
+///
+/// This wraps the full decide → pre-render → prompt → apply → post-render
+/// flow into one of three terminal states. Callers map this into their own
+/// storage shape (see the streaming path in `turn_loop.rs` and the batch
+/// path in [`ToolCoordinator::run_permission_phase`]).
+pub enum ToolCallDecision {
+    /// Tool is approved and ready to be queued for execution. Includes any
+    /// rendered argument content from the formatter — the caller is
+    /// responsible for persisting it (typically into a `ToolCallRequest`
+    /// event's metadata).
+    Approved {
+        executor: Box<dyn Executor>,
+        rendered_arguments: Option<String>,
+    },
+    /// Tool was skipped: persisted "n", `RunMode::Skip`, or user declined
+    /// at the prompt. The response is the synthesized skip message ready
+    /// to be appended to the conversation stream.
+    Skipped(ToolCallResponse),
+    /// Tool failed before it could run — typically because a custom-format
+    /// formatter command errored. The response tells the LLM the tool was
+    /// not executed and may be retried.
+    Failed(ToolCallResponse),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
