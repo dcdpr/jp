@@ -108,6 +108,12 @@ pub struct TurnCoordinator {
 
     // Accumulators for the current cycle
     pending_tool_calls: Vec<ToolCallRequest>,
+
+    /// Display name to stamp onto interrupt-reply [`ChatRequest`]s for
+    /// transcript attribution. `None` means the request stays unattributed.
+    ///
+    /// [`ChatRequest`]: jp_conversation::event::ChatRequest
+    author: Option<String>,
 }
 
 impl TurnCoordinator {
@@ -127,6 +133,7 @@ impl TurnCoordinator {
             structured_renderer: StructuredRenderer::new(printer),
             json_emitter,
             pending_tool_calls: Vec::new(),
+            author: None,
         }
     }
 
@@ -357,6 +364,7 @@ impl TurnCoordinator {
                 self.push_event(conversation_stream, ChatRequest {
                     content,
                     schema: None,
+                    author: self.author.clone(),
                 });
                 self.prepare_continuation();
             }

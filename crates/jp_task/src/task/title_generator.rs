@@ -96,6 +96,7 @@ impl TitleGeneratorTask {
         events.start_turn(ChatRequest {
             content: "Generate a title for this conversation.".into(),
             schema: Some(schema),
+            author: None,
         });
 
         let query = jp_llm::query::ChatQuery {

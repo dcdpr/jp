@@ -8,6 +8,7 @@ use inquire::{Select, Text};
 use jp_config::{
     PartialAppConfig,
     conversation::tool::RunMode,
+    fs::{ConfigLoader, Format, user_global_config_dir},
     model::id::{ModelIdConfig, Name, ProviderId},
 };
 use jp_printer::Printer;
@@ -56,6 +57,11 @@ impl Init {
         let run_mode = Self::ask_run_mode(&mut printer.out_writer(), true)?;
         let (provider, name) = Self::ask_model(&mut printer.out_writer())?;
 
+        // Ask for the user's display name (skipped if already configured
+        // in user-global config). Writes to the user-global config so the
+        // setting is shared across all workspaces.
+        Self::maybe_ask_and_persist_user_name(&mut printer.out_writer())?;
+
         // Write workspace config
         fs::write(
             storage.join("config.toml"),
@@ -79,6 +85,72 @@ impl Init {
 
         printer.println(format!("Initialized workspace at {loc}"));
         Ok(())
+    }
+
+    /// Ask for and persist `user.name` to user-global config, unless it is
+    /// already set there.
+    ///
+    /// Skipped silently when no user-global config directory can be
+    /// determined (e.g. `$HOME` is unset). Empty input also skips,
+    /// leaving transcripts to fall back to the generic `user` label.
+    fn maybe_ask_and_persist_user_name(
+        writer: &mut dyn io::Write,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let home = env::home_dir().and_then(|p| Utf8PathBuf::try_from(p).ok());
+        let Some(global_dir) = user_global_config_dir(home.as_deref()) else {
+            return Ok(());
+        };
+
+        let loader = ConfigLoader {
+            file_stem: "config".into(),
+            create_if_missing: Some(Format::Toml),
+            ..Default::default()
+        };
+        let mut config_file = loader.load(&global_dir)?;
+
+        // If the user has already set their name in user-global config,
+        // don't pester them again.
+        if let Ok(existing) = toml::from_str::<PartialAppConfig>(&config_file.content)
+            && existing.user.name.as_deref().is_some_and(|s| !s.is_empty())
+        {
+            return Ok(());
+        }
+
+        let Some(name) = Self::ask_user_name(writer)? else {
+            return Ok(());
+        };
+
+        let mut partial = PartialAppConfig::empty();
+        partial.user.name = Some(name);
+        config_file.merge_delta(&partial)?;
+
+        if let Some(parent) = config_file.path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&config_file.path, &config_file.content)?;
+
+        Ok(())
+    }
+
+    /// Prompt the user for their display name, pre-filled with the best
+    /// available default (see [`detect_default_user_name`]). Returns `None`
+    /// when the user submits an empty value.
+    fn ask_user_name(
+        writer: &mut dyn io::Write,
+    ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+        let prompt = Text::new("Your name for conversations:").with_help_message(
+            "Stamped onto each message you send. Press Enter to accept the default, or leave \
+             blank for the generic 'user' label.",
+        );
+
+        let default = detect_default_user_name();
+        let answer = match default.as_deref() {
+            Some(d) => prompt.with_default(d).prompt_with_writer(writer)?,
+            None => prompt.prompt_with_writer(writer)?,
+        };
+
+        let trimmed = answer.trim();
+        Ok((!trimmed.is_empty()).then(|| trimmed.to_owned()))
     }
 
     fn ask_run_mode(
@@ -241,6 +313,37 @@ impl Init {
         models.dedup();
         models
     }
+}
+
+/// Best-effort detection of a sensible default display name.
+///
+/// Cascades through:
+///
+/// 1. `git config --get user.name` — typically the user's real name, set
+///    once and reused across tools.
+/// 2. `$USER` (Unix) or `$USERNAME` (Windows) — the system login name,
+///    last-resort fallback.
+///
+/// Returns `None` when nothing is available so the prompt renders without
+/// a pre-filled value.
+fn detect_default_user_name() -> Option<String> {
+    // 1. git config
+    if let Ok(out) = cmd!("git", "config", "--get", "user.name")
+        .stderr_null()
+        .read()
+    {
+        let trimmed = out.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
+        }
+    }
+
+    // 2. system login name ($USER on Unix, $USERNAME on Windows).
+    env::var("USER")
+        .or_else(|_| env::var("USERNAME"))
+        .ok()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
 }
 
 fn has_anthropic() -> bool {

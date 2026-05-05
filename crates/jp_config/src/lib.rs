@@ -48,6 +48,7 @@ pub mod providers;
 pub mod style;
 pub mod template;
 pub mod types;
+pub mod user;
 pub mod util; // TODO: Rename
 
 use std::sync::Arc;
@@ -74,6 +75,7 @@ use crate::{
     style::{PartialStyleConfig, StyleConfig},
     template::{PartialTemplateConfig, TemplateConfig},
     types::extending_path::ExtendingRelativePath,
+    user::{PartialUserConfig, UserConfig},
 };
 
 /// The prefix to use for environment variables that set configuration options.
@@ -167,6 +169,14 @@ pub struct AppConfig {
     /// options for command plugins (standalone binaries).
     #[setting(nested)]
     pub plugins: PluginsConfig,
+
+    /// User configuration.
+    ///
+    /// Captures display attributes of whoever is running JP, used for
+    /// per-turn attribution in transcripts. Symmetric with [`AssistantConfig`]
+    /// — the human side of the user/assistant pair.
+    #[setting(nested)]
+    pub user: UserConfig,
 }
 
 impl AssignKeyValue for PartialAppConfig {
@@ -190,6 +200,7 @@ impl AssignKeyValue for PartialAppConfig {
             _ if kv.p("template") => self.template.assign(kv)?,
             _ if kv.p("providers") => self.providers.assign(kv)?,
             _ if kv.p("plugins") => self.plugins.assign(kv)?,
+            _ if kv.p("user") => self.user.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -223,6 +234,7 @@ impl PartialConfigDelta for PartialAppConfig {
             template: self.template.delta(next.template),
             providers: self.providers.delta(next.providers),
             plugins: self.plugins.delta(next.plugins),
+            user: self.user.delta(next.user),
         }
     }
 }
@@ -240,6 +252,7 @@ impl FillDefaults for PartialAppConfig {
             template: self.template.fill_from(defaults.template),
             providers: self.providers.fill_from(defaults.providers),
             plugins: self.plugins.fill_from(defaults.plugins),
+            user: self.user.fill_from(defaults.user),
         }
     }
 }
@@ -259,6 +272,7 @@ impl ToPartial for AppConfig {
             template: self.template.to_partial(),
             providers: self.providers.to_partial(),
             plugins: self.plugins.to_partial(),
+            user: self.user.to_partial(),
         }
     }
 }
@@ -337,8 +351,8 @@ impl AppConfig {
     ///     "config_load_paths",
     ///     "extends",
     ///     "inherit",
+    ///     "user.name",
     ///     "template.values",
-    ///     "style.typewriter.code_delay",
     /// ]);
     /// ```
     #[must_use]
@@ -380,13 +394,10 @@ impl AppConfig {
     ///     ),
     ///     ("extends".to_owned(), "JP_CFG_EXTENDS".to_owned()),
     ///     ("inherit".to_owned(), "JP_CFG_INHERIT".to_owned()),
+    ///     ("user.name".to_owned(), "JP_CFG_USER_NAME".to_owned()),
     ///     (
     ///         "template.values".to_owned(),
     ///         "JP_CFG_TEMPLATE_VALUES".to_owned()
-    ///     ),
-    ///     (
-    ///         "style.typewriter.code_delay".to_owned(),
-    ///         "JP_CFG_STYLE_TYPEWRITER_CODE_DELAY".to_owned()
     ///     ),
     /// ]);
     /// ```

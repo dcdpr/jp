@@ -342,6 +342,9 @@ Ok(
                 ),
                 command: {},
             },
+            user: PartialUserConfig {
+                name: None,
+            },
         },
     ),
 )

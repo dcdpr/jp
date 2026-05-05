@@ -20,6 +20,18 @@ pub struct ChatRequest {
     /// `ChatResponse::Structured` instead of `ChatResponse::Message`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<Map<String, Value>>,
+
+    /// Display name of whoever authored this request.
+    ///
+    /// Captured at event-creation time from `user.name` so that
+    /// conversations resumed by different teammates retain accurate
+    /// per-turn attribution. This is purely cosmetic — providers do not see
+    /// this field.
+    ///
+    /// `None` for events created before this field was introduced and for
+    /// requests authored without a configured user name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<String>,
 }
 
 impl From<String> for ChatRequest {
@@ -27,6 +39,7 @@ impl From<String> for ChatRequest {
         Self {
             content,
             schema: None,
+            author: None,
         }
     }
 }
@@ -36,6 +49,7 @@ impl From<&str> for ChatRequest {
         Self {
             content: content.to_owned(),
             schema: None,
+            author: None,
         }
     }
 }

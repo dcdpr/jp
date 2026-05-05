@@ -617,6 +617,7 @@ fn test_schema_from_initial_chat_request() {
     stream.start_turn(ChatRequest {
         content: "query".into(),
         schema: Some(schema.clone()),
+        author: None,
     });
 
     assert_eq!(stream.schema(), Some(schema));
@@ -629,6 +630,7 @@ fn test_schema_survives_tool_use_round_trip() {
     stream.start_turn(ChatRequest {
         content: "query".into(),
         schema: Some(schema.clone()),
+        author: None,
     });
 
     stream
@@ -657,6 +659,7 @@ fn test_schema_not_inherited_from_previous_turn() {
     stream.start_turn(ChatRequest {
         content: "structured query".into(),
         schema: Some(schema),
+        author: None,
     });
     stream
         .current_turn_mut()
@@ -677,6 +680,7 @@ fn test_schema_ignores_interrupt_reply() {
     stream.start_turn(ChatRequest {
         content: "query".into(),
         schema: Some(schema.clone()),
+        author: None,
     });
 
     // Simulate an interrupt reply (schema: None).
@@ -686,6 +690,7 @@ fn test_schema_ignores_interrupt_reply() {
         .add_chat_request(ChatRequest {
             content: "continue".into(),
             schema: None,
+            author: None,
         })
         .build()
         .unwrap();

@@ -8,6 +8,7 @@ fn chat_request_with_schema_roundtrip() {
     let request = ChatRequest {
         content: "Extract contacts".into(),
         schema: Some(Map::from_iter([("type".into(), json!("object"))])),
+        author: None,
     };
 
     let json = serde_json::to_value(&request).unwrap();

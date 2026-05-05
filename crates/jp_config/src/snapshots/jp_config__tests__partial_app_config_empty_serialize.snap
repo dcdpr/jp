@@ -181,4 +181,7 @@ PartialAppConfig {
         shutdown_timeout_secs: None,
         command: {},
     },
+    user: PartialUserConfig {
+        name: None,
+    },
 }

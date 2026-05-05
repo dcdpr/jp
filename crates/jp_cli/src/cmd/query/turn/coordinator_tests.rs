@@ -248,6 +248,7 @@ fn test_structured_output_rendered_as_json_code_fence() {
     coordinator.start_turn(&mut stream, ChatRequest {
         content: "Extract contacts".into(),
         schema: Some(Map::from_iter([("type".into(), json!("object"))])),
+        author: None,
     });
 
     // Streamed structured chunks
@@ -288,6 +289,7 @@ fn test_structured_output_persisted_with_parsed_json() {
     coordinator.start_turn(&mut stream, ChatRequest {
         content: "Extract contacts".into(),
         schema: Some(Map::from_iter([("type".into(), json!("object"))])),
+        author: None,
     });
 
     coordinator.handle_event(&mut stream, Event::structured(0, "{\"name\": \"Alice\"}"));
