@@ -67,6 +67,7 @@ expression: "AppConfig::fields()"
     "conversation.start_local",
     "conversation.tools.tools",
     "conversation.tools.*.enable",
+    "conversation.tools.*.format",
     "conversation.tools.*.result",
     "conversation.tools.*.run",
     "conversation.tools.*.style.hidden",

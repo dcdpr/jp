@@ -60,6 +60,45 @@ fn test_enable_serde_roundtrip() {
 }
 
 #[test]
+fn test_format_mode_survives_merge_with_persona_override() {
+    use schematic::PartialConfig as _;
+
+    // Simulate the real-world layering: MCP tool TOML sets `format =
+    // "unattended"`; persona later sets only `enable = true`. The
+    // resulting merged config must still have `format = Unattended`.
+    let mcp_toml = r#"
+source = "local"
+enable = false
+format = "unattended"
+command = "just"
+"#;
+    let persona_toml = r"
+enable = true
+";
+
+    let mut base: PartialToolConfig = toml::from_str(mcp_toml).unwrap();
+    let next: PartialToolConfig = toml::from_str(persona_toml).unwrap();
+
+    base.merge(&(), next).unwrap();
+
+    assert_eq!(base.format, Some(FormatMode::Unattended));
+    assert_eq!(base.enable, Some(Enable::On));
+}
+
+#[test]
+fn test_format_mode_deserializes_from_toml() {
+    let toml = r#"
+source = "local"
+enable = false
+format = "unattended"
+run = "ask"
+"#;
+    let partial: PartialToolConfig = toml::from_str(toml).unwrap();
+    assert_eq!(partial.format, Some(FormatMode::Unattended));
+    assert_eq!(partial.run, Some(RunMode::Ask));
+}
+
+#[test]
 fn test_enable_assign_kv() {
     let mut p = PartialToolConfig::default_values(&()).unwrap().unwrap();
 
