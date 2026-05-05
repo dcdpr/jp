@@ -134,10 +134,15 @@ impl Print {
             apply_style_preset(preset, &mut render_style, &mut tools_config);
         }
 
+        let assistant_name = cfg.assistant.name.clone();
+        let model_id = Some(cfg.assistant.model.id.resolved().to_string());
+
         let mut renderer = TurnRenderer::new(
             ctx.printer.clone(),
             render_style,
             tools_config,
+            assistant_name,
+            model_id,
             root,
             ctx.term.is_tty,
             source,

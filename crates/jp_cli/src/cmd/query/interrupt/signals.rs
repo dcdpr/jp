@@ -69,11 +69,21 @@ pub fn handle_streaming_signal(
             let action = InterruptHandler::with_backend(backend)
                 .handle_streaming_interrupt(&mut printer.prompt_writer(), !llm_stream_finished);
 
+            // `Resume` means "keep waiting for the current stream." The state
+            // machine is a no-op for it, and we must NOT break the inner loop:
+            // breaking drops the live `SelectAll` and forces a redundant new
+            // HTTP request, which can land us in inconsistent state. Continue
+            // polling instead.
+            let is_resume = matches!(action, InterruptAction::Resume);
+
             // Delegate state transition to the turn coordinator
             match turn_coordinator.handle_streaming_interrupt(action, conversation_stream) {
                 // Return without persisting this cycle (previous turn cycles
                 // are already persisted).
                 TurnPhase::Aborted => LoopAction::Return(()),
+
+                // Resume keeps the existing stream alive.
+                _ if is_resume => LoopAction::Continue,
 
                 // All other phases break from loop, persist, then outer loop
                 // decides.
@@ -110,7 +120,7 @@ pub fn handle_llm_event(
 
     let action = turn_coordinator.handle_event(conversation_stream, event);
     match action {
-        Action::Done | Action::ExecuteTools(_) => LoopAction::Break,
+        Action::Done | Action::ExecuteTools => LoopAction::Break,
         _ => LoopAction::Continue,
     }
 }

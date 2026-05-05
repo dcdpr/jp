@@ -7,4 +7,4 @@ pub(crate) mod retry;
 
 pub(crate) use retry::{StreamRetryState, handle_stream_error};
 
-pub(crate) use crate::render::{ChatRenderer, StructuredRenderer};
+pub(crate) use crate::render::TurnView;

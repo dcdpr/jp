@@ -1,8 +1,9 @@
 //! Turn-level rendering for conversation replay.
 //!
-//! The [`TurnRenderer`] coordinates the [`ChatRenderer`], [`StructuredRenderer`],
-//! and [`ToolRenderer`] to render a complete conversation event stream. It
-//! handles turn boundaries, content-kind transitions, and tool config lookups.
+//! The [`TurnRenderer`] coordinates the [`TurnView`] (which owns the chat
+//! and structured sub-renderers) and the [`ToolRenderer`] to render a
+//! complete conversation event stream. It handles turn boundaries,
+//! per-turn config rebuilds, and tool config lookups.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -16,7 +17,7 @@ use jp_conversation::{EventKind, stream::turn_iter::Turn};
 use jp_printer::Printer;
 use tracing::warn;
 
-use super::{ChatRenderer, StructuredRenderer, ToolRenderer, metadata::get_rendered_arguments};
+use super::{ToolRenderer, TurnView, metadata::get_rendered_arguments};
 
 /// Controls where the renderer sources its configuration from.
 #[derive(Debug, Clone)]
@@ -33,8 +34,9 @@ pub enum ConfigSource {
 
 /// Renders conversation events for replay (e.g. `jp conversation print`).
 ///
-/// Owns the three sub-renderers and dispatches each event to the right one,
-/// handling turn separators, content-kind transitions, and tool config lookups.
+/// Owns a [`TurnView`] for chat/structured rendering and a [`ToolRenderer`]
+/// for tool UI; dispatches each event to the right one and rebuilds the
+/// view at turn boundaries when in [`ConfigSource::PerTurn`] mode.
 pub struct TurnRenderer {
     // Stable params for rebuilding sub-renderers.
     printer: Arc<Printer>,
@@ -42,9 +44,7 @@ pub struct TurnRenderer {
     is_tty: bool,
     source: ConfigSource,
 
-    // Sub-renderers (rebuilt per-turn in PerTurn mode).
-    chat: ChatRenderer,
-    structured: StructuredRenderer,
+    view: TurnView,
     tool: ToolRenderer,
     tools_config: ToolsConfig,
 
@@ -52,7 +52,6 @@ pub struct TurnRenderer {
     /// events are encountered so that `ToolCallResponse` can look up the
     /// name without needing access to the full conversation stream.
     tool_names: HashMap<String, String>,
-    is_first_turn: bool,
 }
 
 impl TurnRenderer {
@@ -60,21 +59,23 @@ impl TurnRenderer {
         printer: Arc<Printer>,
         style: StyleConfig,
         tools_config: ToolsConfig,
+        assistant_name: Option<String>,
+        model_id: Option<String>,
         root: Utf8PathBuf,
         is_tty: bool,
         source: ConfigSource,
     ) -> Self {
+        let view = TurnView::new(printer.clone(), style.clone(), assistant_name, model_id);
+        let tool = ToolRenderer::new(printer.clone(), style, root.clone(), is_tty);
         Self {
-            chat: ChatRenderer::new(printer.clone(), style.clone()),
-            structured: StructuredRenderer::new(printer.clone()),
-            tool: ToolRenderer::new(printer.clone(), style, root.clone(), is_tty),
             printer,
             root,
             is_tty,
             source,
+            view,
+            tool,
             tools_config,
             tool_names: HashMap::new(),
-            is_first_turn: true,
         }
     }
 
@@ -89,24 +90,15 @@ impl TurnRenderer {
         for event_with_cfg in turn {
             match &event_with_cfg.event.kind {
                 EventKind::TurnStart(_) => {
-                    if !self.is_first_turn {
-                        self.chat.render_separator();
-                    }
-                    self.is_first_turn = false;
+                    self.view.begin_turn();
                 }
 
                 EventKind::ChatRequest(req) => {
-                    self.chat.render_request(&req.content);
+                    self.view.render_user_request(req);
                 }
 
                 EventKind::ChatResponse(resp) => {
-                    if resp.is_structured() {
-                        self.chat.flush();
-                        self.structured.render_chunk(resp);
-                        self.structured.flush();
-                    } else {
-                        self.chat.render_response(resp);
-                    }
+                    self.view.render_chat_response(resp);
                 }
 
                 EventKind::ToolCallRequest(req) => {
@@ -118,18 +110,9 @@ impl TurnRenderer {
                         .as_ref()
                         .map_or(default_style, ToolConfigWithDefaults::style);
 
-                    if style.hidden {
-                        // Tool call is hidden, but it's still a semantic
-                        // boundary between message blocks. Flush the chat
-                        // buffer so surrounding message chunks render as
-                        // distinct paragraphs, without transitioning to
-                        // ToolCall state (which would add an extra blank
-                        // line on the next message, even though no tool UI
-                        // was rendered).
-                        self.chat.flush();
-                    } else {
-                        self.chat.flush();
-                        self.chat.transition_to_tool_call();
+                    self.view.enter_tool_call(style.hidden);
+
+                    if !style.hidden {
                         self.tool
                             .render_tool_call(&req.name, &req.arguments, &style.parameters);
 
@@ -168,7 +151,7 @@ impl TurnRenderer {
 
     /// Flush all sub-renderers. Call after the last turn has been rendered.
     pub fn flush(&mut self) {
-        self.chat.flush();
+        self.view.flush();
     }
 
     /// Rebuild sub-renderers from a per-turn config partial.
@@ -185,8 +168,13 @@ impl TurnRenderer {
         style.typewriter.text_delay = DelayDuration::instant();
         style.typewriter.code_delay = DelayDuration::instant();
 
-        self.chat = ChatRenderer::new(self.printer.clone(), style.clone());
-        self.structured = StructuredRenderer::new(self.printer.clone());
+        let model_id = Some(config.assistant.model.id.resolved().to_string());
+        self.view.reconfigure(
+            self.printer.clone(),
+            style.clone(),
+            config.assistant.name,
+            model_id,
+        );
         self.tool = ToolRenderer::new(self.printer.clone(), style, self.root.clone(), self.is_tty);
         self.tools_config = config.conversation.tools;
     }

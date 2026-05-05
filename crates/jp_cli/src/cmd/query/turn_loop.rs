@@ -44,7 +44,8 @@ use super::{
     interrupt::{LoopAction, handle_llm_event, handle_streaming_signal},
     stream::{StreamRetryState, handle_stream_error},
     tool::{
-        PermissionDecision, ToolCallState, ToolCoordinator, ToolPrompter, ToolRenderer,
+        PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
+        ToolRenderer, build_execution_plan,
         inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
         spawn_line_timer,
     },
@@ -53,7 +54,7 @@ use super::{
 use crate::{
     cmd::query::tool::coordinator::ExecutionResult,
     error::Error,
-    render::{metadata::set_rendered_arguments, tool::RenderOutcome},
+    render::metadata::set_rendered_arguments,
     signals::{SignalRx, SignalTo},
 };
 
@@ -155,7 +156,13 @@ pub(super) async fn run_turn_loop(
 ) -> Result<(), Error> {
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request, is_tty);
-    let mut turn_coordinator = TurnCoordinator::new(printer.clone(), cfg.style.clone());
+    let mut turn_coordinator = TurnCoordinator::new(
+        printer.clone(),
+        cfg.style.clone(),
+        cfg.user.name.clone(),
+        cfg.assistant.name.clone(),
+        Some(model.id.to_string()),
+    );
     let mut tool_renderer = ToolRenderer::new(
         if cfg.style.tool_call.show && !printer.format().is_json() {
             printer.clone()
@@ -178,17 +185,17 @@ pub(super) async fn run_turn_loop(
 
     info!(model = model.name(), "Starting conversation turn.");
 
-    // Track any tool call that needs to be restarted before the turn ends.
-    let mut pending_restart_calls: Option<Vec<ToolCallRequest>> = None;
+    // Set when an executing phase aborts via user-initiated restart.
+    // The next executing phase walks the stream for unresponded requests
+    // and re-prepares them.
+    let mut restart_requested = false;
 
-    // Permission results collected during the streaming phase,
-    // consumed by the executing phase: (approved, skipped, unavailable).
-    #[allow(clippy::type_complexity)]
-    let mut streaming_perm_results: Option<(
-        Vec<(usize, Box<dyn Executor>)>,
-        Vec<(usize, ToolCallResponse)>,
-        Vec<(usize, ToolCallResponse)>,
-    )> = None;
+    // Id-keyed scratchpad for tool work produced during the streaming
+    // phase. The executing phase derives an ordered execution plan from
+    // the conversation stream + this scratchpad via `build_execution_plan`.
+    // Crucially: there's no public way to enumerate this directly — the
+    // stream is the source of truth for "what needs to run."
+    let mut pending_tools = PendingTools::new();
 
     // Prompter shared between streaming (permission prompts) and
     // executing (tool question prompts) phases.
@@ -209,6 +216,16 @@ pub(super) async fn run_turn_loop(
             TurnPhase::Complete | TurnPhase::Aborted => return Ok(()),
 
             TurnPhase::Streaming => {
+                // Restore structural invariants before each provider request.
+                // Specifically: any `ToolCallRequest` without a matching
+                // `ToolCallResponse` gets a synthetic error response. Without
+                // this, providers like Anthropic reject the request with
+                // `tool_use ids were found without tool_result blocks`. The
+                // top-level `query.rs` sanitize covers the first cycle; this
+                // call covers every subsequent cycle within the turn so a
+                // mid-turn corruption never reaches the wire.
+                lock.as_mut().update_events(ConversationStream::sanitize);
+
                 // Rebuild thread from workspace events to ensure latest context.
                 let events_stream = lock.events().clone();
 
@@ -272,11 +289,9 @@ pub(super) async fn run_turn_loop(
                     ReceiverStream::new(tick_rx).map(StreamingLoopEvent::PreparingTick),
                 );
 
-                // Permission results collected during the streaming phase.
-                let mut perm_approved = vec![];
-                let mut perm_skipped = vec![];
-                let mut perm_unavailable = vec![];
-                let mut perm_tool_index: usize = 0;
+                // Whether we've seen at least one provider event this cycle
+                // — used to reset the retry budget on the first successful
+                // event.
                 let mut received_provider_event = false;
 
                 let mut streams: SelectAll<_> =
@@ -406,114 +421,48 @@ pub(super) async fn run_turn_loop(
                                 tool_coordinator.set_tool_state(&req.id, ToolCallState::Queued);
                                 tool_renderer.complete(&req.id);
 
-                                // Prepare executor and decide permission.
-                                let idx = perm_tool_index;
-                                perm_tool_index += 1;
-
                                 match tool_coordinator.prepare_one(req.clone()) {
                                     Ok(executor) => {
-                                        let decision = tool_coordinator.decide_permission(
-                                            executor,
-                                            is_tty,
-                                            &turn_state,
-                                        );
+                                        // Run the unified per-tool permission
+                                        // pipeline. The await blocks the
+                                        // streaming event loop while the user
+                                        // decides; LLM events buffer in the
+                                        // channel and are processed after.
+                                        let decision = tool_coordinator
+                                            .resolve_tool_call_decision(
+                                                executor,
+                                                &prompter,
+                                                mcp_client,
+                                                is_tty,
+                                                &mut turn_state,
+                                                &tool_renderer,
+                                            )
+                                            .await;
+
                                         match decision {
-                                            PermissionDecision::Approved(exec) => {
-                                                let id = exec.tool_id().to_owned();
-                                                let name = exec.tool_name().to_owned();
-                                                let args = exec.arguments().clone();
-                                                match tool_coordinator
-                                                    .render_approved_tool(
-                                                        &name,
-                                                        &args,
-                                                        &tool_renderer,
-                                                    )
-                                                    .await
-                                                {
-                                                    RenderOutcome::Rendered { content } => {
-                                                        if let Some(c) = content {
-                                                            conv.update_events(|stream| {
-                                                                store_rendered_arguments(
-                                                                    stream, &req.id, &c,
-                                                                );
-                                                            });
-                                                        }
-                                                        perm_approved.push((idx, exec));
-                                                    }
-                                                    RenderOutcome::Suppressed { error } => {
-                                                        perm_skipped.push((
-                                                            idx,
-                                                            ToolCoordinator::render_failed_response(
-                                                                id, &name, &error,
-                                                            ),
-                                                        ));
-                                                    }
-                                                }
-                                            }
-                                            PermissionDecision::Skipped(resp) => {
-                                                perm_skipped.push((idx, resp));
-                                            }
-                                            PermissionDecision::NeedsPrompt {
-                                                executor: exec,
-                                                info,
+                                            ToolCallDecision::Approved {
+                                                executor,
+                                                rendered_arguments,
                                             } => {
-                                                tool_coordinator.set_tool_state(
-                                                    &info.tool_id,
-                                                    ToolCallState::AwaitingPermission,
-                                                );
-                                                // Await the prompt inline. This pauses
-                                                // the event loop — LLM events buffer in
-                                                // the channel and are processed after
-                                                // the user answers.
-                                                let result = prompter
-                                                    .prompt_permission(&info, mcp_client)
-                                                    .await;
-                                                match tool_coordinator.apply_permission_result(
-                                                    result,
-                                                    &info,
-                                                    &mut turn_state,
-                                                    exec,
-                                                ) {
-                                                    Ok(exec) => {
-                                                        let args = exec.arguments().clone();
-                                                        match tool_coordinator
-                                                            .render_approved_tool(
-                                                                &info.tool_name,
-                                                                &args,
-                                                                &tool_renderer,
-                                                            )
-                                                            .await
-                                                        {
-                                                            RenderOutcome::Rendered { content } => {
-                                                                if let Some(c) = content {
-                                                                    conv.update_events(|stream| {
-                                                                        store_rendered_arguments(
-                                                                            stream, &req.id, &c,
-                                                                        );
-                                                                    });
-                                                                }
-                                                                perm_approved.push((idx, exec));
-                                                            }
-                                                            RenderOutcome::Suppressed { error } => {
-                                                                perm_skipped.push((
-                                                                    idx,
-                                                                    ToolCoordinator::render_failed_response(
-                                                                        info.tool_id.clone(),
-                                                                        &info.tool_name,
-                                                                        &error,
-                                                                    ),
-                                                                ));
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(resp) => {
-                                                        perm_skipped.push((idx, resp));
-                                                    }
+                                                if let Some(content) = rendered_arguments {
+                                                    conv.update_events(|stream| {
+                                                        store_rendered_arguments(
+                                                            stream, &req.id, &content,
+                                                        );
+                                                    });
                                                 }
+                                                pending_tools
+                                                    .insert_approved(req.id.clone(), executor);
+                                            }
+                                            ToolCallDecision::Skipped(resp)
+                                            | ToolCallDecision::Failed(resp) => {
+                                                pending_tools.insert_resolved(req.id.clone(), resp);
                                             }
                                         }
                                     }
-                                    Err(resp) => perm_unavailable.push((idx, resp)),
+                                    Err(resp) => {
+                                        pending_tools.insert_resolved(req.id.clone(), resp);
+                                    }
                                 }
                             }
 
@@ -531,30 +480,49 @@ pub(super) async fn run_turn_loop(
                 // Clean up any preparing state on early loop exit.
                 tool_renderer.cancel_all();
 
-                // Stash streaming-phase permission results for the
-                // executing phase to consume.
-                streaming_perm_results = Some((perm_approved, perm_skipped, perm_unavailable));
-
                 conv.flush()?;
             }
 
             TurnPhase::Executing => {
-                // If restarting, use the batch path (re-prepare + full
-                // permission phase). Otherwise consume the results
-                // collected during the streaming phase.
-                if let Some(restart_calls) = pending_restart_calls.take() {
+                // On restart: walk the stream for unresponded tool-call
+                // requests in the current turn and re-prepare them into
+                // `pending_tools` via the existing batch APIs. From there
+                // the unified executing path below picks up.
+                //
+                // The streaming and restart prep flows are still two
+                // separate codepaths today (see Bear note: "unify the
+                // streaming and restart tool-prep codepaths"). Both
+                // converge on `pending_tools` and `build_execution_plan`,
+                // which is the load-bearing invariant for this refactor.
+                if restart_requested {
+                    restart_requested = false;
+
+                    let restart_calls: Vec<ToolCallRequest> = lock
+                        .events()
+                        .iter_turns()
+                        .next_back()
+                        .map(|t| {
+                            t.iter()
+                                .filter_map(|e| e.event.as_tool_call_request())
+                                .filter(|req| {
+                                    lock.events().find_tool_call_response(&req.id).is_none()
+                                })
+                                .cloned()
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
                     if restart_calls.is_empty() {
                         break;
                     }
 
-                    let original_calls = restart_calls.clone();
-                    let unavailable_responses = tool_coordinator.prepare(restart_calls);
+                    let unavailable = tool_coordinator.prepare(restart_calls);
                     let restart_prompter = ToolPrompter::with_prompt_backend(
                         printer.clone(),
                         cfg.editor.path(),
                         prompt_backend.clone(),
                     );
-                    let (executors, skipped_responses) = tool_coordinator
+                    let (executors, skipped) = tool_coordinator
                         .run_permission_phase(
                             &restart_prompter,
                             mcp_client,
@@ -564,58 +532,64 @@ pub(super) async fn run_turn_loop(
                         )
                         .await;
 
-                    let mut conv = lock.as_mut();
-                    let execution_result = tool_coordinator
-                        .execute_with_prompting(
-                            executors,
-                            restart_prompter.into(),
-                            signals.resubscribe(),
-                            &mut turn_coordinator,
-                            &mut turn_state,
-                            &printer,
-                            prompt_backend.as_ref(),
-                            Arc::clone(&inquiry_backend),
-                            &conv,
-                            mcp_client,
-                            root,
-                            &tool_renderer,
-                            is_tty,
-                        )
-                        .await;
-
-                    if execution_result.restart_requested {
-                        pending_restart_calls = Some(original_calls);
-                        continue;
+                    for (_idx, exec) in executors {
+                        let id = exec.tool_id().to_owned();
+                        pending_tools.insert_approved(id, exec);
                     }
-
-                    if commit_tool_responses(
-                        execution_result,
-                        skipped_responses,
-                        unavailable_responses,
-                        &mut tool_coordinator,
-                        &mut turn_coordinator,
-                        &mut conv,
-                    )? {
-                        tool_choice = ToolChoice::Auto;
+                    for (_idx, resp) in skipped {
+                        pending_tools.insert_resolved(resp.id.clone(), resp);
                     }
-                    continue;
+                    for (_idx, resp) in unavailable {
+                        pending_tools.insert_resolved(resp.id.clone(), resp);
+                    }
                 }
 
-                // Normal path: consume results collected during streaming.
-                let (approved, skipped, unavailable) =
-                    streaming_perm_results.take().unwrap_or_default();
+                // Unified executing path: derive the work to do by walking
+                // the conversation stream and reconciling against
+                // `pending_tools`. The stream is the source of truth.
+                let mut conv = lock.as_mut();
+                let plan = build_execution_plan(&conv.events(), &mut pending_tools);
 
-                // Save original calls for potential restart.
-                let original_calls = turn_coordinator.take_pending_tool_calls();
-
-                if approved.is_empty() && skipped.is_empty() && unavailable.is_empty() {
+                if plan.is_empty() {
                     break;
                 }
 
-                // Reset coordinator state for the execution phase.
+                let (items, orphaned) = plan.into_parts();
+
+                let mut approved: Vec<(usize, Box<dyn Executor>)> = Vec::new();
+                let mut pre_resolved: Vec<(usize, ToolCallResponse)> = Vec::new();
+                for item in items {
+                    match item.work {
+                        PendingEntry::Approved(exec) => approved.push((item.index, exec)),
+                        PendingEntry::Resolved(resp) => pre_resolved.push((item.index, resp)),
+                    }
+                }
+
+                // Orphans: a `ToolCallRequest` in the stream's current turn
+                // without a matching pending entry. Should never happen in
+                // correct operation — every flushed request goes through
+                // the prep flow which writes to `pending_tools`. Synthesize
+                // an error response so the conversation stays valid (every
+                // request must have a response before the next provider
+                // call) and surface the inconsistency.
+                for req in orphaned {
+                    warn!(
+                        id = %req.id,
+                        name = %req.name,
+                        "ToolCallRequest in stream without a pending entry; synthesizing error \
+                         response.",
+                    );
+                    let next_idx = approved.len() + pre_resolved.len();
+                    pre_resolved.push((next_idx, ToolCallResponse {
+                        id: req.id,
+                        result: Err(
+                            "Tool call had no prepared executor (internal inconsistency).".into(),
+                        ),
+                    }));
+                }
+
                 tool_coordinator.reset_for_execution();
 
-                let mut conv = lock.as_mut();
                 let execution_result = tool_coordinator
                     .execute_with_prompting(
                         approved,
@@ -635,14 +609,13 @@ pub(super) async fn run_turn_loop(
                     .await;
 
                 if execution_result.restart_requested {
-                    pending_restart_calls = Some(original_calls);
+                    restart_requested = true;
                     continue;
                 }
 
                 if commit_tool_responses(
                     execution_result,
-                    skipped,
-                    unavailable,
+                    pre_resolved,
                     &mut tool_coordinator,
                     &mut turn_coordinator,
                     &mut conv,
@@ -805,15 +778,15 @@ async fn build_inquiry_overrides(
     Ok(overrides)
 }
 
-/// Assemble tool responses from execution, skipped, and unavailable results,
+/// Assemble tool responses from the executor's results plus any pre-resolved
+/// responses (skipped tools, unavailable tools, orphan synthesizations),
 /// commit them to the conversation stream, and flush to disk.
 ///
 /// Returns `true` if a follow-up LLM cycle is needed (i.e. tool responses were
 /// added and the coordinator wants to continue).
 fn commit_tool_responses(
     result: ExecutionResult,
-    skipped: Vec<(usize, ToolCallResponse)>,
-    unavailable: Vec<(usize, ToolCallResponse)>,
+    pre_resolved: Vec<(usize, ToolCallResponse)>,
     tool: &mut ToolCoordinator,
     turn: &mut super::turn::TurnCoordinator,
     conv: &mut ConversationMut,
@@ -822,9 +795,11 @@ fn commit_tool_responses(
     // permission phase into the corresponding ToolCallRequest events.
     flush_rendered_arguments(tool, conv);
 
-    let mut indexed: Vec<_> = result.responses.into_iter().enumerate().collect();
-    indexed.extend(skipped);
-    indexed.extend(unavailable);
+    // Both `result.responses` and `pre_resolved` are already keyed by the
+    // plan index assigned in `build_execution_plan`. Sorting by that
+    // index restores stream order for the persisted responses.
+    let mut indexed: Vec<(usize, ToolCallResponse)> = result.responses;
+    indexed.extend(pre_resolved);
     indexed.sort_by_key(|(idx, _)| *idx);
     let responses: Vec<_> = indexed.into_iter().map(|(_, r)| r).collect();
 
