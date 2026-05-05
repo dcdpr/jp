@@ -18,16 +18,12 @@ use crate::{
 pub struct UserConfig {
     /// Display name of the user contributing to conversations.
     ///
-    /// Stamped onto each [`ChatRequest`] event at creation time as
-    /// [`author`], so transcripts attribute each turn correctly even when
-    /// teammates with different local configs continue the conversation.
+    /// Stamped onto each `ChatRequest` event at creation time as `author`, so
+    /// transcripts attribute each turn correctly even when teammates with
+    /// different local configs continue the conversation.
     ///
-    /// Typically set in user-local config (run `jp init` for an
-    /// interactive setup). When unset, transcripts fall back to a generic
-    /// `"user"` label.
-    ///
-    /// [`ChatRequest`]: jp_conversation::event::ChatRequest
-    /// [`author`]: jp_conversation::event::ChatRequest::author
+    /// Typically set in user-local config (run `jp init` for an interactive
+    /// setup). When unset, transcripts fall back to a generic `"user"` label.
     pub name: Option<String>,
 }
 
