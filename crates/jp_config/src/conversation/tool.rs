@@ -159,6 +159,16 @@ pub struct ToolsDefaultsConfig {
     #[setting(required)]
     pub run: RunMode,
 
+    /// When to run a tool's argument formatter.
+    ///
+    /// - `ask`: Defer rendering until after approval (safe default).
+    /// - `unattended`: Run the formatter ahead of the approval prompt so
+    ///   the user sees the rendered call before deciding.
+    ///
+    /// If unset, derives from [`run`](Self::run): `Ask`/`Edit` map to `Ask`,
+    /// `Unattended`/`Skip` map to `Unattended`.
+    pub format: Option<FormatMode>,
+
     /// How to deliver the results of the tool to the assistant.
     ///
     /// - `unattended`: Always deliver the results of the tool call.
@@ -178,6 +188,7 @@ impl AssignKeyValue for PartialToolsDefaultsConfig {
         match kv.key_string().as_str() {
             "enable" => self.enable = kv.try_some_bool_or_from_str()?,
             "run" => self.run = kv.try_some_from_str()?,
+            "format" => self.format = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
             _ if kv.p("style") => self.style.assign(kv)?,
             _ => return missing_key(&kv),
@@ -192,6 +203,7 @@ impl PartialConfigDelta for PartialToolsDefaultsConfig {
         Self {
             enable: delta_opt(self.enable.as_ref(), next.enable),
             run: delta_opt(self.run.as_ref(), next.run),
+            format: delta_opt(self.format.as_ref(), next.format),
             result: delta_opt(self.result.as_ref(), next.result),
             style: self.style.delta(next.style),
         }
@@ -203,6 +215,7 @@ impl FillDefaults for PartialToolsDefaultsConfig {
         Self {
             enable: self.enable.or(defaults.enable),
             run: self.run.or(defaults.run),
+            format: self.format.or(defaults.format),
             result: self.result.or(defaults.result),
             style: self.style.fill_from(defaults.style),
         }
@@ -216,6 +229,7 @@ impl ToPartial for ToolsDefaultsConfig {
         Self::Partial {
             enable: partial_opts(self.enable.as_ref(), defaults.enable),
             run: partial_opt(&self.run, defaults.run),
+            format: partial_opts(self.format.as_ref(), defaults.format),
             result: partial_opt(&self.result, defaults.result),
             style: self.style.to_partial(),
         }
@@ -292,6 +306,13 @@ pub struct ToolConfig {
     /// Overrides the global default.
     pub run: Option<RunMode>,
 
+    /// When to run the tool's argument formatter.
+    ///
+    /// Overrides the global default. If unset, derives from
+    /// [`run`](Self::run): `Ask`/`Edit` map to `FormatMode::Ask`,
+    /// `Unattended`/`Skip` map to `FormatMode::Unattended`.
+    pub format: Option<FormatMode>,
+
     /// How to deliver the results of the tool to the assistant.
     ///
     /// Overrides the global default.
@@ -332,6 +353,7 @@ impl AssignKeyValue for PartialToolConfig {
             "examples" => self.examples = kv.try_some_string()?,
             "parameters" => self.parameters = kv.try_object()?,
             "run" => self.run = kv.try_some_from_str()?,
+            "format" => self.format = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
             _ if kv.p("style") => self.style.assign(kv)?,
             "questions" => self.questions = kv.try_object()?,
@@ -370,6 +392,7 @@ impl PartialConfigDelta for PartialToolConfig {
                 })
                 .collect(),
             run: delta_opt(self.run.as_ref(), next.run),
+            format: delta_opt(self.format.as_ref(), next.format),
             result: delta_opt(self.result.as_ref(), next.result),
             style: delta_opt_partial(self.style.as_ref(), next.style),
             questions: next
@@ -420,6 +443,7 @@ impl ToPartial for ToolConfig {
                 .map(|(k, v)| (k.clone(), v.to_partial()))
                 .collect(),
             run: partial_opts(self.run.as_ref(), defaults.run),
+            format: partial_opts(self.format.as_ref(), defaults.format),
             result: partial_opts(self.result.as_ref(), defaults.result),
             style: partial_opt_config(self.style.as_ref(), defaults.style),
             questions: self
@@ -985,6 +1009,37 @@ pub enum RunMode {
     Skip,
 }
 
+/// When to run a tool's argument formatter (custom-style parameter render).
+///
+/// This controls whether the formatter — which may make read-only network
+/// calls or other side-effect-free I/O to render the rendered tool call —
+/// runs *before* the user is asked for permission, or *after*.
+///
+/// `Ask` defers rendering until after approval (safe default for
+/// untrusted tools). `Unattended` runs the formatter up front, so the
+/// rendered output appears in the approval prompt — the user makes their
+/// decision based on the rendered call, not raw arguments.
+///
+/// **Contract**: Tools that opt into `Unattended` MUST be side-effect-free
+/// in format mode. They MAY make read-only network calls. They MUST NOT
+/// mutate any state, write files, or send notifications.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum FormatMode {
+    /// Defer formatter execution until after approval.
+    ///
+    /// Safe default: an untrusted tool's formatter cannot run before the
+    /// user has explicitly approved running the tool.
+    #[default]
+    Ask,
+
+    /// Run the formatter ahead of the approval prompt.
+    ///
+    /// Only set this for trusted, side-effect-free formatters. The user
+    /// sees the rendered tool call before deciding whether to approve.
+    Unattended,
+}
+
 /// How to deliver the results of the tool to the assistant.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "lowercase")]
@@ -1096,6 +1151,29 @@ impl ToolConfigWithDefaults {
     #[must_use]
     pub fn run_mut(&mut self) -> &mut RunMode {
         self.tool.run.get_or_insert(self.defaults.run)
+    }
+
+    /// Return the format mode of the tool.
+    ///
+    /// If neither the tool nor the global defaults set a `format` value,
+    /// the mode is derived from [`run`](Self::run): `Ask`/`Edit` map to
+    /// `FormatMode::Ask` (formatter runs after approval, safe default for
+    /// untrusted tools); `Unattended`/`Skip` map to `FormatMode::Unattended`
+    /// (formatter can run freely; the tool was already going to run
+    /// without an approval prompt anyway).
+    #[must_use]
+    pub fn format(&self) -> FormatMode {
+        self.tool
+            .format
+            .or(self.defaults.format)
+            .unwrap_or_else(|| match self.run() {
+                // `Skip` would run the formatter and then immediately
+                // discard the tool, leaving an orphan preview on screen.
+                // Default to `Ask` so the formatter only runs when the
+                // tool is actually going to be invoked.
+                RunMode::Ask | RunMode::Edit | RunMode::Skip => FormatMode::Ask,
+                RunMode::Unattended => FormatMode::Unattended,
+            })
     }
 
     /// Return the result mode of the tool.

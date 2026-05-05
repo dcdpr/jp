@@ -80,7 +80,7 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{
-    QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
+    FormatMode, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
 };
 use jp_conversation::{
     ConversationStream,
@@ -95,7 +95,7 @@ use jp_mcp::Client;
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::ConversationMut;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -190,6 +190,32 @@ pub enum PermissionDecision {
     },
 }
 
+/// Final outcome of [`ToolCoordinator::resolve_tool_call_decision`] — the
+/// per-tool permission pipeline.
+///
+/// This wraps the full decide → pre-render → prompt → apply → post-render
+/// flow into one of three terminal states. Callers map this into their own
+/// storage shape (see the streaming path in `turn_loop.rs` and the batch
+/// path in [`ToolCoordinator::run_permission_phase`]).
+pub enum ToolCallDecision {
+    /// Tool is approved and ready to be queued for execution. Includes any
+    /// rendered argument content from the formatter — the caller is
+    /// responsible for persisting it (typically into a `ToolCallRequest`
+    /// event's metadata).
+    Approved {
+        executor: Box<dyn Executor>,
+        rendered_arguments: Option<String>,
+    },
+    /// Tool was skipped: persisted "n", `RunMode::Skip`, or user declined
+    /// at the prompt. The response is the synthesized skip message ready
+    /// to be appended to the conversation stream.
+    Skipped(ToolCallResponse),
+    /// Tool failed before it could run — typically because a custom-format
+    /// formatter command errored. The response tells the LLM the tool was
+    /// not executed and may be retried.
+    Failed(ToolCallResponse),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolCallState {
     ReceivingArguments { name: String },
@@ -282,6 +308,144 @@ impl ToolCoordinator {
             .get(tool_name)
             .map(|c| c.style().parameters.clone())
             .unwrap_or_default()
+    }
+
+    /// Return the format mode for a tool, falling back to `Ask` if the
+    /// tool is unknown (untrusted-by-default).
+    pub fn format_mode(&self, tool_name: &str) -> FormatMode {
+        self.tools_config
+            .get(tool_name)
+            .map_or(FormatMode::Ask, |c| c.format())
+    }
+
+    /// Pre-render a tool call ahead of its approval prompt, if the tool
+    /// opts into `format = "unattended"`.
+    ///
+    /// Returns:
+    /// - `Ok(Some(content))` if pre-render fired successfully — caller
+    ///   should skip the post-approval render and use this content.
+    /// - `Ok(None)` if pre-render didn't fire (`format = "ask"`) — caller
+    ///   should follow the existing post-approval render path.
+    /// - `Err(error_message)` if the formatter command failed — caller
+    ///   should treat this as a tool failure and skip prompting.
+    pub(crate) async fn pre_render_for_prompt(
+        &self,
+        tool_name: &str,
+        arguments: &Map<String, Value>,
+        tool_renderer: &ToolRenderer,
+    ) -> Result<Option<Option<String>>, String> {
+        if !matches!(self.format_mode(tool_name), FormatMode::Unattended) {
+            return Ok(None);
+        }
+        match self
+            .render_approved_tool(tool_name, arguments, tool_renderer)
+            .await
+        {
+            RenderOutcome::Rendered { content } => Ok(Some(content)),
+            RenderOutcome::Suppressed { error } => Err(error),
+        }
+    }
+
+    /// Single-tool permission pipeline.
+    ///
+    /// Encapsulates the full decide → pre-render → prompt → apply →
+    /// post-render flow. Returns a [`ToolCallDecision`] that the caller
+    /// maps to its storage shape.
+    ///
+    /// This is the seam where new permission-related features should land:
+    /// telemetry, sandboxing decisions, alternate prompting modes — anything
+    /// that needs to apply uniformly to both the streaming path (in
+    /// `turn_loop.rs`) and the batch/restart path
+    /// ([`Self::run_permission_phase`]). Both paths funnel through here, so
+    /// changes don't drift between sites.
+    ///
+    /// # Pipeline steps
+    ///
+    /// 1. [`Self::decide_permission`] resolves the executor's run mode
+    ///    against persisted answers and TTY availability.
+    /// 2. If the decision is `NeedsPrompt`, pre-render the call via
+    ///    [`Self::pre_render_for_prompt`] when `format = "unattended"`,
+    ///    then prompt the user via [`ToolPrompter::prompt_permission`],
+    ///    then apply the result via [`Self::apply_permission_result`].
+    /// 3. For approved tools, render the call (skipping if pre-rendered).
+    /// 4. Return [`ToolCallDecision::Approved`], `Skipped`, or `Failed`.
+    pub(crate) async fn resolve_tool_call_decision(
+        &mut self,
+        executor: Box<dyn Executor>,
+        prompter: &ToolPrompter,
+        mcp_client: &Client,
+        is_tty: bool,
+        turn_state: &mut TurnState,
+        tool_renderer: &ToolRenderer,
+    ) -> ToolCallDecision {
+        // Step 1: decide.
+        let decision = self.decide_permission(executor, is_tty, turn_state);
+
+        // Step 2: handle prompt path. After this match, `executor` is
+        // approved and `pre_rendered` is `Some(content)` if pre-rendering
+        // already happened, `None` if a post-render is still needed.
+        let (executor, pre_rendered) = match decision {
+            PermissionDecision::Approved(executor) => (executor, None),
+            PermissionDecision::Skipped(response) => {
+                return ToolCallDecision::Skipped(response);
+            }
+            PermissionDecision::NeedsPrompt { executor, info } => {
+                self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
+
+                // Pre-render before the prompt for `format = "unattended"`
+                // tools. The user sees the rendered call as part of the
+                // approval decision rather than seeing only raw arguments.
+                //
+                // Caveat: if the user picks `e` (edit) and changes the
+                // arguments, the rendered output reflects pre-edit args.
+                // We accept that staleness for v1; the user is making the
+                // edit decision based on raw JSON anyway.
+                let pre = match self
+                    .pre_render_for_prompt(&info.tool_name, executor.arguments(), tool_renderer)
+                    .await
+                {
+                    Ok(maybe_content) => maybe_content,
+                    Err(error) => {
+                        return ToolCallDecision::Failed(Self::render_failed_response(
+                            info.tool_id.clone(),
+                            &info.tool_name,
+                            &error,
+                        ));
+                    }
+                };
+
+                let result = prompter.prompt_permission(&info, mcp_client).await;
+                match self.apply_permission_result(result, &info, turn_state, executor) {
+                    Ok(executor) => (executor, pre),
+                    Err(response) => return ToolCallDecision::Skipped(response),
+                }
+            }
+        };
+
+        // Step 3: render. If pre-rendered, use that; otherwise render now.
+        let rendered_arguments = if let Some(pre) = pre_rendered {
+            pre
+        } else {
+            let tool_name = executor.tool_name().to_owned();
+            let args = executor.arguments().clone();
+            match self
+                .render_approved_tool(&tool_name, &args, tool_renderer)
+                .await
+            {
+                RenderOutcome::Rendered { content } => content,
+                RenderOutcome::Suppressed { error } => {
+                    let id = executor.tool_id().to_owned();
+                    return ToolCallDecision::Failed(Self::render_failed_response(
+                        id, &tool_name, &error,
+                    ));
+                }
+            }
+        };
+
+        ToolCallDecision::Approved {
+            executor,
+            rendered_arguments,
+        }
     }
 
     pub fn question_target(&self, tool_name: &str, question_id: &str) -> Option<QuestionTarget> {
@@ -554,62 +718,34 @@ impl ToolCoordinator {
         let mut skipped_responses = Vec::new();
 
         for (index, executor) in std::mem::take(&mut self.executors) {
-            let decision = self.decide_permission(executor, is_tty, turn_state);
+            // Funnel through the unified per-tool permission pipeline. The
+            // streaming path in `turn_loop.rs` uses the same call so the
+            // decide → pre-render → prompt → render policy stays in one
+            // place.
+            let decision = self
+                .resolve_tool_call_decision(
+                    executor,
+                    prompter,
+                    mcp_client,
+                    is_tty,
+                    turn_state,
+                    tool_renderer,
+                )
+                .await;
 
             match decision {
-                PermissionDecision::Approved(executor) => {
-                    let id = executor.tool_id().to_owned();
-                    let name = executor.tool_name().to_owned();
-                    let args = executor.arguments().clone();
-                    match self.render_approved_tool(&name, &args, tool_renderer).await {
-                        RenderOutcome::Rendered { content } => {
-                            if let Some(c) = content {
-                                self.rendered_arguments.insert(id, c);
-                            }
-                            approved_executors.push((index, executor));
-                        }
-                        RenderOutcome::Suppressed { error } => {
-                            skipped_responses
-                                .push((index, Self::render_failed_response(id, &name, &error)));
-                        }
+                ToolCallDecision::Approved {
+                    executor,
+                    rendered_arguments,
+                } => {
+                    if let Some(content) = rendered_arguments {
+                        self.rendered_arguments
+                            .insert(executor.tool_id().to_owned(), content);
                     }
+                    approved_executors.push((index, executor));
                 }
-                PermissionDecision::Skipped(response) => {
+                ToolCallDecision::Skipped(response) | ToolCallDecision::Failed(response) => {
                     skipped_responses.push((index, response));
-                }
-                PermissionDecision::NeedsPrompt { executor, info } => {
-                    self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
-                    let result = prompter.prompt_permission(&info, mcp_client).await;
-
-                    match self.apply_permission_result(result, &info, turn_state, executor) {
-                        Ok(executor) => {
-                            let args = executor.arguments().clone();
-                            match self
-                                .render_approved_tool(&info.tool_name, &args, tool_renderer)
-                                .await
-                            {
-                                RenderOutcome::Rendered { content } => {
-                                    if let Some(c) = content {
-                                        self.rendered_arguments.insert(info.tool_id.clone(), c);
-                                    }
-                                    approved_executors.push((index, executor));
-                                }
-                                RenderOutcome::Suppressed { error } => {
-                                    skipped_responses.push((
-                                        index,
-                                        Self::render_failed_response(
-                                            info.tool_id.clone(),
-                                            &info.tool_name,
-                                            &error,
-                                        ),
-                                    ));
-                                }
-                            }
-                        }
-                        Err(response) => {
-                            skipped_responses.push((index, response));
-                        }
-                    }
                 }
             }
         }

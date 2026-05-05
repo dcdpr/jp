@@ -103,6 +103,7 @@ Ok(
                     defaults: PartialToolsDefaultsConfig {
                         enable: None,
                         run: None,
+                        format: None,
                         result: None,
                         style: PartialDisplayStyleConfig {
                             hidden: Some(
