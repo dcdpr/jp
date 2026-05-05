@@ -309,12 +309,7 @@ fn test_static_answers_for_tool_collects_all_answers() {
 fn test_pending_prompt_question_variant() {
     let pending = PendingPrompt::Question {
         index: 0,
-        question: jp_tool::Question {
-            id: "q1".to_string(),
-            text: "Test question".to_string(),
-            answer_type: jp_tool::AnswerType::Text,
-            default: None,
-        },
+        question: jp_tool::Question::text("q1", "Test question"),
     };
 
     // Verify we can match and extract fields
@@ -365,12 +360,7 @@ fn test_pending_prompt_queue_fifo_order() {
     // Add a question prompt
     queue.push_back(PendingPrompt::Question {
         index: 0,
-        question: jp_tool::Question {
-            id: "q1".to_string(),
-            text: "First".to_string(),
-            answer_type: jp_tool::AnswerType::Text,
-            default: None,
-        },
+        question: jp_tool::Question::text("q1", "First"),
     });
 
     // Add a result mode prompt
@@ -388,12 +378,7 @@ fn test_pending_prompt_queue_fifo_order() {
     // Add another question prompt
     queue.push_back(PendingPrompt::Question {
         index: 2,
-        question: jp_tool::Question {
-            id: "q2".to_string(),
-            text: "Third".to_string(),
-            answer_type: jp_tool::AnswerType::Boolean,
-            default: None,
-        },
+        question: jp_tool::Question::boolean("q2", "Third"),
     });
 
     // Verify FIFO order
@@ -432,12 +417,7 @@ fn test_pending_prompt_mixed_types_interleaved() {
     // Simulate: while prompt_active, queue these in arrival order
     queue.push_back(PendingPrompt::Question {
         index: 0,
-        question: jp_tool::Question {
-            id: "branch".to_string(),
-            text: "Which branch?".to_string(),
-            answer_type: jp_tool::AnswerType::Text,
-            default: None,
-        },
+        question: jp_tool::Question::text("branch", "Which branch?"),
     });
 
     queue.push_back(PendingPrompt::ResultMode {
@@ -453,12 +433,8 @@ fn test_pending_prompt_mixed_types_interleaved() {
 
     queue.push_back(PendingPrompt::Question {
         index: 2,
-        question: jp_tool::Question {
-            id: "confirm".to_string(),
-            text: "Confirm action?".to_string(),
-            answer_type: jp_tool::AnswerType::Boolean,
-            default: Some(serde_json::json!(true)),
-        },
+        question: jp_tool::Question::boolean("confirm", "Confirm action?")
+            .with_default(serde_json::json!(true)),
     });
 
     // All three should be queued

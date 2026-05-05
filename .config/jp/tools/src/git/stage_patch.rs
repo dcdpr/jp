@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use jp_tool::{AnswerType, Context, Outcome, Question};
+use jp_tool::{Context, Outcome, Question};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -69,12 +69,12 @@ fn git_stage_patch_impl<R: ProcessRunner>(
         }
         None => {
             return Ok(Outcome::NeedsInput {
-                question: Question {
-                    id: "stage_changes".to_string(),
-                    text: format!("Do you want to stage the following patch?\n\n{combined}"),
-                    answer_type: AnswerType::Boolean,
-                    default: Some(Value::Bool(true)),
-                },
+                question: Question::boolean(
+                    "stage_changes",
+                    "Do you want to stage the patch shown above?",
+                )
+                .with_preamble(combined)
+                .with_default(Value::Bool(true)),
             });
         }
     }

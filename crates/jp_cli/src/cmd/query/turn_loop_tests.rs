@@ -41,7 +41,7 @@ use jp_llm::{
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::FsStorageBackend;
-use jp_tool::{AnswerType, Question};
+use jp_tool::Question;
 use jp_workspace::Workspace;
 use serde_json::{Map, Value, json};
 use tokio::{sync::broadcast, time::timeout};
@@ -3029,12 +3029,7 @@ async fn test_tool_with_single_inquiry() {
             Box::new(InquiryMockExecutor::new(
                 &req.id,
                 &req.name,
-                vec![Question {
-                    id: "confirm".to_string(),
-                    text: "Create backup?".to_string(),
-                    answer_type: AnswerType::Boolean,
-                    default: None,
-                }],
+                vec![Question::boolean("confirm", "Create backup?")],
                 "inquiry tool output",
             ))
         });
@@ -3116,7 +3111,6 @@ async fn test_tool_with_single_inquiry() {
 /// Flow: tool call → `NeedsInput(q1)` → inquiry → answer →
 ///       `NeedsInput(q2)` → inquiry → answer → completed.
 #[tokio::test]
-#[expect(clippy::too_many_lines)]
 async fn test_tool_with_multiple_inquiries() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -3169,18 +3163,8 @@ async fn test_tool_with_multiple_inquiries() {
                 &req.id,
                 &req.name,
                 vec![
-                    Question {
-                        id: "confirm".to_string(),
-                        text: "Proceed?".to_string(),
-                        answer_type: AnswerType::Boolean,
-                        default: None,
-                    },
-                    Question {
-                        id: "reason".to_string(),
-                        text: "Why?".to_string(),
-                        answer_type: AnswerType::Text,
-                        default: None,
-                    },
+                    Question::boolean("confirm", "Proceed?"),
+                    Question::text("reason", "Why?"),
                 ],
                 "both questions answered",
             ))
@@ -3325,12 +3309,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 Box::new(InquiryMockExecutor::new(
                     &req.id,
                     &req.name,
-                    vec![Question {
-                        id: "confirm".to_string(),
-                        text: "Proceed?".to_string(),
-                        answer_type: AnswerType::Boolean,
-                        default: None,
-                    }],
+                    vec![Question::boolean("confirm", "Proceed?")],
                     "inquiry completed",
                 ))
             })
@@ -3460,12 +3439,7 @@ async fn test_parallel_tools_both_with_inquiries() {
                 Box::new(InquiryMockExecutor::new(
                     &req.id,
                     &req.name,
-                    vec![Question {
-                        id: "confirm_a".to_string(),
-                        text: "Proceed A?".to_string(),
-                        answer_type: AnswerType::Boolean,
-                        default: None,
-                    }],
+                    vec![Question::boolean("confirm_a", "Proceed A?")],
                     "tool_a done",
                 ))
             })
@@ -3473,12 +3447,7 @@ async fn test_parallel_tools_both_with_inquiries() {
                 Box::new(InquiryMockExecutor::new(
                     &req.id,
                     &req.name,
-                    vec![Question {
-                        id: "confirm_b".to_string(),
-                        text: "Proceed B?".to_string(),
-                        answer_type: AnswerType::Boolean,
-                        default: None,
-                    }],
+                    vec![Question::boolean("confirm_b", "Proceed B?")],
                     "tool_b done",
                 ))
             });
@@ -3722,12 +3691,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             Box::new(InquiryMockExecutor::new(
                 &req.id,
                 &req.name,
-                vec![Question {
-                    id: "confirm".to_string(),
-                    text: "Confirm?".to_string(),
-                    answer_type: AnswerType::Boolean,
-                    default: None,
-                }],
+                vec![Question::boolean("confirm", "Confirm?")],
                 "should not reach this",
             ))
         });

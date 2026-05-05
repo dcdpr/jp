@@ -1,5 +1,3 @@
-use jp_tool::AnswerType;
-
 use super::*;
 
 #[test]
@@ -28,12 +26,7 @@ fn test_execution_outcome_completed_error_into_response() {
 
 #[test]
 fn test_execution_outcome_needs_input_into_response() {
-    let question = Question {
-        id: "q1".to_string(),
-        text: "What is your name?".to_string(),
-        answer_type: AnswerType::Text,
-        default: None,
-    };
+    let question = Question::text("q1", "What is your name?");
 
     let outcome = ExecutionOutcome::NeedsInput {
         id: "call_789".to_string(),
@@ -73,12 +66,7 @@ fn test_execution_outcome_id() {
 
     let needs_input = ExecutionOutcome::NeedsInput {
         id: "id2".to_string(),
-        question: Question {
-            id: "q".to_string(),
-            text: "?".to_string(),
-            answer_type: AnswerType::Text,
-            default: None,
-        },
+        question: Question::text("q", "?"),
     };
     assert_eq!(needs_input.id(), "id2");
 
@@ -108,12 +96,7 @@ fn test_execution_outcome_helper_methods() {
 
     let needs_input = ExecutionOutcome::NeedsInput {
         id: "3".to_string(),
-        question: Question {
-            id: "q".to_string(),
-            text: "?".to_string(),
-            answer_type: AnswerType::Boolean,
-            default: None,
-        },
+        question: Question::boolean("q", "?"),
     };
     assert!(!needs_input.is_success());
     assert!(needs_input.needs_input());

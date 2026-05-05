@@ -43,12 +43,7 @@ fn test_inquiry_config(provider: MockProvider) -> InquiryConfig {
 }
 
 fn test_question() -> Question {
-    Question {
-        id: "confirm".to_string(),
-        text: "Create backup?".to_string(),
-        answer_type: AnswerType::Boolean,
-        default: None,
-    }
+    Question::boolean("confirm", "Create backup?")
 }
 
 fn test_events() -> ConversationStream {
@@ -72,12 +67,7 @@ fn test_tool_call_inquiry_id_unique_per_question() {
 
 #[test]
 fn test_create_inquiry_schema_boolean() {
-    let question = Question {
-        id: "q1".to_string(),
-        text: "Confirm?".to_string(),
-        answer_type: AnswerType::Boolean,
-        default: None,
-    };
+    let question = Question::boolean("q1", "Confirm?");
 
     let schema = create_inquiry_schema(&question);
 
@@ -97,14 +87,11 @@ fn test_create_inquiry_schema_boolean() {
 
 #[test]
 fn test_create_inquiry_schema_select() {
-    let question = Question {
-        id: "q2".to_string(),
-        text: "Choose one".to_string(),
-        answer_type: AnswerType::Select {
-            options: vec!["A".to_string(), "B".to_string(), "C".to_string()],
-        },
-        default: None,
-    };
+    let question = Question::select("q2", "Choose one").with_options(vec![
+        "A".to_string(),
+        "B".to_string(),
+        "C".to_string(),
+    ]);
 
     let schema = create_inquiry_schema(&question);
     let props = schema.get("properties").and_then(Value::as_object).unwrap();
@@ -120,12 +107,7 @@ fn test_create_inquiry_schema_select() {
 
 #[test]
 fn test_create_inquiry_schema_text() {
-    let question = Question {
-        id: "q3".to_string(),
-        text: "Enter text".to_string(),
-        answer_type: AnswerType::Text,
-        default: None,
-    };
+    let question = Question::text("q3", "Enter text");
 
     let schema = create_inquiry_schema(&question);
     let props = schema.get("properties").and_then(Value::as_object).unwrap();
@@ -140,12 +122,7 @@ fn test_create_inquiry_schema_text() {
 
 #[test]
 fn test_create_inquiry_schema_stable_across_ids() {
-    let question = Question {
-        id: "q1".to_string(),
-        text: "Confirm?".to_string(),
-        answer_type: AnswerType::Boolean,
-        default: None,
-    };
+    let question = Question::boolean("q1", "Confirm?");
 
     let schema_a = create_inquiry_schema(&question);
     let schema_b = create_inquiry_schema(&question);
@@ -238,14 +215,8 @@ async fn llm_backend_returns_cancelled_when_token_is_already_cancelled() {
 #[tokio::test]
 async fn llm_backend_passes_select_question() {
     let inquiry_id = tool_call_inquiry_id("call_sel", "choose");
-    let question = Question {
-        id: "choose".to_string(),
-        text: "Pick one".to_string(),
-        answer_type: AnswerType::Select {
-            options: vec!["A".to_string(), "B".to_string()],
-        },
-        default: None,
-    };
+    let question =
+        Question::select("choose", "Pick one").with_options(vec!["A".to_string(), "B".to_string()]);
     let config = test_inquiry_config(structured_provider(json!({ "answer": "B" })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 
@@ -265,12 +236,7 @@ async fn llm_backend_passes_select_question() {
 #[tokio::test]
 async fn llm_backend_passes_text_question() {
     let inquiry_id = tool_call_inquiry_id("call_txt", "reason");
-    let question = Question {
-        id: "reason".to_string(),
-        text: "Why?".to_string(),
-        answer_type: AnswerType::Text,
-        default: None,
-    };
+    let question = Question::text("reason", "Why?");
     let config = test_inquiry_config(structured_provider(json!({ "answer": "Because reasons" })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 

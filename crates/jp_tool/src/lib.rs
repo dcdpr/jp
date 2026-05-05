@@ -79,6 +79,7 @@ impl Outcome {
 
 /// A request for additional input.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct Question {
     /// The question ID.
     ///
@@ -86,7 +87,12 @@ pub struct Question {
     pub id: String,
 
     /// The question to ask.
+    ///
+    /// This MUST be a single line of text for it to be displayed correctly.
     pub text: String,
+
+    /// An optional preamble to display before the question.
+    pub pre_amble: Option<String>,
 
     /// Type of answer expected
     pub answer_type: AnswerType,
@@ -97,6 +103,86 @@ pub struct Question {
     /// presented to the user, or to use as the answer in non-interactive mode
     /// when no answer can be provided interactively.
     pub default: Option<Value>,
+}
+
+impl Question {
+    /// Create a new text question.
+    pub fn text(id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            text: text.into(),
+            pre_amble: None,
+            answer_type: AnswerType::Text,
+            default: None,
+        }
+    }
+
+    /// Create a new boolean question.
+    pub fn boolean(id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            text: text.into(),
+            pre_amble: None,
+            answer_type: AnswerType::Boolean,
+            default: None,
+        }
+    }
+
+    /// Create a new boolean question.
+    pub fn select(id: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            text: text.into(),
+            pre_amble: None,
+            answer_type: AnswerType::Select { options: vec![] },
+            default: None,
+        }
+    }
+
+    /// Set the preamble text.
+    #[must_use]
+    pub fn with_preamble(mut self, pre_amble: impl Into<String>) -> Self {
+        self.pre_amble = Some(pre_amble.into());
+        self
+    }
+
+    /// Set the default answer.
+    #[must_use]
+    pub fn with_default(mut self, default: impl Into<Value>) -> Self {
+        self.default = Some(default.into());
+        self
+    }
+
+    /// Set the answer type.
+    #[must_use]
+    pub fn with_answer_type(mut self, answer_type: AnswerType) -> Self {
+        self.answer_type = answer_type;
+        self
+    }
+
+    /// Set the answer type to a select type with the given options.
+    #[must_use]
+    pub fn with_options(mut self, options: Vec<String>) -> Self {
+        self.answer_type = AnswerType::Select { options };
+        self
+    }
+
+    /// Add an option to the select answer type.
+    ///
+    /// Converts the answer type to a select type if it is not already.
+    #[must_use]
+    pub fn with_option(mut self, option: impl Into<String>) -> Self {
+        match &mut self.answer_type {
+            AnswerType::Select { options } => options.push(option.into()),
+            _ => {
+                self.answer_type = AnswerType::Select {
+                    options: vec![option.into()],
+                }
+            }
+        }
+
+        self
+    }
 }
 
 /// The type of answer expected for a given question.

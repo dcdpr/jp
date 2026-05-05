@@ -90,9 +90,22 @@ impl InlineSelect {
             .build_help_text()
             .map_err(|e| InquireError::Custom(Box::new(e)))?;
 
+        // `inquire`'s renderer assumes a single-line message: when it
+        // redraws on submit, it clears `1 + wrapped_options_height` lines
+        // and rewrites the answered prompt at that origin. A multi-line
+        // message (e.g. a diff embedded in the prompt text) causes it to
+        // under-count lines, leaving stray newlines and garbling output.
+        // Strip off any leading body and emit it ourselves so inquire only
+        // sees the final single line.
+        let (body, prompt_line) = split_message(&self.message);
+
+        if let Some(body) = body {
+            writeln!(writer, "{body}")?;
+        }
+
         let message = format!(
             "{} [{}]",
-            self.message,
+            prompt_line,
             option_keys
                 .iter()
                 .map(char::to_string)
@@ -139,6 +152,21 @@ impl InlineSelect {
 
         write!(buf, "? - print help")?;
         Ok(buf)
+    }
+}
+
+/// Splits a prompt message into an optional preamble body and the final
+/// single-line prompt that gets handed to inquire.
+///
+/// `inquire`'s `CustomType` (the underlying primitive) tracks line counts
+/// for redraw using its formatted message, which assumes a single line.
+/// A multi-line message wedges its terminal-rewrite logic. We split at
+/// the last newline: everything before is treated as a body to print
+/// up-front, and the trailing fragment becomes the actual prompt.
+fn split_message(message: &str) -> (Option<&str>, &str) {
+    match message.rsplit_once('\n') {
+        Some((before, last)) => (Some(before), last),
+        None => (None, message),
     }
 }
 

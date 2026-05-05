@@ -685,12 +685,7 @@ fn test_prompt_question_boolean_uses_inline_select() {
     let prompt = MockPromptBackend::new().with_inline_responses(['y']);
     let prompter = prompter_with_mock_prompt(prompt);
 
-    let question = jp_tool::Question {
-        id: "q1".to_string(),
-        text: "Proceed?".to_string(),
-        answer_type: jp_tool::AnswerType::Boolean,
-        default: None,
-    };
+    let question = jp_tool::Question::boolean("q1", "Proceed?");
 
     let result = prompter.prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::Bool(true));
@@ -712,12 +707,7 @@ fn test_prompt_question_boolean_default() {
     let prompt = MockPromptBackend::new().with_inline_responses(['N']);
     let prompter = prompter_with_mock_prompt(prompt);
 
-    let question = jp_tool::Question {
-        id: "q1".to_string(),
-        text: "Proceed?".to_string(),
-        answer_type: jp_tool::AnswerType::Boolean,
-        default: Some(Value::Bool(false)),
-    };
+    let question = jp_tool::Question::boolean("q1", "Proceed?").with_default(Value::Bool(false));
 
     let result = prompter.prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::Bool(false));
@@ -729,12 +719,7 @@ fn test_prompt_question_text_uses_backend() {
     let prompt = MockPromptBackend::new().with_text_responses(["user input"]);
     let prompter = prompter_with_mock_prompt(prompt);
 
-    let question = jp_tool::Question {
-        id: "q2".to_string(),
-        text: "Input:".to_string(),
-        answer_type: jp_tool::AnswerType::Text,
-        default: None,
-    };
+    let question = jp_tool::Question::text("q2", "Input:");
 
     let result = prompter.prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::String("user input".to_string()));
@@ -745,14 +730,8 @@ fn test_prompt_question_select_uses_backend() {
     let prompt = MockPromptBackend::new().with_select_responses(["Option B"]);
     let prompter = prompter_with_mock_prompt(prompt);
 
-    let question = jp_tool::Question {
-        id: "q3".to_string(),
-        text: "Choose:".to_string(),
-        answer_type: jp_tool::AnswerType::Select {
-            options: vec!["Option A".to_string(), "Option B".to_string()],
-        },
-        default: None,
-    };
+    let question = jp_tool::Question::select("q3", "Choose:")
+        .with_options(vec!["Option A".to_string(), "Option B".to_string()]);
 
     let result = prompter.prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::String("Option B".to_string()));

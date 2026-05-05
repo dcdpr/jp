@@ -14,7 +14,7 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::{ContentStyle, Stylize as _};
 use fancy_regex::RegexBuilder;
-use jp_tool::{AnswerType, Outcome, Question};
+use jp_tool::{Outcome, Question};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use similar::{ChangeTag, TextDiff, udiff::UnifiedDiff};
@@ -419,17 +419,22 @@ fn guard_broad_replacement(
     reject_message: &str,
     question_text: String,
 ) -> Option<ToolResult> {
+    let (pre_amble, text) = question_text
+        .split_once('\n')
+        .map(|(pre, text)| (Some(pre.to_owned()), text.to_owned()))
+        .unwrap_or((None, question_text));
+
     match answers.get("broad_replacement").and_then(Value::as_bool) {
         Some(true) => None,
         Some(false) => Some(fail(reject_message)),
-        None => Some(Ok(Outcome::NeedsInput {
-            question: Question {
-                id: "broad_replacement".to_string(),
-                text: question_text,
-                answer_type: AnswerType::Boolean,
-                default: Some(Value::Bool(false)),
-            },
-        })),
+        None => {
+            let mut q =
+                Question::boolean("broad_replacement", text).with_default(Value::Bool(false));
+            if let Some(p) = pre_amble {
+                q = q.with_preamble(p);
+            }
+            Some(Ok(Outcome::NeedsInput { question: q }))
+        }
     }
 }
 
@@ -758,12 +763,10 @@ fn apply_changes<R: ProcessRunner>(
                 }
                 None => {
                     return Ok(Outcome::NeedsInput {
-                        question: Question {
-                            id: "modify_dirty_file".to_string(),
-                            text: format!("File '{path}' has uncommitted changes. Modify anyway?"),
-                            answer_type: AnswerType::Boolean,
-                            default: None,
-                        },
+                        question: Question::boolean(
+                            "modify_dirty_file",
+                            format!("File '{path}' has uncommitted changes. Modify anyway?"),
+                        ),
                     });
                 }
             }
@@ -809,12 +812,12 @@ fn apply_changes<R: ProcessRunner>(
         }
         None => {
             return Ok(Outcome::NeedsInput {
-                question: Question {
-                    id: "apply_changes".to_string(),
-                    text: format!("Do you want to apply the following patch?\n\n{patch}"),
-                    answer_type: AnswerType::Boolean,
-                    default: Some(Value::Bool(true)),
-                },
+                question: Question::boolean(
+                    "apply_changes",
+                    "Do you want to apply the patch shown above?",
+                )
+                .with_preamble(patch)
+                .with_default(Value::Bool(true)),
             });
         }
     }
