@@ -4,12 +4,9 @@ path = "sh"
 params.args = ["-c", "cargo metadata --no-deps --format-version=1 | jq -r '.packages[].name' | sort"]
 params.description = "Workspace crate names"
 
-[assistant.system_prompt]
-strategy = "append"
-separator = "paragraph"
-value = """
-# Knowledge: Project Structure
-
+[[assistant.system_prompt_sections]]
+tag = "Project Structure"
+content = """\
 You are an expert at understanding the structure of the project.
 """
 

@@ -1,9 +1,6 @@
-[assistant.system_prompt]
-strategy = "append"
-separator = "paragraph"
-value = """
-# Knowledge: Software Engineering
-
+[[assistant.system_prompt_sections]]
+tag = "Software Engineering"
+content = """\
 You have deep knowledge of software engineering principles, design patterns, and best practices \
 for building robust, maintainable software systems.
 """
