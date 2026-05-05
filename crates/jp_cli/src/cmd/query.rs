@@ -264,16 +264,15 @@ pub(crate) struct Query {
     ///
     /// Applied to the resolved conversation (new or resumed) before the turn
     /// runs. Skips title auto-generation for new conversations — your title
-    /// wins. Pair with `--no-title` only if you want neither (rare).
+    /// wins. Mutually exclusive with `--no-title`.
     #[arg(long = "title", conflicts_with = "no_title")]
     title: Option<String>,
 
-    /// Disable automatic title generation for new conversations.
+    /// Disable the title for the conversation.
     ///
-    /// Sets `conversation.title.generate.auto = false` for this invocation.
-    /// Useful when you want a conversation without any title at all (paired
-    /// with no `--title`), or when you'll set the title later via
-    /// `jp conversation edit --title`.
+    /// Clears any existing title on the resolved conversation (new, forked,
+    /// or resumed) and skips auto-generation for this run. Mutually
+    /// exclusive with `--title`.
     #[arg(long = "no-title", conflicts_with = "title")]
     no_title: bool,
 
@@ -308,13 +307,10 @@ impl Query {
         // 3. Lock contention: user picks "new" or "fork" from the prompt.
         let lock = self.acquire_lock(ctx, handle).await?;
 
-        // Apply `--title` if provided. Mirrors how `conversation fork`
-        // handles its `--title` flag.
-        if let Some(title) = &self.title {
-            lock.as_mut().update_metadata(|m| {
-                m.title = Some(title.clone());
-            });
-        }
+        // The two flags are mutually exclusive (enforced by clap), and the
+        // resolved conversation may be new, freshly forked (which clones the
+        // source's metadata, including any title), or resumed.
+        apply_title_override(&lock, self.title.as_deref(), self.no_title);
 
         // Record this conversation as the session's active conversation.
         if let Some(session) = &ctx.session
@@ -376,12 +372,13 @@ impl Query {
         let stream = lock.events().clone();
 
         // Generate title for new or empty conversations (including forks).
-        // Skip when `--title` was provided (the user already chose one) or
-        // when the resolved config has auto-generation disabled (e.g. via
-        // `--no-title`).
+        // Skip when `--title` or `--no-title` was provided (the user already
+        // expressed an intent for the title), or when the resolved config
+        // has auto-generation disabled.
         if (self.is_new() || self.fork.is_some() || stream.is_empty())
             && ctx.term.args.persist
             && self.title.is_none()
+            && !self.no_title
             && cfg.conversation.title.generate.auto
         {
             debug!("Generating title for new conversation");
@@ -949,6 +946,27 @@ fn fork_conversation(
     })
 }
 
+/// Apply `--title` / `--no-title` to the resolved conversation.
+///
+/// Both flags act on `metadata.title` directly so the run ends with the
+/// title the user asked for, regardless of whether the conversation is new,
+/// freshly forked (which inherits the source's title), or resumed:
+///
+/// - `--title T` sets the title to `Some(T)`.
+/// - `--no-title` clears any existing title.
+/// - Neither flag is a no-op.
+fn apply_title_override(lock: &ConversationLock, title: Option<&str>, no_title: bool) {
+    if let Some(title) = title {
+        lock.as_mut().update_metadata(|m| {
+            m.title = Some(title.to_owned());
+        });
+    } else if no_title {
+        lock.as_mut().update_metadata(|m| {
+            m.title = None;
+        });
+    }
+}
+
 fn get_config_delta_from_cli(
     cfg: &AppConfig,
     lock: &ConversationLock,
@@ -998,7 +1016,7 @@ impl IntoPartialAppConfig for Query {
             target: _,
             fork: _,
             title: _,
-            no_title,
+            no_title: _,
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
@@ -1033,10 +1051,6 @@ impl IntoPartialAppConfig for Query {
 
         if *hide_tool_calls {
             partial.style.tool_call.show = Some(false);
-        }
-
-        if *no_title {
-            partial.conversation.title.generate.auto = Some(false);
         }
 
         Ok(partial)
