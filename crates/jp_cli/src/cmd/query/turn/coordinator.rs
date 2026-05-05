@@ -132,6 +132,7 @@ impl TurnCoordinator {
             chat_renderer: ChatRenderer::new(printer.clone(), style),
             structured_renderer: StructuredRenderer::new(printer),
             json_emitter,
+            pending_tool_calls: Vec::new(),
             author: None,
         }
     }
