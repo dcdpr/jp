@@ -43,8 +43,11 @@ pub(crate) async fn fs_move_file(
             }
             None => {
                 return Ok(Outcome::NeedsInput {
-                    question: Question::boolean("overwrite_file", format!("Destination '{target}' exists. Overwrite?"))
-                        .with_default(Value::Bool(false)),
+                    question: Question::boolean(
+                        "overwrite_file",
+                        format!("Destination '{target}' exists. Overwrite?"),
+                    )
+                    .with_default(Value::Bool(false)),
                 });
             }
         }
@@ -60,8 +63,11 @@ pub(crate) async fn fs_move_file(
             }
             None => {
                 return Ok(Outcome::NeedsInput {
-                    question: Question::boolean("move_dirty_file", format!("File '{source}' has uncommitted changes. Move anyway?"))
-                        .with_default(Value::Bool(false)),
+                    question: Question::boolean(
+                        "move_dirty_file",
+                        format!("File '{source}' has uncommitted changes. Move anyway?"),
+                    )
+                    .with_default(Value::Bool(false)),
                 });
             }
         }

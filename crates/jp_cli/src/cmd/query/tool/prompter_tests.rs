@@ -707,8 +707,7 @@ fn test_prompt_question_boolean_default() {
     let prompt = MockPromptBackend::new().with_inline_responses(['N']);
     let prompter = prompter_with_mock_prompt(prompt);
 
-    let question = jp_tool::Question::boolean("q1", "Proceed?")
-        .with_default(Value::Bool(false));
+    let question = jp_tool::Question::boolean("q1", "Proceed?").with_default(Value::Bool(false));
 
     let result = prompter.prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::Bool(false));
@@ -731,7 +730,8 @@ fn test_prompt_question_select_uses_backend() {
     let prompt = MockPromptBackend::new().with_select_responses(["Option B"]);
     let prompter = prompter_with_mock_prompt(prompt);
 
-    let question = jp_tool::Question::select("q3", "Choose:").with_options(vec!["Option A".to_string(), "Option B".to_string()]);
+    let question = jp_tool::Question::select("q3", "Choose:")
+        .with_options(vec!["Option A".to_string(), "Option B".to_string()]);
 
     let result = prompter.prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::String("Option B".to_string()));

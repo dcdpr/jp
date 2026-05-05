@@ -63,8 +63,11 @@ pub(crate) async fn fs_create_file(
             }
             None => {
                 return Ok(Outcome::NeedsInput {
-                    question: Question::boolean("overwrite_file", format!("File '{path}' exists. Overwrite?"))
-                        .with_default(Value::Bool(false)),
+                    question: Question::boolean(
+                        "overwrite_file",
+                        format!("File '{path}' exists. Overwrite?"),
+                    )
+                    .with_default(Value::Bool(false)),
                 });
             }
         }

@@ -87,7 +87,11 @@ fn test_create_inquiry_schema_boolean() {
 
 #[test]
 fn test_create_inquiry_schema_select() {
-    let question = Question::select("q2", "Choose one").with_options(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
+    let question = Question::select("q2", "Choose one").with_options(vec![
+        "A".to_string(),
+        "B".to_string(),
+        "C".to_string(),
+    ]);
 
     let schema = create_inquiry_schema(&question);
     let props = schema.get("properties").and_then(Value::as_object).unwrap();
@@ -211,7 +215,8 @@ async fn llm_backend_returns_cancelled_when_token_is_already_cancelled() {
 #[tokio::test]
 async fn llm_backend_passes_select_question() {
     let inquiry_id = tool_call_inquiry_id("call_sel", "choose");
-    let question = Question::select("choose", "Pick one").with_options(vec!["A".to_string(), "B".to_string()]);
+    let question =
+        Question::select("choose", "Pick one").with_options(vec!["A".to_string(), "B".to_string()]);
     let config = test_inquiry_config(structured_provider(json!({ "answer": "B" })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 

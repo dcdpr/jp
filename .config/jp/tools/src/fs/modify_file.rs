@@ -428,8 +428,8 @@ fn guard_broad_replacement(
         Some(true) => None,
         Some(false) => Some(fail(reject_message)),
         None => {
-            let mut q = Question::boolean("broad_replacement", text)
-                .with_default(Value::Bool(false));
+            let mut q =
+                Question::boolean("broad_replacement", text).with_default(Value::Bool(false));
             if let Some(p) = pre_amble {
                 q = q.with_preamble(p);
             }
@@ -763,7 +763,10 @@ fn apply_changes<R: ProcessRunner>(
                 }
                 None => {
                     return Ok(Outcome::NeedsInput {
-                        question: Question::boolean("modify_dirty_file", format!("File '{path}' has uncommitted changes. Modify anyway?")),
+                        question: Question::boolean(
+                            "modify_dirty_file",
+                            format!("File '{path}' has uncommitted changes. Modify anyway?"),
+                        ),
                     });
                 }
             }
@@ -809,9 +812,12 @@ fn apply_changes<R: ProcessRunner>(
         }
         None => {
             return Ok(Outcome::NeedsInput {
-                question: Question::boolean("apply_changes", "Do you want to apply the patch shown above?")
-                    .with_preamble(patch)
-                    .with_default(Value::Bool(true)),
+                question: Question::boolean(
+                    "apply_changes",
+                    "Do you want to apply the patch shown above?",
+                )
+                .with_preamble(patch)
+                .with_default(Value::Bool(true)),
             });
         }
     }
