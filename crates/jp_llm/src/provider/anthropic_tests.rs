@@ -934,6 +934,165 @@ fn test_no_injection_when_last_message_is_user() {
     assert_eq!(request.messages.len(), 1); // just the user message
 }
 
+#[test]
+fn test_create_request_resends_signed_thinking_as_native_block() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec!["prefill"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn("First question");
+    events.extend([
+        ConversationEvent::now(ChatResponse::reasoning("internal reasoning"))
+            .with_metadata_field(THINKING_SIGNATURE_KEY, "sig_123"),
+        ConversationEvent::now(ChatResponse::message("Visible answer")),
+    ]);
+    events.start_turn("Follow-up question");
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    assert_eq!(request.messages.len(), 3);
+    let assistant = &request.messages[1];
+    assert_eq!(assistant.role, types::MessageRole::Assistant);
+    assert_eq!(assistant.content.0.len(), 2);
+
+    assert!(matches!(
+        &assistant.content.0[0],
+        types::MessageContent::Thinking(types::Thinking {
+            thinking,
+            signature,
+        }) if thinking == "internal reasoning" && signature.as_deref() == Some("sig_123")
+    ));
+    assert!(matches!(
+        &assistant.content.0[1],
+        types::MessageContent::Text(text) if text.text == "Visible answer"
+    ));
+}
+
+#[test]
+fn test_create_request_resends_redacted_thinking_as_native_block() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec!["prefill"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn("First question");
+    events.extend([
+        ConversationEvent::now(ChatResponse::reasoning(""))
+            .with_metadata_field(REDACTED_THINKING_KEY, "encrypted_payload"),
+        ConversationEvent::now(ChatResponse::message("Visible answer")),
+    ]);
+    events.start_turn("Follow-up question");
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    assert_eq!(request.messages.len(), 3);
+    let assistant = &request.messages[1];
+    assert_eq!(assistant.role, types::MessageRole::Assistant);
+    assert_eq!(assistant.content.0.len(), 2);
+
+    assert!(matches!(
+        &assistant.content.0[0],
+        types::MessageContent::RedactedThinking { data } if data == "encrypted_payload"
+    ));
+    assert!(matches!(
+        &assistant.content.0[1],
+        types::MessageContent::Text(text) if text.text == "Visible answer"
+    ));
+}
+
+#[test]
+fn test_create_request_falls_back_to_think_tags_without_signature() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        features: vec!["prefill"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn("First question");
+    events.extend([
+        ConversationEvent::now(ChatResponse::reasoning("internal reasoning")),
+        ConversationEvent::now(ChatResponse::message("Visible answer")),
+    ]);
+    events.start_turn("Follow-up question");
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    assert_eq!(request.messages.len(), 3);
+    let assistant = &request.messages[1];
+    assert_eq!(assistant.role, types::MessageRole::Assistant);
+    assert_eq!(assistant.content.0.len(), 2);
+
+    assert!(matches!(
+        &assistant.content.0[0],
+        types::MessageContent::Text(text)
+            if text.text == "<think>\ninternal reasoning\n</think>\n\n"
+    ));
+    assert!(matches!(
+        &assistant.content.0[1],
+        types::MessageContent::Text(text) if text.text == "Visible answer"
+    ));
+}
+
 mod transform_schema {
     use serde_json::{Map, Value, json};
 
