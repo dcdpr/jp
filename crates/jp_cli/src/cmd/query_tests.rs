@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{Enable, PartialToolConfig};
 
@@ -29,6 +30,11 @@ fn make_partial_with_tools() -> PartialAppConfig {
 /// Helper to build directives from a list.
 fn directives(ds: Vec<ToolDirective>) -> ToolDirectives {
     ToolDirectives(ds)
+}
+
+fn make_id(secs: u64) -> ConversationId {
+    ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+        .unwrap()
 }
 
 #[test]
@@ -458,4 +464,93 @@ fn test_interleaved_three_step_composition() {
         partial.conversation.tools.tools["explicit_tool"].enable,
         Some(Enable::Off),
     );
+}
+
+fn lock_with_title(
+    workspace: &mut Workspace,
+    id: ConversationId,
+    title: Option<&str>,
+) -> jp_workspace::ConversationLock {
+    let conversation = Conversation {
+        title: title.map(str::to_owned),
+        ..Default::default()
+    };
+    workspace.create_conversation_with_id(id, conversation, Arc::new(AppConfig::new_test()));
+    let handle = workspace.acquire_conversation(&id).unwrap();
+    workspace.test_lock(handle)
+}
+
+#[test]
+fn apply_title_override_no_title_clears_existing_title() {
+    // `--no-title` should clear an inherited title (the
+    // `--fork --no-title` case from PR #600 review): a forked
+    // conversation inherits the source's title via
+    // `fork_conversation`, and `--no-title` is supposed to leave
+    // the run with no title at all.
+    let mut workspace = Workspace::new("/tmp/test");
+    let lock = lock_with_title(&mut workspace, make_id(1000), Some("inherited"));
+
+    apply_title_override(&lock, None, true);
+
+    assert_eq!(lock.metadata().title, None);
+}
+
+#[test]
+fn apply_title_override_no_title_clears_resumed_title() {
+    // `--no-title` is symmetric with `--title T`: both write the
+    // user's intent into `metadata.title`, regardless of whether
+    // the conversation is new, forked, or resumed.
+    let mut workspace = Workspace::new("/tmp/test");
+    let lock = lock_with_title(&mut workspace, make_id(1001), Some("existing"));
+
+    apply_title_override(&lock, None, true);
+
+    assert_eq!(lock.metadata().title, None);
+}
+
+#[test]
+fn apply_title_override_title_overwrites_existing_title() {
+    let mut workspace = Workspace::new("/tmp/test");
+    let lock = lock_with_title(&mut workspace, make_id(1002), Some("old"));
+
+    apply_title_override(&lock, Some("new"), false);
+
+    assert_eq!(lock.metadata().title.as_deref(), Some("new"));
+}
+
+#[test]
+fn apply_title_override_neither_flag_is_noop() {
+    let mut workspace = Workspace::new("/tmp/test");
+    let lock = lock_with_title(&mut workspace, make_id(1003), Some("keep"));
+
+    apply_title_override(&lock, None, false);
+
+    assert_eq!(lock.metadata().title.as_deref(), Some("keep"));
+}
+
+#[test]
+fn no_title_does_not_persist_into_partial_config() {
+    // Regression for the persistence concern in PR #600: routing
+    // `--no-title` through `apply_cli_config` previously wrote
+    // `conversation.title.generate.auto = Some(false)` into the
+    // partial, which would then flow into the conversation's
+    // `config_delta` via `get_config_delta_from_cli` and persist
+    // for every future query on that conversation. The flag is
+    // now strictly invocation-scoped, so the partial must be
+    // untouched relative to a run without the flag.
+    let base = PartialAppConfig::empty();
+
+    let with_flag = Query {
+        no_title: true,
+        ..Default::default()
+    }
+    .apply_cli_config(None, base.clone(), None)
+    .unwrap();
+    let without_flag = Query::default().apply_cli_config(None, base, None).unwrap();
+
+    assert_eq!(
+        with_flag.conversation.title.generate.auto,
+        without_flag.conversation.title.generate.auto,
+    );
+    assert_eq!(with_flag.conversation.title.generate.auto, None);
 }

@@ -260,6 +260,22 @@ pub(crate) struct Query {
     #[arg(long = "tmp", requires = "new")]
     expires_in: Option<Option<humantime::Duration>>,
 
+    /// Set a custom title for the conversation.
+    ///
+    /// Applied to the resolved conversation (new, forked, or resumed) before
+    /// the turn runs. Skips title auto-generation for new conversations —
+    /// your title wins. Mutually exclusive with `--no-title`.
+    #[arg(long = "title", conflicts_with = "no_title")]
+    title: Option<String>,
+
+    /// Disable the title for the conversation.
+    ///
+    /// Clears any existing title on the resolved conversation (new, forked,
+    /// or resumed) and skips auto-generation for this run. Mutually
+    /// exclusive with `--title`.
+    #[arg(long = "no-title", conflicts_with = "title")]
+    no_title: bool,
+
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
@@ -290,6 +306,11 @@ impl Query {
         // 2. --fork/--id/session: resolve an existing conversation, lock it.
         // 3. Lock contention: user picks "new" or "fork" from the prompt.
         let lock = self.acquire_lock(ctx, handle).await?;
+
+        // The two flags are mutually exclusive (enforced by clap), and the
+        // resolved conversation may be new, freshly forked (which clones the
+        // source's metadata, including any title), or resumed.
+        apply_title_override(&lock, self.title.as_deref(), self.no_title);
 
         // Record this conversation as the session's active conversation.
         if let Some(session) = &ctx.session
@@ -351,8 +372,13 @@ impl Query {
         let stream = lock.events().clone();
 
         // Generate title for new or empty conversations (including forks).
+        // Skip when `--title` or `--no-title` was provided (the user already
+        // expressed an intent for the title), or when the resolved config
+        // has auto-generation disabled.
         if (self.is_new() || self.fork.is_some() || stream.is_empty())
             && ctx.term.args.persist
+            && self.title.is_none()
+            && !self.no_title
             && cfg.conversation.title.generate.auto
         {
             debug!("Generating title for new conversation");
@@ -920,6 +946,27 @@ fn fork_conversation(
     })
 }
 
+/// Apply `--title` / `--no-title` to the resolved conversation.
+///
+/// Both flags act on `metadata.title` directly so the run ends with the
+/// title the user asked for, regardless of whether the conversation is new,
+/// freshly forked (which inherits the source's title), or resumed:
+///
+/// - `--title T` sets the title to `Some(T)`.
+/// - `--no-title` clears any existing title.
+/// - Neither flag is a no-op.
+fn apply_title_override(lock: &ConversationLock, title: Option<&str>, no_title: bool) {
+    if let Some(title) = title {
+        lock.as_mut().update_metadata(|m| {
+            m.title = Some(title.to_owned());
+        });
+    } else if no_title {
+        lock.as_mut().update_metadata(|m| {
+            m.title = None;
+        });
+    }
+}
+
 fn get_config_delta_from_cli(
     cfg: &AppConfig,
     lock: &ConversationLock,
@@ -968,6 +1015,8 @@ impl IntoPartialAppConfig for Query {
             expires_in: _,
             target: _,
             fork: _,
+            title: _,
+            no_title: _,
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
