@@ -17,9 +17,6 @@
 //! the stream first or add a new public API method, which is the visible
 //! smell that earlier conventions lacked.
 //!
-//! See also: the `JP refactor` Bear note for the prep-flow unification
-//! follow-up.
-//!
 //! [`ToolCallResponse`]: jp_conversation::event::ToolCallResponse
 use std::collections::HashMap;
 
@@ -110,18 +107,21 @@ pub(crate) struct ExecutionPlan {
     items: Vec<PlanItem>,
 
     /// Tool-call requests that appear in the stream's current turn without a
-    /// matching response AND without a matching entry in `PendingTools`.
-    /// Should be empty in correct operation; a non-empty vec signals a
-    /// contract violation (some path added a `ToolCallRequest` to the stream
-    /// without going through the streaming-phase preparation flow). The
-    /// caller decides what to do — synthesize an error response, log, etc.
-    orphaned: Vec<ToolCallRequest>,
+    /// matching response AND without a matching entry in `PendingTools`,
+    /// paired with the plan index they would have occupied in document
+    /// order. Should be empty in correct operation; a non-empty vec signals
+    /// a contract violation (some path added a `ToolCallRequest` to the
+    /// stream without going through the streaming-phase preparation flow).
+    /// The caller decides what to do — synthesize an error response, log,
+    /// etc. — but MUST preserve the carried index when committing a
+    /// response so stream order is retained.
+    orphaned: Vec<(usize, ToolCallRequest)>,
 }
 
 impl ExecutionPlan {
     /// Decompose the plan into its parts. Consumes the plan; there's no
     /// way to read it twice.
-    pub(crate) fn into_parts(self) -> (Vec<PlanItem>, Vec<ToolCallRequest>) {
+    pub(crate) fn into_parts(self) -> (Vec<PlanItem>, Vec<(usize, ToolCallRequest)>) {
         (self.items, self.orphaned)
     }
 
@@ -177,7 +177,7 @@ pub(crate) fn build_execution_plan(
                 request: request.clone(),
                 work,
             }),
-            None => orphaned.push(request.clone()),
+            None => orphaned.push((index, request.clone())),
         }
     }
 

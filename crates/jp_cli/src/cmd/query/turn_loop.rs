@@ -490,10 +490,9 @@ pub(super) async fn run_turn_loop(
                 // the unified executing path below picks up.
                 //
                 // The streaming and restart prep flows are still two
-                // separate codepaths today (see Bear note: "unify the
-                // streaming and restart tool-prep codepaths"). Both
-                // converge on `pending_tools` and `build_execution_plan`,
-                // which is the load-bearing invariant for this refactor.
+                // separate codepaths today; both converge on
+                // `pending_tools` and `build_execution_plan`, which is the
+                // load-bearing invariant for this refactor.
                 if restart_requested {
                     restart_requested = false;
 
@@ -572,15 +571,14 @@ pub(super) async fn run_turn_loop(
                 // an error response so the conversation stays valid (every
                 // request must have a response before the next provider
                 // call) and surface the inconsistency.
-                for req in orphaned {
+                for (idx, req) in orphaned {
                     warn!(
                         id = %req.id,
                         name = %req.name,
                         "ToolCallRequest in stream without a pending entry; synthesizing error \
                          response.",
                     );
-                    let next_idx = approved.len() + pre_resolved.len();
-                    pre_resolved.push((next_idx, ToolCallResponse {
+                    pre_resolved.push((idx, ToolCallResponse {
                         id: req.id,
                         result: Err(
                             "Tool call had no prepared executor (internal inconsistency).".into(),

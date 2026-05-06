@@ -99,6 +99,44 @@ fn responded_requests_are_skipped() {
     assert_eq!(items[0].index, 0);
 }
 
+/// Orphans interleaved with non-orphan items must keep the plan index
+/// they would have occupied in document order. The downstream
+/// `commit_tool_responses` sorts by that index, so any other choice would
+/// reorder responses relative to their requests in the persisted stream.
+#[test]
+fn orphan_index_matches_stream_position() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("user"));
+    stream
+        .current_turn_mut()
+        .add_tool_call_request(req("a", "tool_a"))
+        .add_tool_call_request(req("orphan", "tool_orphan"))
+        .add_tool_call_request(req("b", "tool_b"))
+        .build()
+        .unwrap();
+
+    let mut pending = PendingTools::new();
+    pending.insert_approved("a".into(), approved_executor("a", "tool_a"));
+    pending.insert_approved("b".into(), approved_executor("b", "tool_b"));
+    // No entry for `orphan` — it falls through to the orphaned vec.
+
+    let plan = build_execution_plan(&stream, &mut pending);
+    let (items, orphaned) = plan.into_parts();
+
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].request.id, "a");
+    assert_eq!(items[0].index, 0);
+    assert_eq!(items[1].request.id, "b");
+    assert_eq!(items[1].index, 2);
+
+    assert_eq!(orphaned.len(), 1);
+    assert_eq!(
+        orphaned[0].0, 1,
+        "orphan must keep its document-order index"
+    );
+    assert_eq!(orphaned[0].1.id, "orphan");
+}
+
 /// A request in the stream without a matching pending entry is reported as
 /// orphaned. In normal operation this should never happen — the streaming
 /// phase always populates pending for every request it adds. Treating it
@@ -121,7 +159,8 @@ fn unmatched_request_is_reported_as_orphaned() {
 
     assert!(items.is_empty());
     assert_eq!(orphaned.len(), 1);
-    assert_eq!(orphaned[0].id, "ghost");
+    assert_eq!(orphaned[0].0, 0);
+    assert_eq!(orphaned[0].1.id, "ghost");
 }
 
 /// The plan walks only the current (most recent) turn. Tool calls from a
