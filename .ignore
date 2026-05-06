@@ -15,6 +15,7 @@
 
 # Then the exclusions (applied within the un-ignored trees)
 .jp/conversations/
+.jp/local-conversations/
 docs/.yarn/
 docs/.vitepress/cache/
 docs/.vitepress/dist/

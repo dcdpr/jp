@@ -27,3 +27,8 @@ This section describes the technical architecture of JP.
   WebAssembly components. Covers the `wasmtime` runtime, WIT contract,
   builtin tools (embedded), local Wasm tools (disk-loaded), and the
   `jp_tool_learn` guest crate.
+
+- [Ubiquitous Language](ubiquitous-language.md) - The canonical glossary of
+  JP's domain vocabulary. Defines the core terms (Workspace, Conversation,
+  Turn, Thread, Attachment, Inquiry, Provider, Backend, etc.) and the
+  distinctions between them.

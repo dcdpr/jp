@@ -89,7 +89,7 @@ const filtered = computed(() => {
 
     if (textQuery) {
         rows = rows.filter(r =>
-            [r.title, r.category, r.status, r.summary]
+            [r.num, r.title, r.category, r.status, r.summary]
                 .some(v => v?.toLowerCase().includes(textQuery))
         )
     }
