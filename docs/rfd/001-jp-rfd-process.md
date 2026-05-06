@@ -138,6 +138,15 @@ reviewing, and iterating without the pressure of a public page. Abandoned
 drafts cost nothing beyond the disk space they occupy. Published RFDs must not
 link to drafts — any such link would fail the docs build.
 
+Drafts cannot be superseded. If a draft is replaced by another in-progress
+draft or by a new RFD before it advances to Discussion, the original draft is
+**deleted**, not superseded. Supersedes-relationships only apply once an RFD
+has been promoted to Accepted or beyond — there is no design to preserve
+before that point. Drafts that the author has decided not to pursue can be
+either deleted (no rationale worth preserving) or abandoned via
+`just rfd-abandon` (rationale worth preserving as a record of the rejected
+idea); the choice is the author's.
+
 ### Discussion
 
 The RFD is complete enough to review. When the author runs `just rfd-promote
@@ -183,7 +192,9 @@ Superseded is distinct from Abandoned: a superseded RFD was accepted and may
 have been partially or fully implemented, but a later design replaced it. An
 abandoned RFD was never accepted or implemented.
 
-An RFD can be superseded from either the Accepted or Implemented state.
+An RFD can be superseded from either the Accepted or Implemented state. Drafts
+cannot be superseded — a draft replaced before promotion is deleted (see
+[Draft](#draft) above).
 
 ### Abandoned
 
