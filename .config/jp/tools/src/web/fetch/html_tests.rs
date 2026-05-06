@@ -599,3 +599,173 @@ mod extract_preview_after_heading {
         assert!(preview.is_empty());
     }
 }
+
+/// Tests covering AsciiDoctor-style horizontal definition lists, as used by
+/// git's manpages on git-scm.com. Fixture is reduced from the actual
+/// `gitglossary` page; each `<dt>` carries three IDs (its own auto-generated
+/// one plus two child `<a id="...">` anchors).
+mod definition_term_sections {
+    use scraper::Html;
+
+    use super::*;
+
+    const GIT_GLOSSARY: &str = r##"
+        <html>
+        <head><title>gitglossary</title></head>
+        <body>
+            <h2 id="_description">DESCRIPTION</h2>
+            <dl class="variablelist">
+                <dt class="hdlist1" id="Documentation/gitglossary.txt-aiddefcleanaclean"><a id="Documentation/gitglossary.txt-clean" class="anchor" href="#Documentation/gitglossary.txt-clean"></a><a id="def_clean"></a>clean </dt>
+                <dd>
+                    <p>A <a href="#def_working_tree">working tree</a> is clean, if it corresponds to the revision referenced by the current head.</p>
+                </dd>
+                <dt class="hdlist1" id="Documentation/gitglossary.txt-aiddefcommitacommit"><a id="Documentation/gitglossary.txt-commit" class="anchor" href="#Documentation/gitglossary.txt-commit"></a><a id="def_commit"></a>commit </dt>
+                <dd>
+                    <p>A single point in the Git history.</p>
+                    <p>Also used as a verb: storing a new snapshot.</p>
+                </dd>
+            </dl>
+            <h2 id="_see_also">SEE ALSO</h2>
+            <p>Other docs.</p>
+        </body>
+        </html>
+    "##;
+
+    #[test]
+    fn list_includes_definition_terms() {
+        let headers = list_section_headers(GIT_GLOSSARY);
+        let ids: Vec<&str> = headers.iter().map(|h| h.id.as_str()).collect();
+
+        assert!(ids.contains(&"_description"));
+        assert!(ids.contains(&"_see_also"));
+        // The dt picks the canonical permalink anchor (first child <a id>),
+        // not the ugly auto-generated id on the <dt> itself.
+        assert!(
+            ids.contains(&"Documentation/gitglossary.txt-clean"),
+            "expected canonical 'clean' anchor in {ids:?}"
+        );
+        assert!(ids.contains(&"Documentation/gitglossary.txt-commit"));
+    }
+
+    #[test]
+    fn definition_term_level_is_below_parent_heading() {
+        let headers = list_section_headers(GIT_GLOSSARY);
+        let clean = headers
+            .iter()
+            .find(|h| h.id == "Documentation/gitglossary.txt-clean")
+            .unwrap();
+        // h2 (level 2) parent → dt is reported at level 3.
+        assert_eq!(clean.level, 3);
+    }
+
+    #[test]
+    fn definition_term_text_is_just_the_term() {
+        let headers = list_section_headers(GIT_GLOSSARY);
+        let clean = headers
+            .iter()
+            .find(|h| h.id == "Documentation/gitglossary.txt-clean")
+            .unwrap();
+        assert_eq!(clean.text, "clean");
+    }
+
+    #[test]
+    fn definition_term_preview_comes_from_dd() {
+        let headers = list_section_headers(GIT_GLOSSARY);
+        let clean = headers
+            .iter()
+            .find(|h| h.id == "Documentation/gitglossary.txt-clean")
+            .unwrap();
+        assert!(
+            clean.preview.starts_with("A working tree is clean"),
+            "unexpected preview: {:?}",
+            clean.preview
+        );
+    }
+
+    #[test]
+    fn one_entry_per_dt_no_duplicates() {
+        let headers = list_section_headers(GIT_GLOSSARY);
+        // Two h2s + two dts = four entries.
+        assert_eq!(headers.len(), 4, "got entries: {headers:?}");
+    }
+
+    #[test]
+    fn extract_via_cross_reference_id_returns_term_only() {
+        let doc = Html::parse_document(GIT_GLOSSARY);
+        let result = extract_section_html_from_doc(&doc, "def_clean").unwrap();
+
+        assert!(result.contains("working tree"), "missing definition body");
+        assert!(
+            !result.contains("single point in the Git history"),
+            "should not bleed into next term: {result}"
+        );
+        assert!(
+            !result.contains("DESCRIPTION"),
+            "should not include parent heading: {result}"
+        );
+        assert!(
+            !result.contains("Other docs"),
+            "should not include sibling section: {result}"
+        );
+    }
+
+    #[test]
+    fn extract_via_dt_own_id_returns_term_only() {
+        let doc = Html::parse_document(GIT_GLOSSARY);
+        let result =
+            extract_section_html_from_doc(&doc, "Documentation/gitglossary.txt-aiddefcleanaclean")
+                .unwrap();
+
+        assert!(result.contains("working tree"));
+        assert!(!result.contains("single point in the Git history"));
+    }
+
+    #[test]
+    fn extract_includes_all_dds_for_multi_paragraph_definitions() {
+        let doc = Html::parse_document(GIT_GLOSSARY);
+        let result = extract_section_html_from_doc(&doc, "def_commit").unwrap();
+
+        assert!(result.contains("single point in the Git history"));
+        assert!(
+            result.contains("Also used as a verb"),
+            "second <dd> should be included: {result}"
+        );
+        assert!(!result.contains("working tree"));
+    }
+
+    #[test]
+    fn extract_anchor_html_resolves_definition_term() {
+        let result = extract_anchor_html(GIT_GLOSSARY, "def_clean").unwrap();
+
+        assert!(result.contains("<title>gitglossary</title>"));
+        assert!(result.contains("working tree"));
+        assert!(!result.contains("single point in the Git history"));
+    }
+
+    #[test]
+    fn inline_anchor_in_paragraph_is_not_a_section() {
+        // Anchors that aren't on a heading or <dt> shouldn't be promoted.
+        let html = r#"
+            <html><body>
+                <h2 id="intro">Intro</h2>
+                <p>See the <a id="footnote-1">footnote</a> for details.</p>
+            </body></html>
+        "#;
+        let headers = list_section_headers(html);
+        let ids: Vec<&str> = headers.iter().map(|h| h.id.as_str()).collect();
+        assert_eq!(ids, vec!["intro"]);
+    }
+
+    #[test]
+    fn dt_without_resolvable_id_is_skipped() {
+        let html = r#"
+            <html><body>
+                <h2 id="intro">Intro</h2>
+                <dl><dt>no anchors here</dt><dd>nope</dd></dl>
+            </body></html>
+        "#;
+        let headers = list_section_headers(html);
+        assert_eq!(headers.len(), 1);
+        assert_eq!(headers[0].id, "intro");
+    }
+}
