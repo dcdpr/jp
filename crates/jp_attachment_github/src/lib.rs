@@ -544,13 +544,10 @@ fn render_reviews(
         // Sort by submission time, with id as a stable tiebreaker.
         sorted.sort_by_key(|r| r.id);
         for r in sorted {
-            let user = if is_pending(r) {
-                "you".to_owned()
-            } else {
-                r.user
-                    .as_ref()
-                    .map_or_else(|| "(unknown)".to_owned(), |u| u.login.clone())
-            };
+            let user = r
+                .user
+                .as_ref()
+                .map_or_else(|| "(unknown)".to_owned(), |u| u.login.clone());
             let state = format_review_state(r);
             let body = r.body.as_deref().map(str::trim).filter(|s| !s.is_empty());
             match body {
@@ -640,13 +637,10 @@ fn render_comment(
     let parent_review = c.pull_request_review_id.and_then(|id| by_review.get(&id));
     let pending = parent_review.is_some_and(|r| is_pending(r));
 
-    let user = if pending {
-        "you".to_owned()
-    } else {
-        c.user
-            .as_ref()
-            .map_or_else(|| "(unknown)".to_owned(), |u| u.login.clone())
-    };
+    let user = c
+        .user
+        .as_ref()
+        .map_or_else(|| "(unknown)".to_owned(), |u| u.login.clone());
 
     let label = match (is_reply, pending, parent_review) {
         (true, true, _) => "reply, pending".to_owned(),
@@ -659,12 +653,13 @@ fn render_comment(
 
     let bullet = if is_reply { "  -" } else { "-" };
     let body_lines: Vec<&str> = c.body.lines().collect();
+    let id = c.id;
 
     if body_lines.len() <= 1 {
         let body = c.body.trim();
-        out.push_str(&format!("{bullet} **{user}** ({label}): {body}\n"));
+        out.push_str(&format!("{bullet} **{user}** ({label}, id={id}): {body}\n"));
     } else {
-        out.push_str(&format!("{bullet} **{user}** ({label}):\n"));
+        out.push_str(&format!("{bullet} **{user}** ({label}, id={id}):\n"));
         let indent = if is_reply { "    > " } else { "  > " };
         for line in &body_lines {
             out.push_str(&format!("{indent}{line}\n"));

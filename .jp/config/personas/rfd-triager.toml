@@ -4,7 +4,7 @@ extends = [
     "../knowledge/software-engineering.toml",
     "../skill/read-files.toml",
     "../skill/git-reading.toml",
-    "../skill/github.toml",
+    "../skill/github-reader.toml",
     "../skill/project-discourse.toml",
     "../skill/web.toml",
 ]
@@ -24,7 +24,7 @@ fs_modify_file = { enable = true, run = "ask" }
 fs_create_file = { enable = true, run = "ask" }
 
 [assistant]
-name = "RFD Feedback Triage"
+name = "RFD Triager"
 
 [assistant.model]
 id = "opus"

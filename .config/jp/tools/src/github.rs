@@ -17,7 +17,7 @@ use create_issue_rfd_tracking::github_create_issue_rfd_tracking;
 use issues::github_issues;
 use pulls::github_pulls;
 use repo::{github_code_search, github_list_files, github_read_file};
-use review::github_pr_review_add_comment;
+use review::{github_pr_review_add_comment, github_pr_review_add_reply};
 
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
@@ -82,6 +82,16 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 t.opt("side")?,
                 t.opt("start_line")?,
                 t.opt("start_side")?,
+            )
+            .await
+        }
+
+        "pr_review_add_reply" => {
+            github_pr_review_add_reply(
+                ctx,
+                t.req("pull_number")?,
+                t.req("comment_id")?,
+                t.req("body")?,
             )
             .await
         }

@@ -1,6 +1,6 @@
 use base64::{Engine as _, prelude::BASE64_STANDARD};
 use indoc::formatdoc;
-use jp_github::models::pulls::{DraftReviewComment, ReviewState, Side};
+use jp_github::models::pulls::{DraftReviewComment, ReviewComment, ReviewState, Side};
 use jp_md::format::Formatter;
 
 use super::auth;
@@ -306,6 +306,120 @@ fn extract_window(content: &str, line: u64, start_line: Option<u64>) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+pub(crate) async fn github_pr_review_add_reply(
+    ctx: Context,
+    pull_number: u64,
+    comment_id: u64,
+    body: String,
+) -> ToolResult {
+    if ctx.action.is_format_arguments() {
+        return Ok(format_reply_for_approval(pull_number, comment_id, &body)
+            .await
+            .into());
+    }
+
+    auth().await?;
+
+    if body.trim().is_empty() {
+        return error("`body` must not be empty");
+    }
+
+    let review_node_id = ensure_pending_review(pull_number).await?;
+    let thread_node_id = jp_github::instance()
+        .pulls(ORG, REPO)
+        .fetch_thread_id_for_comment(pull_number, comment_id)
+        .await
+        .map_err(|e| {
+            handle_404(
+                e,
+                format!("Comment id={comment_id} not found on pull #{pull_number}"),
+            )
+        })?;
+
+    jp_github::instance()
+        .pulls(ORG, REPO)
+        .add_review_thread_reply(&thread_node_id, &review_node_id, &body)
+        .await
+        .map_err(|e| handle_404(e, format!("Pull #{pull_number} not found in {ORG}/{REPO}")))?;
+
+    Ok(format!("Reply queued on PR #{pull_number} (in reply to comment id={comment_id}).").into())
+}
+
+async fn format_reply_for_approval(pull_number: u64, comment_id: u64, body: &str) -> String {
+    // Re-fetch the parent comment instead of trusting whatever the LLM
+    // saw via the attachment: the user is approving the post, the bot
+    // saw a snapshot, and the human deserves a fresh view of what's
+    // actually being replied to.
+    match fetch_parent_comment(pull_number, comment_id).await {
+        Ok(parent) => {
+            let author = parent
+                .user
+                .as_ref()
+                .map_or("(unknown)", |u| u.login.as_str());
+            let location = format_parent_location(&parent);
+            let parent_quoted = parent
+                .body
+                .lines()
+                .map(|l| format!("> {l}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let parent_rendered = Formatter::new()
+                .format_terminal(&parent_quoted)
+                .unwrap_or(parent_quoted);
+            let body_rendered = Formatter::new()
+                .format_terminal(body)
+                .unwrap_or_else(|_| body.to_owned());
+
+            formatdoc!(
+                "
+                PR #{pull_number} \u{2014} replying to {author} on {location}
+
+                {parent_rendered}
+
+                {body_rendered}
+                "
+            )
+        }
+        Err(e) => {
+            // Fail soft: still surface the proposed body so the user can
+            // approve or reject. Naming the failure helps them spot a
+            // stale `comment_id` before posting.
+            let body_rendered = Formatter::new()
+                .format_terminal(body)
+                .unwrap_or_else(|_| body.to_owned());
+            formatdoc!(
+                "
+                PR #{pull_number} \u{2014} replying to comment id={comment_id} (parent preview \
+                 unavailable: {e})
+
+                {body_rendered}
+                "
+            )
+        }
+    }
+}
+
+async fn fetch_parent_comment(pull_number: u64, comment_id: u64) -> Result<ReviewComment> {
+    auth().await?;
+    let comments = jp_github::instance()
+        .pulls(ORG, REPO)
+        .fetch_review_comments(pull_number)
+        .await?;
+    comments
+        .into_iter()
+        .find(|c| c.id == comment_id)
+        .ok_or_else(|| format!("comment id={comment_id} not found on pull #{pull_number}").into())
+}
+
+fn format_parent_location(c: &ReviewComment) -> String {
+    let line = c.line.or(c.original_line).unwrap_or(0);
+    let side = c.side.or(c.original_side).map_or("RIGHT", |s| match s {
+        Side::Right => "RIGHT",
+        Side::Left => "LEFT",
+    });
+    format!("{}:{line} ({side})", c.path)
 }
 
 #[cfg(test)]
