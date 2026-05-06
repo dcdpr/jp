@@ -1,0 +1,82 @@
+[conversation.tools.github_pr_review_add_reply]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+# Render the call ahead of the approval prompt: the user sees the parent
+# comment + proposed reply before deciding whether to post. The formatter
+# is read-only (re-fetches the parent via GraphQL), so this is safe.
+format = "unattended"
+summary = "Append one reply to an existing inline review comment thread on a pull request."
+description = """
+Adds a reply to an existing review-comment thread on the PR. The reply is
+attached to the authenticated user's pending (PENDING) review via GraphQL
+`addPullRequestReviewThreadReply`, so it stays a draft alongside any
+queued top-level comments. If no pending review exists yet, an empty one
+is created on the first call. The review remains in `PENDING` state until
+the user submits it via the GitHub UI.
+
+Use this when triaging existing review comments and you want to record a
+verdict, ask a clarifying question, or note how a comment was addressed —
+without making the reply visible to other readers of the PR yet.
+
+Anchoring rules:
+- `comment_id`: the GitHub REST integer ID of the comment you are
+  replying to. The `gh:pull/N/reviews` attachment surfaces this id next
+  to each comment as `id=<n>`. Pass the id of the specific comment in
+  the thread you want to reply to; GitHub flattens replies into the
+  thread regardless of which comment in the thread you target.
+- `body`: rendered as GitHub-flavored Markdown.
+
+Each call queues exactly one reply. To reply to several threads, call
+this tool repeatedly. The order of calls matches the order the replies
+appear in the GitHub UI within their respective threads.
+"""
+
+examples = """
+A short reply confirming a verdict:
+```json
+{
+  "pull_number": 42,
+  "comment_id": 2371234567,
+  "body": "Good catch — switching to a guard struct in the next push."
+}
+```
+
+A reply pushing back on a review comment:
+```json
+{
+  "pull_number": 42,
+  "comment_id": 2371234567,
+  "body": "I disagree: this `unwrap` is reachable only after `init`, which is enforced by the type system. See `Builder::build` for the invariant."
+}
+```
+"""
+
+# Each reply is added one at a time and requires explicit user approval.
+# The custom parameter formatter (the tool itself, in FormatArguments mode)
+# re-fetches the parent comment so the user can verify what is being
+# replied to before the reply is posted.
+[conversation.tools.github_pr_review_add_reply.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "off"
+results_file_link = "off"
+
+[conversation.tools.github_pr_review_add_reply.parameters.pull_number]
+type = "integer"
+required = true
+summary = "The pull request number containing the thread."
+
+[conversation.tools.github_pr_review_add_reply.parameters.comment_id]
+type = "integer"
+required = true
+summary = "GitHub REST integer ID of the comment to reply to."
+description = """
+Surfaced in the `gh:pull/N/reviews` attachment as `id=<n>` on each comment
+line. GitHub flattens replies into the thread, so any comment id from the
+target thread works — pick the one you're directly responding to.
+"""
+
+[conversation.tools.github_pr_review_add_reply.parameters.body]
+type = "string"
+required = true
+summary = "Reply text. Rendered as GitHub-flavored Markdown."

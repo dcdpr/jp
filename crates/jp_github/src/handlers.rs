@@ -488,6 +488,141 @@ impl PullsHandler {
 
         Ok(())
     }
+
+    /// Find the GraphQL thread node ID of the thread containing the given
+    /// REST comment ID.
+    ///
+    /// GitHub exposes review-thread anchors only via GraphQL; the REST
+    /// API knows about individual comments but not the threads they
+    /// belong to. The reply mutation
+    /// (`addPullRequestReviewThreadReply`) needs the thread's node ID,
+    /// not the comment's database ID, so we walk all threads and match
+    /// on `fullDatabaseId`.
+    ///
+    /// Caps at the first 100 threads, each with up to 100 comments. The
+    /// same shape as `fetch_review_comments`; pagination can be added
+    /// later if PRs in the wild blow past those limits.
+    pub async fn fetch_thread_id_for_comment(
+        &self,
+        pull_number: u64,
+        comment_id: u64,
+    ) -> Result<String> {
+        let query = indoc::indoc! {"
+            query Threads($owner: String!, $name: String!, $number: Int!) {
+              repository(owner: $owner, name: $name) {
+                pullRequest(number: $number) {
+                  reviewThreads(first: 100) {
+                    nodes {
+                      id
+                      comments(first: 100) {
+                        nodes { fullDatabaseId }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+        "};
+
+        let body = serde_json::json!({
+            "query": query,
+            "variables": {
+                "owner": self.owner,
+                "name": self.repo,
+                "number": pull_number,
+            },
+        });
+
+        let response: Value = self.client.graphql(&body).await?;
+        let threads = response
+            .pointer("/data/repository/pullRequest/reviewThreads/nodes")
+            .and_then(|v| v.as_array());
+
+        for thread in threads.into_iter().flatten() {
+            let thread_id = thread.get("id").and_then(Value::as_str);
+            let comments = thread.pointer("/comments/nodes").and_then(|v| v.as_array());
+            for comment in comments.into_iter().flatten() {
+                let id = parse_full_database_id(comment.get("fullDatabaseId"));
+                if id == Some(comment_id)
+                    && let Some(tid) = thread_id
+                {
+                    return Ok(tid.to_owned());
+                }
+            }
+        }
+
+        Err(Error::GitHub {
+            source: GitHubError {
+                status_code: StatusCode::new(404),
+                message: format!(
+                    "comment id={comment_id} not found among the review threads of pull \
+                     #{pull_number}"
+                ),
+            },
+            body: None,
+        })
+    }
+
+    /// Append a reply to an existing review thread, attached to the
+    /// caller's pending review so the reply stays in `PENDING` state
+    /// until the review is submitted from the GitHub UI.
+    ///
+    /// `thread_node_id` is the thread's GraphQL node ID (as returned by
+    /// [`Self::fetch_thread_id_for_comment`]). `review_node_id` is the
+    /// node ID of a pending review by the authenticated user; create one
+    /// via [`Self::create_review`] if none exists yet.
+    pub async fn add_review_thread_reply(
+        &self,
+        thread_node_id: &str,
+        review_node_id: &str,
+        body: &str,
+    ) -> Result<()> {
+        let query = indoc::indoc! {"
+            mutation AddReply($input: AddPullRequestReviewThreadReplyInput!) {
+              addPullRequestReviewThreadReply(input: $input) {
+                comment { id }
+              }
+            }
+        "};
+
+        let mut input = serde_json::Map::new();
+        input.insert(
+            "pullRequestReviewThreadId".to_owned(),
+            Value::String(thread_node_id.to_owned()),
+        );
+        input.insert(
+            "pullRequestReviewId".to_owned(),
+            Value::String(review_node_id.to_owned()),
+        );
+        input.insert("body".to_owned(), Value::String(body.to_owned()));
+
+        let payload = serde_json::json!({
+            "query": query,
+            "variables": { "input": Value::Object(input) },
+        });
+
+        let response: Value = self.client.graphql(&payload).await?;
+        if let Some(errors) = response.get("errors")
+            && !errors.is_null()
+        {
+            let message = errors
+                .as_array()
+                .and_then(|arr| arr.first())
+                .and_then(|e| e.get("message"))
+                .and_then(Value::as_str)
+                .unwrap_or("unknown GraphQL error");
+
+            return Err(Error::GitHub {
+                source: GitHubError {
+                    status_code: StatusCode::new(200),
+                    message: format!("addPullRequestReviewThreadReply: {message}"),
+                },
+                body: Some(errors.to_string()),
+            });
+        }
+
+        Ok(())
+    }
 }
 
 const fn side_to_str(side: models::pulls::Side) -> &'static str {

@@ -195,7 +195,7 @@ pr-review NNN *ARGS: _install-jp
 
     # Look up an existing active conversation with this exact title.
     existing=$(jp -F json conversation ls 2>/dev/null \
-        | jq -r --arg t "$title" 'first(.[] | select(.title == $t) | .id) // empty' \
+        | jq -r --arg t "$title" 'first(.[] | select(.Title == $t) | .ID) // empty' \
         2>/dev/null \
         || true)
 
@@ -237,6 +237,76 @@ pr-review NNN *ARGS: _install-jp
     fi
     printf "\nDraft review staged on https://github.com/dcdpr/jp/pull/{{NNN}}/files — open the page and submit it when ready.\n" >&2
 
+# Triage a GitHub pull request's reviews. Reads the PR's diff and every
+# review/comment from the attached `gh:pull/N/reviews` resource, then
+# produces a per-item verdict (accept / amend / dismiss / defer) with
+# reasoning grounded in the code.
+#
+# The triager does not edit code in this turn. To act on the verdicts,
+# follow up in the same conversation with a dev persona, e.g.
+# `jp q --id <id> --cfg=personas/dev "implement the proposed changes"`.
+#
+# Reuse the same `pr-triage:NNN` conversation across multiple review
+# cycles so the codebase context doesn't have to be rediscovered each
+# round. To start over, archive the existing conversation
+# (`jp conversation rm <id>`) and re-run.
+[group('jp')]
+[positional-arguments]
+pr-triage NNN *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    case "{{NNN}}" in
+        ''|*[!0-9]*)
+            echo "Invalid PR number '{{NNN}}'. Pass a positive integer." >&2
+            exit 1 ;;
+    esac
+
+    shift # remove NNN from positional params
+    args="$@"
+    msg="Triage the reviews on GitHub pull request #{{NNN}} in dcdpr/jp. \
+    For each review comment, write one numbered item containing: the \
+    comment's \`id=<n>\` from the attached reviews, a short quote of \
+    the reviewer's point, a verdict (\`Accept\`, \`Amend\`, \`Dismiss\`, \
+    or \`Defer\`) with reasoning grounded in the actual code, and (when \
+    accepting or amending) the concrete change you would make. Do NOT \
+    edit any files and do NOT post replies yet — output the triage as \
+    plain markdown only."
+
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
+        args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
+    elif [ -z "$args" ]; then
+        args="$msg"
+    fi
+
+    title="pr-triage:{{NNN}}"
+
+    # Look up an existing active conversation with this exact title;
+    # resume it if found, otherwise create a fresh one.
+    existing=$(jp -F json conversation ls 2>/dev/null \
+        | jq -r --arg t "$title" 'first(.[] | select(.Title == $t) | .ID) // empty' \
+        2>/dev/null \
+        || true)
+
+    if [ -n "$existing" ]; then
+        printf "Resuming triage on PR #{{NNN}} (%s)\n\n" "$existing" >&2
+        jp query --id "$existing" --cfg=personas/pr-triager \
+            --attach "gh:pull/{{NNN}}/diff" \
+            --attach "gh:pull/{{NNN}}/reviews" \
+            $args
+    else
+        printf "Triaging PR #{{NNN}}\n\n" >&2
+        jp query --new --title "$title" --cfg=personas/pr-triager \
+            --attach "gh:pull/{{NNN}}/diff" \
+            --attach "gh:pull/{{NNN}}/reviews" \
+            $args
+    fi
+
 # Review an RFD. Accepts a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
 [positional-arguments]
@@ -246,7 +316,11 @@ rfd-review NNN *ARGS: _install-jp
 
     shift # remove NNN from positional params
     args="$@"
-    msg="Please review the attached RFD"
+    msg="Please review the attached RFD. Review the RFD in isolation, \
+    including its explicit dependencies, or any implicit dependencies, but \
+    keep in mind that Draft RFDs are still in the design phase, and Discussion \
+    RFDs are aspirational, but not necessarily final, so any inconsistencies \
+    against those should be noted, but not blockers."
 
     arg="{{NNN}}"
     if echo "$arg" | grep -qiE '^D[0-9]+$'; then
@@ -477,8 +551,9 @@ rfd-extend NNN MMM:
 # Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
 #
 # For drafts (DNN-prefixed files), assigns the next available permanent number
-# and renames the file. When promoting to Accepted, creates a GitHub tracking
-# issue via `jp` and injects the link into the metadata.
+# and renames the file. When promoting to Accepted, offers to create a GitHub
+# tracking issue via `jp` (prompting on TTY, defaulting to yes in
+# non-interactive runs) and injects the link into the metadata.
 #
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
@@ -522,6 +597,7 @@ rfd-promote NNN: _install-jp
     # --- Draft -> Discussion: assign permanent number, rename file ---
     if [ "$current" = "Draft" ]; then
         basename_f=$(basename "$file")
+        old_draft_id=$(echo "$basename_f" | sed 's/^\(D[0-9]*\)-.*/\1/')
         slug=$(echo "$basename_f" | sed 's/^[A-Z]*[0-9]*-//; s/\.md$//')
 
         # Assign next available permanent number.
@@ -538,7 +614,8 @@ rfd-promote NNN: _install-jp
             next_num=$((next_num + 1))
         done
         num=$(printf "%03d" "$next_num")
-        new_file="docs/rfd/${num}-${slug}.md"
+        new_basename="${num}-${slug}.md"
+        new_file="docs/rfd/${new_basename}"
 
         # Rewrite heading and status.
         sed \
@@ -547,44 +624,92 @@ rfd-promote NNN: _install-jp
             "$file" > "$new_file"
         rm "$file"
 
+        # Update cross-references in other RFDs: replace `RFD DNN` with
+        # `RFD NNN` in prose, and `DNN-slug.md` with the correct relative
+        # path to `NNN-slug.md` in link targets. Drafts under `drafts/`
+        # need a `../` prefix because the promoted file moved up a
+        # directory.
+        updated=0
+        for other in docs/rfd/*.md docs/rfd/drafts/*.md; do
+            [ -f "$other" ] || continue
+            [ "$other" = "$new_file" ] && continue
+            if ! grep -q -e "RFD ${old_draft_id}" -e "${basename_f}" "$other"; then
+                continue
+            fi
+            if [ "$(dirname "$other")" = "docs/rfd/drafts" ]; then
+                link_replacement="../${new_basename}"
+            else
+                link_replacement="${new_basename}"
+            fi
+            sed \
+                -e "s|RFD ${old_draft_id}|RFD ${num}|g" \
+                -e "s|${basename_f}|${link_replacement}|g" \
+                "$other" > "${other}.tmp"
+            mv "${other}.tmp" "$other"
+            echo "  updated ${old_draft_id} -> ${num} references in ${other}"
+            updated=$((updated + 1))
+        done
+
         echo "${new_file}: Draft -> Discussion (assigned ${num})"
+        if [ "$updated" -gt 0 ]; then
+            echo "Updated ${updated} cross-reference(s) in other RFDs."
+        fi
 
     # --- Discussion -> Accepted: create tracking issue via jp ---
     elif [ "$current" = "Discussion" ]; then
         sed "s/^- \*\*Status\*\*: Discussion/- **Status**: Accepted/" "$file" > "${file}.tmp"
         mv "${file}.tmp" "$file"
 
-        # Create tracking issue using jp + structured output.
-        SCHEMA='{"type":"object","properties":{"number":{"type":"integer","description":"GitHub issue number"},"url":{"type":"string","description":"GitHub issue URL"}},"required":["number","url"]}'
-        PROMPT="Read the attached RFD. Create a tracking issue for it by calling the github_create_issue_rfd_tracking tool. Return the issue number and url."
-        TOOL_CFG='conversation.tools.github_create_issue_rfd_tracking:={"enable":true,"run":"unattended"}'
+        # Decide whether to create a tracking issue. When a TTY is
+        # attached, ask the caller so they can skip issue creation. In
+        # non-interactive runs (e.g. CI), default to creating one to
+        # preserve prior behaviour.
+        create_issue=true
+        if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+            printf "Create GitHub tracking issue for %s? [Y/n] " "$(basename "$file")" > /dev/tty
+            if IFS= read -r answer < /dev/tty; then
+                case "$answer" in
+                    n|N|no|No|NO) create_issue=false ;;
+                esac
+            fi
+        fi
 
-        result=$(
-            jp query --new --local --tmp=5m --format=json --no-reasoning \
-                -c "$TOOL_CFG" \
-                --schema "$SCHEMA" \
-                --attachment "$file" \
-                "$PROMPT" \
-            | jq -s '.[-1]' 2>/dev/null
-        ) || true
+        if [ "$create_issue" = true ]; then
+            # Create tracking issue using jp + structured output.
+            SCHEMA='{"type":"object","properties":{"number":{"type":"integer","description":"GitHub issue number"},"url":{"type":"string","description":"GitHub issue URL"}},"required":["number","url"]}'
+            PROMPT="Read the attached RFD. Create a tracking issue for it by calling the github_create_issue_rfd_tracking tool. Return the issue number and url."
+            TOOL_CFG='conversation.tools.github_create_issue_rfd_tracking:={"enable":true,"run":"unattended"}'
 
-        issue_num=$(echo "$result" | jq -r '.number // empty' 2>/dev/null || true)
-        issue_url=$(echo "$result" | jq -r '.url // empty' 2>/dev/null || true)
+            result=$(
+                jp query --new --local --tmp=5m --format=json --no-reasoning \
+                    -c "$TOOL_CFG" \
+                    --schema "$SCHEMA" \
+                    --attachment "$file" \
+                    "$PROMPT" \
+                | jq -s '.[-1]' 2>/dev/null
+            ) || true
 
-        if [ -n "$issue_num" ] && [ -n "$issue_url" ]; then
-            first_heading=$(grep -n '^## ' "$file" | head -1 | cut -d: -f1)
-            last_meta=$(head -n "${first_heading:-9999}" "$file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
-            awk -v ln="$last_meta" -v ti="- **Tracking Issue**: [#${issue_num}](${issue_url})" '
-                NR == ln { print; print ti; next }
-                { print }
-            ' "$file" > "${file}.tmp"
-            mv "${file}.tmp" "$file"
-            echo "${file}: Discussion -> Accepted"
-            echo "Tracking issue: #${issue_num} (${issue_url})"
+            issue_num=$(echo "$result" | jq -r '.number // empty' 2>/dev/null || true)
+            issue_url=$(echo "$result" | jq -r '.url // empty' 2>/dev/null || true)
+
+            if [ -n "$issue_num" ] && [ -n "$issue_url" ]; then
+                first_heading=$(grep -n '^## ' "$file" | head -1 | cut -d: -f1)
+                last_meta=$(head -n "${first_heading:-9999}" "$file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
+                awk -v ln="$last_meta" -v ti="- **Tracking Issue**: [#${issue_num}](${issue_url})" '
+                    NR == ln { print; print ti; next }
+                    { print }
+                ' "$file" > "${file}.tmp"
+                mv "${file}.tmp" "$file"
+                echo "${file}: Discussion -> Accepted"
+                echo "Tracking issue: #${issue_num} (${issue_url})"
+            else
+                echo "${file}: Discussion -> Accepted"
+                echo "Warning: tracking issue creation failed or was skipped." >&2
+                echo "Create one manually and add '- **Tracking Issue**: #NNN' to the metadata." >&2
+            fi
         else
             echo "${file}: Discussion -> Accepted"
-            echo "Warning: tracking issue creation failed or was skipped." >&2
-            echo "Create one manually and add '- **Tracking Issue**: #NNN' to the metadata." >&2
+            echo "Skipped tracking issue creation. Add one manually if needed." >&2
         fi
 
     # --- Accepted -> Implemented ---

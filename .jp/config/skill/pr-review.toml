@@ -3,17 +3,24 @@ tag = "pr_review_skill"
 title = "Skill: Pull Request Review"
 content = """\
 You have been given the pull request review skill. You can now propose inline review comments \
-on a GitHub pull request, queued in a draft (PENDING) review until the user submits it from the \
-GitHub UI.
+and thread replies on a GitHub pull request, queued on your pending (PENDING) review until you \
+submit it from the GitHub UI.
 
 The following tools help you with this:
 
 - github_pr_review_add_comment: Append a single inline comment to your draft review on a pull \
-request.
+request. Use this to start a new thread on a specific line.
+- github_pr_review_add_reply: Append a single reply to an existing inline review-comment \
+thread. Use this to respond to comments left by other reviewers (e.g. to record a triage \
+verdict, ask a clarifying question, or note how a comment was addressed). The reply stays in \
+`PENDING` state alongside any queued top-level comments.
 
 This skill pairs naturally with the github-reader skill (for code lookup) and with the \
-`gh:pull/N/diff` and `gh:pull/N/reviews` attachments (for the PR's diff and existing comments).
+`gh:pull/N/diff` and `gh:pull/N/reviews` attachments (for the PR's diff and existing comments). \
+The reviews attachment surfaces each comment's GitHub id as `id=<n>`; pass that to \
+`github_pr_review_add_reply` as `comment_id`.
 """
 
 [conversation.tools]
 github_pr_review_add_comment = { enable = false, style.inline_results = "off", style.results_file_link = "off" }
+github_pr_review_add_reply = { enable = false, style.inline_results = "off", style.results_file_link = "off" }

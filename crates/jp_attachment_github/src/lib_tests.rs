@@ -168,14 +168,18 @@ fn renders_review_summaries_with_state_labels() {
 }
 
 #[test]
-fn renders_pending_reviews_as_yours() {
+fn renders_pending_reviews_with_login() {
     let uri = url("gh:pull/42/reviews");
     let reviews = vec![review(9, "someone", ReviewState::Pending, None)];
     let out = render_reviews(&uri, 42, &reviews, &[], 0);
     assert!(out.contains("1 pending (yours)"), "header in:\n{out}");
     assert!(
-        out.contains("**you** (pending)"),
-        "pending review attributed to user, not 'you':\n{out}"
+        out.contains("**someone** (pending)"),
+        "pending review must show the author's login, not 'you':\n{out}"
+    );
+    assert!(
+        !out.contains("**you**"),
+        "the bare 'you' pronoun is misleading once a different model triages the same PR:\n{out}"
     );
 }
 
@@ -271,13 +275,17 @@ fn renders_replies_nested_under_parent() {
         "original should appear before reply:\n{out}"
     );
     assert!(
-        out.contains("  - **bob** (reply"),
-        "reply should be indented under bob's reply bullet:\n{out}"
+        out.contains("- **alice** (submitted, comment, id=100): original"),
+        "top-level comment should expose its id:\n{out}"
+    );
+    assert!(
+        out.contains("  - **bob** (reply, submitted, comment, id=101): reply"),
+        "reply should be indented under its own bullet and expose its id:\n{out}"
     );
 }
 
 #[test]
-fn renders_pending_inline_comment_as_yours() {
+fn renders_pending_inline_comment_with_login_and_id() {
     let uri = url("gh:pull/42/reviews");
     let reviews = vec![review(7, "someone", ReviewState::Pending, None)];
     let comments = vec![comment(
@@ -295,10 +303,9 @@ fn renders_pending_inline_comment_as_yours() {
 
     let out = render_reviews(&uri, 42, &reviews, &comments, 0);
     assert!(
-        out.contains("**you** (pending)"),
-        "pending inline should label author as 'you':\n{out}"
+        out.contains("**someone** (pending, id=200): draft thought"),
+        "pending inline should label author by login and surface the comment id:\n{out}"
     );
-    assert!(out.contains("draft thought"));
 }
 
 #[test]
