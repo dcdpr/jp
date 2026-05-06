@@ -13,6 +13,9 @@ Fetch a single note by its unique identifier:
 ```sh
 # You can copy the note ID using <kbd>⌥⇧⌘I</kbd>
 jp attachment add "bear://get/2356A6D7-49D7-4818-8E37-3E02D1B95146"
+
+# Shorthand for the same:
+jp attachment add "bear:2356A6D7-49D7-4818-8E37-3E02D1B95146"
 ```
 
 Fetch a list of notes based on a search query:
