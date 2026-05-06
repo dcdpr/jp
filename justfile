@@ -354,6 +354,76 @@ rfd-review NNN *ARGS: _install-jp
     printf "Reviewing $file\n\n" >&2
     jp query --attach "$file" --new --cfg=personas/rfd-reviewer $args
 
+# Triage feedback on an RFD from a reviewer conversation.
+#
+# NNN is the RFD (permanent number like 41/041, or draft ID like D01).
+# MODE is either `new` (start a fresh triage conversation) or `continue`
+# (append to the current session, e.g. to follow up on the implementation
+# conversation that produced the RFD).
+# CONVO is the conversation ID of the `rfd-review` run to pull feedback from.
+# Only the final assistant response of that conversation is attached.
+[group('rfd')]
+[positional-arguments]
+rfd-triage NNN MODE CONVO *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    shift 3 # remove NNN, MODE, CONVO from positional params
+    args="$@"
+    msg="I received feedback on the RFD. Read the attached reviewer response \
+    carefully, then triage it item by item. Ground each point against the code \
+    and related RFDs. Do not assume the feedback is correct. For each item \
+    give a verdict (accept / amend / dismiss / defer) with reasoning, and for \
+    accepted or amended items describe the concrete change you would make to \
+    the RFD. Do NOT edit the RFD yet; give your opinion first."
+
+    # Resolve the target RFD file.
+    arg="{{NNN}}"
+    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
+        draft_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
+        file=$(ls docs/rfd/drafts/${draft_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No draft RFD found with ID ${draft_id}." >&2; exit 1
+        fi
+    elif echo "$arg" | grep -qE '^[0-9]+$'; then
+        n=$(echo "$arg" | sed 's/^0*//')
+        num=$(printf "%03d" "${n:-0}")
+        file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No RFD found with number ${num}." >&2; exit 1
+        fi
+    else
+        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
+    fi
+
+    # Resolve MODE. Explicit to avoid silently picking a default.
+    case "{{MODE}}" in
+        new)      new_flag="--new" ;;
+        continue) new_flag="" ;;
+        *)
+            echo "Invalid MODE '{{MODE}}'. Use 'new' or 'continue'." >&2
+            exit 1 ;;
+    esac
+
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
+        args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
+    elif [ -z "$args" ]; then
+        args="$msg"
+    fi
+
+    printf "Triaging feedback on $file (mode: {{MODE}})\n\n" >&2
+    jp query \
+        --attach "file://$file" \
+        --attach "jp://{{CONVO}}?select=a" \
+        $new_flag \
+        --cfg=personas/rfd-triager \
+        $args
+
 # Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
 # Drafts are created as docs/rfd/drafts/DNN-slug.md; a permanent number is assigned
 # and the file is moved up to docs/rfd/ at Discussion.
