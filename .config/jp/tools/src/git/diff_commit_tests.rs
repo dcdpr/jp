@@ -205,7 +205,11 @@ fn diff_commit_with_pattern() {
 
     assert!(content.contains("```diff\n"));
     assert!(content.contains("world"));
-    assert!(content.ends_with("\n```"));
+    // The closing diff fence is followed by the `[Showing ...]` note,
+    // so we check that both the fence and the note are present rather
+    // than that the output ends with the fence.
+    assert!(content.contains("\n```\n"), "got: {content}");
+    assert!(content.contains("[Showing"), "got: {content}");
 }
 
 #[test]

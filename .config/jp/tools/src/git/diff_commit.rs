@@ -65,10 +65,10 @@ fn git_diff_commit_impl<R: ProcessRunner>(
     };
 
     let mut result = String::new();
-    if let Some(note) = note {
-        writeln!(result, "{note}\n")?;
-    }
     write!(result, "```diff\n{}\n```", content.trim_end())?;
+    if let Some(note) = note {
+        writeln!(result, "\n\n{note}\n")?;
+    }
     Ok(result.into())
 }
 
