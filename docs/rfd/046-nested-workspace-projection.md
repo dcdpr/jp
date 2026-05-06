@@ -366,13 +366,13 @@ Depends on Phase A. Can be merged alongside Phase B.
   conversation locks, and session identity.
 - [RFD 031: Durable Conversation Storage][RFD 031] — dual-write persistence,
   mtime-based sync, and projection model.
-- [RFD 038: Config Inheritance][RFD 038] — `--inherit` flag used by child
+- [RFD 038: Config Reset Keywords][RFD 038] — `--inherit` flag used by child
   conversations for config resolution.
 - [RFD 039: Conversation Trees][RFD 039] — base design that this RFD extends.
   Defines the tree model, user-facing features, and workspace API.
 
 [RFD 020]: 020-parallel-conversations.md
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
-[RFD 038]: 038-config-inheritance-for-conversations.md
+[RFD 038]: 038-config-reset-keywords.md
 [RFD 039]: 039-conversation-trees.md
 [RFD 040]: 040-hidden-conversations-and-tool-context.md

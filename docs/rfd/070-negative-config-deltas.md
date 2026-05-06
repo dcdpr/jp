@@ -783,6 +783,6 @@ Depends on Phase 3.
 
 [RFD 008]: 008-ordered-tool-directives.md
 [RFD 035]: 035-multi-root-config-load-path-resolution.md
-[RFD 038]: 038-config-inheritance-for-conversations.md
+[RFD 038]: 038-config-reset-keywords.md
 [RFD 054]: 054-split-conversation-config-and-events.md
 [RFD 060]: 060-config-explain.md

@@ -545,7 +545,7 @@ Depends on Phase 1.
   conversation locks, and session identity.
 - [RFD 031: Durable Conversation Storage][RFD 031] — dual-write persistence,
   mtime-based sync, and projection model.
-- [RFD 038: Config Inheritance][RFD 038] — `--inherit` flag used by child
+- [RFD 038: Config Reset Keywords][RFD 038] — `--inherit` flag used by child
   conversations for config resolution.
 - `crates/jp_workspace/src/lib.rs` — current workspace implementation.
 - `crates/jp_storage/src/lib.rs` — current storage implementation.
@@ -556,5 +556,5 @@ Depends on Phase 1.
 
 [RFD 020]: 020-parallel-conversations.md
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
-[RFD 038]: 038-config-inheritance-for-conversations.md
+[RFD 038]: 038-config-reset-keywords.md
 [RFD 040]: 040-hidden-conversations-and-tool-context.md
