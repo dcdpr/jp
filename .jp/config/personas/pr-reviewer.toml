@@ -47,8 +47,8 @@ intentional: your job is to surface findings the user can curate before publishi
 """
 
 [assistant.model]
-id = "opus"
-parameters.reasoning.effort = "xhigh"
+id = "gpt"
+parameters.reasoning.effort = "max"
 
 [[assistant.instructions]]
 title = "Review Workflow"

@@ -112,16 +112,6 @@ struct Globals {
     )]
     config: Vec<KeyValueOrPath>,
 
-    #[arg(
-        short = 'I',
-        long = "no-inherit",
-        global = true,
-        value_parser = BoolValueParser::new().map(|v| !v),
-        default_value_t = true,
-        help = "Disable loading of non-CLI provided config.",
-    )]
-    load_non_cli_config: bool,
-
     /// Increase verbosity of logging.
     ///
     /// Can be specified multiple times to increase verbosity.

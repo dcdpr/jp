@@ -83,6 +83,13 @@ items = [
     underscore (`crate_`, `type_`) or a raw identifier (`r#type`). Never misspell the word (e.g. \
     `krate` is wrong).\
     """,
+    """\
+    **No redundant type annotations.** Do not annotate `let` bindings when the right-hand side \
+    already determines the type. Write `let foo = vec![1, 2, 3];` not `let foo: Vec<i32> = \
+    vec![1, 2, 3];`. Annotations are fine when the compiler genuinely can't infer (e.g. \
+    `.collect()` into a specific collection), when you need a non-default numeric type, or when \
+    an annotation is clearer than a turbofish.\
+    """,
 ]
 
 [[assistant.instructions.examples]]
@@ -167,3 +174,8 @@ match val {
 }\
 """
 reason = "Never start a match arm pattern with |."
+
+[[assistant.instructions.examples]]
+good = "let items = vec![1, 2, 3];"
+bad = "let items: Vec<i32> = vec![1, 2, 3];"
+reason = "The macro already determines the type. Redundant annotation is noise."

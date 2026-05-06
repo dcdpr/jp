@@ -1,7 +1,8 @@
 [conversation.tools.git_add_intent]
 enable = "explicit"
 run = "unattended"
-style.inline_results = "full"
+style.inline_results = "off"
+style.parameters = "function_call"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"

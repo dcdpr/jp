@@ -106,7 +106,7 @@ fn test_load_cli_cfg_args_user_global_root() {
     let result = build_cfg(partial, &overrides, None).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-global"));
 
-    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_FILE") };
+    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_DIR") };
 }
 
 #[test]
