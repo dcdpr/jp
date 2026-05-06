@@ -78,6 +78,7 @@ pub(super) async fn fetch(
     Ok(truncate(&md, SUMMARIZE_THRESHOLD).into())
 }
 
+#[cfg_attr(test, derive(Debug))]
 struct SectionHeader {
     id: String,
     level: u8,
@@ -193,17 +194,7 @@ struct ContentBlock {
 /// back to the full page.
 fn extract_anchor_html(html: &str, anchor: &str) -> Option<String> {
     let doc = Html::parse_document(html);
-
-    let selector = Selector::parse(&format!("[id=\"{}\"]", escape_css_value(anchor))).ok()?;
-    let target = doc.select(&selector).next()?;
-
-    let section_html = if is_heading(target.value().name()) {
-        extract_heading_section(&target)
-    } else if let Some(heading) = find_heading_ancestor(&target) {
-        extract_heading_section(&heading)
-    } else {
-        target.html()
-    };
+    let section_html = extract_section_html_from_doc(&doc, anchor)?;
 
     let head_html = Selector::parse("head")
         .ok()
@@ -254,17 +245,119 @@ fn heading_level(tag: &str) -> Option<u8> {
     }
 }
 
-/// Walk up the ancestor chain looking for a heading element.
-fn find_heading_ancestor<'a>(el: &ElementRef<'a>) -> Option<ElementRef<'a>> {
+/// A section root is the element that anchors a stand-alone region of the
+/// document. Headings are the obvious case; AsciiDoctor-style horizontal
+/// definition lists (`<dl><dt>term</dt><dd>...</dd></dl>`, used by git's
+/// manpages and many AsciiDoc-generated sites) are the other common one.
+enum SectionRoot<'a> {
+    Heading(ElementRef<'a>),
+    DefinitionTerm(ElementRef<'a>),
+}
+
+/// Walk up the ancestor chain looking for the closest section root. A `<dt>`
+/// nested inside a heading section returns the `<dt>` (it's deeper, so it's
+/// the more specific section).
+fn find_section_root_ancestor<'a>(el: &ElementRef<'a>) -> Option<SectionRoot<'a>> {
     let mut node = el.parent()?;
     loop {
-        if let Some(element) = ElementRef::wrap(node)
-            && is_heading(element.value().name())
-        {
-            return Some(element);
+        if let Some(element) = ElementRef::wrap(node) {
+            if element.value().name() == "dt" {
+                return Some(SectionRoot::DefinitionTerm(element));
+            }
+            if is_heading(element.value().name()) {
+                return Some(SectionRoot::Heading(element));
+            }
         }
         node = node.parent()?;
     }
+}
+
+/// Extract a `<dt>` along with its associated `<dd>`s, wrapped in a fresh
+/// `<dl>` so the result is valid standalone HTML.
+///
+/// `AsciiDoctor` sometimes emits multiple `<dd>`s per term (multi-paragraph
+/// definitions), so we collect every `<dd>` until the next `<dt>` or any
+/// unrelated element. Whitespace text nodes between siblings are preserved.
+fn extract_definition_section(dt: &ElementRef<'_>) -> String {
+    let mut parts = vec![dt.html()];
+
+    for sibling in dt.next_siblings() {
+        if let Some(el) = ElementRef::wrap(sibling) {
+            // Stop at the next `<dt>` (start of next term) or any other
+            // element (a stray heading, a new dl, ...). Only `<dd>`s belong
+            // to this term.
+            if el.value().name() == "dd" {
+                parts.push(el.html());
+            } else {
+                break;
+            }
+        } else if let Some(text) = sibling.value().as_text() {
+            parts.push(text.to_string());
+        }
+    }
+
+    format!("<dl>{}</dl>", parts.join(""))
+}
+
+/// Resolve the anchor ID for a `<dt>` element. Order differs from headings:
+/// `AsciiDoctor` wraps the canonical anchor in a child `<a id="...">`, while
+/// the `<dt>`'s own `id` is auto-generated from the term and tends to be
+/// ugly (e.g. `Documentation/gitglossary.txt-aiddefcleanaclean`). Prefer the
+/// child anchor when present.
+fn resolve_dt_id(dt: &ElementRef<'_>) -> Option<String> {
+    // Pattern 1: child <a id="...">.
+    if let Ok(sel) = Selector::parse("a[id]")
+        && let Some(child) = dt.select(&sel).next()
+        && let Some(id) = child.value().attr("id")
+        && !id.is_empty()
+    {
+        return Some(id.to_owned());
+    }
+
+    // Pattern 2: id on the <dt> itself.
+    if let Some(id) = dt.value().attr("id")
+        && !id.is_empty()
+    {
+        return Some(id.to_owned());
+    }
+
+    // Pattern 3: any descendant with id.
+    if let Ok(sel) = Selector::parse("[id]")
+        && let Some(child) = dt.select(&sel).next()
+        && let Some(id) = child.value().attr("id")
+        && !id.is_empty()
+    {
+        return Some(id.to_owned());
+    }
+
+    None
+}
+
+/// Collect a short plain-text preview from the `<dd>`s following a `<dt>`,
+/// stopping at the next `<dt>` or unrelated element.
+fn extract_preview_after_dt(dt: &ElementRef<'_>) -> String {
+    let mut text = String::new();
+
+    for sib in dt.next_siblings() {
+        if let Some(el) = ElementRef::wrap(sib) {
+            // Same boundary rule as `extract_definition_section`: only `<dd>`
+            // contributes; anything else ends the preview.
+            if el.value().name() != "dd" {
+                break;
+            }
+
+            let chunk: String = el.text().collect();
+            if !text.is_empty() && !chunk.is_empty() {
+                text.push(' ');
+            }
+            text.push_str(chunk.trim());
+        }
+        if text.len() >= PREVIEW_MAX {
+            break;
+        }
+    }
+
+    truncate_str(&text, PREVIEW_MAX)
 }
 
 /// Escape characters that have special meaning in CSS attribute value
@@ -306,33 +399,50 @@ fn format_section_listing(html: &str) -> String {
     out
 }
 
-/// Discover all heading elements that have an associated anchor ID.
+/// Discover all anchored sections in the document. Walks `h1..h6` and `<dt>`
+/// elements in document order; each `<dt>` is reported at one level below the
+/// most recent enclosing heading so glossary-style pages produce a sensible
+/// outline.
 fn list_section_headers(html: &str) -> Vec<SectionHeader> {
     let doc = Html::parse_document(html);
-    let heading_sel = Selector::parse("h1, h2, h3, h4, h5, h6").unwrap();
+    let sel = Selector::parse("h1, h2, h3, h4, h5, h6, dt").unwrap();
     let mut seen_ids = std::collections::HashSet::new();
     let mut headers = Vec::new();
+    let mut current_heading_level: u8 = 0;
 
-    for heading in doc.select(&heading_sel) {
-        let Some(level) = heading_level(heading.value().name()) else {
-            continue;
-        };
+    for el in doc.select(&sel) {
+        if let Some(level) = heading_level(el.value().name()) {
+            current_heading_level = level;
 
-        let id = resolve_heading_id(&heading);
-        let id = match id {
-            Some(id) if !id.is_empty() && seen_ids.insert(id.clone()) => id,
-            _ => continue,
-        };
+            let id = match resolve_heading_id(&el) {
+                Some(id) if !id.is_empty() && seen_ids.insert(id.clone()) => id,
+                _ => continue,
+            };
 
-        let text = clean_heading_text(&heading);
-        let preview = extract_preview_after_heading(&heading);
+            headers.push(SectionHeader {
+                id,
+                level,
+                text: clean_heading_text(&el),
+                preview: extract_preview_after_heading(&el),
+            });
+        } else {
+            // <dt> element. Skip if we can't resolve a usable anchor ID.
+            let id = match resolve_dt_id(&el) {
+                Some(id) if !id.is_empty() && seen_ids.insert(id.clone()) => id,
+                _ => continue,
+            };
 
-        headers.push(SectionHeader {
-            id,
-            level,
-            text,
-            preview,
-        });
+            // One level deeper than the parent heading, clamped to 6 (h6 is
+            // the deepest level our XML output advertises).
+            let level = current_heading_level.saturating_add(1).clamp(1, 6);
+
+            headers.push(SectionHeader {
+                id,
+                level,
+                text: clean_heading_text(&el),
+                preview: extract_preview_after_dt(&el),
+            });
+        }
     }
 
     headers
@@ -504,11 +614,18 @@ fn extract_section_html_from_doc(doc: &Html, anchor: &str) -> Option<String> {
         return Some(extract_heading_section(&target));
     }
 
-    if let Some(heading) = find_heading_ancestor(&target) {
-        return Some(extract_heading_section(&heading));
+    if target.value().name() == "dt" {
+        return Some(extract_definition_section(&target));
     }
 
-    // Check if the element contains a heading (e.g. <section id="..."><h3>...)
+    if let Some(root) = find_section_root_ancestor(&target) {
+        return Some(match root {
+            SectionRoot::Heading(h) => extract_heading_section(&h),
+            SectionRoot::DefinitionTerm(dt) => extract_definition_section(&dt),
+        });
+    }
+
+    // Container element with an internal heading (e.g. `<section id="x"><h3>`).
     let heading_sel = Selector::parse("h1, h2, h3, h4, h5, h6").ok()?;
     if let Some(inner_heading) = target.select(&heading_sel).next() {
         return Some(extract_heading_section(&inner_heading));
