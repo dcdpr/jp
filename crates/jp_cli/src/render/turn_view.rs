@@ -67,8 +67,11 @@ impl TurnView {
     }
 
     /// Mark the start of a new turn. The next assistant event will emit a
-    /// fresh role header.
+    /// fresh role header. Closes any open structured fence so a turn that
+    /// ended on a `ChatResponse::Structured` doesn't bleed into the next
+    /// turn's content.
     pub fn begin_turn(&mut self) {
+        self.structured.flush();
         self.assistant_header_rendered = false;
     }
 
@@ -76,6 +79,9 @@ impl TurnView {
     /// body. Resets assistant-header gating so the next assistant event
     /// emits a fresh header.
     pub fn render_user_request(&mut self, req: &ChatRequest) {
+        // Close any open structured fence before the user header so the
+        // boundary marker isn't rendered inside a `json` block.
+        self.structured.flush();
         let label = req.author.as_deref().unwrap_or(DEFAULT_USER_LABEL);
         self.chat.render_role_header(label, None);
         self.chat.render_request(&req.content);
@@ -86,13 +92,17 @@ impl TurnView {
     /// role header first if it hasn't been emitted yet for this turn.
     ///
     /// Dispatches structured responses to the structured renderer and
-    /// everything else (messages, reasoning) to the chat renderer.
+    /// everything else (messages, reasoning) to the chat renderer. A
+    /// non-structured response after structured content closes the open
+    /// `json` fence first; a structured response after non-structured
+    /// content flushes the chat buffer first.
     pub fn render_chat_response(&mut self, resp: &ChatResponse) {
         self.ensure_assistant_header();
         if resp.is_structured() {
             self.chat.flush();
             self.structured.render_chunk(resp);
         } else {
+            self.structured.flush();
             self.chat.render_response(resp);
         }
     }
@@ -101,6 +111,10 @@ impl TurnView {
     ///
     /// Emits the assistant header if not already shown, then flushes the
     /// chat buffer so surrounding messages render as distinct paragraphs.
+    /// Also closes any open structured fence — a tool call after
+    /// structured output is a content boundary that must not stay inside
+    /// the `json` block.
+    ///
     /// `hidden` controls whether the chat renderer transitions into the
     /// `ToolCall` content kind: passing `true` keeps the boundary
     /// invisible (suitable for hidden tool calls so the next message
@@ -108,22 +122,20 @@ impl TurnView {
     /// where tool UI follows.
     pub fn enter_tool_call(&mut self, hidden: bool) {
         self.ensure_assistant_header();
+        self.structured.flush();
         self.chat.flush();
         if !hidden {
             self.chat.transition_to_tool_call();
         }
     }
 
-    /// Flush pending chat output.
-    pub fn flush(&mut self) {
-        self.chat.flush();
-    }
-
-    /// Flush pending output for both chat and structured renderers.
+    /// Flush pending output across both chat and structured renderers.
     ///
-    /// Used at the end of a streaming cycle so any unclosed JSON code
-    /// fence gets its closing fence before the next phase starts.
-    pub fn flush_all(&mut self) {
+    /// Closes any open `json` fence and drains any buffered chat content.
+    /// Safe to call at any boundary; in particular, replay's final flush
+    /// after the last turn relies on this to terminate a trailing
+    /// structured response.
+    pub fn flush(&mut self) {
         self.chat.flush();
         self.structured.flush();
     }
@@ -131,13 +143,15 @@ impl TurnView {
     /// Reset internal renderer state, discarding partial buffers.
     ///
     /// Used when a streaming cycle is interrupted and a new one begins
-    /// (e.g. interrupt-with-prefill). Crucially, this leaves the
-    /// assistant-header flag set: the continuation is part of the same
-    /// turn, so re-emitting the header would be a duplicate.
+    /// (e.g. interrupt-with-prefill). Preserves the existing
+    /// `assistant_header_rendered` flag: if a header was already on the
+    /// terminal before the interrupt, the continuation is part of the
+    /// same assistant turn and must not re-emit it; if no header had been
+    /// rendered yet (the user interrupted before the first chunk), the
+    /// flag stays `false` and the next assistant event will emit one.
     pub fn reset_for_continuation(&mut self) {
         self.chat.reset();
         self.structured.reset();
-        self.assistant_header_rendered = true;
     }
 
     /// Replace the underlying renderers and identity.
@@ -145,7 +159,9 @@ impl TurnView {
     /// Used by replay's per-turn config rebuild when the conversation's
     /// historical config differs from the workspace's current config.
     /// Header gating state is preserved (the rebuild itself doesn't open
-    /// a new turn).
+    /// a new turn). Flushes both sub-renderers before swapping them out so
+    /// any open `json` fence or buffered chat output is committed before
+    /// the new instances take over.
     pub fn reconfigure(
         &mut self,
         printer: Arc<Printer>,
@@ -153,6 +169,7 @@ impl TurnView {
         assistant_name: Option<String>,
         model_id: Option<String>,
     ) {
+        self.flush();
         self.chat = ChatRenderer::new(printer.clone(), style);
         self.structured = StructuredRenderer::new(printer);
         self.assistant_name = assistant_name;

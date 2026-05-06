@@ -5,6 +5,13 @@ use jp_printer::{OutputFormat, Printer};
 use serde_json::{Map, json};
 
 use super::{super::state::TurnState, *};
+use crate::cmd::query::interrupt::InterruptAction;
+
+/// Strip ANSI escape codes for readable assertions on captured stdout.
+fn strip_ansi(s: &str) -> String {
+    let bytes = strip_ansi_escapes::strip(s);
+    String::from_utf8(bytes).expect("valid utf-8 after stripping ANSI")
+}
 
 #[test]
 fn test_transitions_to_executing_on_tool_call() {
@@ -416,5 +423,91 @@ fn test_structured_not_routed_to_chat_renderer() {
     assert!(
         output.contains("```json"),
         "Expected code fence, got: {output:?}"
+    );
+}
+
+/// Regression: if the user interrupts before any chunk has arrived and
+/// chooses Continue, the next assistant event MUST emit a fresh role
+/// header. The previous behaviour forced `assistant_header_rendered =
+/// true` in `reset_for_continuation`, which suppressed the header
+/// unconditionally and left the resumed output without a `── jp …`
+/// boundary.
+#[test]
+fn interrupt_continue_before_first_chunk_emits_assistant_header_on_resume() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        Some("anthropic/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("hello"));
+
+    // No chunks have arrived yet — the assistant header has NOT been emitted.
+    coordinator.handle_streaming_interrupt(InterruptAction::Continue, &mut stream);
+
+    // Resumed cycle delivers its first chunk.
+    coordinator.handle_event(&mut stream, Event::message(0, "hi there"));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("\u{2500}\u{2500} jp "),
+        "resumed assistant content must be preceded by a `── jp` header, got: {output:?}"
+    );
+}
+
+/// Regression: a Reply interrupt inserts a new `ChatRequest` boundary,
+/// which in replay would render a labeled user header AND a fresh
+/// assistant header for the following content. Live mode must match.
+#[test]
+fn interrupt_reply_renders_user_header_for_new_request() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        Some("alice".into()),
+        None,
+        Some("anthropic/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("first question"));
+
+    // Some assistant content arrives so the assistant header is emitted.
+    coordinator.handle_event(&mut stream, Event::message(0, "partial answer"));
+
+    // User interrupts with a follow-up reply.
+    coordinator.handle_streaming_interrupt(
+        InterruptAction::Reply("actually, ignore that".into()),
+        &mut stream,
+    );
+
+    // Resumed cycle delivers the new assistant content.
+    coordinator.handle_event(&mut stream, Event::message(1, "new answer"));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    let output = strip_ansi(&out.lock());
+
+    // The labeled user header for the Reply must show up between the
+    // partial answer and the resumed assistant content.
+    let alice_idx = output
+        .find("\u{2500}\u{2500} alice ")
+        .unwrap_or_else(|| panic!("expected a `── alice` header for the Reply, got: {output:?}"));
+
+    // And a fresh assistant header must follow the user boundary.
+    let after_alice = &output[alice_idx..];
+    assert!(
+        after_alice.contains("\u{2500}\u{2500} jp "),
+        "expected a fresh `── jp` header after the Reply, got: {output:?}"
     );
 }
