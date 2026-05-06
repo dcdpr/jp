@@ -290,5 +290,9 @@
   "038-config-reset-keywords.md": {
     "hash": "215e3192963de81456e94c50eb091c9e2b8ef475751ef755f23a4352d26ddea1",
     "summary": "Add UPPERCASE keywords NONE and WORKSPACE to --cfg for resetting config to program defaults or workspace state."
+  },
+  "079-config-sources-and-load-order.md": {
+    "hash": "d733088df6149a2a5232ad1109c3c85625edca824f854934c4ebfca6edcd318c",
+    "summary": "JP loads configuration through implicit (automatic) and deferred (user-requested) sources with layered override precedence."
   }
 }
