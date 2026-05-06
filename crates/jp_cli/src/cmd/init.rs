@@ -135,17 +135,21 @@ impl Init {
     /// Prompt the user for their display name, pre-filled with the best
     /// available default (see [`detect_default_user_name`]). Returns `None`
     /// when the user submits an empty value.
+    ///
+    /// The default is set as an *initial value* (editable), not as an
+    /// `inquire` default (substituted on empty submission), so the user can
+    /// clear the field and submit empty to skip attribution.
     fn ask_user_name(
         writer: &mut dyn io::Write,
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
         let prompt = Text::new("Your name for conversations:").with_help_message(
-            "Stamped onto each message you send. Press Enter to accept the default, or leave \
-             blank for the generic 'user' label.",
+            "Stamped onto each message you send. Press Enter to accept the pre-filled value, or \
+             clear the field for the generic 'user' label.",
         );
 
-        let default = detect_default_user_name();
-        let answer = match default.as_deref() {
-            Some(d) => prompt.with_default(d).prompt_with_writer(writer)?,
+        let initial = detect_default_user_name();
+        let answer = match initial.as_deref() {
+            Some(v) => prompt.with_initial_value(v).prompt_with_writer(writer)?,
             None => prompt.prompt_with_writer(writer)?,
         };
 
@@ -319,26 +323,33 @@ impl Init {
 ///
 /// Cascades through:
 ///
-/// 1. `git config --get user.name` — typically the user's real name, set
-///    once and reused across tools.
-/// 2. `$USER` (Unix) or `$USERNAME` (Windows) — the system login name,
+/// 1. `git config --global --get user.name` — the user's stable global
+///    identity. Preferred because the picked-up value is persisted to
+///    user-global JP config and inherited by every future workspace; a
+///    repo-local override would otherwise leak into unrelated workspaces.
+/// 2. `git config --get user.name` (no scope) — falls back to whatever
+///    git resolves in the current directory, for users who only have a
+///    repo-local identity.
+/// 3. `$USER` (Unix) or `$USERNAME` (Windows) — the system login name,
 ///    last-resort fallback.
 ///
 /// Returns `None` when nothing is available so the prompt renders without
 /// a pre-filled value.
 fn detect_default_user_name() -> Option<String> {
-    // 1. git config
-    if let Ok(out) = cmd!("git", "config", "--get", "user.name")
-        .stderr_null()
-        .read()
-    {
-        let trimmed = out.trim();
-        if !trimmed.is_empty() {
-            return Some(trimmed.to_owned());
+    // 1. git config (global), 2. git config (any scope).
+    for args in [
+        ["config", "--global", "--get", "user.name"].as_slice(),
+        ["config", "--get", "user.name"].as_slice(),
+    ] {
+        if let Ok(out) = cmd("git", args).stderr_null().read() {
+            let trimmed = out.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
         }
     }
 
-    // 2. system login name ($USER on Unix, $USERNAME on Windows).
+    // 3. system login name ($USER on Unix, $USERNAME on Windows).
     env::var("USER")
         .or_else(|_| env::var("USERNAME"))
         .ok()
