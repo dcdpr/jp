@@ -324,6 +324,18 @@ fn rejects_missing_segments() {
     assert!(err.contains("unsupported"), "{err}");
 }
 
+/// `gh:/pull/N/diff` parses as a hostless URL with a path-absolute (NOT
+/// a `cannot_be_a_base` URL). Only the truly opaque `gh:pull/N/diff` is
+/// accepted as the shortform; the path-absolute variant is undocumented
+/// and must be rejected so the URI grammar stays explicit.
+#[test]
+fn rejects_path_absolute_hostless_shortform() {
+    let err = parse_uri(&url("gh:/pull/544/diff"))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unsupported"), "{err}");
+}
+
 #[test]
 fn parses_exclude_query_param() {
     let parsed = parse_uri(&url("gh://dcdpr/jp/pull/1/diff?exclude=docs/**,*.md")).unwrap();

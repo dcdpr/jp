@@ -324,32 +324,29 @@ impl Init {
 /// Cascades through:
 ///
 /// 1. `git config --global --get user.name` — the user's stable global
-///    identity. Preferred because the picked-up value is persisted to
-///    user-global JP config and inherited by every future workspace; a
-///    repo-local override would otherwise leak into unrelated workspaces.
-/// 2. `git config --get user.name` (no scope) — falls back to whatever
-///    git resolves in the current directory, for users who only have a
-///    repo-local identity.
-/// 3. `$USER` (Unix) or `$USERNAME` (Windows) — the system login name,
+///    identity. The picked-up value is persisted to user-global JP
+///    config and inherited by every future workspace, so we deliberately
+///    avoid the unscoped `git config --get user.name`: it would resolve
+///    against whichever repo happens to be in cwd (or in the init root),
+///    leaking a repo-local identity the user explicitly chose not to
+///    make global into every future JP workspace.
+/// 2. `$USER` (Unix) or `$USERNAME` (Windows) — the system login name,
 ///    last-resort fallback.
 ///
 /// Returns `None` when nothing is available so the prompt renders without
 /// a pre-filled value.
 fn detect_default_user_name() -> Option<String> {
-    // 1. git config (global), 2. git config (any scope).
-    for args in [
-        ["config", "--global", "--get", "user.name"].as_slice(),
-        ["config", "--get", "user.name"].as_slice(),
-    ] {
-        if let Ok(out) = cmd("git", args).stderr_null().read() {
-            let trimmed = out.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_owned());
-            }
+    if let Ok(out) = cmd!("git", "config", "--global", "--get", "user.name")
+        .stderr_null()
+        .read()
+    {
+        let trimmed = out.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_owned());
         }
     }
 
-    // 3. system login name ($USER on Unix, $USERNAME on Windows).
+    // System login name ($USER on Unix, $USERNAME on Windows).
     env::var("USER")
         .or_else(|_| env::var("USERNAME"))
         .ok()

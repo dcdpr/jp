@@ -37,6 +37,13 @@ fn test_uri_to_query() {
             )),
         ),
         ("bear:", Err("Invalid bear note query".to_string())),
+        // `bear:/NOTE_ID` parses as a hostless URL with a path-absolute,
+        // i.e. NOT a `cannot_be_a_base` URL. Reject it: the documented
+        // shorthand is the truly opaque `bear:NOTE_ID`.
+        (
+            "bear:/F70FD86D-752F-403D-A517-BF020591F530",
+            Err("Invalid bear note query".to_string()),
+        ),
         (
             "bear://get/tag%20%231",
             Ok(Query::Get("tag #1".to_string())),

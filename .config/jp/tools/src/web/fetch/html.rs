@@ -276,20 +276,28 @@ fn find_section_root_ancestor<'a>(el: &ElementRef<'a>) -> Option<SectionRoot<'a>
 /// `<dl>` so the result is valid standalone HTML.
 ///
 /// `AsciiDoctor` sometimes emits multiple `<dd>`s per term (multi-paragraph
-/// definitions), so we collect every `<dd>` until the next `<dt>` or any
-/// unrelated element. Whitespace text nodes between siblings are preserved.
+/// definitions), so we collect every `<dd>` until the next group starts.
+/// HTML also allows the `<dt><dt><dd>` shape where several terms share one
+/// definition; we accumulate consecutive sibling `<dt>`s up to the first
+/// `<dd>` so fetching any term in the group returns the whole group.
+/// Whitespace text nodes between siblings are preserved.
 fn extract_definition_section(dt: &ElementRef<'_>) -> String {
     let mut parts = vec![dt.html()];
+    let mut seen_dd = false;
 
     for sibling in dt.next_siblings() {
         if let Some(el) = ElementRef::wrap(sibling) {
-            // Stop at the next `<dt>` (start of next term) or any other
-            // element (a stray heading, a new dl, ...). Only `<dd>`s belong
-            // to this term.
-            if el.value().name() == "dd" {
-                parts.push(el.html());
-            } else {
-                break;
+            match el.value().name() {
+                // Consecutive sibling `<dt>`s before any `<dd>` are part of
+                // the same shared-definition group.
+                "dt" if !seen_dd => parts.push(el.html()),
+                "dd" => {
+                    seen_dd = true;
+                    parts.push(el.html());
+                }
+                // A `<dt>` after we've already collected `<dd>`s starts the
+                // next group; anything else is unrelated.
+                _ => break,
             }
         } else if let Some(text) = sibling.value().as_text() {
             parts.push(text.to_string());
@@ -333,24 +341,29 @@ fn resolve_dt_id(dt: &ElementRef<'_>) -> Option<String> {
     None
 }
 
-/// Collect a short plain-text preview from the `<dd>`s following a `<dt>`,
-/// stopping at the next `<dt>` or unrelated element.
+/// Collect a short plain-text preview from the `<dd>`s following a `<dt>`.
+/// Mirrors the boundary rule in `extract_definition_section`: leading sibling
+/// `<dt>`s in a shared-definition group are skipped (their preview comes from
+/// the shared `<dd>`), `<dd>`s contribute, and anything else (or a `<dt>`
+/// after we've started collecting) ends the preview.
 fn extract_preview_after_dt(dt: &ElementRef<'_>) -> String {
     let mut text = String::new();
+    let mut seen_dd = false;
 
     for sib in dt.next_siblings() {
         if let Some(el) = ElementRef::wrap(sib) {
-            // Same boundary rule as `extract_definition_section`: only `<dd>`
-            // contributes; anything else ends the preview.
-            if el.value().name() != "dd" {
-                break;
+            match el.value().name() {
+                "dt" if !seen_dd => continue,
+                "dd" => {
+                    seen_dd = true;
+                    let chunk: String = el.text().collect();
+                    if !text.is_empty() && !chunk.is_empty() {
+                        text.push(' ');
+                    }
+                    text.push_str(chunk.trim());
+                }
+                _ => break,
             }
-
-            let chunk: String = el.text().collect();
-            if !text.is_empty() && !chunk.is_empty() {
-                text.push(' ');
-            }
-            text.push_str(chunk.trim());
         }
         if text.len() >= PREVIEW_MAX {
             break;
@@ -376,7 +389,8 @@ fn escape_css_value(s: &str) -> String {
     out
 }
 
-/// Build an XML listing of all headed sections on the page.
+/// Build an XML listing of all anchored sections on the page (headings and
+/// definition-list terms).
 fn format_section_listing(html: &str) -> String {
     let headers = list_section_headers(html);
     if headers.is_empty() {

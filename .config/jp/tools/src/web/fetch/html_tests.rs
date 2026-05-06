@@ -622,6 +622,8 @@ mod definition_term_sections {
                 <dt class="hdlist1" id="Documentation/gitglossary.txt-aiddefcommitacommit"><a id="Documentation/gitglossary.txt-commit" class="anchor" href="#Documentation/gitglossary.txt-commit"></a><a id="def_commit"></a>commit </dt>
                 <dd>
                     <p>A single point in the Git history.</p>
+                </dd>
+                <dd>
                     <p>Also used as a verb: storing a new snapshot.</p>
                 </dd>
             </dl>
@@ -721,14 +723,16 @@ mod definition_term_sections {
     }
 
     #[test]
-    fn extract_includes_all_dds_for_multi_paragraph_definitions() {
+    fn extract_includes_all_sibling_dds_for_one_term() {
+        // The `commit` term in the fixture is followed by two sibling
+        // `<dd>` elements; both should be included in the extracted section.
         let doc = Html::parse_document(GIT_GLOSSARY);
         let result = extract_section_html_from_doc(&doc, "def_commit").unwrap();
 
         assert!(result.contains("single point in the Git history"));
         assert!(
             result.contains("Also used as a verb"),
-            "second <dd> should be included: {result}"
+            "second sibling <dd> should be included: {result}"
         );
         assert!(!result.contains("working tree"));
     }
@@ -767,5 +771,69 @@ mod definition_term_sections {
         let headers = list_section_headers(html);
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0].id, "intro");
+    }
+
+    /// HTML allows several `<dt>`s to share one `<dd>` ("these terms have
+    /// the same definition"). Fetching any term in the group should return
+    /// the whole group.
+    const SHARED_DEFINITION: &str = r#"
+        <html>
+        <head><title>shared</title></head>
+        <body>
+            <h2 id="_terms">TERMS</h2>
+            <dl>
+                <dt id="t-alpha"><a id="def_alpha"></a>alpha</dt>
+                <dt id="t-beta"><a id="def_beta"></a>beta</dt>
+                <dd>
+                    <p>Shared definition for alpha and beta.</p>
+                </dd>
+                <dt id="t-gamma"><a id="def_gamma"></a>gamma</dt>
+                <dd>
+                    <p>Definition for gamma.</p>
+                </dd>
+            </dl>
+        </body>
+        </html>
+    "#;
+
+    #[test]
+    fn extract_via_first_term_in_shared_group_includes_all_dts_and_dd() {
+        let doc = Html::parse_document(SHARED_DEFINITION);
+        let result = extract_section_html_from_doc(&doc, "def_alpha").unwrap();
+
+        assert!(result.contains(">alpha<"), "missing alpha term: {result}");
+        assert!(result.contains(">beta<"), "missing beta term: {result}");
+        assert!(
+            result.contains("Shared definition"),
+            "missing shared dd: {result}"
+        );
+        // The next group must not bleed in.
+        assert!(
+            !result.contains("gamma"),
+            "should not include unrelated next term: {result}"
+        );
+    }
+
+    #[test]
+    fn extract_via_second_term_in_shared_group_includes_dd() {
+        // The trailing term in a `<dt><dt><dd>` group still resolves to the
+        // shared `<dd>`, since its first sibling is the `<dd>` itself.
+        let doc = Html::parse_document(SHARED_DEFINITION);
+        let result = extract_section_html_from_doc(&doc, "def_beta").unwrap();
+
+        assert!(result.contains(">beta<"));
+        assert!(result.contains("Shared definition"));
+        assert!(!result.contains("gamma"));
+    }
+
+    #[test]
+    fn shared_group_first_term_preview_uses_shared_dd() {
+        let headers = list_section_headers(SHARED_DEFINITION);
+        let alpha = headers.iter().find(|h| h.id == "def_alpha").unwrap();
+        assert!(
+            alpha.preview.starts_with("Shared definition"),
+            "unexpected preview: {:?}",
+            alpha.preview
+        );
     }
 }
