@@ -743,7 +743,7 @@ Additionally:
 
 ## References
 
-- [RFD 038: Config Inheritance][RFD 038] — `--cfg=NONE` and config keywords.
+- [RFD 038: Config Reset Keywords][RFD 038] — `--cfg=NONE` and config keywords.
 - [RFD 039: Conversation Trees][RFD 039] — tree-structured conversation
   hierarchy and `--root` scoping.
 - [RFD 040: Hidden Conversations and Tool Context][RFD 040] — `hidden` flag and
@@ -761,7 +761,7 @@ Additionally:
 
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 037]: 037-await-tool-for-stateful-handle-synchronization.md
-[RFD 038]: 038-config-inheritance-for-conversations.md
+[RFD 038]: 038-config-reset-keywords.md
 [RFD 039]: 039-conversation-trees.md
 [RFD 040]: 040-hidden-conversations-and-tool-context.md
 [RFD 048]: 048-four-channel-output-model.md

@@ -183,10 +183,6 @@
     "hash": "fafd5116726ff573299f6afb85006430dd189bae5133f03b2a9a0f522ea606a4",
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
-  "038-config-inheritance-for-conversations.md": {
-    "hash": "ab698be5173ba45faac9842437895165061196454b5ee0bb33249b28aa4006c4",
-    "summary": "Extends --cfg with UPPERCASE keywords (NONE, WORKSPACE) and conversation IDs for config inheritance."
-  },
   "048-four-channel-output-model.md": {
     "hash": "36dd6e0167f6d23ba454bf141d62d0d6e7495182863d25b9f63790537fa7a191",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
@@ -290,6 +286,10 @@
   "071-conversation-archiving.md": {
     "hash": "ac30ec3193cfe5bc2b2bac3aff28abfa06fc1a9b5309effc6015abc6b6e2ab51",
     "summary": "Adds conversation archiving to JP, moving inactive conversations to a hidden partition while preserving them."
+  },
+  "038-config-reset-keywords.md": {
+    "hash": "215e3192963de81456e94c50eb091c9e2b8ef475751ef755f23a4352d26ddea1",
+    "summary": "Add UPPERCASE keywords NONE and WORKSPACE to --cfg for resetting config to program defaults or workspace state."
   },
   "079-config-sources-and-load-order.md": {
     "hash": "d733088df6149a2a5232ad1109c3c85625edca824f854934c4ebfca6edcd318c",
