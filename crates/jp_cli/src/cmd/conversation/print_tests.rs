@@ -282,6 +282,88 @@ fn prints_structured_data() {
     assert!(output.contains("```json"), "got: {output}");
 }
 
+/// Regression: replay must close the structured `json` fence. Before this
+/// fix, `TurnRenderer::flush()` only flushed the chat sub-renderer, so a
+/// conversation ending on a `ChatResponse::Structured` printed an opening
+/// ```json with no matching close.
+#[test]
+fn structured_fence_is_closed_at_end_of_replay() {
+    let data = json!({"name": "Alice"});
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![ConversationEvent::new(
+        ChatResponse::structured(data),
+        ts(0, 0, 0),
+    )]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    let opens = output.matches("```json").count();
+    // Closing fence is a backtick triple at line start with nothing after.
+    let closes = output.lines().filter(|l| l.trim_end() == "```").count();
+    assert_eq!(
+        opens, closes,
+        "opening and closing ``` fences must match, got opens={opens} closes={closes}, output: \
+         {output:?}"
+    );
+}
+
+/// Regression: a message following a structured response in the same
+/// conversation must render OUTSIDE the `json` fence — the fence is
+/// closed at the role/content boundary, not left open until end-of-stream.
+#[test]
+fn structured_response_followed_by_message_closes_fence_first() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Extract"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::structured(json!({"name": "Alice"})),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Thanks"), ts(0, 1, 1)),
+        ConversationEvent::new(ChatResponse::message("You're welcome.\n\n"), ts(0, 1, 2)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+
+    // The trailing message text must not appear before the JSON fence has
+    // been closed. Find the index of the JSON close (a `\`\`\`` line
+    // standing alone) that follows the opening `\`\`\`json`, and assert
+    // the message body shows up only after it.
+    let open_idx = output.find("```json").expect("expected an opening fence");
+    let close_idx = output[open_idx..]
+        .find("\n```")
+        .map(|i| open_idx + i)
+        .expect("expected a closing fence after the opening one");
+    let welcome_idx = output
+        .find("You're welcome.")
+        .expect("expected the trailing message text");
+    assert!(
+        welcome_idx > close_idx,
+        "trailing message must render after the JSON fence is closed; output: {output:?}"
+    );
+}
+
 #[test]
 fn turn_separators_between_turns() {
     let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![

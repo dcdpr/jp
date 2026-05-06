@@ -216,7 +216,7 @@ impl TurnCoordinator {
                 for event in self.event_builder.drain() {
                     self.push_event(stream, event);
                 }
-                self.view.flush_all();
+                self.view.flush();
                 self.transition_from_streaming(stream, reason)
             }
 
@@ -367,12 +367,19 @@ impl TurnCoordinator {
                     self.push_event(conversation_stream, ChatResponse::message(&partial));
                 }
 
-                // Add user's reply as a new request
-                self.push_event(conversation_stream, ChatRequest {
+                // Add user's reply as a new request, then render it through
+                // the view so the live terminal gets the same labeled
+                // user header replay would emit for this `ChatRequest`.
+                // `render_user_request` also resets the assistant-header
+                // gate, so the next assistant chunk will print a fresh
+                // `── jp …` header.
+                let request = ChatRequest {
                     content,
                     schema: None,
                     author: self.author.clone(),
-                });
+                };
+                self.view.render_user_request(&request);
+                self.push_event(conversation_stream, request);
                 self.prepare_continuation();
             }
 
