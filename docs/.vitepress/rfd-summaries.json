@@ -148,7 +148,7 @@
     "summary": "Introduces `await` built-in tool to synchronize on parallel stateful tool handles with `any`/`all` completion modes."
   },
   "039-conversation-trees.md": {
-    "hash": "f8b80e32b3ccc9313dd401e9666cef014b5e7119ab5be48f83638b0767029702",
+    "hash": "e8e4f2b63f6766b415a38b7ab0466fdf7a38ca9013e15ae4b9f8c6892cbbd770",
     "summary": "Add parent-child conversation relationships via metadata field, enabling fork lineage and hierarchical organization without nested directories."
   },
   "040-hidden-conversations-and-tool-context.md": {
@@ -176,7 +176,7 @@
     "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
   },
   "046-nested-workspace-projection.md": {
-    "hash": "c84c09bcc7c1f3f6870178d928f2a29428200adda99210ab0bfc9494e2fc58af",
+    "hash": "ec20a08f40c1477c9e5b7e5f1981a3422b47c4aaf1924c2c91252c27df7e918b",
     "summary": "Nested workspace directories project conversation trees visually; user-local storage stays flat for durability."
   },
   "047-editor-and-path-access-for-conversations.md": {
@@ -196,7 +196,7 @@
     "summary": "Adds scripting ergonomics: shared config structs, `conversation new` command, `--no-activate` flag, and `--root-id` ancestry constraint."
   },
   "051-sub-agent-workflows.md": {
-    "hash": "1a162b7a00e87551ee7ce35145babf277f86225788cf611d4c616ce394be5dba",
+    "hash": "6003006ef60c269eaf5414370336e7e8a6c1a6bf751a03d19356a7a875b8b0b9",
     "summary": "Guide for building sub-agent workflows using local tools, config overlays, and conversation trees to delegate scoped tasks cheaply."
   },
   "052-workspace-data-store-sanitization.md": {
@@ -280,7 +280,7 @@
     "summary": "Replace Workspace's optional Storage with four focused trait objects (Persist, Load, Lock, Session) for cleaner polymorphism."
   },
   "070-negative-config-deltas.md": {
-    "hash": "11a2589c1ac456f6ecbbcad7b97b14808610a8cb5325b02a4936c8c13689e3dd",
+    "hash": "04a9d2465e437f5e3f1eafa8697d7fa0e774d402facc7c505a86f3d9395a46e6",
     "summary": "Introduces `-C` flag to selectively revert previously applied config sources using provenance tracking via claims maps."
   },
   "071-conversation-archiving.md": {
@@ -290,9 +290,5 @@
   "038-config-reset-keywords.md": {
     "hash": "215e3192963de81456e94c50eb091c9e2b8ef475751ef755f23a4352d26ddea1",
     "summary": "Add UPPERCASE keywords NONE and WORKSPACE to --cfg for resetting config to program defaults or workspace state."
-  },
-  "079-config-sources-and-load-order.md": {
-    "hash": "d733088df6149a2a5232ad1109c3c85625edca824f854934c4ebfca6edcd318c",
-    "summary": "JP loads configuration from four sources in order, resolving extends directives and environment variable overrides."
   }
 }
