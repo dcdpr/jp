@@ -186,6 +186,9 @@ fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn Error + Send + Sync>> {
 
             Query::Search { query: path, tags }
         }
+        // Shorthand: `bear:NOTE_ID`. Opaque form (no `//`) has no host;
+        // the path holds the note id directly. Mirrors the gh handler.
+        None if !path.is_empty() => Query::Get(path),
         _ => return Err("Invalid bear note query".into()),
     };
 

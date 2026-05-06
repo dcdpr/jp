@@ -31,6 +31,13 @@ fn test_uri_to_query() {
         ),
         ("bear://get/1", Ok(Query::Get("1".to_string()))),
         (
+            "bear:F70FD86D-752F-403D-A517-BF020591F530",
+            Ok(Query::Get(
+                "F70FD86D-752F-403D-A517-BF020591F530".to_string(),
+            )),
+        ),
+        ("bear:", Err("Invalid bear note query".to_string())),
+        (
             "bear://get/tag%20%231",
             Ok(Query::Get("tag #1".to_string())),
         ),
