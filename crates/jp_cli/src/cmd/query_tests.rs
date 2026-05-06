@@ -1,8 +1,28 @@
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
-use jp_config::conversation::tool::{Enable, PartialToolConfig};
+use jp_config::{
+    AppConfig, PartialAppConfig, ToPartial,
+    conversation::tool::{Enable, PartialToolConfig},
+    model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
+    util::build,
+};
+use jp_conversation::{Conversation, ConversationId, event::ChatRequest};
+use jp_inquire::prompt::MockPromptBackend;
+use jp_llm::{
+    Provider,
+    provider::mock::MockProvider,
+    tool::{builtin::BuiltinExecutors, executor::ExecutorSource},
+};
+use jp_printer::{OutputFormat, Printer};
+use jp_workspace::{ConversationHandle, Workspace};
+use relative_path::RelativePathBuf;
+use serde_json::Value;
+use tokio::sync::broadcast;
 
 use super::*;
+use crate::{KeyValueOrPath, config_pipeline::ConfigPipeline};
 
 fn make_partial_with_tools() -> PartialAppConfig {
     let mut partial = PartialAppConfig::default();
@@ -35,6 +55,90 @@ fn directives(ds: Vec<ToolDirective>) -> ToolDirectives {
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
         .unwrap()
+}
+
+fn config_with_model(provider: ProviderId, name: &str) -> AppConfig {
+    let mut partial = AppConfig::new_test().to_partial();
+    partial.assistant.model.id = PartialModelIdConfig {
+        provider: Some(provider),
+        name: Some(name.parse().unwrap()),
+    }
+    .into();
+
+    build(partial).unwrap()
+}
+
+fn empty_executor_source() -> Box<dyn ExecutorSource> {
+    Box::new(tool::executor::TerminalExecutorSource::new(
+        BuiltinExecutors::new(),
+        &[],
+    ))
+}
+
+fn build_query_config(
+    workspace: &Workspace,
+    base: PartialAppConfig,
+    cfg_args: &[KeyValueOrPath],
+    query: &Query,
+    handle: Option<&ConversationHandle>,
+) -> AppConfig {
+    let pipeline = ConfigPipeline::new(base, cfg_args, Some(workspace), None).unwrap();
+
+    let conversation_partial = handle.map(|handle| {
+        query
+            .apply_conversation_config(workspace, PartialAppConfig::default(), None, handle)
+            .unwrap()
+    });
+
+    let mut partial = match conversation_partial {
+        Some(conversation_partial) => pipeline.partial_with_conversation(conversation_partial),
+        None => pipeline.partial_without_conversation(),
+    }
+    .unwrap();
+
+    partial = query
+        .apply_cli_config(Some(workspace), partial, None)
+        .unwrap();
+
+    build(partial).unwrap()
+}
+
+async fn run_mock_turn(
+    root: &camino::Utf8Path,
+    cfg: &AppConfig,
+    lock: &jp_workspace::ConversationLock,
+    prompt: &str,
+    response: &str,
+) {
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message(response));
+    let model = provider
+        .model_details(&cfg.assistant.model.id.resolved().name)
+        .await
+        .unwrap();
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+    turn_loop::run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        cfg,
+        &signal_rx,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        lock,
+        jp_config::assistant::tool_choice::ToolChoice::Auto,
+        &[],
+        printer,
+        Arc::new(MockPromptBackend::new()),
+        tool::ToolCoordinator::new(cfg.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from(prompt),
+    )
+    .await
+    .unwrap();
 }
 
 #[test]
@@ -463,6 +567,156 @@ fn test_interleaved_three_step_composition() {
     assert_eq!(
         partial.conversation.tools.tools["explicit_tool"].enable,
         Some(Enable::Off),
+    );
+}
+
+#[test]
+fn query_model_override_is_persisted_as_config_delta() {
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(1000);
+
+    let mut workspace = Workspace::new("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let query = Query {
+        model: Some("openai/gpt-4o".to_owned()),
+        ..Default::default()
+    };
+
+    let partial = query
+        .apply_cli_config(None, base_config.to_partial(), None)
+        .unwrap();
+    let runtime_config = build(partial).unwrap();
+
+    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+        .unwrap()
+        .expect("expected query model override to produce a config delta");
+
+    lock.as_mut()
+        .update_events(|events| events.add_config_delta(delta));
+
+    let events = lock.events().clone();
+    let merged = events.config().unwrap();
+    let model_id = merged.assistant.model.id.resolved();
+
+    assert_eq!(model_id.provider, ProviderId::Openai);
+    assert_eq!(model_id.name.as_ref(), "gpt-4o");
+
+    let (_base, serialized_events) = events.to_parts().unwrap();
+    assert!(
+        serialized_events
+            .iter()
+            .any(|event| { event.get("type").and_then(Value::as_str) == Some("config_delta") }),
+        "expected events.json to contain a config_delta event",
+    );
+}
+
+#[tokio::test]
+async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_query() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join(".jp/config")).unwrap();
+    std::fs::write(
+        root.join(".jp/config/dev.toml"),
+        "assistant.model.id = 'anthropic/dev-model'\n",
+    )
+    .unwrap();
+
+    let mut base = AppConfig::new_test().to_partial();
+    base.config_load_paths = Some(vec![RelativePathBuf::from(".jp/config")]);
+    base.providers.llm.aliases.insert(
+        "gpt".to_owned(),
+        ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-model".parse().unwrap(),
+        }
+        .to_partial(),
+    );
+
+    let mut workspace = Workspace::new(root);
+
+    let query1 = Query {
+        new_conversation: true,
+        query: Some(vec!["is this thing on?".to_owned()]),
+        ..Default::default()
+    };
+    let cfg1 = build_query_config(
+        &workspace,
+        base.clone(),
+        &[KeyValueOrPath::Path("dev".into())],
+        &query1,
+        None,
+    );
+    let model1 = cfg1.assistant.model.id.resolved();
+    assert_eq!(model1.provider, ProviderId::Anthropic);
+    assert_eq!(model1.name.as_ref(), "dev-model");
+
+    let lock1 = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::new(cfg1.clone()), None)
+        .unwrap();
+    let conversation_id = lock1.id();
+    run_mock_turn(
+        root,
+        &cfg1,
+        &lock1,
+        "is this thing on?",
+        "Yes, loud and clear.",
+    )
+    .await;
+    drop(lock1);
+
+    let handle2 = workspace.acquire_conversation(&conversation_id).unwrap();
+    let query2 = Query {
+        model: Some("gpt".to_owned()),
+        query: Some(vec!["are you there?".to_owned()]),
+        ..Default::default()
+    };
+    let cfg2 = build_query_config(&workspace, base.clone(), &[], &query2, Some(&handle2));
+    let lock2 = workspace.test_lock(handle2);
+    let delta = get_config_delta_from_cli(&cfg2, &lock2)
+        .unwrap()
+        .expect("expected model override to persist");
+    lock2
+        .as_mut()
+        .update_events(|events| events.add_config_delta(delta));
+    run_mock_turn(root, &cfg2, &lock2, "are you there?", "Yes.").await;
+    drop(lock2);
+
+    let handle3 = workspace.acquire_conversation(&conversation_id).unwrap();
+    let query3 = Query {
+        query: Some(vec!["plain query".to_owned()]),
+        ..Default::default()
+    };
+    let cfg3 = build_query_config(&workspace, base, &[], &query3, Some(&handle3));
+    let model3 = cfg3.assistant.model.id.resolved();
+    assert_eq!(model3.provider, ProviderId::Openai);
+    assert_eq!(model3.name.as_ref(), "gpt-model");
+
+    let events = workspace.events(&handle3).unwrap();
+    let serialized = events.to_parts().unwrap().1;
+    let model_delta = serialized.iter().find(|event| {
+        event.get("type").and_then(Value::as_str) == Some("config_delta")
+            && event
+                .get("delta")
+                .and_then(|delta| delta.get("assistant"))
+                .and_then(|assistant| assistant.get("model"))
+                .is_some()
+    });
+    let model_delta = model_delta.expect("expected a model config_delta event");
+    assert_eq!(
+        model_delta["delta"]["assistant"]["model"]["id"]["provider"],
+        "openai"
+    );
+    assert_eq!(
+        model_delta["delta"]["assistant"]["model"]["id"]["name"],
+        "gpt-model"
     );
 }
 
