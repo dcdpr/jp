@@ -1,6 +1,6 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "ad0cfb6c27f1d25c670a7a0695fc7f8cccbc30bbdfe16a859a935829b3d2e72d",
+    "hash": "3cedf5d87cab8318dcff26856bb8f2676942dd8ff291d4368c5ee9799236b882",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
@@ -294,5 +294,29 @@
   "079-config-sources-and-load-order.md": {
     "hash": "d733088df6149a2a5232ad1109c3c85625edca824f854934c4ebfca6edcd318c",
     "summary": "JP loads configuration through implicit (automatic) and deferred (user-requested) sources with layered override precedence."
+  },
+  "074-eager-loading-with-command-declared-data-requirements.md": {
+    "hash": "75904dc604884968628539debe22b3e6bc647d22cdd2f66552560b2fe2c46e15",
+    "summary": "Commands declare data needs upfront; startup eagerly loads and validates it, enabling infallible access during execution."
+  },
+  "075-tool-sandbox-and-access-policy.md": {
+    "hash": "fc70af6466a09141803945cd25444fed7b7569be0fd8f4441b852e2f0c28be21",
+    "summary": "OS-level sandboxing for subprocess tools using platform-native mechanisms, extending RFD 076's access policy."
+  },
+  "076-tool-access-grants.md": {
+    "hash": "911a9c7cd88b59cfa7a57a1d04733c2f32b762d25fca71234bc483a0a175a9b4",
+    "summary": "Adds typed access policy grants for tools to declare and enforce what workspace resources they can access."
+  },
+  "077-plugin-configuration-and-trust-policy.md": {
+    "hash": "e6a3db106652171476d7c9e3ce42af7410f072b5ab94521c3b2fc4aadd6f236a",
+    "summary": "Plugin configuration integration with AppConfig enabling trust policies, checksum pinning, execution policies, and per-plugin options."
+  },
+  "078-tool-config-mutation.md": {
+    "hash": "10600b563362baae890c5d3cb0e99f77fb32b0e84396acfad0e7e51cf7f72ac4",
+    "summary": "Scoped tool config access via `access.config` rules, with re-invocation on delta rejection and per-cycle commit buffering."
+  },
+  "080-editor-as-a-config-source.md": {
+    "hash": "95d0706aad1880c4ad949375f4d4725967b3ebd781b10513aa96f1a7040b6edb",
+    "summary": "Move editor invocation into startup pipeline to treat it as a config source, fixing phantom deltas."
   }
 }
