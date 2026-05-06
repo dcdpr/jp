@@ -364,6 +364,50 @@ fn structured_response_followed_by_message_closes_fence_first() {
     );
 }
 
+/// Regression: a message after a structured response *within the same
+/// turn* must close the `json` fence first. This pins the
+/// structured→message branch in `TurnView::render_chat_response`
+/// specifically — no per-turn `reconfigure` runs between the two events,
+/// so the close has to come from that branch.
+#[test]
+fn structured_to_message_in_same_turn_closes_fence_first() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Extract"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::structured(json!({"name": "Alice"})),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(ChatResponse::message("You're welcome.\n\n"), ts(0, 0, 3)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+
+    let open_idx = output.find("```json").expect("expected an opening fence");
+    let close_idx = output[open_idx..]
+        .find("\n```")
+        .map(|i| open_idx + i)
+        .expect("expected a closing fence after the opening one");
+    let welcome_idx = output
+        .find("You're welcome.")
+        .expect("expected the trailing message text");
+    assert!(
+        welcome_idx > close_idx,
+        "trailing message must render after the JSON fence is closed; output: {output:?}"
+    );
+}
+
 #[test]
 fn turn_separators_between_turns() {
     let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![

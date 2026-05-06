@@ -50,11 +50,11 @@ summary = "The URL of the web page to fetch."
 [conversation.tools.web_fetch.parameters.list_sections]
 type = "boolean"
 required = false
-summary = """return a compact listing of all headed sections on the page"""
+summary = """return a compact listing of all anchored sections on the page (headings and definition-list terms)"""
 description = """\
-Each entry includes the section's anchor ID, heading level, title, and a short content preview. \
-Use the anchor IDs with the `sections` parameter to fetch specific sections. Works for both HTML \
-and markdown sources.\
+Each entry includes the section's anchor ID, level, title, and a short content preview. Use the \
+anchor IDs with the `sections` parameter to fetch specific sections. Works for both HTML and \
+markdown sources; HTML also surfaces AsciiDoctor-style `<dt>` glossary terms (e.g. git's manpages).\
 """
 
 [conversation.tools.web_fetch.parameters.sections]
@@ -63,7 +63,8 @@ required = false
 items.type = "string"
 summary = "List of section anchor IDs to fetch."
 description = """\
-Only the content under those headings will be returned, significantly reducing output size. Use \
-`list_sections` first to discover available IDs. IDs are consistent across markdown and HTML \
-fetches (GitHub-style heading slugs).\
+Only the content under those anchors will be returned, significantly reducing output size. Use \
+`list_sections` first to discover available IDs. For headings, IDs are consistent across markdown \
+and HTML fetches (GitHub-style heading slugs); for HTML definition-list terms the ID is whatever \
+the page exposes (typically a permalink anchor).\
 """

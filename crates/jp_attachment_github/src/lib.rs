@@ -175,9 +175,13 @@ fn parse_uri(uri: &Url) -> Result<ParsedUri, Box<dyn Error + Send + Sync>> {
         return Err(format!("expected `gh` scheme, got `{}`", uri.scheme()).into());
     }
 
-    // `gh://owner/repo/...` parses with a host; `gh:pull/...` is opaque
-    // (no `//`) and has no host — in that case, fall back to the
-    // project-rooted defaults.
+    // `gh://owner/repo/...` parses with a host; `gh:pull/...` is the
+    // truly opaque form (no `//`, no leading `/`) and has no host — in
+    // that case, fall back to the project-rooted defaults. Non-opaque
+    // hostless shapes like `gh:/pull/...` are rejected: the URL parser
+    // treats them as hierarchical-with-no-authority, but they aren't a
+    // documented form and silently mapping them to the shortform would
+    // leak that distinction. Mirrors the cmd handler.
     let (owner, segments) = if let Some(host) = uri.host_str() {
         let segments: Vec<&str> = uri
             .path_segments()
@@ -185,10 +189,16 @@ fn parse_uri(uri: &Url) -> Result<ParsedUri, Box<dyn Error + Send + Sync>> {
             .filter(|s| !s.is_empty())
             .collect();
         (host.to_owned(), segments)
-    } else {
+    } else if uri.cannot_be_a_base() {
         // Opaque form: `gh:pull/N/diff`. The whole tail is in `path()`.
         let segments: Vec<&str> = uri.path().split('/').filter(|s| !s.is_empty()).collect();
         (SHORTFORM_OWNER.to_owned(), segments)
+    } else {
+        return Err(format!(
+            "unsupported gh URI shape; expected one of `gh://OWNER/REPO/pull/N/{{diff|reviews}}` \
+             or `gh:pull/N/{{diff|reviews}}`, got `{uri}`"
+        )
+        .into());
     };
 
     // Canonical: REPO/pull/NUMBER/{diff|reviews}
