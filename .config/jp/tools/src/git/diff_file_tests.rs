@@ -204,12 +204,22 @@ fn range_only_start_line() {
 }
 
 #[test]
-fn range_with_pattern_slices_then_greps() {
+fn range_with_pattern_filters_within_window() {
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::success(large_diff(600));
 
-    // Pattern matches `line 5:`, `line 50:`...`line 599:`. The slice
-    // restricts to a window where only some of those appear.
+    // `large_diff(600)` layout (1-based):
+    //   1  diff --git a/big.rs b/big.rs
+    //   2  --- a/big.rs
+    //   3  +++ b/big.rs
+    //   4  @@ -1,1000 +1,1000 @@
+    //   5  +line 0: …
+    //   …
+    //   604 +line 599: …
+    //
+    // Window [550, 604] (1-based, inclusive) starts at "+line 545:" and
+    // ends at "+line 599:". Pattern `line 59\d:` therefore only matches
+    // "line 590:" through "line 599:".
     let content = git_diff_file_impl(
         dir.path(),
         DiffStatus::Unstaged,
@@ -228,10 +238,21 @@ fn range_with_pattern_slices_then_greps() {
     // Matches inside the window are present.
     assert!(content.contains("line 595:"));
     assert!(content.contains("line 599:"));
-    // The slice markers are still in the diff content (above the matches).
+    // Slice markers wrap the grep output.
     assert!(content.contains("... (starting from line #550) ..."));
-    // Grep's matches note (operating on the slice) is present.
+    assert!(content.contains("... (truncated after line #604) ..."));
+    // Grep's matches note is present.
     assert!(content.contains("[Showing"));
+
+    // Synthesized hunk header carries the correct *original-file* line
+    // numbers. The seeding `@@ -1,1000 +1,1000 @@` at line 4 sits *outside*
+    // the window, but `grep_diff` walked the full diff so its line counters
+    // reached new_line=591 by the time it hit the first match ("+line 590:"
+    // at original line 595). 10 contiguous matches → new_count=10.
+    assert!(
+        content.contains("@@ -1,0 +591,10 @@"),
+        "expected accurate synthesized hunk header. content:\n{content}"
+    );
 }
 
 #[test]

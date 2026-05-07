@@ -185,8 +185,18 @@ fn diff_commit_range_with_pattern() {
     .unwrap();
 
     assert!(content.contains("line 595:"));
+    assert!(content.contains("line 599:"));
     assert!(content.contains("... (starting from line #550) ..."));
     assert!(content.contains("[Showing"));
+
+    // Synthesized hunk header carries correct original-file line numbers,
+    // seeded by `@@ -1,1000 +1,1000 @@` at line 4 — even though that line
+    // sits outside the [550, 604] window. See the matching test in
+    // `diff_file_tests.rs` for the full layout walkthrough.
+    assert!(
+        content.contains("@@ -1,0 +591,10 @@"),
+        "expected accurate synthesized hunk header. content:\n{content}"
+    );
 }
 
 #[test]

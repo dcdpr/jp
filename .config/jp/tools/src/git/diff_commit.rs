@@ -27,6 +27,17 @@ pub(crate) async fn git_diff_commit(
     let env = super::env_from_options(options);
     let paths = paths.iter().map(AsRef::as_ref).collect::<Vec<_>>();
 
+    // An empty `paths` array still deserializes successfully (the schema's
+    // `required` only checks presence). Without this guard the tool would
+    // run `git show <rev> --` with no pathspec and dump the entire commit
+    // diff, defeating the drill-down purpose of the `paths` argument.
+    if paths.is_empty() {
+        return error(
+            "`paths` must contain at least one entry. `git_diff_commit` requires explicit paths \
+             to prevent dumping the whole commit diff; use `git_show` for an overview.",
+        );
+    }
+
     if let Err(msg) = validate_line_range(start_line, end_line) {
         return error(msg);
     }
@@ -83,23 +94,24 @@ fn git_diff_commit_impl<R: ProcessRunner>(
 
     let has_range = start_line.is_some() || end_line.is_some();
 
-    // Apply slice first if a range was requested. An explicit range bypasses
-    // the truncation cap — the user is paginating and owns their window size.
-    let working = if has_range {
-        slice_diff(&diff, start_line, end_line)
-    } else {
-        diff
-    };
-
-    // Then either grep (slice-then-grep), pass through (range-only), or
-    // fall back to the default truncation cap.
+    // An explicit range bypasses the truncation cap — the user is paginating
+    // and owns their window size. Three modes:
+    //
+    // - `pattern` (with or without `range`): grep walks the full diff so
+    //   structural headers and `@@` line counters stay accurate. When a
+    //   range is also set, `grep_diff` restricts matches to that window
+    //   instead of pre-slicing, which would hide preceding `@@` headers and
+    //   produce zero-based synthesized hunk headers.
+    // - `range` only: a plain text slice of the rendered diff.
+    // - neither: fall back to the default truncation cap.
     let (mut content, note): (String, Option<String>) = if let Some(pat) = pattern {
-        let (c, n) = grep_diff(&working, pat, context.unwrap_or(3))?;
+        let bounds = has_range.then(|| (start_line.unwrap_or(1), end_line.unwrap_or(total_lines)));
+        let (c, n) = grep_diff(&diff, pat, context.unwrap_or(3), bounds)?;
         (c.into_owned(), n)
     } else if has_range {
-        (working, None)
+        (slice_diff(&diff, start_line, end_line), None)
     } else {
-        let (c, n) = truncate_diff(&working, MAX_LINES);
+        let (c, n) = truncate_diff(&diff, MAX_LINES);
         (c.into_owned(), n)
     };
 

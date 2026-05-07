@@ -49,7 +49,7 @@ fn truncate_large_diff() {
 
 #[test]
 fn grep_finds_matches() {
-    let (content, _note) = grep_diff(small_diff(), "println", 1).unwrap();
+    let (content, _note) = grep_diff(small_diff(), "println", 1, None).unwrap();
 
     assert!(content.contains("println"));
     assert!(content.contains("hello"));
@@ -58,7 +58,7 @@ fn grep_finds_matches() {
 
 #[test]
 fn grep_no_matches() {
-    let (content, note) = grep_diff(small_diff(), "nonexistent_pattern", 3).unwrap();
+    let (content, note) = grep_diff(small_diff(), "nonexistent_pattern", 3, None).unwrap();
 
     assert!(content.contains("No matches"));
     assert!(note.is_none());
@@ -67,14 +67,14 @@ fn grep_no_matches() {
 #[test]
 fn grep_context_controls_visible_lines() {
     // With 0 context, only matching lines are shown.
-    let (content_0, _) = grep_diff(small_diff(), "hello", 0).unwrap();
+    let (content_0, _) = grep_diff(small_diff(), "hello", 0, None).unwrap();
     let lines_0: Vec<&str> = content_0
         .lines()
         .filter(|l| !l.starts_with('[') && !l.is_empty())
         .collect();
 
     // With 2 context, we get surrounding lines too.
-    let (content_2, _) = grep_diff(small_diff(), "hello", 2).unwrap();
+    let (content_2, _) = grep_diff(small_diff(), "hello", 2, None).unwrap();
     let lines_2: Vec<&str> = content_2
         .lines()
         .filter(|l| !l.starts_with('[') && !l.is_empty())
@@ -94,7 +94,7 @@ fn grep_separates_non_contiguous_regions() {
     lines.push("+match_second".to_string());
 
     let diff = lines.join("\n");
-    let (content, _) = grep_diff(&diff, "match_", 1).unwrap();
+    let (content, _) = grep_diff(&diff, "match_", 1, None).unwrap();
 
     assert!(content.contains("match_first"),);
     assert!(content.contains("match_second"),);
@@ -102,7 +102,7 @@ fn grep_separates_non_contiguous_regions() {
 
 #[test]
 fn grep_includes_file_and_hunk_headers() {
-    let (content, _) = grep_diff(small_diff(), "world", 0).unwrap();
+    let (content, _) = grep_diff(small_diff(), "world", 0, None).unwrap();
 
     // Even with 0 context, the diff --git and @@ headers should be present.
     assert!(content.contains("diff --git"), "missing header: {content}");
@@ -126,7 +126,7 @@ fn grep_synthesizes_hunk_headers_with_line_numbers() {
     lines.push("+match_second".to_string());
 
     let diff = lines.join("\n");
-    let (content, _) = grep_diff(&diff, "match_", 0).unwrap();
+    let (content, _) = grep_diff(&diff, "match_", 0, None).unwrap();
 
     let hunk_count = content.matches("@@ ").count();
     assert!(
@@ -155,8 +155,106 @@ fn parse_hunk_start_cases() {
 
 #[test]
 fn grep_invalid_regex_errors() {
-    let result = grep_diff(small_diff(), "[invalid", 0);
+    let result = grep_diff(small_diff(), "[invalid", 0, None);
     assert!(result.is_err());
+}
+
+#[test]
+fn grep_with_bounds_ignores_matches_outside_window() {
+    // Layout (1-based input line numbers):
+    //   1   diff --git a/f.rs b/f.rs
+    //   2   --- a/f.rs
+    //   3   +++ b/f.rs
+    //   4   @@ -1,30 +1,30 @@
+    //   5   +first
+    //   6–25 “filler 0” … “filler 19”
+    //   26  +second
+    let mut lines = vec![
+        "diff --git a/f.rs b/f.rs".to_string(),
+        "--- a/f.rs".to_string(),
+        "+++ b/f.rs".to_string(),
+        "@@ -1,30 +1,30 @@".to_string(),
+    ];
+    lines.push("+first".to_string());
+    for i in 0..20 {
+        lines.push(format!(" filler {i}"));
+    }
+    lines.push("+second".to_string());
+
+    let diff = lines.join("\n");
+
+    // Window covers only the second match (line 26).
+    let (content, _) = grep_diff(&diff, "first|second", 0, Some((26, 26))).unwrap();
+
+    assert!(content.contains("+second"), "missing +second in: {content}");
+    assert!(
+        !content.contains("+first"),
+        "+first leaked through bounds: {content}"
+    );
+}
+
+#[test]
+fn grep_with_bounds_synthesizes_correct_hunk_header() {
+    // Construct a diff where the only match sits past the seeding @@ header,
+    // and the bounds window starts *after* that @@ header. Without bounds-
+    // aware structural tracking the synthesized header would emit `+0,*`.
+    let mut lines = vec![
+        "diff --git a/f.rs b/f.rs".to_string(),
+        "--- a/f.rs".to_string(),
+        "+++ b/f.rs".to_string(),
+        "@@ -1,100 +1,100 @@".to_string(),
+    ];
+    for i in 0..50 {
+        lines.push(format!(" filler {i}"));
+    }
+    lines.push("+target".to_string()); // input line 55, new_line at this point: 51.
+    for i in 50..60 {
+        lines.push(format!(" filler {i}"));
+    }
+
+    let diff = lines.join("\n");
+
+    // Window starts at line 30, well past the seeding @@ header at line 4.
+    let (content, _) = grep_diff(&diff, "^\\+target", 0, Some((30, 60))).unwrap();
+
+    assert!(content.contains("+target"), "missing match: {content}");
+    // "+target" sits in a context of unchanged ` filler` lines. By line 55,
+    // 50 ` ` lines have advanced both old_line and new_line to 51.
+    assert!(
+        content.contains("@@ -51,0 +51,1 @@"),
+        "expected accurate synthesized hunk header. content:\n{content}"
+    );
+}
+
+#[test]
+fn grep_with_bounds_clamps_context_to_window() {
+    // 3-line file (after headers): one match flanked by filler. Asking for
+    // 5 lines of context would normally pull both filler lines, but a tight
+    // window must clamp the context.
+    let lines = [
+        "diff --git a/f.rs b/f.rs",
+        "--- a/f.rs",
+        "+++ b/f.rs",
+        "@@ -1,3 +1,3 @@",
+        " before",   // line 5
+        "+match_me", // line 6
+        " after",    // line 7
+    ];
+
+    let diff = lines.join("\n");
+
+    // Window covers only the match itself (line 6).
+    let (content, _) = grep_diff(&diff, "match_me", 5, Some((6, 6))).unwrap();
+
+    assert!(content.contains("+match_me"));
+    assert!(
+        !content.contains(" before"),
+        "context bled before window: {content}"
+    );
+    assert!(
+        !content.contains(" after"),
+        "context bled after window: {content}"
+    );
 }
 
 #[test]
