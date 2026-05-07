@@ -158,3 +158,109 @@ fn grep_invalid_regex_errors() {
     let result = grep_diff(small_diff(), "[invalid", 0);
     assert!(result.is_err());
 }
+
+#[test]
+fn validate_line_range_accepts_valid() {
+    assert!(validate_line_range(None, None).is_ok());
+    assert!(validate_line_range(Some(1), None).is_ok());
+    assert!(validate_line_range(None, Some(100)).is_ok());
+    assert!(validate_line_range(Some(1), Some(100)).is_ok());
+    assert!(validate_line_range(Some(50), Some(50)).is_ok());
+}
+
+#[test]
+fn validate_line_range_rejects_zero() {
+    assert!(validate_line_range(Some(0), None).is_err());
+    assert!(validate_line_range(None, Some(0)).is_err());
+    assert!(validate_line_range(Some(0), Some(0)).is_err());
+}
+
+#[test]
+fn validate_line_range_rejects_inverted() {
+    let err = validate_line_range(Some(50), Some(10)).unwrap_err();
+    assert!(err.contains("less than or equal"));
+}
+
+#[test]
+fn slice_diff_no_range_returns_input_unchanged() {
+    let out = slice_diff(small_diff(), None, None);
+    assert_eq!(out, small_diff());
+}
+
+#[test]
+fn slice_diff_only_start_keeps_tail() {
+    // small_diff line layout (1-based):
+    //   1: diff --git ...
+    //   2: index abc..def 100644
+    //   3: --- a/src/main.rs
+    //   4: +++ b/src/main.rs
+    //   5: @@ -1,3 +1,3 @@
+    //   6:  fn main() {
+    //   7: -    println!("hello");
+    //   8: +    println!("world");
+    //   9:  }
+    let out = slice_diff(small_diff(), Some(5), None);
+    assert!(out.starts_with("@@ -1,3 +1,3 @@\n"));
+    assert!(out.contains("+    println!(\"world\")"));
+    assert!(!out.contains("diff --git"));
+    assert!(!out.contains("--- a/src/main.rs"));
+}
+
+#[test]
+fn slice_diff_only_end_keeps_head() {
+    let out = slice_diff(small_diff(), None, Some(3));
+    assert!(out.contains("diff --git"));
+    assert!(out.contains("index abc..def"));
+    assert!(out.contains("--- a/src/main.rs"));
+    assert!(!out.contains("+++ b/src/main.rs"));
+    assert!(!out.contains("@@"));
+}
+
+#[test]
+fn slice_diff_both_bounds() {
+    let out = slice_diff(small_diff(), Some(3), Some(5));
+    // Lines 3..=5: --- a/..., +++ b/..., @@ ...
+    assert_eq!(out.lines().count(), 3);
+    assert!(out.contains("--- a/src/main.rs"));
+    assert!(out.contains("+++ b/src/main.rs"));
+    assert!(out.contains("@@ -1,3 +1,3 @@"));
+}
+
+#[test]
+fn slice_diff_end_beyond_total_caps_silently() {
+    // small_diff has 9 lines; asking for 1..=999 should give the whole diff,
+    // no error.
+    let out = slice_diff(small_diff(), Some(1), Some(999));
+    assert_eq!(out, small_diff());
+}
+
+#[test]
+fn add_slice_markers_wraps_content() {
+    let mut content = "the body".to_string();
+    add_slice_markers(&mut content, Some(50), Some(100));
+    assert_eq!(
+        content,
+        "... (starting from line #50) ...\nthe body\n... (truncated after line #100) ..."
+    );
+}
+
+#[test]
+fn add_slice_markers_only_start() {
+    let mut content = "body".to_string();
+    add_slice_markers(&mut content, Some(7), None);
+    assert_eq!(content, "... (starting from line #7) ...\nbody");
+}
+
+#[test]
+fn add_slice_markers_only_end() {
+    let mut content = "body".to_string();
+    add_slice_markers(&mut content, None, Some(42));
+    assert_eq!(content, "body\n... (truncated after line #42) ...");
+}
+
+#[test]
+fn add_slice_markers_no_range_is_noop() {
+    let mut content = "body".to_string();
+    add_slice_markers(&mut content, None, None);
+    assert_eq!(content, "body");
+}

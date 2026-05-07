@@ -42,6 +42,8 @@ fn basic_diff_commit() {
         &["src/main.rs"],
         None,
         None,
+        None,
+        None,
         &runner,
         &[],
     )
@@ -65,6 +67,8 @@ fn diff_commit_with_pattern() {
         &["src/main.rs"],
         Some("world"),
         Some(1),
+        None,
+        None,
         &runner,
         &[],
     )
@@ -92,6 +96,8 @@ fn diff_commit_empty_diff() {
         &["nonexistent.rs"],
         None,
         None,
+        None,
+        None,
         &runner,
         &[],
     )
@@ -110,12 +116,98 @@ fn diff_commit_truncates_large_output() {
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::success(large_diff(600));
 
-    let content = git_diff_commit_impl(dir.path(), "abc123", &["big.rs"], None, None, &runner, &[])
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let content = git_diff_commit_impl(
+        dir.path(),
+        "abc123",
+        &["big.rs"],
+        None,
+        None,
+        None,
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
 
     assert!(content.contains("[Showing 500/604 lines."));
+    assert!(content.contains("`pattern`"));
+    assert!(content.contains("`start_line`"));
+}
+
+#[test]
+fn diff_commit_range_bypasses_cap() {
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::success(large_diff(600));
+
+    let content = git_diff_commit_impl(
+        dir.path(),
+        "abc123",
+        &["big.rs"],
+        None,
+        None,
+        Some(400),
+        Some(600),
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
+
+    assert!(content.contains("... (starting from line #400) ..."));
+    assert!(content.contains("... (truncated after line #600) ..."));
+    assert!(!content.contains("[Showing"));
+    // Lines past the 500-line cap must be present.
+    assert!(content.contains("line 500:"));
+    assert!(content.contains("line 595:"));
+}
+
+#[test]
+fn diff_commit_range_with_pattern() {
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::success(large_diff(600));
+
+    let content = git_diff_commit_impl(
+        dir.path(),
+        "abc123",
+        &["big.rs"],
+        Some(r"line 59\d:"),
+        Some(0),
+        Some(550),
+        Some(604),
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
+
+    assert!(content.contains("line 595:"));
+    assert!(content.contains("... (starting from line #550) ..."));
+    assert!(content.contains("[Showing"));
+}
+
+#[test]
+fn diff_commit_range_start_beyond_total_errors() {
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::success(large_diff(10));
+
+    let outcome = git_diff_commit_impl(
+        dir.path(),
+        "abc123",
+        &["big.rs"],
+        None,
+        None,
+        Some(999),
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap();
+
+    assert!(outcome.into_content().is_none(), "expected error outcome");
 }
 
 #[test]
@@ -123,7 +215,17 @@ fn diff_commit_git_error() {
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::error("fatal: bad revision");
 
-    let outcome =
-        git_diff_commit_impl(dir.path(), "bad", &["file.rs"], None, None, &runner, &[]).unwrap();
+    let outcome = git_diff_commit_impl(
+        dir.path(),
+        "bad",
+        &["file.rs"],
+        None,
+        None,
+        None,
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap();
     assert!(outcome.into_content().is_none(), "expected error outcome");
 }

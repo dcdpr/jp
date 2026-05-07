@@ -181,11 +181,85 @@ pub(super) fn truncate_diff(diff: &str, max_lines: usize) -> (Cow<'_, str>, Opti
 
     let truncated = diff.lines().take(max_lines).collect::<Vec<_>>().join("\n");
     let note = format!(
-        "[Showing {max_lines}/{total} lines. Use the `pattern` parameter to search within this \
-         diff.]"
+        "[Showing {max_lines}/{total} lines. Use `pattern` to search, or `start_line` / \
+         `end_line` to page through this diff.]"
     );
 
     (truncated.into(), Some(note))
+}
+
+/// Validate user-provided line range arguments.
+///
+/// Checks the static cross-cuts: both bounds must be positive, and `start`
+/// must not exceed `end`. The bound-vs-content check (`start > total_lines`)
+/// happens in the caller, since it depends on the diff's actual size and the
+/// error message wants to include that count.
+pub(super) fn validate_line_range(
+    start: Option<usize>,
+    end: Option<usize>,
+) -> Result<(), &'static str> {
+    if start.is_some_and(|v| v == 0) {
+        return Err("`start_line` must be greater than 0.");
+    }
+    if end.is_some_and(|v| v == 0) {
+        return Err("`end_line` must be greater than 0.");
+    }
+    if let (Some(s), Some(e)) = (start, end)
+        && s > e
+    {
+        return Err("`start_line` must be less than or equal to `end_line`.");
+    }
+    Ok(())
+}
+
+/// Slice the diff to a 1-based output-line range, returning just the
+/// extracted body without markers.
+///
+/// `start_line` and `end_line` are inclusive 1-based offsets into the diff's
+/// rendered output. Markers are added separately by [`add_slice_markers`]
+/// after any other processing (grep, truncate) so the slice context is still
+/// visible even when the body has been further filtered.
+///
+/// Validation (positive bounds, ordering, `start <= total`) must happen in
+/// the caller before this is invoked.
+pub(super) fn slice_diff(diff: &str, start_line: Option<usize>, end_line: Option<usize>) -> String {
+    let lines: Vec<&str> = diff.lines().collect();
+    let total = lines.len();
+
+    let start_idx = start_line.map_or(0, |v| v.saturating_sub(1));
+    let end_idx = end_line.map_or(total, |v| v.min(total));
+
+    let slice: &[&str] = if start_idx < end_idx {
+        &lines[start_idx..end_idx]
+    } else {
+        &[]
+    };
+    slice.join("\n")
+}
+
+/// Wrap content with `fs_read_file`-style range markers.
+///
+/// Mirrors `fs_read_file`'s output shape:
+/// ```text
+/// ... (starting from line #N) ...
+/// <content>
+/// ... (truncated after line #M) ...
+/// ```
+///
+/// Applied as the last step so that markers survive intermediate processing
+/// (e.g. when [`grep_diff`] is run inside the slice and would otherwise
+/// strip them as non-matching lines).
+pub(super) fn add_slice_markers(
+    content: &mut String,
+    start_line: Option<usize>,
+    end_line: Option<usize>,
+) {
+    if let Some(s) = start_line {
+        content.insert_str(0, &format!("... (starting from line #{s}) ...\n"));
+    }
+    if let Some(e) = end_line {
+        content.push_str(&format!("\n... (truncated after line #{e}) ..."));
+    }
 }
 
 /// Parse old and new start lines from a `@@` hunk header.
