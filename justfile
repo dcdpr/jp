@@ -1402,7 +1402,7 @@ ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 # Lint the code on CI.
 [group('ci')]
 lint-ci: (_rustup_component "clippy") _install_ci_matchers
-    cargo clippy --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
+    cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
 
 # Check code formatting on CI.
 [group('ci')]
@@ -1412,20 +1412,20 @@ fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
 # Test the code on CI.
 [group('ci')]
 test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
-    @just test --workspace --no-fail-fast
+    cargo nextest run --locked --lib --tests --cargo-profile=nextest --workspace --no-fail-fast
 
 # Generate documentation on CI.
 [group('ci')]
 docs-ci: _install_ci_matchers
     #!/usr/bin/env sh
     export RUSTDOCFLAGS="-D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-html-tags -D rustdoc::invalid-rust-codeblocks -D rustdoc::bare-urls -D rustdoc::unescaped-backticks -D rustdoc::redundant-explicit-links"
-    cargo doc --workspace --profile=docs --all-features --keep-going --document-private-items --no-deps
+    cargo doc --locked --workspace --profile=docs --all-features --keep-going --document-private-items --no-deps
 
 # Generate code coverage on CI.
 [group('ci')]
 coverage-ci: _coverage-setup _install_ci_matchers
-    cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
-    cargo llvm-cov --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
+    cargo llvm-cov --locked --no-cfg-coverage --no-cfg-coverage-nightly --cargo-profile=coverage --no-report nextest
+    cargo llvm-cov --locked --no-cfg-coverage --no-cfg-coverage-nightly --profile=coverage --no-report --doc
     cargo llvm-cov report --doctests --lcov --output-path lcov.info --profile=coverage
 
 _coverage-setup: (_rustup_component "llvm-tools") _install-llvm-cov (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
