@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
+- **Requires**: [RFD 065](065-typed-resource-model-for-attachments.md), [RFD 058](058-typed-content-blocks-for-tool-responses.md)
+- **Required by**: [RFD 067](067-resource-deduplication-for-token-efficiency.md)
 
 ## Summary
 

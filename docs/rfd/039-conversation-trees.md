@@ -5,6 +5,8 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
 - **Extended by**: [RFD 046](046-nested-workspace-projection.md)
+- **Requires**: [RFD 020](020-parallel-conversations.md)
+- **Required by**: [RFD 050](050-scripting-ergonomics-for-conversation-management.md), [RFD 051](051-sub-agent-workflows.md)
 
 ## Summary
 

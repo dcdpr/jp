@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
 - **Extends**: [RFD 016](016-wasm-plugin-architecture.md)
+- **Requires**: [RFD 076](076-tool-access-grants.md)
 
 ## Summary
 

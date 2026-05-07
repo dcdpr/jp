@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-05
-- **Extends**: RFD 048
+- **Extends**: [RFD 048](../048-four-channel-output-model.md)
 
 ## Summary
 

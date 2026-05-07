@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-14
+- **Required by**: [RFD 075](075-tool-sandbox-and-access-policy.md), [RFD 078](078-tool-config-mutation.md)
 
 ## Summary
 

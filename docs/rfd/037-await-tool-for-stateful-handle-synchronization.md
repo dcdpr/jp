@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
+- **Requires**: [RFD 009](009-stateful-tool-protocol.md), [RFD 011](011-system-notification-queue.md)
 
 ## Summary
 

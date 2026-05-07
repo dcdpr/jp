@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
+- **Required by**: [RFD D11](D11-vfs-tool-protocol.md)
 
 ## Summary
 

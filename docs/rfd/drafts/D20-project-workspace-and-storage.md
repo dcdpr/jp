@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-26
+- **Requires**: [RFD 035](../035-multi-root-config-load-path-resolution.md), [RFD 079](../079-config-sources-and-load-order.md)
 
 ## Summary
 

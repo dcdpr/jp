@@ -4,6 +4,8 @@
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-20
+- **Requires**: [RFD 008](008-ordered-tool-directives.md), [RFD 035](035-multi-root-config-load-path-resolution.md), [RFD 038](038-config-reset-keywords.md), [RFD 054](054-split-conversation-config-and-events.md)
+- **Required by**: [RFD 080](080-editor-as-a-config-source.md)
 
 ## Summary
 

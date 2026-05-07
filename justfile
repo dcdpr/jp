@@ -546,76 +546,252 @@ rfd-supersede NNN MMM:
     fi
 
 # Record that RFD MMM extends RFD NNN, updating both documents.
+#
+# Both NNN and MMM may be permanent numbers (e.g. 042) or draft IDs (e.g. D05).
+# Bidirectional metadata is maintained per the draft policy: a published RFD
+# never receives a `Extended by: RFD D«nn»` back-link from a draft (would
+# violate the no-link-from-published-to-draft rule).
 [group('rfd')]
 rfd-extend NNN MMM:
     #!/usr/bin/env sh
     set -eu
 
-    old_n=$(echo "{{NNN}}" | sed 's/^0*//')
-    old_num=$(printf "%03d" "${old_n:-0}")
-    new_n=$(echo "{{MMM}}" | sed 's/^0*//')
-    new_num=$(printf "%03d" "${new_n:-0}")
-    old_file=$(ls docs/rfd/${old_num}-*.md 2>/dev/null | head -1)
-    new_file=$(ls docs/rfd/${new_num}-*.md 2>/dev/null | head -1)
-    if [ -z "$old_file" ]; then
-        echo "No RFD found with number ${old_num}." >&2; exit 1
-    fi
-    if [ -z "$new_file" ]; then
-        echo "No RFD found with number ${new_num}." >&2; exit 1
+    # Validate that the extended RFD (NNN, the older) is not Abandoned or
+    # Superseded — extending a withdrawn or replaced design is almost certainly
+    # a mistake.
+    nnn_file=$(ls docs/rfd/{{NNN}}-*.md docs/rfd/drafts/{{NNN}}-*.md 2>/dev/null | head -1)
+    if [ -z "$nnn_file" ]; then
+        # `_rfd-link` will produce a clearer error; let it handle the
+        # not-found case.
+        :
+    else
+        nnn_status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$nnn_file" | head -1)
+        case "$nnn_status" in
+            Draft|Discussion|Accepted|Implemented) ;;
+            *)
+                echo "Cannot extend RFD {{NNN}} (status: '${nnn_status}')." >&2
+                echo "Abandoned and Superseded RFDs cannot be extended." >&2
+                exit 1 ;;
+        esac
     fi
 
-    # Validate that the extended RFD is in Discussion or later status.
-    old_status=$(sed -n 's/^- \*\*Status\*\*: \(.*\)/\1/p' "$old_file" | head -1)
-    case "$old_status" in
-        Discussion|Accepted|Implemented) ;;
-        *)
-            echo "Cannot extend RFD ${old_num} (status: '${old_status}')." >&2
-            echo "Only Discussion, Accepted or Implemented RFDs can be extended." >&2
-            exit 1 ;;
+    # Delegate to the shared bidirectional-link helper.
+    # rfd-extend NNN MMM means "MMM extends NNN":
+    #   MMM (source) gets `Extends: NNN`.
+    #   NNN (target) gets `Extended by: MMM` (per the draft-aware matrix).
+    just _rfd-link "{{MMM}}" "{{NNN}}" "Extends" "Extended by"
+
+# Record that RFD NNN requires RFD MMM, updating both documents.
+#
+# Both NNN and MMM may be permanent numbers (e.g. 042) or draft IDs (e.g. D05).
+# Bidirectional metadata is maintained per the draft policy: a published RFD
+# never receives a `Required by: RFD D«nn»` back-link from a draft.
+#
+# `Requires` participates in the promotion gate enforced by `rfd-promote`:
+# Discussion → Accepted requires every dependency to be Accepted, Implemented
+# or Superseded; Accepted → Implemented requires every dependency to be
+# Implemented or Superseded.
+[group('rfd')]
+rfd-require NNN MMM:
+    #!/usr/bin/env sh
+    set -eu
+
+    # Delegate to the shared bidirectional-link helper.
+    # rfd-require NNN MMM means "NNN requires MMM":
+    #   NNN (source) gets `Requires: MMM`.
+    #   MMM (target) gets `Required by: NNN` (per the draft-aware matrix).
+    just _rfd-link "{{NNN}}" "{{MMM}}" "Requires" "Required by"
+
+# Internal: write a bidirectional relationship between two RFDs.
+#
+# SOURCE gets `FORWARD: TARGET` in its metadata.
+# TARGET gets `INVERSE: SOURCE` — except when SOURCE is a draft and TARGET is a
+# non-draft (rule 2 of the draft-aware matrix: published RFDs never link to
+# drafts).
+#
+# Refused: SOURCE non-draft + TARGET draft (would create a draft link from a
+# published RFD).
+#
+# Cycles in the FORWARD field are detected by walking TARGET's transitive
+# FORWARD chain and refusing if SOURCE appears anywhere in it.
+[no-exit-message]
+[private]
+_rfd-link SOURCE TARGET FORWARD INVERSE:
+    #!/usr/bin/env sh
+    set -eu
+
+    # --- Helpers ---
+
+    # Resolve an RFD id ("D05" or "42" or "042") to its file path.
+    resolve_file() {
+        if echo "$1" | grep -qE '^D[0-9]+$'; then
+            ls "docs/rfd/drafts/$1-"*.md 2>/dev/null | head -1
+        else
+            n=$(echo "$1" | sed 's/^0*//')
+            num=$(printf "%03d" "${n:-0}")
+            ls "docs/rfd/${num}-"*.md 2>/dev/null | head -1
+        fi
+    }
+
+    # Canonicalize an id to display form ("D05" stays "D05"; "42"/"042" become "042").
+    display_id() {
+        if echo "$1" | grep -qE '^D[0-9]+$'; then
+            echo "$1"
+        else
+            n=$(echo "$1" | sed 's/^0*//')
+            printf "%03d\n" "${n:-0}"
+        fi
+    }
+
+    is_draft() {
+        echo "$1" | grep -qE '^D[0-9]+$'
+    }
+
+    # Compute relative path from $1 (a file) to $2 (a file).
+    relative_link() {
+        from_dir=$(dirname "$1")
+        to_dir=$(dirname "$2")
+        to_base=$(basename "$2")
+        if [ "$from_dir" = "$to_dir" ]; then
+            echo "$to_base"
+        elif [ "$from_dir" = "docs/rfd/drafts" ] && [ "$to_dir" = "docs/rfd" ]; then
+            echo "../$to_base"
+        elif [ "$from_dir" = "docs/rfd" ] && [ "$to_dir" = "docs/rfd/drafts" ]; then
+            echo "drafts/$to_base"
+        else
+            echo "$to_base"
+        fi
+    }
+
+    # Add a `- **FIELD**: LINK` entry to FILE for an entry referring to ID.
+    # Skips if the entry is already present (idempotent).
+    # Returns 0 if added, 1 if skipped.
+    #
+    # All operations are scoped to the metadata header (lines before the first
+    # `## ` heading). RFDs may include metadata-shaped examples inside code
+    # blocks (RFD 001 in particular), and we must not read or write against
+    # those.
+    add_link() {
+        f="$1"; field="$2"; link="$3"; id="$4"
+
+        first_heading=$(grep -n '^## ' "$f" | head -1 | cut -d: -f1)
+        header_end="${first_heading:-9999}"
+
+        existing=$(head -n "$header_end" "$f" | sed -n "s/^- \\*\\*${field}\\*\\*: //p" | head -1)
+        if echo "$existing" | grep -qE "RFD ${id}([^0-9]|\$)"; then
+            return 1
+        fi
+
+        if [ -n "$existing" ]; then
+            # Append to the existing header line, scoped to the header range.
+            sed "1,${header_end}s|^- \\*\\*${field}\\*\\*: .*|&, ${link}|" "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+        else
+            last_meta=$(head -n "$header_end" "$f" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
+            awk -v ln="$last_meta" -v entry="- **${field}**: ${link}" '
+                NR == ln { print; print entry; next }
+                { print }
+            ' "$f" > "$f.tmp"
+            mv "$f.tmp" "$f"
+        fi
+        return 0
+    }
+
+    # --- Resolve source and target ---
+
+    src_id=$(display_id "{{SOURCE}}")
+    tgt_id=$(display_id "{{TARGET}}")
+    src_file=$(resolve_file "{{SOURCE}}")
+    tgt_file=$(resolve_file "{{TARGET}}")
+
+    if [ -z "$src_file" ]; then
+        echo "RFD not found: {{SOURCE}}" >&2; exit 1
+    fi
+    if [ -z "$tgt_file" ]; then
+        echo "RFD not found: {{TARGET}}" >&2; exit 1
+    fi
+
+    # --- Refuse non-draft source → draft target (rule 2 of the matrix) ---
+
+    if ! is_draft "$src_id" && is_draft "$tgt_id"; then
+        echo "Refused: published RFD ${src_id} cannot link to draft RFD ${tgt_id}." >&2
+        echo "Promote ${tgt_id} first, or move the relationship to a draft." >&2
+        exit 1
+    fi
+
+    # --- Refuse duplicate across `Extends` and `Requires` ---
+    #
+    # Extension implies dependency, so the same target must not appear under
+    # both fields. Decide the "other" field to inspect from FORWARD.
+    case "{{FORWARD}}" in
+        Requires) other_forward="Extends" ;;
+        Extends)  other_forward="Requires" ;;
+        *)        other_forward="" ;;
     esac
 
-    # Resolve basenames for relative markdown links.
-    new_basename=$(basename "$new_file")
-    old_basename=$(basename "$old_file")
-
-    # Add "Extended by: [RFD MMM](...)" to the older RFD (NNN).
-    existing_eb=$(sed -n 's/^- \*\*Extended by\*\*: \(.*\)/\1/p' "$old_file" | head -1)
-    new_link="[RFD ${new_num}](${new_basename})"
-    if echo "$existing_eb" | grep -q "RFD ${new_num}"; then
-        echo "${old_file}: already extended by RFD ${new_num}"
-    elif [ -n "$existing_eb" ]; then
-        sed "s/^- \*\*Extended by\*\*: .*/&, ${new_link}/" "$old_file" > "${old_file}.tmp"
-        mv "${old_file}.tmp" "$old_file"
-        echo "${old_file}: Extended by ${existing_eb}, RFD ${new_num}"
-    else
-        first_heading=$(grep -n '^## ' "$old_file" | head -1 | cut -d: -f1)
-        last_meta=$(head -n "${first_heading:-9999}" "$old_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
-        awk -v ln="$last_meta" -v eb="- **Extended by**: ${new_link}" '
-            NR == ln { print; print eb; next }
-            { print }
-        ' "$old_file" > "${old_file}.tmp"
-        mv "${old_file}.tmp" "$old_file"
-        echo "${old_file}: Extended by RFD ${new_num}"
+    if [ -n "$other_forward" ]; then
+        other_line=$(sed -n "s/^- \\*\\*${other_forward}\\*\\*: //p" "$src_file" | head -1)
+        if echo "$other_line" | grep -qE "RFD ${tgt_id}([^0-9]|\$)"; then
+            echo "Refused: RFD ${src_id} already lists RFD ${tgt_id} under '${other_forward}'." >&2
+            echo "Extension implies dependency; don't list the same target under both. Drop one entry first." >&2
+            exit 1
+        fi
     fi
 
-    # Add "Extends: [RFD NNN](...)" to the newer RFD (MMM).
-    existing_ex=$(sed -n 's/^- \*\*Extends\*\*: \(.*\)/\1/p' "$new_file" | head -1)
-    old_link="[RFD ${old_num}](${old_basename})"
-    if echo "$existing_ex" | grep -q "RFD ${old_num}"; then
-        echo "${new_file}: already extends RFD ${old_num}"
-    elif [ -n "$existing_ex" ]; then
-        sed "s/^- \*\*Extends\*\*: .*/&, ${old_link}/" "$new_file" > "${new_file}.tmp"
-        mv "${new_file}.tmp" "$new_file"
-        echo "${new_file}: Extends ${existing_ex}, RFD ${old_num}"
+    # --- Cycle detection: walk TARGET's transitive `Requires`+`Extends` chain ---
+    #
+    # The two relationships are unified for gating and cycle purposes
+    # (extension is a kind of dependency), so the cycle walk traverses both
+    # fields as a single edge set.
+
+    visited=""
+    frontier="$tgt_id"
+    while [ -n "$frontier" ]; do
+        next_frontier=""
+        for cur in $frontier; do
+            case " $visited " in *" $cur "*) continue ;; esac
+            visited="$visited $cur"
+
+            if [ "$cur" = "$src_id" ]; then
+                echo "Refused: cycle detected. Adding RFD ${src_id} → RFD ${tgt_id} on '{{FORWARD}}' would close a loop in the Requires/Extends graph." >&2
+                exit 1
+            fi
+
+            cur_file=$(resolve_file "$cur")
+            [ -z "$cur_file" ] && continue
+
+            for cyc_field in Requires Extends; do
+                line=$(sed -n "s/^- \\*\\*${cyc_field}\\*\\*: //p" "$cur_file" | head -1)
+                ids=$(echo "$line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}')
+                for id in $ids; do
+                    next_frontier="$next_frontier $id"
+                done
+            done
+        done
+        frontier="$next_frontier"
+    done
+
+    # --- Compute display links and write metadata ---
+
+    fwd_link="[RFD ${tgt_id}]($(relative_link "$src_file" "$tgt_file"))"
+    inv_link="[RFD ${src_id}]($(relative_link "$tgt_file" "$src_file"))"
+
+    # Write FORWARD on source.
+    if add_link "$src_file" "{{FORWARD}}" "$fwd_link" "$tgt_id"; then
+        echo "${src_file}: {{FORWARD}}: RFD ${tgt_id}"
     else
-        first_heading=$(grep -n '^## ' "$new_file" | head -1 | cut -d: -f1)
-        last_meta=$(head -n "${first_heading:-9999}" "$new_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
-        awk -v ln="$last_meta" -v ex="- **Extends**: ${old_link}" '
-            NR == ln { print; print ex; next }
-            { print }
-        ' "$new_file" > "${new_file}.tmp"
-        mv "${new_file}.tmp" "$new_file"
-        echo "${new_file}: Extends RFD ${old_num}"
+        echo "${src_file}: already lists RFD ${tgt_id} under {{FORWARD}}"
+    fi
+
+    # Write INVERSE on target unless rule 3 of the matrix (draft → non-draft).
+    if is_draft "$src_id" && ! is_draft "$tgt_id"; then
+        echo "${tgt_file}: skipped {{INVERSE}}: RFD ${src_id} (suppressed: draft → non-draft)"
+    else
+        if add_link "$tgt_file" "{{INVERSE}}" "$inv_link" "$src_id"; then
+            echo "${tgt_file}: {{INVERSE}}: RFD ${src_id}"
+        else
+            echo "${tgt_file}: already lists RFD ${src_id} under {{INVERSE}}"
+        fi
     fi
 
 # Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
@@ -663,6 +839,71 @@ rfd-promote NNN: _install-jp
             echo "Promotable statuses: Draft, Discussion, Accepted." >&2
             exit 1 ;;
     esac
+
+    # --- Pre-flight (Draft -> Discussion): refuse if Requires or Extends
+    # contain draft references. The promoted RFD becomes a published file;
+    # published files cannot reference drafts (the loader's DNN check would
+    # fail the next docs build).
+    if [ "$current" = "Draft" ]; then
+        for field in Requires Extends; do
+            line=$(sed -n "s/^- \\*\\*${field}\\*\\*: //p" "$file" | head -1)
+            if echo "$line" | grep -qE 'RFD D[0-9]+'; then
+                echo "Cannot promote: '${field}' on $(basename "$file") contains draft references." >&2
+                echo "  ${line}" >&2
+                echo "Promote those drafts first, or remove the entries." >&2
+                exit 1
+            fi
+        done
+    fi
+
+    # --- Promotion gate (Discussion -> Accepted, Accepted -> Implemented):
+    # check that all `Requires` dependencies are at a sufficient status.
+    # Discussion -> Accepted requires deps to be Accepted, Implemented, or
+    # Superseded; Accepted -> Implemented requires deps to be Implemented or
+    # Superseded.
+    case "$current" in
+        Discussion) gate_states="Accepted Implemented Superseded" ;;
+        Accepted)   gate_states="Implemented Superseded" ;;
+        *)          gate_states="" ;;
+    esac
+
+    if [ -n "$gate_states" ]; then
+        # Gather deps from `Requires` and `Extends` (unified gate: extension
+        # is a kind of dependency, both participate).
+        deps=""
+        for field in Requires Extends; do
+            line=$(sed -n "s/^- \\*\\*${field}\\*\\*: //p" "$file" | head -1)
+            field_deps=$(echo "$line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}')
+            deps="$deps $field_deps"
+        done
+        deps=$(echo "$deps" | tr ' ' '\n' | awk 'NF' | sort -u)
+
+        if [ -n "$deps" ]; then
+            unmet=""
+            for dep in $deps; do
+                if echo "$dep" | grep -qE '^D[0-9]+$'; then
+                    dep_file=$(ls "docs/rfd/drafts/${dep}-"*.md 2>/dev/null | head -1)
+                else
+                    dep_file=$(ls "docs/rfd/${dep}-"*.md 2>/dev/null | head -1)
+                fi
+                if [ -z "$dep_file" ]; then
+                    unmet="${unmet}\n  RFD ${dep} (not found)"
+                    continue
+                fi
+                dep_status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$dep_file" | head -1)
+                case " $gate_states " in
+                    *" $dep_status "*) ;;
+                    *) unmet="${unmet}\n  RFD ${dep} (${dep_status})" ;;
+                esac
+            done
+            if [ -n "$unmet" ]; then
+                echo "Cannot promote to ${next}: dependencies not satisfied:" >&2
+                printf "${unmet}\n" >&2
+                echo "Required: status is one of: ${gate_states}" >&2
+                exit 1
+            fi
+        fi
+    fi
 
     # --- Draft -> Discussion: assign permanent number, rename file ---
     if [ "$current" = "Draft" ]; then
@@ -718,6 +959,78 @@ rfd-promote NNN: _install-jp
             mv "${other}.tmp" "$other"
             echo "  updated ${old_draft_id} -> ${num} references in ${other}"
             updated=$((updated + 1))
+        done
+
+        # Strip draft entries from `Required by` and `Extended by` on the
+        # promoted file. These are bookkeeping artefacts of the bidirectional
+        # draft-draft policy; the file is now published and cannot carry
+        # draft back-links.
+        for field in "Required by" "Extended by"; do
+            awk -v field="$field" '
+                BEGIN { search = "^- \\*\\*" field "\\*\\*: " }
+                $0 ~ search {
+                    sub(search, "", $0)
+                    n = split($0, entries, /, /)
+                    new = ""
+                    for (i = 1; i <= n; i++) {
+                        if (entries[i] !~ /RFD D[0-9]+/) {
+                            new = (new == "") ? entries[i] : new ", " entries[i]
+                        }
+                    }
+                    if (new != "") print "- **" field "**: " new
+                    next
+                }
+                { print }
+            ' "$new_file" > "${new_file}.tmp"
+            mv "${new_file}.tmp" "$new_file"
+        done
+
+        # Backfill: for each entry in `Requires` and `Extends`, ensure the
+        # target lists the promoted RFD under the inverse field. Targets that
+        # were drafts at link-time may not have the back-link (rule 3 of the
+        # draft-aware matrix); add it now.
+        for pair in "Requires:Required by" "Extends:Extended by"; do
+            forward=$(echo "$pair" | cut -d: -f1)
+            inverse=$(echo "$pair" | cut -d: -f2)
+
+            line=$(sed -n "s/^- \\*\\*${forward}\\*\\*: //p" "$new_file" | head -1)
+            [ -z "$line" ] && continue
+
+            for dep in $(echo "$line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
+                if echo "$dep" | grep -qE '^D[0-9]+$'; then
+                    dep_file=$(ls "docs/rfd/drafts/${dep}-"*.md 2>/dev/null | head -1)
+                else
+                    dep_file=$(ls "docs/rfd/${dep}-"*.md 2>/dev/null | head -1)
+                fi
+                [ -z "$dep_file" ] && continue
+
+                existing=$(sed -n "s/^- \\*\\*${inverse}\\*\\*: //p" "$dep_file" | head -1)
+                if echo "$existing" | grep -qE "RFD ${num}([^0-9]|\$)"; then
+                    continue
+                fi
+
+                dep_dir=$(dirname "$dep_file")
+                if [ "$dep_dir" = "docs/rfd/drafts" ]; then
+                    rel="../${new_basename}"
+                else
+                    rel="${new_basename}"
+                fi
+                link="[RFD ${num}](${rel})"
+
+                if [ -n "$existing" ]; then
+                    sed "s|^- \\*\\*${inverse}\\*\\*: .*|&, ${link}|" "$dep_file" > "${dep_file}.tmp"
+                    mv "${dep_file}.tmp" "$dep_file"
+                else
+                    first_heading=$(grep -n '^## ' "$dep_file" | head -1 | cut -d: -f1)
+                    last_meta=$(head -n "${first_heading:-9999}" "$dep_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
+                    awk -v ln="$last_meta" -v entry="- **${inverse}**: ${link}" '
+                        NR == ln { print; print entry; next }
+                        { print }
+                    ' "$dep_file" > "${dep_file}.tmp"
+                    mv "${dep_file}.tmp" "$dep_file"
+                fi
+                echo "  backfilled ${inverse}: RFD ${num} into ${dep_file}"
+            done
         done
 
         echo "${new_file}: Draft -> Discussion (assigned ${num})"
@@ -823,6 +1136,20 @@ rfd-abandon NNN +REASON:
     echo "${file}: Abandoned (${current} -> Abandoned)"
     if [ -n "$tracking" ]; then
         echo "Remember to close the tracking issue: https://github.com/dcdpr/jp/issues/${tracking}"
+    fi
+
+    # Warn about RFDs that depend on this one (`Required by` field). The
+    # abandonment doesn't auto-cascade or auto-fix; the dependents need
+    # manual review. The check uses this RFD's own `Required by` field as
+    # the source of truth (assumes `rfd-require` was used to maintain it).
+    required_by_line=$(sed -n 's/^- \*\*Required by\*\*: //p' "$file" | head -1)
+    if [ -n "$required_by_line" ]; then
+        echo "" >&2
+        echo "Warning: the following RFDs depend on this one (Required by):" >&2
+        for r in $(echo "$required_by_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
+            echo "  RFD ${r}" >&2
+        done
+        echo "Their dependency on RFD ${num} is now broken — review and update." >&2
     fi
 
 # Generate or update AI summaries for RFD documents.

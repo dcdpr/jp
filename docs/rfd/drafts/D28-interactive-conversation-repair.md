@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-15
+- **Requires**: [RFD 052](../052-workspace-data-store-sanitization.md), [RFD 054](../054-split-conversation-config-and-events.md), [RFD 070](../070-negative-config-deltas.md)
 
 ## Summary
 

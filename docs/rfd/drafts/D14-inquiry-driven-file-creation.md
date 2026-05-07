@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-02
+- **Requires**: [RFD D13](D13-schema-answer-type-and-inherit-model-alias.md)
 
 ## Summary
 

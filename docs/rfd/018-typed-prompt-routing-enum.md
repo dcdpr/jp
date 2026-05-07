@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-01
+- **Requires**: [RFD 028](028-structured-inquiry-system-for-tool-questions.md)
+- **Required by**: [RFD 049](049-non-interactive-mode-and-detached-prompt-policy.md)
 
 ## Summary
 

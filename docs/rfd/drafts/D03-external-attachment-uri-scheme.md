@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
+- **Requires**: [RFD 065](../065-typed-resource-model-for-attachments.md), [RFD 066](../066-content-addressable-blob-store.md)
 
 ## Summary
 

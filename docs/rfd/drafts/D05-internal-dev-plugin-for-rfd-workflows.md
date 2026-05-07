@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-20
+- **Requires**: [RFD 001](../001-jp-rfd-process.md), [RFD 003](../003-jp-assisted-rfds.md), [RFD 050](../050-scripting-ergonomics-for-conversation-management.md), [RFD 072](../072-command-plugin-system.md)
 
 ## Summary
 

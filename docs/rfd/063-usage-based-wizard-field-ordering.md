@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-21
+- **Requires**: [RFD 061](061-interactive-config.md), [RFD 062](062-cli-usage-tracking.md), [RFD 060](060-config-explain.md)
 
 ## Summary
 

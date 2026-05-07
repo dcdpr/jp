@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
+- **Requires**: [RFD 020](020-parallel-conversations.md), [RFD 023](023-resumable-conversation-turns.md), [RFD 026](026-agent-loop-extraction.md), [RFD 049](049-non-interactive-mode-and-detached-prompt-policy.md)
 
 > [!WARNING]
 > This RFD is an early draft and incomplete. The overall direction is

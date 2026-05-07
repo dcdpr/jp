@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
+- **Required by**: [RFD 071](071-conversation-archiving.md), [RFD 074](074-eager-loading-with-command-declared-data-requirements.md)
+- **Requires**: [RFD 069](069-guard-scoped-persistence-for-conversations.md), [RFD 052](052-workspace-data-store-sanitization.md)
 
 ## Summary
 

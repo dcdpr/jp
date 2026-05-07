@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
+- **Requires**: [RFD 005](../005-first-class-inquiry-events.md), [RFD 028](../028-structured-inquiry-system-for-tool-questions.md), [RFD 034](../034-inquiry-specific-assistant-configuration.md)
 
 ## Summary
 

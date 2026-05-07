@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-17
+- **Required by**: [RFD 027](027-client-server-query-architecture.md), [RFD 051](051-sub-agent-workflows.md)
+- **Requires**: [RFD 018](018-typed-prompt-routing-enum.md), [RFD 048](048-four-channel-output-model.md)
 
 ## Summary
 

@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-28
+- **Required by**: [RFD 017](017-wasm-attachment-handlers.md)
 
 ## Summary
 

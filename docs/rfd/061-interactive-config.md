@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-21
+- **Requires**: [RFD 060](060-config-explain.md)
+- **Required by**: [RFD 063](063-usage-based-wizard-field-ordering.md)
 
 ## Summary
 

@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
+- **Requires**: [RFD 005](005-first-class-inquiry-events.md), [RFD 009](009-stateful-tool-protocol.md)
+- **Required by**: [RFD 037](037-await-tool-for-stateful-handle-synchronization.md)
 
 ## Summary
 

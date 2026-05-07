@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
-- **Extends**: RFD D15
+- **Extends**: [RFD D15](D15-structured-logging-infrastructure.md)
 
 ## Summary
 

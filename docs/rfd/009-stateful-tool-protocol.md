@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
+- **Requires**: [RFD 028](028-structured-inquiry-system-for-tool-questions.md)
+- **Required by**: [RFD 010](010-pty-infrastructure-and-interactive-tool-sdk.md), [RFD 011](011-system-notification-queue.md), [RFD 037](037-await-tool-for-stateful-handle-synchronization.md), [RFD 058](058-typed-content-blocks-for-tool-responses.md)
 
 ## Summary
 

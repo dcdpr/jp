@@ -1,11 +1,11 @@
-# RFD 071: Inquiry Rejection Reasoning and Escalation
+# RFD D29: Inquiry Rejection Reasoning and Escalation
 
 - **Status**: Draft
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-14
-- **Extends**: [RFD 028](028-structured-inquiry-system-for-tool-questions.md),
-  [RFD 034](034-inquiry-specific-assistant-configuration.md)
+- **Extends**: [RFD 028](../028-structured-inquiry-system-for-tool-questions.md), [RFD 034](../034-inquiry-specific-assistant-configuration.md)
+- **Requires**: [RFD 005](../005-first-class-inquiry-events.md), [RFD 049](../049-non-interactive-mode-and-detached-prompt-policy.md)
 
 ## Summary
 

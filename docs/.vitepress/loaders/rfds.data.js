@@ -132,6 +132,189 @@ export default {
             )
         }
 
+        // Validate the dependency graph implied by `Requires` and `Extends`.
+        //
+        // The two relationships are unified for enforcement: an extension is
+        // a kind of dependency (`Extends ⊆ Requires`). The gate, the
+        // duplicate check, and the cycle detector all operate on the union.
+        //
+        // Three checks:
+        //
+        // 1. **No duplicates.** A target must not appear under both `Requires`
+        //    and `Extends` on the same RFD. Same for the inverse pair
+        //    (`Required by` / `Extended by`). Extension already implies the
+        //    dependency — listing both is redundant and a future maintenance
+        //    hazard.
+        // 2. **Status gate.** An RFD with status `Accepted` must not depend on
+        //    an RFD that is below `Accepted`. An RFD with status `Implemented`
+        //    must not depend on an RFD that is below `Implemented`.
+        //    `Superseded` counts as both (the dependency was satisfied at
+        //    some point).
+        // 3. **Cycle detection.** A → B → ... → A is rejected. The justfile
+        //    `rfd-require` / `rfd-extend` recipes already refuse to *write*
+        //    a cycle; the loader is the unconditional CI backstop for
+        //    hand-edits.
+        //
+        // Drafts are not loaded here, so all checks apply only to the
+        // published graph. The DNN check above already covers the orthogonal
+        // case of a published RFD pointing at a draft.
+        const ACCEPTED_PLUS = new Set(['Accepted', 'Implemented', 'Superseded'])
+        const IMPLEMENTED_PLUS = new Set(['Implemented', 'Superseded'])
+
+        // Extract a `- **Field**: ...` line and pull the 3-digit RFD numbers
+        // out of it. Drafts can't appear here in published RFDs (DNN check
+        // enforces), so we match 3-digit numbers only.
+        const parseField = (content, field) => {
+            const re = new RegExp(`^- \\*\\*${field}\\*\\*:\\s*(.+)$`, 'm')
+            const line = content.match(re)?.[1] ?? ''
+            return [...line.matchAll(/\bRFD\s+(\d{3})\b/g)].map(m => m[1])
+        }
+
+        // First parse pass: extract relationship metadata into a small graph.
+        const graph = new Map()
+        for (const f of files) {
+            const content = readFileSync(resolve(rfdDir, f), 'utf-8')
+            const num = f.match(/^(\d{3})/)?.[1]
+            if (!num) continue
+            const status = content
+                .match(/^- \*\*Status\*\*:\s*(\w+)/m)?.[1] ?? null
+            graph.set(num, {
+                file: f,
+                status,
+                requires: parseField(content, 'Requires'),
+                extends_: parseField(content, 'Extends'),
+                requiredBy: parseField(content, 'Required by'),
+                extendedBy: parseField(content, 'Extended by'),
+            })
+        }
+
+        // 1. No-duplicate check across `Requires` / `Extends` (and the inverse
+        //    pair `Required by` / `Extended by`).
+        const duplicates = []
+        for (const [num, entry] of graph) {
+            const reqSet = new Set(entry.requires)
+            for (const e of entry.extends_) {
+                if (reqSet.has(e)) {
+                    duplicates.push({
+                        file: entry.file,
+                        num,
+                        dep: e,
+                        fields: ['Requires', 'Extends'],
+                    })
+                }
+            }
+            const reqBySet = new Set(entry.requiredBy)
+            for (const e of entry.extendedBy) {
+                if (reqBySet.has(e)) {
+                    duplicates.push({
+                        file: entry.file,
+                        num,
+                        dep: e,
+                        fields: ['Required by', 'Extended by'],
+                    })
+                }
+            }
+        }
+
+        if (duplicates.length > 0) {
+            const report = duplicates
+                .map(({ file, num, dep, fields }) =>
+                    `  ${file}: RFD ${num} lists RFD ${dep} under both '${fields[0]}' and '${fields[1]}'`
+                )
+                .join('\n')
+            throw new Error(
+                `Duplicate relationship metadata on published RFDs:\n` +
+                report + '\n\n' +
+                `Extension implies dependency — don't list the same target ` +
+                `under both fields. Drop one entry; 'Extends' is the more ` +
+                `specific of the pair.`
+            )
+        }
+
+        // Build the unified deps map (Requires ∪ Extends) for the gate and
+        // cycle detection. With the no-duplicate invariant just enforced, the
+        // union has no double-counting.
+        const deps = new Map()
+        for (const [num, entry] of graph) {
+            deps.set(num, [...new Set([...entry.requires, ...entry.extends_])])
+        }
+
+        // 2. Status gate.
+        const gateViolations = []
+        for (const [num, entry] of graph) {
+            const allowed = entry.status === 'Accepted' ? ACCEPTED_PLUS
+                          : entry.status === 'Implemented' ? IMPLEMENTED_PLUS
+                          : null
+            if (!allowed) continue
+            for (const dep of deps.get(num) ?? []) {
+                const depEntry = graph.get(dep)
+                if (!depEntry) {
+                    gateViolations.push({
+                        file: entry.file, num, status: entry.status,
+                        dep, depStatus: '(not found)',
+                    })
+                    continue
+                }
+                if (!allowed.has(depEntry.status)) {
+                    gateViolations.push({
+                        file: entry.file, num, status: entry.status,
+                        dep, depStatus: depEntry.status,
+                    })
+                }
+            }
+        }
+
+        if (gateViolations.length > 0) {
+            const report = gateViolations
+                .map(({ file, num, status, dep, depStatus }) =>
+                    `  ${file}: RFD ${num} (${status}) depends on RFD ${dep} (${depStatus})`
+                )
+                .join('\n')
+            throw new Error(
+                `Promotion gate violations on published RFDs:\n` +
+                report + '\n\n' +
+                `Accepted RFDs require deps to be Accepted/Implemented/Superseded; ` +
+                `Implemented RFDs require deps to be Implemented/Superseded. ` +
+                `Both \`Requires\` and \`Extends\` participate.`
+            )
+        }
+
+        // 3. Cycle detection on the unified graph (DFS with white/gray/black).
+        const cycles = []
+        {
+            const WHITE = 0, GRAY = 1, BLACK = 2
+            const color = new Map()
+            for (const num of graph.keys()) color.set(num, WHITE)
+
+            const visit = (num, path) => {
+                color.set(num, GRAY)
+                for (const next of deps.get(num) ?? []) {
+                    if (!graph.has(next)) continue
+                    if (color.get(next) === GRAY) {
+                        const start = path.indexOf(next)
+                        cycles.push([...path.slice(start), next])
+                        continue
+                    }
+                    if (color.get(next) === BLACK) continue
+                    visit(next, [...path, next])
+                }
+                color.set(num, BLACK)
+            }
+
+            for (const num of graph.keys()) {
+                if (color.get(num) === WHITE) visit(num, [num])
+            }
+        }
+
+        if (cycles.length > 0) {
+            const report = cycles
+                .map(c => '  ' + c.map(n => `RFD ${n}`).join(' → '))
+                .join('\n')
+            throw new Error(
+                `Dependency cycles detected (Requires ∪ Extends):\n` + report
+            )
+        }
+
         // First pass: parse metadata and references.
         const rfds = files.map(f => {
             const content = readFileSync(resolve(rfdDir, f), 'utf-8')

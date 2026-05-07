@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-12
+- **Requires**: [RFD 029](../029-scriptable-structured-output.md)
 
 ## Summary
 

@@ -4,6 +4,7 @@
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
+- **Requires**: [RFD 038](038-config-reset-keywords.md), [RFD 039](039-conversation-trees.md), [RFD 040](040-hidden-conversations-and-tool-context.md), [RFD 048](048-four-channel-output-model.md), [RFD 049](049-non-interactive-mode-and-detached-prompt-policy.md), [RFD 050](050-scripting-ergonomics-for-conversation-management.md)
 
 ## Summary
 

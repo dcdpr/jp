@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-20
+- **Requires**: [RFD 020](../020-parallel-conversations.md), [RFD 038](../038-config-reset-keywords.md), [RFD 070](../070-negative-config-deltas.md)
 
 ## Summary
 

@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
+- **Requires**: [RFD 076](076-tool-access-grants.md), [RFD 070](070-negative-config-deltas.md)
 
 ## Summary
 
