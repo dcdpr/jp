@@ -76,6 +76,8 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 t.req("paths")?,
                 t.opt("pattern")?,
                 t.opt("context")?,
+                t.opt("start_line")?,
+                t.opt("end_line")?,
                 opts,
             )
             .await
@@ -88,6 +90,8 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
                 t.req("paths")?,
                 t.opt("pattern")?,
                 t.opt("context")?,
+                t.opt("start_line")?,
+                t.opt("end_line")?,
                 opts,
             )
             .await

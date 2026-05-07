@@ -15,12 +15,22 @@ The `paths` parameter is required to prevent accidentally dumping massive \
 diffs.
 
 If the diff exceeds 500 lines, it is truncated with a message suggesting \
-the use of the `pattern` parameter.
+the use of the `pattern`, `start_line`, and `end_line` parameters.
 
 When `pattern` is provided, the tool greps within the diff output and \
 returns only matching lines with surrounding context, similar to \
 `fs_grep_files`. This is useful for large diffs where you only care \
 about specific changes.
+
+When `start_line` and/or `end_line` are provided, the tool returns the \
+given 1-based line range of the rendered diff output (mirroring \
+`fs_read_file`). This is the escape hatch for the 500-line cap: page \
+through a large diff in chunks rather than asking for everything at once.
+
+`pattern` and the line range compose: when both are set, the tool greps \
+within the requested line window — matches and context are restricted to \
+the window, while hunk-header line numbers stay accurate to the original \
+diff.
 """
 
 examples = """
@@ -37,6 +47,16 @@ Show the full staged diff for multiple files:
 Search within a large unstaged diff:
 ```json
 {"status": "unstaged", "paths": ["crates/jp_config/src/lib.rs"], "pattern": "fn parse", "context": 5}
+```
+
+Page through a large diff (lines 500-999):
+```json
+{"status": "unstaged", "paths": ["crates/jp_llm/src/stream.rs"], "start_line": 500, "end_line": 999}
+```
+
+Grep within a window of a large diff:
+```json
+{"status": "staged", "paths": ["src/main.rs"], "start_line": 500, "end_line": 1500, "pattern": "TODO"}
 ```
 """
 
@@ -65,3 +85,11 @@ summary = "Regex pattern to search within the diff output. When set, only matchi
 [conversation.tools.git_diff_file.parameters.context]
 type = "integer"
 summary = "Number of context lines around pattern matches. Defaults to 3 when `pattern` is set. Ignored without `pattern`."
+
+[conversation.tools.git_diff_file.parameters.start_line]
+type = "integer"
+summary = "1-based start line of the rendered diff output. When set, bypasses the 500-line truncation cap. Use this with `end_line` to page through large diffs."
+
+[conversation.tools.git_diff_file.parameters.end_line]
+type = "integer"
+summary = "1-based end line of the rendered diff output (inclusive). When set, bypasses the 500-line truncation cap. Use with `start_line` to define a window."

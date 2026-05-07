@@ -10,15 +10,15 @@ and diffs. The following tools help you with this:
 parameter narrows which files appear in the overview but does NOT bypass the per-file cap — \
 use `git_diff_file` for that.
 - git_diff_file: Working-tree analog of `git_diff_commit`. Show the full staged or unstaged \
-diff for explicitly listed files. Requires `status` and `paths`. Supports an optional \
-`pattern` parameter to grep within large diffs.
+diff for explicitly listed files. Requires `status` and `paths`. Supports `pattern` to grep \
+within large diffs and `start_line` / `end_line` to page through large diffs in chunks.
 - git_log: Search the commit history. Supports filtering by message text, file paths, date range, \
 and result count.
 - git_show: Show commit details (message and changed file stats). Does NOT include actual diff \
 content.
 - git_diff_commit: Show the actual diff for specific files in a commit. Requires explicit file \
-paths to prevent context bloat. Supports an optional `pattern` parameter to grep within large \
-diffs.
+paths to prevent context bloat. Supports `pattern` to grep within large diffs and `start_line` / \
+`end_line` to page through large diffs in chunks.
 
 Use these tools in a drill-down workflow:
 - For commits: `git_log` to find commits, `git_show` to inspect metadata and changed files, \

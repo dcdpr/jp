@@ -1391,6 +1391,30 @@ async fn diff_file_rejects_empty_paths() {
 }
 
 #[tokio::test]
+async fn diff_commit_rejects_empty_paths() {
+    // Mirror of `diff_file_rejects_empty_paths`. Without this guard,
+    // `git show <rev> --` with no pathspec would dump the entire commit
+    // diff, defeating the drill-down purpose of `paths`. The new
+    // `start_line`/`end_line` paging would then let the model inspect a
+    // specific region of that unbounded dump — making this guard a
+    // prerequisite for the paging feature, not just a parity fix.
+    let dir = camino_tempfile::tempdir().unwrap();
+    let root = dir.path().to_owned();
+
+    let outcome = tools::run(
+        ctx(&root),
+        tool("git_diff_commit", &json!({"revision": "HEAD", "paths": []})),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(outcome, Outcome::Error { .. }),
+        "expected error outcome, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
 async fn staged_diff_excludes_intent_to_add_files() {
     if !has_git() {
         return;
