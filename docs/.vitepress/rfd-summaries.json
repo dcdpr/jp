@@ -200,7 +200,7 @@
     "summary": "Guide for building sub-agent workflows using local tools, config overlays, and conversation trees to delegate scoped tasks cheaply."
   },
   "052-workspace-data-store-sanitization.md": {
-    "hash": "38733ed41a7cc0f8e52afdf686c36b8c76f294fcbedb4156d476fd0fde00d7ed",
+    "hash": "8db914682989d574d204793b4c8c2de3efb144a7f8231f6c9f06af38da879a02",
     "summary": "Introduces Workspace::sanitize() method that validates .jp data store, moves corrupt conversations to .trash/ with error explanations, and ensures four invariants before CLI commands run."
   },
   "053-auto-refresh-conversation-titles.md": {

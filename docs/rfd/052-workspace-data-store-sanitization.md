@@ -1,6 +1,6 @@
 # RFD 052: Workspace Data Store Sanitization
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-18
