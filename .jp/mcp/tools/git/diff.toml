@@ -7,8 +7,12 @@ command = "just serve-tools {{context}} {{tool}}"
 summary = "Show the diff of changes in the git repository, filtered by staging status."
 description = """
 Returns a per-file summary of changes with truncated diffs. Each file's diff \
-is capped at 50 lines. If a file is truncated, re-run with `paths` set to \
-that file to see its full diff.
+is capped at 50 lines. If a file is truncated, use `git_diff_file` with that \
+file in `paths` to see its full diff (and optionally a `pattern` to search \
+within it).
+
+The `paths` parameter on this tool narrows which files appear in the \
+overview but does NOT lift the per-file truncation cap.
 """
 
 examples = """
@@ -17,7 +21,7 @@ Diff all unstaged changes:
 {"status": "unstaged"}
 ```
 
-Diff unstaged changes in specific files:
+Narrow the overview to specific paths:
 ```json
 {"status": "unstaged", "paths": ["crates/jp_config/src/conversation/tool.rs"]}
 ```
@@ -36,7 +40,7 @@ parameters = "function_call"
 [conversation.tools.git_diff.parameters.paths]
 type = "array"
 items.type = "string"
-summary = "Optional list of paths to restrict the diff to. If omitted, diffs the entire repository."
+summary = "Optional list of paths to restrict the overview to. If omitted, diffs the entire repository. Does NOT bypass per-file truncation — use `git_diff_file` for full per-file diffs."
 
 [conversation.tools.git_diff.parameters.status]
 type = "string"

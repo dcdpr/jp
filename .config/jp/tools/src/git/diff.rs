@@ -4,7 +4,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use serde_json::{Map, Value};
 
 use crate::util::{
-    OneOrMany, ToolResult,
+    OneOrMany, ToolResult, error,
     runner::{DuctProcessRunner, ProcessRunner},
 };
 
@@ -21,7 +21,7 @@ pub(crate) enum DiffStatus {
 }
 
 impl DiffStatus {
-    fn parse(s: &str) -> Result<Self, String> {
+    pub(super) fn parse(s: &str) -> Result<Self, String> {
         match s {
             "staged" => Ok(Self::Staged),
             "unstaged" => Ok(Self::Unstaged),
@@ -46,6 +46,10 @@ fn git_diff_impl<R: ProcessRunner>(
     runner: &R,
     env: &[(&str, &str)],
 ) -> ToolResult {
+    // The trailing `--` is required to disambiguate paths from revspecs.
+    // Without it, deleted-file paths trigger
+    //   fatal: <path>: no such path in the working tree.
+    // because git tries to resolve them against the working tree first.
     let mut args = match status {
         DiffStatus::Staged => vec![
             "diff-index",
@@ -53,14 +57,22 @@ fn git_diff_impl<R: ProcessRunner>(
             "--ita-invisible-in-index",
             "-p",
             "HEAD",
+            "--",
         ],
-        DiffStatus::Unstaged => vec!["diff-files", "-p"],
+        DiffStatus::Unstaged => vec!["diff-files", "-p", "--"],
     };
 
     let path_refs: Vec<&str> = paths.iter().map(String::as_str).collect();
     args.extend(path_refs);
 
     let output = runner.run_with_env("git", &args, root, env)?;
+
+    // A non-zero exit must surface as an error. Without this check, a git
+    // failure with empty stdout falls through to "No changes." below and
+    // silently swallows whatever git wrote to stderr.
+    if !output.status.is_success() {
+        return error(format!("git diff failed: {}", output.stderr.trim()));
+    }
 
     let diff = output.stdout.trim();
     if diff.is_empty() {
@@ -73,7 +85,7 @@ fn git_diff_impl<R: ProcessRunner>(
 /// Format a unified diff with per-file truncation.
 ///
 /// Each file's diff is capped at `max_lines_per_file`. Truncated files get a
-/// note directing the user to narrow their query with the `paths` parameter.
+/// note directing the user to `git_diff_file` for the full per-file diff.
 fn format_diff(diff: &str, max_lines_per_file: usize) -> String {
     let files = split_into_files(diff);
 
@@ -115,16 +127,17 @@ fn format_diff(diff: &str, max_lines_per_file: usize) -> String {
             let _ = write!(result, "```diff\n{}\n```", truncated.trim_end());
             let _ = write!(
                 result,
-                "\n[Truncated {}/{} lines for `{}`. Use `paths` to see the full diff.]",
-                max_lines_per_file, f.line_count, f.path
+                "\n[Truncated {}/{} lines for `{}`. Use `git_diff_file` with `paths: [\"{}\"]` to \
+                 see the full diff.]",
+                max_lines_per_file, f.line_count, f.path, f.path
             );
         }
     }
 
     if any_truncated {
         result.push_str(
-            "\n\nSome files were truncated. Re-run with `paths` set to the files of interest to \
-             see their full diff.",
+            "\n\nSome files were truncated. Use `git_diff_file` with `paths` set to the files of \
+             interest to see their full diff (with optional `pattern` for searching).",
         );
     }
 

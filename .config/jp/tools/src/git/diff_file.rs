@@ -3,29 +3,37 @@ use std::fmt::Write;
 use camino::{Utf8Path, Utf8PathBuf};
 use serde_json::{Map, Value};
 
-use super::diff_filter::{grep_diff, truncate_diff};
+use super::{
+    diff::DiffStatus,
+    diff_filter::{grep_diff, truncate_diff},
+};
 use crate::util::{
     OneOrMany, ToolResult, error,
     runner::{DuctProcessRunner, ProcessRunner},
 };
 
 /// Maximum lines of diff output before truncation kicks in.
+///
+/// Matches `git_diff_commit` — both tools serve the same drill-down purpose
+/// (give me the full diff for these specific files) and should behave
+/// consistently from the caller's point of view.
 const MAX_LINES: usize = 500;
 
-pub(crate) async fn git_diff_commit(
+pub(crate) async fn git_diff_file(
     root: Utf8PathBuf,
-    revision: String,
+    status: String,
     paths: OneOrMany<String>,
     pattern: Option<String>,
     context: Option<usize>,
     options: &Map<String, Value>,
 ) -> ToolResult {
+    let status = DiffStatus::parse(&status)?;
     let env = super::env_from_options(options);
     let paths = paths.iter().map(AsRef::as_ref).collect::<Vec<_>>();
 
-    git_diff_commit_impl(
+    git_diff_file_impl(
         &root,
-        &revision,
+        status,
         &paths,
         pattern.as_deref(),
         context,
@@ -34,30 +42,40 @@ pub(crate) async fn git_diff_commit(
     )
 }
 
-fn git_diff_commit_impl<R: ProcessRunner>(
+fn git_diff_file_impl<R: ProcessRunner>(
     root: &Utf8Path,
-    revision: &str,
+    status: DiffStatus,
     paths: &[&str],
     pattern: Option<&str>,
     context: Option<usize>,
     runner: &R,
     env: &[(&str, &str)],
 ) -> ToolResult {
-    // `git show <rev> --format= -- <paths>` gives us just the diff for
-    // specific files, with an empty format to suppress the commit header.
-    let mut args: Vec<&str> = vec!["show", "--format=", revision, "--"];
+    // Same flags as `git_diff` — the only difference is that we always pass
+    // explicit paths and we don't apply per-file truncation.
+    let mut args: Vec<&str> = match status {
+        DiffStatus::Staged => vec![
+            "diff-index",
+            "--cached",
+            "--ita-invisible-in-index",
+            "-p",
+            "HEAD",
+            "--",
+        ],
+        DiffStatus::Unstaged => vec!["diff-files", "-p", "--"],
+    };
     args.extend(paths);
 
     let output = runner.run_with_env("git", &args, root, env)?;
 
     if !output.status.is_success() {
-        return error(format!("git show failed: {}", output.stderr.trim()));
+        return error(format!("git diff failed: {}", output.stderr.trim()));
     }
 
     let diff = output.stdout.trim_start().to_string();
 
     if diff.is_empty() {
-        return Ok("No diff found for the specified revision and paths.".into());
+        return Ok("No changes for the specified paths.".into());
     }
 
     let (content, note) = match pattern {
@@ -74,5 +92,5 @@ fn git_diff_commit_impl<R: ProcessRunner>(
 }
 
 #[cfg(test)]
-#[path = "diff_commit_tests.rs"]
+#[path = "diff_file_tests.rs"]
 mod tests;

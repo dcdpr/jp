@@ -5,8 +5,13 @@ content = """\
 You have been given the git-reading skill. You are an expert at reading and navigating git history \
 and diffs. The following tools help you with this:
 
-- git_diff: Diff the git repository, with a required `status` parameter: `"staged"` or `"unstaged"`. \
-Output is truncated per file; use the `paths` parameter to see full diffs for specific files.
+- git_diff: Overview of staged or unstaged changes, with a required `status` parameter: \
+`"staged"` or `"unstaged"`. Each file's diff is capped at 50 lines. The optional `paths` \
+parameter narrows which files appear in the overview but does NOT bypass the per-file cap — \
+use `git_diff_file` for that.
+- git_diff_file: Working-tree analog of `git_diff_commit`. Show the full staged or unstaged \
+diff for explicitly listed files. Requires `status` and `paths`. Supports an optional \
+`pattern` parameter to grep within large diffs.
 - git_log: Search the commit history. Supports filtering by message text, file paths, date range, \
 and result count.
 - git_show: Show commit details (message and changed file stats). Does NOT include actual diff \
@@ -15,13 +20,16 @@ content.
 paths to prevent context bloat. Supports an optional `pattern` parameter to grep within large \
 diffs.
 
-Use these tools in a drill-down workflow: `git_log` to find commits, `git_show` to inspect a \
-commit's metadata and changed files, and `git_diff_commit` to view the actual diff for specific \
-files of interest.
+Use these tools in a drill-down workflow:
+- For commits: `git_log` to find commits, `git_show` to inspect metadata and changed files, \
+`git_diff_commit` to view the actual diff for specific files.
+- For the working tree: `git_diff` for the overview, `git_diff_file` to drill into a file \
+whose diff was truncated.
 """
 
 [conversation.tools]
 git_diff = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+git_diff_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_log = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_show = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_diff_commit = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }

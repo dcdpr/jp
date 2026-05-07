@@ -1277,6 +1277,97 @@ async fn diff_commit_no_match_for_path() {
 }
 
 #[tokio::test]
+async fn staged_diff_with_new_deleted_and_modified_paths() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+
+    // Seed two files: one we'll delete, one we'll modify.
+    fs::write(root.join("delete_me.rs"), "to be deleted\n").unwrap();
+    fs::write(root.join("modify_me.rs"), "before\n").unwrap();
+    git(&root, &["add", "delete_me.rs", "modify_me.rs"]);
+    git(&root, &["commit", "-m", "seed"]);
+
+    // Stage a new file, the deletion, and the modification together.
+    fs::write(root.join("new_file.rs"), "brand new content\n").unwrap();
+    fs::remove_file(root.join("delete_me.rs")).unwrap();
+    fs::write(root.join("modify_me.rs"), "after\n").unwrap();
+    git(&root, &[
+        "add",
+        "--all",
+        "new_file.rs",
+        "delete_me.rs",
+        "modify_me.rs",
+    ]);
+
+    // Without the `--` separator git aborts with
+    //   fatal: delete_me.rs: no such path in the working tree.
+    // and `git_diff` would previously swallow that as "No changes.".
+    let content = run_ok(
+        ctx(&root),
+        tool(
+            "git_diff",
+            &json!({
+                "paths": ["new_file.rs", "delete_me.rs", "modify_me.rs"],
+                "status": "staged",
+            }),
+        ),
+    )
+    .await;
+
+    assert!(
+        content.contains("new_file.rs"),
+        "missing new_file.rs in: {content}"
+    );
+    assert!(
+        content.contains("delete_me.rs"),
+        "missing delete_me.rs in: {content}"
+    );
+    assert!(
+        content.contains("modify_me.rs"),
+        "missing modify_me.rs in: {content}"
+    );
+}
+
+#[tokio::test]
+async fn diff_surfaces_git_errors_instead_of_swallowing_them() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+
+    // Point GIT_DIR at a path that does not exist; git will exit non-zero
+    // with a complaint on stderr. The tool must surface that, not silently
+    // report "No changes.".
+    let mut options = git_options();
+    options
+        .get_mut("env")
+        .and_then(Value::as_object_mut)
+        .unwrap()
+        .insert(
+            "GIT_DIR".to_string(),
+            json!("/definitely/not/a/real/git/dir/jp_test"),
+        );
+
+    let t = Tool {
+        name: "git_diff".to_string(),
+        arguments: json!({"status": "unstaged"}).as_object().unwrap().clone(),
+        answers: Map::new(),
+        options,
+    };
+
+    let outcome = tools::run(ctx(&root), t).await.unwrap();
+
+    assert!(
+        matches!(outcome, Outcome::Error { .. }),
+        "expected error outcome, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
 async fn staged_diff_excludes_intent_to_add_files() {
     if !has_git() {
         return;
