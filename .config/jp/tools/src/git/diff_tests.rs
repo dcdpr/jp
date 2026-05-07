@@ -130,7 +130,7 @@ fn format_truncates_large_file() {
 
     assert!(out.contains("truncated to 20"));
     assert!(out.contains("[Truncated 20/104 lines for `big.rs`."));
-    assert!(out.contains("Re-run with `paths`"));
+    assert!(out.contains("git_diff_file"));
 
     // Should contain exactly 20 lines of diff content inside the code fence
     let fence_content = out

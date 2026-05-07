@@ -10,6 +10,8 @@ mod apply;
 mod commit;
 mod diff;
 mod diff_commit;
+mod diff_file;
+mod diff_filter;
 mod hunk;
 mod list_patches;
 mod log;
@@ -22,6 +24,7 @@ use add_intent::git_add_intent;
 use commit::git_commit;
 use diff::git_diff;
 use diff_commit::git_diff_commit;
+use diff_file::git_diff_file;
 use list_patches::git_list_patches;
 use log::git_log;
 use show::git_show;
@@ -70,6 +73,18 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             git_diff_commit(
                 ctx.root,
                 t.req("revision")?,
+                t.req("paths")?,
+                t.opt("pattern")?,
+                t.opt("context")?,
+                opts,
+            )
+            .await
+        }
+
+        "diff_file" => {
+            git_diff_file(
+                ctx.root,
+                t.req("status")?,
                 t.req("paths")?,
                 t.opt("pattern")?,
                 t.opt("context")?,
