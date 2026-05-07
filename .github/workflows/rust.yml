@@ -146,9 +146,9 @@ jobs:
           cache-bin: false
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - if: ${{ steps.task.outputs.run == 'true' }}
+      - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # V0.10
-      - if: ${{ steps.task.outputs.run == 'true' }}
+      - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
