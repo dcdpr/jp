@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
+- **Requires**: [RFD 009](009-stateful-tool-protocol.md)
 
 ## Summary
 

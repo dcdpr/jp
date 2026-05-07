@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-24
 - **Extends**: [RFD D25]
+- **Requires**: [RFD 043](../043-incremental-tool-call-argument-streaming.md)
 
 ## Summary
 

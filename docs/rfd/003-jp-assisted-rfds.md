@@ -4,6 +4,8 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
+- **Requires**: [RFD 001](001-jp-rfd-process.md), [RFD 002](002-using-llms.md)
+- **Required by**: [RFD 041](041-rfd-lifecycle-enhancements.md)
 
 ## Summary
 

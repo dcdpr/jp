@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
+- **Requires**: [RFD 048](048-four-channel-output-model.md), [RFD 030](030-schema-dsl.md)
 
 ## Summary
 

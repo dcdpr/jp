@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-02
 - **Extends**: [RFD 028][RFD 028], [RFD 034][RFD 034]
+- **Required by**: [RFD D14](D14-inquiry-driven-file-creation.md)
 
 ## Summary
 

@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-12
+- **Requires**: [RFD D06](D06-self-describing-local-tools.md)
 
 ## Summary
 

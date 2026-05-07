@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-06
+- **Required by**: [RFD 077](077-plugin-configuration-and-trust-policy.md)
 
 ## Summary
 

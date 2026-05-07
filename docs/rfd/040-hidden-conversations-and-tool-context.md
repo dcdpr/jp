@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
+- **Required by**: [RFD 051](051-sub-agent-workflows.md)
 
 ## Summary
 

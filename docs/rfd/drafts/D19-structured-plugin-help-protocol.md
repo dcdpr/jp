@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-07
+- **Requires**: [RFD 072](../072-command-plugin-system.md)
+- **Required by**: [RFD D23](D23-json-input-and-schema-for-cli.md)
 
 ## Summary
 

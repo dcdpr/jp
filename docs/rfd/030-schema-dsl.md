@@ -4,6 +4,7 @@
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
+- **Required by**: [RFD 029](029-scriptable-structured-output.md)
 
 ## Summary
 

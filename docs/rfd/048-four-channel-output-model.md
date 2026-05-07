@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-17
 - **Tracking Issue**: [#518](https://github.com/dcdpr/jp/issues/518)
+- **Required by**: [RFD 029](029-scriptable-structured-output.md), [RFD 049](049-non-interactive-mode-and-detached-prompt-policy.md), [RFD 051](051-sub-agent-workflows.md)
 
 ## Summary
 

@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-21
+- **Required by**: [RFD 063](063-usage-based-wizard-field-ordering.md)
 
 ## Summary
 

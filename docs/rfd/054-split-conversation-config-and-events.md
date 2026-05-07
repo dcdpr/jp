@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-11
+- **Required by**: [RFD 070](070-negative-config-deltas.md), [RFD 079](079-config-sources-and-load-order.md)
 
 ## Summary
 

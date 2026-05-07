@@ -3,8 +3,8 @@
 - **Status**: Draft
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
-- **Extends**: RFD 072
 - **Date**: 2026-04-06
+- **Extends**: [RFD 072](../072-command-plugin-system.md)
 
 ## Summary
 
@@ -44,13 +44,25 @@ A plugin subscribes to a conversation to receive events as they occur.
 **Subscribe:**
 
 ```json
-{"type": "subscribe", "sub_id": "chat-main", "conversation": "17127583920", "events": ["chat_response", "tool_call_request", "tool_call_response"]}
+{
+  "type": "subscribe",
+  "sub_id": "chat-main",
+  "conversation": "17127583920",
+  "events": [
+    "chat_response",
+    "tool_call_request",
+    "tool_call_response"
+  ]
+}
 ```
 
 Response:
 
 ```json
-{"type": "subscribed", "sub_id": "chat-main"}
+{
+  "type": "subscribed",
+  "sub_id": "chat-main"
+}
 ```
 
 The `sub_id` is chosen by the plugin and must be unique among its active
@@ -65,19 +77,33 @@ source — a concurrent `jp query` session, another plugin, or this plugin's own
 `query` operation):
 
 ```json
-{"type": "event", "sub_id": "chat-main", "data": {"timestamp": "...", "type": "chat_response", "message": "Here's what I found..."}}
+{
+  "type": "event",
+  "sub_id": "chat-main",
+  "data": {
+    "timestamp": "...",
+    "type": "chat_response",
+    "message": "Here's what I found..."
+  }
+}
 ```
 
 **Unsubscribe:**
 
 ```json
-{"type": "unsubscribe", "sub_id": "chat-main"}
+{
+  "type": "unsubscribe",
+  "sub_id": "chat-main"
+}
 ```
 
 Response:
 
 ```json
-{"type": "unsubscribed", "sub_id": "chat-main"}
+{
+  "type": "unsubscribed",
+  "sub_id": "chat-main"
+}
 ```
 
 Subscriptions are automatically removed when the plugin exits.
@@ -90,13 +116,29 @@ field indicating what kind of response JP expects.
 **Tool call approval:**
 
 ```json
-{"type": "event", "sub_id": "chat-main", "respond": "tool_approval", "data": {"type": "tool_call_request", "id": "tc_1", "name": "cargo_check", "arguments": {}}}
+{
+  "type": "event",
+  "sub_id": "chat-main",
+  "respond": "tool_approval",
+  "data": {
+    "type": "tool_call_request",
+    "id": "tc_1",
+    "name": "cargo_check",
+    "arguments": {}
+  }
+}
 ```
 
 The plugin responds:
 
 ```json
-{"type": "respond", "sub_id": "chat-main", "respond": "tool_approval", "tool_call_id": "tc_1", "action": "approve"}
+{
+  "type": "respond",
+  "sub_id": "chat-main",
+  "respond": "tool_approval",
+  "tool_call_id": "tc_1",
+  "action": "approve"
+}
 ```
 
 Valid actions: `approve`, `reject`, `modify` (with an `arguments` field
@@ -105,13 +147,32 @@ containing the modified arguments).
 **Inquiry question:**
 
 ```json
-{"type": "event", "sub_id": "chat-main", "respond": "inquiry", "data": {"type": "inquiry_request", "id": "inq_1", "question": "Which file?", "options": ["a.rs", "b.rs"]}}
+{
+  "type": "event",
+  "sub_id": "chat-main",
+  "respond": "inquiry",
+  "data": {
+    "type": "inquiry_request",
+    "id": "inq_1",
+    "question": "Which file?",
+    "options": [
+      "a.rs",
+      "b.rs"
+    ]
+  }
+}
 ```
 
 The plugin responds:
 
 ```json
-{"type": "respond", "sub_id": "chat-main", "respond": "inquiry", "inquiry_id": "inq_1", "answer": "a.rs"}
+{
+  "type": "respond",
+  "sub_id": "chat-main",
+  "respond": "inquiry",
+  "inquiry_id": "inq_1",
+  "answer": "a.rs"
+}
 ```
 
 If the plugin does not respond within a configurable timeout, JP falls back to
@@ -128,7 +189,11 @@ plugin sends a user message, JP runs the full turn loop (streaming, tool calls,
 retries), and events flow back to the plugin via its subscription.
 
 ```json
-{"type": "query", "conversation": "17127583920", "content": "What files changed?"}
+{
+  "type": "query",
+  "conversation": "17127583920",
+  "content": "What files changed?"
+}
 ```
 
 The `query` payload supports optional fields for the full range of
@@ -144,7 +209,29 @@ The `query` payload supports optional fields for the full range of
 Example with both:
 
 ```json
-{"type": "query", "conversation": "17127583920", "content": "Summarize this file", "attachments": [{"type": "file_content", "path": "src/main.rs", "content": "fn main() {}"}], "schema": {"type": "object", "properties": {"summary": {"type": "string"}}, "required": ["summary"]}}
+{
+  "type": "query",
+  "conversation": "17127583920",
+  "content": "Summarize this file",
+  "attachments": [
+    {
+      "type": "file_content",
+      "path": "src/main.rs",
+      "content": "fn main() {}"
+    }
+  ],
+  "schema": {
+    "type": "object",
+    "properties": {
+      "summary": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "summary"
+    ]
+  }
+}
 ```
 
 When omitted, `attachments` defaults to an empty list and `schema` defaults
@@ -153,7 +240,10 @@ to `null` (free-form response).
 Response (acknowledges the query has started):
 
 ```json
-{"type": "query_started", "conversation": "17127583920"}
+{
+  "type": "query_started",
+  "conversation": "17127583920"
+}
 ```
 
 JP locks the conversation, starts a turn, and runs the agent loop. Events
@@ -161,7 +251,13 @@ stream to the plugin via its active subscription on that conversation. When the
 turn completes:
 
 ```json
-{"type": "event", "sub_id": "chat-main", "data": {"type": "query_complete"}}
+{
+  "type": "event",
+  "sub_id": "chat-main",
+  "data": {
+    "type": "query_complete"
+  }
+}
 ```
 
 During the turn, the plugin receives all intermediate events: `chat_response`

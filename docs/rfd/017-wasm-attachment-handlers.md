@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-28
+- **Requires**: [RFD 015](015-simplified-attachment-handler-trait.md), [RFD 016](016-wasm-plugin-architecture.md)
 
 ## Summary
 

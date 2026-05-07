@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-12
+- **Required by**: [RFD D07](D07-typed-tool-sdk-for-rust.md)
 
 ## Summary
 

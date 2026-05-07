@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-15
+- **Required by**: [RFD 043](043-incremental-tool-call-argument-streaming.md)
 
 ## Summary
 

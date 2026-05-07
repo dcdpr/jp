@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
+- **Required by**: [RFD 046](046-nested-workspace-projection.md)
 
 ## Summary
 

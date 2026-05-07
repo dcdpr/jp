@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
 - **Extended by**: [RFD 069](069-guard-scoped-persistence-for-conversations.md)
+- **Required by**: [RFD 027](027-client-server-query-architecture.md), [RFD 039](039-conversation-trees.md), [RFD 050](050-scripting-ergonomics-for-conversation-management.md)
 
 ## Summary
 

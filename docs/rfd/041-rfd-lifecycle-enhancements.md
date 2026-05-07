@@ -4,6 +4,7 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-09
+- **Requires**: [RFD 001](001-jp-rfd-process.md), [RFD 003](003-jp-assisted-rfds.md)
 
 ## Summary
 

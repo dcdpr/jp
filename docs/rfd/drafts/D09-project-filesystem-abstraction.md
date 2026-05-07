@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
+- **Requires**: [RFD 073](../073-layered-storage-backend-for-workspaces.md)
+- **Required by**: [RFD D11](D11-vfs-tool-protocol.md)
 
 ## Summary
 

@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
+- **Requires**: [RFD 005](005-first-class-inquiry-events.md)
+- **Required by**: [RFD 027](027-client-server-query-architecture.md)
 
 ## Summary
 

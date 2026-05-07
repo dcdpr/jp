@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-04
+- **Requires**: [RFD 079](079-config-sources-and-load-order.md)
 
 ## Summary
 

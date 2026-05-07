@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
+- **Required by**: [RFD 027](027-client-server-query-architecture.md)
 
 ## Summary
 

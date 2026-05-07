@@ -1,4 +1,4 @@
-# RFD D20: Stable Event Identifiers
+# RFD D24: Stable Event Identifiers
 
 - **Status**: Draft
 - **Category**: Design

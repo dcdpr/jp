@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-13
+- **Requires**: [RFD D19](D19-structured-plugin-help-protocol.md)
 
 ## Summary
 

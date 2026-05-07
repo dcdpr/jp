@@ -1,6 +1,6 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "3cedf5d87cab8318dcff26856bb8f2676942dd8ff291d4368c5ee9799236b882",
+    "hash": "e25c4ae7d06b44de18ef538bf8d279faa57dfeaf60776d450728fb5d48fab928",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
@@ -40,7 +40,7 @@
     "summary": "System notification queue delivers asynchronous subsystem notifications to the assistant by embedding them in existing conversation messages."
   },
   "012-typed-llm-streaming-events.md": {
-    "hash": "945b8f5720bc9c4937d15202d019d425b75cd62f5df4ab534d58f5eaf6ce690a",
+    "hash": "c664f9f889091b7158f590aed968c87032de8690ec85c14870a3c3719a27fa3b",
     "summary": "Decouple streaming transport from persistence by replacing ConversationEvent in Event::Part with a purpose-built EventPart enum."
   },
   "013-named-query-templates.md": {
@@ -164,7 +164,7 @@
     "summary": "Introduces per-tool options field for static user-defined configuration passed to tools at runtime."
   },
   "043-incremental-tool-call-argument-streaming.md": {
-    "hash": "75fbd7234b321610989533fe79518e584d53a99beec353f0bfc0b023aabe59d2",
+    "hash": "2b1a1d6161fbcfdcdbd05c661db42b030534ff4c109689089126de99addc0bd4",
     "summary": "Extend EventBuilder to incrementally parse and emit tool call arguments as typed fragments during streaming."
   },
   "044-workspace-initialization.md": {
@@ -192,7 +192,7 @@
     "summary": "Configurable detached prompt policy controls JP behavior when no interactive client is available; defaults to safe 'deny' mode."
   },
   "050-scripting-ergonomics-for-conversation-management.md": {
-    "hash": "d0b49d3629d402d2587784ae0293a9797a99f9d643b45dcb8bb6638499c51deb",
+    "hash": "6863720d6851364c986531e6c695e86e63c0a039a5214163b01da0a78ecf304c",
     "summary": "Adds scripting ergonomics: shared config structs, `conversation new` command, `--no-activate` flag, and `--root-id` ancestry constraint."
   },
   "051-sub-agent-workflows.md": {

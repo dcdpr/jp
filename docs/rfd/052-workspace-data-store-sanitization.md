@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-18
+- **Required by**: [RFD 073](073-layered-storage-backend-for-workspaces.md)
 
 ## Summary
 

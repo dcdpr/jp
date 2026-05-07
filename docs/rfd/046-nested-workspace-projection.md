@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-16
 - **Extends**: [RFD 039](039-conversation-trees.md)
+- **Requires**: [RFD 031](031-durable-conversation-storage-with-workspace-projection.md)
 
 ## Summary
 

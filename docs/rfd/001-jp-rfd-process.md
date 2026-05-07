@@ -4,6 +4,7 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
+- **Required by**: [RFD 003](003-jp-assisted-rfds.md), [RFD 041](041-rfd-lifecycle-enhancements.md)
 
 ## Summary
 
@@ -310,6 +311,8 @@ All categories use the same metadata:
 - **Tracking Issue**: #NNN (added automatically at Accepted)
 - **Extends**: RFD NNN (if this RFD builds on another)
 - **Extended by**: RFD NNN (if another RFD builds on this one)
+- **Requires**: RFD NNN (if this RFD depends on another)
+- **Required by**: RFD NNN (if another RFD depends on this one)
 - **Supersedes**: RFD NNN (if applicable)
 - **Superseded by**: RFD NNN (if applicable)
 ```
@@ -320,10 +323,41 @@ implementation progress. The issue is created by `jp` using the
 `github_create_issue_rfd_tracking` tool, which reads the RFD and generates a
 task list from the Implementation Plan.
 
-The `Extends` and `Extended by` fields capture directional extension
-relationships between RFDs (see [Tooling](#tooling) for `just rfd-extend`).
-Unlike Supersedes, an extending RFD builds on its predecessor — the original
-remains valid and in effect.
+The `Extends` and `Extended by` fields capture design-lineage relationships:
+"this RFD builds on that one's design." They are maintained by
+`just rfd-extend`. Unlike `Supersedes`, an extending RFD builds on its
+predecessor — the original remains valid and in effect.
+
+The `Requires` and `Required by` fields capture hard dependencies: "this RFD
+cannot be Accepted (or Implemented) until that one is." They are maintained
+by `just rfd-require`.
+
+**Both relationships participate in the same gate.** An extension is a kind
+of dependency (`Extends ⊆ Requires`) — if A extends B, then A also
+depends on B. So `rfd-promote` and the docs build enforce both fields
+uniformly:
+
+- Promoting an RFD from **Discussion to Accepted** requires every entry in
+  `Requires` *or* `Extends` to be at status `Accepted`, `Implemented`, or
+  `Superseded`.
+- Promoting from **Accepted to Implemented** requires every entry to be at
+  status `Implemented` or `Superseded`.
+
+This lets RFDs be designed in parallel (multiple RFDs in `Accepted` at
+once) while preventing claims of design completion that rest on an unbuilt
+foundation. Cycles in the union graph are refused at write time and by the
+docs build.
+
+**Don't list the same target in both `Extends` and `Requires`.** Extension
+implies the dependency, so listing the same target twice is redundant. Pick
+`Extends` when the relationship is design lineage; pick `Requires` when it
+is only execution prerequisite. The recipes refuse to write a duplicate, and
+the docs build refuses to publish one.
+
+Drafts may participate in the dependency graph, but back-links from non-draft
+RFDs are suppressed: a published RFD never lists a draft under `Required by`
+or `Extended by`. When a draft is promoted, missing back-links on its
+dependency targets are filled in automatically by `rfd-promote`.
 
 ### Writing Style
 
@@ -360,7 +394,9 @@ remains valid and in effect.
 
 ### Accepting an RFD
 1. When discussion converges, run `just rfd-promote NNN` to advance the status
-   to **Accepted**.
+   to **Accepted**. The promotion is gated on the RFD's `Requires` *and*
+   `Extends` fields: every entry in either field must be at status `Accepted`,
+   `Implemented`, or `Superseded`.
 2. Merge the pull request.
 3. Create implementation issues or tasks as needed.
 
@@ -373,6 +409,9 @@ remains valid and in effect.
   to **Implemented**.
 - **Design extended**: When a new RFD builds on this one, run `just rfd-extend
   NNN MMM` to record the relationship in both documents.
+- **Design depended on**: When a new RFD requires this one as a hard
+  prerequisite, run `just rfd-require NNN MMM` (NNN requires MMM) to record
+  the dependency. The relationship gates promotion of the dependent RFD.
 - **Design superseded**: Write a new RFD, then run `just rfd-supersede NNN MMM`
   to mark the old RFD as superseded and cross-link both documents.
 - **Idea abandoned**: Run `just rfd-abandon NNN "reason"` to mark the RFD as
@@ -390,7 +429,11 @@ to see them.
 |                                 | assigns number; Discussion → Accepted    |
 |                                 | creates tracking issue.                  |
 | `just rfd-extend NNN MMM`       | Record that RFD MMM extends RFD NNN,     |
-|                                 | updating both.                           |
+|                                 | updating both. Accepts draft IDs (DNN)   |
+|                                 | on either side.                          |
+| `just rfd-require NNN MMM`      | Record that RFD NNN requires RFD MMM,    |
+|                                 | updating both. Cycles are refused.       |
+|                                 | Accepts draft IDs (DNN) on either side.  |
 | `just rfd-supersede NNN MMM`    | Mark RFD NNN as superseded by RFD MMM,   |
 |                                 | updating both.                           |
 | `just rfd-abandon NNN REASON`   | Mark RFD NNN as abandoned with the given |

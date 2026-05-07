@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
+- **Requires**: [RFD D09](D09-project-filesystem-abstraction.md), [RFD D10](D10-unified-tool-execution-model.md), [RFD 075](../075-tool-sandbox-and-access-policy.md), [RFD 058](../058-typed-content-blocks-for-tool-responses.md), [RFD 009](../009-stateful-tool-protocol.md)
 
 ## Summary
 

@@ -4,6 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-17
+- **Requires**: [RFD 028](028-structured-inquiry-system-for-tool-questions.md)
+- **Required by**: [RFD 011](011-system-notification-queue.md), [RFD 023](023-resumable-conversation-turns.md)
 
 ## Summary
 

@@ -1,10 +1,10 @@
 # RFD 043: Incremental Tool Call Argument Streaming
 
 - **Status**: Discussion
-- **Depends on**: [RFD 012 (Event Part Redesign)][RFD 012]
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-24
+- **Requires**: [RFD 012](012-typed-llm-streaming-events.md)
 
 ## Summary
 

@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-15
+- **Requires**: [RFD 073](073-layered-storage-backend-for-workspaces.md), [RFD 069](069-guard-scoped-persistence-for-conversations.md)
 
 ## Summary
 

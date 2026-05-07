@@ -4,18 +4,20 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
+- **Requires**: [RFD 020](020-parallel-conversations.md), [RFD 039](039-conversation-trees.md)
+- **Required by**: [RFD 051](051-sub-agent-workflows.md)
 
 ## Summary
 
 This RFD introduces changes to make JP easier to use in scripts and agentic
-workflows: shared option structs for conversation creation and configuration, a
-`jp conversation new` subcommand that creates a conversation and prints its ID,
-updated `jp conversation fork` behavior to match, a `--no-activate` flag on `jp
-query` that suppresses session updates, and a `--root-id` flag on `jp query`
-that constrains the target to a strict descendant of a given ancestor. Together
-with the `--id` flag from [RFD 020], these changes give scripts and
-orchestrators precise control over conversation lifecycle and targeting without
-affecting the interactive user experience.
+workflows: shared option args for conversation creation and configuration, a
+`jp conversation new` subcommand that creates a conversation and prints its
+ID, updated `jp conversation fork` behavior to match, a `--no-activate` flag
+on `jp query` that suppresses session updates, and a `--root-id` flag on `jp
+query` that constrains the target to a strict descendant of a given ancestor.
+Together with the `--id` flag from [RFD 020], these changes give scripts and
+orchestrators precise control over conversation lifecycle and targeting
+without affecting the interactive user experience.
 
 ## Motivation
 
@@ -47,115 +49,148 @@ avoid side effects, `--root-id` to constrain scope).
 
 ## Design
 
-### Shared option structs
+### Shared option args
 
-Today, conversation-creation flags (`--local`, `--tmp`) and config-override
-flags (`--model`, `--reasoning`, `--tool`, etc.) live directly on the `Query`
-struct. This makes them unavailable to management commands like `conversation
-fork`. Two shared clap `Args` structs fix this by consolidating flags that
-appear across multiple commands.
+Today, conversation-creation flags (`--local`, `--no-local`, `--tmp`,
+`--title`, `--no-title`) and config-override flags (`--model`, `--reasoning`,
+`--tool`, etc.) live directly on the `Query` struct. This makes them
+unavailable to management commands like `conversation fork`. Two shared
+argument types fix this: `ConversationCreateArgs` and `ConversationConfigArgs`.
 
-**`ConversationCreateOpts`** — flags for creating a conversation:
+A single derive-based `#[derive(clap::Args)]` struct flattened into each
+command is **not** sufficient, because the same flag must vary per command:
+
+| Concern          | Detail                                                                                                                                                |
+|------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `requires`       | `--local` / `--no-local` / `--tmp` carry `requires = "new_conversation"` on `Query` but must be unconditional on `conversation new` and `... fork`.   |
+| Short collisions | `Query` uses `-l` for `--local` and `-t` for `--tool`; `conversation fork` already uses `-l` for `--last` and `-t` for `--title`. Shorts must differ. |
+| `--no-local`     | Must remain mutually exclusive with `--local` and override `conversation.start_local`. The naive proposal silently dropped this flag.                 |
+
+The codebase already solves this kind of "same semantics, different clap
+surface" problem in `crates/jp_cli/src/cmd/conversation_id.rs` with
+`PositionalIds<SESSION, MULTI>` and `FlagIds<SESSION, MULTI>` — manual
+`clap::Args` implementations parameterized by mode. The shared option args
+follow the same pattern.
+
+**Semantic types** — the parsed, command-agnostic payloads:
 
 ```rust
-/// Options for creating a new conversation.
-///
-/// Shared between `jp query --new`, `jp conversation new`,
-/// and `jp conversation fork`.
-#[derive(Debug, Default, clap::Args)]
+/// Options applied to a conversation at creation or resolution.
 pub(crate) struct ConversationCreateOpts {
-    /// Store the conversation locally, outside of the workspace.
-    #[arg(short = 'l', long = "local")]
-    pub local: bool,
+    pub locality:   Option<LocalityOverride>,    // --local / --no-local
+    pub expires_in: Option<Option<Duration>>,    // --tmp[=DURATION]
+    pub title:      Option<TitleOverride>,       // --title / --no-title
+}
 
-    /// Set the expiration date of the conversation.
-    #[arg(long = "tmp")]
-    pub expires_in: Option<Option<humantime::Duration>>,
+pub(crate) enum LocalityOverride { Local, Workspace }
+pub(crate) enum TitleOverride    { Set(String), Clear }
+
+/// Config overrides applied to a conversation.
+pub(crate) struct ConversationConfigOpts {
+    pub model:           Option<String>,
+    pub parameters:      Vec<KvAssignment>,
+    pub reasoning:       Option<ReasoningConfig>,
+    pub no_reasoning:    bool,
+    pub hide_reasoning:  bool,
+    pub hide_tool_calls: bool,
+    pub tool_directives: ToolDirectives,         // see below
+    pub tool_use:        Option<Option<String>>,
+    pub no_tool_use:     bool,
+    pub attachments:     Vec<AttachmentUrlOrPath>,
 }
 ```
 
-**`ConversationConfigOpts`** — flags that modify a conversation's config,
-applicable to both new and existing conversations:
+`ToolDirectives` is the existing manually-parsed type from `cmd/query.rs` that
+preserves left-to-right ordering between `--tool` and `--no-tool` by reading
+clap argument indices. Lifting it into a shared module is part of Phase 1; it
+cannot be replaced with separate `Vec<Option<String>>` fields without losing
+the ordering guarantee that compositions like `--no-tools --tool=write` rely
+on.
+
+`--title` / `--no-title` apply at creation, fork, and resume time today (PR
+#600), so they belong with `ConversationCreateOpts` rather than living
+separately on each command.
+
+**Mode-parameterized wrappers** — each command flattens a mode-typed wrapper
+that produces the semantic types:
 
 ```rust
-/// Config overrides applied to a conversation.
-///
-/// Shared between `jp query`, `jp conversation new`,
-/// and `jp conversation fork`.
-#[derive(Debug, Default, clap::Args)]
-pub(crate) struct ConversationConfigOpts {
-    /// The model to use.
-    #[arg(short = 'm', long = "model")]
-    pub model: Option<String>,
+pub(crate) struct ConversationCreateArgs<M: CreateArgMode> {
+    opts: ConversationCreateOpts,
+    _mode: PhantomData<M>,
+}
 
-    /// The model parameters to use.
-    #[arg(short = 'p', long = "param", value_name = "KEY=VALUE",
-          action = ArgAction::Append)]
-    pub parameters: Vec<KvAssignment>,
+pub(crate) trait CreateArgMode {
+    const LOCAL_SHORT:    Option<char>;
+    const NO_LOCAL_SHORT: Option<char>;
+    const TITLE_SHORT:    Option<char>;
+    const NO_TITLE_SHORT: Option<char>;
 
-    /// Enable reasoning.
-    #[arg(short = 'r', long = "reasoning")]
-    pub reasoning: Option<ReasoningConfig>,
-
-    /// Disable reasoning.
-    #[arg(short = 'R', long = "no-reasoning")]
-    pub no_reasoning: bool,
-
-    /// Do not display the reasoning content.
-    #[arg(long = "hide-reasoning")]
-    pub hide_reasoning: bool,
-
-    /// Do not display tool calls.
-    #[arg(long = "hide-tool-calls")]
-    pub hide_tool_calls: bool,
-
-    /// The tool(s) to enable.
-    #[arg(short = 't', long = "tool", action = ArgAction::Append,
-          num_args = 0..=1, default_missing_value = "")]
-    pub tools: Vec<Option<String>>,
-
-    /// Disable tools.
-    #[arg(short = 'T', long = "no-tools", action = ArgAction::Append,
-          num_args = 0..=1, default_missing_value = "")]
-    pub no_tools: Vec<Option<String>>,
-
-    /// The tool to use.
-    #[arg(short = 'u', long = "tool-use")]
-    pub tool_use: Option<Option<String>>,
-
-    /// Disable tool use by the assistant.
-    #[arg(short = 'U', long = "no-tool-use")]
-    pub no_tool_use: bool,
-
-    /// Add attachment to the configuration.
-    #[arg(short = 'a', long = "attachment", alias = "attach")]
-    pub attachments: Vec<AttachmentUrlOrPath>,
+    /// Shared `requires_any` constraint for `--local`, `--no-local`, and
+    /// `--tmp` — the three flags that today carry `requires = "new"` on
+    /// `Query`. Empty means unconditional. `--title` and `--no-title` are
+    /// always unconditional. Modeled as `&[&str]` (not `Option<&str>`) so
+    /// future modes can require any of several flags without another
+    /// refactor.
+    const CREATE_FLAG_REQUIRES_ANY: &'static [&'static str];
 }
 ```
 
-All three commands flatten both structs via `#[command(flatten)]`. The parsing
-and application logic (currently in `Query::apply_cli_config`) moves to methods
-on the shared structs so all commands share the same code path for config
-resolution.
+Three mode markers:
 
-Flags that only make sense during an active query remain on `Query`: `--schema`,
-`--template`, `--replay`, `--edit`/`--no-edit`.
+| Mode                  | `-l` / `-L`                       | `--title` short | `CREATE_FLAG_REQUIRES_ANY` |
+|-----------------------|-----------------------------------|-----------------|----------------------------|
+| `QueryCreateMode`     | `-l` / `-L`                       | (none)          | `["new_conversation"]`     |
+| `ConversationNewMode` | `-l` / `-L`                       | (none)          | `[]`                       |
+| `ForkCreateMode`      | (none, `--last` owns `-l`) / `-L` | `-t` (today)    | `[]`                       |
+
+`ConversationConfigArgs<M: ConfigArgMode>` follows the same shape for the
+config flags. `ConfigArgMode` parameterizes both the `-t` short on `--tool`
+and the `-a` short on `--attachment`, because `conversation fork` already
+uses `-t` for `--title` *and* `-a` for `--activate`:
+
+```rust
+pub(crate) trait ConfigArgMode {
+    const TOOL_SHORT:       Option<char>;
+    const ATTACHMENT_SHORT: Option<char>;
+}
+```
+
+| Mode                        | `--tool` short | `--attachment` short |
+|-----------------------------|----------------|----------------------|
+| `QueryConfigMode`           | `-t`           | `-a`                 |
+| `ConversationNewConfigMode` | `-t`           | `-a`                 |
+| `ForkConfigMode`            | (none)         | (none)               |
+
+Do not silently steal `-a` from `--activate` or `-t` from `--title` on
+`fork`; both are existing user-facing shorts.
+
+`augment_args` builds each clap `Arg` from the mode constants;
+`from_arg_matches` collects matches into the shared semantic types. The
+runtime application logic (currently `apply_model`, `apply_reasoning`,
+`apply_enable_tools`, `apply_attachments` on `Query`) moves to methods on the
+semantic structs so all commands share the same code path.
+
+**Flags that stay on `Query`.** Flags that only make sense during an active
+query remain there: `--schema`, `--template`, `--replay`, `--edit` /
+`--no-edit`.
 
 Config resolution for all three commands follows the same path: file layers,
-environment variables, and CLI overrides via `ConversationConfigOpts`. [RFD
+environment variables, and CLI overrides via `ConversationConfigArgs`. [RFD
 038]'s `--cfg` flag applies as well for setting arbitrary config values at
 creation time. The resulting config becomes the conversation's base config.
 
 ### Management commands: `conversation new` and `conversation fork`
 
 Both `conversation new` and `conversation fork` are management commands that
-create conversations for use by other commands. They share the same conventions:
+create conversations for use by other commands. They share the same
+conventions:
 
-- **Print the new conversation ID to stdout.** Scripts capture the ID for later
-  use with `--id`.
+- **Print the new conversation ID to stdout.** Scripts capture the ID for
+  later use with `--id`.
 - **Do not activate by default.** Activation is opt-in via `--activate`.
-- **Accept both shared option structs** (`ConversationCreateOpts` and
-  `ConversationConfigOpts`).
+- **Accept both shared option args** (`ConversationCreateArgs` and
+  `ConversationConfigArgs`).
 
 #### `jp conversation new`
 
@@ -185,8 +220,21 @@ $ jp query --id="$FORK_ID" "Try a different approach"
 $ jp conversation fork jp-c17528832001 --model anthropic/claude-sonnet-4-5 --local
 ```
 
-Config overrides are applied to the forked conversation's base config, on top of
-whatever config the source conversation had.
+Config overrides are applied to the forked conversation's base config, on top
+of whatever config the source conversation had.
+
+`conversation fork` accepts multiple source conversations (positional). When
+N > 1 sources are forked:
+
+- **Text output:** one new conversation ID per line, in the same order as the
+  sources.
+- **JSON output (`-F json`):** a top-level array of IDs, e.g. `["jp-c...",
+  "jp-c..."]`. Matches the convention used elsewhere in JP for list outputs.
+- **`--activate` with N > 1 sources:** rejected with a clear error
+  (*"--activate cannot be combined with multiple source conversations; pick
+  one to activate."*). Activating "the last forked one" is too clever — its
+  meaning would depend on argument order, and Hyrum's Law guarantees someone
+  would rely on it.
 
 ### `--no-activate` on `jp query`
 
@@ -224,47 +272,84 @@ The flag works in both models.
 jp query --id=jp-c17528842001 --root-id=jp-c17528832001 "Continue"
 ```
 
-`--root-id` constrains the target conversation to be a **strict descendant** of
-the specified conversation. JP verifies the constraint before the query
-executes. If the constraint is violated, the command fails with an error.
+`--root-id` constrains the target conversation to be a **strict descendant**
+of the specified conversation. The check is strict: the target must be a
+child, grandchild, or deeper descendant. The target **cannot** be the
+root-id itself.
 
-The check is strict: the target conversation must be a child, grandchild, or
-deeper descendant of the root-id conversation. The target **cannot** be the
-root-id conversation itself.
+**Enforcement timing.** The constraint lives on `ConversationLoadRequest`,
+not on `Query`, so it is checked between handle resolution and
+per-conversation config loading:
 
-| Condition                                | Result             |
-|------------------------------------------|--------------------|
-| Target is a strict descendant of root-id | OK, query proceeds |
-| Target is the root-id itself             | Error              |
-| Target is not a descendant of root-id    | Error              |
-| Root-id conversation does not exist      | Error              |
-
-Error messages are specific to the failure:
-
-```txt
-Error: Conversation jp-c17528842001 is not a descendant of jp-c17528832001.
+```
+load_workspace  → load_base_partial
+  → conversation_load_request           (Query produces it, with root_id)
+  → resolve_request                     ← handles materialized
+  → enforce_root_constraint             ← NEW; runs before config load
+  → apply_conversation_config           (loads target's per-conversation config)
+  → command.run
 ```
 
-```txt
-Error: Conversation jp-c17528832001 cannot be both the target and the
-       root constraint.
+If the check ran inside `Query::run` instead, the merged `AppConfig` would
+already contain config keys (model, system prompts, tools, ...) from a
+conversation outside the allowed subtree, even if the run aborted before
+persisting anything. That undermines the scoping intent — see
+[Non-Goals](#non-goals) for why this is *not* a security boundary, but it is
+still a correctness issue.
+
+**Errors and precedence.** Errors are checked in this order, so the most
+informative message wins:
+
+| Order | Condition                                | Error                                                                  |
+|-------|------------------------------------------|------------------------------------------------------------------------|
+| 1     | Root-id conversation does not exist      | `Root conversation <id> not found.`                                    |
+| 2     | Target conversation does not exist       | (existing target-not-found error)                                      |
+| 3     | Target equals root-id                    | `Conversation <id> cannot be both the target and the root constraint.` |
+| 4     | Target is not a descendant of root-id    | `Conversation <target> is not a descendant of <root>.`                 |
+| 5     | Target is a strict descendant of root-id | OK, query proceeds                                                     |
+
+Existence checks must precede the equality check; otherwise the "target ==
+root" message is misleading when neither conversation actually exists.
+
+**Other constraints.**
+
+- `--root-id` requires `--id`. A script using `--root-id` knows which
+  conversation it wants — implicit resolution via session mapping or `--last`
+  would defeat the purpose of the constraint.
+- `--root-id` is mutually exclusive with `--new` and `--fork`. It constrains
+  targeting of existing conversations; `--new` and `--fork` create new ones.
+- `--root-id` requires the tree index from [RFD 039]. The ancestry check
+  walks the `parent_id` chain using the in-memory tree index, which is
+  O(depth) — trivial for realistic tree depths.
+
+### Ephemeral cleanup runs only after `jp query`
+
+`remove_ephemeral_conversations` in `crates/jp_cli/src/lib.rs` runs at the
+end of every command today. With non-activating creation (`conversation new`,
+`conversation fork`) and non-activating queries (`--no-activate`), this
+races with downstream use of the IDs the commands just produced:
+
+```sh
+ID="$(jp conversation new --tmp)"
+# Without the gate, the conversation is already cleaned up here
+# because `--tmp` (bare) means `expires_at = 0` and it was never activated.
+jp query --id="$ID" "continue"
 ```
 
-```txt
-Error: Root conversation jp-c17528832001 not found.
-```
+This RFD gates `remove_ephemeral_conversations` to `jp query` only.
+Management commands skip it. The next `jp query` invocation still cleans up
+non-active ephemerals, so the GC contract is unchanged — only the
+opportunistic timing changes. `cleanup_stale_files` (orphaned locks, stale
+session mappings) is not affected and continues to run after every command.
 
-`--root-id` requires `--id`. A script using `--root-id` knows which conversation
-it wants — implicit resolution via session mapping or `--last` would defeat the
-purpose of the constraint.
-
-`--root-id` is mutually exclusive with `--new` and `--fork`. It constrains
-targeting of existing conversations. `--new` and `--fork` create conversations —
-there is nothing to constrain.
-
-`--root-id` requires the tree index from [RFD 039]. The ancestry check walks the
-`parent_id` chain using the in-memory tree index, which is O(depth) — trivial
-for realistic tree depths.
+This still leaves bare `--tmp` on `--no-activate` queries as a sharp edge:
+`jp query --id=X --no-activate --tmp "..."` runs the query, never activates
+X, and the same invocation cleans X up at the end. Workflows that need to
+reuse a non-activated ephemeral conversation across multiple commands must
+pass `--tmp=DURATION`. The RFD does not silently change bare-`--tmp`
+semantics or reject the combination — an explicit duration matches the
+user's actual lifetime requirement, and rejecting compositions creates
+surprises elsewhere.
 
 ### Summary
 
@@ -318,6 +403,24 @@ would give the flag two purposes: constraining existing targets and influencing
 creation. `--fork=0 --id=<parent>` ([RFD 039]) already creates a child under a
 specified parent, making the creation case redundant.
 
+### Derive-based shared option struct (no mode parameterization)
+
+A simpler implementation flattens a single `#[derive(clap::Args)]` struct into
+each command. Rejected because it cannot preserve, in any combination:
+
+- `requires = "new_conversation"` on `--local` / `--tmp` for `Query` while
+  leaving them unconditional on `conversation new` and `conversation fork`.
+- `Query`'s `-l` / `-L` / `-t` shorts where `conversation fork` has
+  collisions (`-l` for `--last`, `-t` for `--title`).
+- `--no-local`'s mutual exclusivity with `--local` and its override of
+  `conversation.start_local`.
+
+A derive-only approach would force users of `jp query -l` to switch to
+`jp query --local`, which is a Hyrum's-Law breakage on a published flag
+short. The mode-parameterized pattern — already used by `PositionalIds` and
+`FlagIds` in `conversation_id.rs` — is the price of preserving the existing
+UX.
+
 ## Non-Goals
 
 - **Background execution.** Running conversations as detached processes is
@@ -343,23 +446,44 @@ needed for scripting use cases, but that is a broader concern beyond this RFD.
 
 ## Implementation Plan
 
-### Phase 1: Shared option structs and fork updates
+### Phase 1: Shared option args and fork updates
 
-Extract `ConversationCreateOpts` and `ConversationConfigOpts` from `Query` into
-shared structs. Move the config application logic (`apply_model`,
-`apply_reasoning`, `apply_enable_tools`, `apply_attachments`) to methods on
-`ConversationConfigOpts`. `Query`, `ConversationNew`, and `Fork` flatten the
-shared structs.
+Three sub-steps, in order:
 
-Update `conversation fork` to accept the shared option structs and print the
-forked conversation ID to stdout.
+1. **Lift `ToolDirectives` into a shared module.** Currently lives in
+   `cmd/query.rs`. The custom clap parser is unchanged; only its location
+   moves.
 
-No behavioral changes to `jp query`. Can be merged independently.
+2. **Introduce the mode-parameterized wrappers.** Define
+   `ConversationCreateArgs<M: CreateArgMode>`,
+   `ConversationConfigArgs<M: ConfigArgMode>`, the trait constants, and the
+   three mode markers (`QueryCreateMode`, `ConversationNewMode`,
+   `ForkCreateMode`). Move the config application logic (`apply_model`,
+   `apply_reasoning`, `apply_enable_tools`, `apply_attachments`) to methods
+   on the semantic `ConversationConfigOpts`. `Query` flattens the wrappers
+   in place of its existing fields.
+
+3. **Update `conversation fork`** to flatten both wrappers, print the new
+   conversation ID(s) to stdout (one per line in text mode, JSON array in
+   `-F json` mode), and reject `--activate` with multiple sources.
+
+No behavioral changes to `jp query` for users who don't pass new flags. The
+mode-trait pattern is structurally a bigger change than a derive-based
+extraction would be — flag explicitly in review.
 
 ### Phase 2: `jp conversation new`
 
-Add the `ConversationNew` subcommand. It creates a conversation using the shared
-options, optionally activates it, and prints the ID to stdout.
+Two sub-steps:
+
+1. **Gate `remove_ephemeral_conversations` to `jp query`.** Today it runs at
+   the end of every command in `crates/jp_cli/src/lib.rs`. With
+   `conversation new --tmp` this would clean up the conversation in the same
+   invocation that produced its ID. Move the call behind a
+   `matches!(cli.command, Commands::Query(_))` guard.
+   `cleanup_stale_files` is unaffected.
+
+2. **Add the `ConversationNew` subcommand.** It creates a conversation using
+   the shared options, optionally activates it, and prints the ID to stdout.
 
 Depends on Phase 1.
 
@@ -373,11 +497,14 @@ Can be merged independently of Phase 1–2.
 
 ### Phase 4: `--root-id` on `jp query`
 
-Add the `--root-id` flag to `Query`. Implement the strict-descendant check using
-the tree index from [RFD 039]. Requires `--id`. Mutually exclusive with `--new`
+Add the `--root-id` flag to `Query`. Model the constraint on
+`ConversationLoadRequest` and enforce it between `resolve_request` and
+`apply_conversation_config` so the per-conversation config layer never loads
+from a conversation outside the allowed subtree (see the Enforcement timing
+note in the Design section). Requires `--id`. Mutually exclusive with `--new`
 and `--fork`.
 
-Depends on [RFD 039] Phase 1 (parent_id and tree index).
+Depends on [RFD 039] Phase 1 (`parent_id` and tree index).
 
 ## References
 

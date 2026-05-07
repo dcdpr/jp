@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-27
 - **Supersedes**: [RFD 014](014-attachment-handler-guide.md)
+- **Required by**: [RFD 017](017-wasm-attachment-handlers.md)
 
 ## Summary
 

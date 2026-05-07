@@ -14,6 +14,7 @@ rfd_promote = { enable = true, run = "unattended" }
 rfd_supersede = { enable = true, run = "unattended" }
 rfd_abandon = { enable = true, run = "unattended" }
 rfd_extend = { enable = true, run = "unattended" }
+rfd_require = { enable = true, run = "unattended" }
 
 fs_modify_file = { enable = true, run = "unattended" }
 fs_create_file.questions.overwrite_file.answer = true
@@ -55,8 +56,23 @@ status, which also moves the file up to `docs/rfd/`.
 assigns the next available permanent number and renames the file. When \
 promoting to Accepted, it creates a GitHub tracking issue.
 
-`rfd_extend` records extension relationships between RFDs \
-(adds Extends/Extended by metadata to both documents).
+`rfd_extend` records design-lineage relationships between RFDs \
+(adds Extends/Extended by metadata to both documents). Use this when \
+the new RFD builds on the predecessor's design vocabulary.
+
+`rfd_require` records hard-dependency relationships between RFDs \
+(adds Requires/Required by metadata to both documents). Use this when \
+the new RFD depends on the predecessor existing without building on \
+its design.
+
+Both relationships are gated identically at promotion time: an RFD \
+cannot advance to Accepted while any of its `Requires`-or-`Extends` \
+targets are still in Discussion or earlier; it cannot advance to \
+Implemented while any are still pre-Implementation. Cycles in the \
+union graph are refused. Don't list the same target under both \
+`Requires` and `Extends` — extension implies the dependency, so the \
+duplicate is redundant. Both recipes accept draft IDs (DNN) on \
+either side.
 
 `fs_modify_file` is available but runs in confirmation mode — the user \
 sees a diff and approves or rejects each edit. Make targeted, minimal \
