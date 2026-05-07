@@ -24,8 +24,10 @@ given 1-based line range of the rendered diff output (mirroring \
 `fs_read_file`). This is the escape hatch for the 500-line cap: page \
 through a large diff in chunks rather than asking for everything at once.
 
-`pattern` and the line range compose: when both are set, the diff is \
-sliced first and `pattern` greps within the slice.
+`pattern` and the line range compose: when both are set, the tool greps \
+within the requested line window — matches and context are restricted to \
+the window, while hunk-header line numbers stay accurate to the original \
+diff.
 """
 
 examples = """
@@ -49,7 +51,7 @@ Page through a large commit diff (lines 500-999):
 {"revision": "abc1234", "paths": ["crates/jp_llm/src/stream.rs"], "start_line": 500, "end_line": 999}
 ```
 
-Grep within a slice of a large commit diff:
+Grep within a window of a large commit diff:
 ```json
 {"revision": "HEAD", "paths": ["src/main.rs"], "start_line": 500, "end_line": 1500, "pattern": "TODO"}
 ```
