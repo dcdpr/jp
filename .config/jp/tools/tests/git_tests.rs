@@ -1368,6 +1368,29 @@ async fn diff_surfaces_git_errors_instead_of_swallowing_them() {
 }
 
 #[tokio::test]
+async fn diff_file_rejects_empty_paths() {
+    // The empty-paths guard short-circuits before any git invocation, so
+    // this test does not need an initialized repo (or even git installed).
+    let dir = camino_tempfile::tempdir().unwrap();
+    let root = dir.path().to_owned();
+
+    // `paths: []` deserializes successfully into `OneOrMany::Many(vec![])`.
+    // The tool must reject it instead of silently running git without a
+    // pathspec, which would dump the entire working-tree diff.
+    let outcome = tools::run(
+        ctx(&root),
+        tool("git_diff_file", &json!({"status": "unstaged", "paths": []})),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches!(outcome, Outcome::Error { .. }),
+        "expected error outcome, got {outcome:?}"
+    );
+}
+
+#[tokio::test]
 async fn staged_diff_excludes_intent_to_add_files() {
     if !has_git() {
         return;

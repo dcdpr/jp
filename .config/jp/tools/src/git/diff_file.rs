@@ -31,6 +31,17 @@ pub(crate) async fn git_diff_file(
     let env = super::env_from_options(options);
     let paths = paths.iter().map(AsRef::as_ref).collect::<Vec<_>>();
 
+    // An empty `paths` array still deserializes successfully (the schema's
+    // `required` only checks presence). Without this guard the tool would run
+    // git with no pathspec and dump the entire working-tree or staged diff,
+    // defeating its drill-down purpose.
+    if paths.is_empty() {
+        return error(
+            "`paths` must contain at least one entry. `git_diff_file` requires explicit paths to \
+             prevent dumping the whole diff; use `git_diff` for an overview.",
+        );
+    }
+
     git_diff_file_impl(
         &root,
         status,
