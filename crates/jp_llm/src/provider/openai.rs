@@ -1115,7 +1115,18 @@ fn classify_stream_error(error: types::response::Error) -> StreamError {
         return StreamError::rate_limit(retry_after);
     }
 
-    if matches!(type_, "server_error" | "api_error") {
+    // Server-side transient errors. Match on either type or code: OpenAI emits
+    // generic types (`server_error`, `api_error`) but also more specific overload
+    // signals where the discriminator lives in `code` (e.g.
+    // `service_unavailable_error` / `server_is_overloaded`, the wire form of
+    // the documented 503 "engine is currently overloaded" condition). Some
+    // OpenAI-compatible providers also reuse Anthropic's `overloaded_error`.
+    let transient_type = matches!(
+        type_,
+        "server_error" | "api_error" | "service_unavailable_error" | "overloaded_error"
+    );
+    let transient_code = matches!(code, Some("server_is_overloaded"));
+    if transient_type || transient_code {
         let err = StreamError::transient(error.message);
         return match retry_after {
             Some(d) => err.with_retry_after(d),
