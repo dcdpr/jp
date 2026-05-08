@@ -74,3 +74,62 @@
     background: color-mix(in srgb, #ef4444 25%, transparent);
     color: #fca5a5;
 }
+
+/* ── RFD link colors (status-coded) ───────────────────────────────── */
+
+/* Inline body links and reference pills both pick up the badge palette
+   via these classes. The selectors include `:hover` to keep the status
+   color when hovered (overriding VitePress's default brand-2 hover). */
+.vp-doc a.rfd-link--implemented,
+.vp-doc a.rfd-link--implemented:hover,
+.rfd-ref-link.rfd-link--implemented,
+.rfd-ref-link.rfd-link--implemented:hover { color: #059669; }
+.vp-doc a.rfd-link--accepted,
+.vp-doc a.rfd-link--accepted:hover,
+.rfd-ref-link.rfd-link--accepted,
+.rfd-ref-link.rfd-link--accepted:hover    { color: #2563eb; }
+.vp-doc a.rfd-link--discussion,
+.vp-doc a.rfd-link--discussion:hover,
+.rfd-ref-link.rfd-link--discussion,
+.rfd-ref-link.rfd-link--discussion:hover  { color: #7c3aed; }
+.vp-doc a.rfd-link--superseded,
+.vp-doc a.rfd-link--superseded:hover,
+.rfd-ref-link.rfd-link--superseded,
+.rfd-ref-link.rfd-link--superseded:hover  { color: #d97706; }
+.vp-doc a.rfd-link--abandoned,
+.vp-doc a.rfd-link--abandoned:hover,
+.rfd-ref-link.rfd-link--abandoned,
+.rfd-ref-link.rfd-link--abandoned:hover   { color: #dc2626; }
+
+.dark .vp-doc a.rfd-link--implemented,
+.dark .vp-doc a.rfd-link--implemented:hover,
+.dark .rfd-ref-link.rfd-link--implemented,
+.dark .rfd-ref-link.rfd-link--implemented:hover { color: #6ee7b7; }
+.dark .vp-doc a.rfd-link--accepted,
+.dark .vp-doc a.rfd-link--accepted:hover,
+.dark .rfd-ref-link.rfd-link--accepted,
+.dark .rfd-ref-link.rfd-link--accepted:hover    { color: #93c5fd; }
+.dark .vp-doc a.rfd-link--discussion,
+.dark .vp-doc a.rfd-link--discussion:hover,
+.dark .rfd-ref-link.rfd-link--discussion,
+.dark .rfd-ref-link.rfd-link--discussion:hover  { color: #d8b4fe; }
+.dark .vp-doc a.rfd-link--superseded,
+.dark .vp-doc a.rfd-link--superseded:hover,
+.dark .rfd-ref-link.rfd-link--superseded,
+.dark .rfd-ref-link.rfd-link--superseded:hover  { color: #fcd34d; }
+.dark .vp-doc a.rfd-link--abandoned,
+.dark .vp-doc a.rfd-link--abandoned:hover,
+.dark .rfd-ref-link.rfd-link--abandoned,
+.dark .rfd-ref-link.rfd-link--abandoned:hover   { color: #fca5a5; }
+
+/* Reference pills also tint their background to match their status. */
+.rfd-ref-link.rfd-link--implemented { background: color-mix(in srgb, #10b981 12%, transparent); }
+.rfd-ref-link.rfd-link--accepted    { background: color-mix(in srgb, #3b82f6 12%, transparent); }
+.rfd-ref-link.rfd-link--discussion  { background: color-mix(in srgb, #a855f7 12%, transparent); }
+.rfd-ref-link.rfd-link--superseded  { background: color-mix(in srgb, #f59e0b 12%, transparent); }
+.rfd-ref-link.rfd-link--abandoned   { background: color-mix(in srgb, #ef4444 12%, transparent); }
+.rfd-ref-link.rfd-link--implemented:hover { background: color-mix(in srgb, #10b981 22%, transparent); }
+.rfd-ref-link.rfd-link--accepted:hover    { background: color-mix(in srgb, #3b82f6 22%, transparent); }
+.rfd-ref-link.rfd-link--discussion:hover  { background: color-mix(in srgb, #a855f7 22%, transparent); }
+.rfd-ref-link.rfd-link--superseded:hover  { background: color-mix(in srgb, #f59e0b 22%, transparent); }
+.rfd-ref-link.rfd-link--abandoned:hover   { background: color-mix(in srgb, #ef4444 22%, transparent); }

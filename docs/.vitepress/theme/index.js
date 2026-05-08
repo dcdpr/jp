@@ -1,6 +1,7 @@
 import DefaultTheme from 'vitepress/theme'
 import PageActions from './PageActions.vue'
 import RfdBreadcrumb from './RfdBreadcrumb.vue'
+import RfdLinkColors from './RfdLinkColors.vue'
 import RfdReferences from './RfdReferences.vue'
 import RfdStatusBadge from './RfdStatusBadge.vue'
 import { h } from 'vue'
@@ -15,6 +16,7 @@ export default {
                 h(RfdBreadcrumb),
                 h(RfdReferences),
                 h(RfdStatusBadge),
+                h(RfdLinkColors),
             ],
         })
     },
