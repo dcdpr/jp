@@ -37,7 +37,7 @@ writing conventions. Use it as the authoritative reference for format and comple
 """
 
 [assistant.model]
-id = "opus"
+id = "gpt"
 parameters.reasoning.effort = "xhigh"
 
 [[assistant.instructions]]
