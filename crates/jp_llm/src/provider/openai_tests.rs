@@ -795,6 +795,33 @@ mod classify_stream_error {
         assert!(!classified.is_retryable());
     }
 
+    /// The exact in-stream overload payload reported in the field:
+    /// `type=service_unavailable_error, code=server_is_overloaded`. This used
+    /// to surface as a non-retryable `Other` error because the message has no
+    /// parseable retry-after hint.
+    #[test]
+    fn service_unavailable_overload_is_classified_as_transient() {
+        let e = err(
+            "service_unavailable_error",
+            Some("server_is_overloaded"),
+            "Our servers are currently overloaded. Please try again later.",
+        );
+
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::Transient);
+        assert!(classified.is_retryable());
+    }
+
+    #[test]
+    fn overloaded_error_type_is_classified_as_transient() {
+        let e = err("overloaded_error", None, "backend overloaded");
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::Transient);
+        assert!(classified.is_retryable());
+    }
+
     #[test]
     fn server_error_carries_retry_after_hint() {
         let e = err(
