@@ -10,18 +10,28 @@
 
 This RFD extends `--cfg` with two reserved UPPERCASE keyword values — `NONE` and
 `WORKSPACE` — that each define a **reset point**: a known state that `--cfg`
-returns to when the keyword is encountered. `WORKSPACE` expands to a
-fully-populated `PartialAppConfig` and is processed using the existing
-left-to-right merge model from [RFD 008]. `NONE` is additionally a pre-pipeline
-gate that skips all implicit config loading, providing an escape hatch when
-implicit config is broken or when a script wants full control.
+returns to when the keyword is encountered. Both keywords share the same
+reset-then-layer mechanism: each persists a `ConfigDelta::Reset` event that
+clears accumulated state to `PartialAppConfig::default()`, and `WORKSPACE`
+appends a `ConfigDelta::Apply` carrying the workspace's resolved partial on top.
+Subsequent `--cfg` directives layer on top of the reset, processed using the
+existing left-to-right merge model from [RFD 008]. `NONE` is additionally a
+pre-pipeline gate that skips all implicit config loading, providing an escape
+hatch when implicit config is broken or when a script wants full control.
 
-To persist `NONE`'s reset semantics, `ConfigDelta` is promoted from a struct to
-an enum with `Apply` (existing shape) and `Reset` (new) variants.
+This RFD also defines `loader.reset = "none"` for self-contained config entries.
+When a `--cfg` entry declares this setting, JP performs the same positional
+reset as `--cfg=NONE` immediately before applying that entry. Unlike the `NONE`
+keyword, `loader.reset` does not skip implicit config loading; it only affects
+the accumulated state at the entry's position in the `--cfg` directive stream.
 
-This RFD focuses on the two keyword reset points. Conversation-ID values for
-`--cfg` (e.g. `--cfg=jp-c17528832001`) and fork-implicit config are out of
-scope here; see [Non-Goals](#non-goals).
+To persist these reset semantics, `ConfigDelta` is promoted from a struct to an
+enum with `Apply` (existing shape) and `Reset` (new) variants.
+
+This RFD focuses on reset points in the `--cfg` directive stream: the two
+keyword reset points and the entry-local `loader.reset = "none"` setting.
+Conversation-ID values for `--cfg` (e.g. `--cfg=jp-c17528832001`) and
+fork-implicit config are out of scope here; see [Non-Goals](#non-goals).
 
 ## Motivation
 
@@ -32,8 +42,8 @@ scripts can't start from program defaults without brittle workarounds; users who
 want to undo post-creation changes to a conversation must hand-pick each field
 to reset.
 
-This RFD introduces two reset-point keywords (`NONE` and `WORKSPACE`) so users
-can write whatever reset they need directly:
+This RFD introduces two reset-point keywords (`NONE` and `WORKSPACE`) and an
+entry-local reset setting so users can write whatever reset they need directly:
 
 - **Scripting and automation.** A script that wants predictable config
   regardless of the user's environment needs to bypass implicit loading entirely
@@ -44,6 +54,9 @@ can write whatever reset they need directly:
 - **Re-adopting workspace defaults.** A conversation that has diverged from
   workspace config should be able to re-adopt it without hand-picking every
   changed field (`--cfg=WORKSPACE`).
+- **Self-contained config entries.** A named config entry can declare
+  `loader.reset = "none"` so `jp q -c entry` applies that entry on top of
+  program defaults without requiring the user to remember `--cfg=NONE -c entry`.
 
 Targeted revert of individual sources — for example, undoing a specific `-c`
 that was applied — is covered by [RFD 070]'s `-C` directive, which uses claim
@@ -53,13 +66,14 @@ history rather than value-based resets.
 
 ### UPPERCASE keywords for `--cfg`
 
-The existing `--cfg` flag gains reserved UPPERCASE keyword values. `WORKSPACE`
-expands to a fully-populated `PartialAppConfig` — the same type that a TOML file
-or inline assignment produces. Because the expanded partial sets every config
-field, it overwrites whatever came before it in the pipeline.
-
-Both keywords reset the accumulated config state at their position in the
-`--cfg` list. They differ in what they reset to.
+The existing `--cfg` flag gains reserved UPPERCASE keyword values. Both keywords
+reset the accumulated config state at their position in the `--cfg` list; they
+differ in what they reset to. Persistence is uniform: each keyword emits a
+`ConfigDelta::Reset` event into the conversation stream, and `WORKSPACE` follows
+that with a `ConfigDelta::Apply` carrying the workspace's resolved partial. The
+`Reset` clears accumulated state to defaults; whatever `Apply` events follow
+(whether the keyword's own or user-supplied directives) layer on top in
+left-to-right order.
 
 #### `NONE`
 
@@ -78,11 +92,56 @@ Resets to the workspace's fully-resolved config — the merged result of implici
 loading as described in [RFD 079]. This is the same state that new conversations
 use by default when no `--cfg` keywords are present.
 
+Implicit loading includes `JP_CFG_*` environment variables (see [RFD 079]), so
+`WORKSPACE` captures whatever env vars are in effect at invocation time. The
+persisted reset records their values; re-running later with different env vars
+does not retroactively change an already-stored reset.
+
 Note that `config_load_paths` (the deferred-loading search path for `--cfg
 <name>`) is a *setting* within the workspace config, not a separate loading
 mechanism. `WORKSPACE` includes whatever value `config_load_paths` has in the
 merged config, but merely referencing that setting doesn't load any of the files
 it points to — those are only loaded on explicit `--cfg <name>` invocation.
+
+#### Entry-local reset with `loader.reset`
+
+A config entry can declare that it resets accumulated config before applying
+itself:
+
+```toml
+[loader]
+reset = "none"
+```
+
+`loader.reset = "none"` is the entry-local equivalent of placing `--cfg=NONE`
+immediately before that entry in the ordered `--cfg` stream. It resets the
+accumulated config to program defaults, then applies the entry's resolved
+config, including its own `loader.extends` tree.
+
+```sh
+# If `committer` declares `loader.reset = "none"`, these are equivalent
+# for config state after the `committer` entry applies:
+jp q -c committer
+jp q -c NONE -c committer
+```
+
+The equivalence is positional, not pre-pipeline. `loader.reset` does not skip
+implicit config loading, because JP must load the base config before it can
+resolve and read the `committer` entry. If implicit config is broken, the user
+still needs `--cfg=NONE` / `--no-cfg`.
+
+The setting is honored only when the file is loaded as an explicit `--cfg`
+entry. If the same file is reached through another file's `loader.extends`, its
+`loader.reset` value is ignored. A transitive reset would let an included
+fragment discard its parent entry's accumulated config, which is too surprising.
+
+When one `--cfg` argument resolves to multiple entries across roots, each entry
+is processed in root precedence order. A `loader.reset = "none"` on a later
+entry resets state at that point, discarding earlier entries from the same
+argument.
+
+Only `"none"` is defined by this RFD. Other reset targets can be added later if
+there is a concrete use case.
 
 #### `--no-cfg` shorthand
 
@@ -116,15 +175,20 @@ jp q --cfg=foo.toml --cfg=NONE
 jp q --cfg=NONE --cfg=foo.toml
 ```
 
-Since pre-`NONE` directives get discarded anyway, the implementation skips
-parsing them entirely. Malformed or missing pre-`NONE` `--cfg` values do not
-raise errors — the user's intent was for them to be replaced by `NONE`'s reset.
+Pre-`NONE` `--cfg` values are still parsed by clap (which validates syntax at
+parse time), but the directive loop skips processing them: their file-load and
+merge effects are not executed, since `NONE`'s positional reset would discard
+them anyway. A syntactically malformed pre-`NONE` `--cfg` value is therefore
+still rejected at clap parse time — `NONE` is not a recovery mechanism for
+malformed arguments on the same command line. It recovers from broken
+*implicit* config (the files JP auto-loads), which is the actual motivating
+use case.
 
 #### Explicit paths under `NONE`
 
 Since `NONE` skips implicit loading, no config files have been read and the
 resolved `config_load_paths` is empty. Subsequent `--cfg <name>` directives that
-rely on load-path resolution will fail — there are no search paths to look in.
+rely on search-path resolution will fail — there are no search paths to look in.
 
 This is intentional. For scripting under `NONE`, always reference config files
 by explicit path:
@@ -157,6 +221,25 @@ Conversation-ID values (`--cfg=jp-c<id>`) are out of scope for this RFD (see
 [Non-Goals](#non-goals)); if a later RFD defines them, they compose with
 these keywords in the same pipeline.
 
+#### `NONE` and `WORKSPACE` are mutually exclusive
+
+`--cfg=NONE` and `--cfg=WORKSPACE` cannot appear in the same `--cfg` list.
+`NONE`'s pre-pipeline gate skips the implicit-loading step that `WORKSPACE`
+expands to, so the combination is internally inconsistent: either `NONE` is
+silently overridden, or `WORKSPACE` lazily re-runs the very loading the user
+just opted out of. Rather than choose, the directive parser rejects the
+combination outright:
+
+```
+error: --cfg=NONE and --cfg=WORKSPACE are mutually exclusive.
+```
+
+The check runs before any directive is processed and is independent of
+position. To get fresh state with workspace overrides on top, run
+`--cfg=WORKSPACE` (which already resets to workspace state). To start from
+program defaults and layer arbitrary config explicitly, run
+`--cfg=NONE --cfg=<paths>`.
+
 ### Default behavior
 
 When no keyword is present, `--cfg` values layer on top of the implicit starting
@@ -186,16 +269,24 @@ resolution. This eliminates ambiguity without heuristics:
 - `WORKSPACE.toml` → file path (not an exact keyword match)
 - `jp-c17528832001` → conversation ID
 
+For files literally named `NONE` or `WORKSPACE`, force path interpretation
+with the existing `@`-prefix or a path-style prefix:
+
+```sh
+jp q --cfg=@WORKSPACE     # treat as a path
+jp q --cfg=./WORKSPACE    # treat as a path (any leading `./` or `../` works)
+```
+
 Conversation IDs (`jp-c` prefix + digits) are out of scope for this RFD (see
 [Non-Goals](#non-goals)) but share the same disambiguation pipeline: keyword
 matches first, then conversation IDs, then file paths.
 
 ### Interaction with continuing conversations
 
-Both `WORKSPACE` and `NONE` work uniformly when continuing an existing
-conversation: each persists an event in `events.json` representing its reset
-semantics, then any subsequent `--cfg` values layer on top and persist as normal
-`Apply` events.
+`WORKSPACE`, `NONE`, and `loader.reset = "none"` work uniformly when continuing
+an existing conversation: each persists a `ConfigDelta::Reset` event in
+`events.json` representing the reset point, then any further state layers on top
+as `Apply` events.
 
 ```sh
 # Continue conversation, switch to workspace config
@@ -207,38 +298,49 @@ jp q --cfg=NONE --cfg=mre.toml
 
 ```
 
-**For `WORKSPACE`**: the delta between the stream's current resolved config and
-the keyword's expanded partial is computed using fully-resolved `AppConfig`
-diffing (not partial diffing), which correctly captures fields being set back to
-their default values. The resulting delta is stored as a `ConfigDelta::Apply`
-event in the stream.
+**For `NONE`**: a `ConfigDelta::Reset` is persisted (see [ConfigDelta
+enum](#configdelta-enum)) and nothing further from the keyword itself.
+Subsequent user-provided `--cfg` directives in the same invocation persist as
+`Apply` events after the `Reset`, so the full event stream becomes
+`[..., Reset, Apply, Apply, ...]`.
 
-**For `NONE`**: a `ConfigDelta::Reset` event (see [ConfigDelta
-enum](#configdelta-enum)) is persisted instead. When folded by future
-invocations, `Reset` discards all accumulated state and restarts from
-`PartialAppConfig::default()`. Subsequent `--cfg` directives in the same
-invocation persist as `Apply` events after the `Reset`, so the full event stream
-becomes `[..., Reset, Apply, Apply, ...]`. Future invocations folding the stream
-see the reset as authoritative: anything before it is effectively discarded for
-config resolution.
+**For `loader.reset = "none"`**: when the resetting entry is processed, JP emits
+`ConfigDelta::Reset` before that entry's `Apply`. The entry itself is then
+persisted as a normal `Apply` event. Unlike the `NONE` keyword, no pre-pipeline
+gate runs.
+
+**For `WORKSPACE`**: a `ConfigDelta::Reset` is persisted, immediately
+followed by a `ConfigDelta::Apply` carrying the workspace partial as it
+resolved at invocation time. Subsequent user-provided `--cfg` directives
+layer on top as additional `Apply` events, so the stream becomes
+`[..., Reset, Apply(workspace), Apply, Apply, ...]`. The persisted workspace
+`Apply` is *value-stable* — re-running later, even after workspace config
+files have been edited, does not retroactively change the persisted reset.
+To re-adopt updated workspace config, run `--cfg=WORKSPACE` again.
+
+When folded by future invocations, `Reset` discards all accumulated state and
+restarts from `PartialAppConfig::default()`. Subsequent `Apply` events apply
+on top of defaults. Future invocations folding the stream see the reset as
+authoritative: anything before it is effectively discarded for config
+resolution.
+
+Both keywords and `loader.reset` therefore use the same reset-then-layer
+machinery, and `Reset` events terminate [RFD 070]'s `-C` walk-back regardless of
+which source emitted them.
 
 Chat history (turns, messages, tool calls) is always loaded — only the config
 resolution is affected by `Reset`.
 
 ### `ConfigDelta` enum
 
-To persist `NONE`'s reset semantics, `ConfigDelta` is promoted from a struct to
-an enum:
+To persist `Reset` semantics, `ConfigDelta` is promoted from a struct to an
+enum:
 
 ```rust
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Debug, Clone)]
 pub enum ConfigDelta {
-    #[serde(rename = "reset")]
-    Reset(ResetDelta),
-
-    #[serde(untagged)]
     Apply(ApplyDelta),
+    Reset(ResetDelta),
 }
 
 pub struct ApplyDelta {
@@ -251,11 +353,28 @@ pub struct ResetDelta {
 }
 ```
 
-Serde's internal tagging (`tag = "type"`) serializes `Reset` as `{"type":
-"reset", "timestamp": "..."}`. `Apply` is marked `#[serde(untagged)]`, so it
-serializes as today without a `type` field — preserving the existing on-disk
-shape for backward compatibility. No migration needed; legacy events deserialize
-into `Apply` via the untagged fallback.
+Serialization is hand-rolled to preserve the existing event envelope. Today,
+`InternalEvent::ConfigDelta` is wrapped at the `InternalEvent` layer with
+`{"type": "config_delta", ...}` (see `crates/jp_conversation/src/stream.rs`).
+The discriminator between `Apply` and `Reset` lives *inside* that envelope as
+an `op` field — putting it under `type` would collide with the outer envelope's
+own `type` tag and break deserialization (the existing
+`InternalEvent::deserialize` dispatches on the top-level `type`).
+
+Wire shapes:
+
+```json
+// Apply (unchanged from today; no `op` field).
+{"type": "config_delta", "timestamp": "...", "delta": { /* ... */ }}
+
+// Reset (new).
+{"type": "config_delta", "op": "reset", "timestamp": "..."}
+```
+
+The `Apply` form is identical to today's on-disk shape. Legacy events (no `op`
+field) decode as `Apply` — no migration needed. `deserialize_config_delta` in
+`crates/jp_conversation/src/stream.rs` is updated to look for `op == "reset"`
+first and fall through to the legacy `Apply` parse otherwise.
 
 Fold semantics:
 
@@ -269,16 +388,18 @@ For stream walk-back (used by [RFD 070]'s `-C` revert): a `Reset` event
 terminates the walk. Anything before the `Reset` is unreachable — `-C` treats it
 as equivalent to reaching the base config.
 
-### New conversation creation with `NONE`
+### New conversation creation with `NONE` and `loader.reset`
 
 When a new conversation is created with `NONE` in the `--cfg` list:
 
-- Pre-scan skips implicit loading, so the workspace `base` partial is
+- Pre-scan skips implicit loading, so the starting partial is
   `PartialAppConfig::default()`.
-- Post-`NONE` directives emit `Apply` events that land in `init` (per [RFD
-  070]'s `base_config.json` shape).
-- No `Reset` event is emitted at creation time — `base` is already defaults, so
-  the reset is implicit.
+- Post-`NONE` directives are merged on top of defaults during the directive
+  loop, and the result is written to `base_config.json` as today's flat
+  partial (per [RFD 054]).
+- No `Reset` event is emitted at creation time — the base file already
+  represents the post-reset state. Subsequent invocations load the
+  conversation and start from this flat base.
 
 Example:
 
@@ -286,20 +407,26 @@ Example:
 jp q -c NONE -c dev --new foobar
 ```
 
-Produces `base_config.json`:
+Produces `base_config.json` containing dev's contribution merged on top of
+program defaults. The conversation's working config starts at "just dev"
+regardless of what happens to workspace config files afterward.
 
-```json
-{
-  "base": {},
-  "init": [
-    { "timestamp": "...", "delta": { /* dev's contribution */ }, "claims": {...} }
-  ]
-}
+`loader.reset = "none"` follows the same creation-time rule at its directive
+position. If `committer` declares `loader.reset = "none"`, then:
+
+```sh
+jp q -c committer --new foobar
 ```
 
-Future invocations (`jp q baz`) load the conversation, fold defaults + `init` =
-defaults + dev. The conversation's working config is "just dev" regardless of
-what happens to workspace config files afterward.
+writes the post-reset state to `base_config.json` without emitting a `Reset`
+event at creation time.
+
+> [!NOTE]
+> [RFD 070] reshapes `base_config.json` to `{ base, init }` and adds per-source
+> claims. Once that lands, post-`NONE` directives at creation time will land in
+> `init` as `Apply` events with their own claims rather than being merged into
+> `base`. Until then, fields touched by post-`NONE` directives at creation time
+> have no per-source provenance.
 
 ## Drawbacks
 
@@ -330,6 +457,29 @@ keywords from file paths.
 
 Considered but rejected in favor of UPPERCASE, which requires no special
 characters and is visually distinct.
+
+### Lowercase reserved keywords
+
+Use lowercase reserved words (`--cfg=none`, `--cfg=workspace`) and rely on
+the `@`-prefix or `./`-prefix escape for files literally named `none` or
+`workspace`.
+
+Rejected because lowercase tokens are visually indistinguishable from common
+file names. UPPERCASE makes the keyword nature obvious to readers and minimizes
+the risk of accidental shadowing — the relevant precedent is Vim's `-u NONE`,
+which uses the same uppercase convention to disambiguate against a file path.
+
+### Separate `--config-base=none|workspace` flag
+
+Express the reset point via a dedicated flag instead of a value within
+`--cfg`.
+
+Rejected because a separate flag would split the ordered directive stream
+into two parallel inputs and break the left-to-right composition with other
+`-c` directives that this design relies on (per [RFD 008]). Putting the
+reset point at a position in the `--cfg` list, alongside everything else, is
+what makes commands like `--cfg=foo.toml --cfg=NONE --cfg=bar.toml`
+self-explanatory.
 
 ## Non-Goals
 
@@ -375,12 +525,14 @@ this (validation happens on the final merged config), but it needs verification.
 
 Because `NONE`'s pre-scan gate affects implicit config loading, it must be
 detected before `load_base_partial` (which performs the implicit-loading
-sequence from [RFD 079]) and before any conversation stream loading. The CLI
+sequence from [RFD 079]) and before conversation-config folding. The CLI
 entry point scans `--cfg` values for an exact `NONE` match before either step
 runs; if found, both are skipped and the base partial starts at
-`PartialAppConfig::default()`. The positional reset (emitting a `Reset` event
-into the stream, or setting `base = defaults` for new conversations) happens
-during the later directive loop.
+`PartialAppConfig::default()`. The conversation stream itself is still
+loaded — chat history (turns, messages, tool calls) is unaffected. The
+positional reset (emitting a `Reset` event into the stream for continuing
+conversations, or absorbing post-`NONE` directives into `base_config.json`
+for new conversations) happens during the later directive loop.
 
 ### Reset and `-C` (from RFD 070)
 
@@ -391,6 +543,14 @@ future config resolution, so it shouldn't contribute to revert either. A `-C
 dev` after a `Reset` that discarded dev's claims behaves as "no fields currently
 claimed by dev" and emits the standard diagnostic.
 
+### `loader.reset` metadata timing
+
+`loader.reset` is loader metadata. It must be read from a resolved `--cfg` entry
+before that entry is applied, but it is not part of the persisted application
+config. The field itself is not written to conversation deltas or
+`base_config.json`; only its reset effect is persisted through `Reset` events or
+creation-time base state.
+
 ## Implementation Plan
 
 ### Phase 1: `ConfigDelta` enum and fold-time reset
@@ -400,12 +560,19 @@ Promote `ConfigDelta` from a struct to an enum with `Apply` and `Reset` variants
 
 - Rename the existing `ConfigDelta` struct to `ApplyDelta`.
 - Add `ResetDelta { timestamp: DateTime<Utc> }`.
-- Define `ConfigDelta` as `#[serde(tag = "type")]` enum with `Reset` tagged as
-  `"reset"` and `Apply` marked `#[serde(untagged)]` (backward-compatible with
-  existing on-disk events that have no `type` field).
+- Define `ConfigDelta` as a plain enum (no `#[serde(tag)]`). Hand-roll
+  `Serialize` so `Apply` produces today's flat shape (no `op` field) and
+  `Reset` produces `{"op": "reset", "timestamp": "..."}`. The outer
+  `InternalEvent` wrapper continues to add `"type": "config_delta"`
+  unchanged.
 - Update the hand-rolled `deserialize_config_delta` in
-  `crates/jp_conversation/src/stream.rs` to dispatch on presence of `type:
-  "reset"`. Legacy events without a `type` field deserialize as `Apply`.
+  `crates/jp_conversation/src/stream.rs` to dispatch on `op == "reset"`.
+  Events without an `op` field (including all legacy events) decode as
+  `Apply`.
+- Update `add_config_delta` in the same file: the existing destructure and
+  empty-diff suppression apply only to `Apply`. `add_config_delta(Reset)`
+  always appends — `Reset` events have no diff to suppress and their
+  presence is the whole point.
 - Update the stream fold (in `config()`, `Iter`, `IterMut`, `IntoIter`, and the
   `apply_config_delta` helper introduced by [RFD 070] Phase 1) to match on the
   variant:
@@ -418,34 +585,88 @@ Promote `ConfigDelta` from a struct to an enum with `Apply` and `Reset` variants
 
 Tests:
 
-- `ConfigDelta::Reset` round-trip through `deserialize_config_delta`.
-- Backward compat: legacy events (no `type` field) load as `Apply`.
+- `ConfigDelta::Reset` round-trips through full `InternalEvent`
+  serialize/deserialize (not just `deserialize_config_delta` in isolation),
+  asserting the on-disk shape is `{"type":"config_delta","op":"reset",...}`.
+- `ConfigDelta::Apply` on-disk shape is unchanged from today.
+- Backward compat: legacy events without `op` decode as `Apply`.
+- `add_config_delta(ConfigDelta::Reset(_))` always appends, even on a stream
+  where adding an empty `Apply` would be suppressed.
 - Fold: stream `[Apply(dev), Reset, Apply(fresh)]` resolves to defaults + fresh.
 - `-C dev` walk-back after `[Apply(dev), Reset]` reports no matching claims
   (`Reset` terminated the walk).
 
 Can be merged independently.
 
-### Phase 2: Keyword recognition in `--cfg`
+### Phase 2: Reset recognition in `--cfg`
 
-Add UPPERCASE keyword recognition to `--cfg` processing. Implement `WORKSPACE`
-as a positional `Apply` directive following the ordered-directive pattern from
-[RFD 008].
+Add UPPERCASE keyword recognition and entry-local `loader.reset` recognition to
+`--cfg` processing. All reset points share the same reset-then-layer machinery;
+they differ in what triggers them and what, if anything, is layered on top.
 
-Implement `NONE` in two parts:
+**Up-front mutual-exclusion check.** If both `NONE` and `WORKSPACE` appear
+in the same `--cfg` list, reject with a clear error before any directive
+runs (see [`NONE` and `WORKSPACE` are mutually
+exclusive](#none-and-workspace-are-mutually-exclusive)). The check is purely
+based on the parsed `--cfg` list and is independent of position.
 
-- **Pre-pipeline gate.** The CLI entry point scans `--cfg` values for an exact
-  `NONE` match; if present, `load_base_partial` and conversation-config loading
-  are skipped. Pre-`NONE` `--cfg` values are not parsed (they'd be discarded by
-  the positional reset anyway).
+Implement `NONE`:
+
+- **Pre-pipeline gate.** The CLI entry point scans `--cfg` values for an
+  exact `NONE` match; if present, `load_base_partial` and
+  conversation-config folding are skipped. The conversation stream is still
+  loaded for chat history. Pre-`NONE` `--cfg` values are still parsed by
+  clap (syntactic validation runs at parse time); the directive loop simply
+  skips processing them.
 - **Positional reset.** In the directive loop, when `NONE` is encountered:
-  - For new conversations (`--new`, `--fork`): no explicit event is emitted; the
-    new conversation's `base_config.json` is written with `base = defaults`.
-    Post-`NONE` directives land in `init` as `Apply` events.
-  - For continuing conversations: emit a `Reset` event into `events.json`.
-    Post-`NONE` directives emit `Apply` events after it.
+  - For new conversations (`--new`, `--fork`): no event is emitted; the
+    new conversation's `base_config.json` is written with the post-`NONE`
+    merge result as today's flat partial (per [RFD 054]). [RFD 070] later
+    refactors this to `{ base, init }` so post-`NONE` directives gain
+    per-source claims.
+  - For continuing conversations: emit a `ConfigDelta::Reset` event into
+    `events.json`. Post-`NONE` directives emit `Apply` events after it.
+
+Implement `WORKSPACE`:
+
+- For new conversations (`--new`, `--fork`): no events are emitted from the
+  keyword itself — the default new-conversation behavior already starts
+  from workspace state and writes `base_config.json` accordingly.
+  `--cfg=WORKSPACE` at creation time is therefore equivalent to omitting
+  it, and post-`WORKSPACE` directives merge in as today.
+- For continuing conversations: emit a `ConfigDelta::Reset` event followed
+  by a `ConfigDelta::Apply` carrying the workspace partial as resolved at
+  invocation time. Post-`WORKSPACE` directives emit `Apply` events after
+  the pair.
 
 Depends on Phase 1.
+
+Implement `loader.reset = "none"`:
+
+- Read the setting from each resolved `--cfg` entry before applying that entry's
+  partial.
+- Honor it only for explicit `--cfg` entries. Ignore it when the same file is
+  reached through `loader.extends`.
+- For continuing conversations, emit `ConfigDelta::Reset` immediately before the
+  resetting entry's `Apply` event.
+- For new conversations, absorb the reset into the new base state the same way
+  `NONE` is absorbed at creation time.
+- Do not run the `NONE` pre-pipeline gate. Broken implicit config still requires
+  the `NONE` keyword or bare `--no-cfg`.
+
+Tests:
+
+- A continuing conversation with `-c committer` where `committer` declares
+  `loader.reset = "none"` appends `[Reset, Apply(committer)]`.
+- A new conversation with the same entry writes post-reset state to
+  `base_config.json` and emits no `Reset` event at creation time.
+- A file reached through `loader.extends` with `loader.reset = "none"` does not
+  reset the parent entry.
+- A multi-root `--cfg dev` where the later root's entry declares
+  `loader.reset = "none"` discards earlier resolved entries from that same
+  argument.
+- `loader.reset = "none"` does not skip implicit loading; a broken implicit
+  config still fails unless the command uses `NONE` / `--no-cfg`.
 
 Conversation-ID resolution is out of scope for this RFD (see [Non-Goals](#non-goals)).
 
@@ -459,10 +680,18 @@ Conversation-ID resolution is out of scope for this RFD (see [Non-Goals](#non-go
   (the infrastructure a future `START` keyword would use), extends `ApplyDelta`
   with claims and unsets, and adds a valued form to `--no-cfg` for targeted
   revert.
+- [RFD 054]: Split Conversation Config and Events — defines today's flat
+  `base_config.json` shape that this RFD writes post-`NONE` state into until
+  RFD 070 reshapes it.
 - `crates/jp_config/src/fs.rs` — config loading and merging logic.
-- `crates/jp_config/src/delta.rs` — `ConfigDelta` applied during
-  conversations.
+- `crates/jp_cli/src/config_pipeline.rs` — resolved `--cfg` entries and loader
+  metadata.
+- `crates/jp_conversation/src/stream.rs` — conversation `ConfigDelta` and
+  stream fold.
+- `crates/jp_config/src/delta.rs` — `PartialConfigDelta` trait and
+  partial-merge primitives.
 
 [RFD 008]: 008-ordered-tool-directives.md
-[RFD 079]: 079-config-sources-and-load-order.md
+[RFD 054]: 054-split-conversation-config-and-events.md
 [RFD 070]: 070-negative-config-deltas.md
+[RFD 079]: 079-config-sources-and-load-order.md
