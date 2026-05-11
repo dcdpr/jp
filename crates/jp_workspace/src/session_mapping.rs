@@ -17,7 +17,10 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use super::Workspace;
-use crate::session::{Session, SessionSource};
+use crate::{
+    conversation_lock::ConversationLock,
+    session::{Session, SessionSource},
+};
 
 /// A session's conversation history, persisted to disk.
 ///
@@ -132,9 +135,20 @@ impl Workspace {
 
     /// Record that the given session activated a conversation.
     ///
-    /// Writes the session mapping to the backing store. If no mapping exists
-    /// yet, one is created.
-    pub fn activate_session_conversation(
+    /// Writes only the session mapping. Use [`activate_session_conversation`]
+    /// when you hold a [`ConversationLock`] — that variant also bumps the
+    /// conversation's `last_activated_at`, which is the canonical "this
+    /// conversation was last worked on" timestamp consumed by sorting,
+    /// archiving, and `--id=last`.
+    ///
+    /// This bare form is for the lock-contention fallback in `jp c use` (where
+    /// another process holds the lock, so we can't write the metadata, and
+    /// accept that `last_activated_at` will reflect the lock holder's
+    /// activation time rather than ours) and for tests that exercise
+    /// session-mapping logic in isolation.
+    ///
+    /// [`activate_session_conversation`]: Self::activate_session_conversation
+    pub fn record_session_activation(
         &self,
         session: &Session,
         id: ConversationId,
@@ -149,6 +163,32 @@ impl Workspace {
         let value = serde_json::to_value(&mapping).map_err(jp_storage::Error::from)?;
         self.sessions.save_session(session.id.as_str(), &value)?;
         Ok(())
+    }
+
+    /// Record that a conversation was activated in the given session.
+    ///
+    /// Updates two things:
+    ///
+    /// 1. The session-to-conversation mapping (most recent first), via
+    ///    [`record_session_activation`].
+    /// 2. The conversation's `last_activated_at` timestamp on its metadata, via
+    ///    the held lock. The metadata write is staged in-memory and flushes
+    ///    when the resulting [`ConversationMut`] drops at the end of this call.
+    ///
+    /// Requiring `&ConversationLock` makes it a type-level invariant that the
+    /// caller holds the conversation's exclusive lock — so the metadata bump is
+    /// safe to perform.
+    ///
+    /// [`record_session_activation`]: Self::record_session_activation
+    /// [`ConversationMut`]: crate::ConversationMut
+    pub fn activate_session_conversation(
+        &self,
+        conv: &ConversationLock,
+        session: &Session,
+        now: DateTime<Utc>,
+    ) -> crate::error::Result<()> {
+        conv.as_mut().update_metadata(|m| m.last_activated_at = now);
+        self.record_session_activation(session, conv.id(), now)
     }
 
     /// Remove orphaned lock files and stale session mappings.

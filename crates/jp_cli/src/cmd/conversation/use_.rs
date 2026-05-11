@@ -1,7 +1,7 @@
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_workspace::ConversationHandle;
-use tracing::warn;
+use jp_workspace::{ConversationHandle, LockResult};
+use tracing::{debug, warn};
 
 use crate::{
     cmd::{
@@ -36,10 +36,10 @@ impl Use {
         }
 
         let handle = handles.into_iter().next().expect("Use requires a handle");
-        Self::run_activate_inner(ctx, &handle)
+        Self::run_activate_inner(ctx, handle)
     }
 
-    fn run_activate_inner(ctx: &mut Ctx, handle: &ConversationHandle) -> Output {
+    fn run_activate_inner(ctx: &mut Ctx, handle: ConversationHandle) -> Output {
         let id = handle.id();
 
         let active_id = ctx
@@ -64,11 +64,33 @@ impl Use {
                 .into());
         };
 
-        if let Err(error) = ctx
-            .workspace
-            .activate_session_conversation(session, id, ctx.now())
-        {
-            warn!(%error, "Failed to write session mapping.");
+        // Try to acquire the conversation lock non-blocking. On contention
+        // (another process is mid-query on this conversation), skip the
+        // metadata bump — we can't write `last_activated_at` while someone else
+        // holds the lock, and we don't want to block behind a streaming query
+        // just to record the activation time in the metadata.
+        //
+        // The on-disk `last_activated_at` reflects the lock holder's activation
+        // time (typically recent), which is close enough for sorting and
+        // archive cutoffs in the common case. We still record this session's
+        // mapping so the user's intent ("X is now my active conversation") is
+        // captured immediately, and the `SessionHistoryEntry::activated_at` we
+        // write here carries the exact `now`.
+        let now = ctx.now();
+        let result = match ctx.workspace.lock_conversation(handle, Some(session))? {
+            LockResult::Acquired(lock) => ctx
+                .workspace
+                .activate_session_conversation(&lock, session, now),
+            LockResult::AlreadyLocked(_) => {
+                debug!(
+                    %id,
+                    "Conversation locked by another process; recording session activation only."
+                );
+                ctx.workspace.record_session_activation(session, id, now)
+            }
+        };
+        if let Err(error) = result {
+            warn!(%error, "Failed to record activation.");
         }
 
         let from = active_id.map_or_else(
@@ -109,7 +131,7 @@ impl Use {
         ctx.printer
             .println(format!("Unarchived conversation {id_fmt}"));
 
-        Self::run_activate_inner(ctx, &handle)
+        Self::run_activate_inner(ctx, handle)
     }
 
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
@@ -126,3 +148,7 @@ fn conversation_title(ctx: &Ctx, id: ConversationId) -> Option<String> {
     let h = ctx.workspace.acquire_conversation(&id).ok()?;
     ctx.workspace.metadata(&h).ok()?.title.clone()
 }
+
+#[cfg(test)]
+#[path = "use_tests.rs"]
+mod tests;
