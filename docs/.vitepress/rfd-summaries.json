@@ -288,8 +288,8 @@
     "summary": "Adds conversation archiving to JP, moving inactive conversations to a hidden partition while preserving them."
   },
   "038-config-reset-keywords.md": {
-    "hash": "a63b4338c3ce3962cac54d0e840475484e6fdbe808326c10581ea6785c7d4d42",
-    "summary": "Add UPPERCASE keywords NONE and WORKSPACE to --cfg for resetting config to program defaults or workspace state."
+    "hash": "7b3a90b6e0afd2f2f65cf51ee2d90c86e3563cb133232a24c986f96ca4a6cff5",
+    "summary": "UPPERCASE keywords NONE and WORKSPACE reset config state; loader.reset entry setting provides local resets; ConfigDelta becomes enum to persist resets."
   },
   "079-config-sources-and-load-order.md": {
     "hash": "06a977d5a6635636d321f68bf3c803204b69528de4554b6addfa042ffedd2295",
