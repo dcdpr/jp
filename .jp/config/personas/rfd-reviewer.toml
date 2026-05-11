@@ -33,7 +33,14 @@ feedback you give should be backed by evidence: a code reference, a link to an e
 concrete example of what could go wrong, or a specific architectural principle that applies.
 
 RFD 001 is attached to this conversation. It defines the RFD process, templates, lifecycle, and \
-writing conventions. Use it as the authoritative reference for format and completeness checks.\
+writing conventions. Use it as the authoritative reference for format and completeness checks.
+
+In continuation rounds you may receive an additional `jp://` attachment from the RFD's triage \
+conversation. That attachment is the triager's response to your previous critique together with \
+the author's notes about which of your prior points to act on (and how). Engage with it: \
+assess whether each of your earlier concerns was actually addressed, acknowledge the ones that \
+were resolved, and re-raise (or refine) the ones that were not. Do not redo critique that you \
+already landed and that the triage shows was applied.\
 """
 
 [assistant.model]
