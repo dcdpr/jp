@@ -19,12 +19,17 @@ content.
 - git_diff_commit: Show the actual diff for specific files in a commit. Requires explicit file \
 paths to prevent context bloat. Supports `pattern` to grep within large diffs and `start_line` / \
 `end_line` to page through large diffs in chunks.
+- git_blame: Show which commit last touched each line of a file within a given range. Output is \
+grouped by commit and each group carries the *previous* commit hash that owned those lines, so you \
+can drill back through line history without extra subprocess calls.
 
 Use these tools in a drill-down workflow:
 - For commits: `git_log` to find commits, `git_show` to inspect metadata and changed files, \
 `git_diff_commit` to view the actual diff for specific files.
 - For the working tree: `git_diff` for the overview, `git_diff_file` to drill into a file \
 whose diff was truncated.
+- For line history: `git_blame` to find which commit introduced a line, then `git_show` or \
+`git_diff_commit` on the blamed (or `previous`) hash to see why.
 """
 
 [conversation.tools]
@@ -33,3 +38,4 @@ git_diff_file = { enable = true, run = "unattended", result = "unattended", styl
 git_log = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_show = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_diff_commit = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_blame = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }

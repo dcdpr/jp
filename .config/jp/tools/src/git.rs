@@ -7,6 +7,7 @@ use crate::{
 
 mod add_intent;
 mod apply;
+mod blame;
 mod commit;
 mod diff;
 mod diff_commit;
@@ -21,6 +22,7 @@ mod stage_patch_lines;
 mod unstage;
 
 use add_intent::git_add_intent;
+use blame::git_blame;
 use commit::git_commit;
 use diff::git_diff;
 use diff_commit::git_diff_commit;
@@ -68,6 +70,19 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         }
 
         "show" => git_show(ctx.root, t.req("revision")?, opts).await,
+
+        "blame" => {
+            git_blame(
+                ctx.root,
+                t.req("path")?,
+                t.req("start_line")?,
+                t.req("end_line")?,
+                t.opt("revision")?,
+                t.opt("ignore_whitespace")?,
+                opts,
+            )
+            .await
+        }
 
         "diff_commit" => {
             git_diff_commit(
