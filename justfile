@@ -193,36 +193,17 @@ pr-review NNN *ARGS: _install-jp
 
     title="pr-review:{{NNN}}"
 
-    # Look up an existing active conversation with this exact title.
-    existing=$(jp -F json conversation ls 2>/dev/null \
-        | jq -r --arg t "$title" 'first(.[] | select(.Title == $t) | .ID) // empty' \
-        2>/dev/null \
-        || true)
+    existing=""
+    out=$(just _resolve-conversation "$title")
+    case "$out" in
+        "CONTINUE "*) existing="${out#CONTINUE }" ;;
+        "ARCHIVE "*)  jp conversation archive "${out#ARCHIVE }" || true ;;
+        NEW)          ;;
+        QUIT)         exit 0 ;;
+        *)            echo "Unexpected from _resolve-conversation: $out" >&2; exit 1 ;;
+    esac
 
-    resume=false
     if [ -n "$existing" ]; then
-        if [ -t 0 ] && [ -t 1 ]; then
-            printf "Found existing review conversation %s for PR #{{NNN}}.\n" "$existing" >&2
-            printf "  [c]ontinue / [n]ew (archive old) / [q]uit: " >&2
-            read -r choice
-        else
-            choice=c
-        fi
-        case "$choice" in
-            ""|c|C)
-                resume=true ;;
-            n|N)
-                jp conversation archive "$existing" >&2 || true
-                ;;
-            q|Q)
-                exit 0 ;;
-            *)
-                echo "Unknown choice '$choice'; aborting." >&2
-                exit 1 ;;
-        esac
-    fi
-
-    if [ "$resume" = "true" ]; then
         printf "Resuming review on PR #{{NNN}} (%s)\n\n" "$existing" >&2
         jp query --id "$existing" --cfg=personas/pr-reviewer \
             --attach "gh:pull/{{NNN}}/diff" \
@@ -246,10 +227,10 @@ pr-review NNN *ARGS: _install-jp
 # follow up in the same conversation with a dev persona, e.g.
 # `jp q --id <id> --cfg=personas/dev "implement the proposed changes"`.
 #
-# Reuse the same `pr-triage:NNN` conversation across multiple review
-# cycles so the codebase context doesn't have to be rediscovered each
-# round. To start over, archive the existing conversation
-# (`jp conversation rm <id>`) and re-run.
+# When a `pr-triage:NNN` conversation already exists, prompts whether to
+# continue, archive-and-start-fresh, or quit. Resuming preserves the
+# triager's codebase context across review cycles; starting fresh is
+# useful when the conversation has gone off the rails.
 [group('jp')]
 [positional-arguments]
 pr-triage NNN *ARGS: _install-jp
@@ -286,12 +267,15 @@ pr-triage NNN *ARGS: _install-jp
 
     title="pr-triage:{{NNN}}"
 
-    # Look up an existing active conversation with this exact title;
-    # resume it if found, otherwise create a fresh one.
-    existing=$(jp -F json conversation ls 2>/dev/null \
-        | jq -r --arg t "$title" 'first(.[] | select(.Title == $t) | .ID) // empty' \
-        2>/dev/null \
-        || true)
+    existing=""
+    out=$(just _resolve-conversation "$title")
+    case "$out" in
+        "CONTINUE "*) existing="${out#CONTINUE }" ;;
+        "ARCHIVE "*)  jp conversation archive "${out#ARCHIVE }" || true ;;
+        NEW)          ;;
+        QUIT)         exit 0 ;;
+        *)            echo "Unexpected from _resolve-conversation: $out" >&2; exit 1 ;;
+    esac
 
     if [ -n "$existing" ]; then
         printf "Resuming triage on PR #{{NNN}} (%s)\n\n" "$existing" >&2
@@ -308,6 +292,16 @@ pr-triage NNN *ARGS: _install-jp
     fi
 
 # Review an RFD. Accepts a permanent number (41, 041) or a draft ID (D01).
+#
+# When an `rfd-review:<id>` conversation already exists, prompts whether to
+# continue, archive-and-start-fresh, or quit. In continuation mode, also
+# attaches the latest turn from the matching `rfd-triage:<id>` conversation
+# (if one exists) so the reviewer can engage with the triager's response
+# and the author's notes from the previous cycle.
+#
+# Looks up Bear notes tagged `rfd/<id>/review` and attaches them. If none
+# match, prompts whether to continue without notes, edit the prompt inline,
+# or quit.
 [group('rfd')]
 [positional-arguments]
 rfd-review NNN *ARGS: _install-jp
@@ -324,85 +318,59 @@ rfd-review NNN *ARGS: _install-jp
 
     arg="{{NNN}}"
     if echo "$arg" | grep -qiE '^D[0-9]+$'; then
-        draft_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/drafts/${draft_id}-*.md 2>/dev/null | head -1)
+        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
+        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
         if [ -z "$file" ]; then
-            echo "No draft RFD found with ID ${draft_id}." >&2; exit 1
+            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
         fi
     elif echo "$arg" | grep -qE '^[0-9]+$'; then
         n=$(echo "$arg" | sed 's/^0*//')
-        num=$(printf "%03d" "${n:-0}")
-        file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
+        rfd_id=$(printf "%03d" "${n:-0}")
+        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
         if [ -z "$file" ]; then
-            echo "No RFD found with number ${num}." >&2; exit 1
+            echo "No RFD found with number ${rfd_id}." >&2; exit 1
         fi
     else
         echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
     fi
 
-    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
-    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
-    if starts_with "-- " "$@"; then
-    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
-    elif [ -z "$args" ]; then
-        args="$msg"
+    title="rfd-review:${rfd_id}"
+
+    existing=""
+    out=$(just _resolve-conversation "$title")
+    case "$out" in
+        "CONTINUE "*) existing="${out#CONTINUE }" ;;
+        "ARCHIVE "*)  jp conversation archive "${out#ARCHIVE }" || true ;;
+        NEW)          ;;
+        QUIT)         exit 0 ;;
+        *)            echo "Unexpected from _resolve-conversation: $out" >&2; exit 1 ;;
+    esac
+
+    # In continuation mode, fold in the latest triage turn so the reviewer
+    # can engage with the triager's response and the author's notes from
+    # the prior cycle.
+    triage_attach=""
+    if [ -n "$existing" ]; then
+        triage_id=$(jp -F json conversation ls 2>/dev/null \
+            | jq -r --arg t "rfd-triage:${rfd_id}" \
+                'first(.[] | select(.Title == $t) | .ID) // empty' \
+            2>/dev/null || true)
+        if [ -n "$triage_id" ]; then
+            triage_attach="--attach jp://${triage_id}?select=u,a:-1"
+            printf "Attaching last triage turn from %s\n" "$triage_id" >&2
+        fi
     fi
 
-    printf "Reviewing $file\n\n" >&2
-    jp query --attach "$file" --new --cfg=personas/rfd-reviewer $args
-
-# Triage feedback on an RFD from a reviewer conversation.
-#
-# NNN is the RFD (permanent number like 41/041, or draft ID like D01).
-# MODE is either `new` (start a fresh triage conversation) or `continue`
-# (append to the current session, e.g. to follow up on the implementation
-# conversation that produced the RFD).
-# CONVO is the conversation ID of the `rfd-review` run to pull feedback from.
-# Only the final assistant response of that conversation is attached.
-[group('rfd')]
-[positional-arguments]
-rfd-triage NNN MODE CONVO *ARGS: _install-jp
-    #!/usr/bin/env sh
-    set -eu
-
-    shift 3 # remove NNN, MODE, CONVO from positional params
-    args="$@"
-    msg="I received feedback on the RFD. Read the attached reviewer response \
-    carefully, then triage it item by item. Ground each point against the code \
-    and related RFDs. Do not assume the feedback is correct. For each item \
-    give a verdict (accept / amend / dismiss / defer) with reasoning, and for \
-    accepted or amended items describe the concrete change you would make to \
-    the RFD. Do NOT edit the RFD yet; give your opinion first."
-
-    # Resolve the target RFD file.
-    arg="{{NNN}}"
-    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
-        draft_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/drafts/${draft_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No draft RFD found with ID ${draft_id}." >&2; exit 1
-        fi
-    elif echo "$arg" | grep -qE '^[0-9]+$'; then
-        n=$(echo "$arg" | sed 's/^0*//')
-        num=$(printf "%03d" "${n:-0}")
-        file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No RFD found with number ${num}." >&2; exit 1
-        fi
-    else
-        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
-    fi
-
-    # Resolve MODE. Explicit to avoid silently picking a default.
-    case "{{MODE}}" in
-        new)      new_flag="--new" ;;
-        continue) new_flag="" ;;
-        *)
-            echo "Invalid MODE '{{MODE}}'. Use 'new' or 'continue'." >&2
-            exit 1 ;;
+    note_attach=""
+    extra_edit=""
+    note_out=$(just _bear-note "rfd/${rfd_id}/review")
+    case "$note_out" in
+        "FOUND "*) note_attach="--attach ${note_out#FOUND }"
+                   printf "Attaching Bear notes tagged 'rfd/%s/review'\n" "$rfd_id" >&2 ;;
+        EDIT)      extra_edit="--edit" ;;
+        CONTINUE)  ;;
+        QUIT)      exit 0 ;;
+        *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
     esac
 
     starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
@@ -416,12 +384,213 @@ rfd-triage NNN MODE CONVO *ARGS: _install-jp
         args="$msg"
     fi
 
-    printf "Triaging feedback on $file (mode: {{MODE}})\n\n" >&2
-    jp query \
-        --attach "file://$file" \
-        --attach "jp://{{CONVO}}?select=a" \
-        $new_flag \
-        --cfg=personas/rfd-triager \
+    if [ -n "$existing" ]; then
+        printf "Resuming review on $file (%s)\n\n" "$existing" >&2
+        jp query --id "$existing" --cfg=personas/rfd-reviewer \
+            --attach "$file" \
+            $triage_attach \
+            $note_attach \
+            $extra_edit \
+            $args
+    else
+        printf "Reviewing $file\n\n" >&2
+        jp query --new --title "$title" --cfg=personas/rfd-reviewer \
+            --attach "$file" \
+            $note_attach \
+            $extra_edit \
+            $args
+    fi
+
+# Triage feedback on an RFD from its review conversation.
+#
+# Looks up the matching `rfd-review:<id>` conversation by title and attaches
+# its latest user/assistant turn (the reviewer's verdicts plus any author
+# notes from that round). When an `rfd-triage:<id>` conversation already
+# exists, prompts whether to continue, archive-and-start-fresh, or quit.
+#
+# Looks up Bear notes tagged `rfd/<id>/triage` and attaches them. If none
+# match, prompts whether to continue without notes, edit the prompt inline,
+# or quit.
+#
+# Accepts a permanent number (41, 041) or a draft ID (D01).
+[group('rfd')]
+[positional-arguments]
+rfd-triage NNN *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    args="$@"
+    msg="I received feedback on the RFD. Read the attached reviewer response \
+    carefully, then triage it item by item. Ground each point against the code \
+    and related RFDs. Do not assume the feedback is correct. For each item \
+    give a verdict (accept / amend / dismiss / defer) with reasoning, and for \
+    accepted or amended items describe the concrete change you would make to \
+    the RFD. Do NOT edit the RFD yet; give your opinion first."
+
+    # Resolve the target RFD file.
+    arg="{{NNN}}"
+    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
+        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
+        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
+        fi
+    elif echo "$arg" | grep -qE '^[0-9]+$'; then
+        n=$(echo "$arg" | sed 's/^0*//')
+        rfd_id=$(printf "%03d" "${n:-0}")
+        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No RFD found with number ${rfd_id}." >&2; exit 1
+        fi
+    else
+        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
+    fi
+
+    # The triage step needs the sibling review conversation to exist.
+    review_id=$(jp -F json conversation ls 2>/dev/null \
+        | jq -r --arg t "rfd-review:${rfd_id}" \
+            'first(.[] | select(.Title == $t) | .ID) // empty' \
+        2>/dev/null || true)
+    if [ -z "$review_id" ]; then
+        echo "No 'rfd-review:${rfd_id}' conversation found. Run 'just rfd-review ${rfd_id}' first." >&2
+        exit 1
+    fi
+
+    title="rfd-triage:${rfd_id}"
+
+    existing=""
+    out=$(just _resolve-conversation "$title")
+    case "$out" in
+        "CONTINUE "*) existing="${out#CONTINUE }" ;;
+        "ARCHIVE "*)  jp conversation archive "${out#ARCHIVE }" || true ;;
+        NEW)          ;;
+        QUIT)         exit 0 ;;
+        *)            echo "Unexpected from _resolve-conversation: $out" >&2; exit 1 ;;
+    esac
+
+    note_attach=""
+    extra_edit=""
+    note_out=$(just _bear-note "rfd/${rfd_id}/triage")
+    case "$note_out" in
+        "FOUND "*) note_attach="--attach ${note_out#FOUND }"
+                   printf "Attaching Bear notes tagged 'rfd/%s/triage'\n" "$rfd_id" >&2 ;;
+        EDIT)      extra_edit="--edit" ;;
+        CONTINUE)  ;;
+        QUIT)      exit 0 ;;
+        *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
+    esac
+
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
+        args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
+    elif [ -z "$args" ]; then
+        args="$msg"
+    fi
+
+    if [ -n "$existing" ]; then
+        printf "Resuming triage on $file (%s)\n\n" "$existing" >&2
+        jp query --id "$existing" --cfg=personas/rfd-triager \
+            --attach "file://$file" \
+            --attach "jp://${review_id}?select=u,a:-1" \
+            $note_attach \
+            $extra_edit \
+            $args
+    else
+        printf "Triaging feedback on $file\n\n" >&2
+        jp query --new --title "$title" --cfg=personas/rfd-triager \
+            --attach "file://$file" \
+            --attach "jp://${review_id}?select=u,a:-1" \
+            $note_attach \
+            $extra_edit \
+            $args
+    fi
+
+# Apply triage decisions to an RFD.
+#
+# Resumes the existing `rfd-triage:<id>` conversation with the dev persona
+# so the assistant can edit the RFD file based on the triage verdicts.
+# Re-attaches the RFD file so the dev sees the current state (including
+# any prior-round edits), and looks up Bear notes tagged `rfd/<id>/apply`
+# for any author guidance about what to apply.
+#
+# Accepts a permanent number (41, 041) or a draft ID (D01).
+[group('rfd')]
+[positional-arguments]
+rfd-apply NNN *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    args="$@"
+    msg="The triage decisions for this RFD are in the conversation above. \
+    Please apply the accepted and amended verdicts to the RFD by editing the \
+    attached file. Re-read the file first - it may have been edited in a \
+    previous round and the line numbers from the triage may have moved. \
+    Stick to the verdicts; do not introduce changes that weren't triaged."
+
+    # Resolve the RFD file and id.
+    arg="{{NNN}}"
+    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
+        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
+        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
+        fi
+    elif echo "$arg" | grep -qE '^[0-9]+$'; then
+        n=$(echo "$arg" | sed 's/^0*//')
+        rfd_id=$(printf "%03d" "${n:-0}")
+        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No RFD found with number ${rfd_id}." >&2; exit 1
+        fi
+    else
+        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
+    fi
+
+    # The apply step lives inside the triage conversation; that conversation
+    # must already exist.
+    triage_id=$(jp -F json conversation ls 2>/dev/null \
+        | jq -r --arg t "rfd-triage:${rfd_id}" \
+            'first(.[] | select(.Title == $t) | .ID) // empty' \
+        2>/dev/null || true)
+    if [ -z "$triage_id" ]; then
+        echo "No 'rfd-triage:${rfd_id}' conversation found. Run 'just rfd-triage ${rfd_id}' first." >&2
+        exit 1
+    fi
+
+    note_attach=""
+    extra_edit=""
+    note_out=$(just _bear-note "rfd/${rfd_id}/apply")
+    case "$note_out" in
+        "FOUND "*) note_attach="--attach ${note_out#FOUND }"
+                   printf "Attaching Bear notes tagged 'rfd/%s/apply'\n" "$rfd_id" >&2 ;;
+        EDIT)      extra_edit="--edit" ;;
+        CONTINUE)  ;;
+        QUIT)      exit 0 ;;
+        *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
+    esac
+
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
+        args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
+    elif [ -z "$args" ]; then
+        args="$msg"
+    fi
+
+    printf "Applying triage decisions to $file (%s)\n\n" "$triage_id" >&2
+    jp query --id "$triage_id" --cfg=personas/dev \
+        --attach "$file" \
+        $note_attach \
+        $extra_edit \
         $args
 
 # Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
@@ -1481,3 +1650,86 @@ vet-ci: (_install "cargo-vet@" + vet_version)
 
 @_rustup_component +COMPONENTS:
     rustup component add {{COMPONENTS}}
+
+# Internal: resolve a conversation by title.
+#
+# Looks up an active conversation whose title equals TITLE. If found and the
+# caller is on a TTY, prompts the user for [c]ontinue / [n]ew (archive old) /
+# [q]uit. Outputs one of:
+#
+#   CONTINUE <id>   - caller should resume this conversation
+#   ARCHIVE <id>    - caller should archive this id and start fresh
+#   NEW             - no existing match, just start fresh
+#   QUIT            - caller should exit cleanly
+#
+# The actual archive is left to the caller because `jp conversation archive`
+# may itself prompt for confirmation (e.g. on the active conversation), and
+# its prompt has to be visible to the user, not captured by `$()`.
+[no-exit-message]
+[private]
+_resolve-conversation TITLE:
+    #!/usr/bin/env sh
+    set -eu
+
+    existing=$(jp -F json conversation ls 2>/dev/null \
+        | jq -r --arg t "{{TITLE}}" 'first(.[] | select(.Title == $t) | .ID) // empty' \
+        2>/dev/null \
+        || true)
+
+    if [ -z "$existing" ]; then
+        echo "NEW"
+        exit 0
+    fi
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "Found existing conversation %s titled '%s'.\n" "$existing" "{{TITLE}}" > /dev/tty
+        printf "  [c]ontinue / [n]ew (archive old) / [q]uit: " > /dev/tty
+        IFS= read -r choice < /dev/tty
+    else
+        choice=c
+    fi
+
+    case "$choice" in
+        ""|c|C) echo "CONTINUE $existing" ;;
+        n|N)    echo "ARCHIVE $existing" ;;
+        q|Q)    echo "QUIT" ;;
+        *)      echo "Unknown choice '$choice'; aborting." >&2; exit 1 ;;
+    esac
+
+# Internal: look up a Bear note (or notes) by tag.
+#
+# Resolves `bear://search/?tag=TAG` against the local Bear database. Outputs
+# one of:
+#
+#   FOUND <bear-uri>   - at least one note matched; caller should attach URI
+#   EDIT               - no notes matched; caller should add `--edit`
+#   CONTINUE           - no notes matched; caller should skip notes silently
+#   QUIT               - caller should exit cleanly
+#
+# Resolution uses `jp attachment print`, which is read-only and stateless.
+[no-exit-message]
+[private]
+_bear-note TAG:
+    #!/usr/bin/env sh
+    set -eu
+
+    uri="bear://search/?tag={{TAG}}"
+    if jp attachment print "$uri" 2>/dev/null | grep -q .; then
+        echo "FOUND $uri"
+        exit 0
+    fi
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "No Bear note tagged '%s' found.\n" "{{TAG}}" > /dev/tty
+        printf "  [c]ontinue without note / [e]dit prompt inline / [q]uit: " > /dev/tty
+        IFS= read -r ans < /dev/tty
+    else
+        ans=c
+    fi
+
+    case "$ans" in
+        ""|c|C) echo "CONTINUE" ;;
+        e|E)    echo "EDIT" ;;
+        q|Q)    echo "QUIT" ;;
+        *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
+    esac
