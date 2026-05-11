@@ -204,7 +204,7 @@
     "summary": "Introduces Workspace::sanitize() method that validates .jp data store, moves corrupt conversations to .trash/ with error explanations, and ensures four invariants before CLI commands run."
   },
   "053-auto-refresh-conversation-titles.md": {
-    "hash": "42b4f764ddcb1a2f2177a2b9d61d56177b723ce40bba39038a0a19370f6c0dfd",
+    "hash": "236a09a77f480a209026675c85de63bc7064130a38891a5173dc46cbf3b3df60",
     "summary": "Auto-refresh stale conversation titles periodically by re-running LLM generation when accumulated turns exceed a configured threshold."
   },
   "054-split-conversation-config-and-events.md": {
