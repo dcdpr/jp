@@ -479,7 +479,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
         source: SessionSource::env("JP_SESSION"),
     };
     workspace
-        .activate_session_conversation(&session, conversation_id, chrono::Utc::now())
+        .record_session_activation(&session, conversation_id, chrono::Utc::now())
         .unwrap();
 
     let cli = Cli::parse_from([

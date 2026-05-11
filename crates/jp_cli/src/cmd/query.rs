@@ -316,9 +316,9 @@ impl Query {
         if let Some(session) = &ctx.session
             && let Err(error) = ctx
                 .workspace
-                .activate_session_conversation(session, lock.id(), now)
+                .activate_session_conversation(&lock, session, now)
         {
-            warn!(%error, "Failed to write session mapping.");
+            warn!(%error, "Failed to record activation.");
         }
 
         if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {

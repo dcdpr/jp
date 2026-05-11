@@ -38,6 +38,68 @@ fn setup() -> (Utf8TempDir, Workspace, Option<Arc<FsStorageBackend>>) {
 }
 
 #[test]
+fn activate_session_conversation_bumps_last_activated_at_and_session() {
+    let (_tmp, mut ws, _fs) = setup();
+    let session = test_session();
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let original = datetime!(2025-07-19 14:00:00 Z);
+    let now = datetime!(2025-07-19 16:30:00 Z);
+
+    let config = Arc::new(jp_config::AppConfig::new_test());
+    let conv = jp_conversation::Conversation {
+        last_activated_at: original,
+        ..Default::default()
+    };
+    ws.create_conversation_with_id(id, conv, config);
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let lock = ws.test_lock(handle);
+
+    ws.activate_session_conversation(&lock, &session, now)
+        .unwrap();
+
+    // Session mapping was recorded.
+    assert_eq!(ws.session_active_conversation(&session), Some(id));
+
+    // Conversation's last_activated_at was bumped to `now`. This is the
+    // bug fix: previously, only the session mapping was written.
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let meta = ws.metadata(&handle).unwrap();
+    assert_eq!(meta.last_activated_at, now);
+}
+
+#[test]
+fn record_session_activation_does_not_touch_conversation_metadata() {
+    let (_tmp, mut ws, _fs) = setup();
+    let session = test_session();
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let original = datetime!(2025-07-19 14:00:00 Z);
+    let now = datetime!(2025-07-19 16:30:00 Z);
+
+    let config = Arc::new(jp_config::AppConfig::new_test());
+    let conv = jp_conversation::Conversation {
+        last_activated_at: original,
+        ..Default::default()
+    };
+    ws.create_conversation_with_id(id, conv, config);
+
+    ws.record_session_activation(&session, id, now).unwrap();
+
+    // Session mapping was recorded.
+    assert_eq!(ws.session_active_conversation(&session), Some(id));
+
+    // The bare form must NOT change conversation metadata — it's used in
+    // the lock-contention fallback (`jp c use` while another process holds
+    // the lock) and in tests that exercise session-mapping logic.
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let meta = ws.metadata(&handle).unwrap();
+    assert_eq!(
+        meta.last_activated_at, original,
+        "record_session_activation must leave last_activated_at untouched"
+    );
+}
+
+#[test]
 fn activate_creates_new_mapping() {
     let (_tmp, mut ws, _fs) = setup();
     let session = test_session();
@@ -47,7 +109,7 @@ fn activate_creates_new_mapping() {
     let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
     ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
 
-    ws.activate_session_conversation(&session, id, now).unwrap();
+    ws.record_session_activation(&session, id, now).unwrap();
 
     assert_eq!(ws.session_active_conversation(&session), Some(id));
     assert_eq!(ws.session_previous_conversation(&session), None);
@@ -68,12 +130,12 @@ fn activate_deduplicates_history() {
     );
     ws.create_conversation_with_id(id2, jp_conversation::Conversation::default(), config);
 
-    ws.activate_session_conversation(&session, id1, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session, id1, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
-    ws.activate_session_conversation(&session, id2, datetime!(2025-07-19 15:00:00 Z))
+    ws.record_session_activation(&session, id2, datetime!(2025-07-19 15:00:00 Z))
         .unwrap();
     // Re-activate id1 — should move it to the front, not duplicate.
-    ws.activate_session_conversation(&session, id1, datetime!(2025-07-19 16:00:00 Z))
+    ws.record_session_activation(&session, id1, datetime!(2025-07-19 16:00:00 Z))
         .unwrap();
 
     assert_eq!(ws.session_active_conversation(&session), Some(id1));
@@ -115,7 +177,7 @@ fn env_source_roundtrips_through_json() {
     };
     let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
 
-    ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session, id, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
 
     let mapping = ws.load_session_mapping(&session).unwrap();
@@ -152,7 +214,7 @@ fn no_user_storage_returns_error_on_write() {
     let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
 
     assert!(
-        ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
+        ws.record_session_activation(&session, id, datetime!(2025-07-19 14:00:00 Z))
             .is_err()
     );
 }
@@ -227,7 +289,7 @@ fn cleanup_removes_stale_getsid_session() {
     ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
 
     // Write a session mapping referencing a live conversation.
-    ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session, id, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
     assert!(ws.session_active_conversation(&session).is_some());
 
@@ -257,7 +319,7 @@ fn cleanup_keeps_getsid_session_file_but_prunes_ghost_entries() {
     // and has no active lock. The session file should survive (alive
     // process), but the ghost entry should be pruned (unlocked + absent).
     let ghost_id = ConversationId::try_from(datetime!(2025-07-19 18:00:00 Z)).unwrap();
-    ws.activate_session_conversation(&session, ghost_id, datetime!(2025-07-19 18:00:00 Z))
+    ws.record_session_activation(&session, ghost_id, datetime!(2025-07-19 18:00:00 Z))
         .unwrap();
 
     ws.cleanup_stale_files(fs.as_deref());
@@ -288,7 +350,7 @@ fn cleanup_removes_stale_hwnd_session() {
     let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
     ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
 
-    ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session, id, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
     assert!(ws.session_active_conversation(&session).is_some());
 
@@ -325,9 +387,9 @@ fn all_active_conversation_ids_across_sessions() {
     );
     ws.create_conversation_with_id(id2, jp_conversation::Conversation::default(), config);
 
-    ws.activate_session_conversation(&session_a, id1, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session_a, id1, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
-    ws.activate_session_conversation(&session_b, id2, datetime!(2025-07-19 15:00:00 Z))
+    ws.record_session_activation(&session_b, id2, datetime!(2025-07-19 15:00:00 Z))
         .unwrap();
 
     let mut active = ws.all_active_conversation_ids();
@@ -377,7 +439,7 @@ fn cleanup_keeps_session_referencing_conversation_created_after_index_load() {
         .write_test_conversation(&conv_other, &jp_conversation::Conversation::default());
 
     // Write a session mapping pointing at that conversation.
-    ws.activate_session_conversation(&session_b, conv_other, datetime!(2025-07-19 16:00:00 Z))
+    ws.record_session_activation(&session_b, conv_other, datetime!(2025-07-19 16:00:00 Z))
         .unwrap();
 
     // Verify precondition: the conversation is NOT in the in-memory index.
@@ -427,7 +489,7 @@ fn cleanup_keeps_env_session_with_live_conversations() {
         .unwrap()
         .write_test_conversation(&id, &jp_conversation::Conversation::default());
 
-    ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session, id, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
 
     ws.cleanup_stale_files(fs.as_deref());
@@ -451,7 +513,7 @@ fn active_conversation_returns_none_for_deleted_conversation() {
 
     let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
     ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
-    ws.activate_session_conversation(&session, id, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session, id, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
 
     assert_eq!(ws.session_active_conversation(&session), Some(id));
@@ -485,9 +547,9 @@ fn previous_conversation_returns_none_for_deleted_conversation() {
     );
     ws.create_conversation_with_id(id2, jp_conversation::Conversation::default(), config);
 
-    ws.activate_session_conversation(&session, id1, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session, id1, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
-    ws.activate_session_conversation(&session, id2, datetime!(2025-07-19 15:00:00 Z))
+    ws.record_session_activation(&session, id2, datetime!(2025-07-19 15:00:00 Z))
         .unwrap();
 
     assert_eq!(ws.session_previous_conversation(&session), Some(id1));
@@ -533,11 +595,11 @@ fn cleanup_skips_pruning_locked_conversations() {
         .unwrap()
         .expect("should acquire lock");
 
-    ws.activate_session_conversation(&session, dead_id, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session, dead_id, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
-    ws.activate_session_conversation(&session, locked_id, datetime!(2025-07-19 15:00:00 Z))
+    ws.record_session_activation(&session, locked_id, datetime!(2025-07-19 15:00:00 Z))
         .unwrap();
-    ws.activate_session_conversation(&session, live_id, datetime!(2025-07-19 16:00:00 Z))
+    ws.record_session_activation(&session, live_id, datetime!(2025-07-19 16:00:00 Z))
         .unwrap();
 
     // Before cleanup: 3 entries.
@@ -580,9 +642,9 @@ fn cleanup_prunes_dead_entries_from_session_history() {
     fs.write_test_conversation(&live_id, &jp_conversation::Conversation::default());
 
     // Activate both: dead first, then live (so live is history[0]).
-    ws.activate_session_conversation(&session, dead_id, datetime!(2025-07-19 14:00:00 Z))
+    ws.record_session_activation(&session, dead_id, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
-    ws.activate_session_conversation(&session, live_id, datetime!(2025-07-19 15:00:00 Z))
+    ws.record_session_activation(&session, live_id, datetime!(2025-07-19 15:00:00 Z))
         .unwrap();
 
     // Before cleanup: both entries in history.

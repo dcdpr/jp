@@ -66,9 +66,9 @@ impl Fork {
                 && let Some(session) = &ctx.session
                 && let Err(error) =
                     ctx.workspace
-                        .activate_session_conversation(session, lock.id(), ctx.now())
+                        .activate_session_conversation(&lock, session, ctx.now())
             {
-                tracing::warn!(%error, "Failed to write session mapping.");
+                tracing::warn!(%error, "Failed to record activation.");
             }
         }
         ctx.printer.println("Conversation forked.");
