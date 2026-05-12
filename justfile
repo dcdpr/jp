@@ -593,6 +593,119 @@ rfd-apply NNN *ARGS: _install-jp
         $extra_edit \
         $args
 
+# Implement an Accepted RFD. Accepts a permanent number (41, 041).
+#
+# The implementor reads the RFD as the contract: minor inconsistencies with
+# current code are reconciled unilaterally and noted in the report; major
+# conflicts pause for user input. Begins at phase 1 of the Implementation Plan
+# unless the user explicitly requests a different phase via positional args.
+#
+# Refuses anything other than Accepted or Implemented — Implemented is allowed
+# so that follow-up runs can fix implementation drift on already-shipped RFDs.
+#
+# When an `rfd-implement:<id>` conversation already exists, prompts whether
+# to continue, archive-and-start-fresh, or quit. Looks up Bear notes tagged
+# `rfd/<id>/implement` and attaches them.
+[group('rfd')]
+[positional-arguments]
+rfd-implement NNN *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    args="$@"
+    msg="Implement the attached RFD. Read it fully first, then locate the \
+    Implementation Plan and begin with phase 1 (or the phase the user has \
+    requested in additional args). The RFD is Accepted; treat it as the \
+    contract. For minor inconsistencies with the current code, make a minimal \
+    reconciliation and list it in the final report. For major conflicts (a \
+    section's assumptions no longer hold, a data shape or API the RFD relies \
+    on is gone, a newer RFD has changed the boundary), stop and surface the \
+    problem instead of resolving it yourself. End the turn with the final \
+    report exactly as your instructions describe."
+
+    # Resolve the RFD file and id. We accept a draft id (D01) too so the
+    # status-gate error is meaningful instead of "file not found"; drafts
+    # will be refused below.
+    arg="{{NNN}}"
+    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
+        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
+        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
+        fi
+    elif echo "$arg" | grep -qE '^[0-9]+$'; then
+        n=$(echo "$arg" | sed 's/^0*//')
+        rfd_id=$(printf "%03d" "${n:-0}")
+        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No RFD found with number ${rfd_id}." >&2; exit 1
+        fi
+    else
+        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
+    fi
+
+    # Status gate: only Accepted or Implemented RFDs are valid targets.
+    status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+    case "$status" in
+        Accepted|Implemented) ;;
+        *)
+            echo "Cannot implement: $(basename "$file") is '${status}'." >&2
+            echo "Only Accepted or Implemented RFDs may be implemented." >&2
+            exit 1 ;;
+    esac
+
+    title="rfd-implement:${rfd_id}"
+
+    existing=""
+    out=$(just _resolve-conversation "$title")
+    case "$out" in
+        "CONTINUE "*) existing="${out#CONTINUE }" ;;
+        "ARCHIVE "*)  jp conversation archive "${out#ARCHIVE }" || true ;;
+        NEW)          ;;
+        QUIT)         exit 0 ;;
+        *)            echo "Unexpected from _resolve-conversation: $out" >&2; exit 1 ;;
+    esac
+
+    note_attach=""
+    extra_edit=""
+    note_out=$(just _bear-note "rfd/${rfd_id}/implement")
+    case "$note_out" in
+        "FOUND "*) note_attach="--attach ${note_out#FOUND }"
+                   printf "Attaching Bear notes tagged 'rfd/%s/implement'\n" "$rfd_id" >&2 ;;
+        EDIT)      extra_edit="--edit" ;;
+        CONTINUE)  ;;
+        QUIT)      exit 0 ;;
+        *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
+    esac
+
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
+    if starts_with "-- " "$@"; then
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
+        args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
+    elif [ -z "$args" ]; then
+        args="$msg"
+    fi
+
+    if [ -n "$existing" ]; then
+        printf "Resuming implementation of $file (%s)\n\n" "$existing" >&2
+        jp query --id "$existing" --cfg=personas/rfd-implementor \
+            --attach "$file" \
+            $note_attach \
+            $extra_edit \
+            $args
+    else
+        printf "Implementing $file\n\n" >&2
+        jp query --new --title "$title" --cfg=personas/rfd-implementor \
+            --attach "$file" \
+            $note_attach \
+            $extra_edit \
+            $args
+    fi
+
 # Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
 # Drafts are created as docs/rfd/drafts/DNN-slug.md; a permanent number is assigned
 # and the file is moved up to docs/rfd/ at Discussion.
