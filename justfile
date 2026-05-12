@@ -26,6 +26,8 @@ alias if := issue-feat
 [private]
 default:
     #!/usr/bin/env sh
+    set -eu
+
     if ! which jq >/dev/null; then
         just --list
         exit 0
@@ -55,6 +57,8 @@ default:
 [positional-arguments]
 run *ARGS:
     #!/usr/bin/env sh
+    set -eu
+
     cargo run --package jp_cli -- "$@"
 
 # Install the `jp` binary from your local checkout.
@@ -77,19 +81,11 @@ issue-feat +ARGS="Please create a feature request for the following:\n\n": _inst
 [positional-arguments]
 commit *ARGS: _install-jp
     #!/usr/bin/env sh
-    args="$@"
+    set -eu
+
     msg="Give me a commit message"
 
-    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
-    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
-    if starts_with "-- " "$@"; then
-    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
-    elif [ -z "$args" ]; then
-        args="$msg"
-    fi
+    args=$(just _shape-args "$msg" "$@")
 
     jp query --new --local --tmp=1h --cfg=personas/committer $args || exit 1
     git commit --amend
@@ -98,25 +94,19 @@ commit *ARGS: _install-jp
 [positional-arguments]
 stage *ARGS: _install-jp
     #!/usr/bin/env sh
-    args="$@"
+    set -eu
+
     msg="Find related changes in the git diff and stage ONE set of changes in preparation for a \
     commit using the 'git_stage_patch' tool. Follow your prompt instructions carefully."
 
-    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
-    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
-    if starts_with "-- " "$@"; then
-    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
-    elif [ -z "$args" ]; then
-        args="$msg"
-    fi
+    args=$(just _shape-args "$msg" "$@")
 
     jp query --new --local --tmp=1h --cfg=personas/stager $args
 
 stage-and-commit: _install-jp
     #!/usr/bin/env sh
+    set -eu
+
     out=$(just stage -c style.reasoning.display=hidden)
     just commit "$out - now write me a commit message"
 
@@ -129,6 +119,8 @@ build-changelog: (_install "jilu@" + jilu_version)
 [positional-arguments]
 profile-heap *ARGS:
     #!/usr/bin/env sh
+    set -eu
+
     cargo run --profile profiling --features dhat -- "$@"
 
 # Ask JP to create a new RFD based on the current conversation context.
@@ -136,19 +128,11 @@ profile-heap *ARGS:
 [positional-arguments]
 rfd-this *ARGS: _install-jp
     #!/usr/bin/env sh
-    args="$@"
+    set -eu
+
     msg="I gave you the RFD skill, use it to codify all that we just discussed and concluded in a feature request RFD."
 
-    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
-    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
-    if starts_with "-- " "$@"; then
-    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
-    elif [ -z "$args" ]; then
-        args="$msg"
-    fi
+    args=$(just _shape-args "$msg" "$@")
 
     jp query --cfg=skill/rfd $args
 
@@ -171,7 +155,6 @@ pr-review NNN *ARGS: _install-jp
     esac
 
     shift # remove NNN from positional params
-    args="$@"
     msg="Review GitHub pull request #{{NNN}} in dcdpr/jp. Follow your review \
     workflow: enumerate the PR, read every changed file's diff, cross-reference \
     where useful, then call github_pr_review_add_comment with pull_number=\
@@ -180,16 +163,7 @@ pr-review NNN *ARGS: _install-jp
     overall take, mergeability). Do NOT submit the review yourself — leave \
     it as a draft."
 
-    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
-    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
-    if starts_with "-- " "$@"; then
-    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
-    elif [ -z "$args" ]; then
-        args="$msg"
-    fi
+    args=$(just _shape-args "$msg" "$@")
 
     title="pr-review:{{NNN}}"
 
@@ -244,7 +218,6 @@ pr-triage NNN *ARGS: _install-jp
     esac
 
     shift # remove NNN from positional params
-    args="$@"
     msg="Triage the reviews on GitHub pull request #{{NNN}} in dcdpr/jp. \
     For each review comment, write one numbered item containing: the \
     comment's \`id=<n>\` from the attached reviews, a short quote of \
@@ -254,16 +227,7 @@ pr-triage NNN *ARGS: _install-jp
     edit any files and do NOT post replies yet — output the triage as \
     plain markdown only."
 
-    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
-    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
-    if starts_with "-- " "$@"; then
-    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
-    elif [ -z "$args" ]; then
-        args="$msg"
-    fi
+    args=$(just _shape-args "$msg" "$@")
 
     title="pr-triage:{{NNN}}"
 
@@ -309,30 +273,15 @@ rfd-review NNN *ARGS: _install-jp
     set -eu
 
     shift # remove NNN from positional params
-    args="$@"
     msg="Please review the attached RFD. Review the RFD in isolation, \
     including its explicit dependencies, or any implicit dependencies, but \
     keep in mind that Draft RFDs are still in the design phase, and Discussion \
     RFDs are aspirational, but not necessarily final, so any inconsistencies \
     against those should be noted, but not blockers."
 
-    arg="{{NNN}}"
-    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
-        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
-        fi
-    elif echo "$arg" | grep -qE '^[0-9]+$'; then
-        n=$(echo "$arg" | sed 's/^0*//')
-        rfd_id=$(printf "%03d" "${n:-0}")
-        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No RFD found with number ${rfd_id}." >&2; exit 1
-        fi
-    else
-        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
-    fi
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
 
     title="rfd-review:${rfd_id}"
 
@@ -373,16 +322,7 @@ rfd-review NNN *ARGS: _install-jp
         *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
     esac
 
-    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
-    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
-    if starts_with "-- " "$@"; then
-    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
-    elif [ -z "$args" ]; then
-        args="$msg"
-    fi
+    args=$(just _shape-args "$msg" "$@")
 
     if [ -n "$existing" ]; then
         printf "Resuming review on $file (%s)\n\n" "$existing" >&2
@@ -420,7 +360,6 @@ rfd-triage NNN *ARGS: _install-jp
     set -eu
 
     shift # remove NNN from positional params
-    args="$@"
     msg="I received feedback on the RFD. Read the attached reviewer response \
     carefully, then triage it item by item. Ground each point against the code \
     and related RFDs. Do not assume the feedback is correct. For each item \
@@ -428,24 +367,9 @@ rfd-triage NNN *ARGS: _install-jp
     accepted or amended items describe the concrete change you would make to \
     the RFD. Do NOT edit the RFD yet; give your opinion first."
 
-    # Resolve the target RFD file.
-    arg="{{NNN}}"
-    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
-        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
-        fi
-    elif echo "$arg" | grep -qE '^[0-9]+$'; then
-        n=$(echo "$arg" | sed 's/^0*//')
-        rfd_id=$(printf "%03d" "${n:-0}")
-        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No RFD found with number ${rfd_id}." >&2; exit 1
-        fi
-    else
-        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
-    fi
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
 
     # The triage step needs the sibling review conversation to exist.
     review_id=$(jp -F json conversation ls 2>/dev/null \
@@ -481,16 +405,7 @@ rfd-triage NNN *ARGS: _install-jp
         *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
     esac
 
-    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
-    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
-    if starts_with "-- " "$@"; then
-    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
-    elif [ -z "$args" ]; then
-        args="$msg"
-    fi
+    args=$(just _shape-args "$msg" "$@")
 
     if [ -n "$existing" ]; then
         printf "Resuming triage on $file (%s)\n\n" "$existing" >&2
@@ -526,31 +441,15 @@ rfd-apply NNN *ARGS: _install-jp
     set -eu
 
     shift # remove NNN from positional params
-    args="$@"
     msg="The triage decisions for this RFD are in the conversation above. \
     Please apply the accepted and amended verdicts to the RFD by editing the \
     attached file. Re-read the file first - it may have been edited in a \
     previous round and the line numbers from the triage may have moved. \
     Stick to the verdicts; do not introduce changes that weren't triaged."
 
-    # Resolve the RFD file and id.
-    arg="{{NNN}}"
-    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
-        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
-        fi
-    elif echo "$arg" | grep -qE '^[0-9]+$'; then
-        n=$(echo "$arg" | sed 's/^0*//')
-        rfd_id=$(printf "%03d" "${n:-0}")
-        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No RFD found with number ${rfd_id}." >&2; exit 1
-        fi
-    else
-        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
-    fi
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
 
     # The apply step lives inside the triage conversation; that conversation
     # must already exist.
@@ -575,16 +474,7 @@ rfd-apply NNN *ARGS: _install-jp
         *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
     esac
 
-    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
-    contains() { case ${2-} in *"$1"*) true;; *) false;; esac; }
-    if starts_with "-- " "$@"; then
-    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
-    elif [ -z "$args" ]; then
-        args="$msg"
-    fi
+    args=$(just _shape-args "$msg" "$@")
 
     printf "Applying triage decisions to $file (%s)\n\n" "$triage_id" >&2
     jp query --id "$triage_id" --cfg=personas/dev \
@@ -592,6 +482,94 @@ rfd-apply NNN *ARGS: _install-jp
         $note_attach \
         $extra_edit \
         $args
+
+# Implement an Accepted RFD. Accepts a permanent number (41, 041).
+#
+# The implementor reads the RFD as the contract: minor inconsistencies with
+# current code are reconciled unilaterally and noted in the report; major
+# conflicts pause for user input. Begins at phase 1 of the Implementation Plan
+# unless the user explicitly requests a different phase via positional args.
+#
+# Refuses anything other than Accepted or Implemented — Implemented is allowed
+# so that follow-up runs can fix implementation drift on already-shipped RFDs.
+#
+# When an `rfd-implement:<id>` conversation already exists, prompts whether
+# to continue, archive-and-start-fresh, or quit. Looks up Bear notes tagged
+# `rfd/<id>/implement` and attaches them.
+[group('rfd')]
+[positional-arguments]
+rfd-implement NNN *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    msg="Implement the attached RFD. Read it fully first, then locate the \
+    Implementation Plan and begin with phase 1 (or the phase the user has \
+    requested in additional args). The RFD is Accepted; treat it as the \
+    contract. For minor inconsistencies with the current code, make a minimal \
+    reconciliation and list it in the final report. For major conflicts (a \
+    section's assumptions no longer hold, a data shape or API the RFD relies \
+    on is gone, a newer RFD has changed the boundary), stop and surface the \
+    problem instead of resolving it yourself. End the turn with the final \
+    report exactly as your instructions describe."
+
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
+
+    # Status gate: only Accepted or Implemented RFDs are valid targets.
+    # Drafts pass `_rfd-resolve` and get a meaningful "is 'Draft'" error
+    # here instead of "file not found".
+    status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+    case "$status" in
+        Accepted|Implemented) ;;
+        *)
+            echo "Cannot implement: $(basename "$file") is '${status}'." >&2
+            echo "Only Accepted or Implemented RFDs may be implemented." >&2
+            exit 1 ;;
+    esac
+
+    title="rfd-implement:${rfd_id}"
+
+    existing=""
+    out=$(just _resolve-conversation "$title")
+    case "$out" in
+        "CONTINUE "*) existing="${out#CONTINUE }" ;;
+        "ARCHIVE "*)  jp conversation archive "${out#ARCHIVE }" || true ;;
+        NEW)          ;;
+        QUIT)         exit 0 ;;
+        *)            echo "Unexpected from _resolve-conversation: $out" >&2; exit 1 ;;
+    esac
+
+    note_attach=""
+    extra_edit=""
+    note_out=$(just _bear-note "rfd/${rfd_id}/implement")
+    case "$note_out" in
+        "FOUND "*) note_attach="--attach ${note_out#FOUND }"
+                   printf "Attaching Bear notes tagged 'rfd/%s/implement'\n" "$rfd_id" >&2 ;;
+        EDIT)      extra_edit="--edit" ;;
+        CONTINUE)  ;;
+        QUIT)      exit 0 ;;
+        *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
+    esac
+
+    args=$(just _shape-args "$msg" "$@")
+
+    if [ -n "$existing" ]; then
+        printf "Resuming implementation of $file (%s)\n\n" "$existing" >&2
+        jp query --id "$existing" --cfg=personas/rfd-implementor \
+            --attach "$file" \
+            $note_attach \
+            $extra_edit \
+            $args
+    else
+        printf "Implementing $file\n\n" >&2
+        jp query --new --title "$title" --cfg=personas/rfd-implementor \
+            --attach "$file" \
+            $note_attach \
+            $extra_edit \
+            $args
+    fi
 
 # Create a new RFD draft. CATEGORY is 'design', 'decision', 'guide', or 'process'.
 # Drafts are created as docs/rfd/drafts/DNN-slug.md; a permanent number is assigned
@@ -976,27 +954,9 @@ rfd-promote NNN: _install-jp
     #!/usr/bin/env sh
     set -eu
 
-    arg="{{NNN}}"
-
-    # --- Resolve the RFD file from the argument. ---
-    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
-        # Draft ID (e.g. D01, D12).
-        draft_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/drafts/${draft_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No draft RFD found with ID ${draft_id}." >&2; exit 1
-        fi
-    elif echo "$arg" | grep -qE '^[0-9]+$'; then
-        # Permanent number.
-        n=$(echo "$arg" | sed 's/^0*//')
-        num=$(printf "%03d" "${n:-0}")
-        file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
-            echo "No RFD found with number ${num}." >&2; exit 1
-        fi
-    else
-        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
-    fi
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
 
     current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
     case "$current" in
@@ -1587,6 +1547,8 @@ test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
 [group('ci')]
 docs-ci: _install_ci_matchers
     #!/usr/bin/env sh
+    set -eu
+
     export RUSTDOCFLAGS="-D rustdoc::broken-intra-doc-links -D rustdoc::private-intra-doc-links -D rustdoc::invalid-codeblock-attributes -D rustdoc::invalid-html-tags -D rustdoc::invalid-rust-codeblocks -D rustdoc::bare-urls -D rustdoc::unescaped-backticks -D rustdoc::redundant-explicit-links"
     cargo doc --locked --workspace --profile=docs --all-features --keep-going --document-private-items --no-deps
 
@@ -1733,3 +1695,78 @@ _bear-note TAG:
         q|Q)    echo "QUIT" ;;
         *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
     esac
+
+# Internal: resolve an RFD argument (DNN draft ID or NNN/NN permanent number)
+# to its canonical id and file path.
+#
+# On success, prints `<rfd_id> <file>` to stdout on a single line:
+#   - rfd_id is `DNN` for drafts, zero-padded `NNN` for permanent numbers.
+#   - file is the relative path under `docs/rfd/` or `docs/rfd/drafts/`.
+#
+# On failure (invalid argument, file not found), writes a message to stderr
+# and exits 1. Callers should propagate the exit status with `|| exit 1`.
+[no-exit-message]
+[private]
+_rfd-resolve NNN:
+    #!/usr/bin/env sh
+    set -eu
+
+    arg="{{NNN}}"
+    if echo "$arg" | grep -qiE '^D[0-9]+$'; then
+        rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
+        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
+        fi
+    elif echo "$arg" | grep -qE '^[0-9]+$'; then
+        n=$(echo "$arg" | sed 's/^0*//')
+        rfd_id=$(printf "%03d" "${n:-0}")
+        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
+        if [ -z "$file" ]; then
+            echo "No RFD found with number ${rfd_id}." >&2; exit 1
+        fi
+    else
+        echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
+    fi
+
+    echo "${rfd_id} ${file}"
+
+# Internal: shape a recipe's `*ARGS` and a default prompt MSG into a single
+# `args` string that the recipe forwards to `jp query`.
+#
+# Resolves four shapes (in this order):
+#
+#   1. ARGS starts with a single `-- text` arg: pass-through. The user
+#      supplied their own prompt; don't double up with MSG.
+#   2. ARGS starts with a flag (-X) and doesn't contain `--`: the user is
+#      passing jp flags only, so append `-- $MSG` to make MSG the prompt.
+#   3. ARGS is non-empty free-form text: use MSG as preamble, ARGS as extra
+#      context (separated by `\n\n Here is additional context: `).
+#   4. ARGS is empty: use MSG alone.
+#
+# Prints the resulting `args` string to stdout with no trailing newline.
+# Callers use it as: `args=$(just _shape-args "$msg" "$@")`.
+[no-exit-message]
+[private]
+[positional-arguments]
+_shape-args MSG *ARGS:
+    #!/usr/bin/env sh
+    set -eu
+
+    msg="$1"; shift
+
+    starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
+    contains()    { case ${2-} in *"$1"*) true;; *) false;; esac; }
+
+    args="$*"
+    if starts_with "-- " "$@"; then
+        :
+    elif starts_with "-" "$@" && ! contains "-- " "$@"; then
+        args="$* -- $msg"
+    elif [ -n "$args" ]; then
+        args="$msg\n\n Here is additional context: $args"
+    else
+        args="$msg"
+    fi
+
+    printf '%s' "$args"
