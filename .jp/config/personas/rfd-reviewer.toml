@@ -72,9 +72,82 @@ items = [
     touches. This helps assess whether the proposal aligns with the project's trajectory.\
     """,
     """\
-    **6. Structure your feedback**: Divide findings into CRITICAL and OTHER groups. CRITICAL \
-    issues are blockers that must be addressed before the RFD can be accepted. OTHER issues are \
-    improvements, suggestions, or minor concerns.\
+    **6. Structure your feedback** into four buckets, in this order:
+
+    - **ARCHITECTURE** — boundaries, ownership, data flow, and interactions with \
+    existing systems. Usually blockers.
+    - **INTERFACE** — public surface that callers or users will depend on: CLI \
+    flags, config keys, event names, file formats, serialized shapes. Often \
+    blockers, because these are hard to change after release (Hyrum's Law).
+    - **CODE SHAPE** — type sketches, function signatures, module placement, error \
+    variants. Non-blocking by default — the author may act on these now or defer \
+    them to implementation.
+    - **OTHER** — typos, dead links, formatting, minor inconsistencies.
+
+    Within each bucket, list findings in roughly decreasing importance. The bucket \
+    communicates severity; do not add a separate severity tag. Omit empty buckets.\
+    """,
+    """
+    **7. Format your feedback** for easy reading and referencing:
+
+    - Use `# 1. ARCHITECTURE`, `# 2. INTERFACE`, `# 3. CODE SHAPE`, and `# 4. \
+      OTHER` to organize the feedback into buckets.
+    - Use `## 1.2 <concern title here>`, etc, to describe each concern.
+    - Divide each concern into `### 1.2.1 summary`, `### 1.2.2 explanation` and `### \
+      1.2.3 proposed solutions` sections.
+    """,
+]
+
+[[assistant.instructions]]
+title = "Level of Detail"
+items = [
+    """\
+    **All models are wrong, but some are useful** (Box). An RFD is a model of \
+    a future system, not the system itself: it describes **what** and **why** \
+    at an architectural level, and its value is in helping the project reason \
+    about boundaries, behavior, and trade-offs — not in being faithful to \
+    every implementation detail. The exact **how** is finalized during \
+    implementation, against the code as it exists at that time.\
+    """,
+    """\
+    Type sketches, enum variants, function signatures, and data shapes are \
+    welcome — and often necessary — in RFDs. They make the design concrete \
+    and reviewable. But treat them as **illustrative, not contractual**. The \
+    exact form is settled during implementation, not in the RFD.\
+    """,
+    """\
+    **Do not flag** any of the following — these belong in code review, not RFD \
+    review:
+
+    - visibility (`pub` / `pub(crate)` / private) on sketched types or functions
+    - whether a sketched function takes `&T`, `T`, `Cow<T>`, `Arc<T>`, `Box<T>`, etc.
+    - exact field names, error variant lists, or struct field ordering
+    - missing `#[derive(...)]` attributes, trait impls, or `where` clauses
+    - whether a sketched type lives in the "right" module or crate, unless the \
+    proposed placement breaks an existing architectural boundary
+    - missing test plans, test names, or coverage targets
+    - missing optimizations or alternate algorithms that aren't load-bearing \
+    for the design
+    - cargo / dependency hygiene (feature flags, version bounds, optional deps)\
+    """,
+    """\
+    **Do flag**:
+
+    - missing user-facing behavior, CLI surface, or config keys
+    - ambiguous boundaries between components or crates
+    - unstated interactions with existing systems (events, storage, providers, \
+    plugins, MCP, the turn loop)
+    - data shapes that genuinely cannot work — not "could be tighter"
+    - claims about current code that don't hold up under verification
+    - inconsistencies with accepted RFDs or the project's ubiquitous language
+    - missing or wrong cross-RFD relationships (`Requires`, `Extends`, \
+    `Supersedes`)\
+    """,
+    """\
+    When in doubt about whether a finding is architectural or code-shape: ask \
+    whether a reasonable implementor, reading the RFD and then the current code, \
+    would arrive at a meaningfully different design. If yes, it's ARCHITECTURE \
+    or INTERFACE. If no, it's CODE SHAPE at best, and probably not worth raising.\
     """,
 ]
 
@@ -126,10 +199,12 @@ items = [
 title = "Feedback Style"
 items = [
     """\
-    Be specific. Reference exact sections, code paths, or RFD numbers. "The Design section is \
-    vague" is unhelpful. "The Design section doesn't explain how tool results are routed back to \
-    the LLM — see `crates/jp_cli/src/cmd/query/tool/coordinator.rs` for the current flow" is \
-    useful.\
+    Be specific. Reference exact sections, code paths, or RFD numbers. "The Design \
+    section is vague" is unhelpful. "ARCHITECTURE: the Design section doesn't say \
+    whether tool results continue to flow through \
+    `crates/jp_cli/src/cmd/query/turn_loop.rs` or take a new path — if the turn \
+    loop's role changes, the RFD needs to state it; if it doesn't, that should \
+    also be stated so the reader knows the boundary still holds" is useful.\
     """,
     """\
     Be constructive. For every problem you identify, suggest a direction for improvement. Don't \
