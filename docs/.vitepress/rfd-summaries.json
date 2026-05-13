@@ -12,7 +12,7 @@
     "summary": "Custom Buffer segments streaming markdown blocks; TerminalRenderer applies ANSI-aware formatting for terminal output."
   },
   "005-first-class-inquiry-events.md": {
-    "hash": "5eb0945a554d9b24e3e7f389404b1b7b52dddbc719cb9b2b39a759469993badd",
+    "hash": "729364c5988c103fef921dba62fc2531902a34ec0ffde6102798554fab79a3a1",
     "summary": "Record inquiry events in conversation stream with centralized filtering to keep them hidden from LLM providers."
   },
   "006-turn-scoped-mutations.md": {
@@ -24,7 +24,7 @@
     "summary": "Llamacpp provider will drop the openai crate to properly extract reasoning content from all three llama.cpp reasoning formats."
   },
   "008-ordered-tool-directives.md": {
-    "hash": "3550889c3befc487d13b8b965310abe0d8d77d6077822458c95d08818efced71",
+    "hash": "b3a9a369bb8fe9504d64cb63fab50daa2467ab127f228fe751bf8f07d1ce1730",
     "summary": "Make CLI tool flags order-sensitive, processing `--tool` and `--no-tools` left-to-right instead of in fixed order."
   },
   "009-stateful-tool-protocol.md": {
@@ -104,7 +104,7 @@
     "summary": "Client-server architecture unifying foreground, detached, and reattached query execution with IPC-based output streaming and inquiry routing."
   },
   "028-structured-inquiry-system-for-tool-questions.md": {
-    "hash": "f68d04abc1dd98c2f273d7b7e22a7a3824df6b8fd72a116c1dc6b2ff547bf94d",
+    "hash": "cca41ee4223369ccf24c52de2ba15592f5e356e78e099fb2223954e23027f3dc",
     "summary": "Replace tool re-invocation with async inquiries to avoid token waste and latency when tools need LLM answers."
   },
   "003-jp-assisted-rfds.md": {
@@ -132,7 +132,7 @@
     "summary": "Replace structured output with a tool-use-based inquiry system to preserve prompt cache and reduce LLM costs."
   },
   "034-inquiry-specific-assistant-configuration.md": {
-    "hash": "6c7b256b92d2c3138ea3e7904efa8de501b262f8419f12915bec02428dc00c8f",
+    "hash": "4a69a04dc2df8c563ec02b2d203ce06338feeaaf6ae3c3f22ec454e2aeca0031",
     "summary": "Route inquiries to cheaper models with stable schemas for 5-25x cost reduction via configurable assistant overrides."
   },
   "035-multi-root-config-load-path-resolution.md": {
@@ -318,5 +318,17 @@
   "080-editor-as-a-config-source.md": {
     "hash": "35526d96c99770bc77fd9ddef2581b32cb1c8d727601e2c34a63ca156e11fa6f",
     "summary": "Move editor invocation into startup pipeline to treat it as a config source, fixing phantom deltas."
+  },
+  "081-decompose-tool-enable-into-state-and-allow_toggle.md": {
+    "hash": "9747b24634eeb9b7a40e64ee32a298a0a946e27a69c8c8bf4a8646ff7237a6aa",
+    "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
+  },
+  "082-unified-inquiry-event-recording.md": {
+    "hash": "4ef63f722234f055f81e0a21650c7a3294d5993988a50ea26fd71377cb458e35",
+    "summary": "Record all tool-question exchanges uniformly, add cancellation tracking, redact secrets, derive attribution from code path."
+  },
+  "083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md": {
+    "hash": "9771dbc360a8520dd921fc914193429de1d7cebe19a919d018e29ffb108293c2",
+    "summary": "Built-in ask_user tool enables assistants to ask typed questions mid-turn with exclusive human-only routing and answer persistence policies."
   }
 }

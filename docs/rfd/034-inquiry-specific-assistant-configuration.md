@@ -6,6 +6,7 @@
 - **Date**: 2026-03-07
 - **Supersedes**: [RFD 033](033-cache-preserving-inquiry-via-tool-use.md)
 - **Extends**: [RFD 028](028-structured-inquiry-system-for-tool-questions.md)
+- **Required by**: [RFD 083](083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md)
 
 ## Summary
 

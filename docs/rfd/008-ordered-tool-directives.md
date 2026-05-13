@@ -6,6 +6,7 @@
 - **Date**: 2026-03-13
 - **Tracking Issue**: [#437](https://github.com/dcdpr/jp/issues/437)
 - **Required by**: [RFD 079](079-config-sources-and-load-order.md)
+- **Extended by**: [RFD 081](081-decompose-tool-enable-into-state-and-allow_toggle.md)
 
 ## Summary
 
