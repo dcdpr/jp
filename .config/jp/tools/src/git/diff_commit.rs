@@ -68,7 +68,9 @@ fn git_diff_commit_impl<R: ProcessRunner>(
 ) -> ToolResult {
     // `git show <rev> --format= -- <paths>` gives us just the diff for
     // specific files, with an empty format to suppress the commit header.
-    let mut args: Vec<&str> = vec!["show", "--format=", revision, "--"];
+    // `--end-of-options` marks `<rev>` as a positional so git can't
+    // reinterpret it as an option (e.g. `--output=<file>`).
+    let mut args: Vec<&str> = vec!["show", "--format=", "--end-of-options", revision, "--"];
     args.extend(paths);
 
     let output = runner.run_with_env("git", &args, root, env)?;

@@ -28,7 +28,7 @@ fn stage_single_file() {
 
     let runner = MockProcessRunner::builder()
         .expect("git")
-        .args(&["ls-files", "test.rs"])
+        .args(&["ls-files", "--", "test.rs"])
         .returns_success("test.rs\n")
         .expect("git")
         .args(&[
@@ -74,7 +74,7 @@ fn stage_non_last_hunk_of_multi_hunk_diff() {
 
     let runner = MockProcessRunner::builder()
         .expect("git")
-        .args(&["ls-files", "f.rs"])
+        .args(&["ls-files", "--", "f.rs"])
         .returns_success("f.rs\n")
         .expect("git")
         .args(&["diff-files", "-p", "--minimal", "--unified=0", "--", "f.rs"])
@@ -107,7 +107,7 @@ fn stale_id_is_rejected_with_helpful_message() {
 
     let runner = MockProcessRunner::builder()
         .expect("git")
-        .args(&["ls-files", "f.rs"])
+        .args(&["ls-files", "--", "f.rs"])
         .returns_success("f.rs\n")
         .expect("git")
         .args(&["diff-files", "-p", "--minimal", "--unified=0", "--", "f.rs"])
@@ -143,7 +143,7 @@ fn partial_failure_stages_what_it_can() {
     // good.rs succeeds, bad.rs has no hunks.
     let runner = MockProcessRunner::builder()
         .expect("git")
-        .args(&["ls-files", "good.rs"])
+        .args(&["ls-files", "--", "good.rs"])
         .returns_success("good.rs\n")
         .expect("git")
         .args(&[
@@ -156,7 +156,7 @@ fn partial_failure_stages_what_it_can() {
         ])
         .returns_success(good_diff)
         .expect("git")
-        .args(&["ls-files", "bad.rs"])
+        .args(&["ls-files", "--", "bad.rs"])
         .returns_success("bad.rs\n")
         .expect("git")
         .args(&[
@@ -212,7 +212,7 @@ fn ids_resolve_in_file_order_regardless_of_request_order() {
     // Capture the patch sent to `git apply` so we can verify ordering.
     let runner = MockProcessRunner::builder()
         .expect("git")
-        .args(&["ls-files", "f.rs"])
+        .args(&["ls-files", "--", "f.rs"])
         .returns_success("f.rs\n")
         .expect("git")
         .args(&["diff-files", "-p", "--minimal", "--unified=0", "--", "f.rs"])

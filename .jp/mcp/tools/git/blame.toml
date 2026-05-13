@@ -1,0 +1,79 @@
+[conversation.tools.git_blame]
+enable = "explicit"
+run = "unattended"
+style.inline_results = "full"
+style.parameters = "function_call"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Show which commits last touched each line of a file in a given range."
+description = """
+Returns blame information for a contiguous range of lines in a file. Output \
+is grouped by commit: consecutive lines that share the same blamed commit \
+are collapsed into a single hunk to keep the response compact.
+
+Each hunk includes:
+
+- `hash` / `short_hash`: the commit that introduced the current version of \
+those lines.
+- `previous` (when set): the commit that owned those lines *before* this \
+change. Use this to drill back through line history — call `git_show \
+<previous>`, `git_diff_commit <previous>`, or `git_blame --revision \
+<previous>` to see the prior state.
+- `author`, `date`, `summary`: commit metadata.
+- `lines`: each line number paired with the source content.
+
+The line range is required and capped at 200 lines per call. If you need a \
+wider window, narrow with `pattern`-style discovery (`fs_grep_files`, \
+`git_log -- <path>`) first, then blame the resulting range.
+
+Defaults to the working tree (mirrors `git blame` with no revision). Pass \
+`revision` to blame at a specific commit, tag, or branch.
+"""
+
+examples = """
+Find who last touched a function body:
+```json
+{"path": "crates/jp_llm/src/stream.rs", "start_line": 42, "end_line": 58}
+```
+
+Drill back one layer: blame the lines as they were before the current \
+change, using the `previous` hash from a prior call (porcelain's \
+`previous` is already the prior commit — do not append `^`):
+```json
+{"path": "crates/jp_llm/src/stream.rs", "start_line": 42, "end_line": 58, "revision": "abc1234"}
+```
+
+Ignore whitespace-only changes when assigning blame:
+```json
+{"path": "src/main.rs", "start_line": 1, "end_line": 30, "ignore_whitespace": true}
+```
+
+Blame at a specific tag or branch:
+```json
+{"path": "src/main.rs", "start_line": 100, "end_line": 110, "revision": "v0.3.0"}
+```
+"""
+
+[conversation.tools.git_blame.parameters.path]
+type = "string"
+required = true
+summary = "Path of the file to blame, relative to the workspace root."
+
+[conversation.tools.git_blame.parameters.start_line]
+type = "integer"
+required = true
+summary = "1-based start line of the range to blame."
+
+[conversation.tools.git_blame.parameters.end_line]
+type = "integer"
+required = true
+summary = "1-based end line of the range to blame (inclusive). The range is capped at 200 lines per call."
+
+[conversation.tools.git_blame.parameters.revision]
+type = "string"
+summary = "Revision to blame at (commit hash, tag, branch, or revspec). Defaults to the working tree."
+
+[conversation.tools.git_blame.parameters.ignore_whitespace]
+type = "boolean"
+summary = "Ignore whitespace-only changes when assigning blame (passes `-w` to git blame)."

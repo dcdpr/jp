@@ -113,11 +113,14 @@ fn build_file_patch<R: ProcessRunner>(
     runner: &R,
     env: &[(&str, &str)],
 ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    // The `--` separator is required so that a user-supplied path starting
+    // with `-` (e.g. `--exclude-from=/etc/passwd`) isn't parsed by `git
+    // ls-files` as a command-line option.
     let ProcessOutput {
         stdout,
         stderr,
         status,
-    } = runner.run_with_env("git", &["ls-files", path], &ctx.root, env)?;
+    } = runner.run_with_env("git", &["ls-files", "--", path], &ctx.root, env)?;
 
     if !status.is_success() {
         return Err(format!("Failed to check tracking status: {stderr}").into());

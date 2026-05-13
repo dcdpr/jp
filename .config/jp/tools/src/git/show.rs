@@ -82,9 +82,18 @@ fn git_show_impl<R: ProcessRunner>(
     // header from the --numstat output that follows.
     let format_arg = format!("--format={SHOW_FORMAT}{STAT_SEPARATOR}");
 
+    // `--end-of-options` marks `<revision>` as a positional argument so
+    // git can't reinterpret it as an option (e.g. `--output=<file>`,
+    // which would write the diff to an attacker-chosen path).
     let output = runner.run_with_env(
         "git",
-        &["show", &format_arg, "--numstat", revision],
+        &[
+            "show",
+            &format_arg,
+            "--numstat",
+            "--end-of-options",
+            revision,
+        ],
         root,
         env,
     )?;

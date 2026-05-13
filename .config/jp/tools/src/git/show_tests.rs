@@ -82,6 +82,28 @@ fn show_git_error() {
 }
 
 #[test]
+fn option_like_revision_is_passed_as_positional() {
+    // `--end-of-options` must appear immediately before the revision so
+    // an option-shaped value like `--output=/tmp/leak` reaches git as a
+    // positional (where it'll fail revision resolution) rather than as
+    // an option to `git show`.
+    let dir = tempdir().unwrap();
+    let format_arg = format!("--format={SHOW_FORMAT}{STAT_SEPARATOR}");
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "show",
+            &format_arg,
+            "--numstat",
+            "--end-of-options",
+            "--output=/tmp/leak",
+        ])
+        .returns_success(sample_show_output());
+
+    let _outcome = git_show_impl(dir.path(), "--output=/tmp/leak", &runner, &[]).unwrap();
+}
+
+#[test]
 fn show_missing_separator_errors() {
     let result = parse_show_output("some garbage output without separator");
     assert!(result.is_err());
