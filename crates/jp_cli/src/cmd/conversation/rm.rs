@@ -3,7 +3,7 @@ use std::fmt::Write as _;
 use crossterm::style::Stylize as _;
 use inquire::Confirm;
 use jp_conversation::ConversationId;
-use jp_workspace::ConversationHandle;
+use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
     cmd::{
@@ -41,12 +41,7 @@ impl Rm {
         // creation date. `conversation_load_request` returns `none()` in this
         // mode, so `handles` is empty here.
         if self.range.is_set() {
-            handles = ctx
-                .workspace
-                .conversations()
-                .filter(|(id, _)| self.range.matches(**id))
-                .map(|(id, _)| ctx.workspace.acquire_conversation(id))
-                .collect::<Result<Vec<_>, _>>()?;
+            handles = self.resolve_filtered(&ctx.workspace)?;
 
             if handles.is_empty() {
                 ctx.printer.println("No conversations match the range.");
@@ -68,6 +63,23 @@ impl Rm {
         } else {
             ConversationLoadRequest::explicit_or_session(&self.target)
         }
+    }
+
+    /// Resolve handles by applying the range filter over the workspace.
+    ///
+    /// Extracted from `run` so the filter step can be exercised in tests
+    /// without driving the async confirmation/lock path. This is the
+    /// load-bearing line between `--from/--until` and actual deletion;
+    /// regressing it would silently turn a range delete into a full wipe.
+    fn resolve_filtered(
+        &self,
+        workspace: &Workspace,
+    ) -> Result<Vec<ConversationHandle>, crate::error::Error> {
+        workspace
+            .conversations()
+            .filter(|(id, _)| self.range.matches(**id))
+            .map(|(id, _)| workspace.acquire_conversation(id).map_err(Into::into))
+            .collect()
     }
 }
 

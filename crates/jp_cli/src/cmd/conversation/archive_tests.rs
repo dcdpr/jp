@@ -191,3 +191,75 @@ fn matches_no_filters_accepts_everything() {
     assert!(cmd.matches(make_id(0), &Conversation::default()));
     assert!(cmd.matches(make_id(1_000_000_000), &Conversation::default()));
 }
+
+// `resolve_filtered` is the integration between `matches` and the workspace
+// iteration. `matches` is well-covered above, but a regression that broke
+// the iteration (e.g. dropping the `.filter`) would still pass the
+// `matches_*` tests. Build a workspace with a known set of conversations
+// and assert the filter composition selects the expected subset.
+fn make_conversation(last_activated_secs: i64) -> Conversation {
+    Conversation::default().with_last_activated_at(ts(last_activated_secs))
+}
+
+fn workspace_with(conversations: &[(ConversationId, Conversation)]) -> Workspace {
+    let mut ws = Workspace::new("/tmp/jp-cli-archive-resolve-test");
+    let config = Arc::new(AppConfig::new_test());
+    for (id, conv) in conversations {
+        ws.create_conversation_with_id(*id, conv.clone(), config.clone());
+    }
+    ws
+}
+
+#[test]
+fn resolve_filtered_composes_range_and_inactive_since() {
+    // Created in range and inactive long enough: matches.
+    let in_range_inactive = (make_id(1500), make_conversation(4000));
+    // Created in range but still active: filtered out by inactive_since.
+    let in_range_active = (make_id(1700), make_conversation(6000));
+    // Inactive but created before the from bound: filtered out.
+    let before_from = (make_id(500), make_conversation(4000));
+    // Inactive but created at the until bound (exclusive): filtered out.
+    let at_until = (make_id(2000), make_conversation(4000));
+
+    let ws = workspace_with(&[
+        in_range_inactive.clone(),
+        in_range_active,
+        before_from,
+        at_until,
+    ]);
+
+    let cmd = Archive {
+        range: CreationRange {
+            from: Some(ts(1000).into()),
+            until: Some(ts(2000).into()),
+        },
+        inactive_since: Some(ts(5000).into()),
+        ..empty_archive()
+    };
+
+    let ids: Vec<_> = cmd
+        .resolve_filtered(&ws)
+        .unwrap()
+        .iter()
+        .map(jp_workspace::ConversationHandle::id)
+        .collect();
+
+    assert_eq!(ids, vec![in_range_inactive.0]);
+}
+
+#[test]
+fn resolve_filtered_no_filters_returns_every_conversation() {
+    let a = (make_id(100), Conversation::default());
+    let b = (make_id(200), Conversation::default());
+    let ws = workspace_with(&[a.clone(), b.clone()]);
+
+    let mut ids: Vec<_> = empty_archive()
+        .resolve_filtered(&ws)
+        .unwrap()
+        .iter()
+        .map(jp_workspace::ConversationHandle::id)
+        .collect();
+    ids.sort();
+
+    assert_eq!(ids, vec![a.0, b.0]);
+}

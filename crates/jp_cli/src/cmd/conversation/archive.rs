@@ -1,7 +1,7 @@
 use crossterm::style::Stylize as _;
 use jp_conversation::{Conversation, ConversationId};
 use jp_inquire::InlineOption;
-use jp_workspace::ConversationHandle;
+use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
     cmd::{
@@ -66,7 +66,7 @@ impl Archive {
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         let handles = if self.has_filter() {
-            let filtered = self.resolve_filtered(ctx)?;
+            let filtered = self.resolve_filtered(&ctx.workspace)?;
             if filtered.is_empty() {
                 ctx.printer.println("No conversations match the filter.");
                 return Ok(());
@@ -106,11 +106,14 @@ impl Archive {
     }
 
     /// Resolve handles by applying `matches` over the workspace.
-    fn resolve_filtered(&self, ctx: &Ctx) -> Result<Vec<ConversationHandle>, crate::error::Error> {
-        ctx.workspace
+    fn resolve_filtered(
+        &self,
+        workspace: &Workspace,
+    ) -> Result<Vec<ConversationHandle>, crate::error::Error> {
+        workspace
             .conversations()
             .filter(|(id, c)| self.matches(**id, c))
-            .map(|(id, _)| ctx.workspace.acquire_conversation(id).map_err(Into::into))
+            .map(|(id, _)| workspace.acquire_conversation(id).map_err(Into::into))
             .collect()
     }
 }
