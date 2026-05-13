@@ -320,15 +320,15 @@
     "summary": "Move editor invocation into startup pipeline to treat it as a config source, fixing phantom deltas."
   },
   "081-decompose-tool-enable-into-state-and-allow_toggle.md": {
-    "hash": "1098925b964b945dd7b70bb3d669f356827ed66420cb6f8fda62c025ce0f58b9",
+    "hash": "2077e183ff079ddba7943b132b4c8b9b9ece70fc499088017f94447ba115d0b5",
     "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
   },
   "082-unified-inquiry-event-recording.md": {
-    "hash": "4ef63f722234f055f81e0a21650c7a3294d5993988a50ea26fd71377cb458e35",
+    "hash": "78e3c2ee4dccf3caf5296a976e321b7a90396ca6ed08b68329707f4de2ca04ec",
     "summary": "Record all tool-question exchanges uniformly, add cancellation tracking, redact secrets, derive attribution from code path."
   },
   "083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md": {
-    "hash": "9771dbc360a8520dd921fc914193429de1d7cebe19a919d018e29ffb108293c2",
+    "hash": "ce63d23373fbec173a05310c106403f79985eccbeafcddfd2ed09cee05595334",
     "summary": "Built-in ask_user tool enables assistants to ask typed questions mid-turn with exclusive human-only routing and answer persistence policies."
   }
 }
