@@ -346,6 +346,12 @@ impl From<crate::error::Error> for Error {
                 ("error", error.clone()),
             ]
             .into(),
+            AttachmentConversationMissing { id, uri } => [
+                ("message", "Attachment conversation not found".into()),
+                ("id", id.to_string()),
+                ("uri", uri.to_string()),
+            ]
+            .into(),
             Editor(error) => [("message", "Editor error".into()), ("error", error.clone())].into(),
             Task(error) => with_cause(error.as_ref(), "Task error"),
             TemplateUndefinedVariable(var) => [

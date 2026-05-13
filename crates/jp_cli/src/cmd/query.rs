@@ -99,8 +99,8 @@ use tracing::{debug, trace, warn};
 use turn_loop::run_turn_loop;
 
 use super::{
-    ConversationLoadRequest, Output, attachment::register_attachment, conversation_id::FlagIds,
-    lock::LockOutcome,
+    ConversationLoadRequest, Output, attachment::load_conversation_attachments,
+    conversation_id::FlagIds, lock::LockOutcome,
 };
 use crate::{
     Ctx, PATH_STRING_PREFIX,
@@ -397,20 +397,13 @@ impl Query {
         let tools =
             tool_definitions(cfg.conversation.tools.iter(), &ctx.mcp_client, forced_tool).await?;
 
-        let attachment_futs: Vec<_> = cfg
+        let attachment_urls: Vec<_> = cfg
             .conversation
             .attachments
             .iter()
             .map(jp_config::conversation::attachment::AttachmentConfig::to_url)
-            .collect::<std::result::Result<Vec<_>, _>>()?
-            .into_iter()
-            .map(|url| register_attachment(ctx, url))
-            .collect();
-        let attachments: Vec<_> = futures::future::try_join_all(attachment_futs)
-            .await?
-            .into_iter()
-            .flatten()
-            .collect();
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        let attachments = load_conversation_attachments(ctx, attachment_urls).await?;
 
         debug!(count = attachments.len(), "Attachments loaded.");
 
