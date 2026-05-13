@@ -402,10 +402,50 @@ fn renders_outdated_comment_with_original_anchor_and_marker() {
         out.contains("### Line 8 (RIGHT, outdated)"),
         "outdated comment should fall back to original_line and pick up the marker:\n{out}"
     );
-    assert!(out.contains("used to be here"));
+    assert!(
+        out.contains("**alice** (submitted, comment, outdated, id=101): used to be here"),
+        "each outdated comment bullet should carry the marker in its label:\n{out}"
+    );
+    assert!(
+        out.contains("**alice** (submitted, comment, id=100): still here"),
+        "live comment bullets should be untouched:\n{out}"
+    );
     assert!(
         !out.contains("hidden"),
         "no outdated should be hidden when caller passed them explicitly"
+    );
+}
+
+#[test]
+fn renders_outdated_marker_on_replies() {
+    let uri = url("gh:pull/42/reviews?include_outdated=true");
+    let reviews = vec![review(1, "alice", ReviewState::Commented, None)];
+
+    // The whole thread is outdated (GraphQL flags every comment on the
+    // thread). Both the top-level comment and its reply must carry the
+    // marker so a reader scanning bullets in isolation sees it.
+    let mut parent = outdated_comment(
+        100,
+        Some(1),
+        "src/lib.rs",
+        12,
+        Side::Right,
+        "original",
+        "alice",
+    );
+    parent.in_reply_to_id = None;
+    let mut child = outdated_comment(101, Some(1), "src/lib.rs", 12, Side::Right, "reply", "bob");
+    child.in_reply_to_id = Some(100);
+
+    let out = render_reviews(&uri, 42, &reviews, &[parent, child], 0);
+
+    assert!(
+        out.contains("- **alice** (submitted, comment, outdated, id=100): original"),
+        "parent bullet should carry outdated marker:\n{out}"
+    );
+    assert!(
+        out.contains("  - **bob** (reply, submitted, comment, outdated, id=101): reply"),
+        "reply bullet should also carry outdated marker:\n{out}"
     );
 }
 

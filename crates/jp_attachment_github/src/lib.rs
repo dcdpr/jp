@@ -39,7 +39,8 @@
 //! flag and a reliable line / side anchor even when REST returns null.
 //!
 //! - `?include_outdated=true` — include outdated comments. They render with
-//!   their original anchor (`original_line` etc.) and an `(outdated)` marker.
+//!   their original anchor (`original_line` etc.) and pick up an `outdated`
+//!   marker both on the anchor header and on each comment's label.
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -652,7 +653,7 @@ fn render_comment(
         .as_ref()
         .map_or_else(|| "(unknown)".to_owned(), |u| u.login.clone());
 
-    let label = match (is_reply, pending, parent_review) {
+    let mut label = match (is_reply, pending, parent_review) {
         (true, true, _) => "reply, pending".to_owned(),
         (true, false, Some(r)) => format!("reply, {}", format_review_state(r)),
         (true, false, None) => "reply".to_owned(),
@@ -660,6 +661,9 @@ fn render_comment(
         (false, false, Some(r)) => format_review_state(r),
         (false, false, None) => "submitted".to_owned(),
     };
+    if c.outdated {
+        label.push_str(", outdated");
+    }
 
     let bullet = if is_reply { "  -" } else { "-" };
     let body_lines: Vec<&str> = c.body.lines().collect();
