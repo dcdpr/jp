@@ -134,7 +134,7 @@ pub enum ResolveError {
     ConversationMissing(ConversationId),
 
     /// Any other failure encountered while resolving the URI.
-    #[error("{0}")]
+    #[error(transparent)]
     Other(Box<dyn Error + Send + Sync>),
 }
 
