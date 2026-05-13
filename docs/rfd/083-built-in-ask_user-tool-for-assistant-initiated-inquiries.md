@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
-- **Requires**: [RFD 028](../028-structured-inquiry-system-for-tool-questions.md), [RFD 034](../034-inquiry-specific-assistant-configuration.md), [RFD 081](../081-decompose-tool-enable-into-state-and-allow_toggle.md), [RFD 082](../082-unified-inquiry-event-recording.md)
+- **Requires**: [RFD 028](028-structured-inquiry-system-for-tool-questions.md), [RFD 034](034-inquiry-specific-assistant-configuration.md), [RFD 081](081-decompose-tool-enable-into-state-and-allow_toggle.md), [RFD 082](082-unified-inquiry-event-recording.md)
 
 ## Summary
 
@@ -961,12 +961,12 @@ would silently route the assistant's own question to a sub-agent.
 
 [#311]: https://github.com/dcdpr/jp/issues/311
 
-[RFD 005]: ../005-first-class-inquiry-events.md
-[RFD 018]: ../018-typed-prompt-routing-enum.md
-[RFD 019]: ../019-non-interactive-mode.md
-[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
-[RFD 034]: ../034-inquiry-specific-assistant-configuration.md
-[RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md
-[RFD 055]: ../055-tool-groups.md
-[RFD 081]: ../081-decompose-tool-enable-into-state-and-allow_toggle.md
-[RFD 082]: ../082-unified-inquiry-event-recording.md
+[RFD 005]: 005-first-class-inquiry-events.md
+[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 019]: 019-non-interactive-mode.md
+[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
+[RFD 034]: 034-inquiry-specific-assistant-configuration.md
+[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
+[RFD 055]: 055-tool-groups.md
+[RFD 081]: 081-decompose-tool-enable-into-state-and-allow_toggle.md
+[RFD 082]: 082-unified-inquiry-event-recording.md

@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-11
-- **Extends**: [RFD 008](../008-ordered-tool-directives.md)
+- **Extends**: [RFD 008](008-ordered-tool-directives.md)
 - **Required by**: [RFD 083](083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md)
 
 ## Summary

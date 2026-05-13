@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
-- **Extends**: [RFD 005](../005-first-class-inquiry-events.md)
+- **Extends**: [RFD 005](./005-first-class-inquiry-events.md)
 - **Required by**: [RFD 083](083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md)
 
 ## Summary
@@ -1114,9 +1114,9 @@ Independent of the others, lands alongside Phase 3 in the same PR.
 - [RFD 049] — defines the full `exclusive` flag and detached-policy
   cascade; consumed downstream by [RFD 083].
 
-[RFD 005]: ../005-first-class-inquiry-events.md
-[RFD 023]: ../023-resumable-conversation-turns.md
-[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
-[RFD 034]: ../034-inquiry-specific-assistant-configuration.md
-[RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md
+[RFD 005]: 005-first-class-inquiry-events.md
+[RFD 023]: 023-resumable-conversation-turns.md
+[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
+[RFD 034]: 034-inquiry-specific-assistant-configuration.md
+[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 083]: 083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
