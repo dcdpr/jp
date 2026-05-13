@@ -320,7 +320,7 @@
     "summary": "Move editor invocation into startup pipeline to treat it as a config source, fixing phantom deltas."
   },
   "081-decompose-tool-enable-into-state-and-allow_toggle.md": {
-    "hash": "9747b24634eeb9b7a40e64ee32a298a0a946e27a69c8c8bf4a8646ff7237a6aa",
+    "hash": "1098925b964b945dd7b70bb3d669f356827ed66420cb6f8fda62c025ce0f58b9",
     "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
   },
   "082-unified-inquiry-event-recording.md": {
