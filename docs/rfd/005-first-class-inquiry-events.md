@@ -6,6 +6,7 @@
 - **Date**: 2026-02-17
 - **Requires**: [RFD 028](028-structured-inquiry-system-for-tool-questions.md)
 - **Required by**: [RFD 011](011-system-notification-queue.md), [RFD 023](023-resumable-conversation-turns.md)
+- **Extended by**: [RFD 082](082-unified-inquiry-event-recording.md)
 
 ## Summary
 

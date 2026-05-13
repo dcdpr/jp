@@ -4,11 +4,11 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
-- **Extends**: [RFD D27](D27-built-in-ask_user-tool-for-assistant-initiated-inquiries.md)
+- **Extends**: [RFD 083](../083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md)
 
 ## Summary
 
-Extend the `ask_user` built-in tool from [RFD D27] to collect multi-question
+Extend the `ask_user` built-in tool from [RFD 083] to collect multi-question
 forms in a single tool call, with predicate-gated branching, a unified cancel
 UX (`Reply` / `End Turn` / `Back`), and support for `boolean`, `select`,
 `multi_select`, `text`, and `schema` answer types. The LLM fills in a
@@ -17,7 +17,7 @@ it, prompting the user and collecting answers.
 
 ## Motivation
 
-[RFD D27] makes `ask_user` a single-question tool. In practice, user-facing
+[RFD 083] makes `ask_user` a single-question tool. In practice, user-facing
 flows often need several related answers (e.g. "which directory, and with
 what permissions?"). Today, the LLM collects them with multiple `ask_user`
 calls, paying an LLM round-trip per call. For linear or branching forms
@@ -30,7 +30,7 @@ follow-ups collapses the round-trips. Combined with a typed-schema answer
 the structured config for this migration") without tool authors having to
 build one-off prompts.
 
-Independently, [RFD D27] left the cancel UX sparse: the user can answer or
+Independently, [RFD 083] left the cancel UX sparse: the user can answer or
 Ctrl+C. This RFD fills in the discoverable options — `Reply`, `End Turn`,
 `Back` — which become useful enough on their own that they apply to
 single-question `ask_user` calls too.
@@ -77,7 +77,7 @@ skipped silently.
 ### Tool arguments meta-schema
 
 The `ask_user` tool's own argument schema describes what the LLM can submit.
-[RFD D27]'s single-question shape becomes the common case where `questions`
+[RFD 083]'s single-question shape becomes the common case where `questions`
 contains one entry; this RFD expands that shape.
 
 ```jsonc
@@ -255,7 +255,7 @@ of selected option values.
 Rendered as `[N/M]` before each prompt, where `N` is the 1-indexed position
 of the current question and `M` is the total number of questions in the
 submitted list. Hidden when `M == 1` (no indicator for single-question
-calls, preserving [RFD D27]'s simple UX for the common case).
+calls, preserving [RFD 083]'s simple UX for the common case).
 
 ## Drawbacks
 
@@ -278,7 +278,7 @@ calls, preserving [RFD D27]'s simple UX for the common case).
 
 The LLM calls `ask_user` with one question, reads the answer, calls again
 with the next question tailored to the response. Already possible under
-[RFD D27] — no new work needed.
+[RFD 083] — no new work needed.
 
 Rejected as the *only* approach because it costs one LLM round-trip per
 question. For forms the LLM can predict in advance (most of them), the
@@ -297,7 +297,7 @@ common cases at a fraction of the implementation cost.
 
 ### Skip the cancel menu; keep Ctrl+C
 
-Keep [RFD D27]'s existing behavior: answer or Ctrl+C.
+Keep [RFD 083]'s existing behavior: answer or Ctrl+C.
 
 Rejected: Ctrl+C is a power-user signal, not discoverable. Explicit
 `Reply` / `End Turn` / `Back` options in the prompt UI are a meaningful UX
@@ -339,9 +339,9 @@ bottom of the terminal" expectation.
 - **`MultiSelect` value shape.** Returns a `Vec<Value>` of selected option
   values. If options are heterogeneous (some string, some integer), the
   return is a heterogeneous array. Document the expectation and validate.
-- **Single-question call parity with [RFD D27].** A submitted `questions`
+- **Single-question call parity with [RFD 083].** A submitted `questions`
   list of length 1 should render identically to the single-question tool
-  call in [RFD D27] (no progress indicator, direct prompt). This must be
+  call in [RFD 083] (no progress indicator, direct prompt). This must be
   verified with snapshot tests.
 
 ## Implementation Plan
@@ -351,12 +351,12 @@ bottom of the terminal" expectation.
 Update `AskUser` to accept `{ questions: [...] }`. Walk the list in order,
 collecting answers into a `Map<String, Value>`. Return the map as the tool
 result. No `when`, no `Back`, no cancel menu — just the existing
-[RFD D27] prompt paths applied N times in sequence.
+[RFD 083] prompt paths applied N times in sequence.
 
 Validation: unique `id`s; `options`/`schema` required-ness per
 `answer_type`.
 
-Depends on [RFD D27] Phase 2. Can be merged independently.
+Depends on [RFD 083] Phase 2. Can be merged independently.
 
 ### Phase 2: `when` predicate
 
@@ -407,16 +407,16 @@ Depends on Phase 1.
 
 ## References
 
-- [RFD D27] — the single-question `ask_user` tool this RFD extends.
+- [RFD 083] — the single-question `ask_user` tool this RFD extends.
 - [RFD D13] — defines `AnswerType::Schema` (shared variant).
 - [RFD 028] — the inquiry coordinator, walker foundation.
 - [RFD 034] — inquiry-specific assistant configuration (relevant for
   schema-typed answers routed through sub-agents, though `ask_user` itself
   stays user-facing).
 - [RFD 049] — `exclusive` flag and detached-policy cascade, inherited from
-  [RFD D27].
+  [RFD 083].
 
-[RFD D27]: D27-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
+[RFD 083]: ../083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
 [RFD D13]: D13-schema-answer-type-and-inherit-model-alias.md
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md
