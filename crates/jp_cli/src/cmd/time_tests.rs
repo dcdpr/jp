@@ -53,6 +53,17 @@ fn parse_invalid_input() {
 }
 
 #[test]
+fn parse_conversation_id() {
+    use jp_conversation::ConversationId;
+
+    let dt = Utc.with_ymd_and_hms(2026, 1, 15, 10, 30, 0).unwrap();
+    let id = ConversationId::try_from(dt).unwrap();
+
+    let t: TimeThreshold = id.to_string().parse().unwrap();
+    assert_eq!(*t, dt);
+}
+
+#[test]
 fn deref_to_datetime() {
     let t: TimeThreshold = "2026-06-15".parse().unwrap();
     let dt: &chrono::DateTime<Utc> = &t;

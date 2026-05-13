@@ -10,6 +10,7 @@ use crate::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
+        time::TimeThreshold,
     },
     ctx::Ctx,
     format::conversation::DetailsFmt,
@@ -20,21 +21,21 @@ pub(crate) struct Rm {
     #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Remove all conversations *starting from* the specified conversation,
-    /// based on creation date.
+    /// Remove all conversations created at or after the specified time.
     ///
-    /// Can be used in combination with `--until` to remove a range of
-    /// conversations.
+    /// Accepts a conversation ID (uses its creation timestamp), a relative
+    /// duration (e.g. `3w`, `30d`, `6h`), or an absolute date
+    /// (e.g. `2026-01-01`). Can be combined with `--until` to remove a range.
     #[arg(long, conflicts_with = "id")]
-    from: Option<ConversationId>,
+    from: Option<TimeThreshold>,
 
-    /// Remove all conversations *until and excluding* the specified
-    /// conversation, based on creation date.
+    /// Remove all conversations created before the specified time.
     ///
-    /// Can be used in combination with `--from` to remove a range of
-    /// conversations.
+    /// Accepts the same formats as `--from`. The range is half-open
+    /// (`--until` is exclusive), so `--from X --until Y` removes everything
+    /// in `[X, Y)`.
     #[arg(long, conflicts_with = "id")]
-    until: Option<ConversationId>,
+    until: Option<TimeThreshold>,
 
     /// Do not prompt for confirmation.
     #[arg(long, short = 'y')]
@@ -48,14 +49,21 @@ impl Rm {
             .as_ref()
             .and_then(|s| ctx.workspace.session_active_conversation(s));
 
-        // Range mode: resolve IDs from --from/--until.
-        if handles.is_empty() {
+        // Range mode: resolve IDs by filtering all conversations on
+        // creation date. `conversation_load_request` returns `none()` in this
+        // mode, so `handles` is empty here.
+        if self.from.is_some() || self.until.is_some() {
             handles = ctx
                 .workspace
                 .conversations()
-                .map(|(id, _)| id)
-                .map(|id| ctx.workspace.acquire_conversation(id))
+                .filter(|(id, _)| self.matches(**id))
+                .map(|(id, _)| ctx.workspace.acquire_conversation(id))
                 .collect::<Result<Vec<_>, _>>()?;
+
+            if handles.is_empty() {
+                ctx.printer.println("No conversations match the range.");
+                return Ok(());
+            }
         }
 
         for handle in handles {
@@ -72,6 +80,13 @@ impl Rm {
         } else {
             ConversationLoadRequest::explicit_or_session(&self.target)
         }
+    }
+
+    /// Half-open range test on the conversation's creation date. Pure for
+    /// testability.
+    fn matches(&self, id: ConversationId) -> bool {
+        self.from.is_none_or(|t| id.timestamp() >= *t)
+            && self.until.is_none_or(|t| id.timestamp() < *t)
     }
 }
 
@@ -132,3 +147,7 @@ fn confirm_and_remove(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "rm_tests.rs"]
+mod tests;

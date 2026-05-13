@@ -3,12 +3,15 @@
 use std::{ops::Deref, str::FromStr};
 
 use chrono::{DateTime, Utc};
+use jp_conversation::ConversationId;
 
-/// A point in time parsed from either a relative duration (`3w`, `30d`) or an
-/// absolute date/datetime (`2026-01-01`, RFC 3339).
+/// A point in time parsed from a conversation ID, a relative duration
+/// (`3w`, `30d`), or an absolute date/datetime (`2026-01-01`, RFC 3339).
 ///
 /// Stored as an absolute `DateTime<Utc>`. Relative durations are subtracted
-/// from `Utc::now()` at parse time.
+/// from `Utc::now()` at parse time. Conversation IDs resolve to their
+/// embedded creation timestamp, which makes `--from jp-c…` a convenient
+/// shorthand for `--from <when-that-conversation-was-created>`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TimeThreshold(pub DateTime<Utc>);
 
@@ -36,7 +39,12 @@ impl FromStr for TimeThreshold {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Try as relative duration first (e.g. "3w", "30d", "6h").
+        // Try as a conversation ID — its embedded timestamp is the threshold.
+        if let Ok(id) = s.parse::<ConversationId>() {
+            return Ok(Self(id.timestamp()));
+        }
+
+        // Try as relative duration (e.g. "3w", "30d", "6h").
         if let Ok(dur) = humantime::parse_duration(s) {
             let cutoff = Utc::now() - dur;
             return Ok(Self(cutoff));
@@ -57,7 +65,8 @@ impl FromStr for TimeThreshold {
         }
 
         Err(format!(
-            "invalid time threshold '{s}': expected a duration (3w, 30d) or date (2026-01-01)"
+            "invalid time threshold '{s}': expected a conversation ID, a duration (3w, 30d), or a \
+             date (2026-01-01)"
         ))
     }
 }
