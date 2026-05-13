@@ -142,21 +142,29 @@ pub(crate) async fn load_conversation_attachments(
     ctx: &Ctx,
     urls: Vec<Url>,
 ) -> Result<Vec<jp_attachment::Attachment>> {
-    let futs = urls.into_iter().map(|url| register_attachment(ctx, url));
-    let mut attachments = Vec::new();
-    for result in futures::future::join_all(futs).await {
-        match result {
-            Ok(atts) => attachments.extend(atts),
+    // Handle the missing-conversation case inside each future so the outer
+    // `try_join_all` keeps its fail-fast behavior for real errors: a
+    // structural failure aborts the batch immediately instead of waiting
+    // for slow HTTP/GitHub handlers to finish.
+    let futs = urls.into_iter().map(|url| async move {
+        match register_attachment(ctx, url).await {
+            Ok(atts) => Ok(atts),
             Err(Error::AttachmentConversationMissing { id, uri }) => {
                 warn!(
                     %id,
                     %uri,
                     "Skipping attachment: referenced conversation is unavailable."
                 );
+                Ok(Vec::new())
             }
-            Err(error) => return Err(error),
+            Err(error) => Err(error),
         }
-    }
+    });
+    let attachments = futures::future::try_join_all(futs)
+        .await?
+        .into_iter()
+        .flatten()
+        .collect();
     Ok(attachments)
 }
 
