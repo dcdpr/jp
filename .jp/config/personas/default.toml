@@ -2,6 +2,11 @@
 id = "sonnet"
 parameters.reasoning.effort = "auto"
 
+[conversation]
+attachments = [
+    "cmd:date?description=Current Date",
+]
+
 [assistant.system_prompt]
 strategy = "replace"
 value = """
