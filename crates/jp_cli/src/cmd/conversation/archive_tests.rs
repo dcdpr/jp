@@ -9,7 +9,7 @@ use jp_workspace::{
 };
 
 use super::*;
-use crate::cmd::{conversation_id::PositionalIds, target::resolve_request};
+use crate::cmd::{conversation_id::PositionalIds, target::resolve_request, time::CreationRange};
 
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
@@ -43,8 +43,7 @@ fn workspace_with_active_conversation(id: ConversationId) -> (Workspace, Session
 fn empty_archive() -> Archive {
     Archive {
         target: PositionalIds::from_targets(vec![]),
-        from: None,
-        until: None,
+        range: CreationRange::default(),
         inactive_since: None,
         yes: false,
     }
@@ -113,7 +112,10 @@ fn inactive_since_returns_no_load_request() {
 #[test]
 fn from_returns_no_load_request() {
     let cmd = Archive {
-        from: Some("1d".parse().unwrap()),
+        range: CreationRange {
+            from: Some("1d".parse().unwrap()),
+            until: None,
+        },
         ..empty_archive()
     };
 
@@ -124,7 +126,10 @@ fn from_returns_no_load_request() {
 #[test]
 fn until_returns_no_load_request() {
     let cmd = Archive {
-        until: Some("1d".parse().unwrap()),
+        range: CreationRange {
+            from: None,
+            until: Some("1d".parse().unwrap()),
+        },
         ..empty_archive()
     };
 
@@ -136,34 +141,9 @@ fn ts(secs: i64) -> DateTime<Utc> {
     DateTime::<Utc>::UNIX_EPOCH + chrono::Duration::seconds(secs)
 }
 
-#[test]
-fn matches_from_inclusive() {
-    let cmd = Archive {
-        from: Some(ts(1000).into()),
-        ..empty_archive()
-    };
-
-    // Strictly before: excluded.
-    assert!(!cmd.matches(make_id(999), &Conversation::default()));
-    // Equal: included (>=).
-    assert!(cmd.matches(make_id(1000), &Conversation::default()));
-    // After: included.
-    assert!(cmd.matches(make_id(1001), &Conversation::default()));
-}
-
-#[test]
-fn matches_until_exclusive() {
-    let cmd = Archive {
-        until: Some(ts(2000).into()),
-        ..empty_archive()
-    };
-
-    assert!(cmd.matches(make_id(1999), &Conversation::default()));
-    // Equal: excluded (<).
-    assert!(!cmd.matches(make_id(2000), &Conversation::default()));
-    assert!(!cmd.matches(make_id(2001), &Conversation::default()));
-}
-
+/// Pure range semantics (from-inclusive, until-exclusive) are covered by
+/// `CreationRange` tests in `time_tests.rs`. The tests below cover
+/// archive-specific composition with `--inactive-since`.
 #[test]
 fn matches_inactive_since_uses_last_activated_at() {
     let cmd = Archive {
@@ -183,8 +163,10 @@ fn matches_inactive_since_uses_last_activated_at() {
 #[test]
 fn matches_filters_and_compose() {
     let cmd = Archive {
-        from: Some(ts(1000).into()),
-        until: Some(ts(2000).into()),
+        range: CreationRange {
+            from: Some(ts(1000).into()),
+            until: Some(ts(2000).into()),
+        },
         inactive_since: Some(ts(5000).into()),
         ..empty_archive()
     };

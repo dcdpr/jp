@@ -71,6 +71,50 @@ impl FromStr for TimeThreshold {
     }
 }
 
+/// A half-open `[from, until)` filter on conversation creation date, shared
+/// between subcommands that want range-based selection (`jp c rm`,
+/// `jp c archive`, …).
+///
+/// `--from` is inclusive, `--until` is exclusive. Both accept the full
+/// [`TimeThreshold`] syntax (conversation ID, relative duration, or absolute
+/// date). The pair is declared as a clap [`ArgGroup`] so the whole range is
+/// mutually exclusive with the positional `id` argument provided by
+/// `PositionalIds` — setting any bound and an `id` together is a parse error.
+///
+/// [`ArgGroup`]: clap::ArgGroup
+#[derive(Debug, Default, clap::Args)]
+#[group(id = "creation_range", multiple = true, conflicts_with = "id")]
+pub(crate) struct CreationRange {
+    /// Match conversations created at or after the specified time.
+    ///
+    /// Accepts a conversation ID (uses its creation timestamp), a relative
+    /// duration (e.g. `3w`, `30d`, `6h`), or an absolute date
+    /// (e.g. `2026-01-01`). Composable with `--until`.
+    #[arg(long)]
+    pub from: Option<TimeThreshold>,
+
+    /// Match conversations created before the specified time.
+    ///
+    /// Accepts the same formats as `--from`. The range is half-open
+    /// (`--until` is exclusive), so `--from X --until Y` matches everything
+    /// in `[X, Y)`.
+    #[arg(long)]
+    pub until: Option<TimeThreshold>,
+}
+
+impl CreationRange {
+    /// Whether either bound is set.
+    pub fn is_set(&self) -> bool {
+        self.from.is_some() || self.until.is_some()
+    }
+
+    /// Half-open range test on the conversation's creation timestamp.
+    pub fn matches(&self, id: ConversationId) -> bool {
+        self.from.is_none_or(|t| id.timestamp() >= *t)
+            && self.until.is_none_or(|t| id.timestamp() < *t)
+    }
+}
+
 #[cfg(test)]
 #[path = "time_tests.rs"]
 mod tests;

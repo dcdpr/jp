@@ -8,7 +8,7 @@ use crate::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
-        time::TimeThreshold,
+        time::{CreationRange, TimeThreshold},
     },
     ctx::Ctx,
 };
@@ -32,20 +32,9 @@ pub(crate) struct Archive {
     #[command(flatten)]
     target: PositionalIds<false, true>,
 
-    /// Archive all conversations created at or after the specified time.
-    ///
-    /// Accepts a conversation ID (uses its creation timestamp), a relative
-    /// duration (e.g. `3w`, `30d`, `6h`), or an absolute date
-    /// (e.g. `2026-01-01`). Composes with `--until` and `--inactive-since`.
-    #[arg(long, conflicts_with = "id")]
-    from: Option<TimeThreshold>,
-
-    /// Archive all conversations created before the specified time.
-    ///
-    /// Accepts the same formats as `--from`. The range is half-open
-    /// (`--until` is exclusive).
-    #[arg(long, conflicts_with = "id")]
-    until: Option<TimeThreshold>,
+    /// Archive all conversations created in a `[--from, --until)` range.
+    #[command(flatten)]
+    range: CreationRange,
 
     /// Archive all conversations inactive since a given time.
     ///
@@ -63,7 +52,7 @@ pub(crate) struct Archive {
 impl Archive {
     /// Whether any of the filter flags is set.
     fn has_filter(&self) -> bool {
-        self.from.is_some() || self.until.is_some() || self.inactive_since.is_some()
+        self.range.is_set() || self.inactive_since.is_some()
     }
 
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
@@ -110,8 +99,7 @@ impl Archive {
 
     /// AND-composition of the active filter flags. Pure for testability.
     fn matches(&self, id: ConversationId, conv: &Conversation) -> bool {
-        self.from.is_none_or(|t| id.timestamp() >= *t)
-            && self.until.is_none_or(|t| id.timestamp() < *t)
+        self.range.matches(id)
             && self
                 .inactive_since
                 .is_none_or(|t| conv.last_activated_at < *t)

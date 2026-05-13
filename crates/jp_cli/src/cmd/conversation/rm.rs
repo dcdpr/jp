@@ -10,7 +10,7 @@ use crate::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
-        time::TimeThreshold,
+        time::CreationRange,
     },
     ctx::Ctx,
     format::conversation::DetailsFmt,
@@ -21,21 +21,9 @@ pub(crate) struct Rm {
     #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Remove all conversations created at or after the specified time.
-    ///
-    /// Accepts a conversation ID (uses its creation timestamp), a relative
-    /// duration (e.g. `3w`, `30d`, `6h`), or an absolute date
-    /// (e.g. `2026-01-01`). Can be combined with `--until` to remove a range.
-    #[arg(long, conflicts_with = "id")]
-    from: Option<TimeThreshold>,
-
-    /// Remove all conversations created before the specified time.
-    ///
-    /// Accepts the same formats as `--from`. The range is half-open
-    /// (`--until` is exclusive), so `--from X --until Y` removes everything
-    /// in `[X, Y)`.
-    #[arg(long, conflicts_with = "id")]
-    until: Option<TimeThreshold>,
+    /// Remove all conversations created in a `[--from, --until)` range.
+    #[command(flatten)]
+    range: CreationRange,
 
     /// Do not prompt for confirmation.
     #[arg(long, short = 'y')]
@@ -52,11 +40,11 @@ impl Rm {
         // Range mode: resolve IDs by filtering all conversations on
         // creation date. `conversation_load_request` returns `none()` in this
         // mode, so `handles` is empty here.
-        if self.from.is_some() || self.until.is_some() {
+        if self.range.is_set() {
             handles = ctx
                 .workspace
                 .conversations()
-                .filter(|(id, _)| self.matches(**id))
+                .filter(|(id, _)| self.range.matches(**id))
                 .map(|(id, _)| ctx.workspace.acquire_conversation(id))
                 .collect::<Result<Vec<_>, _>>()?;
 
@@ -75,18 +63,11 @@ impl Rm {
     }
 
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        if self.from.is_some() || self.until.is_some() {
+        if self.range.is_set() {
             ConversationLoadRequest::none()
         } else {
             ConversationLoadRequest::explicit_or_session(&self.target)
         }
-    }
-
-    /// Half-open range test on the conversation's creation date. Pure for
-    /// testability.
-    fn matches(&self, id: ConversationId) -> bool {
-        self.from.is_none_or(|t| id.timestamp() >= *t)
-            && self.until.is_none_or(|t| id.timestamp() < *t)
     }
 }
 

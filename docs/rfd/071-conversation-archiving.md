@@ -37,7 +37,8 @@ experience as the workspace grows.
 #### Archiving
 
 ```sh
-# Show a picker of conversations to archive
+# Archive the session's active conversation (same fallback chain as
+# `jp c show`: session active → conversation.default_id → picker)
 jp conversation archive
 jp c a
 
@@ -49,6 +50,24 @@ jp c archive ?
 
 # Archive all pinned conversations
 jp c archive +pinned
+
+# Archive a range of conversations by creation date. Both bounds accept a
+# conversation ID (uses its creation timestamp), a relative duration
+# (3w, 30d, 6h), or an absolute date (2026-01-01). The range is half-open:
+# --from is inclusive, --until is exclusive.
+jp c archive --from 3w --until 1d
+jp c archive --from jp-c123
+
+# Archive every conversation unused since a given time (last_activated_at,
+# not creation date). Accepts the same syntax as --from.
+jp c archive --inactive-since 30d
+
+# Filters AND-compose; this archives conversations created in the last
+# month that have been idle for at least a week.
+jp c archive --from 30d --inactive-since 7d
+
+# Skip the per-conversation confirmation prompt for pinned/active entries.
+jp c archive --inactive-since 6mo --yes
 ```
 
 When archiving a pinned or active session conversation, JP prompts for
@@ -59,6 +78,7 @@ Archive the active conversation jp-c123? [y/n/?]
 ```
 
 The prompt defaults to "no" and the conversation is skipped if declined.
+`--yes` (`-y`) suppresses the prompt for batch use.
 
 #### Unarchiving
 
@@ -184,9 +204,20 @@ archived index to `State` is straightforward.
 ### CLI Integration
 
 `jp c archive` participates in the standard conversation resolution pipeline.
-Its `conversation_load_request` returns real targets: a `Picker` when no IDs are
-given, or the explicit targets when IDs are provided. The startup pipeline
-resolves them, and the subcommand receives pre-resolved handles.
+Its `conversation_load_request` behaves in two modes:
+
+- **Filter mode** (any of `--from`/`--until`/`--inactive-since` set): returns
+  `ConversationLoadRequest::none()`. The subcommand iterates the workspace and
+  selects matching conversations internally, mirroring `jp c unarchive`'s
+  internal-resolution pattern.
+- **Direct mode** (no filter flags): returns `explicit_or_session(target)` —
+  explicit IDs when provided, otherwise the same fallback chain as `jp c show`
+  (session active → `conversation.default_id` → picker). Resolution happens in
+  the startup pipeline and the subcommand receives pre-resolved handles.
+
+The shared `--from`/`--until` range filter is implemented as a flattened
+`CreationRange` args struct in `crates/jp_cli/src/cmd/time.rs`, reused by
+`jp c rm` so the two commands' creation-range semantics stay in lockstep.
 
 `jp c unarchive` returns `ConversationLoadRequest::none()` because its targets
 are in the archive partition and cannot be resolved through the active index.
@@ -266,10 +297,15 @@ Can be merged independently.
 
 ### Phase 2: CLI Subcommands
 
-Add `jp c archive` and `jp c unarchive` subcommands with `--older-than` support.
-Add `--archived` flag to `jp c ls`. Add `archived`/`+archived`/`?archived`
-targeting keywords. Update `jp c use` to support unarchive-and-activate via the
-`archived` keyword.
+Add `jp c archive` and `jp c unarchive` subcommands. Add `--archived` flag to
+`jp c ls`. Add `archived`/`+archived`/`?archived` targeting keywords. Update
+`jp c use` to support unarchive-and-activate via the `archived` keyword.
+
+Archive's selection flags ship as `--from`/`--until` (creation-date range) and
+`--inactive-since` (last-activity threshold); all three accept the
+`TimeThreshold` syntax (conversation ID, relative duration, or absolute date)
+and AND-compose. `--from`/`--until` are extracted into a shared
+`CreationRange` args struct reused by `jp c rm`.
 
 Depends on Phase 1.
 
