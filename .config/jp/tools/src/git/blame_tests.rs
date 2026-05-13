@@ -58,25 +58,106 @@ fn parses_porcelain_into_commits_and_lines() {
         sha: SHA_ALICE.into(),
         final_line: 42,
         content: "let stream = self.build_stream();".into(),
+        previous: Some(SHA_PREV_ALICE.into()),
     });
     assert_eq!(blame.lines[1].final_line, 43);
+    // Single-path repeat: porcelain omits `previous` on the second header
+    // for Alice, but we keep the value from her first appearance.
+    assert_eq!(blame.lines[1].previous.as_deref(), Some(SHA_PREV_ALICE));
     assert_eq!(blame.lines[2].sha, SHA_BOB);
+    assert!(
+        blame.lines[2].previous.is_none(),
+        "bob is initial commit for this line"
+    );
 
     let alice = blame.commits.get(SHA_ALICE).unwrap();
     assert_eq!(alice.author, "Alice");
     assert_eq!(alice.summary, "feat: rework streaming loop");
-    assert_eq!(alice.previous.as_deref(), Some(SHA_PREV_ALICE));
     assert_eq!(alice.date, "2024-06-01T08:00:00+00:00");
 
     let bob = blame.commits.get(SHA_BOB).unwrap();
     assert_eq!(bob.author, "Bob");
     assert_eq!(bob.summary, "fix: handle EOF");
-    assert!(
-        bob.previous.is_none(),
-        "bob is initial commit for this line"
-    );
     // 1716000000 epoch (2024-05-18T02:40:00Z) at +0200 → 04:40:00+02:00.
     assert_eq!(bob.date, "2024-05-18T04:40:00+02:00");
+}
+
+/// Sample porcelain output for a single commit that touches lines that
+/// came from *different* prior commits (the `MORE_THAN_ONE_PATH` case
+/// from `builtin/blame.c`). Porcelain re-emits `previous`/`filename` on
+/// each subsequent appearance even though the rest of the metadata
+/// block is suppressed.
+fn sample_porcelain_multi_path() -> String {
+    let other_prev = "1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb";
+    format!(
+        "\
+{SHA_ALICE} 10 42 1
+author Alice
+author-mail <alice@example.com>
+author-time 1717228800
+author-tz +0000
+committer Alice
+committer-mail <alice@example.com>
+committer-time 1717228800
+committer-tz +0000
+summary feat: consolidate sources
+previous {SHA_PREV_ALICE} src/foo.rs
+filename src/foo.rs
+\tline from foo.rs
+{SHA_ALICE} 99 43 1
+previous {other_prev} src/bar.rs
+filename src/foo.rs
+\tline from bar.rs
+"
+    )
+}
+
+#[test]
+fn previous_is_per_line_for_multi_path_commits() {
+    let blame =
+        parse_porcelain(&sample_porcelain_multi_path(), "src/foo.rs", None, 42, 43).unwrap();
+
+    // Both lines are attributed to the same commit, but they have
+    // different prior origins. The current code used to drop the second
+    // `previous`; verify it's preserved per line.
+    assert_eq!(blame.lines.len(), 2);
+    assert_eq!(blame.lines[0].sha, SHA_ALICE);
+    assert_eq!(blame.lines[0].previous.as_deref(), Some(SHA_PREV_ALICE));
+    assert_eq!(blame.lines[1].sha, SHA_ALICE);
+    assert_eq!(
+        blame.lines[1].previous.as_deref(),
+        Some("1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb")
+    );
+}
+
+#[test]
+fn group_lines_splits_on_different_previous_same_sha() {
+    let blame =
+        parse_porcelain(&sample_porcelain_multi_path(), "src/foo.rs", None, 42, 43).unwrap();
+    let groups = group_lines(&blame.lines);
+
+    assert_eq!(
+        groups.len(),
+        2,
+        "same sha with different `previous` must split into separate hunks"
+    );
+    assert_eq!(groups[0].previous.as_deref(), Some(SHA_PREV_ALICE));
+    assert_eq!(
+        groups[1].previous.as_deref(),
+        Some("1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb")
+    );
+}
+
+#[test]
+fn format_blame_renders_per_line_previous_for_multi_path_commits() {
+    let blame =
+        parse_porcelain(&sample_porcelain_multi_path(), "src/foo.rs", None, 42, 43).unwrap();
+    let output = format_blame(&blame).unwrap();
+
+    // Both prior origins should appear in the rendered output, each in
+    // its own hunk.
+    assert!(output.contains(&format!("previous: {SHA_PREV_ALICE}")));
+    assert!(output.contains("previous: 1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb"));
 }
 
 #[test]
@@ -100,7 +181,7 @@ filename foo.rs
     let zero_sha = "0".repeat(40);
     let meta = blame.commits.get(&zero_sha).unwrap();
     assert_eq!(meta.author, "Not Committed Yet");
-    assert!(meta.previous.is_none());
+    assert!(blame.lines[0].previous.is_none());
 }
 
 #[test]
@@ -122,11 +203,13 @@ fn group_lines_splits_on_line_gap() {
             sha: SHA_ALICE.into(),
             final_line: 10,
             content: "a".into(),
+            previous: None,
         },
         BlameLine {
             sha: SHA_ALICE.into(),
             final_line: 12,
             content: "b".into(),
+            previous: None,
         },
     ];
 
@@ -191,6 +274,40 @@ fn rejects_inverted_range() {
 }
 
 #[test]
+fn option_like_revision_is_passed_as_positional() {
+    // `--end-of-options` must appear immediately before the revision so
+    // that an option-shaped value like `--contents=/etc/passwd` is
+    // forwarded to git as a positional (where it'll fail revision
+    // resolution) rather than being parsed by `git blame` as an option.
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "blame",
+            "--porcelain",
+            "-L1,10",
+            "--end-of-options",
+            "--contents=/etc/passwd",
+            "--",
+            "src/foo.rs",
+        ])
+        .returns_success(sample_porcelain());
+
+    // The mock's drop check fails if the expected arg list didn't run.
+    let _outcome = git_blame_impl(
+        dir.path(),
+        "src/foo.rs",
+        1,
+        10,
+        Some("--contents=/etc/passwd"),
+        false,
+        &runner,
+        &[],
+    )
+    .unwrap();
+}
+
+#[test]
 fn rejects_oversized_range() {
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::never_called();
@@ -236,6 +353,7 @@ fn blame_with_revision_and_whitespace_flag() {
             "--porcelain",
             "-L42,44",
             "-w",
+            "--end-of-options",
             "HEAD~3",
             "--",
             "src/foo.rs",

@@ -35,7 +35,6 @@ struct CommitMetadata {
     author: String,
     date: String,
     summary: String,
-    previous: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -43,6 +42,13 @@ struct BlameLine {
     sha: String,
     final_line: usize,
     content: String,
+    /// Commit that owned this line before the change attributed to `sha`,
+    /// taken from porcelain's `previous <sha> <path>` field. Kept per-line
+    /// (not per-commit) because that field is path-origin metadata: a
+    /// single commit can legitimately have *different* prior commits for
+    /// different line groups when copy/move detection is in play, and
+    /// porcelain re-emits `previous` for every group of such commits.
+    previous: Option<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -111,7 +117,12 @@ fn git_blame_impl<R: ProcessRunner>(
         args.push("-w");
     }
 
+    // `--end-of-options` marks `<rev>` as a positional argument so git
+    // can't reinterpret it as an option. `git blame --contents=<file>`
+    // in particular would let a caller read arbitrary files; we don't
+    // want any future option to become reachable either.
     if let Some(rev) = revision {
+        args.push("--end-of-options");
         args.push(rev);
     }
 
@@ -158,6 +169,17 @@ fn parse_porcelain(
     let mut current_meta = CommitMetadata::default();
     let mut current_author_time: Option<i64> = None;
     let mut current_author_tz: Option<String> = None;
+    // `previous` for the block being parsed *right now*. Reset at every
+    // header line and updated when a `previous` metadata line is seen.
+    let mut current_block_previous: Option<String> = None;
+    // Last `previous` value seen for each commit. For single-path commits,
+    // porcelain only emits `previous` on the first appearance and the
+    // value applies to every later appearance of the same SHA. For
+    // multi-path commits, porcelain re-emits `previous` for every
+    // appearance — the override is captured per-block in
+    // `current_block_previous` and also recorded here so we don't fall
+    // back to a stale value.
+    let mut last_known_previous: HashMap<String, Option<String>> = HashMap::new();
 
     for raw in stdout.lines() {
         if let Some(content) = raw.strip_prefix('\t') {
@@ -176,10 +198,22 @@ fn parse_porcelain(
                 current_author_tz = None;
             }
 
+            // Resolve the effective `previous` for this line. An explicit
+            // value in the current block wins; otherwise we fall back to
+            // the last `previous` seen for this commit (which covers the
+            // single-path-repeat case where porcelain omits the field).
+            let previous = if let Some(prev) = current_block_previous.clone() {
+                last_known_previous.insert(sha.clone(), Some(prev.clone()));
+                Some(prev)
+            } else {
+                last_known_previous.get(&sha).cloned().unwrap_or(None)
+            };
+
             lines.push(BlameLine {
                 sha,
                 final_line: current_final_line,
                 content: content.to_string(),
+                previous,
             });
 
             continue;
@@ -204,6 +238,11 @@ fn parse_porcelain(
             current_meta = CommitMetadata::default();
             current_author_time = None;
             current_author_tz = None;
+            // `previous` is path-origin metadata and can be re-emitted for
+            // already-seen shas (multi-path commits). Reset it at every
+            // header; if the block re-emits it we'll pick the new value up
+            // again, otherwise we fall back to `last_known_previous`.
+            current_block_previous = None;
 
             continue;
         }
@@ -222,7 +261,7 @@ fn parse_porcelain(
                 // `previous <sha> <path>` — keep just the sha for drill-down.
                 let sha = value.split_whitespace().next().unwrap_or_default();
                 if is_sha(sha) {
-                    current_meta.previous = Some(sha.to_string());
+                    current_block_previous = Some(sha.to_string());
                 }
             }
             _ => {}
@@ -271,29 +310,36 @@ fn parse_tz(tz: &str) -> Option<FixedOffset> {
 
 struct LineGroup<'a> {
     sha: String,
+    previous: Option<String>,
     lines: Vec<&'a BlameLine>,
 }
 
-/// Group consecutive lines that share a sha AND are line-number contiguous.
-/// A gap in line numbers starts a new group even when the sha matches, so
-/// the rendered output doesn't imply a continuous block where there isn't
-/// one. With porcelain's `-L <start>,<end>` range, lines are always
-/// contiguous, but the explicit check keeps this robust to other invocation
-/// shapes later.
+/// Group consecutive lines that share a sha AND the same `previous` AND
+/// are line-number contiguous. A gap in line numbers, a different sha, or
+/// a different prior origin all start a new group, so the rendered output
+/// doesn't imply a continuous block where there isn't one. With
+/// porcelain's `-L <start>,<end>` range lines are always line-number
+/// contiguous; the `previous` check is what actually splits multi-path
+/// commits where the same sha has different prior origins for different
+/// line groups.
 fn group_lines(lines: &[BlameLine]) -> Vec<LineGroup<'_>> {
     let mut groups: Vec<LineGroup<'_>> = Vec::new();
 
     for line in lines {
-        let extend = groups
-            .last()
-            .and_then(|g| g.lines.last().map(|prev| (g.sha.as_str(), prev.final_line)))
-            .is_some_and(|(sha, prev)| sha == line.sha && prev + 1 == line.final_line);
+        let extend = groups.last().is_some_and(|g| {
+            g.sha == line.sha
+                && g.previous == line.previous
+                && g.lines
+                    .last()
+                    .is_some_and(|prev| prev.final_line + 1 == line.final_line)
+        });
 
         if extend {
             groups.last_mut().expect("checked above").lines.push(line);
         } else {
             groups.push(LineGroup {
                 sha: line.sha.clone(),
+                previous: line.previous.clone(),
                 lines: vec![line],
             });
         }
@@ -322,7 +368,7 @@ fn format_blame(blame: &BlameOutput) -> Result<String> {
         writeln!(out, "  <hunk>")?;
         writeln!(out, "    hash: {}", group.sha)?;
         writeln!(out, "    short_hash: {}", short_hash(&group.sha))?;
-        if let Some(prev) = &meta.previous {
+        if let Some(prev) = &group.previous {
             writeln!(out, "    previous: {prev}")?;
         }
         if !meta.author.is_empty() {

@@ -38,9 +38,10 @@ Find who last touched a function body:
 ```
 
 Drill back one layer: blame the lines as they were before the current \
-change, using the `previous` hash from a prior call:
+change, using the `previous` hash from a prior call (porcelain's \
+`previous` is already the prior commit — do not append `^`):
 ```json
-{"path": "crates/jp_llm/src/stream.rs", "start_line": 42, "end_line": 58, "revision": "abc1234^"}
+{"path": "crates/jp_llm/src/stream.rs", "start_line": 42, "end_line": 58, "revision": "abc1234"}
 ```
 
 Ignore whitespace-only changes when assigning blame:

@@ -32,6 +32,37 @@ fn large_diff(line_count: usize) -> String {
 }
 
 #[test]
+fn option_like_revision_is_passed_as_positional() {
+    // `--end-of-options` must precede `<rev>` so an option-shaped value
+    // reaches git as a positional rather than as an option to `git show`.
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "show",
+            "--format=",
+            "--end-of-options",
+            "--output=/tmp/leak",
+            "--",
+            "src/main.rs",
+        ])
+        .returns_success(small_diff());
+
+    let _outcome = git_diff_commit_impl(
+        dir.path(),
+        "--output=/tmp/leak",
+        &["src/main.rs"],
+        None,
+        None,
+        None,
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap();
+}
+
+#[test]
 fn basic_diff_commit() {
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::success(small_diff());
