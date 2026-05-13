@@ -1,27 +1,28 @@
-use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
-use jp_conversation::ConversationId;
+use jp_conversation::{Conversation, ConversationId};
 use jp_inquire::InlineOption;
-use jp_workspace::ConversationHandle;
+use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
     cmd::{
         ConversationLoadRequest, Output,
-        conversation_id::{ConversationIds as _, PositionalIds},
+        conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
-        target::{ConversationTarget, PickerFilter},
-        time::TimeThreshold,
+        time::{CreationRange, TimeThreshold},
     },
     ctx::Ctx,
 };
 
 /// Archive conversations.
 ///
-/// Without IDs, shows a picker of conversations. With IDs, archives each one.
-/// Prompts for confirmation when archiving pinned or active conversations.
+/// Without IDs, archives the session's active conversation (same fallback
+/// chain as `jp c show`: session active → `conversation.default_id` →
+/// picker). With IDs, archives each one. Prompts for confirmation when
+/// archiving pinned or active conversations (suppress with `--yes`).
 ///
-/// Use `--inactive-since` to archive all conversations that haven't been used
-/// since a given time or duration (e.g. `3w`, `2026-01-01`).
+/// Use `--from`/`--until` to archive a range of conversations by creation
+/// date, or `--inactive-since` to archive everything unused since a given
+/// time. The three filters AND together when combined.
 ///
 /// Archived conversations are hidden from listings and pickers. Use `jp c ls
 /// --archived` to list them, `jp c unarchive` to restore them, or `jp c use
@@ -31,41 +32,54 @@ pub(crate) struct Archive {
     #[command(flatten)]
     target: PositionalIds<false, true>,
 
+    /// Archive all conversations created in a `[--from, --until)` range.
+    #[command(flatten)]
+    range: CreationRange,
+
     /// Archive all conversations inactive since a given time.
     ///
-    /// Accepts a relative duration (e.g. `3w`, `30d`, `6h`) or an absolute date
-    /// (e.g. `2026-01-01`). Archives every conversation whose last activity is
-    /// before the computed threshold.
+    /// Accepts the same formats as `--from`. Filters on `last_activated_at`
+    /// (when the conversation was last used) rather than its creation date,
+    /// which makes this distinct from `--until`.
     #[arg(long, conflicts_with = "id")]
     inactive_since: Option<TimeThreshold>,
+
+    /// Do not prompt for confirmation on pinned or active conversations.
+    #[arg(long, short = 'y')]
+    yes: bool,
 }
 
 impl Archive {
+    /// Whether any of the filter flags is set.
+    fn has_filter(&self) -> bool {
+        self.range.is_set() || self.inactive_since.is_some()
+    }
+
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        if self.inactive_since.is_some() {
-            // --inactive-since resolves conversations internally.
-            ConversationLoadRequest::none()
-        } else {
-            let targets = self.target.ids();
-            if targets.is_empty() {
-                ConversationLoadRequest::explicit(vec![ConversationTarget::Picker(
-                    PickerFilter::default(),
-                )])
-            } else {
-                ConversationLoadRequest::explicit(targets.to_vec())
-            }
+        if self.has_filter() {
+            // Filter mode resolves conversations internally.
+            return ConversationLoadRequest::none();
         }
+
+        ConversationLoadRequest::explicit_or_session(&self.target)
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        if let Some(threshold) = self.inactive_since {
-            return self.run_inactive_since(ctx, *threshold).await;
-        }
+        let handles = if self.has_filter() {
+            let filtered = self.resolve_filtered(&ctx.workspace)?;
+            if filtered.is_empty() {
+                ctx.printer.println("No conversations match the filter.");
+                return Ok(());
+            }
+            filtered
+        } else {
+            handles
+        };
 
         for handle in handles {
             let id = handle.id();
 
-            if !confirm_archive(ctx, &id)? {
+            if !self.yes && !confirm_archive(ctx, &id)? {
                 continue;
             }
 
@@ -83,41 +97,24 @@ impl Archive {
         Ok(())
     }
 
-    /// Archive all conversations with `last_activated_at` before `cutoff`.
-    async fn run_inactive_since(&self, ctx: &mut Ctx, cutoff: DateTime<Utc>) -> Output {
-        let ids: Vec<_> = ctx
-            .workspace
+    /// AND-composition of the active filter flags. Pure for testability.
+    fn matches(&self, id: ConversationId, conv: &Conversation) -> bool {
+        self.range.matches(id)
+            && self
+                .inactive_since
+                .is_none_or(|t| conv.last_activated_at < *t)
+    }
+
+    /// Resolve handles by applying `matches` over the workspace.
+    fn resolve_filtered(
+        &self,
+        workspace: &Workspace,
+    ) -> Result<Vec<ConversationHandle>, crate::error::Error> {
+        workspace
             .conversations()
-            .filter(|(_, c)| c.last_activated_at < cutoff)
-            .map(|(id, _)| *id)
-            .collect();
-
-        if ids.is_empty() {
-            ctx.printer.println("No conversations match the threshold.");
-            return Ok(());
-        }
-
-        for id in ids {
-            let Ok(handle) = ctx.workspace.acquire_conversation(&id) else {
-                continue;
-            };
-
-            if !confirm_archive(ctx, &id)? {
-                continue;
-            }
-
-            let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
-                LockOutcome::Acquired(lock) => lock,
-                LockOutcome::NewConversation | LockOutcome::ForkConversation(_) => unreachable!(),
-            };
-            ctx.workspace.archive_conversation(lock.into_mut());
-            ctx.printer.println(format!(
-                "Conversation {} archived.",
-                id.to_string().bold().yellow()
-            ));
-        }
-
-        Ok(())
+            .filter(|(id, c)| self.matches(**id, c))
+            .map(|(id, _)| workspace.acquire_conversation(id).map_err(Into::into))
+            .collect()
     }
 }
 
@@ -160,3 +157,7 @@ fn confirm_archive(ctx: &mut Ctx, id: &ConversationId) -> Result<bool, crate::er
         _ => Ok(false),
     }
 }
+
+#[cfg(test)]
+#[path = "archive_tests.rs"]
+mod tests;

@@ -3,13 +3,14 @@ use std::fmt::Write as _;
 use crossterm::style::Stylize as _;
 use inquire::Confirm;
 use jp_conversation::ConversationId;
-use jp_workspace::ConversationHandle;
+use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
+        time::CreationRange,
     },
     ctx::Ctx,
     format::conversation::DetailsFmt,
@@ -20,21 +21,9 @@ pub(crate) struct Rm {
     #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Remove all conversations *starting from* the specified conversation,
-    /// based on creation date.
-    ///
-    /// Can be used in combination with `--until` to remove a range of
-    /// conversations.
-    #[arg(long, conflicts_with = "id")]
-    from: Option<ConversationId>,
-
-    /// Remove all conversations *until and excluding* the specified
-    /// conversation, based on creation date.
-    ///
-    /// Can be used in combination with `--from` to remove a range of
-    /// conversations.
-    #[arg(long, conflicts_with = "id")]
-    until: Option<ConversationId>,
+    /// Remove all conversations created in a `[--from, --until)` range.
+    #[command(flatten)]
+    range: CreationRange,
 
     /// Do not prompt for confirmation.
     #[arg(long, short = 'y')]
@@ -48,14 +37,16 @@ impl Rm {
             .as_ref()
             .and_then(|s| ctx.workspace.session_active_conversation(s));
 
-        // Range mode: resolve IDs from --from/--until.
-        if handles.is_empty() {
-            handles = ctx
-                .workspace
-                .conversations()
-                .map(|(id, _)| id)
-                .map(|id| ctx.workspace.acquire_conversation(id))
-                .collect::<Result<Vec<_>, _>>()?;
+        // Range mode: resolve IDs by filtering all conversations on
+        // creation date. `conversation_load_request` returns `none()` in this
+        // mode, so `handles` is empty here.
+        if self.range.is_set() {
+            handles = self.resolve_filtered(&ctx.workspace)?;
+
+            if handles.is_empty() {
+                ctx.printer.println("No conversations match the range.");
+                return Ok(());
+            }
         }
 
         for handle in handles {
@@ -67,11 +58,28 @@ impl Rm {
     }
 
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        if self.from.is_some() || self.until.is_some() {
+        if self.range.is_set() {
             ConversationLoadRequest::none()
         } else {
             ConversationLoadRequest::explicit_or_session(&self.target)
         }
+    }
+
+    /// Resolve handles by applying the range filter over the workspace.
+    ///
+    /// Extracted from `run` so the filter step can be exercised in tests
+    /// without driving the async confirmation/lock path. This is the
+    /// load-bearing line between `--from/--until` and actual deletion;
+    /// regressing it would silently turn a range delete into a full wipe.
+    fn resolve_filtered(
+        &self,
+        workspace: &Workspace,
+    ) -> Result<Vec<ConversationHandle>, crate::error::Error> {
+        workspace
+            .conversations()
+            .filter(|(id, _)| self.range.matches(**id))
+            .map(|(id, _)| workspace.acquire_conversation(id).map_err(Into::into))
+            .collect()
     }
 }
 
@@ -132,3 +140,7 @@ fn confirm_and_remove(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "rm_tests.rs"]
+mod tests;
