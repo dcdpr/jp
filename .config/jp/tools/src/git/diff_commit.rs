@@ -70,13 +70,7 @@ fn git_diff_commit_impl<R: ProcessRunner>(
     // specific files, with an empty format to suppress the commit header.
     // `--end-of-options` marks `<rev>` as a positional so git can't
     // reinterpret it as an option (e.g. `--output=<file>`).
-    let mut args: Vec<&str> = vec![
-        "show",
-        "--format=",
-        "--end-of-options",
-        revision,
-        "--",
-    ];
+    let mut args: Vec<&str> = vec!["show", "--format=", "--end-of-options", revision, "--"];
     args.extend(paths);
 
     let output = runner.run_with_env("git", &args, root, env)?;

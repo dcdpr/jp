@@ -148,6 +148,79 @@ fn group_lines_splits_on_different_previous_same_sha() {
     );
 }
 
+/// Multi-path commit where the *second* origin has no prior commit:
+/// the first block emits `previous A`/`filename`, the second emits
+/// `filename` alone (because `MORE_THAN_ONE_PATH` re-emits path-origin
+/// metadata, but this origin's `suspect->previous` is null). The buggy
+/// behaviour would inherit `A` for the second line; the fix should
+/// record it as `None`.
+fn sample_porcelain_multi_path_one_origin_has_no_previous() -> String {
+    format!(
+        "\
+{SHA_ALICE} 10 42 1
+author Alice
+author-mail <alice@example.com>
+author-time 1717228800
+author-tz +0000
+committer Alice
+committer-mail <alice@example.com>
+committer-time 1717228800
+committer-tz +0000
+summary feat: consolidate sources
+previous {SHA_PREV_ALICE} src/foo.rs
+filename src/foo.rs
+\tline from foo.rs
+{SHA_ALICE} 99 43 1
+filename src/foo.rs
+\tline from nowhere
+"
+    )
+}
+
+#[test]
+fn previous_is_none_when_block_has_filename_but_no_previous() {
+    let blame = parse_porcelain(
+        &sample_porcelain_multi_path_one_origin_has_no_previous(),
+        "src/foo.rs",
+        None,
+        42,
+        43,
+    )
+    .unwrap();
+
+    // First block: previous explicitly set.
+    assert_eq!(blame.lines[0].previous.as_deref(), Some(SHA_PREV_ALICE));
+    // Second block: `filename` re-emitted without `previous`, meaning
+    // this origin has no prior commit. Must not inherit the first
+    // block's value.
+    assert!(
+        blame.lines[1].previous.is_none(),
+        "block with `filename` but no `previous` must render `None`, got {:?}",
+        blame.lines[1].previous
+    );
+}
+
+#[test]
+fn group_lines_splits_when_second_origin_has_no_previous() {
+    let blame = parse_porcelain(
+        &sample_porcelain_multi_path_one_origin_has_no_previous(),
+        "src/foo.rs",
+        None,
+        42,
+        43,
+    )
+    .unwrap();
+    let groups = group_lines(&blame.lines);
+
+    assert_eq!(
+        groups.len(),
+        2,
+        "Some(prev) and None must not group together"
+    );
+    assert_eq!(groups[0].previous.as_deref(), Some(SHA_PREV_ALICE));
+    assert!(groups[1].previous.is_none());
+}
+
 #[test]
 fn format_blame_renders_per_line_previous_for_multi_path_commits() {
     let blame =

@@ -172,13 +172,20 @@ fn parse_porcelain(
     // `previous` for the block being parsed *right now*. Reset at every
     // header line and updated when a `previous` metadata line is seen.
     let mut current_block_previous: Option<String> = None;
-    // Last `previous` value seen for each commit. For single-path commits,
-    // porcelain only emits `previous` on the first appearance and the
-    // value applies to every later appearance of the same SHA. For
-    // multi-path commits, porcelain re-emits `previous` for every
-    // appearance — the override is captured per-block in
-    // `current_block_previous` and also recorded here so we don't fall
-    // back to a stale value.
+    // Whether the current block emitted a `filename` line. Per
+    // `builtin/blame.c::emit_porcelain_details`, porcelain emits
+    // `filename` whenever it emits path-origin metadata — i.e. on first
+    // appearance of a commit OR on any appearance when
+    // `MORE_THAN_ONE_PATH` is set. Its presence is the signal that this
+    // block's `previous` is fully specified, including its meaningful
+    // *absence* ("no prior commit for this origin"). Its absence means
+    // porcelain suppressed path-origin metadata because it would be
+    // redundant (single-path-repeat), and we should inherit the commit's
+    // last known `previous` instead.
+    let mut current_block_has_filename: bool = false;
+    // Last `previous` value seen for each commit, used only as the
+    // fallback for single-path-repeat blocks (blocks without their own
+    // `filename` line).
     let mut last_known_previous: HashMap<String, Option<String>> = HashMap::new();
 
     for raw in stdout.lines() {
@@ -198,13 +205,17 @@ fn parse_porcelain(
                 current_author_tz = None;
             }
 
-            // Resolve the effective `previous` for this line. An explicit
-            // value in the current block wins; otherwise we fall back to
-            // the last `previous` seen for this commit (which covers the
-            // single-path-repeat case where porcelain omits the field).
-            let previous = if let Some(prev) = current_block_previous.clone() {
-                last_known_previous.insert(sha.clone(), Some(prev.clone()));
-                Some(prev)
+            // Resolve the effective `previous` for this line. If the
+            // block emitted its own path-origin metadata (a `filename`
+            // line), its `previous` is fully specified — use it directly,
+            // even when that value is `None` ("no prior commit for this
+            // origin"), and record it as the latest known for the commit.
+            // Otherwise this is a single-path-repeat block: porcelain
+            // suppressed path-origin metadata as redundant, and we
+            // inherit the commit's last known `previous`.
+            let previous = if current_block_has_filename {
+                last_known_previous.insert(sha.clone(), current_block_previous.clone());
+                current_block_previous.clone()
             } else {
                 last_known_previous.get(&sha).cloned().unwrap_or(None)
             };
@@ -238,11 +249,14 @@ fn parse_porcelain(
             current_meta = CommitMetadata::default();
             current_author_time = None;
             current_author_tz = None;
-            // `previous` is path-origin metadata and can be re-emitted for
-            // already-seen shas (multi-path commits). Reset it at every
-            // header; if the block re-emits it we'll pick the new value up
-            // again, otherwise we fall back to `last_known_previous`.
+            // `previous` and `filename` are path-origin metadata and can
+            // be re-emitted for already-seen shas (multi-path commits).
+            // Reset both at every header; if the block re-emits them
+            // we'll pick the new values up. If `filename` is absent for
+            // the rest of the block, that's a single-path-repeat and we
+            // fall back to `last_known_previous`.
             current_block_previous = None;
+            current_block_has_filename = false;
 
             continue;
         }
@@ -264,6 +278,7 @@ fn parse_porcelain(
                     current_block_previous = Some(sha.to_string());
                 }
             }
+            "filename" => current_block_has_filename = true,
             _ => {}
         }
     }
