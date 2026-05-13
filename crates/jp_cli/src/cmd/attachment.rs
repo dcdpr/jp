@@ -4,12 +4,12 @@ use jp_attachment_file_content as _;
 use jp_attachment_github as _;
 use jp_attachment_http_content as _;
 use jp_attachment_internal::{
-    resolve as resolve_internal_attachment, validate as validate_internal_attachment,
+    ResolveError, resolve as resolve_internal_attachment, validate as validate_internal_attachment,
 };
 use jp_attachment_mcp_resources as _;
 use jp_config::PartialAppConfig;
 use jp_workspace::Workspace;
-use tracing::trace;
+use tracing::{trace, warn};
 use url::Url;
 
 use super::Output;
@@ -107,8 +107,13 @@ pub(crate) async fn register_attachment(
     let scheme = attachment_scheme(&uri);
 
     if scheme == "jp" {
-        return resolve_internal_attachment(&ctx.workspace, &uri)
-            .map_err(|e| Error::Attachment(e.to_string()));
+        return match resolve_internal_attachment(&ctx.workspace, &uri) {
+            Ok(attachments) => Ok(attachments),
+            Err(ResolveError::ConversationMissing(id)) => {
+                Err(Error::AttachmentConversationMissing { id, uri })
+            }
+            Err(ResolveError::Other(error)) => Err(Error::Attachment(error.to_string())),
+        };
     }
 
     let Some(mut handler) = jp_attachment::find_handler_by_scheme(scheme) else {
@@ -125,3 +130,36 @@ pub(crate) async fn register_attachment(
         .await
         .map_err(|e| Error::Attachment(e.to_string()))
 }
+
+/// Resolve a list of attachment URLs for the current query.
+///
+/// Unlike [`register_attachment`], this loader is tolerant of `jp://`
+/// attachments whose target conversation has been archived or removed since
+/// the attachment was registered: those references are warned about and
+/// skipped rather than aborting the whole query. Every other failure
+/// (invalid URI, real I/O error, etc.) is propagated.
+pub(crate) async fn load_conversation_attachments(
+    ctx: &Ctx,
+    urls: Vec<Url>,
+) -> Result<Vec<jp_attachment::Attachment>> {
+    let futs = urls.into_iter().map(|url| register_attachment(ctx, url));
+    let mut attachments = Vec::new();
+    for result in futures::future::join_all(futs).await {
+        match result {
+            Ok(atts) => attachments.extend(atts),
+            Err(Error::AttachmentConversationMissing { id, uri }) => {
+                warn!(
+                    %id,
+                    %uri,
+                    "Skipping attachment: referenced conversation is unavailable."
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(attachments)
+}
+
+#[cfg(test)]
+#[path = "attachment_tests.rs"]
+mod tests;

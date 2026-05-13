@@ -2,6 +2,7 @@ use std::io;
 
 use camino::Utf8PathBuf;
 use jp_conversation::ConversationId;
+use url::Url;
 
 use crate::cmd;
 
@@ -61,6 +62,13 @@ pub(crate) enum Error {
 
     #[error("Attachment error: {0}")]
     Attachment(String),
+
+    /// The conversation referenced by a `jp://` attachment has been
+    /// archived or deleted from the workspace. Surfaced as its own variant
+    /// so query-time loaders can warn and skip dead references rather than
+    /// abort the whole query.
+    #[error("Attachment conversation '{id}' not found")]
+    AttachmentConversationMissing { id: ConversationId, uri: Url },
 
     #[error("Editor error: {0}")]
     Editor(String),

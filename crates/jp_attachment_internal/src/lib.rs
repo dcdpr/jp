@@ -23,6 +23,7 @@ use jp_conversation::{
 use jp_workspace::{ConversationHandle, Workspace};
 use serde::Serialize;
 use serde_json::Value;
+use thiserror::Error as ThisError;
 use url::Url;
 
 mod selector;
@@ -116,6 +117,45 @@ impl Entry {
     }
 }
 
+/// Errors produced when resolving a `jp://` URI.
+///
+/// The [`ConversationMissing`](Self::ConversationMissing) variant is
+/// surfaced separately so callers that re-resolve persisted attachments —
+/// notably `jp query` — can warn and skip dead references instead of
+/// aborting the entire operation. Every other failure (invalid URI,
+/// malformed selector, I/O error, etc.) goes through
+/// [`Other`](Self::Other) and should be treated as a hard error.
+#[derive(Debug, ThisError)]
+pub enum ResolveError {
+    /// The referenced conversation is not present in the workspace's active
+    /// index. This happens when the conversation has been archived or
+    /// removed since the attachment was registered.
+    #[error("conversation '{0}' not found")]
+    ConversationMissing(ConversationId),
+
+    /// Any other failure encountered while resolving the URI.
+    #[error("{0}")]
+    Other(Box<dyn Error + Send + Sync>),
+}
+
+impl From<Box<dyn Error + Send + Sync>> for ResolveError {
+    fn from(error: Box<dyn Error + Send + Sync>) -> Self {
+        Self::Other(error)
+    }
+}
+
+impl From<String> for ResolveError {
+    fn from(message: String) -> Self {
+        Self::Other(message.into())
+    }
+}
+
+impl From<&str> for ResolveError {
+    fn from(message: &str) -> Self {
+        Self::Other(message.into())
+    }
+}
+
 /// Validate a `jp://` URI without performing I/O.
 pub fn validate(uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
     let entry = uri_to_entry(uri)?;
@@ -123,10 +163,7 @@ pub fn validate(uri: &Url) -> Result<(), Box<dyn Error + Send + Sync>> {
 }
 
 /// Resolve a `jp://` URI against the already-open workspace.
-pub fn resolve(
-    workspace: &Workspace,
-    uri: &Url,
-) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+pub fn resolve(workspace: &Workspace, uri: &Url) -> Result<Vec<Attachment>, ResolveError> {
     let entry = uri_to_entry(uri)?;
     validate_entry(&entry)?;
     fetch_entry(&entry, workspace)
@@ -149,28 +186,33 @@ fn validate_entry(entry: &Entry) -> Result<(), Box<dyn Error + Send + Sync>> {
 
 /// Resolve an entry into one or more [`Attachment`]s using the given storage
 /// backend.
-fn fetch_entry(
-    entry: &Entry,
-    workspace: &Workspace,
-) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+fn fetch_entry(entry: &Entry, workspace: &Workspace) -> Result<Vec<Attachment>, ResolveError> {
     match entry.variant()? {
         CONVERSATION_VARIANT => fetch_conversation(entry, workspace),
-        v => Err(unsupported_variant_error(v)),
+        v => Err(unsupported_variant_error(v).into()),
     }
 }
 
 fn fetch_conversation(
     entry: &Entry,
     workspace: &Workspace,
-) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+) -> Result<Vec<Attachment>, ResolveError> {
     let id = ConversationId::from_str(&entry.id)
         .map_err(|e| format!("invalid conversation id '{}': {e}", entry.id))?;
 
     let selector = parse_selector(&entry.select)?;
 
-    let handle = workspace
-        .acquire_conversation(&id)
-        .map_err(|e| format!("failed to find conversation '{id}': {e}"))?;
+    // Distinguish "the conversation is gone" (archived or deleted) from any
+    // other workspace error, so callers can decide whether to skip+warn or
+    // hard-fail. `acquire_conversation` only fails with `NotFound` today,
+    // but match on it explicitly to remain correct if more variants are added.
+    let handle = match workspace.acquire_conversation(&id) {
+        Ok(h) => h,
+        Err(jp_workspace::Error::NotFound(_, _)) => {
+            return Err(ResolveError::ConversationMissing(id));
+        }
+        Err(e) => return Err(format!("failed to acquire conversation '{id}': {e}").into()),
+    };
     let stream = workspace
         .events(&handle)
         .map_err(|e| format!("failed to load conversation '{id}': {e}"))?;
@@ -191,7 +233,7 @@ fn fetch_conversation_raw(
     stream: &ConversationStream,
     selector: Selector,
     mode: RawMode,
-) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+) -> Result<Vec<Attachment>, ResolveError> {
     let events = collect_selected_events(stream, selector);
     let raw = RawConversation {
         events,

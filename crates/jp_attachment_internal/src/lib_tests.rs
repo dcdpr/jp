@@ -218,6 +218,34 @@ fn resolve_errors_when_conversation_is_not_loaded() {
 }
 
 #[test]
+fn resolve_returns_conversation_missing_variant_when_id_not_in_index() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let workspace = Workspace::new(tmp.path().to_path_buf());
+    let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
+    let uri = Url::parse(&format!("jp://{id}")).unwrap();
+
+    let err = resolve(&workspace, &uri).expect_err("expected missing conversation error");
+    match err {
+        ResolveError::ConversationMissing(missing) => assert_eq!(missing, id),
+        ResolveError::Other(other) => panic!("expected ConversationMissing, got Other({other})"),
+    }
+}
+
+#[test]
+fn resolve_returns_other_for_invalid_selector() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let workspace = Workspace::new(tmp.path().to_path_buf());
+    let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
+    let uri = Url::parse(&format!("jp://{id}?select=zzz")).unwrap();
+
+    let err = resolve(&workspace, &uri).expect_err("expected invalid selector error");
+    assert!(
+        matches!(err, ResolveError::Other(_)),
+        "expected Other, got {err:?}"
+    );
+}
+
+#[test]
 fn render_stream_empty_returns_empty_string() {
     let stream = ConversationStream::new_test();
     let rendered = render_stream(&stream, Selector::default());
