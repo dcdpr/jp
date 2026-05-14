@@ -3,7 +3,7 @@ use std::sync::Arc;
 use jp_config::style::StyleConfig;
 use jp_conversation::{
     ConversationEvent, ConversationStream,
-    event::{ChatRequest, ChatResponse, ToolCallResponse},
+    event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
 };
 use jp_llm::{
     event::{Event, EventPart, FinishReason, ToolCallPart},
@@ -49,6 +49,49 @@ pub enum TurnPhase {
     /// When a turn reaches this phase, the shell should exit the turn loop
     /// WITHOUT persisting. Any partial content is discarded.
     Aborted,
+}
+
+/// Outcome returned by [`TurnCoordinator::handle_event`].
+///
+/// `action` describes turn-state control flow. `committed` describes the
+/// conversation event, if any, that was appended while handling the input.
+/// Keeping these separate avoids smuggling event-builder details into the turn
+/// state machine's action enum while still letting the shell react immediately
+/// to newly committed tool calls.
+#[derive(Debug)]
+pub struct HandleEventOutcome {
+    /// The next state-machine action for the shell.
+    pub action: Action,
+
+    /// The event committed while handling the input, if the shell needs to
+    /// react to it immediately.
+    pub committed: CommittedEvent,
+}
+
+impl HandleEventOutcome {
+    fn new(action: Action) -> Self {
+        Self {
+            action,
+            committed: CommittedEvent::None,
+        }
+    }
+
+    fn committed(action: Action, committed: CommittedEvent) -> Self {
+        Self { action, committed }
+    }
+}
+
+/// A committed conversation event that the shell may need to react to before
+/// the current provider stream finishes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommittedEvent {
+    /// No relevant event was committed.
+    None,
+
+    /// A [`ToolCallRequest`] was committed. The shell should run the
+    /// permission/preparation pipeline immediately so prompts appear at the
+    /// same streaming boundary as before.
+    ToolCallRequest(ToolCallRequest),
 }
 
 /// Actions returned by the Turn Coordinator to be executed by the shell.
@@ -162,14 +205,22 @@ impl TurnCoordinator {
         self.state = TurnPhase::Streaming;
     }
 
-    pub fn handle_event(&mut self, stream: &mut ConversationStream, event: Event) -> Action {
+    pub fn handle_event(
+        &mut self,
+        stream: &mut ConversationStream,
+        event: Event,
+    ) -> HandleEventOutcome {
         match self.state {
             TurnPhase::Streaming => self.handle_streaming_event(stream, event),
-            _ => Action::Continue,
+            _ => HandleEventOutcome::new(Action::Continue),
         }
     }
 
-    fn handle_streaming_event(&mut self, stream: &mut ConversationStream, event: Event) -> Action {
+    fn handle_streaming_event(
+        &mut self,
+        stream: &mut ConversationStream,
+        event: Event,
+    ) -> HandleEventOutcome {
         match event {
             Event::Part {
                 index,
@@ -203,25 +254,35 @@ impl TurnCoordinator {
                 }
 
                 self.event_builder.handle_part(index, part, metadata);
-                Action::Continue
+                HandleEventOutcome::new(Action::Continue)
             }
             Event::Flush { index, metadata } => {
-                if let Some(event) = self.event_builder.handle_flush(index, metadata) {
-                    self.push_event(stream, event);
-                }
+                let Some(event) = self.event_builder.handle_flush(index, metadata) else {
+                    return HandleEventOutcome::new(Action::Continue);
+                };
 
-                Action::Continue
+                // Detect tool-call requests before consuming `event`, so
+                // the shell can dispatch immediately without re-inspecting
+                // the stream tail. Only tool-call requests are surfaced:
+                // message, reasoning, and structured output stay on the
+                // hot path without cloning.
+                let committed = event
+                    .as_tool_call_request()
+                    .cloned()
+                    .map_or(CommittedEvent::None, CommittedEvent::ToolCallRequest);
+                self.push_event(stream, event);
+                HandleEventOutcome::committed(Action::Continue, committed)
             }
             Event::Finished(reason) => {
                 for event in self.event_builder.drain() {
                     self.push_event(stream, event);
                 }
                 self.view.flush();
-                self.transition_from_streaming(stream, reason)
+                HandleEventOutcome::new(self.transition_from_streaming(stream, reason))
             }
 
             // Patch is handled by the caller before reaching here.
-            Event::Patch(_) => Action::Continue,
+            Event::Patch(_) => HandleEventOutcome::new(Action::Continue),
         }
     }
 

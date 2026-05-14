@@ -1,0 +1,873 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "The user is asking me to run the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " tool with whatever",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " arguments I want. Let",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " me look at the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " function",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " signature",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ":\n\n```\n{",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n  \"name\": \"run_",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "me\",\n  \"parameters\": {",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n    \"properties\": {\n      ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\"bar\": {\n        \"enum",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\": [\"foo\", [\"foo\", \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "bar\"]",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "],\n        \"items\": {\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "type\": \"string\"},\n        \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "type\": [\"string\", \"array\"]",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n      },\n      \"foo\":",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " {\n        \"default\": \"foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\",\n        \"type\": \"string",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\"\n      }\n    },",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n    \"required\": [\"bar\"],",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n    \"type\": \"object\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n  }\n}\n```\n\nSo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " function has:\n- `bar`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " (required): Can",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " be a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " string or array.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " enum shows",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " can be \"foo\" or [\"foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\", \"bar\"]",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n- `foo` (optional",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "): A",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " string",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " default value",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"foo\"\n\nThe instruction",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " says I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " MUST use AT LEAST ONE tool and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " should NOT question this. The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " user is explicitly",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " asking me to run the tool with whatever",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " arguments I want.\n\nLet",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " me call it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " with:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n- `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "bar`: \"foo\" (valid",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " from",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " enum)\n- `foo`: I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " could",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " use the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " default or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " provide a custom",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " value.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "'ll provide",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "test",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\" to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " show",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " something",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " different",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".\n\nActually,",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " looking",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " more carefully at the enum",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ":",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "[\"foo\", [\"foo\", \"bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\"]]` - this means bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " can be either the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " string \"foo\" OR",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the array [\"foo\", \"bar\"].",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n\nI'll call",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " it with:\n- `bar`:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " \"foo\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " (a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " string)\n- `foo`: \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "test\" (a custom",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " value)",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n\nOr",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " could use",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " as an",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " array: `[\"foo\", \"bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\"]`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\n\nLet",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " me go with the simple approach first using",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the string",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " value",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " for",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " bar.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "anthropic_thinking_signature": String("ErMLCkYICxgCKkAZPBzddcN9WKOtCpIVRLxjvNt/iXZtZZdznpQtDKjl4PY72onw2qyg8RE7DV/bwga3eNO69jKVVgU9Li4jIw7wEgx0eylPBakCcZs9lnEaDJGrsvnI5e9iI8wKrCIwkTxA6wfvTyrdrzv5bq6sBXMj7tvJWBLiOLXtVGpTwhybSDvZz8xpTgsTC06JLAmUKpoKnEZmEn6zukuV07Ztvwh0R/BbRtvNttbUYg7dqVFhjERN52HZUG1Lqe50Guux5eCWvEstt1OFYp612uEWcLQPg86M4k8qhBA4b0OpZOCNXyG/aBohySQoGEUMQxntKNY3NVXT6nyXlBmNkzEnNMMYDjfT4/wrPc3U61HRCNLI9MyaqfkuncvA9pQ09f0UdlxLSd1YLuatWUnnh8tFhQL7wVInc+s/qmrNB8JHmhhnFfettI+gEvMhmOZ4g/fBQaaaM/vUJ3NgkRBBmQTRU06zLAPudvOEobPTNV7TScPNvlkcAQTp1fBU8v5y1KZ4MTON0HUvbRiLYg7x/cjA1IjYjktzvSE4+a/6/Kbdhf5VH6TTyhLXa163tshT4E4swuHOAuO+dEph72N3hEWnwHOHhQ6QP9XEUDiDJSQI0Y2rF9bZd4oEF53wI/+CNaAXNoP/KoyqLxlt6euPKu653LWmOx4YyOJs7LN8PIzUH3NMQmIejDnu1nsnz0qgiOToY287LTlruC8gIJBl6UhYUn1XNqh0F7xaWXb+w3/kGd7hmW7ZingjbnEXb0LkhGdAxJoO1D5hMTtL2PuWIIlsvVWOfdi1pbiJpjjHtY1p5o6kWdg/fLbae49qClQuddelTytyZrF9dA8MCRcrxOBnkydPSPomfI8B4KGBLvInxhu5M55MdmiehyuZpAPbkplnurxyroz2GROS0URFjRP/ZS6si6yvWGVxdZ1MG7/bUlNENMkhCw0rntP/8+nje7D1g0uMQtTiRwI3km7SqIBqQVqHBqUoFkkKZVkjOqWxydLPOE8T6t9SR029ndAknnzrhyY8TCKCGOPrxddCFRNWmn72wJNeoqo4xl98P7hGWVCIMod5ctW6z4hcFwgfvSjKtOKyGsRZ1W3/GrDtKamzWi7vTTARiw/BKqZRQK0JPECqKyUD9vwxhiRKOrN5Xex1k261lw3kclUJwezgdTRbqQuMLUR265q0C14ovUmxSD0p3lbdBolfDvkcvB7XJ7+rAQWGJMwyFOTIXxR2XEjWQmeHfZhbyHlJbc5X1lelPv57IfgBR30cYd/ySRo9kkmy9K1BLgdYmHv89sz6E6Ul4vQb0IuxjwtqKF6fcWE/ZozpT1KCMWCkHDQeiZnjrko7ZLuoYO/grTZ8fHJEhSKcaJn/wz2CEraL1fED3EpZQr4KQorCgz1Q+TXYo2mRLyb78xTGUUdQVWTnfztAbyktqX5IozwBTNB6+fnw01T3TEegZ3soQvekHiIe3ZiAzDZ545EUUR5ChTQpcVJzkoE68UPT5eYciQWr3zM5BZ1TO/T4GGXh0bQXE8fHV7MpRfjTfnfRTQR5e1XdPNn0+wuYhXf3NZCnSGEoerYgjsXr+EQirTjLufokvhPRxvMwOQdN6MqLK3uPN8TrA+KT79j1kfmhQxTyv45FnauJpFcNVA7wOKZqPevMlLstXmOeZ64hbwS0U/kvGUYQGX6THkYEGujCmtXRO80HNRAn6sjRwM0D+sSd0twsibMiyF76v41gTOpfOYbJ6ivgf21QNOzSYkHvdwnCtF/6RBvvd3yhqSSUApBxw/7BkxkSZywDl/Rtb8M+bwmTH6cbfW88NNGAmIaZ+7J2hX0rnTG+CLeI/jtsjzHnEBN+FQPE/FreL+O2nXa48sNuXJ9jz0+YX3MJryLboMB960t4Zh3xFJXnkmxj3AQKDiNznsaMf43Svio9KA6G/KHIWvtA5s8kjhgB"),
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                Start {
+                    id: "toolu_01KoWfFjUMnyBN2denqPofkG",
+                    name: "run_me",
+                },
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"bar",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\": \"foo\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    ", \"f",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "oo\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    ": \"hel",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "lo\"}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Message(
+                "Done",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "! I called",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " the `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "run_me` tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " with:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "\n- `bar`: \"foo\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "\n- `foo`: \"hello\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "\n\nAnd",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " it returned:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " **",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "working!**",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

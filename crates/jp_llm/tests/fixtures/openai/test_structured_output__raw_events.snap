@@ -1,0 +1,122 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 1,
+            part: Structured(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "{\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "titles",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "\":[\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "Help",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Herr",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "ington",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Hall",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " classroom",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " assignment",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " images",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "\"]",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "}",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {
+                "openai_item_id": String("msg_0f88d65ccbba21df016995b6b75c1c819496aa4ea0d6c99a50"),
+            },
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

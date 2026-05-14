@@ -1,0 +1,40 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "**Assessing the Interaction**\n\nI've identified the user's likely intent: to test the system's responsiveness. It's a simple input, so the goal is equally straightforward – a helpful and appropriate response acknowledging the interaction. The core task is now in responding appropriately.\n\n\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "**Refining the Response**\n\nI've determined the best response to the test message as \"Hello! I received your test message. How can I help you today?\". This balances acknowledgment with a prompt for further interaction. My next step is to prepare it for implementation, making it ready for a real-time interaction.\n\n\n",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Hello! I received your test message. How can I help you today?",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

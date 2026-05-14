@@ -49,7 +49,7 @@ fn test_transitions_to_executing_on_tool_call() {
 
     assert_eq!(coordinator.current_phase(), TurnPhase::Executing);
     assert!(
-        matches!(action, Action::ExecuteTools),
+        matches!(action.action, Action::ExecuteTools),
         "expected ExecuteTools, got {action:?}"
     );
     // The actual list of tool calls to execute is derived from the stream
@@ -83,7 +83,7 @@ fn test_transitions_to_complete_no_tools() {
     let action = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
     assert_eq!(coordinator.current_phase(), TurnPhase::Complete);
-    match action {
+    match action.action {
         Action::Done => {}
         _ => panic!("Expected Done action"),
     }
@@ -302,7 +302,7 @@ fn test_multi_part_tool_call_deferred_to_flush() {
 
     assert_eq!(coordinator.current_phase(), TurnPhase::Executing);
     assert!(
-        matches!(action, Action::ExecuteTools),
+        matches!(action.action, Action::ExecuteTools),
         "expected ExecuteTools, got {action:?}"
     );
 }
@@ -352,7 +352,7 @@ fn test_structured_output_rendered_as_json_code_fence() {
 
     // Turn should complete
     assert_eq!(coordinator.current_phase(), TurnPhase::Complete);
-    assert!(matches!(action, Action::Done));
+    assert!(matches!(action.action, Action::Done));
 }
 
 #[test]
@@ -510,4 +510,99 @@ fn interrupt_reply_renders_user_header_for_new_request() {
         after_alice.contains("\u{2500}\u{2500} jp "),
         "expected a fresh `── jp` header after the Reply, got: {output:?}"
     );
+}
+
+/// A `Flush` that produces a `ToolCallRequest` surfaces it as a committed
+/// event. The shell uses this signal directly instead of inspecting the stream
+/// tail, so the dispatch trigger is unambiguous.
+#[test]
+fn flush_producing_tool_call_surfaces_request_as_committed_event() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    coordinator.handle_event(
+        &mut stream,
+        Event::tool_call_start(1, "call_42", "fs_read_file"),
+    );
+    coordinator.handle_event(
+        &mut stream,
+        Event::tool_call_args(1, r#"{"path":"foo.rs"}"#),
+    );
+
+    let action = coordinator.handle_event(&mut stream, Event::flush(1));
+
+    assert!(matches!(action.action, Action::Continue));
+    match action.committed {
+        CommittedEvent::ToolCallRequest(req) => {
+            assert_eq!(req.id, "call_42");
+            assert_eq!(req.name, "fs_read_file");
+            assert_eq!(req.arguments["path"], "foo.rs");
+        }
+        CommittedEvent::None => panic!("expected committed ToolCallRequest, got None"),
+    }
+}
+
+/// Regression for the duplicate-render bug: a second `Flush` after the
+/// tool-call buffer has already been drained must NOT re-fire dispatch.
+/// The previous implementation inferred dispatch from the stream tail,
+/// which kept pointing at the prior `ToolCallRequest`; the new contract
+/// drives dispatch off `EventBuilder::handle_flush`, which is idempotent.
+#[test]
+fn duplicate_flush_after_tool_call_does_not_surface_request() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    coordinator.handle_event(&mut stream, Event::tool_call_start(2, "call_xyz", "run_me"));
+    coordinator.handle_event(&mut stream, Event::tool_call_args(2, "{}"));
+
+    // First flush legitimately produces the tool call.
+    let first = coordinator.handle_event(&mut stream, Event::flush(2));
+    assert!(
+        matches!(first.action, Action::Continue),
+        "first flush should continue the stream, got {first:?}"
+    );
+    assert!(
+        matches!(first.committed, CommittedEvent::ToolCallRequest(_)),
+        "first flush should surface the request, got {first:?}"
+    );
+
+    // Second flush of the same index — the kind a misbehaving provider
+    // would emit — must be a no-op for dispatch. The stream tail is
+    // still a `ToolCallRequest`, but that's no longer the dispatch
+    // signal.
+    let second = coordinator.handle_event(&mut stream, Event::flush(2));
+    assert!(
+        matches!(second.action, Action::Continue),
+        "duplicate flush should continue the stream, got {second:?}"
+    );
+    assert!(
+        matches!(second.committed, CommittedEvent::None),
+        "duplicate flush must NOT re-dispatch, got {second:?}"
+    );
+
+    // And the stream still has exactly one tool-call request — the
+    // second flush did not append anything.
+    let tool_calls = stream
+        .iter()
+        .filter(|e| e.event.as_tool_call_request().is_some())
+        .count();
+    assert_eq!(tool_calls, 1);
 }

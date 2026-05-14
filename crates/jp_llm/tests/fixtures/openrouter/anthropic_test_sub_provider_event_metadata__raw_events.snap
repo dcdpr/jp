@@ -1,0 +1,245 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "anthropic_thinking_signature": String(""),
+                "openrouter_metadata": Array [
+                    Object {
+                        "index": Number(0),
+                        "field": String("anthropic_thinking_signature"),
+                    },
+                ],
+            },
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "This",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " is a simple",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " test",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " message. The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " user is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " likely",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " checking",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " whether",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " I'm",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " working or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " testing",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " my",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " capabilities. I should respond in a friendly",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ", helpful way",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " confirm",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " that I'm functioning",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " an",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "d ready to assist.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "anthropic_thinking_signature": String("EvQCCkYICxgCKkBUOzDfSgVcC/aShJcLfq6lq/mu26rxHBthz9cb6m2Tc/iVF5A/l3ipUuMjuitreUY3jsk+8ahxIiqflllrO9u5EgwtN2cpwS9StK/DkkQaDNFcgB5Yn+XSI755TiIwabB58ApAyR6nZlPqIP6G9YTVap9IbtQWWajoRUYdIHGudhjcoXNjCZtADp1SLkG6KtsBa0k6H5JYz4Mib+as1xZ21NrVndNk3Mg86YM8z++kSHbkaJInEnGkdVh/AiXswO6QIwxzMfrrPhP+tdYDHnUWRZ5Hb8sSUmXtjBzPiSFfCUqx4DpevuCj4cNL+XSUbEJgi2ataYE7P6LLiQacrEo7x97KZiaClq21ZJ3SRDWTW04sfpJ0ugKnBi4m8im18crn5nDRWeoa9HM4Vv4T1fnuDm+rF4ceKS5gzAUfLcQFKQVDLQaFIes2Aquv7kYxGiDDjWSIXns4/2nsv0ymnv714RSWtYACZkm96I+lGAE="),
+                "openrouter_metadata": Array [
+                    Object {
+                        "index": Number(0),
+                        "field": String("anthropic_thinking_signature"),
+                    },
+                ],
+            },
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Hello! I'm",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " working",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " an",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "d ready to help.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " What",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " would you like to know",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " or discuss",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "?",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

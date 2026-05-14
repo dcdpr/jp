@@ -1,0 +1,238 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "openai_encrypted_content": String("gAAAAABpquoe6AOXGp5vYRlcK52mPH_3FPYXVzoiQWE0JoNV-fIEtxz9q6hHntbV4bQ-Jt_jFLlnKinYTuDeuNUvRqLHar0bvmeTYTmJhtwI107tYzaQJAbxLfkxs5Eon9Zh-fSpm5UsyKf5WMFaSNv20Bq4znF6i6-TtcQL5OD8xXmn1rkAIDYn4PsTHCXNMS0zmc_JAHIuFyuBDtmA2iHWNV5fD0lm5g0sMEI9wHceQuGfyzfnF-BXilwz0M4bGxTxLtBFoKH4orGaflpE5vYONGdyTuTSngLoMw53jARuSHWx5ZthNVrhcYVV_oXFjYwIjg2-FIfXnP1PoyWLQrUdqMYFvxNwqoSi9V93g4OXNEO-XVQbW_Vn6GposVZQ6kXycFSNGzM56RN0fyKYSCPy-fl4rWnOKa88hOW5XdpdxV4264s3vmTkDy8ywISoR28dE8Hk5sWk1w-hhi1_mppIg7-6lpbY1FDj2Y_Rx2NoMe7EVd2UDNJGqi4_0EWmkmMj2fxm7uidUvlU5bxw-ITWQi0erJqWQdQTp69EXuzDeSaDdWAH1ZuFbWx7K2VVa3LYQ4MUiHg5hl0hbJIkisHyQXGnJr-2zZgdQnafTYK70UYda1KNeRkR3w48fTbrI6Scp-PVHO_6eyURuuqC1pFnTth23g4CAWV23JBGuSQxHdC6x9hdiYe0Zm4VQkJYPC8nGs2HEukPAQc0Qv1Cf-ZllllUsFBnA6_LCiiRODg6Pe4UYQGYQaHGDQ_4YkPEIyEJiqRXSqedfhSc24eB7K4F0qr8O66cjr5Lmh5bnxTpyKcaL5jrx--6vX20NnQFVQmJTyVOdg8lpJbvJhOePQWO4Qjqe9d8u-3u14AseIo6Rlns3V_PIJQDftkS066rqLjlj5onqOLB"),
+                "openrouter_metadata": Array [
+                    Object {
+                        "id": String("rs_023ab01049dcaf390169aaea1de2288194885412d44aa13592"),
+                        "index": Number(0),
+                        "field": String("openai_encrypted_content"),
+                    },
+                ],
+            },
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                Start {
+                    id: "call_Vvg5Dy9TkCdqYIkRawxATO3Z",
+                    name: "run_me",
+                },
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "hello",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\",\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "bar",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\"}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Other(
+                String("tool_calls"),
+            ),
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "openai_encrypted_content": String("gAAAAABpquof7IcULL7H8xd3HSLpVOtEwoJyuBwK-UrsmJL_D_-sr2nRxRw1WNd0fSBqQ-DyAi8WFk5L-VnDWIbOj7lkbCXZb__H6EXggDD_pkpmK4ShmWL6bABywqP2B1pjhdSe6OTd-nfnCNm8sTFhHutC6FyHNf-DUL3Mc5IF_6TP_qxGSntO_DqM_4oYlZ2LSWPbyxWzWX9jGlZR--epx0QNSxBZ57fn9bB8EZfINtXKrptcqZir27CHcd74vWTUmZYYJVtubdqJoyQBtB97SfaxZW7BNFAxlwDPDaMaqpNZzahzZtYt01xvu02AVIb0kBq14e46iyALMDbd-2pJ8js4yUIzraz8Cb-evko9-Az-GHyqe-8wiI7_aPYoWli3Fj7cKAbaia-xTVNRkq6Gs_GcSQUqblF6KBHZ77cdZelwNa350QO8SY3Kztn7CjZk_s1gzA-kwM9n_gOijEcdvyQKS6xYuPX8lq4HFFiEoD8bhBboAjzNpetNolBAQDqPSi0xwuC6YNB2_Ypokw2OQmlvjD1X93mlzlUotLLjrvJKuU6fQwNSY-ceAc37J2A8oXSP_OfNutWsDfXe2fdi0BHlGzq8IWUEGCZ_ftH-fKXrIlBftvVG2HO3L63mzuEIglgyLfMvZKIRCwwbVUu99ImvoEaNNtQivMigNbR2U-XEafP9TyNtkMTFJ2v7lhOHba__rdVRH1wuOn7jR2CswSs7ntDAlqJzEIWLwlWICDPGIYhynYW9l0qCCpl-MH0wD_LJ50XKRnJIseeEFfCDIgsh7SeULVOW8XBEs3wCs2D05EvLNTCKQSQp1tI3khSw4hkMsei5-LZPn-bcd8r-BPK3JU4OjjQZ2mSbWkJj4zgTIWwjHrUTzwbm5I5iHQZW7MPkAOB9"),
+                "openrouter_metadata": Array [
+                    Object {
+                        "id": String("rs_024d31edff8a68450169aaea1eefa88193adaa0b31f3442216"),
+                        "index": Number(0),
+                        "field": String("openai_encrypted_content"),
+                    },
+                ],
+            },
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " ran",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " returned",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ":",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "working",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "!\"",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

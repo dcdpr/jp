@@ -1,0 +1,172 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: ToolCall(
+                Start {
+                    id: "toolu_01E4ddxa3xX41QXso65PHvCJ",
+                    name: "run_me",
+                },
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"bar\": \"f",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "oo\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    ", ",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\"foo\": ",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\"foo\"}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Message(
+                "Great",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "! The tool ran successfully with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " the arguments `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "bar:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " \"foo\"` and `foo:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " \"foo\"`,",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " returned",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " \"working!\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " as the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " response",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                ".",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

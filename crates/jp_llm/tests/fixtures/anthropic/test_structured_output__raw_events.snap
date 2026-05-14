@@ -1,0 +1,50 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Structured(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "{\"titles\": [\"Generating",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                " a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                " Conversation Title\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "]}",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

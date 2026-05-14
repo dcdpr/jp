@@ -1,0 +1,170 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: ToolCall(
+                Start {
+                    id: "toolu_0113bSV1GiCA46VddyWm86oR",
+                    name: "run_me",
+                },
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"bar\": ",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\"foo\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    ", \"foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\": \"foo\"}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Message(
+                "Done",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "! The tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " ran successfully with the arguments",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "=",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "foo` and `foo=foo`,",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " returned",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " output:",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "working!\"",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

@@ -49,7 +49,7 @@ use super::{
         inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
         spawn_line_timer,
     },
-    turn::{Action, TurnCoordinator, TurnPhase, TurnState},
+    turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase, TurnState},
 };
 use crate::{
     cmd::query::tool::coordinator::ExecutionResult,
@@ -390,10 +390,15 @@ pub(super) async fn run_turn_loop(
                                     });
                             }
 
-                            let is_flush = matches!(event, Event::Flush { .. });
                             let is_finished = matches!(event, Event::Finished(_));
 
-                            let action = conv.update_events(|stream| {
+                            // `handle_llm_event` returns turn control plus
+                            // any newly committed event that needs immediate
+                            // shell handling. We dispatch on the committed
+                            // event, not on the stream tail: a duplicate flush
+                            // from a misbehaving provider commits nothing and
+                            // so cannot drive a double dispatch.
+                            let (action, committed) = conv.update_events(|stream| {
                                 handle_llm_event(event, &mut turn_coordinator, stream)
                             });
                             match action {
@@ -402,22 +407,13 @@ pub(super) async fn run_turn_loop(
                                 LoopAction::Return(()) => return Ok(()),
                             }
 
-                            // On Flush of a tool call: clear the temp line,
-                            // prepare the executor, decide permission, then
-                            // render the tool call header + arguments. For
-                            // attended tools the permission prompt comes first,
-                            // so the user approves before seeing the full
-                            // rendering.
-                            let flushed_req = is_flush
-                                .then(|| {
-                                    conv.events()
-                                        .last()
-                                        .as_ref()
-                                        .and_then(|e| e.as_tool_call_request())
-                                        .cloned()
-                                })
-                                .flatten();
-                            if let Some(req) = flushed_req {
+                            // On a flushed tool-call request: clear the temp
+                            // line, prepare the executor, decide permission,
+                            // then render the tool call header + arguments.
+                            // For attended tools the permission prompt comes
+                            // first, so the user approves before seeing the
+                            // full rendering.
+                            if let CommittedEvent::ToolCallRequest(req) = committed {
                                 tool_coordinator.set_tool_state(&req.id, ToolCallState::Queued);
                                 tool_renderer.complete(&req.id);
 

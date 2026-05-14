@@ -6,5 +6,5 @@
 pub(crate) mod coordinator;
 pub(crate) mod state;
 
-pub(crate) use coordinator::{Action, TurnCoordinator, TurnPhase};
+pub(crate) use coordinator::{Action, CommittedEvent, TurnCoordinator, TurnPhase};
 pub(crate) use state::TurnState;

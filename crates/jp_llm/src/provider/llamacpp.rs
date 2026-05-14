@@ -99,6 +99,7 @@ impl Provider for Llamacpp {
             extractor: ReasoningExtractor::default(),
             tool_call_indices: Vec::new(),
             reasoning_flushed: false,
+            message_flushed: false,
             finish_reason: None,
             is_structured,
         };
@@ -129,6 +130,12 @@ struct StreamState {
     /// on finish.
     tool_call_indices: Vec<usize>,
     reasoning_flushed: bool,
+    /// Tracks whether `Event::flush(1)` (the message/structured index) has
+    /// already been emitted in this stream. Without this gate, the
+    /// `finish_reason` chunk and the `[DONE]` sentinel both emit it,
+    /// producing a spurious second flush that downstream consumers can
+    /// misinterpret as a re-dispatch signal.
+    message_flushed: bool,
     /// Captured from `finish_reason` in the last choice delta. Emitted as
     /// `Event::Finished` when the `[DONE]` sentinel arrives.
     finish_reason: Option<FinishReason>,
@@ -161,8 +168,19 @@ fn handle_sse_event_sync(
                     state.reasoning_flushed = true;
                 }
 
-                // Flush message content.
-                events.push(Ok(Event::flush(1)));
+                // Flush message content if we never did.
+                if !state.message_flushed {
+                    events.push(Ok(Event::flush(1)));
+                    state.message_flushed = true;
+                }
+
+                // Drain any tool call indices that weren't flushed via
+                // `finish_reason`. In well-behaved streams this is empty —
+                // the safety net guards against a missing `finish_reason`
+                // chunk that would otherwise orphan the tool call buffer.
+                for index in state.tool_call_indices.drain(..) {
+                    events.push(Ok(Event::flush(index)));
+                }
 
                 events.push(Ok(Event::Finished(
                     state
@@ -271,18 +289,29 @@ fn handle_sse_event_sync(
                         events.push(Ok(Event::flush(0)));
                         state.reasoning_flushed = true;
                     }
-                    events.push(Ok(Event::flush(1)));
+                    if !state.message_flushed {
+                        events.push(Ok(Event::flush(1)));
+                        state.message_flushed = true;
+                    }
 
                     if matches!(reason.as_str(), "tool_calls" | "stop") {
-                        for &index in &state.tool_call_indices {
+                        for index in state.tool_call_indices.drain(..) {
                             events.push(Ok(Event::flush(index)));
                         }
-                        state.tool_call_indices.clear();
                     }
 
                     // Per the OpenAI spec.
                     match reason.as_str() {
-                        "length" => state.finish_reason = Some(FinishReason::MaxTokens),
+                        "length" => {
+                            // Active tool-call blocks are structurally
+                            // incomplete when the model hits the token
+                            // limit. Drop them here so the `[DONE]` safety
+                            // net does not commit truncated arguments —
+                            // mirrors `EventBuilder::drain` and the Google
+                            // provider's MaxTokens behaviour.
+                            state.tool_call_indices.clear();
+                            state.finish_reason = Some(FinishReason::MaxTokens);
+                        }
                         "stop" => state.finish_reason = Some(FinishReason::Completed),
                         _ => {}
                     }

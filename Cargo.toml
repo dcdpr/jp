@@ -64,6 +64,7 @@ duct = { version = "1", default-features = false }
 duct_sh = { version = "1", default-features = false }
 dyn-clone = { version = "1", default-features = false }
 dyn-hash = { version = "1", default-features = false }
+eventsource-stream = { version = "0.2", default-features = false }
 fancy-regex = { version = "0.17", default-features = false }
 futures = { version = "0.3", default-features = false }
 gemini_client_rs = { git = "https://github.com/JeanMertz/gemini-client", default-features = false } # <https://github.com/Adriftdev/gemini-client/pull/16>

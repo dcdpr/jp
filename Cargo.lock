@@ -2240,6 +2240,7 @@ dependencies = [
  "base64",
  "camino",
  "chrono",
+ "eventsource-stream",
  "futures",
  "gemini_client_rs",
  "indexmap",
