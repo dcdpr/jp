@@ -1,5 +1,24 @@
+use eventsource_stream::Event as MessageEvent;
+
 use super::*;
 use crate::provider::llamacpp::StreamChunk;
+
+fn sse_message(data: &str) -> SseEvent {
+    SseEvent::Message(MessageEvent {
+        data: data.to_owned(),
+        ..MessageEvent::default()
+    })
+}
+
+fn flush_indices(events: &[std::result::Result<Event, StreamError>]) -> Vec<usize> {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Ok(Event::Flush { index, .. }) => Some(*index),
+            _ => None,
+        })
+        .collect()
+}
 
 #[test]
 fn parse_cerebras_content_chunk() {
@@ -248,4 +267,75 @@ fn transform_schema_preserves_number_constraints() {
     assert_eq!(age["minimum"], 0);
     assert_eq!(age["maximum"], 150);
     assert!(age.get("description").is_none());
+}
+
+/// `finish_reason: "length"` followed by `[DONE]` must not flush any pending
+/// tool-call buffers. When the model hits the token limit mid-tool-call, the
+/// arguments are structurally incomplete; the safety-net drain on `[DONE]`
+/// would otherwise commit them with truncated JSON (degraded to `{}`), which
+/// could re-dispatch a partial call.
+#[test]
+fn length_finish_reason_drops_pending_tool_calls() {
+    let mut state = StreamState {
+        tool_call_indices: Vec::new(),
+        reasoning_flushed: false,
+        message_flushed: false,
+        finish_reason: None,
+        is_structured: false,
+    };
+
+    // Tool call delta with partial arguments.
+    let tool_chunk = r#"{
+        "choices": [{
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "call_xyz",
+                    "function": { "name": "run_me", "arguments": "{\"path\":" }
+                }]
+            },
+            "index": 0,
+            "finish_reason": null
+        }]
+    }"#;
+    handle_sse_event_sync(Ok(sse_message(tool_chunk)), &mut state).unwrap();
+    assert_eq!(state.tool_call_indices, vec![2]);
+
+    // Terminal `"length"` chunk: should clear the pending tool-call index so
+    // the `[DONE]` safety net cannot commit the truncated buffer.
+    let finish_chunk = r#"{
+        "choices": [{
+            "delta": {},
+            "index": 0,
+            "finish_reason": "length"
+        }]
+    }"#;
+    let finish_events = handle_sse_event_sync(Ok(sse_message(finish_chunk)), &mut state).unwrap();
+    // Reasoning was already flushed when the tool-call chunk arrived, so only
+    // the message index flushes here. The tool-call index must NOT be in this
+    // list — that's the bug guard.
+    assert_eq!(
+        flush_indices(&finish_events),
+        vec![1],
+        "only message index should flush on length, got {finish_events:?}"
+    );
+    assert!(
+        state.tool_call_indices.is_empty(),
+        "length must drop pending tool-call indices, got {:?}",
+        state.tool_call_indices,
+    );
+    assert_eq!(state.finish_reason, Some(FinishReason::MaxTokens));
+
+    // `[DONE]` safety net: must NOT flush the tool-call index, and must
+    // finish with MaxTokens.
+    let done_events = handle_sse_event_sync(Ok(sse_message("[DONE]")), &mut state).unwrap();
+    assert!(
+        flush_indices(&done_events).is_empty(),
+        "[DONE] after length must not flush any indices, got {done_events:?}"
+    );
+    let last = done_events.last().unwrap().as_ref().unwrap();
+    assert!(
+        matches!(last, Event::Finished(FinishReason::MaxTokens)),
+        "expected Finished(MaxTokens), got {last:?}"
+    );
 }

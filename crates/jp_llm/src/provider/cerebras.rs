@@ -665,7 +665,16 @@ fn handle_sse_event_sync(
                     }
 
                     match reason.as_str() {
-                        "length" => state.finish_reason = Some(FinishReason::MaxTokens),
+                        "length" => {
+                            // Active tool-call blocks are structurally
+                            // incomplete when the model hits the token
+                            // limit. Drop them here so the `[DONE]` safety
+                            // net does not commit truncated arguments —
+                            // mirrors `EventBuilder::drain` and the Google
+                            // provider's MaxTokens behaviour.
+                            state.tool_call_indices.clear();
+                            state.finish_reason = Some(FinishReason::MaxTokens);
+                        }
                         "stop" => state.finish_reason = Some(FinishReason::Completed),
                         _ => {}
                     }
