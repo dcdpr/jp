@@ -1,0 +1,112 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "openai_encrypted_content": String("gAAAAABpquoV3YLVHKhMjvWrU5rDwucSWl7_H6NYSylYKuYrfnDW3oQdRP3NIVzgYr7PhsFmQ9tqAkgZ6_zZkjcJINKIK5cw-1M0O5qNoVgk8zOy21aefTNRi0O93iuJFk6IHp8HfxwXXEchzlIfzUaY6-YB7rqptsoVTd3k5sGdgoK7FXdweFGZb_R6dB2Qlo48oyw6UB-WSa3nqxvX2QmZgqBh9-xO2y-RUQi6R3bcAPQqOJ8hI89PZzMggdZ9mxccOOAW_6-_PgpWvC9xBy5h6YBjJ71z3xzQ28q1L6xd9PHZWKrgk0MX9lzeCCboekWaWtwLU9BIR_QrKMD_9tzkQdE_3zMQQUtOIIaXvjjfavODSSz_3LyABOfCjX-RyT4TroncoXK56j6-gNpziJPGrOK-U1-vp-bUZ8bAWKa0TuW-ro0XCnCKcrudHXkGmD3aWi8pannPBKDSTDi8ARH0yIYgQLunrmJuhAe8ij1-1X6mQ5yDhtGNWOSQc8Tp_Ed_HRNLNvn0Govmf6-2UNQqWbRnNl810JCMfnff56EPhdDBHZnBOZJ2sGBygYnFaw3U6SBVzwLEK5lS6_WXhOaTIzvUIcA3oEm_zJNXBaf2aUuMVk2dIR1ttHI60KOpomKsEhB9OUZv-JMeotW7kwwlp7nn0_W11kxTmprb0Mzjzje505zV213UeGfGOb2W_nOCZRuyC4ZDYuur2bqvICx1eq1vKBIqZE0yRPP4k3RbqAne-xGfa6_gXOEJ4hBfpICnXnmoNr64UZ7tJ5ymVKrW46LnVl2WKhQziWGvfVW6ey5T9yLUjbaD7AiYCgtOxyEtWFvLHSjjB64eObfUOBWgq8Jx-tCh9Apy1KtH_V0xeaQ0zjWzJih0bTc8YPHNFFVN3SkPGbXK"),
+                "openrouter_metadata": Array [
+                    Object {
+                        "id": String("rs_0d2f8b32ba1b0ee00169aaea1505a08193836d0944a0e1489c"),
+                        "index": Number(0),
+                        "field": String("openai_encrypted_content"),
+                    },
+                ],
+            },
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "{\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "titles",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "\":[\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "Generate",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " title",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " for",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " this",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " conversation",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "\"]",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "}",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

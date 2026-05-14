@@ -1,0 +1,515 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "openai_encrypted_content": String("gAAAAABpquoalqWS1Im8NIBi5Xj4UD2aFxBv0JKgoe7MOD5ED62L5_QxYXB6duvD0OCVrjfyth7e7Na45bi_00IEWlv-dpO5r84Nq3peGGUcvessSxaILmAxQtnHM6aYqRZybAdZeSaxBCi9s6tB_BNOrFxsnFIkMSX7d3YVkk0wMRFb0WDZBiCWswP6JnZxMaWYPmleLTH0DQRIjkW9uwgJ53PcOYR0M79ZLiOaC97cT-WE94pPzJFUOuIqB5DYdxGJwVj7TY821e_LB9m36vTbdqlvRBjUnEl8TS6qCbBeriTGV5-Jy1s7MYEnM_SO-zkimkvaL-BZxdYJ1fE38vTGa9-iyfoWuojtyACpRjBfN9F6bypFDeBqCtJ39iohkqgCZLOwdxYGkl_k_5pCA8-UzvZYPwjhm4wzMSZbB8IQFGKVsAJ69P4HQAHlFnaFaBMm1oQHgIPVgORzf4kgOB4GRsP7w9ilN7qZK_jFI7LgZ05b7qC1eBM5PmS2W2nDqyI1GJ5uwAeCdtz6mkRFO0F73s7883RePLGcn3N5t_Tx3dOJ8MFtpchMakshcQesz9QxbqzJpy4PfRO7xRErCJ2INyF5ijFCwPC7s16BI8u6sRlbEGRPVkB3xdKrvibptbYFF_LV105q7accDouMj8gLFNFl47DujaPEkuZ8BOpUybh8m_zKNvijIzbzWYfoF6cO5-55EKQKinOrbPTkBaoWtJuzIG93OlFqJQQSMcwAq81Ss2oWE-MsWusM48RatUGvB-LAeqAzGDMyUYZ5x6lhJeeawg-x4dA5EJikovBGmzdBmOap9x9XLdG1MJ1yoYnAwqjUztHOwxMFOEI5dXuWVwXREdEck9W9cIqkA_CXdoLP06_tSWwKnpwJBgw9FP2ePUSMXVVo"),
+                "openrouter_metadata": Array [
+                    Object {
+                        "id": String("rs_03cb48bc16b08d990169aaea1a04648190ae64b0a6fe7d2c83"),
+                        "index": Number(0),
+                        "field": String("openai_encrypted_content"),
+                    },
+                ],
+            },
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                Start {
+                    id: "call_L9Z0sQ0ZuY1BxWOfPbnWU7wf",
+                    name: "run_me",
+                },
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "run",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    " with",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    " default",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\",\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "bar",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\"}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 2,
+            metadata: {},
+        },
+        Finished(
+            Other(
+                String("tool_calls"),
+            ),
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "openai_encrypted_content": String("gAAAAABpquobLwKl3cgu7A8KnfvhGqv4bbaiLckdrbb28iVGaV788n99KrC1Mc-Rrk0-D_r6LBRa7-cSc2dCa-9AFPxxQGy3_6P2KOoN14igBWA3GK-TCI8QOAPT1WLimWiC-9pPh7yUsaPJo-B2y5OyBUkYNT0ImcoMYQ9Ac-SK9RBUcoDDw9EgjHEnd-y2TzIZFZXnL6m8wokbonw5rcCuBF_-XUM0ay7GcO5E9C3F7kmxZawfHu9BO3EsoGwbcTNMCS0jUDTxyLhf5hu10gwWSbnSPf2vFvp9z8kSKlOE6IbInNa6M_54UUXJqfyIUeMgHKoeXhLvfkss_bxcYdomDjTTr1vJeHXbinj6m12dogbNAEZDWAtV1OXeGrvYiZgb3fq6sr5nan0HfDOmmt-4e1PjPtbEZxKe7JvprvECzXrpOsTSIBU9CIoHbOfWwCdv8P9CgHJWeKP3ZbDvwmUZNIdHyIgYHPVrvmkn0hGJSsEgs00nqcwoxT9fUVrws3ijWBh0C3tGPvIgomF1MIPo_RdcyHgOIBS3V-t015D1nfL3IFc1W7SqvusOOUA_EUZw_1ZAyE6sdo2EIzq5Sl-XP_GBwJHkbp4Gf5d-SNbVxPjgBGuiRbzZb0QBKNqpMisM7WrWw_ZdF6fgsdWGPPAl7AhOHzJa8Cxn5NUoV3Vpa_lnIFyYHEh4KxoQBMwCJ9xLqwd3gS0-BaGS_iy17O7owR6N6IBHaqwhMAiBBvGiztj1vZM4c0RARB9gnFlpIwY85kI5mqpZ6lrdCUz-mNbLVixXN1xdMDFyn2L085fMeR9A6tQKJfHoTZQAAp-yxxrcnLTFyDq8Vo4wRKvbNowKJo7Nn7AkwsxOPpZEewuQZckraOILDanWgcyNspM3VsguhDT_UDIP"),
+                "openrouter_metadata": Array [
+                    Object {
+                        "id": String("rs_0c59ab0afca9d0b00169aaea1b4e848190b959cc1fc2e098c1"),
+                        "index": Number(0),
+                        "field": String("openai_encrypted_content"),
+                    },
+                ],
+            },
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " ran",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " default",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " arguments",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " responded",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ":",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "working",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "!\"\n\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "If",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " you'd",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " like",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " me",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " run",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " again",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " different",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " arguments",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " tell",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " me",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " what",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " inputs",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " use",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " (",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " say",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "choose",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " for",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " me",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\")",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " I'll",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " run",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ".",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

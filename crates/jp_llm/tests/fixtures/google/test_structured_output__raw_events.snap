@@ -1,0 +1,29 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Structured(
+                "{\n  \"titles\": [\"Conversation Title",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                " Request\"]\n}",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

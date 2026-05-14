@@ -1,0 +1,70 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "The user is asking a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " simple math question.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "",
+            ),
+            metadata: {
+                "anthropic_thinking_signature": String("EtIBCkYICxgCKkBN5NJqJIeLCiAqkfpaWfsOkN1BR8OlbxUPrnJrvLg2wpB10LFEOdpBuDkqar3RoqRqnYDw3tWf0d8v3vqOZ741EgwcFNxoO4XttUTOs30aDJBSCDDS7MM12o/tKCIwBEsXqD98nDRhYwdqykW1nRvRO0gtiT6Yg+id8XgwgBQs8DazQhyqToQh4DH0UmbNKjo922mzjOT81xiWsuXze5CXHpy08TzdpvwPHvlL9yryWwGrvKWOr2fG6I8AgmWs9UQaVX0wUhy5jtpCGAE="),
+            },
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "2 + 2 = **",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "4**.",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

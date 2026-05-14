@@ -1,0 +1,40 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Reasoning(
+                "**Acknowledge the Test**\n\nI've acknowledged the \"Test message\" input. My intent analysis identifies this as a system check to gauge functionality. Currently, I'm determining the most appropriate and concise response to ensure responsiveness.\n\n\n",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "Message received loud and clear! I am functioning correctly.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " How can I help you today?",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

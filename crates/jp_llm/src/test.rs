@@ -392,12 +392,14 @@ pub async fn run_chat_completion(
             let mut conversation_stream = None;
 
             let mut all_events = vec![];
+            let mut raw_events: Vec<Vec<Event>> = vec![];
             let mut history = vec![];
             let mut model_details = vec![];
             let mut models = vec![];
 
             for (index, mut request) in requests.into_iter().enumerate() {
                 all_events.push(vec![]);
+                raw_events.push(vec![]);
 
                 if let TestRequest::ToolCallResponse {
                     result,
@@ -498,6 +500,14 @@ pub async fn run_chat_completion(
                             .await
                             .unwrap();
 
+                        // Capture the raw provider event stream before it's
+                        // consumed by EventBuilder. This makes provider-level
+                        // misbehavior (duplicate flushes, mis-ordered events)
+                        // visible in snapshots — the `all_events` output
+                        // below only sees what `handle_flush` produced and
+                        // therefore filters out idempotent duplicates.
+                        raw_events[index] = events.clone();
+
                         let stream = conversation_stream
                             .as_mut()
                             .expect("Chat request always sets conversation_stream");
@@ -574,6 +584,7 @@ pub async fn run_chat_completion(
             if has_chat_request {
                 outputs.extend(vec![
                     ("", Snap::debug(all_events)),
+                    ("raw_events", Snap::debug(raw_events)),
                     ("conversation_stream", {
                         // ConversationStream doesn't implement Serialize directly;
                         // decompose it via to_parts for the snapshot.

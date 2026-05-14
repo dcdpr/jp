@@ -15,7 +15,7 @@ use tracing::{info, trace};
 
 use super::handler::{InterruptAction, InterruptHandler};
 use crate::{
-    cmd::query::turn::{Action, TurnCoordinator, TurnPhase},
+    cmd::query::turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase},
     signals::SignalTo,
 };
 
@@ -98,31 +98,41 @@ pub fn handle_streaming_signal(
 /// Stream errors are handled separately by
 /// [`handle_stream_error`](crate::cmd::query::stream::handle_stream_error), which
 /// is the single source of truth for all retry logic.
+///
+/// Returns the loop-control signal alongside any committed event the shell
+/// should react to immediately. The committed event is surfaced directly from
+/// [`EventBuilder::handle_flush`] (via the coordinator) so the shell never has
+/// to infer it from the conversation stream's tail — a duplicate flush from a
+/// misbehaving provider commits nothing and so cannot cause a double dispatch.
+///
+/// [`EventBuilder::handle_flush`]: jp_llm::event_builder::EventBuilder::handle_flush
 pub fn handle_llm_event(
     event: Event,
     turn_coordinator: &mut TurnCoordinator,
     conversation_stream: &mut ConversationStream,
-) -> LoopAction<()> {
+) -> (LoopAction<()>, CommittedEvent) {
     // `Patch` is a side-channel instruction from the provider to fix bad events
     // in the conversation stream. This can be handled directly instead of
     // passing through the turn coordinator.
     if let Event::Patch(patches) = event {
         apply_history_patches(conversation_stream, &patches);
-        return LoopAction::Continue;
+        return (LoopAction::Continue, CommittedEvent::None);
     }
 
     // `Retry` means the provider wants us to rebuild the request and try again.
     // Break the inner streaming loop while keeping the phase as `Streaming` so
     // the outer turn loop re-enters with a fresh request.
     if matches!(event, Event::Finished(FinishReason::Retry)) {
-        return LoopAction::Break;
+        return (LoopAction::Break, CommittedEvent::None);
     }
 
-    let action = turn_coordinator.handle_event(conversation_stream, event);
-    match action {
+    let outcome = turn_coordinator.handle_event(conversation_stream, event);
+    let loop_action = match outcome.action {
         Action::Done | Action::ExecuteTools => LoopAction::Break,
-        _ => LoopAction::Continue,
-    }
+        Action::Continue | Action::SendFollowUp => LoopAction::Continue,
+    };
+
+    (loop_action, outcome.committed)
 }
 
 /// Apply provider-issued metadata patches to historical conversation events.
