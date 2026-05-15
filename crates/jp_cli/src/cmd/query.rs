@@ -216,6 +216,21 @@ pub(crate) struct Query {
     #[arg(short = 'E', long = "no-edit", conflicts_with = "edit")]
     no_edit: bool,
 
+    /// Pre-fill the editor with the last assistant message quoted as a
+    /// markdown blockquote (each line prefixed with `> `).
+    ///
+    /// Useful for inline replies: open `$EDITOR` with the assistant's last
+    /// response pre-quoted, then intersperse your replies between the
+    /// quoted lines (mutt/email style). The complete buffer — quotes plus
+    /// your replies — becomes your next message.
+    ///
+    /// Implies `--edit`. Conflicts with `--no-edit` and `--replay`. If no
+    /// prior assistant message exists in this conversation, a warning is
+    /// emitted and the editor opens with whatever other content was seeded
+    /// (query, stdin, or empty).
+    #[arg(long = "quote", alias = "reply", conflicts_with_all = ["no_edit", "replay"])]
+    quote: bool,
+
     /// The model to use.
     #[arg(short = 'm', long = "model")]
     model: Option<String>,
@@ -544,6 +559,20 @@ impl Query {
             *chat_request = format!("{text}{sep}{chat_request}");
         }
 
+        // If --quote is set, prepend the last assistant message as a markdown
+        // blockquote so it sits at the top of the editor buffer. The user can
+        // then intersperse replies between the quoted lines (mutt-style inline
+        // reply). Missing message (e.g. brand new conversation) degrades to a
+        // warning and the editor opens with whatever else was seeded.
+        if self.quote {
+            if let Some(message) = last_assistant_message(stream) {
+                let quoted = blockquote(message);
+                *chat_request = format!("{quoted}\n\n{chat_request}");
+            } else {
+                warn!("--quote: no prior assistant message in this conversation");
+            }
+        }
+
         let (query_file, editor_provided_config) = self.edit_message(
             &mut chat_request,
             stream,
@@ -739,10 +768,11 @@ impl Query {
     /// Returns `true` if editing is explicitly enabled.
     ///
     /// This means the `--edit` flag was provided (but not `--edit=false`),
-    /// which means the editor should be opened, regardless of whether a query
-    /// is provided as an argument.
+    /// or `--quote` was provided (which implies editing). In either case the
+    /// editor should be opened, regardless of whether a query is provided as
+    /// an argument.
     fn force_edit(&self) -> bool {
-        !self.force_no_edit() && self.edit.is_some()
+        !self.force_no_edit() && (self.edit.is_some() || self.quote)
     }
 
     #[must_use]
@@ -789,6 +819,37 @@ impl Query {
             LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None),
         }
     }
+}
+
+/// Return the most recent assistant message text in the stream.
+///
+/// Walks the stream in reverse and returns the first `ChatResponse::Message` it
+/// encounters. Reasoning, structured-data responses, and tool calls are
+/// skipped.
+fn last_assistant_message(stream: &ConversationStream) -> Option<&str> {
+    stream
+        .iter()
+        .rev()
+        .filter_map(|e| e.event.as_chat_response())
+        .find_map(|r| r.as_message())
+}
+
+/// Prefix each line of `text` with `> ` for use as a markdown blockquote.
+///
+/// Empty lines are emitted as just `>` (no trailing space) so the blockquote
+/// stays visually continuous across paragraph breaks while avoiding
+/// trailing-whitespace warnings in editors.
+fn blockquote(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            if line.is_empty() {
+                ">".to_owned()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// A single tool selection directive from the CLI.
@@ -996,6 +1057,7 @@ impl IntoPartialAppConfig for Query {
             attachments,
             edit,
             no_edit,
+            quote: _,
             tool_use,
             no_tool_use,
             query: _,

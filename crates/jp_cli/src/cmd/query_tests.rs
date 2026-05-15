@@ -8,7 +8,10 @@ use jp_config::{
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
     util::build,
 };
-use jp_conversation::{Conversation, ConversationId, event::ChatRequest};
+use jp_conversation::{
+    Conversation, ConversationId, ConversationStream,
+    event::{ChatRequest, ChatResponse},
+};
 use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{
     Provider,
@@ -807,4 +810,80 @@ fn no_title_does_not_persist_into_partial_config() {
         without_flag.conversation.title.generate.auto,
     );
     assert_eq!(with_flag.conversation.title.generate.auto, None);
+}
+
+#[test]
+fn blockquote_prefixes_each_line() {
+    assert_eq!(blockquote("hello"), "> hello");
+    assert_eq!(blockquote("a\nb"), "> a\n> b");
+    assert_eq!(blockquote("a\nb\nc"), "> a\n> b\n> c");
+}
+
+#[test]
+fn blockquote_keeps_paragraph_breaks_with_bare_marker() {
+    // Markdown continues a blockquote across a `>` line; an unprefixed
+    // blank line would terminate it. The bare `>` (no trailing space)
+    // also avoids editor trailing-whitespace warnings.
+    assert_eq!(blockquote("a\n\nb"), "> a\n>\n> b");
+}
+
+#[test]
+fn blockquote_trailing_newline_is_dropped_by_lines() {
+    // `str::lines` drops the trailing terminator, so a string with and
+    // without a trailing newline produce identical quotes.
+    assert_eq!(blockquote("a\nb\n"), "> a\n> b");
+}
+
+#[test]
+fn last_assistant_message_returns_most_recent_message() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("first question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("first answer"))
+        .build()
+        .unwrap();
+    stream.start_turn("second question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("second answer"))
+        .build()
+        .unwrap();
+
+    assert_eq!(last_assistant_message(&stream), Some("second answer"));
+}
+
+#[test]
+fn last_assistant_message_skips_reasoning_after_message() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("the answer"))
+        .add_chat_response(ChatResponse::reasoning("thinking after"))
+        .build()
+        .unwrap();
+
+    // Reasoning is the most recent ChatResponse, but --quote wants the
+    // assistant's spoken text, so the message wins.
+    assert_eq!(last_assistant_message(&stream), Some("the answer"));
+}
+
+#[test]
+fn last_assistant_message_returns_none_for_empty_stream() {
+    let stream = ConversationStream::new_test();
+    assert_eq!(last_assistant_message(&stream), None);
+}
+
+#[test]
+fn last_assistant_message_returns_none_when_only_reasoning_present() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::reasoning("only thinking, no message yet"))
+        .build()
+        .unwrap();
+
+    assert_eq!(last_assistant_message(&stream), None);
 }
