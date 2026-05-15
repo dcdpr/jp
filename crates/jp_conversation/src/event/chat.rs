@@ -148,6 +148,15 @@ impl ChatResponse {
         matches!(self, Self::Structured { .. })
     }
 
+    /// Returns a reference to the message content, if applicable.
+    #[must_use]
+    pub const fn as_message(&self) -> Option<&str> {
+        match self {
+            Self::Message { message } => Some(message.as_str()),
+            _ => None,
+        }
+    }
+
     /// Returns a reference to the structured JSON data, if applicable.
     #[must_use]
     pub const fn as_structured_data(&self) -> Option<&Value> {
