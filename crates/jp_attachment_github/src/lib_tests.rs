@@ -1,9 +1,40 @@
 use jp_github::models::{
     User,
     pulls::{Review, ReviewComment, ReviewState, Side},
+    repos::{DiffEntry, DiffEntryStatus},
 };
 
 use super::*;
+
+fn entry(
+    filename: &str,
+    status: DiffEntryStatus,
+    additions: u64,
+    deletions: u64,
+    patch: Option<&str>,
+) -> DiffEntry {
+    DiffEntry {
+        filename: filename.to_owned(),
+        status,
+        additions,
+        deletions,
+        changes: additions + deletions,
+        previous_filename: None,
+        patch: patch.map(str::to_owned),
+    }
+}
+
+fn renamed_entry(prev: &str, new: &str, patch: Option<&str>) -> DiffEntry {
+    DiffEntry {
+        filename: new.to_owned(),
+        status: DiffEntryStatus::Renamed,
+        additions: 0,
+        deletions: 0,
+        changes: 0,
+        previous_filename: Some(prev.to_owned()),
+        patch: patch.map(str::to_owned),
+    }
+}
 
 fn url(s: &str) -> Url {
     Url::parse(s).unwrap()
@@ -695,4 +726,183 @@ index 111..222
     assert_eq!(included, 1);
     assert_eq!(excluded, 0);
     assert!(filtered.contains("snapshots/foo.snap"));
+}
+
+#[test]
+fn synthesizes_unified_diff_from_files() {
+    // Happy path: two modified files, both with patches. Output must
+    // carry a `diff --git` header per file plus the patch verbatim, so
+    // it can be consumed by anything that already parses unified diffs.
+    let entries = vec![
+        entry(
+            "src/lib.rs",
+            DiffEntryStatus::Modified,
+            1,
+            1,
+            Some("@@ -1 +1 @@\n-old\n+new\n"),
+        ),
+        entry(
+            "src/main.rs",
+            DiffEntryStatus::Modified,
+            1,
+            0,
+            Some("@@ -1,2 +1,3 @@\n a\n+inserted\n b\n"),
+        ),
+    ];
+
+    let patterns = compile_excludes(&[], true).unwrap();
+    let synth = synthesize_diff_from_files(&entries, &patterns);
+
+    assert_eq!(synth.included, 2);
+    assert_eq!(synth.excluded, 0);
+    assert_eq!(synth.truncated, 0);
+    assert_eq!(
+        synth.text,
+        "\
+diff --git a/src/lib.rs b/src/lib.rs
+@@ -1 +1 @@
+-old
++new
+diff --git a/src/main.rs b/src/main.rs
+@@ -1,2 +1,3 @@
+ a
++inserted
+ b
+"
+    );
+}
+
+#[test]
+fn synthesizer_filters_entries_before_emitting_patches() {
+    // The exclude filter must drop matching entries entirely — not just
+    // hide them in the output. This is the win over the diff-endpoint
+    // path: we never have to look at a 5000-line lockfile patch to
+    // decide we don't want it.
+    let entries = vec![
+        entry(
+            "src/lib.rs",
+            DiffEntryStatus::Modified,
+            1,
+            1,
+            Some("@@ -1 +1 @@\n-a\n+b\n"),
+        ),
+        entry(
+            "Cargo.lock",
+            DiffEntryStatus::Modified,
+            5000,
+            5000,
+            Some("@@ -1 +1 @@\n-x\n+y\n"),
+        ),
+        entry(
+            "snapshots/foo.snap",
+            DiffEntryStatus::Modified,
+            10,
+            10,
+            Some("@@ -1 +1 @@\n-s\n+s2\n"),
+        ),
+    ];
+
+    let patterns = compile_excludes(&[], false).unwrap();
+    let synth = synthesize_diff_from_files(&entries, &patterns);
+
+    assert_eq!(synth.included, 1);
+    assert_eq!(synth.excluded, 2);
+    assert!(synth.text.contains("diff --git a/src/lib.rs b/src/lib.rs"));
+    assert!(
+        !synth.text.contains("Cargo.lock"),
+        "excluded file must not appear in output:\n{}",
+        synth.text
+    );
+    assert!(
+        !synth.text.contains("snapshots/foo.snap"),
+        "excluded file must not appear in output:\n{}",
+        synth.text
+    );
+}
+
+#[test]
+fn synthesizer_emits_placeholder_for_missing_patch() {
+    // GitHub omits `patch` for files too large or binary. We still emit
+    // the `diff --git` header so the LLM can see the file changed, plus
+    // a placeholder summarizing the status and line counts.
+    let entries = vec![entry(
+        "assets/logo.png",
+        DiffEntryStatus::Modified,
+        0,
+        0,
+        None,
+    )];
+
+    let patterns = compile_excludes(&[], true).unwrap();
+    let synth = synthesize_diff_from_files(&entries, &patterns);
+
+    assert_eq!(synth.included, 1);
+    assert_eq!(synth.truncated, 1);
+    assert!(
+        synth
+            .text
+            .contains("diff --git a/assets/logo.png b/assets/logo.png")
+    );
+    assert!(
+        synth.text.contains("[patch omitted by GitHub"),
+        "placeholder line should mention GitHub omitted the patch:\n{}",
+        synth.text
+    );
+    assert!(
+        synth.text.contains("status=modified"),
+        "placeholder must surface the change status so reviewers know what kind of edit it \
+         was:\n{}",
+        synth.text
+    );
+}
+
+#[test]
+fn synthesizer_emits_rename_markers() {
+    // Renames need the `rename from`/`rename to` markers AND the `a/`
+    // path must point at the previous filename, otherwise downstream
+    // consumers can't distinguish a rename from a delete+add. With a
+    // patch attached, the markers come before the hunks.
+    let entries = vec![
+        renamed_entry("src/old_name.rs", "src/new_name.rs", None),
+        renamed_entry(
+            "src/touched_old.rs",
+            "src/touched_new.rs",
+            Some("@@ -1 +1 @@\n-a\n+b\n"),
+        ),
+    ];
+
+    let patterns = compile_excludes(&[], true).unwrap();
+    let synth = synthesize_diff_from_files(&entries, &patterns);
+
+    assert_eq!(synth.included, 2);
+    assert!(
+        synth
+            .text
+            .contains("diff --git a/src/old_name.rs b/src/new_name.rs"),
+        "a/ side must use the previous filename for renames:\n{}",
+        synth.text
+    );
+    assert!(synth.text.contains("rename from src/old_name.rs"));
+    assert!(synth.text.contains("rename to src/new_name.rs"));
+    assert!(
+        synth
+            .text
+            .contains("rename from src/touched_old.rs\nrename to src/touched_new.rs\n@@ "),
+        "rename markers must appear before the hunks:\n{}",
+        synth.text
+    );
+}
+
+#[test]
+fn synthesizer_returns_empty_for_no_entries() {
+    // Defensive: a PR with no changed files (rare, but legal — e.g.
+    // a force-push to identical content) must produce no body and zero
+    // counters, not a malformed blob.
+    let patterns = compile_excludes(&[], true).unwrap();
+    let synth = synthesize_diff_from_files(&[], &patterns);
+
+    assert_eq!(synth.included, 0);
+    assert_eq!(synth.excluded, 0);
+    assert_eq!(synth.truncated, 0);
+    assert!(synth.text.is_empty());
 }
