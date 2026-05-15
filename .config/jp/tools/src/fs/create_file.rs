@@ -20,22 +20,6 @@ pub(crate) async fn fs_create_file(
     path: String,
     content: Option<String>,
 ) -> ToolResult {
-    if ctx.action.is_format_arguments() {
-        let lang = crate::util::lang_from_path(&path);
-
-        let mut response = format!("Created file '{}'", path.as_str().bold().blue());
-        if let Some(content) = content {
-            let code_block = format!("`````{lang}\n{content}\n`````");
-            let highlighted = Formatter::new()
-                .format_terminal(&code_block)
-                .unwrap_or(code_block);
-            let header = response.clone();
-            response.push_str(&format!(" with content:\n\n{highlighted}\n\n{header}"));
-        }
-
-        return Ok(response.into());
-    }
-
     let p = PathBuf::from(&path);
 
     if p.is_absolute() {
@@ -48,6 +32,22 @@ pub(crate) async fn fs_create_file(
 
     if p.iter().count() > 20 {
         return error("Path must be less than 20 components long.");
+    }
+
+    if ctx.action.is_format_arguments() {
+        let lang = crate::util::lang_from_path(&path);
+
+        let mut response = format!("Creating file '{}'", path.as_str().bold().blue());
+        if let Some(content) = content {
+            let code_block = format!("`````{lang}\n{content}\n`````");
+            let highlighted = Formatter::new()
+                .format_terminal(&code_block)
+                .unwrap_or(code_block);
+            let header = response.clone();
+            response.push_str(&format!(" with content:\n\n{highlighted}\n\n{header}"));
+        }
+
+        return Ok(response.into());
     }
 
     let absolute_path = ctx.root.join(path.trim_start_matches('/'));
