@@ -278,6 +278,13 @@ impl TurnCoordinator {
                     self.push_event(stream, event);
                 }
                 self.view.flush();
+                // The provider has stopped emitting. Switch the printer's
+                // bounded-latency controller into drain mode so its
+                // per-character delay holds the current pace instead of
+                // slowing back up as the queue empties. The next streaming
+                // cycle's first chunk resets the controller back to live
+                // mode.
+                self.view.signal_typewriter_drain();
                 HandleEventOutcome::new(self.transition_from_streaming(stream, reason))
             }
 

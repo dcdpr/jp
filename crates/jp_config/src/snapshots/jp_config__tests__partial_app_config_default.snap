@@ -127,6 +127,7 @@ PartialAppConfig {
         typewriter: PartialTypewriterConfig {
             text_delay: None,
             code_delay: None,
+            max_latency: None,
         },
     },
     editor: PartialEditorConfig {

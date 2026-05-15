@@ -242,6 +242,11 @@ Ok(
                             500µs,
                         ),
                     ),
+                    max_latency: Some(
+                        DelayDuration(
+                            0ns,
+                        ),
+                    ),
                 },
             },
             editor: PartialEditorConfig {
