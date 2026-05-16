@@ -104,6 +104,7 @@ saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-multi
 schemars = { version = "1.0.0-alpha.17", default-features = false }
 schematic = { version = "0.19", default-features = false }
 scraper = { version = "0.25", default-features = false }
+semver = { version = "1", default-features = false }
 serde = { version = "1", default-features = false }
 serde-untagged = { version = "0.1", default-features = false }
 serde_json = { version = "1", default-features = false }
@@ -132,6 +133,7 @@ unicode-width = { version = "0.2", default-features = false }
 url = { version = "2", default-features = false }
 which = { version = "8", default-features = false }
 windows-sys = { version = "0.61", default-features = false }
+zip = { version = "2", default-features = false, features = ["bzip2"] }
 
 [patch.crates-io]
 miette = { git = "https://github.com/zkat/miette" } # <https://github.com/zkat/miette/pull/439>

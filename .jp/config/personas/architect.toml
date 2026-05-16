@@ -10,6 +10,7 @@ extends = [
     "../skill/github-reader.toml",
     "../skill/project-discourse.toml",
     "../skill/rfd.toml",
+    "../skill/rust-docs.toml",
     "../skill/unix.toml",
 ]
 

@@ -1,6 +1,16 @@
 
 # cargo-vet audits file
 
+[[audits.bzip2]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.4 -> 0.5.2"
+
+[[audits.bzip2-sys]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.11+1.0.8 -> 0.1.13+1.0.8"
+
 [[audits.cfb]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -328,6 +338,18 @@ criteria = "safe-to-deploy"
 user-id = 6741 # Alice Ryhl (Darksonn)
 start = "2021-01-11"
 end = "2027-02-13"
+
+[[trusted.bzip2]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2020-07-06"
+end = "2027-05-16"
+
+[[trusted.bzip2-sys]]
+criteria = "safe-to-deploy"
+user-id = 1 # Alex Crichton (alexcrichton)
+start = "2020-02-24"
+end = "2027-05-16"
 
 [[trusted.cargo-platform]]
 criteria = "safe-to-deploy"

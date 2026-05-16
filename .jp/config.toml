@@ -14,6 +14,14 @@ anthropic.beta_headers = [
     "context-management-2025-06-27",
 ]
 
+# In-workspace MCP server for browsing Rust crate documentation from docs.rs.
+# The `just serve-bookworm` recipe rebuilds the release binary on every spawn
+# (incremental, so it's a no-op when source is unchanged).
+[providers.mcp.bookworm]
+type = "stdio"
+command = "just"
+arguments = ["serve-bookworm"]
+
 [providers.llm.aliases]
 # Anthropic aliases
 anthropic = "anthropic/claude-sonnet-4-6"

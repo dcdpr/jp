@@ -1,0 +1,27 @@
+[[assistant.system_prompt_sections]]
+tag = "rust_docs_skill"
+title = "Skill: Rust Crate Docs"
+content = """\
+You have been given the Rust crate docs skill. You can look up published Rust \
+crates on crates.io and read their documentation, source, and metadata from \
+docs.rs. The following tools help you with this:
+
+- rust_crates_search: Find crates on crates.io by keyword.
+- rust_crate_search_items: Search items (types, fns, traits, methods) inside a crate.
+- rust_crate_resource: Fetch a docs / metadata / README / source resource by `crate://` URI.
+- rust_crate_versions: List recent versions of a crate.
+- rust_crate_readme: Get a crate's README as markdown.
+
+Use these to ground claims about third-party crates in their actual API \
+shape, supported versions, and prose docs — not from memory.
+
+NOTE: The JP crates are NOT published on crates.io. You should use regular \
+fs_* file reading/searching tools for those crates instead.
+"""
+
+[conversation.tools]
+rust_crates_search = { enable = true }
+rust_crate_search_items = { enable = true }
+rust_crate_resource = { enable = true }
+rust_crate_versions = { enable = true }
+rust_crate_readme = { enable = true }

@@ -1,3 +1,7 @@
+extends = [
+    "rust-docs.toml",
+]
+
 [[assistant.system_prompt_sections]]
 tag = "rust_development_skill"
 title = "Skill: Rust Development"
