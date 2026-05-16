@@ -81,6 +81,11 @@ impl ChatRenderer {
     pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
         let pretty = printer.pretty_printing_enabled();
         let formatter = formatter_from_config(&config, pretty);
+        // Configure the printer's bounded-latency controller from the
+        // typewriter style. `max_latency = 0` (the default) leaves the
+        // controller disabled, preserving the original static per-character
+        // delay behavior.
+        printer.set_max_latency(config.typewriter.max_latency.into());
         Self {
             buffer: Buffer::new(),
             formatter,
@@ -362,6 +367,16 @@ impl ChatRenderer {
         if let Some(remaining) = self.buffer.flush() {
             self.print_block(&remaining);
         }
+    }
+
+    /// Signal that the current typewriter producer is done emitting.
+    ///
+    /// Called by the coordinator on `Event::Finished` after the renderer
+    /// has flushed its remaining content. Switches the printer's
+    /// bounded-latency controller into drain mode so the per-character
+    /// delay can no longer grow as the queue empties.
+    pub fn signal_typewriter_drain(&self) {
+        self.printer.mark_typewriter_drained();
     }
 
     /// Cancel the reasoning timer if one is running.

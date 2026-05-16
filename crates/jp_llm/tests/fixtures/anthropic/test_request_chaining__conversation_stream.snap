@@ -125,6 +125,10 @@ expression: v
         "code_delay": {
           "secs": 0,
           "nanos": 500000
+        },
+        "max_latency": {
+          "secs": 0,
+          "nanos": 0
         }
       }
     },

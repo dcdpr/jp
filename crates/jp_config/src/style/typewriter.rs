@@ -39,6 +39,24 @@ pub struct TypewriterConfig {
     /// - `0` to disable
     #[setting(default = "500u")]
     pub code_delay: DelayDuration,
+
+    /// Maximum latency the typewriter is allowed to fall behind the source.
+    ///
+    /// When set to a non-zero value, the typewriter acts as a bounded-
+    /// latency controller: the effective per-character delay shrinks below
+    /// `text_delay`/`code_delay` as the queue of pending characters grows,
+    /// keeping printed output within `max_latency` of what the source has
+    /// already emitted. With a fast provider (e.g. Cerebras) this prevents
+    /// the typewriter from falling many seconds behind. When the source
+    /// stops emitting, the controller switches to drain mode and stops
+    /// slowing back down as the queue empties.
+    ///
+    /// The default is `0`, which disables the controller and keeps the
+    /// static `text_delay`/`code_delay` behavior.
+    ///
+    /// Accepts the same formats as `text_delay`.
+    #[setting(default = "0")]
+    pub max_latency: DelayDuration,
 }
 
 impl AssignKeyValue for PartialTypewriterConfig {
@@ -47,6 +65,7 @@ impl AssignKeyValue for PartialTypewriterConfig {
             "" => kv.try_merge_object(self)?,
             "text_delay" => self.text_delay = kv.try_some_from_str()?,
             "code_delay" => self.code_delay = kv.try_some_from_str()?,
+            "max_latency" => self.max_latency = kv.try_some_from_str()?,
             _ => return missing_key(&kv),
         }
 
@@ -59,6 +78,7 @@ impl PartialConfigDelta for PartialTypewriterConfig {
         Self {
             text_delay: delta_opt(self.text_delay.as_ref(), next.text_delay),
             code_delay: delta_opt(self.code_delay.as_ref(), next.code_delay),
+            max_latency: delta_opt(self.max_latency.as_ref(), next.max_latency),
         }
     }
 }
@@ -68,6 +88,7 @@ impl FillDefaults for PartialTypewriterConfig {
         Self {
             text_delay: self.text_delay.or(defaults.text_delay),
             code_delay: self.code_delay.or(defaults.code_delay),
+            max_latency: self.max_latency.or(defaults.max_latency),
         }
     }
 }
@@ -79,6 +100,7 @@ impl ToPartial for TypewriterConfig {
         Self::Partial {
             text_delay: partial_opt(&self.text_delay, defaults.text_delay),
             code_delay: partial_opt(&self.code_delay, defaults.code_delay),
+            max_latency: partial_opt(&self.max_latency, defaults.max_latency),
         }
     }
 }

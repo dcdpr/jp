@@ -140,6 +140,16 @@ impl TurnView {
         self.structured.flush();
     }
 
+    /// Signal to the printer that the current streaming cycle has ended.
+    ///
+    /// Forwards to the chat renderer, which switches the printer's
+    /// bounded-latency controller into drain mode so its per-character
+    /// delay holds its current pace as the queue empties (instead of
+    /// slowing back toward the configured cap).
+    pub fn signal_typewriter_drain(&self) {
+        self.chat.signal_typewriter_drain();
+    }
+
     /// Reset internal renderer state, discarding partial buffers.
     ///
     /// Used when a streaming cycle is interrupted and a new one begins
