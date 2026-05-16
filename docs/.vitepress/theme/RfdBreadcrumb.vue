@@ -1,9 +1,18 @@
 <script setup>
 import { useRoute } from 'vitepress'
 import { ref, watch, computed, onMounted } from 'vue'
+import { data } from '../../.vitepress/loaders/rfds.data.js'
 
 const route = useRoute()
 const trail = ref([])
+
+// Trail only stores `{ num, slug }`; look up titles on render. Drafts
+// (`DNN`) aren't in `data` and gracefully fall through to no tooltip.
+const titleByNum = new Map(data.map(r => [r.num, r.title]))
+const tooltip = (num) => {
+    const t = titleByNum.get(num)
+    return t ? `RFD ${num}: ${t}` : null
+}
 
 const STORAGE_KEY = 'rfd-trail'
 
@@ -61,7 +70,7 @@ watch(() => route.path, onNavigate)
         <a href="/rfd/">RFDs</a>
         <template v-for="(entry, i) in trail" :key="entry.num">
             <span class="rfd-breadcrumb-sep">/</span>
-            <a v-if="i < trail.length - 1" :href="'/rfd/' + entry.slug">{{ entry.num }}</a>
+            <a v-if="i < trail.length - 1" :href="'/rfd/' + entry.slug" :title="tooltip(entry.num)">{{ entry.num }}</a>
             <span v-else class="rfd-breadcrumb-current">{{ entry.num }}</span>
         </template>
     </nav>

@@ -34,11 +34,11 @@ const visible = computed(() =>
     <div v-if="visible" class="rfd-references">
         <div v-if="references.length" class="rfd-ref-section">
             <span class="rfd-ref-label">References</span>
-            <a v-for="ref in references" :key="ref.num" :href="'/rfd/' + ref.slug" :class="['rfd-ref-link', 'rfd-link--' + (ref.status?.toLowerCase() ?? 'unknown')]">{{ ref.num }}</a>
+            <a v-for="ref in references" :key="ref.num" :href="'/rfd/' + ref.slug" :title="`RFD ${ref.num}: ${ref.title}`" :class="['rfd-ref-link', 'rfd-link--' + (ref.status?.toLowerCase() ?? 'unknown')]">{{ ref.num }}</a>
         </div>
         <div v-if="referencedBy.length" class="rfd-ref-section">
             <span class="rfd-ref-label">Referenced by</span>
-            <a v-for="ref in referencedBy" :key="ref.num" :href="'/rfd/' + ref.slug" :class="['rfd-ref-link', 'rfd-link--' + (ref.status?.toLowerCase() ?? 'unknown')]">{{ ref.num }}</a>
+            <a v-for="ref in referencedBy" :key="ref.num" :href="'/rfd/' + ref.slug" :title="`RFD ${ref.num}: ${ref.title}`" :class="['rfd-ref-link', 'rfd-link--' + (ref.status?.toLowerCase() ?? 'unknown')]">{{ ref.num }}</a>
         </div>
     </div>
 </template>
