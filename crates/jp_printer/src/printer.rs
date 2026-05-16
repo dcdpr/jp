@@ -550,21 +550,38 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                     return;
                 }
 
+                // Accumulate per-character delays into batches before
+                // blocking. The bounded-latency controller can request
+                // delays well below the OS scheduler's tick (notably
+                // ~15.6ms on Windows), and a sub-tick sleep still costs
+                // a full tick of wall clock. Without batching, a burst
+                // of 200 chars at 1ms each takes ~3.1s on Windows
+                // instead of the 200ms the controller asked for —
+                // silently violating the configured `max_latency`.
+                let mut credit = Duration::ZERO;
                 for (c, visible) in VisibleCharsIterator::new(&content) {
                     let _err = write!(writer, "{c}");
                     let _err = writer.flush();
 
-                    if visible {
-                        let effective = self.delay_control.effective_delay(*delay);
+                    if !visible {
+                        continue;
+                    }
+
+                    let effective = self.delay_control.effective_delay(*delay);
+                    credit = credit.saturating_add(effective);
+
+                    if credit >= SLEEP_GRANULARITY {
                         let mut skip = self.delay_control.skip.lock();
-                        if !*skip && !effective.is_zero() {
+                        if !*skip {
                             // Interruptible sleep: returns early if
                             // flush_instant() notifies the condvar.
-                            self.delay_control.wake.wait_for(&mut skip, effective);
+                            self.delay_control.wake.wait_for(&mut skip, credit);
                         }
                         drop(skip);
-                        release_pending(&self.delay_control, 1);
+                        credit = Duration::ZERO;
                     }
+
+                    release_pending(&self.delay_control, 1);
                 }
             }
         }
@@ -848,6 +865,29 @@ impl DelayControl {
         cap.min(Duration::from_nanos(computed_nanos))
     }
 }
+
+/// Minimum batch size for typewriter per-character delays.
+///
+/// `Condvar::wait_for` is bounded below by the OS scheduler's timer
+/// resolution. On Linux/macOS that's well under 1ms, so per-character
+/// sleeps are honored as requested and the typewriter looks smooth.
+/// On Windows the default tick is ~15.6ms, so any sub-tick request
+/// still parks the worker for a full tick — without batching, a 200-
+/// character burst at 1ms each takes ~3.1s instead of the 200ms the
+/// bounded-latency controller asked for, silently violating the
+/// configured `max_latency`.
+///
+/// The worker accumulates effective per-character delays and only
+/// parks once the accumulated credit reaches this threshold. Setting
+/// it just below the Windows tick lets a single batched sleep cover
+/// the same tick the OS was already going to schedule us on. On
+/// non-Windows platforms the threshold is small enough that any
+/// practical per-character delay hits it on the first character, so
+/// the loop behaves identically to the original per-character sleep.
+#[cfg(windows)]
+const SLEEP_GRANULARITY: Duration = Duration::from_millis(10);
+#[cfg(not(windows))]
+const SLEEP_GRANULARITY: Duration = Duration::from_nanos(1);
 
 /// Count the visible (non-control, non-ANSI-escape) characters in a string.
 ///
