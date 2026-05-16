@@ -1,6 +1,16 @@
 
 # cargo-vet audits file
 
+[[audits.bzip2]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.4 -> 0.5.2"
+
+[[audits.bzip2-sys]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.11+1.0.8 -> 0.1.13+1.0.8"
+
 [[audits.cfb]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
