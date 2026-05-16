@@ -20,6 +20,32 @@ use crate::{
 /// Max chars of preview text per section in the listing.
 const PREVIEW_MAX: usize = 120;
 
+/// Top-level wrapper IDs used by rustdoc-generated pages (docs.rs, local
+/// `cargo doc` output). These get matched as section anchors via the
+/// ancestor-id fallback in `resolve_heading_id`, but they're page chrome,
+/// not content. Filtering them out only at the listing layer keeps explicit
+/// `sections=["main-content"]` requests working for non-rustdoc pages.
+const RUSTDOC_SCAFFOLDING_IDS: &[&str] = &[
+    "rustdoc_body_wrapper",
+    "rustdoc-toc",
+    "rustdoc-modnav",
+    "main-content",
+];
+
+fn is_rustdoc_scaffolding_id(id: &str) -> bool {
+    RUSTDOC_SCAFFOLDING_IDS.contains(&id)
+}
+
+/// True if `el` is a `<div class="docblock">` (rustdoc's documentation
+/// container). Multi-class attributes are handled.
+fn is_docblock(el: &ElementRef<'_>) -> bool {
+    el.value().name() == "div"
+        && el
+            .value()
+            .attr("class")
+            .is_some_and(|c| c.split_ascii_whitespace().any(|cl| cl == "docblock"))
+}
+
 const HAIKU_MODEL: &str = "claude-haiku-4-5";
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 
@@ -205,6 +231,37 @@ fn extract_anchor_html(html: &str, anchor: &str) -> Option<String> {
     Some(format!(
         "<html>{head_html}<body>{section_html}</body></html>"
     ))
+}
+
+/// Build the extraction for a rustdoc `<section>` item: the section itself
+/// plus the immediately following sibling `<div class="docblock">`.
+///
+/// When the section is wrapped in `<summary>` (rustdoc's `<details>` toggle
+/// layout), the docblock is a sibling of the summary, not of the section.
+/// We do **not** return the whole `<details>` because impl headers nest
+/// every method inside a `<div class="impl-items">` sibling — returning
+/// the details would pull in every method's signature and docs.
+fn extract_rustdoc_section(section: &ElementRef<'_>) -> String {
+    let mut parts = vec![section.html()];
+
+    let docblock_anchor = section
+        .parent()
+        .and_then(ElementRef::wrap)
+        .filter(|el| el.value().name() == "summary")
+        .unwrap_or(*section);
+
+    for sib in docblock_anchor.next_siblings() {
+        let Some(el) = ElementRef::wrap(sib) else {
+            continue;
+        };
+        if is_docblock(&el) {
+            parts.push(el.html());
+        }
+        // First element sibling decides: docblock or unrelated, stop either way.
+        break;
+    }
+
+    parts.join("")
 }
 
 /// Extracts a heading element and all following siblings up to (but not
@@ -429,7 +486,13 @@ fn list_section_headers(html: &str) -> Vec<SectionHeader> {
             current_heading_level = level;
 
             let id = match resolve_heading_id(&el) {
-                Some(id) if !id.is_empty() && seen_ids.insert(id.clone()) => id,
+                Some(id)
+                    if !id.is_empty()
+                        && !is_rustdoc_scaffolding_id(&id)
+                        && seen_ids.insert(id.clone()) =>
+                {
+                    id
+                }
                 _ => continue,
             };
 
@@ -442,7 +505,13 @@ fn list_section_headers(html: &str) -> Vec<SectionHeader> {
         } else {
             // <dt> element. Skip if we can't resolve a usable anchor ID.
             let id = match resolve_dt_id(&el) {
-                Some(id) if !id.is_empty() && seen_ids.insert(id.clone()) => id,
+                Some(id)
+                    if !id.is_empty()
+                        && !is_rustdoc_scaffolding_id(&id)
+                        && seen_ids.insert(id.clone()) =>
+                {
+                    id
+                }
                 _ => continue,
             };
 
@@ -580,7 +649,43 @@ fn extract_preview_after_heading(heading: &ElementRef<'_>) -> String {
         }
     }
 
+    // Rustdoc puts the signature heading inside `<section>` with no useful
+    // following siblings; the prose lives in a sibling `<div class="docblock">`
+    // of the section (or of its enclosing `<summary>` in toggle layout).
+    // Without this fallback, every method on every docs.rs page reports an
+    // empty preview.
+    if text.is_empty()
+        && let Some(parent) = heading.parent().and_then(ElementRef::wrap)
+        && parent.value().name() == "section"
+    {
+        text = preview_from_section_docblock(parent);
+    }
+
     truncate_str(&text, PREVIEW_MAX)
+}
+
+/// Collect preview text from a rustdoc section's neighboring docblock.
+/// Mirrors `extract_rustdoc_section`'s sibling-resolution logic so listing
+/// previews and extracted bodies agree on where the docs live.
+fn preview_from_section_docblock(section: ElementRef<'_>) -> String {
+    let anchor = section
+        .parent()
+        .and_then(ElementRef::wrap)
+        .filter(|el| el.value().name() == "summary")
+        .unwrap_or(section);
+
+    for sib in anchor.next_siblings() {
+        let Some(el) = ElementRef::wrap(sib) else {
+            continue;
+        };
+        if is_docblock(&el) {
+            let raw: String = el.text().collect();
+            return raw.split_whitespace().collect::<Vec<_>>().join(" ");
+        }
+        break;
+    }
+
+    String::new()
 }
 
 fn truncate_str(s: &str, max: usize) -> String {
@@ -637,6 +742,15 @@ fn extract_section_html_from_doc(doc: &Html, anchor: &str) -> Option<String> {
             SectionRoot::Heading(h) => extract_heading_section(&h),
             SectionRoot::DefinitionTerm(dt) => extract_definition_section(&dt),
         });
+    }
+
+    // Rustdoc wraps each item in `<section id="...">` (e.g. `method.X`,
+    // `variant.Y`, `impl-Foo-for-Bar`). The signature heading is inside
+    // the section; the documentation is in a sibling `<div class="docblock">`,
+    // optionally further wrapped in a `<details>` toggle. The container
+    // fallback below would only return the heading and miss the docs.
+    if target.value().name() == "section" {
+        return Some(extract_rustdoc_section(&target));
     }
 
     // Container element with an internal heading (e.g. `<section id="x"><h3>`).

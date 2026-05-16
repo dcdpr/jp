@@ -600,6 +600,220 @@ mod extract_preview_after_heading {
     }
 }
 
+/// Tests covering rustdoc-generated item pages (the docs.rs / `cargo doc`
+/// shape). Two structural quirks matter:
+///
+/// - Method/variant/assoc-type signatures live inside `<section id="...">`
+///   and the docs are in a sibling `<div class="docblock">`, optionally
+///   wrapped in a `<details>` toggle. The heading's own siblings are empty,
+///   so a naïve walk misses every method's documentation.
+/// - The page has a handful of structural IDs (`rustdoc_body_wrapper`,
+///   `rustdoc-toc`, `rustdoc-modnav`, `main-content`) that get picked up by
+///   the ancestor-id fallback and clutter the section listing.
+mod rustdoc_pages {
+    use scraper::Html;
+
+    use super::*;
+
+    const RUSTDOC_ITEM_PAGE: &str = r#"<!DOCTYPE html>
+<html>
+<head>
+  <title>Value in serde_json - Rust</title>
+  <meta name="generator" content="rustdoc">
+</head>
+<body>
+<div id="rustdoc_body_wrapper">
+  <nav id="rustdoc-modnav"><h2>In crate</h2></nav>
+  <main>
+    <nav id="rustdoc-toc"><h2>TOC</h2></nav>
+    <section id="main-content">
+      <h1>Enum Value</h1>
+      <h2 id="variants">Variants</h2>
+      <ul>
+        <li>
+          <section id="variant.Null"><h3>Null</h3></section>
+          <div class="docblock"><p>Represents a JSON null value.</p></div>
+        </li>
+      </ul>
+      <h2 id="implementations">Implementations</h2>
+      <details class="toggle">
+        <summary><section id="impl-Default-for-Value">
+          <h3>impl Default for Value</h3>
+        </section></summary>
+        <div class="docblock"><p>The default value is Value::Null.</p></div>
+        <div class="impl-items">
+          <details class="toggle">
+            <summary><section id="method.pointer">
+              <h4>pub fn pointer(&amp;self) -&gt; Option</h4>
+            </section></summary>
+            <div class="docblock">
+              <p>Looks up a value by a JSON Pointer.</p>
+              <h5 id="examples">§Examples</h5>
+              <pre>let data = json!({});</pre>
+            </div>
+          </details>
+        </div>
+      </details>
+    </section>
+  </main>
+</div>
+</body>
+</html>"#;
+
+    #[test]
+    fn list_skips_rustdoc_scaffolding_ids() {
+        let headers = list_section_headers(RUSTDOC_ITEM_PAGE);
+        let ids: Vec<&str> = headers.iter().map(|h| h.id.as_str()).collect();
+
+        for forbidden in [
+            "rustdoc_body_wrapper",
+            "rustdoc-toc",
+            "rustdoc-modnav",
+            "main-content",
+        ] {
+            assert!(
+                !ids.contains(&forbidden),
+                "scaffolding id `{forbidden}` should be skipped, got {ids:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn list_includes_item_anchors() {
+        let headers = list_section_headers(RUSTDOC_ITEM_PAGE);
+        let ids: Vec<&str> = headers.iter().map(|h| h.id.as_str()).collect();
+
+        for required in [
+            "variants",
+            "implementations",
+            "variant.Null",
+            "impl-Default-for-Value",
+            "method.pointer",
+        ] {
+            assert!(
+                ids.contains(&required),
+                "expected anchor `{required}` in listing, got {ids:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn list_h4_method_preview_uses_sibling_docblock() {
+        // The h4 signature lives inside a `<section>` with no useful
+        // siblings; the docs are in a `<div class="docblock">` that's a
+        // sibling of the enclosing `<summary>`. The preview must peek
+        // through to that docblock or every method on the page reports an
+        // empty description.
+        let headers = list_section_headers(RUSTDOC_ITEM_PAGE);
+        let pointer = headers
+            .iter()
+            .find(|h| h.id == "method.pointer")
+            .expect("method.pointer in headers");
+        assert!(
+            pointer.preview.contains("Looks up a value"),
+            "preview should peek into sibling docblock; got {:?}",
+            pointer.preview
+        );
+    }
+
+    #[test]
+    fn extract_method_in_toggle_includes_signature_and_docs() {
+        let doc = Html::parse_document(RUSTDOC_ITEM_PAGE);
+        let result = extract_section_html_from_doc(&doc, "method.pointer").unwrap();
+
+        assert!(
+            result.contains("pub fn pointer"),
+            "missing signature: {result}"
+        );
+        assert!(
+            result.contains("Looks up a value"),
+            "missing docblock prose: {result}"
+        );
+        assert!(
+            result.contains("§Examples"),
+            "missing examples heading: {result}"
+        );
+    }
+
+    #[test]
+    fn extract_method_does_not_bleed_into_neighbors() {
+        let doc = Html::parse_document(RUSTDOC_ITEM_PAGE);
+        let result = extract_section_html_from_doc(&doc, "method.pointer").unwrap();
+
+        assert!(
+            !result.contains("Represents a JSON null"),
+            "variant doc bled in: {result}"
+        );
+        assert!(
+            !result.contains("The default value"),
+            "impl doc bled in: {result}"
+        );
+    }
+
+    #[test]
+    fn extract_impl_returns_header_and_docs_without_nested_methods() {
+        // The impl block's `<details>` also contains a `<div class="impl-items">`
+        // with every method inside. Extracting the impl must return only the
+        // signature and its own docblock — not every nested method.
+        let doc = Html::parse_document(RUSTDOC_ITEM_PAGE);
+        let result = extract_section_html_from_doc(&doc, "impl-Default-for-Value").unwrap();
+
+        assert!(
+            result.contains("impl Default for Value"),
+            "missing header: {result}"
+        );
+        assert!(
+            result.contains("The default value"),
+            "missing impl docblock: {result}"
+        );
+        assert!(
+            !result.contains("pub fn pointer"),
+            "impl extraction should not include nested method: {result}"
+        );
+        assert!(
+            !result.contains("Looks up a value"),
+            "impl extraction should not include nested method docs: {result}"
+        );
+    }
+
+    #[test]
+    fn extract_variant_with_flat_docblock_returns_both() {
+        // variant.Null is the no-toggle case: a `<section>` followed by a
+        // sibling `<div class="docblock">` directly inside the parent `<li>`.
+        let doc = Html::parse_document(RUSTDOC_ITEM_PAGE);
+        let result = extract_section_html_from_doc(&doc, "variant.Null").unwrap();
+
+        assert!(result.contains(">Null<"), "missing variant name: {result}");
+        assert!(
+            result.contains("Represents a JSON null"),
+            "missing docblock: {result}"
+        );
+        assert!(
+            !result.contains("Looks up a value"),
+            "method doc bled in: {result}"
+        );
+    }
+
+    #[test]
+    fn extract_heading_anchor_unaffected_by_section_branch() {
+        // h2-anchored sections (e.g. `variants`) still extract via the
+        // existing heading code path: they include everything up to the
+        // next sibling heading of the same level.
+        let doc = Html::parse_document(RUSTDOC_ITEM_PAGE);
+        let result = extract_section_html_from_doc(&doc, "variants").unwrap();
+
+        assert!(result.contains("Variants"));
+        assert!(
+            result.contains("Represents a JSON null"),
+            "variants section should contain the variant: {result}"
+        );
+        assert!(
+            !result.contains("Implementations"),
+            "variants section should stop at the next h2: {result}"
+        );
+    }
+}
+
 /// Tests covering AsciiDoctor-style horizontal definition lists, as used by
 /// git's manpages on git-scm.com. Fixture is reduced from the actual
 /// `gitglossary` page; each `<dt>` carries three IDs (its own auto-generated
