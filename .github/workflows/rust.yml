@@ -16,6 +16,11 @@ env:
   CARGO_PROFILE_COVERAGE_DEBUG: line-tables-only
   CARGO_PROFILE_NEXTEST_DEBUG: 0
   CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER: rust-lld.exe
+  # Use content checksums instead of file mtimes for cargo's fingerprints.
+  # `actions/checkout` rewrites source mtimes on every run, which would
+  # otherwise invalidate cached workspace-crate artifacts even when the
+  # content is unchanged. See rust-lang/cargo#14136.
+  CARGO_UNSTABLE_CHECKSUM_FRESHNESS: "true"
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
@@ -149,6 +154,11 @@ jobs:
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # V0.10
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
+        # `bash` is required: on Windows the default shell is PowerShell, where
+        # `$GITHUB_ENV` is an empty PowerShell variable rather than a bash env
+        # reference, so the redirect silently appends to nothing and the wrapper
+        # never propagates to `cargo`.
+        shell: bash
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
