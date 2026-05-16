@@ -3,12 +3,8 @@ use std::borrow::Cow;
 use base64::{Engine as _, prelude::BASE64_STANDARD};
 use serde_json::{Value, json};
 
-use super::auth;
-use crate::{
-    Result,
-    github::{ORG, REPO},
-    to_xml,
-};
+use super::{auth, auth_optional, parse_repo};
+use crate::{Result, to_xml};
 
 pub(crate) async fn github_code_search(
     repository: Option<String>,
@@ -28,7 +24,8 @@ pub(crate) async fn github_code_search(
 
     auth().await?;
 
-    let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
+    let (owner, repo) = parse_repo(repository)?;
+    let repository = format!("{owner}/{repo}");
     let page = jp_github::instance()
         .search()
         .code(&format!("{query} repo:{repository}"))
@@ -76,7 +73,7 @@ pub(crate) async fn github_read_file(
         content: Option<String>,
     }
 
-    auth().await?;
+    auth_optional().await?;
 
     // Silently treat 0 as 1 — both bounds are 1-based, but rather than
     // bouncing the LLM with an error and forcing a re-call, we just round
@@ -90,13 +87,10 @@ pub(crate) async fn github_read_file(
         return Err("`start_line` must be less than or equal to `end_line`".into());
     }
 
-    let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
-    let (org, repo) = repository
-        .split_once('/')
-        .ok_or("`repository` must be in the form of <org>/<repo>")?;
+    let (owner, repo) = parse_repo(repository)?;
 
     let client = jp_github::instance();
-    let files = client.repos(org, repo);
+    let files = client.repos(&owner, &repo);
     let mut files = files.get_content().path(path);
 
     if let Some(ref_) = ref_ {
@@ -312,16 +306,13 @@ pub(crate) async fn github_list_files(
 
     auth().await?;
 
-    let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
-    let (org, repo) = repository
-        .split_once('/')
-        .ok_or("`repository` must be in the form of <org>/<repo>")?;
+    let (owner, repo) = parse_repo(repository)?;
 
     let prefix = path.unwrap_or_default();
     let ref_ = ref_.unwrap_or_else(|| "HEAD".to_owned());
 
     let mut files = vec![];
-    fetch(org, repo, &ref_, &prefix, &mut files).await?;
+    fetch(&owner, &repo, &ref_, &prefix, &mut files).await?;
 
     to_xml(Files { files })
 }

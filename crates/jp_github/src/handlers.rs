@@ -61,6 +61,68 @@ impl IssuesHandler {
             per_page: 100,
         }
     }
+
+    /// Begin building a single-page fetch of conversation comments for an
+    /// issue or pull request.
+    ///
+    /// Returns a single page rather than auto-paginating; callers that
+    /// need to step through long threads pass an explicit `page`. This
+    /// keeps responses bounded for LLM consumption — long discussions
+    /// would otherwise blow the context window.
+    #[must_use]
+    pub fn list_comments(&self, number: u64) -> IssueCommentListBuilder {
+        IssueCommentListBuilder {
+            client: self.client.clone(),
+            owner: self.owner.clone(),
+            repo: self.repo.clone(),
+            number,
+            page: 1,
+            per_page: 30,
+        }
+    }
+}
+
+pub struct IssueCommentListBuilder {
+    pub(crate) client: Octocrab,
+    pub(crate) owner: String,
+    pub(crate) repo: String,
+    pub(crate) number: u64,
+    pub(crate) page: u64,
+    pub(crate) per_page: u8,
+}
+
+impl IssueCommentListBuilder {
+    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
+    /// Set the number of comments per page (max 100 enforced by GitHub).
+    /// Defaults to 30.
+    #[must_use]
+    pub const fn per_page(mut self, per_page: u8) -> Self {
+        self.per_page = per_page;
+        self
+    }
+
+    pub async fn send(self) -> Result<Vec<models::issues::Comment>> {
+        let query = vec![
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
+
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/issues/{}/comments",
+                    self.owner, self.repo, self.number
+                ),
+                &query,
+            )
+            .await
+    }
 }
 
 pub struct IssueListBuilder {

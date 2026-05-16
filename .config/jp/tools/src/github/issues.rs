@@ -1,23 +1,37 @@
 use chrono::{DateTime, Utc};
 use url::Url;
 
-use super::auth;
-use crate::{
-    Result,
-    github::{ORG, REPO, handle_404},
-    to_xml,
-};
+use super::{auth_optional, parse_repo};
+use crate::{Result, github::handle_404, to_xml};
 
-pub(crate) async fn github_issues(number: Option<u64>) -> Result<String> {
-    auth().await?;
+/// Comments-per-page when fetching a specific issue. Fixed at 10 to keep
+/// responses bounded; long threads are walked with the `page` parameter.
+const COMMENTS_PER_PAGE: u8 = 10;
+
+pub(crate) async fn github_issues(
+    repository: Option<String>,
+    number: Option<u64>,
+    page: Option<u64>,
+) -> Result<String> {
+    auth_optional().await?;
+
+    let (owner, repo) = parse_repo(repository)?;
+    let page = page.unwrap_or(1).max(1);
 
     match number {
-        Some(number) => get_issue(number).await,
-        None => get_issues().await,
+        Some(number) => get_issue(&owner, &repo, number, page).await,
+        None => get_issues(&owner, &repo).await,
     }
 }
 
-async fn get_issue(number: u64) -> Result<String> {
+async fn get_issue(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> {
+    #[derive(serde::Serialize)]
+    struct Comment {
+        author: String,
+        created_at: DateTime<Utc>,
+        body: Option<String>,
+    }
+
     #[derive(serde::Serialize)]
     struct Issue {
         number: u64,
@@ -29,13 +43,35 @@ async fn get_issue(number: u64) -> Result<String> {
         created_at: DateTime<Utc>,
         closed_at: Option<DateTime<Utc>>,
         linked_pull_request: Option<Url>,
+        comments_count: u64,
+        comments_page: u64,
+        comments_per_page: u8,
+        comments: Vec<Comment>,
     }
 
-    let issue = jp_github::instance()
-        .issues(ORG, REPO)
+    let client = jp_github::instance();
+
+    let issue = client
+        .issues(owner, repo)
         .get(number)
         .await
-        .map_err(|e| handle_404(e, format!("Issue #{number} not found in {ORG}/{REPO}")))?;
+        .map_err(|e| handle_404(e, format!("Issue #{number} not found in {owner}/{repo}")))?;
+
+    let comments = client
+        .issues(owner, repo)
+        .list_comments(number)
+        .page(page)
+        .per_page(COMMENTS_PER_PAGE)
+        .send()
+        .await
+        .map_err(|e| handle_404(e, format!("Issue #{number} not found in {owner}/{repo}")))?
+        .into_iter()
+        .map(|c| Comment {
+            author: c.user.login,
+            created_at: c.created_at,
+            body: c.body,
+        })
+        .collect();
 
     to_xml(Issue {
         number,
@@ -47,10 +83,14 @@ async fn get_issue(number: u64) -> Result<String> {
         created_at: issue.created_at,
         closed_at: issue.closed_at,
         linked_pull_request: issue.pull_request.map(|pr| pr.html_url),
+        comments_count: issue.comments,
+        comments_page: page,
+        comments_per_page: COMMENTS_PER_PAGE,
+        comments,
     })
 }
 
-async fn get_issues() -> Result<String> {
+async fn get_issues(owner: &str, repo: &str) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Issues {
         issue: Vec<Issue>,
@@ -66,10 +106,11 @@ async fn get_issues() -> Result<String> {
         created_at: DateTime<Utc>,
         closed_at: Option<DateTime<Utc>>,
         linked_pull_request: Option<Url>,
+        comments_count: u64,
     }
 
     let page = jp_github::instance()
-        .issues(ORG, REPO)
+        .issues(owner, repo)
         .list()
         .per_page(100)
         .send()
@@ -88,6 +129,7 @@ async fn get_issues() -> Result<String> {
             created_at: issue.created_at,
             closed_at: issue.closed_at,
             linked_pull_request: issue.pull_request.map(|pr| pr.html_url),
+            comments_count: issue.comments,
         })
         .collect();
 

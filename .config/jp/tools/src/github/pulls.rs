@@ -2,13 +2,12 @@ use chrono::{DateTime, Utc};
 use jp_github::{models::repos::DiffEntryStatus, params};
 use url::Url;
 
-use super::auth;
-use crate::{
-    Result,
-    github::{ORG, REPO, handle_404},
-    to_xml, to_xml_with_root,
-    util::OneOrMany,
-};
+use super::{auth_optional, parse_repo};
+use crate::{Result, github::handle_404, to_xml, to_xml_with_root, util::OneOrMany};
+
+/// Comments-per-page when fetching a specific pull request. Matches the
+/// issues tool — long discussions are walked with the `page` parameter.
+const COMMENTS_PER_PAGE: u8 = 10;
 
 /// The status of a issue or pull request.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
@@ -19,22 +18,28 @@ pub enum State {
 }
 
 pub(crate) async fn github_pulls(
+    repository: Option<String>,
     number: Option<u64>,
     state: Option<State>,
     file_diffs: Option<OneOrMany<String>>,
+    page: Option<u64>,
 ) -> Result<String> {
-    auth().await?;
+    auth_optional().await?;
 
+    let (owner, repo) = parse_repo(repository)?;
+    let page = page.unwrap_or(1).max(1);
     let file_diffs = file_diffs.unwrap_or_default();
 
     match number {
-        Some(number) if !file_diffs.is_empty() => diff(number, file_diffs.into_vec()).await,
-        Some(number) => get(number).await,
-        None => list(state).await,
+        Some(number) if !file_diffs.is_empty() => {
+            diff(&owner, &repo, number, file_diffs.into_vec()).await
+        }
+        Some(number) => get(&owner, &repo, number, page).await,
+        None => list(&owner, &repo, state).await,
     }
 }
 
-async fn get(number: u64) -> Result<String> {
+async fn get(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> {
     #[derive(serde::Serialize)]
     struct ChangedFile {
         filename: String,
@@ -43,6 +48,13 @@ async fn get(number: u64) -> Result<String> {
         deletions: u64,
         changes: u64,
         previous_filename: Option<String>,
+    }
+
+    #[derive(serde::Serialize)]
+    struct Comment {
+        author: String,
+        created_at: DateTime<Utc>,
+        body: Option<String>,
     }
 
     #[derive(serde::Serialize)]
@@ -58,22 +70,27 @@ async fn get(number: u64) -> Result<String> {
         merged_at: Option<DateTime<Utc>>,
         merge_commit_sha: Option<String>,
         changed_files: Vec<ChangedFile>,
+        comments_page: u64,
+        comments_per_page: u8,
+        comments: Vec<Comment>,
     }
 
-    let pull = jp_github::instance()
-        .pulls(ORG, REPO)
+    let client = jp_github::instance();
+
+    let pull = client
+        .pulls(owner, repo)
         .get(number)
         .await
-        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
+        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {owner}/{repo}")))?;
 
-    let page = jp_github::instance()
-        .pulls(ORG, REPO)
+    let files_page = client
+        .pulls(owner, repo)
         .list_files(number)
         .await
-        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
+        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {owner}/{repo}")))?;
 
-    let changed_files = jp_github::instance()
-        .all_pages(page)
+    let changed_files = client
+        .all_pages(files_page)
         .await?
         .into_iter()
         .map(|file| ChangedFile {
@@ -83,6 +100,25 @@ async fn get(number: u64) -> Result<String> {
             deletions: file.deletions,
             changes: file.changes,
             previous_filename: file.previous_filename,
+        })
+        .collect();
+
+    // PR conversation comments share the issues endpoint — `/issues/{N}/comments`
+    // returns the same thread shown in the "Conversation" tab. Inline review
+    // comments live on a different endpoint and aren't part of this scope.
+    let comments = client
+        .issues(owner, repo)
+        .list_comments(number)
+        .page(page)
+        .per_page(COMMENTS_PER_PAGE)
+        .send()
+        .await
+        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {owner}/{repo}")))?
+        .into_iter()
+        .map(|c| Comment {
+            author: c.user.login,
+            created_at: c.created_at,
+            body: c.body,
         })
         .collect();
 
@@ -103,10 +139,13 @@ async fn get(number: u64) -> Result<String> {
         merged_at: pull.merged_at,
         merge_commit_sha: pull.merge_commit_sha,
         changed_files,
+        comments_page: page,
+        comments_per_page: COMMENTS_PER_PAGE,
+        comments,
     })
 }
 
-async fn diff(number: u64, file_diffs: Vec<String>) -> Result<String> {
+async fn diff(owner: &str, repo: &str, number: u64, file_diffs: Vec<String>) -> Result<String> {
     #[derive(serde::Serialize)]
     struct ChangedFile {
         filename: String,
@@ -119,10 +158,10 @@ async fn diff(number: u64, file_diffs: Vec<String>) -> Result<String> {
     }
 
     let page = jp_github::instance()
-        .pulls(ORG, REPO)
+        .pulls(owner, repo)
         .list_files(number)
         .await
-        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
+        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {owner}/{repo}")))?;
 
     let changed_files: Vec<_> = jp_github::instance()
         .all_pages(page)
@@ -143,7 +182,7 @@ async fn diff(number: u64, file_diffs: Vec<String>) -> Result<String> {
     to_xml_with_root(&changed_files, "files")
 }
 
-async fn list(state: Option<State>) -> Result<String> {
+async fn list(owner: &str, repo: &str, state: Option<State>) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Pulls {
         pull: Vec<Pull>,
@@ -169,7 +208,7 @@ async fn list(state: Option<State>) -> Result<String> {
     };
 
     let page = jp_github::instance()
-        .pulls(ORG, REPO)
+        .pulls(owner, repo)
         .list()
         .state(state)
         .per_page(100)

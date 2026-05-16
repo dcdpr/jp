@@ -1,5 +1,5 @@
 use crate::{
-    Context, Error, Tool,
+    Context, Error, Result, Tool,
     util::{ToolResult, unknown_tool},
 };
 
@@ -22,11 +22,25 @@ use review::{github_pr_review_add_comment, github_pr_review_add_reply};
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
 
+/// Parse a `repository` argument of the form `owner/repo`, defaulting to
+/// the project's own repo when unset.
+pub(crate) fn parse_repo(repository: Option<String>) -> Result<(String, String)> {
+    let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
+    let (owner, repo) = repository
+        .split_once('/')
+        .ok_or("`repository` must be in the form of <owner>/<repo>")?;
+    Ok((owner.to_owned(), repo.to_owned()))
+}
+
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("github_") {
-        "issues" => github_issues(t.opt_or_empty("number")?)
-            .await
-            .map(Into::into),
+        "issues" => github_issues(
+            t.opt("repository")?,
+            t.opt_or_empty("number")?,
+            t.opt("page")?,
+        )
+        .await
+        .map(Into::into),
 
         "create_issue_bug" => github_create_issue_bug(
             t.req("title")?,
@@ -68,9 +82,15 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         .await
         .map(Into::into),
 
-        "pulls" => github_pulls(t.opt("number")?, t.opt("state")?, t.opt("file_diffs")?)
-            .await
-            .map(Into::into),
+        "pulls" => github_pulls(
+            t.opt("repository")?,
+            t.opt("number")?,
+            t.opt("state")?,
+            t.opt("file_diffs")?,
+            t.opt("page")?,
+        )
+        .await
+        .map(Into::into),
 
         "pr_review_add_comment" => {
             github_pr_review_add_comment(
@@ -118,12 +138,15 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     }
 }
 
-async fn auth() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let token = std::env::var("JP_GITHUB_TOKEN")
-        .or_else(|_| std::env::var("GITHUB_TOKEN"))
-        .map_err(|_| {
-            "unable to get auth token. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token."
-        })?;
+/// Initialize the GitHub client with a token, verifying it works.
+///
+/// Use this for tools that modify state (`create_issue_*`,
+/// `pr_review_*`) or that hit endpoints which always require auth
+/// (GraphQL, search).
+async fn auth() -> Result<()> {
+    let token = read_token().ok_or(
+        "unable to get auth token. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token.",
+    )?;
 
     let octocrab = jp_github::Octocrab::builder()
         .personal_token(token)
@@ -141,6 +164,35 @@ async fn auth() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     }
 
     Ok(())
+}
+
+/// Initialize the GitHub client, falling back to anonymous access when no
+/// token is set.
+///
+/// Use this for read-only tools that work against public repos without
+/// auth. Anonymous requests get GitHub's 60-req/hour rate limit; the
+/// authenticated limit is 5000/hour. We do not verify the token here —
+/// the real request will surface a 401 if the token is bad, which is a
+/// better signal than a generic "can't authenticate" message.
+async fn auth_optional() -> Result<()> {
+    let mut builder = jp_github::Octocrab::builder();
+    if let Some(token) = read_token() {
+        builder = builder.personal_token(token);
+    }
+
+    let octocrab = builder
+        .build()
+        .map_err(|err| format!("unable to create github client: {err:#}"))?;
+
+    jp_github::initialise(octocrab);
+    Ok(())
+}
+
+fn read_token() -> Option<String> {
+    std::env::var("JP_GITHUB_TOKEN")
+        .ok()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .filter(|t| !t.is_empty())
 }
 
 fn handle_404(error: jp_github::Error, msg: impl Into<String>) -> Error {

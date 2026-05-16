@@ -17,7 +17,19 @@ fn issue_json(number: u64) -> Value {
         "user": {"login": "octocat"},
         "created_at": "2024-01-01T00:00:00Z",
         "closed_at": null,
-        "pull_request": null
+        "pull_request": null,
+        "comments": 0
+    })
+}
+
+fn issue_comment_json(id: u64, login: &str, body: &str) -> Value {
+    json!({
+        "id": id,
+        "user": { "login": login },
+        "body": body,
+        "html_url": format!("https://github.com/acme/widgets/issues/42#issuecomment-{id}"),
+        "created_at": "2024-02-01T00:00:00Z",
+        "updated_at": null
     })
 }
 
@@ -132,6 +144,40 @@ async fn issues_list_paginates_across_pages() {
 
     page_1.assert();
     page_2.assert();
+}
+
+#[tokio::test]
+async fn issue_list_comments_returns_requested_page() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/issues/42/comments")
+                .query_param("per_page", "10")
+                .query_param("page", "2");
+            then.status(200).json_body(json!([
+                issue_comment_json(101, "alice", "first"),
+                issue_comment_json(102, "bob", "second")
+            ]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let comments = client
+        .issues("acme", "widgets")
+        .list_comments(42)
+        .page(2)
+        .per_page(10)
+        .send()
+        .await
+        .expect("list comments");
+
+    assert_eq!(comments.len(), 2);
+    assert_eq!(comments[0].id, 101);
+    assert_eq!(comments[0].user.login, "alice");
+    assert_eq!(comments[0].body.as_deref(), Some("first"));
+    assert_eq!(comments[1].id, 102);
+    mock.assert();
 }
 
 #[tokio::test]

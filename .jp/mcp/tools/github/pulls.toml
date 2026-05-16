@@ -4,10 +4,10 @@ run = "unattended"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Find one or more pull requests in the project's GitHub repository."
+summary = "Find one or more pull requests in a GitHub repository."
 
 examples = """
-List open pull requests:
+List open pull requests in the current project's repo:
 ```json
 {"state": "open"}
 ```
@@ -16,6 +16,17 @@ Get a PR with file diffs:
 ```json
 {"number": 15, "file_diffs": ["crates/jp_llm/src/builtin.rs"]}
 ```
+
+Get a PR from a different repository, including the first page of
+conversation comments:
+```json
+{"repository": "Swatinem/rust-cache", "number": 42}
+```
+
+Walk further into the comment thread:
+```json
+{"repository": "Swatinem/rust-cache", "number": 42, "page": 2}
+```
 """
 
 [conversation.tools.github_pulls.style]
@@ -23,13 +34,20 @@ inline_results = "off"
 results_file_link = "off"
 parameters = "function_call"
 
+[conversation.tools.github_pulls.parameters.repository]
+type = "string"
+summary = "Repository to read pull requests from, in `owner/repo` form."
+description = """
+If unspecified, defaults to the current project's GitHub repository.
+"""
+
 [conversation.tools.github_pulls.parameters.number]
 type = "integer"
 summary = "Pull request number to get information about."
 description = """
 If unspecified, a list of all pull requests will be returned, without the
-pull request contents. You can re-run the tool with the correct pull request
-number to get more details about a pull request.
+pull request contents or comments. Re-run the tool with the pull request
+number to fetch its details and comments.
 """
 
 [conversation.tools.github_pulls.parameters.state]
@@ -49,4 +67,13 @@ description = """
 If unspecified, only the list of changed files will be returned, but not the
 actual diff. You can re-run the tool with the correct file path to get the
 diff.
+"""
+
+[conversation.tools.github_pulls.parameters.page]
+type = "integer"
+summary = "1-indexed page of conversation comments to fetch (10 per page)."
+description = """
+Only applies when `number` is set and `file_diffs` is empty. The response
+includes the requested page of the PR's conversation comments. Inline
+review comments are not returned by this tool. Defaults to 1.
 """
