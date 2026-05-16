@@ -22,7 +22,7 @@ pub(crate) async fn fs_create_file(
 ) -> ToolResult {
     let p = PathBuf::from(&path);
 
-    if p.is_absolute() {
+    if p.has_root() {
         return error("Path must be relative.");
     }
 

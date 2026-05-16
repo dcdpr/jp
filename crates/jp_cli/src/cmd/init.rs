@@ -39,7 +39,7 @@ impl Init {
             .try_into()
             .map_err(FromPathBufError::into_io_error)?;
 
-        if !root.is_absolute() {
+        if !root.has_root() {
             root = cwd.join(root);
         }
 

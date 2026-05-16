@@ -16,11 +16,11 @@ pub(crate) async fn fs_move_file(
     let src = Utf8PathBuf::from(&source);
     let dst = Utf8PathBuf::from(&target);
 
-    if src.is_absolute() {
+    if src.has_root() {
         return Err("Source path must be relative.".into());
     }
 
-    if dst.is_absolute() {
+    if dst.has_root() {
         return Err("Destination path must be relative.".into());
     }
 

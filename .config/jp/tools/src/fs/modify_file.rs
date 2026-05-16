@@ -287,7 +287,7 @@ fn validate_paths(default_path: Option<&str>, patterns: &[Pattern]) -> Result<()
 /// Validates a single file path.
 fn validate_single_path(path: &str) -> Result<(), String> {
     let p = Utf8PathBuf::from(path);
-    if p.is_absolute() {
+    if p.has_root() {
         return Err(format!("Path must be relative: {path}"));
     }
 
