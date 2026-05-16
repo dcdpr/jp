@@ -884,8 +884,25 @@ impl DelayControl {
 /// non-Windows platforms the threshold is small enough that any
 /// practical per-character delay hits it on the first character, so
 /// the loop behaves identically to the original per-character sleep.
+///
+/// A better-but-more-complex fix exists for Windows specifically:
+/// `std::thread::sleep` has used `CreateWaitableTimerExW` with
+/// `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` since Rust 1.75 (Win 10
+/// 1803+), so true sub-millisecond per-character pacing is possible.
+/// Reaching it from here means dropping the `Condvar`-based wake and
+/// polling the `skip` flag between short `thread::sleep` calls —
+/// trading immediate `flush_instant` wake-up for up-to-poll-interval
+/// wake-up latency, plus extra syscall overhead from re-creating the
+/// waitable timer on every sleep. We've taken the simpler batching
+/// fix here on the assumption that ~10ms bursts on Windows are
+/// acceptable for a typewriter effect. Revisit if real-world output
+/// on Windows looks visibly chunkier than the Linux/macOS baseline.
 #[cfg(windows)]
 const SLEEP_GRANULARITY: Duration = Duration::from_millis(10);
+
+/// See the `cfg(windows)` variant for the rationale. On non-Windows
+/// platforms the scheduler's timer resolution is already sub-ms, so
+/// the threshold is effectively just "any non-zero delay".
 #[cfg(not(windows))]
 const SLEEP_GRANULARITY: Duration = Duration::from_nanos(1);
 
