@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-03
-- **Requires**: [RFD 035](035-multi-root-config-load-path-resolution.md), [RFD 038](038-config-reset-keywords.md), [RFD 054](054-split-conversation-config-and-events.md)
+- **Requires**: [RFD 035](035-multi-root-config-load-path-resolution.md), [RFD 054](054-split-conversation-config-and-events.md)
 - **Required by**: [RFD 078](078-tool-config-mutation.md)
 
 ## Summary
@@ -44,15 +44,9 @@ that was subsequently claimed by another config source (e.g. `architect`). If
 both `dev` and `architect` set `tools = [read_file]`, reverting `dev` should not
 disable the tool — `architect` still wants it.
 
-If we do nothing, users must either track config state manually, start new
-conversations when they want to change config profiles, or rely on `--cfg NONE`
-([RFD 038]) which resets *everything* rather than selectively reverting one
-source.
-
-It should be noted that `-C` is one tool among several for managing config
-state. `--cfg NONE` and `--cfg WORKSPACE` ([RFD 038]) provide clean-slate
-alternatives when precise per-source revert is not needed. `-C` is the precision
-tool for "undo this specific source."
+If we do nothing, users must either track config state manually or start new
+conversations when they want to change config profiles. Neither is good UX,
+and the latter is destructive.
 
 ## Design
 
@@ -192,17 +186,13 @@ inner for resolution type:
   if its current resolved value matches the specified value, walking back past
   all claims on that field.
 
-#### Claims on `ApplyDelta`
+#### Claims on `ConfigDelta`
 
-[RFD 038] promotes `ConfigDelta` to an enum with `Apply` and `Reset` variants.
-This RFD's additions — `claims` and `unsets` — live on the `Apply` variant. The
-`Reset` variant carries only a timestamp and signals fold-time state clearing.
-
-The `Apply` variant (renamed from today's `ConfigDelta` struct) gains a claims
-map recording which config source last set each field during that invocation:
+`ConfigDelta` (today a struct in `crates/jp_conversation/src/stream.rs`) gains
+two new fields recording per-field provenance and explicit field clearing:
 
 ```rust
-pub struct ApplyDelta {
+pub struct ConfigDelta {
     pub timestamp: DateTime<Utc>,
     pub delta: Box<PartialAppConfig>,
 
@@ -213,12 +203,6 @@ pub struct ApplyDelta {
     pub claims: BTreeMap<String, Vec<String>>,
 }
 ```
-
-**Which RFD owns what.** The enum wrapper and the `Reset` variant are defined in
-[RFD 038] (they exist to persist `NONE`'s reset semantics). This RFD defines the
-shape of `ApplyDelta`. The two can land in either order: if 038 lands first,
-070's additions mutate `ApplyDelta`; if 070 lands first, 038 refactors
-`ConfigDelta` into the enum and renames the struct to `ApplyDelta`.
 
 - **`delta`**: the config diff, same as today.
 - **`unsets`**: dotted field paths to reset to `None`. Populated by revert
@@ -268,7 +252,6 @@ leaking user-specific paths into shared workspace storage:
 | User-local file                 | `<user-local>`             | `d4e5f6:<user-local>`               |
 | Structured object with `id`     | The `id` value             | `f7a8b9:quick-model`                |
 | Conversation ID                 | The conversation ID        | `c0d1e2:jp-c17528832001`            |
-| Keyword (`NONE`, `WORKSPACE`)   | The keyword                | `000000:NONE`                       |
 | Key-value assignment            | The canonical field path   | `11a2b3:assistant.model.id`         |
 | Shortcut flag (`--model`, etc.) | Same as kv (maps to field) | `11a2b3:assistant.model.id`         |
 | Environment variable            | —                          | Explicit unclaim (empty `Vec`)      |
@@ -612,9 +595,7 @@ multiple kv reverts.
 3. **Compute revert values.** For each field in scope, walk
    `ConfigDelta` events backwards past all claims that match the
    target set (any stored identity in the target set), until a claim
-   with no target-matching identity, the base config, or a `Reset`
-   event ([RFD 038]). A `Reset` terminates the walk as if the base
-   were reached: pre-`Reset` state is unreachable for revert purposes.
+   with no target-matching identity or the base config is reached.
    Use the config value at that point. If the target value is `None`,
    add the field path to the revert delta's `unsets` list instead of
    its partial (schematic's merge cannot express `Some → None`
@@ -907,11 +888,9 @@ flag to appear with or without a value:
 no_config: Vec<CfgDirective>,
 ```
 
-Bare `--no-cfg` (no value) retains its [RFD 038] meaning — alias for
-`--cfg NONE` — and is handled by the positive directive path, not by
-this RFD's revert machinery. This RFD only extends `--no-cfg` to
-accept a value for targeted revert; the bare form's semantics are
-RFD 038's concern.
+Bare `--no-cfg` (no value) has no defined meaning in this RFD and is
+rejected at parse time — `-C` / `--no-cfg` always requires a value.
+A later RFD may define a meaning for the bare form.
 
 Positive (`-c`) and negative (`-C`) args are merged into a single
 `Vec<CfgDirective>` preserving command-line order. Since clap does not
@@ -924,11 +903,10 @@ the same pattern for `--tool`/`--no-tools` (see [RFD 008]); the
 
 Users who want to undo post-creation changes to a conversation —
 i.e., revert to the `base + init` state captured at creation time —
-can use targeted `-C <source>` for specific sources, or
-`--cfg WORKSPACE --cfg <source>` for a broader reset. A dedicated
-`--cfg START` keyword that expands to `base + init` is a deferred
-non-goal of [RFD 038]; the `init` list introduced here preserves the
-infrastructure needed to add it later.
+can use targeted `-C <source>` for specific sources. A dedicated
+keyword that expands to `base + init` is out of scope; the `init`
+list introduced here preserves the infrastructure needed to add
+such a keyword later.
 
 ### Examples
 
@@ -1002,7 +980,7 @@ resolved value of `assistant.name` is `DevBot`.
 
 **Invocation 2**: `-C assistant.name=DevBot` reads the current resolved
 value (`DevBot`), compares to the target (`DevBot`). Match. Walk back
-through `ApplyDelta` events; for each delta, check whether
+through `ConfigDelta` events; for each delta, check whether
 `assistant.name`'s resolved value at that point was still `DevBot`.
 Stop at the first earlier state where it was different (or at base).
 Emit a revert delta setting `assistant.name` to that earlier value.
@@ -1121,7 +1099,7 @@ file and re-deriving its fields.
 
 ## Drawbacks
 
-**Claims add storage overhead.** Each `ApplyDelta` gains a `BTreeMap` of
+**Claims add storage overhead.** Each `ConfigDelta` gains a `BTreeMap` of
 field paths to source hashes. For a typical persona file setting 10-20
 fields, this is a few hundred bytes per delta. Negligible in practice.
 
@@ -1208,8 +1186,6 @@ without touching the config type system.
 - **Direct stream editing.** `-C` does not remove or modify existing
   `ConfigDelta` events in the conversation stream. It influences the *next*
   delta by changing what the pipeline produces. The stream remains append-only.
-  (Note: [RFD 038]'s `Reset` event is emitted by the pipeline as a normal
-  append, not as a retroactive edit.)
 - **Provenance display.** Showing which source contributed which field is useful
   but orthogonal. See [RFD 060].
 
@@ -1468,37 +1444,24 @@ An explicit opt-in keeps the classification visible in code. A future
 attribute can be added later if the set of duplicate-capable fields
 grows significantly.
 
-### Interaction with RFD 038 keywords and conversation inheritance
+### Conversation-ID inheritance
 
-`--cfg WORKSPACE` from [RFD 038], and conversation-ID inheritance
-(`--cfg jp-c<id>`, defined in a future RFD), produce fully-populated
-partials that overwrite most fields. Like any
-`Apply` source, they generate claims under their respective source
-identity (`hash("WORKSPACE")`, `hash(conversation_id)`) and persist as
-`ApplyDelta` events. The claims pipeline is uniform — no special-case
-logic for keywords or conversation IDs.
+Conversation-ID inheritance (`--cfg jp-c<id>`, defined in a future RFD)
+expands another conversation's resolved config into a fully-populated
+partial. Like any `Apply` source, an inheriting partial generates claims
+under its source identity (`hash(conversation_id)`) and persists as a
+`ConfigDelta` event. The claims pipeline is uniform — no special-case
+logic for inheritance.
 
-`--cfg NONE` is handled differently by [RFD 038]: it persists as a
-`ResetDelta` (not an `ApplyDelta`) that clears accumulated state when
-folded. `ResetDelta` carries no claims of its own. For this RFD's
-walk-back algorithm, a `Reset` event terminates the walk just like
-reaching the base config (pre-reset state is unreachable).
-
-`-C NONE` has no meaningful semantics — `ResetDelta` doesn't carry
-claims to revert against, and pre-reset claims aren't in the current
-state. This RFD treats `-C NONE` as an error.
-
-**Conversation-ID inheritance collapses claim granularity.** When
-`-c jp-c17528832001` expands another conversation's resolved config into
-a fully-populated partial, a single source identity
-(`hash(conversation_id)`) claims every field. The inner provenance from
-the source conversation — which `dev` or `architect` originally claimed
-each field — is lost in the target conversation. This is acceptable:
-inheritance is a wholesale "adopt this state" operation, and
-`-C jp-c<id>` undoes it wholesale. Users who need finer-grained control
-over inherited influence should layer sources explicitly
-(`-c jp-c<id> -c overrides.toml`) rather than relying on preserved
-provenance from the source.
+**Inheritance collapses claim granularity.** A single source identity
+(`hash(conversation_id)`) claims every field in the inherited partial.
+The inner provenance from the source conversation — which `dev` or
+`architect` originally claimed each field — is lost in the target
+conversation. This is acceptable: inheritance is a wholesale "adopt
+this state" operation, and `-C jp-c<id>` undoes it wholesale. Users
+who need finer-grained control over inherited influence should layer
+sources explicitly (`-c jp-c<id> -c overrides.toml`) rather than
+relying on preserved provenance from the source.
 
 ### Extends sub-files
 
@@ -1568,7 +1531,7 @@ Users can inspect current claims via `jp conversation show --claims`
 
 ### Backward compatibility
 
-Old conversation streams have `ApplyDelta` events without claims. The
+Old conversation streams have `ConfigDelta` events without claims. The
 `#[serde(default)]` attribute initializes an empty map for these. For
 fields without claims, `-C` skips rather than guessing — silently falling
 back to value-diff guessing would produce unpredictable results. Legacy
@@ -1596,12 +1559,8 @@ This phase lays the data-model foundation without wiring `-C` itself.
 
 **`ConfigDelta` changes** in `crates/jp_conversation/src/stream.rs`:
 
-Depends on [RFD 038]'s enum refactor (`ConfigDelta` becomes
-`{ Apply(ApplyDelta), Reset(ResetDelta) }`). The changes below operate
-on `ApplyDelta`.
-
 - Add `claims: BTreeMap<String, Vec<String>>` and
-  `unsets: Vec<String>` fields to `ApplyDelta`. The claims-map value
+  `unsets: Vec<String>` fields to `ConfigDelta`. The claims-map value
   is a list: empty means explicit unclaim, non-empty means the field
   is claimed by any of the listed identities.
 - Extend `deserialize_config_delta` to read `claims` and `unsets` from
@@ -1649,7 +1608,7 @@ Tests:
 
 - Claims and unsets serialization round-trip via
   `deserialize_config_delta` (stable key ordering via `BTreeMap`).
-- Backward compatibility with old `ApplyDelta` events (no claims
+- Backward compatibility with old `ConfigDelta` events (no claims
   field).
 - `unset` and `remove_element` for representative field types
   (scalar optional, nested struct, vec element removal).
@@ -1710,7 +1669,7 @@ Tests:
 - Claims are recorded correctly for each source type (file, kv,
   JSON-object, shortcut flag, env).
 - Per-directive deltas: `-c dev -c architect` produces two
-  `ApplyDelta` events, not one.
+  `ConfigDelta` events, not one.
 - Within-invocation A→B→A persists three deltas with the correct
   intermediate claims.
 - Shortcut flags batch into a single trailing delta.
@@ -1838,9 +1797,9 @@ wrapping `KeyValueOrPath`.
 **CLI wiring**:
 
 - Wire `-C` / `--no-cfg` in clap as the negative counterpart of
-  `-c` / `--cfg`. `-C` requires a value — bare `--no-cfg` is
-  handled by the positive `--cfg` path (aliased to `--cfg NONE`
-  per [RFD 038]), not by this RFD's revert machinery.
+  `-c` / `--cfg`. The flag requires a value (file path, `key=value`,
+  or JSON object); bare `--no-cfg` has no defined meaning in this
+  RFD and is rejected at parse time.
 - Add a manual `clap::FromArgMatches` impl that merges the `-c` and
   `-C` vectors into a single `Vec<CfgDirective>` preserving
   command-line order via `ArgMatches::indices_of(..)`. Same pattern
@@ -1906,11 +1865,6 @@ Depends on Phase 3.
   interleaved CLI flags.
 - [RFD 035]: Multi-Root Config Load Path Resolution — defines the three-root
   search for `--cfg` paths, which `-C` reuses.
-- [RFD 038]: Config Reset Keywords — defines the `NONE` and
-  `WORKSPACE` keywords, and the `ConfigDelta` enum with `Apply` /
-  `Reset` variants that this RFD's `ApplyDelta` sits inside. This RFD
-  reuses the `--no-cfg` long form introduced there (bare form retains
-  its RFD 038 meaning) and adds a valued form for targeted revert.
 - **Conversation-ID inheritance** (`--cfg=jp-c<id>` and `--fork` implicit
   config) is defined in a future RFD. This RFD assumes inherited conversation
   partials claim every field they set under `hash(conversation_id)`,
@@ -1928,7 +1882,6 @@ Depends on Phase 3.
 
 [RFD 008]: 008-ordered-tool-directives.md
 [RFD 035]: 035-multi-root-config-load-path-resolution.md
-[RFD 038]: 038-config-reset-keywords.md
 [RFD 054]: 054-split-conversation-config-and-events.md
 [RFD 060]: 060-config-explain.md
 [RFD 079]: 079-config-sources-and-load-order.md

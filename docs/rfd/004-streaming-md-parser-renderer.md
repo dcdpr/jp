@@ -4,6 +4,7 @@
 - **Category**: Decision
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-19
+- **Extended by**: [RFD 084](084-configurable-markdown-element-coloring.md)
 
 ## Summary
 
