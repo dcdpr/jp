@@ -1,0 +1,61 @@
+[conversation.tools.rust_crate_search_items]
+enable = false
+run = "unattended"
+
+source = "mcp.bookworm.crate_search_items"
+summary = "Search for item definitions within a crate."
+description = """\
+Returns a list of items (modules, types, functions, methods, traits, variants, \
+etc.) inside the given crate that match a partial-path query, each with its \
+canonical path, kind, signature, prose docs (as markdown), and resource URIs \
+for drilling in further.
+
+The query is case-insensitive partial-match against both the item's name and \
+its full path. Use `kinds` to narrow the results — e.g. only methods, only \
+traits — when you know what you're after.\
+"""
+
+examples = """
+Find any `Value` symbol in serde_json:
+```json
+{"crate_name": "serde_json", "query": "Value"}
+```
+
+Find methods on `Value`:
+```json
+{"crate_name": "serde_json", "query": "Value::", "kinds": ["Method"]}
+```
+
+Narrow by version:
+```json
+{"crate_name": "tokio", "crate_version": "1.40", "query": "spawn"}
+```
+"""
+
+[conversation.tools.rust_crate_search_items.style]
+inline_results = "off"
+parameters = "function_call"
+
+[conversation.tools.rust_crate_search_items.parameters.crate_name]
+type = "string"
+required = true
+summary = "Exact name of the crate."
+
+[conversation.tools.rust_crate_search_items.parameters.crate_version]
+type = "string"
+default = "latest"
+summary = "Semver-compatible version, or `latest` for the most recent release."
+
+[conversation.tools.rust_crate_search_items.parameters.query]
+type = "string"
+required = true
+summary = "Partial-match query against item names and paths."
+
+[conversation.tools.rust_crate_search_items.parameters.kinds]
+type = "array"
+summary = """\
+Filter by item kind. Allowed values: Constant, Derive, Enum, Function, Macro, \
+Method, Module, Struct, Trait, Type, Variant, Attribute. Omit for all kinds.\
+"""
+[conversation.tools.rust_crate_search_items.parameters.kinds.items]
+type = "string"

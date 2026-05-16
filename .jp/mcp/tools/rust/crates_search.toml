@@ -1,0 +1,36 @@
+[conversation.tools.rust_crates_search]
+enable = false
+run = "unattended"
+
+source = "mcp.bookworm.crates_search"
+summary = "Search crates.io for crates matching a query."
+description = """\
+Returns a list of crates from crates.io that match the query, along with each \
+crate's name, latest version, description, download count, and homepage / \
+documentation / repository links. Each result is keyed by a `crate://` URI \
+that can be passed back to `rust_crate_resource` to drill in further.
+
+Prefer broad keyword queries over exact phrases — the underlying search is \
+fuzzy and works best with a few descriptive terms.\
+"""
+
+examples = """
+Find an HTTP client crate:
+```json
+{"query": "http client"}
+```
+
+Find a JSON parser:
+```json
+{"query": "serde json"}
+```
+"""
+
+[conversation.tools.rust_crates_search.style]
+inline_results = "off"
+parameters = "function_call"
+
+[conversation.tools.rust_crates_search.parameters.query]
+type = "string"
+required = true
+summary = "Search query."

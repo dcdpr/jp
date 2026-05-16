@@ -1,0 +1,27 @@
+[conversation.tools.rust_crate_versions]
+enable = false
+run = "unattended"
+
+source = "mcp.bookworm.crate_versions"
+summary = "List recent versions of a crate."
+description = """\
+Returns the most recent non-yanked versions of the named crate, along with \
+each version's release date, download count, MSRV, and publisher. Useful for \
+picking a concrete version to feed into `rust_crate_search_items` or \
+`rust_crate_resource`.\
+"""
+
+examples = """
+```json
+{"crate_name": "tokio"}
+```
+"""
+
+[conversation.tools.rust_crate_versions.style]
+inline_results = "off"
+parameters = "function_call"
+
+[conversation.tools.rust_crate_versions.parameters.crate_name]
+type = "string"
+required = true
+summary = "Exact name of the crate."

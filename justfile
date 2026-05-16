@@ -1473,6 +1473,21 @@ install-tools:
 serve-tools CONTEXT TOOL:
     @jp-tools {{quote(CONTEXT)}} {{quote(TOOL)}}
 
+# Run the bookworm MCP server (docs.rs documentation tools).
+#
+# Rebuilds the release binary first; `cargo build` is incremental, so this is
+# a no-op when nothing has changed and a fast incremental compile when it has.
+# The repo's `.jp/config.toml` points `providers.mcp.bookworm.command` at this
+# recipe, so every `jp query` that uses bookworm tools picks up the latest
+# local source automatically.
+[group('tools')]
+serve-bookworm: _build-bookworm
+    @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
+
+[private]
+@_build-bookworm:
+    cargo build {{quiet_flag}} --release --package bookworm
+
 # Build all command plugin binaries for a target (defaults to host).
 [group('plugins')]
 plugin-build TARGET="":

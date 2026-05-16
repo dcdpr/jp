@@ -1,0 +1,37 @@
+[conversation.tools.rust_crate_readme]
+enable = false
+run = "unattended"
+
+source = "mcp.bookworm.crate_readme"
+summary = "Get a crate's README as markdown."
+description = """\
+Fetches the README for a specific crate version and converts it from HTML to \
+markdown. Useful for a quick overview of a crate's purpose, feature flags, \
+and typical usage before diving into the item docs.\
+"""
+
+examples = """
+Latest version:
+```json
+{"crate_name": "anyhow"}
+```
+
+Specific version:
+```json
+{"crate_name": "tokio", "crate_version": "1.40.0"}
+```
+"""
+
+[conversation.tools.rust_crate_readme.style]
+inline_results = "off"
+parameters = "function_call"
+
+[conversation.tools.rust_crate_readme.parameters.crate_name]
+type = "string"
+required = true
+summary = "Exact name of the crate."
+
+[conversation.tools.rust_crate_readme.parameters.crate_version]
+type = "string"
+default = "latest"
+summary = "Semver-compatible version, or `latest` for the most recent release."

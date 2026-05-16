@@ -1,0 +1,46 @@
+[conversation.tools.rust_crate_resource]
+enable = false
+run = "unattended"
+
+source = "mcp.bookworm.crate_resource"
+summary = "Fetch a crate resource (metadata, README, items, source) by URI."
+description = """\
+Single entry point for everything else bookworm exposes. Supported URI shapes:
+
+- `crate://{name}` — list non-yanked crate versions
+- `crate://{name}/{version}` — get crate metadata
+- `crate://{name}/{version}/readme` — README as markdown
+- `crate://{name}/{version}/items` — list all item resources
+- `crate://{name}/{version}/src` — list source file resources
+- `crate://{name}/{version}/items/{path}` — fetch a specific item's docs
+- `crate://{name}/{version}/src/{path}` — fetch a specific source file
+
+`{version}` may be a concrete semver (`1.0.140`), a partial semver (`1`), or \
+`latest` for the most recent release.\
+"""
+
+examples = """
+List versions of serde_json:
+```json
+{"uri": "crate://serde_json"}
+```
+
+Fetch the docs for a specific method:
+```json
+{"uri": "crate://serde_json/1.0.140/items/value/enum.Value.html#method.pointer"}
+```
+
+Read a source file:
+```json
+{"uri": "crate://tokio/latest/src/tokio/runtime/mod.rs.html"}
+```
+"""
+
+[conversation.tools.rust_crate_resource.style]
+inline_results = "off"
+parameters = "function_call"
+
+[conversation.tools.rust_crate_resource.parameters.uri]
+type = "string"
+required = true
+summary = "Crate resource URI."
