@@ -116,18 +116,9 @@ expression: v
         }
       },
       "typewriter": {
-        "text_delay": {
-          "secs": 0,
-          "nanos": 3000000
-        },
-        "code_delay": {
-          "secs": 0,
-          "nanos": 500000
-        },
-        "max_latency": {
-          "secs": 0,
-          "nanos": 0
-        }
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
       }
     },
     "editor": {

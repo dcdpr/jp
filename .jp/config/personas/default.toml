@@ -7,6 +7,9 @@ attachments = [
     "cmd:date?description=Current Date",
 ]
 
+[style]
+typewriter.max_latency = "200ms"
+
 [assistant.system_prompt]
 strategy = "replace"
 value = """
