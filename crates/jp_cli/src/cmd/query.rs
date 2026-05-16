@@ -224,11 +224,16 @@ pub(crate) struct Query {
     /// quoted lines (mutt/email style). The complete buffer — quotes plus
     /// your replies — becomes your next message.
     ///
-    /// Implies `--edit`. Conflicts with `--no-edit` and `--replay`. If no
-    /// prior assistant message exists in this conversation, a warning is
-    /// emitted and the editor opens with whatever other content was seeded
-    /// (query, stdin, or empty).
-    #[arg(long = "quote", alias = "reply", conflicts_with_all = ["no_edit", "replay"])]
+    /// Forces the editor open by default; respects `--no-edit` /
+    /// `--edit=false` if explicitly suppressed, in which case the quoted
+    /// text is sent as-is. Composes with `--replay`: the quote is taken
+    /// from the stream *after* the replayed turn has been trimmed, i.e.
+    /// the assistant message preceding the turn being replayed.
+    ///
+    /// If no prior assistant message exists in this conversation, a
+    /// warning is emitted and the editor opens with whatever other content
+    /// was seeded (query, stdin, or empty).
+    #[arg(long = "quote")]
     quote: bool,
 
     /// The model to use.
