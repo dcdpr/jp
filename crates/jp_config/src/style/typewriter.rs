@@ -1,9 +1,13 @@
 //! Typewriter effect styling configuration.
 
-use std::time::Duration;
+use std::{fmt, str::FromStr, time::Duration};
 
-use schematic::{Config, Schematic};
-use serde::{Deserialize, Serialize};
+use humantime::{format_duration, parse_duration};
+use schematic::{Config, Schema, SchemaBuilder, Schematic};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, IgnoredAny, MapAccess, Visitor},
+};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
@@ -18,26 +22,17 @@ use crate::{
 pub struct TypewriterConfig {
     /// Delay between printing characters.
     ///
-    /// The default is `3` milliseconds.
+    /// Accepts any [`humantime`]-compatible duration string, e.g. `"3ms"`,
+    /// `"500us"`, `"1s"`. Use `"0s"` to disable.
     ///
-    /// You can use one of the following formats:
-    /// - `10` for 10 milliseconds
-    /// - `5m` for 5 milliseconds
-    /// - `1u` for 1 microsecond
-    /// - `0` to disable
-    #[setting(default = "3")]
+    /// The default is `3ms`.
+    #[setting(default = "3ms")]
     pub text_delay: DelayDuration,
 
     /// Delay between printing code-block characters.
     ///
-    /// The default is `500` microseconds.
-    ///
-    /// You can use one of the following formats:
-    /// - `10` for 10 milliseconds
-    /// - `5m` for 5 milliseconds
-    /// - `1u` for 1 microsecond
-    /// - `0` to disable
-    #[setting(default = "500u")]
+    /// Accepts the same formats as `text_delay`. The default is `500us`.
+    #[setting(default = "500us")]
     pub code_delay: DelayDuration,
 
     /// Maximum latency the typewriter is allowed to fall behind the source.
@@ -51,11 +46,10 @@ pub struct TypewriterConfig {
     /// stops emitting, the controller switches to drain mode and stops
     /// slowing back down as the queue empties.
     ///
-    /// The default is `0`, which disables the controller and keeps the
-    /// static `text_delay`/`code_delay` behavior.
-    ///
-    /// Accepts the same formats as `text_delay`.
-    #[setting(default = "0")]
+    /// Accepts the same formats as `text_delay`. The default is `0s`, which
+    /// disables the controller and keeps the static `text_delay`/
+    /// `code_delay` behavior.
+    #[setting(default = "0s")]
     pub max_latency: DelayDuration,
 }
 
@@ -105,13 +99,11 @@ impl ToPartial for TypewriterConfig {
     }
 }
 
-/// Error when parsing `DelayDuration`.
-#[derive(Debug, thiserror::Error)]
-#[error("Invalid duration: {0}")]
-pub struct DelayError(String);
-
 /// Typewriter delay duration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize, Schematic)]
+///
+/// Parses and serializes using the [`humantime`] format, e.g. `"3ms"`,
+/// `"500us"`, `"1s"`, `"0s"` to disable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct DelayDuration(Duration);
 
 impl DelayDuration {
@@ -122,30 +114,90 @@ impl DelayDuration {
     }
 }
 
+impl FromStr for DelayDuration {
+    type Err = humantime::DurationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        parse_duration(s).map(Self)
+    }
+}
+
 impl TryFrom<&str> for DelayDuration {
-    type Error = DelayError;
+    type Error = humantime::DurationError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
         s.parse()
     }
 }
 
-impl std::str::FromStr for DelayDuration {
-    type Err = DelayError;
+impl fmt::Display for DelayDuration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        format_duration(self.0).fmt(f)
+    }
+}
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let num = s
-            .chars()
-            .take_while(char::is_ascii_digit)
-            .collect::<String>();
+impl Serialize for DelayDuration {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(&format_duration(self.0))
+    }
+}
 
-        let num = match s.get(num.len()..).unwrap_or_default() {
-            "m" | "" => num.parse::<u64>().map(Duration::from_millis).ok(),
-            "u" => num.parse::<u64>().map(Duration::from_micros).ok(),
-            _ => None,
-        };
+impl<'de> Deserialize<'de> for DelayDuration {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct DelayVisitor;
 
-        num.map(Self).ok_or_else(|| DelayError(s.to_owned()))
+        impl<'de> Visitor<'de> for DelayVisitor {
+            type Value = DelayDuration;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str(
+                    "a humantime duration string (e.g. \"3ms\") or a legacy {secs, nanos} object",
+                )
+            }
+
+            fn visit_str<E: de::Error>(self, v: &str) -> Result<DelayDuration, E> {
+                v.parse().map_err(de::Error::custom)
+            }
+
+            // Backwards-compat: stored conversations from before the
+            // humantime change serialized `DelayDuration` using `Duration`'s
+            // default `{secs, nanos}` representation. Accept that shape on
+            // read so existing conversations keep loading; new writes still
+            // go out as a humantime string via `Serialize`.
+            //
+            // This is a tactical patch; the general fix for stored-config
+            // schema drift is tracked in RFD D27.
+            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<DelayDuration, M::Error> {
+                let mut secs: u64 = 0;
+                let mut nanos: u32 = 0;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "secs" => secs = map.next_value()?,
+                        "nanos" => nanos = map.next_value()?,
+                        _ => {
+                            let _: IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+                Ok(DelayDuration(Duration::new(secs, nanos)))
+            }
+        }
+
+        deserializer.deserialize_any(DelayVisitor)
+    }
+}
+
+impl Schematic for DelayDuration {
+    fn schema_name() -> Option<String> {
+        Some("DelayDuration".into())
+    }
+
+    fn build_schema(mut schema: SchemaBuilder) -> Schema {
+        let mut schema = schema.string(schematic::schema::StringType::default());
+        schema.set_description(
+            "Typewriter delay duration in humantime format (e.g. \"3ms\", \"500us\", \"1s\").",
+        );
+        schema
     }
 }
 
@@ -154,3 +206,7 @@ impl From<DelayDuration> for Duration {
         delay.0
     }
 }
+
+#[cfg(test)]
+#[path = "typewriter_tests.rs"]
+mod tests;
