@@ -5,13 +5,13 @@ import { data } from '../../.vitepress/loaders/rfds.data.js'
 
 const route = useRoute()
 
-// Map RFD number -> lowercase status, e.g. "042" -> "implemented".
-const statusByNum = new Map(
-    data.map(r => [r.num, r.status?.toLowerCase()]).filter(([, s]) => s)
-)
+// Map RFD number -> data entry, for status + title lookup.
+const byNum = new Map(data.map(r => [r.num, r]))
 
-function applyLinkColors() {
-    if (!/^\/rfd\/\d{3}-/.test(route.path)) return
+function enhanceLinks() {
+    // Status coloring is scoped to RFD pages where the legend makes sense.
+    // Tooltips apply everywhere RFD links appear.
+    const colorize = /^\/rfd\/\d{3}-/.test(route.path)
 
     for (const a of document.querySelectorAll('.vp-doc a[href]')) {
         const raw = a.getAttribute('href') ?? ''
@@ -23,18 +23,25 @@ function applyLinkColors() {
         // (`/rfd/065-foo`).
         const num = a.pathname?.match(/\/rfd\/(\d{3})-/)?.[1]
         if (!num) continue
-        const status = statusByNum.get(num)
-        if (!status) continue
+        const rfd = byNum.get(num)
+        if (!rfd) continue
+
+        // Don't clobber an explicit title from the markdown source.
+        if (rfd.title && !a.hasAttribute('title')) {
+            a.setAttribute('title', `RFD ${num}: ${rfd.title}`)
+        }
+
+        if (!colorize || !rfd.status) continue
         // Idempotent: skip if a status class is already present.
         if ([...a.classList].some(c => c.startsWith('rfd-link--'))) continue
-        a.classList.add('rfd-link', `rfd-link--${status}`)
+        a.classList.add('rfd-link', `rfd-link--${rfd.status.toLowerCase()}`)
     }
 }
 
-onMounted(() => nextTick(applyLinkColors))
-watch(() => route.path, () => nextTick(applyLinkColors))
+onMounted(() => nextTick(enhanceLinks))
+watch(() => route.path, () => nextTick(enhanceLinks))
 </script>
 
 <template>
-    <!-- Renders nothing; tags RFD links via DOM manipulation. -->
+    <!-- Renders nothing; tags RFD links with status classes + title tooltips. -->
 </template>
