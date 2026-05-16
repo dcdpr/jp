@@ -54,8 +54,11 @@ use jp_attachment::{
     Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, typetag,
 };
 use jp_github::{
-    Octocrab,
-    models::pulls::{PullRequest, Review, ReviewComment, Side},
+    Error as GhError, Octocrab,
+    models::{
+        pulls::{PullRequest, Review, ReviewComment, Side},
+        repos::{DiffEntry, DiffEntryStatus},
+    },
 };
 use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
@@ -312,17 +315,154 @@ async fn fetch_pr_diff(
 
     // Metadata first (title, description, refs).
     let pr = pulls.get(number).await?;
-
-    // Then the unified diff via custom Accept header.
-    let diff_text = pulls.diff(number).await?;
-
     let patterns = compile_excludes(&parsed.excludes, parsed.no_defaults)?;
-    let (filtered, included, excluded) = filter_diff(&diff_text, &patterns);
 
-    let header = render_diff_header(uri, &pr, included, excluded, parsed);
-    let body = format!("{header}\n\n{filtered}");
+    // Try the unified-diff endpoint first. GitHub caps it at 20,000
+    // lines and returns 406 above that; fall back to the paginated
+    // /pulls/N/files endpoint and synthesize a diff-like blob from the
+    // per-file patches. The fallback has different limits (max ~300
+    // files per PR; individual patches are dropped when too large or
+    // binary), so we surface both file count and patch-truncation count
+    // in the header.
+    let (body, included, excluded, notice) = match pulls.diff(number).await {
+        Ok(diff_text) => {
+            let (filtered, included, excluded) = filter_diff(&diff_text, &patterns);
+            (filtered, included, excluded, None)
+        }
+        Err(err) if is_diff_too_large(&err) => {
+            debug!(
+                uri = %uri,
+                "Unified diff exceeded GitHub's 20k-line cap; falling back to /pulls/N/files."
+            );
+            let page = pulls.list_files(number).await?;
+            let entries = client.all_pages(page).await?;
+            let synth = synthesize_diff_from_files(&entries, &patterns);
+            let mut note = format!(
+                "Note: PR diff exceeded GitHub's 20,000-line cap; reconstructed from the \
+                 paginated /pulls/{number}/files endpoint."
+            );
+            if synth.truncated > 0 {
+                note.push_str(&format!(
+                    " {} file(s) had their patch omitted by GitHub (too large or binary); the \
+                     `diff --git` headers are still present.",
+                    synth.truncated
+                ));
+            }
+            (synth.text, synth.included, synth.excluded, Some(note))
+        }
+        Err(err) => return Err(err.into()),
+    };
+
+    let header = render_diff_header(uri, &pr, included, excluded, parsed, notice.as_deref());
+    let body = format!("{header}\n\n{body}");
 
     Ok(Attachment::text(uri.to_string(), body))
+}
+
+/// Did the unified-diff endpoint reject the PR for being too large?
+///
+/// GitHub returns HTTP 406 (Not Acceptable) for `application/vnd.github.diff`
+/// once the diff exceeds 20,000 lines. The same status is unlikely to come
+/// back from this endpoint for any other reason, so a status-only check is
+/// sufficient — we don't pattern-match the human-readable message because
+/// GitHub has rewritten it before.
+fn is_diff_too_large(err: &GhError) -> bool {
+    matches!(err, GhError::GitHub { source, .. } if source.status_code.as_u16() == 406)
+}
+
+/// Output of [`synthesize_diff_from_files`].
+struct SynthesizedDiff {
+    text: String,
+    included: usize,
+    excluded: usize,
+    /// Files whose `patch` field was `None` — GitHub omits it for files
+    /// that are too large (~3000 lines) or binary. The `diff --git` header
+    /// is still emitted so the LLM can see *which* files changed even when
+    /// the hunks are missing.
+    truncated: usize,
+}
+
+/// Build a unified-diff-like blob from the per-file entries returned by
+/// `/pulls/{N}/files`. Used as the fallback when the unified-diff endpoint
+/// exceeds GitHub's 20k-line cap.
+///
+/// The output is *not* a byte-for-byte equivalent of `git diff`: GitHub's
+/// per-file `patch` field starts at the first hunk (`@@ ...`) and omits the
+/// `index`/`---`/`+++` lines. We add the `diff --git a/PATH b/PATH` header
+/// per file so downstream consumers (and the LLM) can still identify file
+/// boundaries the standard way. Renames and copies get the usual
+/// `rename from`/`rename to` (or `copy from`/`copy to`) markers, mirroring
+/// what `git diff` would emit.
+fn synthesize_diff_from_files(entries: &[DiffEntry], patterns: &[Pattern]) -> SynthesizedDiff {
+    let mut text = String::new();
+    let mut included = 0_usize;
+    let mut excluded = 0_usize;
+    let mut truncated = 0_usize;
+
+    for entry in entries {
+        if path_matches_any(&entry.filename, patterns) {
+            excluded += 1;
+            continue;
+        }
+
+        let renamed = matches!(
+            entry.status,
+            DiffEntryStatus::Renamed | DiffEntryStatus::Copied
+        );
+        let prev = entry.previous_filename.as_deref().filter(|_| renamed);
+        let a_path = prev.unwrap_or(entry.filename.as_str());
+        let b_path = entry.filename.as_str();
+
+        text.push_str(&format!("diff --git a/{a_path} b/{b_path}\n"));
+        if let Some(prev) = prev {
+            let label = if matches!(entry.status, DiffEntryStatus::Copied) {
+                "copy"
+            } else {
+                "rename"
+            };
+            text.push_str(&format!("{label} from {prev}\n"));
+            text.push_str(&format!("{label} to {}\n", entry.filename));
+        }
+
+        if let Some(patch) = entry.patch.as_deref() {
+            text.push_str(patch);
+            if !patch.ends_with('\n') {
+                text.push('\n');
+            }
+        } else {
+            truncated += 1;
+            text.push_str(&format!(
+                "[patch omitted by GitHub: file is binary or exceeds the per-file Files API \
+                 limit; status={status}, +{add}/-{del} ({changes} changes)]\n",
+                status = status_str(entry.status),
+                add = entry.additions,
+                del = entry.deletions,
+                changes = entry.changes,
+            ));
+        }
+
+        included += 1;
+    }
+
+    SynthesizedDiff {
+        text,
+        included,
+        excluded,
+        truncated,
+    }
+}
+
+const fn status_str(s: DiffEntryStatus) -> &'static str {
+    match s {
+        DiffEntryStatus::Added => "added",
+        DiffEntryStatus::Removed => "removed",
+        DiffEntryStatus::Modified => "modified",
+        DiffEntryStatus::Renamed => "renamed",
+        DiffEntryStatus::Copied => "copied",
+        DiffEntryStatus::Changed => "changed",
+        DiffEntryStatus::Unchanged => "unchanged",
+        DiffEntryStatus::Unknown => "unknown",
+    }
 }
 
 async fn fetch_pr_reviews(
@@ -445,6 +585,7 @@ fn render_diff_header(
     included: usize,
     excluded: usize,
     parsed: &ParsedUri,
+    notice: Option<&str>,
 ) -> String {
     let title = pr.title.as_deref().unwrap_or("(no title)");
     let author = pr.user.as_ref().map_or("(unknown)", |u| u.login.as_str());
@@ -485,9 +626,14 @@ fn render_diff_header(
         format!("Files included: {included}, excluded by defaults + `?exclude`: {excluded}.")
     };
 
+    let notice_line = match notice {
+        Some(n) => format!("\n{n}"),
+        None => String::new(),
+    };
+
     format!(
         "PR #{number}: {title}\n\nSource: {uri}\nURL:    {html_url}\nAuthor: {author}\nState:  \
-         {state}\nBase:   {base}\nHead:   {head}\n\n{filter_line}{body_section}",
+         {state}\nBase:   {base}\nHead:   {head}\n\n{filter_line}{notice_line}{body_section}",
         number = pr.number,
     )
 }
