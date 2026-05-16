@@ -54,6 +54,31 @@ async fn format_with_content_contains_ansi() {
 }
 
 #[tokio::test]
+async fn format_rejects_absolute_path() {
+    let ctx = format_ctx();
+    let answers = Map::new();
+
+    let result = fs_create_file(
+        ctx,
+        &answers,
+        "/tmp/repro.rs".to_owned(),
+        Some("fn main() {}\n".to_owned()),
+    )
+    .await
+    .unwrap();
+
+    match result {
+        Outcome::Error { message, .. } => {
+            assert!(
+                message.contains("Path must be relative"),
+                "unexpected error message: {message}"
+            );
+        }
+        other => panic!("expected Error outcome, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn format_without_content() {
     let ctx = format_ctx();
     let answers = Map::new();

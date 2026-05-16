@@ -14,7 +14,7 @@ pub(crate) async fn fs_delete_file(
 ) -> std::result::Result<Outcome, Error> {
     let p = Utf8PathBuf::from(&path);
 
-    if p.is_absolute() {
+    if p.has_root() {
         return Err("Path must be relative.".into());
     }
 
