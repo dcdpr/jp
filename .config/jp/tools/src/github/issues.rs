@@ -1,7 +1,8 @@
 use chrono::{DateTime, Utc};
+use jp_github::params;
 use url::Url;
 
-use super::{auth_optional, parse_repo};
+use super::{State, auth_optional, parse_repo};
 use crate::{Result, github::handle_404, to_xml};
 
 /// Comments-per-page when fetching a specific issue. Fixed at 10 to keep
@@ -11,6 +12,7 @@ const COMMENTS_PER_PAGE: u8 = 10;
 pub(crate) async fn github_issues(
     repository: Option<String>,
     number: Option<u64>,
+    state: Option<State>,
     page: Option<u64>,
 ) -> Result<String> {
     auth_optional().await?;
@@ -20,7 +22,7 @@ pub(crate) async fn github_issues(
 
     match number {
         Some(number) => get_issue(&owner, &repo, number, page).await,
-        None => get_issues(&owner, &repo, page).await,
+        None => get_issues(&owner, &repo, state, page).await,
     }
 }
 
@@ -95,7 +97,7 @@ async fn get_issue(owner: &str, repo: &str, number: u64, page: u64) -> Result<St
 /// as possible while staying bounded.
 const LIST_PER_PAGE: u8 = 100;
 
-async fn get_issues(owner: &str, repo: &str, page: u64) -> Result<String> {
+async fn get_issues(owner: &str, repo: &str, state: Option<State>, page: u64) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Issues {
         page: u64,
@@ -116,9 +118,16 @@ async fn get_issues(owner: &str, repo: &str, page: u64) -> Result<String> {
         comments_count: u64,
     }
 
+    let state = match state {
+        Some(State::Open) => params::State::Open,
+        Some(State::Closed) => params::State::Closed,
+        None => params::State::All,
+    };
+
     let issues = jp_github::instance()
         .issues(owner, repo)
         .list()
+        .state(state)
         .page(page)
         .per_page(LIST_PER_PAGE)
         .send()

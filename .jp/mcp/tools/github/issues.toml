@@ -7,7 +7,12 @@ command = "just serve-tools {{context}} {{tool}}"
 summary = "Find one or more issues in a GitHub repository."
 
 examples = """
-List all issues in the current project's repo:
+List open issues in the current project's repo:
+```json
+{"state": "open"}
+```
+
+List every issue (open and closed) by leaving `state` unset:
 ```json
 {}
 ```
@@ -47,6 +52,14 @@ description = """
 If unspecified, a single page of issues will be returned, without the
 issue contents or comments. Re-run the tool with the issue number to
 fetch its details and comments.
+"""
+
+[conversation.tools.github_issues.parameters.state]
+type = "string"
+enum = ["open", "closed"]
+summary = "Filter issues by their state."
+description = """
+If unspecified, both open and closed issues will be returned.
 """
 
 [conversation.tools.github_issues.parameters.page]

@@ -2,20 +2,12 @@ use chrono::{DateTime, Utc};
 use jp_github::{models::repos::DiffEntryStatus, params};
 use url::Url;
 
-use super::{auth_optional, parse_repo};
+use super::{State, auth_optional, parse_repo};
 use crate::{Result, github::handle_404, to_xml, to_xml_with_root, util::OneOrMany};
 
 /// Comments-per-page when fetching a specific pull request. Matches the
 /// issues tool — long discussions are walked with the `page` parameter.
 const COMMENTS_PER_PAGE: u8 = 10;
-
-/// The status of a issue or pull request.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum State {
-    Open,
-    Closed,
-}
 
 pub(crate) async fn github_pulls(
     repository: Option<String>,

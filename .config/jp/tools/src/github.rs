@@ -19,17 +19,41 @@ use pulls::github_pulls;
 use repo::{github_code_search, github_list_files, github_read_file};
 use review::{github_pr_review_add_comment, github_pr_review_add_reply};
 
+#[cfg(test)]
+#[path = "github_tests.rs"]
+mod tests;
+
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
 
+/// Tool-level state filter for `github_issues` and `github_pulls`.
+///
+/// The underlying GitHub API supports `all` too, but exposing it
+/// explicitly is redundant — leaving the parameter unspecified at the
+/// tool boundary already means "both open and closed". Both tools map
+/// `None` to [`jp_github::params::State::All`] internally.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum State {
+    Open,
+    Closed,
+}
+
 /// Parse a `repository` argument of the form `owner/repo`, defaulting to
 /// the project's own repo when unset.
+///
+/// Rejects malformed shapes (`owner/repo/extra`, `/repo`, `owner/`,
+/// `owner`) at the boundary rather than letting them interpolate into
+/// GitHub API paths and surface as opaque 404s.
 pub(crate) fn parse_repo(repository: Option<String>) -> Result<(String, String)> {
     let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
-    let (owner, repo) = repository
-        .split_once('/')
-        .ok_or("`repository` must be in the form of <owner>/<repo>")?;
-    Ok((owner.to_owned(), repo.to_owned()))
+    let parts: Vec<&str> = repository.split('/').collect();
+    match parts.as_slice() {
+        [owner, repo] if !owner.is_empty() && !repo.is_empty() => {
+            Ok(((*owner).to_owned(), (*repo).to_owned()))
+        }
+        _ => Err("`repository` must be in the form of <owner>/<repo>".into()),
+    }
 }
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
@@ -37,6 +61,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         "issues" => github_issues(
             t.opt("repository")?,
             t.opt_or_empty("number")?,
+            t.opt("state")?,
             t.opt("page")?,
         )
         .await

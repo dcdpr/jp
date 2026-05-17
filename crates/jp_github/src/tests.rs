@@ -112,6 +112,7 @@ async fn issues_list_returns_requested_page_only() {
         .mock_async(|when, then| {
             when.method(GET)
                 .path("/repos/acme/widgets/issues")
+                .query_param("state", "open")
                 .query_param("per_page", "2")
                 .query_param("page", "3");
             then.status(200).json_body(json!([issue_json(5)]));
@@ -130,6 +131,35 @@ async fn issues_list_returns_requested_page_only() {
 
     assert_eq!(issues.len(), 1);
     assert_eq!(issues[0].number, 5);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn issues_list_forwards_explicit_state_filter() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/issues")
+                .query_param("state", "closed")
+                .query_param("per_page", "100")
+                .query_param("page", "1");
+            then.status(200).json_body(json!([issue_json(9)]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let issues = client
+        .issues("acme", "widgets")
+        .list()
+        .state(params::State::Closed)
+        .per_page(100)
+        .send()
+        .await
+        .expect("list issues");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].number, 9);
     mock.assert();
 }
 

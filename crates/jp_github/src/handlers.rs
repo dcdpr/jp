@@ -35,6 +35,7 @@ impl IssuesHandler {
             client: self.client.clone(),
             owner: self.owner.clone(),
             repo: self.repo.clone(),
+            state: params::State::Open,
             page: 1,
             per_page: 30,
         }
@@ -130,11 +131,20 @@ pub struct IssueListBuilder {
     pub(crate) client: Octocrab,
     pub(crate) owner: String,
     pub(crate) repo: String,
+    pub(crate) state: params::State,
     pub(crate) page: u64,
     pub(crate) per_page: u8,
 }
 
 impl IssueListBuilder {
+    /// Filter the list by state. Defaults to `Open`, matching GitHub's
+    /// own default for this endpoint.
+    #[must_use]
+    pub const fn state(mut self, state: params::State) -> Self {
+        self.state = state;
+        self
+    }
+
     /// Set the 1-indexed page number to fetch. Defaults to 1.
     #[must_use]
     pub const fn page(mut self, page: u64) -> Self {
@@ -156,6 +166,7 @@ impl IssueListBuilder {
     /// budget. Use [`Self::page`] to step through the list.
     pub async fn send(self) -> Result<Vec<models::issues::Issue>> {
         let query = vec![
+            ("state".to_owned(), self.state.as_str().to_owned()),
             ("per_page".to_owned(), self.per_page.to_string()),
             ("page".to_owned(), self.page.to_string()),
         ];
