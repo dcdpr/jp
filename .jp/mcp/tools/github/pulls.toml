@@ -12,21 +12,29 @@ List open pull requests in the current project's repo:
 {"state": "open"}
 ```
 
-Get a PR with file diffs:
+List every PR (open and closed) by leaving `state` unset:
 ```json
-{"number": 15, "file_diffs": ["crates/jp_llm/src/builtin.rs"]}
+{}
 ```
 
-Get a PR from a different repository, including the first page of
-conversation comments:
+Get details for a specific PR, including the first page of conversation
+comments:
 ```json
-{"repository": "Swatinem/rust-cache", "number": 42}
+{"number": 42}
 ```
 
-Walk further into the comment thread:
+Fetch a PR from a different repository:
 ```json
-{"repository": "Swatinem/rust-cache", "number": 42, "page": 2}
+{"repository": "Swatinem/rust-cache", "number": 37}
 ```
+
+Walk further into a long comment thread:
+```json
+{"repository": "Swatinem/rust-cache", "number": 37, "page": 2}
+```
+
+To inspect a PR's actual code changes, use the separate `github_pr_diff`
+tool — `github_pulls` only returns metadata and conversation.
 """
 
 [conversation.tools.github_pulls.style]
@@ -46,8 +54,8 @@ type = "integer"
 summary = "Pull request number to get information about."
 description = """
 If unspecified, a single page of pull requests will be returned, without
-the pull request contents or comments. Re-run the tool with the pull
-request number to fetch its details and comments.
+the PR descriptions or comments. Re-run the tool with the PR number to
+fetch its details and conversation comments.
 """
 
 [conversation.tools.github_pulls.parameters.state]
@@ -55,30 +63,22 @@ type = "string"
 enum = ["open", "closed"]
 summary = "Filter pull requests by their state."
 description = """
-If unspecified, all pull requests will be returned.
-"""
-
-[conversation.tools.github_pulls.parameters.file_diffs]
-# TODO: ["string", "array"], because I've seen LLMs trip over this one.
-type = "array"
-items.type = "string"
-summary = "List of changed file paths to get the diff for."
-description = """
-If unspecified, only the list of changed files will be returned, but not the
-actual diff. You can re-run the tool with the correct file path to get the
-diff.
+If unspecified, both open and closed pull requests will be returned.
 """
 
 [conversation.tools.github_pulls.parameters.page]
 type = "integer"
 summary = "1-indexed page to fetch. Defaults to 1."
 description = """
-When `number` is set (and `file_diffs` is empty), selects a page of the
-PR's conversation comments (10 per page); the response includes
-`comments_count` (total) so you can tell when the thread is exhausted.
-Inline review comments are not returned by this tool.
+When `number` is set, selects a page of conversation comments (10 per
+page); the response includes `comments_count` (total) so you can tell
+when the thread is exhausted. Inline review comments are not returned
+by this tool.
 
 When `number` is unset, selects a page of pull requests (100 per page).
 The response does not include a grand total — request the next page and
 stop when fewer than 100 pull requests come back.
+
+The response in `number` mode also exposes `changed_files_count`; use
+`github_pr_diff` to fetch the actual file changes.
 """

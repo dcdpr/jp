@@ -7,6 +7,7 @@ mod create_issue_bug;
 mod create_issue_enhancement;
 mod create_issue_rfd_tracking;
 mod issues;
+mod pr_diff;
 mod pulls;
 mod repo;
 mod review;
@@ -15,6 +16,7 @@ use create_issue_bug::github_create_issue_bug;
 use create_issue_enhancement::github_create_issue_enhancement;
 use create_issue_rfd_tracking::github_create_issue_rfd_tracking;
 use issues::github_issues;
+use pr_diff::github_pr_diff;
 use pulls::github_pulls;
 use repo::{github_code_search, github_list_files, github_read_file};
 use review::{github_pr_review_add_comment, github_pr_review_add_reply};
@@ -56,6 +58,7 @@ pub(crate) fn parse_repo(repository: Option<String>) -> Result<(String, String)>
     }
 }
 
+#[allow(clippy::too_many_lines, reason = "flat dispatch table")]
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("github_") {
         "issues" => github_issues(
@@ -111,7 +114,15 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             t.opt("repository")?,
             t.opt("number")?,
             t.opt("state")?,
-            t.opt("file_diffs")?,
+            t.opt("page")?,
+        )
+        .await
+        .map(Into::into),
+
+        "pr_diff" => github_pr_diff(
+            t.opt("repository")?,
+            t.req("number")?,
+            t.opt("files")?,
             t.opt("page")?,
         )
         .await

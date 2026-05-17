@@ -10,7 +10,8 @@ The following tools help you with this:
 
 - github_code_search: Search through the project's codebase.
 - github_issues: Search through the project's issues.
-- github_pulls: Search through the project's pull requests.
+- github_pulls: Search through the project's pull requests (metadata and conversation).
+- github_pr_diff: Inspect the files changed in a pull request.
 - github_read_file: Read the contents of a file in the project's repository.
 """
 
@@ -18,4 +19,5 @@ The following tools help you with this:
 github_code_search = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 github_issues = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 github_pulls = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+github_pr_diff = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 github_read_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }

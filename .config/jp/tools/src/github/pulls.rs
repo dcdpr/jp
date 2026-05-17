@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
-use jp_github::{models::repos::DiffEntryStatus, params};
+use jp_github::params;
 use url::Url;
 
 use super::{State, auth_optional, parse_repo};
-use crate::{Result, github::handle_404, to_xml, to_xml_with_root, util::OneOrMany};
+use crate::{Result, github::handle_404, to_xml};
 
 /// Comments-per-page when fetching a specific pull request. Matches the
 /// issues tool — long discussions are walked with the `page` parameter.
@@ -13,35 +13,20 @@ pub(crate) async fn github_pulls(
     repository: Option<String>,
     number: Option<u64>,
     state: Option<State>,
-    file_diffs: Option<OneOrMany<String>>,
     page: Option<u64>,
 ) -> Result<String> {
     auth_optional().await?;
 
     let (owner, repo) = parse_repo(repository)?;
     let page = page.unwrap_or(1).max(1);
-    let file_diffs = file_diffs.unwrap_or_default();
 
     match number {
-        Some(number) if !file_diffs.is_empty() => {
-            diff(&owner, &repo, number, file_diffs.into_vec()).await
-        }
         Some(number) => get(&owner, &repo, number, page).await,
         None => list(&owner, &repo, state, page).await,
     }
 }
 
 async fn get(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> {
-    #[derive(serde::Serialize)]
-    struct ChangedFile {
-        filename: String,
-        status: DiffEntryStatus,
-        additions: u64,
-        deletions: u64,
-        changes: u64,
-        previous_filename: Option<String>,
-    }
-
     #[derive(serde::Serialize)]
     struct Comment {
         author: String,
@@ -61,7 +46,7 @@ async fn get(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> 
         closed_at: Option<DateTime<Utc>>,
         merged_at: Option<DateTime<Utc>>,
         merge_commit_sha: Option<String>,
-        changed_files: Vec<ChangedFile>,
+        changed_files_count: u64,
         comments_count: u64,
         comments_page: u64,
         comments_per_page: u8,
@@ -75,26 +60,6 @@ async fn get(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> 
         .get(number)
         .await
         .map_err(|e| handle_404(e, format!("Pull #{number} not found in {owner}/{repo}")))?;
-
-    let files_page = client
-        .pulls(owner, repo)
-        .list_files(number)
-        .await
-        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {owner}/{repo}")))?;
-
-    let changed_files = client
-        .all_pages(files_page)
-        .await?
-        .into_iter()
-        .map(|file| ChangedFile {
-            filename: file.filename,
-            status: file.status,
-            additions: file.additions,
-            deletions: file.deletions,
-            changes: file.changes,
-            previous_filename: file.previous_filename,
-        })
-        .collect();
 
     // PR conversation comments share the issues endpoint — `/issues/{N}/comments`
     // returns the same thread shown in the "Conversation" tab. Inline review
@@ -131,49 +96,12 @@ async fn get(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> 
         closed_at: pull.closed_at,
         merged_at: pull.merged_at,
         merge_commit_sha: pull.merge_commit_sha,
-        changed_files,
+        changed_files_count: pull.changed_files,
         comments_count: pull.comments,
         comments_page: page,
         comments_per_page: COMMENTS_PER_PAGE,
         comments,
     })
-}
-
-async fn diff(owner: &str, repo: &str, number: u64, file_diffs: Vec<String>) -> Result<String> {
-    #[derive(serde::Serialize)]
-    struct ChangedFile {
-        filename: String,
-        status: DiffEntryStatus,
-        additions: u64,
-        deletions: u64,
-        changes: u64,
-        previous_filename: Option<String>,
-        patch: Option<String>,
-    }
-
-    let page = jp_github::instance()
-        .pulls(owner, repo)
-        .list_files(number)
-        .await
-        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {owner}/{repo}")))?;
-
-    let changed_files: Vec<_> = jp_github::instance()
-        .all_pages(page)
-        .await?
-        .into_iter()
-        .filter(|file| file_diffs.contains(&file.filename))
-        .map(|file| ChangedFile {
-            patch: file.patch,
-            filename: file.filename,
-            status: file.status,
-            additions: file.additions,
-            deletions: file.deletions,
-            changes: file.changes,
-            previous_filename: file.previous_filename,
-        })
-        .collect();
-
-    to_xml_with_root(&changed_files, "files")
 }
 
 /// Items per page when listing pull requests. Fixed at 100 (the

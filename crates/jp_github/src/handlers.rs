@@ -275,17 +275,23 @@ impl PullsHandler {
             .await
     }
 
-    pub async fn list_files(&self, number: u64) -> Result<Page<models::repos::DiffEntry>> {
-        let items = self
-            .client
-            .get_paginated(
-                &format!("/repos/{}/{}/pulls/{number}/files", self.owner, self.repo),
-                vec![],
-                100,
-            )
-            .await?;
-
-        Ok(Page::new(items))
+    /// Begin building a single-page fetch of the files changed in a pull
+    /// request.
+    ///
+    /// Like the other list builders, this returns a single page rather
+    /// than auto-paginating — callers that need to walk every file step
+    /// through pages explicitly. Keeps responses bounded for arbitrary
+    /// repositories.
+    #[must_use]
+    pub fn list_files(&self, number: u64) -> PullFilesListBuilder {
+        PullFilesListBuilder {
+            client: self.client.clone(),
+            owner: self.owner.clone(),
+            repo: self.repo.clone(),
+            number,
+            page: 1,
+            per_page: 30,
+        }
     }
 
     /// Fetch a pull request as a unified diff.
@@ -803,6 +809,49 @@ impl PullReviewCreateBuilder {
                     self.owner, self.repo, self.number
                 ),
                 &payload,
+            )
+            .await
+    }
+}
+
+pub struct PullFilesListBuilder {
+    pub(crate) client: Octocrab,
+    pub(crate) owner: String,
+    pub(crate) repo: String,
+    pub(crate) number: u64,
+    pub(crate) page: u64,
+    pub(crate) per_page: u8,
+}
+
+impl PullFilesListBuilder {
+    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
+    /// Set the number of files per page (max 100 enforced by GitHub).
+    /// Defaults to 30.
+    #[must_use]
+    pub const fn per_page(mut self, per_page: u8) -> Self {
+        self.per_page = per_page;
+        self
+    }
+
+    pub async fn send(self) -> Result<Vec<models::repos::DiffEntry>> {
+        let query = vec![
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
+
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/pulls/{}/files",
+                    self.owner, self.repo, self.number
+                ),
+                &query,
             )
             .await
     }

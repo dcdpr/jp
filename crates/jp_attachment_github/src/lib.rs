@@ -334,8 +334,8 @@ async fn fetch_pr_diff(
                 uri = %uri,
                 "Unified diff exceeded GitHub's 20k-line cap; falling back to /pulls/N/files."
             );
-            let page = pulls.list_files(number).await?;
-            let entries = client.all_pages(page).await?;
+            let entries =
+                fetch_all_changed_files(&client, &parsed.owner, &parsed.repo, number).await?;
             let synth = synthesize_diff_from_files(&entries, &patterns);
             let mut note = format!(
                 "Note: PR diff exceeded GitHub's 20,000-line cap; reconstructed from the \
@@ -368,6 +368,40 @@ async fn fetch_pr_diff(
 /// GitHub has rewritten it before.
 fn is_diff_too_large(err: &GhError) -> bool {
     matches!(err, GhError::GitHub { source, .. } if source.status_code.as_u16() == 406)
+}
+
+/// Walk every page of `/pulls/{N}/files` for the given PR.
+///
+/// `list_files` now returns a single page per request; this helper does
+/// the auto-paginating walk that the attachment used to get for free.
+/// Capped at 10 pages (1000 files at the maximum per-page size) to bound
+/// the cost on pathological PRs — monorepo refactors of that scale are
+/// rare enough that truncating with a notice is fine.
+async fn fetch_all_changed_files(
+    client: &Octocrab,
+    owner: &str,
+    repo: &str,
+    number: u64,
+) -> Result<Vec<DiffEntry>, Box<dyn Error + Send + Sync>> {
+    const PER_PAGE: u8 = 100;
+    const MAX_PAGES: u64 = 10;
+
+    let mut out = Vec::new();
+    for page in 1..=MAX_PAGES {
+        let batch = client
+            .pulls(owner, repo)
+            .list_files(number)
+            .page(page)
+            .per_page(PER_PAGE)
+            .send()
+            .await?;
+        let count = batch.len();
+        out.extend(batch);
+        if count < usize::from(PER_PAGE) {
+            break;
+        }
+    }
+    Ok(out)
 }
 
 /// Output of [`synthesize_diff_from_files`].

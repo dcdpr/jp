@@ -83,6 +83,11 @@ pub mod pulls {
         /// we don't care about (e.g. webhook events).
         #[serde(default)]
         pub comments: u64,
+        /// Total number of files changed in this pull request. Exposed by
+        /// the PR detail endpoint; defaulted to 0 because the field is
+        /// absent from list-style payloads.
+        #[serde(default)]
+        pub changed_files: u64,
     }
 
     /// A reference to a git object (branch tip or base).

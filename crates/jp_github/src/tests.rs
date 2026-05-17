@@ -45,7 +45,20 @@ fn pull_json(number: u64) -> Value {
         "closed_at": null,
         "merged_at": null,
         "merge_commit_sha": null,
-        "comments": 0
+        "comments": 0,
+        "changed_files": 0
+    })
+}
+
+fn diff_entry_json(filename: &str, patch: Option<&str>) -> Value {
+    json!({
+        "filename": filename,
+        "status": "modified",
+        "additions": 3,
+        "deletions": 1,
+        "changes": 4,
+        "previous_filename": null,
+        "patch": patch,
     })
 }
 
@@ -559,6 +572,66 @@ async fn pulls_delete_review_treats_204_as_success() {
         .delete_review(7, 11)
         .await
         .expect("delete pending review");
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_list_files_returns_requested_page_only() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/pulls/42/files")
+                .query_param("per_page", "100")
+                .query_param("page", "2");
+            then.status(200).json_body(json!([
+                diff_entry_json("src/foo.rs", Some("@@ -1 +1 @@\n-a\n+b")),
+                diff_entry_json("src/bar.rs", None),
+            ]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let entries = client
+        .pulls("acme", "widgets")
+        .list_files(42)
+        .page(2)
+        .per_page(100)
+        .send()
+        .await
+        .expect("list files");
+
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].filename, "src/foo.rs");
+    assert_eq!(entries[0].patch.as_deref(), Some("@@ -1 +1 @@\n-a\n+b"));
+    assert_eq!(entries[1].filename, "src/bar.rs");
+    assert!(entries[1].patch.is_none());
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_get_exposes_changed_files_count() {
+    let server = MockServer::start_async().await;
+    let mut pr = pull_json(42);
+    pr["changed_files"] = json!(17);
+    pr["comments"] = json!(3);
+
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET).path("/repos/acme/widgets/pulls/42");
+            then.status(200).json_body(pr);
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let pull = client
+        .pulls("acme", "widgets")
+        .get(42)
+        .await
+        .expect("get pull");
+
+    assert_eq!(pull.changed_files, 17);
+    assert_eq!(pull.comments, 3);
     mock.assert();
 }
 
