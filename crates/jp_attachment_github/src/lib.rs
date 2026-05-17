@@ -336,6 +336,12 @@ async fn fetch_pr_diff(
             );
             let entries =
                 fetch_all_changed_files(&client, &parsed.owner, &parsed.repo, number).await?;
+            // `pr.changed_files` is GitHub's authoritative count from the
+            // PR-detail endpoint. Comparing against what we actually
+            // fetched tells us exactly how many files the per-page cap
+            // dropped — more useful than a bare "cap was hit" signal.
+            let fetched_files = u64::try_from(entries.len()).unwrap_or(u64::MAX);
+            let dropped_files = pr.changed_files.saturating_sub(fetched_files);
             let synth = synthesize_diff_from_files(&entries, &patterns);
             let mut note = format!(
                 "Note: PR diff exceeded GitHub's 20,000-line cap; reconstructed from the \
@@ -346,6 +352,12 @@ async fn fetch_pr_diff(
                     " {} file(s) had their patch omitted by GitHub (too large or binary); the \
                      `diff --git` headers are still present.",
                     synth.truncated
+                ));
+            }
+            if dropped_files > 0 {
+                note.push_str(&format!(
+                    " {dropped_files} additional changed file(s) beyond the {fetched_files}-file \
+                     cap were not fetched; the reconstructed diff is incomplete.",
                 ));
             }
             (synth.text, synth.included, synth.excluded, Some(note))

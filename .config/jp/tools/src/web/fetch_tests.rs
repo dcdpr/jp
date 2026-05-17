@@ -49,10 +49,35 @@ mod github_issue_or_pr_redirect {
 
     #[test]
     fn pull_url_suggests_github_pulls() {
+        // Bare `/pull/N` (conversation tab) routes to the metadata+comments
+        // tool, not the diff tool.
         let msg = redirect("https://github.com/rust-lang/rust/pull/12345").unwrap();
         assert!(msg.contains("`github_pulls`"));
+        assert!(!msg.contains("`github_pr_diff`"));
         assert!(msg.contains(r#""repository": "rust-lang/rust""#));
         assert!(msg.contains(r#""number": 12345"#));
+    }
+
+    #[test]
+    fn pull_files_url_suggests_github_pr_diff() {
+        // `/pull/N/files` is the files-changed tab — the common paste
+        // target for code review URLs — and routes to the dedicated diff
+        // tool.
+        let msg = redirect("https://github.com/rust-lang/rust/pull/12345/files").unwrap();
+        assert!(msg.contains("`github_pr_diff`"));
+        assert!(!msg.contains("`github_pulls`"));
+        assert!(msg.contains(r#""repository": "rust-lang/rust""#));
+        assert!(msg.contains(r#""number": 12345"#));
+    }
+
+    #[test]
+    fn pull_other_subpaths_fall_back_to_github_pulls() {
+        // `/commits`, `/checks` etc. don't have dedicated tools — the
+        // metadata+conversation answer is the closest fit, so the redirect
+        // keeps them on `github_pulls`.
+        let msg = redirect("https://github.com/foo/bar/pull/42/commits").unwrap();
+        assert!(msg.contains("`github_pulls`"));
+        assert!(!msg.contains("`github_pr_diff`"));
     }
 
     #[test]

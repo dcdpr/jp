@@ -96,13 +96,18 @@ fn github_issue_or_pr_redirect(url: &Url) -> Option<String> {
         return None;
     }
 
-    let owner = segments[0];
-    let repo = segments[1];
-    let tool = match segments[2] {
-        "issues" => "github_issues",
-        "pull" | "pulls" => "github_pulls",
+    let tool = match segments.as_slice() {
+        [_, _, "issues", _, ..] => "github_issues",
+        // The files-changed tab is the common paste target for code reviews
+        // and maps to the dedicated diff tool. Other PR subpaths (commits,
+        // checks, conflicts) fall through to `github_pulls`, where the
+        // metadata+conversation answer is the closest fit.
+        [_, _, "pull" | "pulls", _, "files", ..] => "github_pr_diff",
+        [_, _, "pull" | "pulls", _, ..] => "github_pulls",
         _ => return None,
     };
+    let owner = segments[0];
+    let repo = segments[1];
     let number: u64 = segments[3].parse().ok()?;
 
     Some(format!(
