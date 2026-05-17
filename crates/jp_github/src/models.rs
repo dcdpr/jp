@@ -76,6 +76,13 @@ pub mod pulls {
         pub merge_commit_sha: Option<String>,
         pub head: Option<GitRef>,
         pub base: Option<GitRef>,
+        /// Total number of conversation comments on this pull request,
+        /// shared with the issue-comments endpoint. Inline review comments
+        /// are counted separately by GitHub and not reflected here.
+        /// Defaulted to 0 because the field is absent from some payloads
+        /// we don't care about (e.g. webhook events).
+        #[serde(default)]
+        pub comments: u64,
     }
 
     /// A reference to a git object (branch tip or base).

@@ -45,9 +45,9 @@ If unspecified, defaults to the current project's GitHub repository.
 type = "integer"
 summary = "Pull request number to get information about."
 description = """
-If unspecified, a list of all pull requests will be returned, without the
-pull request contents or comments. Re-run the tool with the pull request
-number to fetch its details and comments.
+If unspecified, a single page of pull requests will be returned, without
+the pull request contents or comments. Re-run the tool with the pull
+request number to fetch its details and comments.
 """
 
 [conversation.tools.github_pulls.parameters.state]
@@ -71,9 +71,14 @@ diff.
 
 [conversation.tools.github_pulls.parameters.page]
 type = "integer"
-summary = "1-indexed page of conversation comments to fetch (10 per page)."
+summary = "1-indexed page to fetch. Defaults to 1."
 description = """
-Only applies when `number` is set and `file_diffs` is empty. The response
-includes the requested page of the PR's conversation comments. Inline
-review comments are not returned by this tool. Defaults to 1.
+When `number` is set (and `file_diffs` is empty), selects a page of the
+PR's conversation comments (10 per page); the response includes
+`comments_count` (total) so you can tell when the thread is exhausted.
+Inline review comments are not returned by this tool.
+
+When `number` is unset, selects a page of pull requests (100 per page).
+The response does not include a grand total — request the next page and
+stop when fewer than 100 pull requests come back.
 """

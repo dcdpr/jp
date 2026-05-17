@@ -20,7 +20,7 @@ pub(crate) async fn github_issues(
 
     match number {
         Some(number) => get_issue(&owner, &repo, number, page).await,
-        None => get_issues(&owner, &repo).await,
+        None => get_issues(&owner, &repo, page).await,
     }
 }
 
@@ -90,9 +90,16 @@ async fn get_issue(owner: &str, repo: &str, number: u64, page: u64) -> Result<St
     })
 }
 
-async fn get_issues(owner: &str, repo: &str) -> Result<String> {
+/// Items per page when listing issues. Fixed at 100 (the GitHub API
+/// max for this endpoint) so a single response covers as much ground
+/// as possible while staying bounded.
+const LIST_PER_PAGE: u8 = 100;
+
+async fn get_issues(owner: &str, repo: &str, page: u64) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Issues {
+        page: u64,
+        per_page: u8,
         issue: Vec<Issue>,
     }
 
@@ -109,16 +116,15 @@ async fn get_issues(owner: &str, repo: &str) -> Result<String> {
         comments_count: u64,
     }
 
-    let page = jp_github::instance()
+    let issues = jp_github::instance()
         .issues(owner, repo)
         .list()
-        .per_page(100)
+        .page(page)
+        .per_page(LIST_PER_PAGE)
         .send()
         .await?;
 
-    let issue = jp_github::instance()
-        .all_pages(page)
-        .await?
+    let issue = issues
         .into_iter()
         .map(|issue| Issue {
             number: issue.number,
@@ -133,5 +139,9 @@ async fn get_issues(owner: &str, repo: &str) -> Result<String> {
         })
         .collect();
 
-    to_xml(Issues { issue })
+    to_xml(Issues {
+        page,
+        per_page: LIST_PER_PAGE,
+        issue,
+    })
 }

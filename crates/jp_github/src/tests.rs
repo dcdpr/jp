@@ -44,7 +44,8 @@ fn pull_json(number: u64) -> Value {
         "created_at": "2024-01-01T00:00:00Z",
         "closed_at": null,
         "merged_at": null,
-        "merge_commit_sha": null
+        "merge_commit_sha": null,
+        "comments": 0
     })
 }
 
@@ -105,45 +106,31 @@ async fn current_user_maps_github_error_status_and_message() {
 }
 
 #[tokio::test]
-async fn issues_list_paginates_across_pages() {
+async fn issues_list_returns_requested_page_only() {
     let server = MockServer::start_async().await;
-    let page_1 = server
+    let mock = server
         .mock_async(|when, then| {
             when.method(GET)
                 .path("/repos/acme/widgets/issues")
                 .query_param("per_page", "2")
-                .query_param("page", "1");
-            then.status(200)
-                .json_body(json!([issue_json(1), issue_json(2)]));
-        })
-        .await;
-    let page_2 = server
-        .mock_async(|when, then| {
-            when.method(GET)
-                .path("/repos/acme/widgets/issues")
-                .query_param("per_page", "2")
-                .query_param("page", "2");
-            then.status(200).json_body(json!([issue_json(3)]));
+                .query_param("page", "3");
+            then.status(200).json_body(json!([issue_json(5)]));
         })
         .await;
 
     let client = test_client(&server.base_url(), None);
-    let page = client
+    let issues = client
         .issues("acme", "widgets")
         .list()
+        .page(3)
         .per_page(2)
         .send()
         .await
         .expect("list issues");
 
-    let issues = client.all_pages(page).await.expect("all pages");
-    assert_eq!(issues.len(), 3);
-    assert_eq!(issues[0].number, 1);
-    assert_eq!(issues[1].number, 2);
-    assert_eq!(issues[2].number, 3);
-
-    page_1.assert();
-    page_2.assert();
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].number, 5);
+    mock.assert();
 }
 
 #[tokio::test]
@@ -554,21 +541,21 @@ async fn pulls_list_uses_state_query() {
                 .path("/repos/acme/widgets/pulls")
                 .query_param("state", "closed")
                 .query_param("per_page", "100")
-                .query_param("page", "1");
+                .query_param("page", "2");
             then.status(200).json_body(json!([pull_json(12)]));
         })
         .await;
 
     let client = test_client(&server.base_url(), None);
-    let page = client
+    let pulls = client
         .pulls("acme", "widgets")
         .list()
         .state(params::State::Closed)
+        .page(2)
         .per_page(100)
         .send()
         .await
         .expect("list pulls");
-    let pulls = client.all_pages(page).await.expect("all pages");
 
     assert_eq!(pulls.len(), 1);
     assert_eq!(pulls[0].number, 12);

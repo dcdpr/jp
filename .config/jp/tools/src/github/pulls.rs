@@ -35,7 +35,7 @@ pub(crate) async fn github_pulls(
             diff(&owner, &repo, number, file_diffs.into_vec()).await
         }
         Some(number) => get(&owner, &repo, number, page).await,
-        None => list(&owner, &repo, state).await,
+        None => list(&owner, &repo, state, page).await,
     }
 }
 
@@ -70,6 +70,7 @@ async fn get(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> 
         merged_at: Option<DateTime<Utc>>,
         merge_commit_sha: Option<String>,
         changed_files: Vec<ChangedFile>,
+        comments_count: u64,
         comments_page: u64,
         comments_per_page: u8,
         comments: Vec<Comment>,
@@ -139,6 +140,7 @@ async fn get(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> 
         merged_at: pull.merged_at,
         merge_commit_sha: pull.merge_commit_sha,
         changed_files,
+        comments_count: pull.comments,
         comments_page: page,
         comments_per_page: COMMENTS_PER_PAGE,
         comments,
@@ -182,9 +184,15 @@ async fn diff(owner: &str, repo: &str, number: u64, file_diffs: Vec<String>) -> 
     to_xml_with_root(&changed_files, "files")
 }
 
-async fn list(owner: &str, repo: &str, state: Option<State>) -> Result<String> {
+/// Items per page when listing pull requests. Fixed at 100 (the
+/// GitHub API max for this endpoint).
+const LIST_PER_PAGE: u8 = 100;
+
+async fn list(owner: &str, repo: &str, state: Option<State>, page: u64) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Pulls {
+        page: u64,
+        per_page: u8,
         pull: Vec<Pull>,
     }
 
@@ -207,17 +215,16 @@ async fn list(owner: &str, repo: &str, state: Option<State>) -> Result<String> {
         None => params::State::All,
     };
 
-    let page = jp_github::instance()
+    let pulls = jp_github::instance()
         .pulls(owner, repo)
         .list()
         .state(state)
-        .per_page(100)
+        .page(page)
+        .per_page(LIST_PER_PAGE)
         .send()
         .await?;
 
-    let pull = jp_github::instance()
-        .all_pages(page)
-        .await?
+    let pull = pulls
         .into_iter()
         .map(|pull| Pull {
             number: pull.number,
@@ -237,5 +244,9 @@ async fn list(owner: &str, repo: &str, state: Option<State>) -> Result<String> {
         })
         .collect();
 
-    to_xml(Pulls { pull })
+    to_xml(Pulls {
+        page,
+        per_page: LIST_PER_PAGE,
+        pull,
+    })
 }

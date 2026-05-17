@@ -35,6 +35,7 @@ impl IssuesHandler {
             client: self.client.clone(),
             owner: self.owner.clone(),
             repo: self.repo.clone(),
+            page: 1,
             per_page: 30,
         }
     }
@@ -129,27 +130,42 @@ pub struct IssueListBuilder {
     pub(crate) client: Octocrab,
     pub(crate) owner: String,
     pub(crate) repo: String,
+    pub(crate) page: u64,
     pub(crate) per_page: u8,
 }
 
 impl IssueListBuilder {
+    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
     #[must_use]
     pub const fn per_page(mut self, per_page: u8) -> Self {
         self.per_page = per_page;
         self
     }
 
-    pub async fn send(self) -> Result<Page<models::issues::Issue>> {
-        let items = self
-            .client
-            .get_paginated(
-                &format!("/repos/{}/{}/issues", self.owner, self.repo),
-                vec![],
-                self.per_page,
-            )
-            .await?;
+    /// Fetch a single page of issues.
+    ///
+    /// Deliberately does not auto-paginate: callers may be pointed at an
+    /// arbitrary repository, and walking every page of `rust-lang/rust`
+    /// (for example) would blow rate limits and any reasonable response
+    /// budget. Use [`Self::page`] to step through the list.
+    pub async fn send(self) -> Result<Vec<models::issues::Issue>> {
+        let query = vec![
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
 
-        Ok(Page::new(items))
+        self.client
+            .get_json(
+                &format!("/repos/{}/{}/issues", self.owner, self.repo),
+                &query,
+            )
+            .await
     }
 }
 
@@ -429,6 +445,7 @@ impl PullsHandler {
             owner: self.owner.clone(),
             repo: self.repo.clone(),
             state: params::State::Open,
+            page: 1,
             per_page: 30,
         }
     }
@@ -785,6 +802,7 @@ pub struct PullListBuilder {
     pub(crate) owner: String,
     pub(crate) repo: String,
     pub(crate) state: params::State,
+    pub(crate) page: u64,
     pub(crate) per_page: u8,
 }
 
@@ -795,24 +813,34 @@ impl PullListBuilder {
         self
     }
 
+    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
     #[must_use]
     pub const fn per_page(mut self, per_page: u8) -> Self {
         self.per_page = per_page;
         self
     }
 
-    pub async fn send(self) -> Result<Page<models::pulls::PullRequest>> {
-        let query = vec![("state".to_owned(), self.state.as_str().to_owned())];
-        let items = self
-            .client
-            .get_paginated(
-                &format!("/repos/{}/{}/pulls", self.owner, self.repo),
-                query,
-                self.per_page,
-            )
-            .await?;
+    /// Fetch a single page of pull requests. See [`IssueListBuilder::send`]
+    /// for why this does not auto-paginate.
+    pub async fn send(self) -> Result<Vec<models::pulls::PullRequest>> {
+        let query = vec![
+            ("state".to_owned(), self.state.as_str().to_owned()),
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
 
-        Ok(Page::new(items))
+        self.client
+            .get_json(
+                &format!("/repos/{}/{}/pulls", self.owner, self.repo),
+                &query,
+            )
+            .await
     }
 }
 

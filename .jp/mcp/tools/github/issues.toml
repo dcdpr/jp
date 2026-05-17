@@ -44,15 +44,20 @@ If unspecified, defaults to the current project's GitHub repository.
 type = "integer"
 summary = "Issue number to get information about."
 description = """
-If unspecified, a list of all issues will be returned, without the
+If unspecified, a single page of issues will be returned, without the
 issue contents or comments. Re-run the tool with the issue number to
 fetch its details and comments.
 """
 
 [conversation.tools.github_issues.parameters.page]
 type = "integer"
-summary = "1-indexed page of comments to fetch (10 per page)."
+summary = "1-indexed page to fetch. Defaults to 1."
 description = """
-Only applies when `number` is set. The response includes `comments_count`
-(total) and the requested page of comments. Defaults to 1.
+When `number` is set, selects a page of conversation comments (10 per
+page); the response includes `comments_count` (total) so you can tell
+when the thread is exhausted.
+
+When `number` is unset, selects a page of issues (100 per page). The
+response does not include a grand total — request the next page and
+stop when fewer than 100 issues come back.
 """

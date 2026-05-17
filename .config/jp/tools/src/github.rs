@@ -189,10 +189,14 @@ async fn auth_optional() -> Result<()> {
 }
 
 fn read_token() -> Option<String> {
-    std::env::var("JP_GITHUB_TOKEN")
-        .ok()
-        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
-        .filter(|t| !t.is_empty())
+    // Filter each variable individually so an empty primary value doesn't
+    // shadow a valid fallback. CI configs that set `JP_GITHUB_TOKEN=""`
+    // alongside a real `GITHUB_TOKEN` should still authenticate.
+    fn non_empty(name: &str) -> Option<String> {
+        std::env::var(name).ok().filter(|t| !t.is_empty())
+    }
+
+    non_empty("JP_GITHUB_TOKEN").or_else(|| non_empty("GITHUB_TOKEN"))
 }
 
 fn handle_404(error: jp_github::Error, msg: impl Into<String>) -> Error {
