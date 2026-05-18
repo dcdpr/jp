@@ -15,6 +15,39 @@ pub enum State {
     /// We are inside an indented code block.
     InIndentedCode,
 
+    /// We are inside a list, buffering the current list item.
+    ///
+    /// While in this state, indented content at any column greater than
+    /// `marker_column` is treated as continuation of the current item.
+    /// In particular, content at column 4 is *not* treated as an indented
+    /// code block — that classification only applies at block boundaries
+    /// outside a list.
+    ///
+    /// When a fence or a deeper list marker appears inside the item,
+    /// the buffer pushes the current `InList` state onto its parents
+    /// stack and switches to the inner state. On close, the parent is
+    /// popped back.
+    InList {
+        /// Column where the list's markers appear. Sibling items must
+        /// share this column.
+        marker_column: usize,
+        /// Column where item content (post-marker) starts. Deeper
+        /// markers seen at this column or beyond start a nested list.
+        content_column: usize,
+        /// Whether the list is ordered (digit + delim). Bullet otherwise.
+        is_ordered: bool,
+        /// The marker delimiter character: `.` or `)` for ordered, `-`/
+        /// `*`/`+` for bullet.
+        delimiter: u8,
+        /// For ordered lists, the marker number on the first item. Used
+        /// to renumber emitted items so the output is consistent with
+        /// CommonMark's renumbering even though we stream items
+        /// individually.
+        start_number: u32,
+        /// Number of items already flushed from this list.
+        items_flushed: u32,
+    },
+
     /// We are inside a fenced code block and looking for the closing fence.
     InFencedCode {
         /// The type of fence character used.
@@ -24,6 +57,10 @@ pub enum State {
         fence_length: usize,
 
         /// The indentation of the opening fence.
+        ///
+        /// When the fence is inside a list item, this is the parent
+        /// list's `content_column`; code lines have this many leading
+        /// spaces stripped before emission.
         indent: usize,
 
         /// Nesting depth of inner fenced code blocks. When an inner fence

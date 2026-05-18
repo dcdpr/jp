@@ -24,9 +24,9 @@ fn orphaned_fence_converts_to_block() {
     let events: Vec<Event> = chain.by_ref().collect();
 
     // The paragraph after the list should be present, not swallowed as code.
-    let has_paragraph = events
-        .iter()
-        .any(|e| matches!(e, Event::Block(s) if s.contains("regular paragraph")));
+    let has_paragraph = events.iter().any(
+        |e| matches!(e, Event::Block { content, .. } if content.contains("regular paragraph")),
+    );
     assert!(
         has_paragraph,
         "Paragraph after the list should not be swallowed.\nEvents: {events:#?}"
@@ -85,10 +85,12 @@ fn fence_escalation_rewrites_lengths() {
     );
 
     // Closing fence should also be 5 backticks.
-    let closing = events.iter().find(|e| matches!(e, Event::FencedCodeEnd(_)));
+    let closing = events
+        .iter()
+        .find(|e| matches!(e, Event::FencedCodeEnd { .. }));
     assert_eq!(
         closing,
-        Some(&Event::FencedCodeEnd("`````".into())),
+        Some(&Event::fenced_code_end("`````")),
         "Closing fence should be escalated to 5.\nEvents: {events:#?}"
     );
 }
@@ -134,10 +136,12 @@ fn fence_escalation_handles_tildes() {
         "Tilde fence should be escalated to 5.\nEvents: {events:#?}"
     );
 
-    let closing = events.iter().find(|e| matches!(e, Event::FencedCodeEnd(_)));
+    let closing = events
+        .iter()
+        .find(|e| matches!(e, Event::FencedCodeEnd { .. }));
     assert_eq!(
         closing,
-        Some(&Event::FencedCodeEnd("~~~~~".into())),
+        Some(&Event::fenced_code_end("~~~~~")),
         "Tilde closing should be escalated.\nEvents: {events:#?}"
     );
 }

@@ -69,6 +69,7 @@ pub fn format_terminal(
     theme: &Theme,
     default_background: Option<&DefaultBackground>,
     inline_code_bg: Option<&(String, String)>,
+    indent: usize,
     output: &mut dyn Write,
 ) -> fmt::Result {
     let mut f = TerminalFormatter::new(
@@ -79,6 +80,7 @@ pub fn format_terminal(
         theme,
         default_background,
         inline_code_bg,
+        indent,
         output,
     );
     f.format(root)
@@ -127,11 +129,12 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         theme: &'w Theme,
         default_background: Option<&DefaultBackground>,
         inline_code_bg: Option<&'w (String, String)>,
+        indent: usize,
         output: &'w mut dyn Write,
     ) -> Self {
         Self {
             node,
-            writer: TerminalWriter::new(output, width, default_background),
+            writer: TerminalWriter::new(output, width, default_background, indent),
             table_options,
             hr_options,
             theme,

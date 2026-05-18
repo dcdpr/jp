@@ -66,6 +66,15 @@ pub struct TerminalOptions {
     /// When set, the renderer applies this background and restores it after
     /// inline elements (like code spans) that set their own background.
     pub default_background: Option<DefaultBackground>,
+
+    /// Visual indent (in spaces) applied to every line of the rendered
+    /// content.
+    ///
+    /// The streaming buffer sets this when emitting events from inside a
+    /// nested list item or fenced code block, so the renderer puts the
+    /// content at the correct visual column. `0` (the default) means no
+    /// indent — content renders at column 0.
+    pub indent: usize,
 }
 
 /// A formatter for markdown text.
@@ -257,6 +266,7 @@ impl Formatter {
             &self.theme,
             options.default_background.as_ref(),
             self.inline_code_bg.as_ref(),
+            options.indent,
             &mut buf,
         )?;
 

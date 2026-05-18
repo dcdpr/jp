@@ -227,6 +227,7 @@ fn render_cell_content(
             theme,
             default_background,
             inline_code_bg,
+            0,
             &mut buf,
         );
 

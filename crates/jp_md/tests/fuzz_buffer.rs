@@ -12,9 +12,7 @@ fn run_fuzz_test(original: &str, chunks: Vec<&str>) {
         }
     }
 
-    if let Some(flushed) = buffer.flush() {
-        output.push(jp_md::buffer::Event::Flush(flushed));
-    }
+    output.extend(buffer.flush_events());
 
     // 1. Run full text through buffer -> expected
     // 2. Run chunks through buffer -> actual
@@ -25,9 +23,7 @@ fn run_fuzz_test(original: &str, chunks: Vec<&str>) {
     for event in &mut expected_buffer {
         expected.push(event);
     }
-    if let Some(flushed) = expected_buffer.flush() {
-        expected.push(jp_md::buffer::Event::Flush(flushed));
-    }
+    expected.extend(expected_buffer.flush_events());
 
     assert_eq!(output, expected, "Failed with fragmented input");
 }

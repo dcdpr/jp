@@ -17,7 +17,26 @@ impl TestCase<'_> {
             assert_eq!(actual, expected, "failed case: {name}");
         }
 
-        assert_eq!(buf.flush().as_deref(), self.flushed, "failed case: {name}");
+        assert_partial_flush(&mut buf, self.flushed, name);
+    }
+}
+
+/// Helper for tests that expected the old `Buffer::flush() -> Option<String>`
+/// API. Asserts the buffer's remaining content (via `flush_events`) matches
+/// `expected` as a *single* trailing `Flush` event with indent=0, or `None`
+/// for an empty buffer.
+#[track_caller]
+fn assert_partial_flush(buf: &mut Buffer, expected: Option<&str>, name: &str) {
+    let events = buf.flush_events();
+    match (events.as_slice(), expected) {
+        ([], None) => {}
+        ([Event::Flush { content, indent: 0 }], Some(exp)) => {
+            assert_eq!(content, exp, "failed case ({name}): flush content mismatch");
+        }
+        (events, exp) => panic!(
+            "failed case ({name}): expected single Flush with content={exp:?}, indent=0; got \
+             {events:?}"
+        ),
     }
 }
 
@@ -28,8 +47,8 @@ fn test_buffer_indented_code() {
             in_out: vec![
                 ("    code\n    more\n", vec![]),
                 ("Paragraph\n\n", vec![
-                    Event::Block("    code\n    more\n".into()),
-                    Event::Block("Paragraph\n\n".into()),
+                    Event::block("    code\n    more\n"),
+                    Event::block("Paragraph\n\n"),
                 ]),
             ],
             flushed: None,
@@ -38,8 +57,8 @@ fn test_buffer_indented_code() {
             in_out: vec![
                 ("    foo\n\n", vec![]),
                 ("    bar\nText\n\n", vec![
-                    Event::Block("    foo\n\n    bar\n".into()),
-                    Event::Block("Text\n\n".into()),
+                    Event::block("    foo\n\n    bar\n"),
+                    Event::block("Text\n\n"),
                 ]),
             ],
             flushed: None,
@@ -47,16 +66,14 @@ fn test_buffer_indented_code() {
         ("ends_on_blank", TestCase {
             in_out: vec![
                 ("    foo\n\n", vec![]),
-                ("Next\n", vec![Event::Block("    foo\n".into())]),
+                ("Next\n", vec![Event::block("    foo\n")]),
             ],
             flushed: Some("Next\n"),
         }),
         ("fragmented", TestCase {
             in_out: vec![
                 ("    foo", vec![]),
-                ("\n    bar\n\nbaz", vec![Event::Block(
-                    "    foo\n    bar\n".into(),
-                )]),
+                ("\n    bar\n\nbaz", vec![Event::block("    foo\n    bar\n")]),
             ],
             flushed: Some("baz"),
         }),
@@ -65,8 +82,8 @@ fn test_buffer_indented_code() {
                 ("    foo", vec![]),
                 ("\n    bar\n\n", vec![]),
                 ("\n    baz", vec![]),
-                ("\nqux", vec![Event::Block(
-                    "    foo\n    bar\n\n\n    baz\n".into(),
+                ("\nqux", vec![Event::block(
+                    "    foo\n    bar\n\n\n    baz\n",
                 )]),
             ],
             flushed: Some("qux"),
@@ -82,9 +99,7 @@ fn test_buffer_indented_code() {
 fn test_buffer_paragraph() {
     let cases = vec![
         ("simple", TestCase {
-            in_out: vec![("Paragraph.\n\n", vec![Event::Block(
-                "Paragraph.\n\n".into(),
-            )])],
+            in_out: vec![("Paragraph.\n\n", vec![Event::block("Paragraph.\n\n")])],
             flushed: None,
         }),
         ("no final newline", TestCase {
@@ -95,20 +110,18 @@ fn test_buffer_paragraph() {
             in_out: vec![
                 ("Paragraph.\n", vec![]),
                 ("# New Header\n", vec![
-                    Event::Block("Paragraph.\n".into()),
-                    Event::Block("# New Header\n".into()),
+                    Event::block("Paragraph.\n"),
+                    Event::block("# New Header\n"),
                 ]),
             ],
             flushed: None,
         }),
         ("interrupted by thematic break", TestCase {
             in_out: vec![
-                ("Paragraph.\n\n", vec![Event::Block(
-                    "Paragraph.\n\n".into(),
-                )]),
+                ("Paragraph.\n\n", vec![Event::block("Paragraph.\n\n")]),
                 ("---\nAfter\n\n", vec![
-                    Event::Block("---\n".into()),
-                    Event::Block("After\n\n".into()),
+                    Event::block("---\n"),
+                    Event::block("After\n\n"),
                 ]),
             ],
             flushed: None,
@@ -124,15 +137,15 @@ fn test_buffer_paragraph() {
 fn test_buffer_setext_header() {
     let cases = vec![
         ("simple", TestCase {
-            in_out: vec![("Header\n===\n", vec![Event::Block("Header\n===\n".into())])],
+            in_out: vec![("Header\n===\n", vec![Event::block("Header\n===\n")])],
             flushed: None,
         }),
         ("fragmented", TestCase {
             in_out: vec![
                 ("Header\n", vec![]),
                 ("===\nNext\n\n", vec![
-                    Event::Block("Header\n===\n".into()),
-                    Event::Block("Next\n\n".into()),
+                    Event::block("Header\n===\n"),
+                    Event::block("Next\n\n"),
                 ]),
             ],
             flushed: None,
@@ -140,7 +153,7 @@ fn test_buffer_setext_header() {
         ("partial underline", TestCase {
             in_out: vec![
                 ("Header\n--", vec![]),
-                ("-\n", vec![Event::Block("Header\n---\n".into())]),
+                ("-\n", vec![Event::block("Header\n---\n")]),
             ],
             flushed: None,
         }),
@@ -161,13 +174,14 @@ fn test_buffer_fenced_code_streaming() {
                     language: "rust".into(),
                     fence_type: FenceType::Backtick,
                     fence_length: 3,
+                    indent: 0,
                 }]),
-                ("fn main() {\n", vec![Event::FencedCodeLine(
-                    "fn main() {\n".into(),
+                ("fn main() {\n", vec![Event::fenced_code_line(
+                    "fn main() {\n",
                 )]),
-                ("}\n", vec![Event::FencedCodeLine("}\n".into())]),
-                ("```\n", vec![Event::FencedCodeEnd("```".into())]),
-                ("After\n\n", vec![Event::Block("After\n\n".into())]),
+                ("}\n", vec![Event::fenced_code_line("}\n")]),
+                ("```\n", vec![Event::fenced_code_end("```")]),
+                ("After\n\n", vec![Event::block("After\n\n")]),
             ],
             flushed: None,
         }),
@@ -177,11 +191,16 @@ fn test_buffer_fenced_code_streaming() {
                     language: "rust".into(),
                     fence_type: FenceType::Backtick,
                     fence_length: 3,
+                    indent: 2,
                 }]),
-                ("  fn main() {\n", vec![Event::FencedCodeLine(
-                    "fn main() {\n".into(),
-                )]),
-                ("  ```\n", vec![Event::FencedCodeEnd("```".into())]),
+                ("  fn main() {\n", vec![Event::FencedCodeLine {
+                    content: "fn main() {\n".into(),
+                    indent: 2,
+                }]),
+                ("  ```\n", vec![Event::FencedCodeEnd {
+                    fence: "```".into(),
+                    indent: 2,
+                }]),
             ],
             flushed: None,
         }),
@@ -191,11 +210,12 @@ fn test_buffer_fenced_code_streaming() {
                     language: "rust".into(),
                     fence_type: FenceType::Backtick,
                     fence_length: 3,
+                    indent: 0,
                 }]),
                 ("}\n```\nAfter\n\n", vec![
-                    Event::FencedCodeLine("fn main() {}\n".into()),
-                    Event::FencedCodeEnd("```".into()),
-                    Event::Block("After\n\n".into()),
+                    Event::fenced_code_line("fn main() {}\n"),
+                    Event::fenced_code_end("```"),
+                    Event::block("After\n\n"),
                 ]),
             ],
             flushed: None,
@@ -206,9 +226,10 @@ fn test_buffer_fenced_code_streaming() {
                     language: String::new(),
                     fence_type: FenceType::Backtick,
                     fence_length: 4,
+                    indent: 0,
                 },
-                Event::FencedCodeLine("code\n".into()),
-                Event::FencedCodeEnd("````".into()),
+                Event::fenced_code_line("code\n"),
+                Event::fenced_code_end("````"),
             ])],
             flushed: None,
         }),
@@ -218,11 +239,12 @@ fn test_buffer_fenced_code_streaming() {
                     language: String::new(),
                     fence_type: FenceType::Tilde,
                     fence_length: 3,
+                    indent: 0,
                 },
-                Event::FencedCodeLine("Hello\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("World\n".into()),
-                Event::FencedCodeEnd("~~~".into()),
+                Event::fenced_code_line("Hello\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("World\n"),
+                Event::fenced_code_end("~~~"),
             ])],
             flushed: None,
         }),
@@ -232,11 +254,12 @@ fn test_buffer_fenced_code_streaming() {
                     language: String::new(),
                     fence_type: FenceType::Backtick,
                     fence_length: 3,
+                    indent: 0,
                 },
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeEnd("```".into()),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_end("```"),
             ])],
             flushed: None,
         }),
@@ -246,13 +269,14 @@ fn test_buffer_fenced_code_streaming() {
                     language: String::new(),
                     fence_type: FenceType::Backtick,
                     fence_length: 3,
+                    indent: 0,
                 },
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeEnd("```".into()),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_end("```"),
             ])],
             flushed: None,
         }),
@@ -262,13 +286,14 @@ fn test_buffer_fenced_code_streaming() {
                     language: String::new(),
                     fence_type: FenceType::Backtick,
                     fence_length: 3,
+                    indent: 0,
                 },
-                Event::FencedCodeLine("foo\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("\n".into()),
-                Event::FencedCodeLine("bar\n".into()),
-                Event::FencedCodeEnd("```".into()),
+                Event::fenced_code_line("foo\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("\n"),
+                Event::fenced_code_line("bar\n"),
+                Event::fenced_code_end("```"),
             ])],
             flushed: None,
         }),
@@ -296,23 +321,456 @@ fn test_buffer_nested_fenced_code() {
             language: "markdown".into(),
             fence_type: FenceType::Backtick,
             fence_length: 3,
+            indent: 0,
         },
-        Event::FencedCodeLine("foo bar\n".into()),
-        Event::FencedCodeLine("\n".into()),
+        Event::fenced_code_line("foo bar\n"),
+        Event::fenced_code_line("\n"),
         // Inner fence opening — treated as code content, depth increments.
-        Event::FencedCodeLine("```rust\n".into()),
-        Event::FencedCodeLine("fn main() {}\n".into()),
+        Event::fenced_code_line("```rust\n"),
+        Event::fenced_code_line("fn main() {}\n"),
         // Inner fence closing — depth decrements, still code content.
-        Event::FencedCodeLine("```\n".into()),
-        Event::FencedCodeLine("\n".into()),
-        Event::FencedCodeLine("baz\n".into()),
-        Event::FencedCodeLine("\n".into()),
+        Event::fenced_code_line("```\n"),
+        Event::fenced_code_line("\n"),
+        Event::fenced_code_line("baz\n"),
+        Event::fenced_code_line("\n"),
         // Actual closing fence — depth is 0, closes the outer block.
-        Event::FencedCodeEnd("```".into()),
-        Event::Block("regular paragraph\n\n".into()),
+        Event::fenced_code_end("```"),
+        Event::block("regular paragraph\n\n"),
     ]);
 
-    assert_eq!(buf.flush(), None);
+    assert_eq!(buf.flush_events(), Vec::<Event>::new());
+}
+
+#[test]
+fn test_buffer_flush_events_renumbers_partial_list_items() {
+    // The buffer can't flush items until the *next* line has arrived
+    // with a complete newline, so when a stream ends with a partial
+    // last line in a list, several items can pile up. `flush_events`
+    // splits the remainder at sibling-marker boundaries, emits each
+    // complete item as its own `Block` (with renumbering), and emits
+    // the final partial line as a `Flush`.
+    let input = "5. First\n7. Second\n9. Third without trailing newline";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    // Only the first item flushed normally. "7. Second" can't flush
+    // via next() because the line after it ("9. Third...") is
+    // incomplete; the buffer waits.
+    assert_eq!(events, vec![Event::Block {
+        content: "5. First\n".into(),
+        indent: 0,
+    }]);
+
+    // flush_events splits the remaining two items: "7. Second\n"
+    // becomes a complete `Block` (renumbered `7.` -> `6.`); the partial
+    // "9. Third without trailing newline" becomes a `Flush` (renumbered
+    // `9.` -> `7.`).
+    let flushed = buf.flush_events();
+    assert_eq!(flushed, vec![
+        Event::Block {
+            content: "6. Second\n".into(),
+            indent: 0,
+        },
+        Event::Flush {
+            content: "7. Third without trailing newline".into(),
+            indent: 0,
+        },
+    ]);
+}
+
+#[test]
+fn test_buffer_partial_list_flush_renders_correctly_end_to_end() {
+    // End-to-end guarantee for the test above: the rendered terminal
+    // output renumbers all items sequentially even though the buffer
+    // only renumbers the first marker of the partial flush.
+    use crate::format::{Formatter, TerminalOptions};
+
+    let input = "5. First\n7. Second\n9. Third without trailing newline";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let f = Formatter::with_width(0);
+    let mut rendered = String::new();
+    for ev in buf.by_ref() {
+        if let Event::Block { content, indent } = ev {
+            let opts = TerminalOptions {
+                indent,
+                ..Default::default()
+            };
+            rendered.push_str(&f.format_terminal_with(&content, &opts).unwrap());
+        }
+    }
+    for ev in buf.flush_events() {
+        if let Event::Block { content, indent } | Event::Flush { content, indent } = ev {
+            let opts = TerminalOptions {
+                indent,
+                ..Default::default()
+            };
+            rendered.push_str(&f.format_terminal_with(&content, &opts).unwrap());
+        }
+    }
+
+    let plain: String = strip_ansi(&rendered);
+    assert!(
+        plain.contains("5. First"),
+        "missing item 5.\nRendered: {plain:?}"
+    );
+    assert!(
+        plain.contains("6. Second"),
+        "missing renumbered item 6.\nRendered: {plain:?}"
+    );
+    assert!(
+        plain.contains("7. Third without trailing newline"),
+        "missing renumbered item 7.\nRendered: {plain:?}"
+    );
+}
+
+#[test]
+fn test_buffer_flush_event_preserves_continuation_paragraph_indent() {
+    // Stream ends with a loose-item continuation paragraph (after a
+    // blank line, indented to content_column). flush_event treats the
+    // remaining buffer as an item flush (it starts with the item's
+    // own marker line) and strips only `marker_column` leading spaces.
+    // The continuation paragraph keeps its `content_column` indent,
+    // which comrak then recognises as a loose-list continuation.
+    let input = "1. Item one\n\n   continuation paragraph without trailing newline";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert!(events.is_empty(), "unexpected events: {events:?}");
+
+    let flushed = buf.flush_events();
+    assert_eq!(flushed, vec![Event::Flush {
+        content: "1. Item one\n\n   continuation paragraph without trailing newline".into(),
+        indent: 0,
+    }]);
+}
+
+#[test]
+fn test_buffer_continuation_paragraph_renders_at_content_column() {
+    // End-to-end guarantee for the test above: the continuation
+    // paragraph renders at column 3 (the item's content_column),
+    // because comrak parses the partial flush as a loose-list item.
+    use crate::format::{Formatter, TerminalOptions};
+
+    let input = "1. Item one\n\n   continuation paragraph without trailing newline";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let f = Formatter::with_width(0);
+    let mut rendered = String::new();
+    for ev in buf.flush_events() {
+        if let Event::Block { content, indent } | Event::Flush { content, indent } = ev {
+            let opts = TerminalOptions {
+                indent,
+                ..Default::default()
+            };
+            rendered.push_str(&f.format_terminal_with(&content, &opts).unwrap());
+        }
+    }
+
+    let plain = strip_ansi(&rendered);
+    let lines: Vec<&str> = plain.lines().collect();
+    assert!(
+        lines.iter().any(|l| l.starts_with("1. Item one")),
+        "missing item marker line.\nRendered: {plain:?}"
+    );
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("   continuation paragraph")),
+        "continuation paragraph should render at column 3.\nRendered: {plain:?}"
+    );
+}
+
+/// Strip ANSI escape sequences for plain-text assertions.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_escape = false;
+    for c in s.chars() {
+        if in_escape {
+            if c.is_ascii_alphabetic() || c == '~' {
+                in_escape = false;
+            }
+        } else if c == '\x1b' {
+            in_escape = true;
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[test]
+fn test_buffer_triple_nested_lists_stream_at_each_level() {
+    // Three levels of ordered list nesting. Each level's items emit
+    // their own Block with the level's `marker_column` as visual
+    // indent, and ordered markers are renumbered per-level.
+    let input = "1. Top\n   1. Mid one\n      1. Inner one\n      9. Inner two\n   3. Mid two\n2. \
+                 Top two\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "1. Top\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "1. Mid one\n".into(),
+            indent: 3,
+        },
+        Event::Block {
+            content: "1. Inner one\n".into(),
+            indent: 6,
+        },
+        Event::Block {
+            content: "2. Inner two\n".into(),
+            indent: 6,
+        },
+        Event::Block {
+            content: "2. Mid two\n".into(),
+            indent: 3,
+        },
+    ]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "2. Top two\n".into(),
+        indent: 0
+    }]);
+}
+
+#[test]
+fn test_buffer_mixed_bullet_and_ordered_nesting() {
+    // Mixed bullet outer, ordered inner.
+    let input = "- Outer one\n  1. Inner one\n  5. Inner two\n- Outer two\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "- Outer one\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "1. Inner one\n".into(),
+            indent: 2,
+        },
+        Event::Block {
+            content: "2. Inner two\n".into(),
+            indent: 2,
+        },
+    ]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "- Outer two\n".into(),
+        indent: 0
+    }]);
+}
+
+#[test]
+fn test_buffer_ordered_outer_bullet_inner_nesting() {
+    // Ordered outer, bullet inner. Bullets don't renumber; just
+    // indent at the outer's content_column.
+    let input = "1. Outer one\n   - Inner a\n   - Inner b\n2. Outer two\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "1. Outer one\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "- Inner a\n".into(),
+            indent: 3,
+        },
+        Event::Block {
+            content: "- Inner b\n".into(),
+            indent: 3,
+        },
+    ]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "2. Outer two\n".into(),
+        indent: 0
+    }]);
+}
+
+#[test]
+fn test_buffer_two_blank_lines_terminate_list() {
+    // Per CommonMark, two consecutive blank lines followed by
+    // less-indented content end a list. The walk's `prev_blank` flag
+    // is sticky across consecutive blanks, so we see this through:
+    // blank → blank → non-marker at less indent → Terminator.
+    let input = "1. Item\n\n\nparagraph at column 0\n\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "1. Item\n\n\n".into(),
+            indent: 0,
+        },
+        Event::block("paragraph at column 0\n\n"),
+    ]);
+    assert_eq!(buf.flush_events(), Vec::<Event>::new());
+}
+
+#[test]
+fn test_buffer_block_interrupter_inside_list_terminates() {
+    // A block interrupter (header, fence, thematic break, HTML block)
+    // at <=3 indent terminates the list, even without a preceding
+    // blank line.
+    let input = "1. Item\n# Header that interrupts\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "1. Item\n".into(),
+            indent: 0,
+        },
+        Event::block("# Header that interrupts\n"),
+    ]);
+    assert_eq!(buf.flush_events(), Vec::<Event>::new());
+}
+
+#[test]
+fn test_buffer_lazy_continuation_inside_list_item() {
+    // CommonMark lazy continuation: a non-blank line at less indent
+    // than content_column, NOT preceded by a blank line, is part of
+    // the current item's paragraph.
+    let input = "1. First line of item\nlazy continuation\n2. Next item\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    // The first item bundles the lazy continuation line; only the
+    // sibling marker triggers the flush.
+    assert_eq!(events, vec![Event::Block {
+        content: "1. First line of item\nlazy continuation\n".into(),
+        indent: 0,
+    }]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "2. Next item\n".into(),
+        indent: 0
+    }]);
+}
+
+#[test]
+fn test_buffer_nested_list_streams_with_renumbering() {
+    // Sub-items emit individually with the parent's content column as
+    // visual indent. Ordered markers are renumbered relative to the
+    // nested list's start number, so `1, 7, 99` renders as `1, 2, 3`.
+    let input = "1. Outer\n   1. Sub one\n   7. Sub two\n   99. Sub three\n2. Next outer\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "1. Outer\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "1. Sub one\n".into(),
+            indent: 3,
+        },
+        Event::Block {
+            content: "2. Sub two\n".into(),
+            indent: 3,
+        },
+        Event::Block {
+            content: "3. Sub three\n".into(),
+            indent: 3,
+        },
+    ]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "2. Next outer\n".into(),
+        indent: 0
+    }]);
+}
+
+#[test]
+fn test_buffer_fence_in_list_streams_with_indent() {
+    // A fenced code block opened inside a list item is recognised and
+    // streams as `FencedCode*` events with the fence's visual column as
+    // its `indent`. Item content emitted around it uses the same indent
+    // logic as the rest of the list.
+    let input = "1. Here's code:\n\n   ```rust\n   fn main() {}\n   ```\n\n2. Next item.\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "1. Here's code:\n\n".into(),
+            indent: 0,
+        },
+        Event::FencedCodeStart {
+            language: "rust".into(),
+            fence_type: FenceType::Backtick,
+            fence_length: 3,
+            indent: 3,
+        },
+        Event::FencedCodeLine {
+            content: "fn main() {}\n".into(),
+            indent: 3,
+        },
+        Event::FencedCodeEnd {
+            fence: "```".into(),
+            indent: 3,
+        },
+    ]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "2. Next item.\n".into(),
+        indent: 0
+    }]);
+}
+
+#[test]
+fn test_buffer_loose_list_with_indented_nested_content_not_split() {
+    // Regression for the original loose-list bug, updated to the
+    // Option A semantics: the outer marker line, each nested sub-item,
+    // and the trailing paragraph each stream as their own `Block` with
+    // the appropriate visual `indent`. Ordered sub-item markers are
+    // renumbered relative to the nested list's start number.
+    let input = "10. **Outer item** \u{2014}\n\n    1. Sub one\n    7. Sub two\n    99. Sub \
+                 three\n\n    End of item 10.\n\n11. **Next outer**\n";
+
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "10. **Outer item** \u{2014}\n\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "1. Sub one\n".into(),
+            indent: 4,
+        },
+        Event::Block {
+            content: "2. Sub two\n".into(),
+            indent: 4,
+        },
+        Event::Block {
+            content: "3. Sub three\n\n".into(),
+            indent: 4,
+        },
+        Event::Block {
+            content: "End of item 10.\n\n".into(),
+            indent: 4,
+        },
+    ]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "11. **Next outer**\n".into(),
+        indent: 0
+    }]);
 }
 
 #[test]
@@ -330,7 +788,7 @@ fn test_buffer_list_streams_incrementally() {
     let events: Vec<Event> = buf.by_ref().collect();
     assert_eq!(
         events,
-        vec![Event::Block("1. First item\n".into())],
+        vec![Event::block("1. First item\n")],
         "Should flush first item when second arrives"
     );
 
@@ -338,7 +796,7 @@ fn test_buffer_list_streams_incrementally() {
     let events: Vec<Event> = buf.by_ref().collect();
     assert_eq!(
         events,
-        vec![Event::Block("2. Second item\n".into())],
+        vec![Event::block("2. Second item\n")],
         "Should flush second item when third arrives"
     );
 
@@ -346,8 +804,8 @@ fn test_buffer_list_streams_incrementally() {
     buf.push("\nAfter list\n\n");
     let events: Vec<Event> = buf.by_ref().collect();
     assert_eq!(events, vec![
-        Event::Block("3. Third item\n\n".into()),
-        Event::Block("After list\n\n".into()),
+        Event::block("3. Third item\n\n"),
+        Event::block("After list\n\n"),
     ],);
 }
 
@@ -358,13 +816,20 @@ fn test_buffer_list_multiline_items_not_split() {
     buf.push("1. First item that\n   continues here\n");
     buf.push("2. Second item\n\n");
 
+    // First item (with continuation) flushes when the second item's
+    // marker arrives. The second item is the last one we've seen so far
+    // — a trailing blank line alone doesn't end the list, because more
+    // indented content could still arrive.
     let events: Vec<Event> = buf.by_ref().collect();
-    // First item (with continuation) flushes when second arrives.
-    // Second item flushes at blank line.
-    assert_eq!(events, vec![
-        Event::Block("1. First item that\n   continues here\n".into()),
-        Event::Block("2. Second item\n\n".into()),
-    ]);
+    assert_eq!(events, vec![Event::block(
+        "1. First item that\n   continues here\n"
+    )]);
+
+    // The list ends when non-indented, non-marker content appears after
+    // the blank line.
+    buf.push("Outside list\n");
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(events, vec![Event::block("2. Second item\n\n")]);
 }
 
 #[test]
@@ -372,24 +837,30 @@ fn test_buffer_unordered_list_streams() {
     let mut buf = Buffer::new();
     buf.push("- Alpha\n- Beta\n- Gamma\n\n");
 
+    // Items stream at each sibling marker. The last item stays buffered
+    // until the list is known to have ended.
     let events: Vec<Event> = buf.by_ref().collect();
-    // Each item streams separately, last one terminated by blank line.
     assert_eq!(events, vec![
-        Event::Block("- Alpha\n".into()),
-        Event::Block("- Beta\n".into()),
-        Event::Block("- Gamma\n\n".into()),
+        Event::block("- Alpha\n"),
+        Event::block("- Beta\n"),
     ]);
+
+    // End-of-stream flushes the remaining item.
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "- Gamma\n\n".into(),
+        indent: 0
+    }]);
 }
 
 #[test]
 fn test_buffer_thematic_break() {
     let cases = vec![
         ("simple", TestCase {
-            in_out: vec![("---\n", vec![Event::Block("---\n".into())])],
+            in_out: vec![("---\n", vec![Event::block("---\n")])],
             flushed: None,
         }),
         ("with spaces", TestCase {
-            in_out: vec![(" * * * \n", vec![Event::Block(" * * * \n".into())])],
+            in_out: vec![(" * * * \n", vec![Event::block(" * * * \n")])],
             flushed: None,
         }),
     ];
@@ -402,8 +873,8 @@ fn test_buffer_thematic_break() {
 #[test]
 fn test_buffer_link_ref_def() {
     let cases = vec![("simple", TestCase {
-        in_out: vec![("[my-link]: https://example.com\n", vec![Event::Block(
-            "[my-link]: https://example.com\n".into(),
+        in_out: vec![("[my-link]: https://example.com\n", vec![Event::block(
+            "[my-link]: https://example.com\n",
         )])],
         flushed: None,
     })];
@@ -419,8 +890,8 @@ fn test_buffer_html_blocks() {
         ("Type 1 (Script) with blanks", TestCase {
             in_out: vec![
                 ("<script>\nvar x = 1;\n\n", vec![]),
-                ("console.log(x);\n</script>\n", vec![Event::Block(
-                    "<script>\nvar x = 1;\n\nconsole.log(x);\n</script>\n".into(),
+                ("console.log(x);\n</script>\n", vec![Event::block(
+                    "<script>\nvar x = 1;\n\nconsole.log(x);\n</script>\n",
                 )]),
             ],
             flushed: None,
@@ -428,8 +899,8 @@ fn test_buffer_html_blocks() {
         ("Type 6 (Div) fragmented", TestCase {
             in_out: vec![
                 ("<div>\n  <p>Hello</p>\n", vec![]),
-                ("\nThis is after.", vec![Event::Block(
-                    "<div>\n  <p>Hello</p>\n\n".into(),
+                ("\nThis is after.", vec![Event::block(
+                    "<div>\n  <p>Hello</p>\n\n",
                 )]),
             ],
             flushed: Some("This is after."),
@@ -437,8 +908,8 @@ fn test_buffer_html_blocks() {
         ("Type 7 (No Interrupt)", TestCase {
             in_out: vec![
                 ("This is a paragraph.\n", vec![]),
-                ("<a>foo</a>\n\n", vec![Event::Block(
-                    "This is a paragraph.\n<a>foo</a>\n\n".into(),
+                ("<a>foo</a>\n\n", vec![Event::block(
+                    "This is a paragraph.\n<a>foo</a>\n\n",
                 )]),
             ],
             flushed: None,
@@ -447,16 +918,16 @@ fn test_buffer_html_blocks() {
             in_out: vec![
                 ("<!-- Hello\n\n", vec![]),
                 ("World -->\nPara\n\n", vec![
-                    Event::Block("<!-- Hello\n\nWorld -->\n".into()),
-                    Event::Block("Para\n\n".into()),
+                    Event::block("<!-- Hello\n\nWorld -->\n"),
+                    Event::block("Para\n\n"),
                 ]),
             ],
             flushed: None,
         }),
         ("Type 4 (Doctype)", TestCase {
             in_out: vec![("<!DOCTYPE html>\n<p>Hi</p>\n\n", vec![
-                Event::Block("<!DOCTYPE html>\n".into()),
-                Event::Block("<p>Hi</p>\n\n".into()),
+                Event::block("<!DOCTYPE html>\n"),
+                Event::block("<p>Hi</p>\n\n"),
             ])],
             flushed: None,
         }),
@@ -472,9 +943,9 @@ fn test_buffer_misc() {
     let cases = vec![
         ("multiple blocks, one chunk", TestCase {
             in_out: vec![("# Header 1\n\nParagraph.\n\n---\n", vec![
-                Event::Block("# Header 1\n".into()),
-                Event::Block("Paragraph.\n\n".into()),
-                Event::Block("---\n".into()),
+                Event::block("# Header 1\n"),
+                Event::block("Paragraph.\n\n"),
+                Event::block("---\n"),
             ])],
             flushed: None,
         }),
@@ -485,8 +956,8 @@ fn test_buffer_misc() {
         ("blank lines", TestCase {
             in_out: vec![
                 ("\n\n\n", vec![]),
-                ("# Header\n", vec![Event::Block("# Header\n".into())]),
-                ("\n\nPara\n\n", vec![Event::Block("Para\n\n".into())]),
+                ("# Header\n", vec![Event::block("# Header\n")]),
+                ("\n\nPara\n\n", vec![Event::block("Para\n\n")]),
             ],
             flushed: None,
         }),
@@ -505,16 +976,19 @@ fn test_fmt_write() {
     let _ = writeln!(buf, "It has two lines.");
 
     let actual: Vec<Event> = buf.by_ref().collect();
-    assert_eq!(actual, vec![Event::Block("# Hello\n".into())]);
+    assert_eq!(actual, vec![Event::block("# Hello\n")]);
 
     let _ = writeln!(buf, "\nAnd a new one.");
 
     let actual: Vec<Event> = buf.by_ref().collect();
-    assert_eq!(actual, vec![Event::Block(
-        "This is a paragraph.\nIt has two lines.\n\n".into(),
+    assert_eq!(actual, vec![Event::block(
+        "This is a paragraph.\nIt has two lines.\n\n"
     )]);
 
-    assert_eq!(buf.flush(), Some("And a new one.\n".into()));
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "And a new one.\n".into(),
+        indent: 0
+    }]);
 }
 
 #[test]
@@ -612,11 +1086,9 @@ fn test_is_atx_header() {
 fn test_buffer_atx_header_validation() {
     // Invalid headers treated as paragraphs
     let invalid = vec![
-        ("#hashtag\n\n", vec![Event::Block("#hashtag\n\n".into())]),
-        ("#5 bolt\n\n", vec![Event::Block("#5 bolt\n\n".into())]),
-        ("####### foo\n\n", vec![Event::Block(
-            "####### foo\n\n".into(),
-        )]),
+        ("#hashtag\n\n", vec![Event::block("#hashtag\n\n")]),
+        ("#5 bolt\n\n", vec![Event::block("#5 bolt\n\n")]),
+        ("####### foo\n\n", vec![Event::block("####### foo\n\n")]),
     ];
 
     for (input, expected) in invalid {
@@ -628,10 +1100,10 @@ fn test_buffer_atx_header_validation() {
 
     // Valid headers
     let valid = vec![
-        ("# Valid\n", vec![Event::Block("# Valid\n".into())]),
-        ("###### Six\n", vec![Event::Block("###### Six\n".into())]),
-        ("#\tTab\n", vec![Event::Block("#\tTab\n".into())]),
-        ("#\n", vec![Event::Block("#\n".into())]),
+        ("# Valid\n", vec![Event::block("# Valid\n")]),
+        ("###### Six\n", vec![Event::block("###### Six\n")]),
+        ("#\tTab\n", vec![Event::block("#\tTab\n")]),
+        ("#\n", vec![Event::block("#\n")]),
     ];
 
     for (input, expected) in valid {
@@ -649,49 +1121,56 @@ fn test_tabs_in_block_detection() {
     buf.push("\t# Not Header\n\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, Vec::<Event>::new());
-    assert_eq!(buf.flush(), Some("\t# Not Header\n\n".into()));
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "\t# Not Header\n\n".into(),
+        indent: 0
+    }]);
 
     // 3 spaces before # = valid header
     let mut buf = Buffer::new();
     buf.push("   # Valid\n");
     let actual: Vec<Event> = buf.by_ref().collect();
-    assert_eq!(actual, vec![Event::Block("   # Valid\n".into())]);
+    assert_eq!(actual, vec![Event::block("   # Valid\n")]);
 
     // Tab after # = valid header
     let mut buf = Buffer::new();
     buf.push("#\tFoo\n");
     let actual: Vec<Event> = buf.by_ref().collect();
-    assert_eq!(actual, vec![Event::Block("#\tFoo\n".into())]);
+    assert_eq!(actual, vec![Event::block("#\tFoo\n")]);
 
     // Tab at column 0 before thematic break = indented code
     let mut buf = Buffer::new();
     buf.push("\t***\n\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, Vec::<Event>::new());
-    assert_eq!(buf.flush(), Some("\t***\n\n".into()));
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "\t***\n\n".into(),
+        indent: 0
+    }]);
 
     // 3 spaces before *** = valid thematic break
     let mut buf = Buffer::new();
     buf.push("   ***\n");
     let actual: Vec<Event> = buf.by_ref().collect();
-    assert_eq!(actual, vec![Event::Block("   ***\n".into())]);
+    assert_eq!(actual, vec![Event::block("   ***\n")]);
 
     // Mixed tabs and spaces in thematic break
     let mut buf = Buffer::new();
     buf.push("*\t*\t*\t\n");
     let actual: Vec<Event> = buf.by_ref().collect();
-    assert_eq!(actual, vec![Event::Block("*\t*\t*\t\n".into())]);
+    assert_eq!(actual, vec![Event::block("*\t*\t*\t\n")]);
 }
 
 #[test]
 fn test_buffer_event_display() {
     let cases = vec![
-        (Event::Block("Hello".into()), "Hello"),
+        (Event::block("Hello"), "Hello"),
         (
             Event::FencedCodeStart {
                 language: "rust".into(),
                 fence_type: FenceType::Backtick,
                 fence_length: 3,
+                indent: 0,
             },
             "```rust",
         ),
@@ -700,11 +1179,12 @@ fn test_buffer_event_display() {
                 language: "python".into(),
                 fence_type: FenceType::Tilde,
                 fence_length: 4,
+                indent: 0,
             },
             "~~~~python",
         ),
-        (Event::FencedCodeLine("Hello".into()), "Hello"),
-        (Event::FencedCodeEnd("```".into()), "```"),
+        (Event::fenced_code_line("Hello"), "Hello"),
+        (Event::fenced_code_end("```"), "```"),
     ];
 
     for (event, expected) in cases {
