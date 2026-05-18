@@ -1,4 +1,10 @@
+use camino::Utf8PathBuf;
+use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
+use jp_printer::{OutputFormat, Printer};
+use schematic::Config as _;
+
 use super::{super::executor::TerminalExecutorSource, *};
+use crate::render::tool::ToolRenderer;
 
 fn empty_executor_source() -> Box<dyn jp_llm::tool::executor::ExecutorSource> {
     Box::new(TerminalExecutorSource::new(
@@ -303,6 +309,127 @@ fn test_static_answers_for_tool_collects_all_answers() {
     assert_eq!(answers.get("q1"), Some(&serde_json::json!("answer1")));
     assert_eq!(answers.get("q2"), Some(&serde_json::json!(42)));
     assert!(answers.get("q3").is_none());
+}
+
+#[tokio::test]
+async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
+    // Regression test for the bug where `fs_delete_file`-style tools
+    // (built-in parameter style + `run = "ask"`) showed the permission
+    // prompt without first rendering the arguments. `FormatMode::Ask`
+    // exists to defer side-effecting custom formatters; it should not
+    // suppress rendering for the pure built-in styles.
+    let tool_config = ToolConfig::from_partial(
+        jp_config::conversation::tool::PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            style: Some(PartialDisplayStyleConfig {
+                parameters: Some(ParametersStyle::FunctionCall),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        vec![],
+    )
+    .expect("valid tool config");
+
+    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
+    tools_config.insert("fs_delete_file".to_string(), tool_config);
+
+    let coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
+
+    // Sanity-check the precondition: with no explicit `format` and the
+    // default `run = "ask"`, the format mode derives to `Ask`. The bug
+    // was that this gated rendering even for non-Custom styles.
+    assert_eq!(coordinator.format_mode("fs_delete_file"), FormatMode::Ask);
+
+    let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let style_config = jp_config::AppConfig::new_test().style;
+    let tool_renderer = ToolRenderer::new(
+        printer.clone(),
+        style_config,
+        Utf8PathBuf::from("/tmp"),
+        false,
+    );
+
+    let mut args = Map::new();
+    args.insert("path".into(), Value::String("src/foo.rs".into()));
+
+    let result = coordinator
+        .pre_render_for_prompt("fs_delete_file", &args, &tool_renderer)
+        .await;
+
+    // Non-Custom styles should always pre-render. `content` is `None`
+    // because only Custom formatters produce persistable rendered content.
+    assert!(
+        matches!(result, Ok(Some(None))),
+        "pre-render should fire for FunctionCall style, got: {result:?}"
+    );
+
+    printer.flush();
+    let output = stderr.lock();
+    assert!(
+        output.contains("fs_delete_file"),
+        "stderr should contain tool name; got: {output:?}"
+    );
+    assert!(
+        output.contains("src/foo.rs"),
+        "stderr should contain the rendered argument; got: {output:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
+    // Counterpart to the test above: Custom formatters with the default
+    // `FormatMode::Ask` should still defer rendering until after approval,
+    // because the formatter is a user-controlled shell command.
+    use jp_config::conversation::tool::CommandConfigOrString;
+
+    let tool_config = ToolConfig::from_partial(
+        jp_config::conversation::tool::PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            style: Some(PartialDisplayStyleConfig {
+                parameters: Some(ParametersStyle::Custom(CommandConfigOrString::String(
+                    "echo SHOULD-NOT-RUN".into(),
+                ))),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        vec![],
+    )
+    .expect("valid tool config");
+
+    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
+    tools_config.insert("custom_tool".to_string(), tool_config);
+
+    let coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
+    assert_eq!(coordinator.format_mode("custom_tool"), FormatMode::Ask);
+
+    let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let style_config = jp_config::AppConfig::new_test().style;
+    let tool_renderer = ToolRenderer::new(
+        printer.clone(),
+        style_config,
+        Utf8PathBuf::from("/tmp"),
+        false,
+    );
+
+    let result = coordinator
+        .pre_render_for_prompt("custom_tool", &Map::new(), &tool_renderer)
+        .await;
+
+    assert!(
+        matches!(result, Ok(None)),
+        "Custom + format=ask should defer rendering, got: {result:?}"
+    );
+
+    printer.flush();
+    let output = stderr.lock();
+    assert!(
+        !output.contains("SHOULD-NOT-RUN"),
+        "custom formatter must not have run; got: {output:?}"
+    );
 }
 
 #[test]
