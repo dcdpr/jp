@@ -837,6 +837,66 @@ fn test_buffer_fence_in_list_streams_with_indent() {
 }
 
 #[test]
+fn test_buffer_fence_in_two_digit_item_closes() {
+    // Regression: the closing-fence detector used the document-level
+    // `indent_len < 4` rule, which is wrong for fences nested inside
+    // list items with `content_column >= 4`. With marker `10. `,
+    // content_column is 4, so the opening fence at indent=4 enters
+    // `InFencedCode { indent: 4, .. }` — and the closing fence, also
+    // at indent=4, would fail `indent_len < 4` and stay in the
+    // `InFencedCode` state forever. The check is now relative to the
+    // stored fence indent (`indent_len - indent < 4`), so this closes.
+    let input = "10. Outer\n\n    ```rust\n    fn main() {}\n    ```\n\n11. Next\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "10. Outer\n\n".into(),
+            indent: 0,
+        },
+        Event::FencedCodeStart {
+            language: "rust".into(),
+            fence_type: FenceType::Backtick,
+            fence_length: 3,
+            indent: 4,
+        },
+        Event::FencedCodeLine {
+            content: "fn main() {}\n".into(),
+            indent: 4,
+        },
+        Event::FencedCodeEnd {
+            fence: "```".into(),
+            indent: 4,
+        },
+    ]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "11. Next\n".into(),
+        indent: 0,
+    }]);
+}
+
+#[test]
+fn test_buffer_fence_in_list_allows_extra_close_indent() {
+    // CommonMark §4.5 allows the closing fence to be up to 3 spaces
+    // more indented than the opening fence's container. The opening
+    // fence here sits at column 3; the closer at column 6 (three
+    // extra spaces) must still close it.
+    let input = "1. item\n\n   ```rust\n   fn x() {}\n      ```\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::FencedCodeEnd { .. })),
+        "closing fence with up-to-3-extra indent should be recognised. Got: {events:#?}"
+    );
+}
+
+#[test]
 fn test_buffer_loose_list_with_indented_nested_content_not_split() {
     // Regression for the original loose-list bug, updated to the
     // Option A semantics: the outer marker line, each nested sub-item,

@@ -868,17 +868,28 @@ impl Buffer {
         let expected_char = fence_type.as_char();
 
         // Check if this line looks like a fence (opening or closing).
-        let fence_on_line = if indent_len < 4 && content.starts_with(expected_char) {
-            let run = content.chars().take_while(|&c| c == expected_char).count();
-            if run >= fence_length {
-                let after = &content[run..];
-                Some((run, after.trim()))
+        //
+        // Per CommonMark §4.5, a fence may be indented up to 3 spaces
+        // *relative to its container*. For document-level fences the
+        // container is column 0 and the stored `indent` is 0, so this is
+        // equivalent to the old `indent_len < 4` rule. For fences nested
+        // inside list items, `indent` is the opening fence's visual
+        // column (e.g. 4 for an item with marker `10. `), so the close
+        // is allowed in `[indent, indent + 3]` — otherwise the closing
+        // fence sits at exactly `indent` and would be misclassified as a
+        // code line, leaving the buffer stuck in `InFencedCode` forever.
+        let fence_on_line =
+            if indent_len.saturating_sub(indent) < 4 && content.starts_with(expected_char) {
+                let run = content.chars().take_while(|&c| c == expected_char).count();
+                if run >= fence_length {
+                    let after = &content[run..];
+                    Some((run, after.trim()))
+                } else {
+                    None
+                }
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
         if let Some((_run, after)) = fence_on_line {
             if after.is_empty() {
