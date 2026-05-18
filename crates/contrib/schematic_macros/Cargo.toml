@@ -1,0 +1,26 @@
+[package]
+name = "schematic_macros"
+description = "Macros for the schematic crate."
+edition = "2024"
+license = "MIT"
+publish = false
+version = "0.19.3"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+convert_case = { workspace = true }
+darling = { workspace = true, features = ["suggestions"] }
+proc-macro2 = { workspace = true, features = ["proc-macro"] }
+quote = { workspace = true, features = ["proc-macro"] }
+syn = { workspace = true, features = ["clone-impls", "derive", "full", "parsing", "printing", "proc-macro"] }
+
+[features]
+default = []
+config = []
+env = []
+schema = []
+
+[lints]
+workspace = true

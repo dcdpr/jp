@@ -1,0 +1,61 @@
+[package]
+name = "schematic"
+description = "A layered serde configuration and schema library."
+edition = "2024"
+license = "MIT"
+publish = false
+version = "0.19.4"
+
+[dependencies]
+schematic_macros = { path = "../schematic_macros" }
+schematic_types = { path = "../schematic_types" }
+serde-content = { workspace = true, features = ["serde", "std"] }
+serde = { workspace = true, features = ["derive", "std"] }
+thiserror = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
+
+# config
+serde_path_to_error = { workspace = true, optional = true }
+
+# schema
+convert_case = { workspace = true, optional = true }
+indexmap = { workspace = true, optional = true, features = ["serde", "std"] }
+
+# json
+json-strip-comments = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true, features = ["preserve_order"] }
+
+# toml
+toml = { workspace = true, optional = true, features = ["parse", "display"] }
+
+# yaml
+serde_yaml = { workspace = true, optional = true }
+
+[features]
+default = ["config", "env"]
+config = ["dep:serde_path_to_error", "schematic_macros/config"]
+schema = ["dep:convert_case", "dep:indexmap", "schematic_macros/schema"]
+schema_serde = ["schema", "schematic_types/serde"]
+
+# Features
+env = ["schematic_macros/env"]
+
+# Formats
+json = [
+    "dep:json-strip-comments",
+    "dep:serde_json",
+    "schematic_types/serde_json",
+]
+toml = ["dep:toml", "schematic_types/serde_toml"]
+yaml = ["dep:serde_yaml", "schematic_types/serde_yaml"]
+
+# Renderers
+renderer_template = ["schema"]
+
+# Types
+type_indexmap = ["schematic_types/indexmap"]
+type_relative_path = ["schematic_types/relative_path"]
+type_url = ["schematic_types/url"]
+
+[lints]
+workspace = true

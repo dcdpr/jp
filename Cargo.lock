@@ -2713,26 +2713,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miette"
-version = "7.6.0"
-source = "git+https://github.com/zkat/miette#df7bcfa17d9c0813286050ee245d5c3d94653f1c"
-dependencies = [
- "cfg-if",
- "miette-derive",
- "unicode-width",
-]
-
-[[package]]
-name = "miette-derive"
-version = "7.6.0"
-source = "git+https://github.com/zkat/miette#df7bcfa17d9c0813286050ee245d5c3d94653f1c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3701,28 +3681,25 @@ dependencies = [
 [[package]]
 name = "schematic"
 version = "0.19.4"
-source = "git+https://github.com/JeanMertz/schematic?branch=merged#e475f886f679fa92ebd30bdee20cd45f6edf602b"
 dependencies = [
  "convert_case 0.11.0",
  "indexmap",
  "json-strip-comments",
- "miette",
  "schematic_macros",
  "schematic_types",
  "serde",
  "serde-content",
  "serde_json",
  "serde_path_to_error",
+ "serde_yaml",
  "thiserror 2.0.18",
  "toml",
  "tracing",
- "yaml_serde",
 ]
 
 [[package]]
 name = "schematic_macros"
 version = "0.19.3"
-source = "git+https://github.com/JeanMertz/schematic?branch=merged#e475f886f679fa92ebd30bdee20cd45f6edf602b"
 dependencies = [
  "convert_case 0.11.0",
  "darling 0.23.0",
@@ -3734,15 +3711,16 @@ dependencies = [
 [[package]]
 name = "schematic_types"
 version = "0.11.3"
-source = "git+https://github.com/JeanMertz/schematic?branch=merged#e475f886f679fa92ebd30bdee20cd45f6edf602b"
 dependencies = [
  "indexmap",
+ "insta",
  "relative-path",
+ "schematic_types",
  "serde",
  "serde_json",
+ "serde_yaml",
  "toml",
  "url",
- "yaml_serde",
 ]
 
 [[package]]
@@ -5416,19 +5394,6 @@ checksum = "f57dd51b88a4b9f99f9b55b136abb86210629d61c48117ddb87f567e51e66be7"
 dependencies = [
  "log",
  "markup5ever",
-]
-
-[[package]]
-name = "yaml_serde"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a7f5270edc6fab0529a772a772b3e505dfd883a8de5cc5b464e35fabe586411"
-dependencies = [
- "indexmap",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
 ]
 
 [[package]]

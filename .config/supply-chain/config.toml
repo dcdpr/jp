@@ -37,12 +37,6 @@ audit-as-crates-io = true
 [policy.inquire]
 audit-as-crates-io = true
 
-[policy.miette]
-audit-as-crates-io = true
-
-[policy.miette-derive]
-audit-as-crates-io = true
-
 [policy.openai_responses]
 audit-as-crates-io = false
 
@@ -399,14 +393,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.memmap2]]
 version = "0.9.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.miette]]
-version = "7.6.0@git:df7bcfa17d9c0813286050ee245d5c3d94653f1c"
-criteria = "safe-to-deploy"
-
-[[exemptions.miette-derive]]
-version = "7.6.0@git:df7bcfa17d9c0813286050ee245d5c3d94653f1c"
 criteria = "safe-to-deploy"
 
 [[exemptions.minijinja]]

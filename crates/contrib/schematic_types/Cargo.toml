@@ -1,0 +1,41 @@
+[package]
+name = "schematic_types"
+description = "Shapes and types for defining schemas for Rust types."
+edition = "2024"
+license = "MIT"
+publish = false
+version = "0.11.3"
+
+[dependencies]
+indexmap = { workspace = true, features = ["serde", "std"] }
+relative-path = { workspace = true, optional = true, features = ["alloc"] }
+serde = { workspace = true, optional = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true, features = ["std"] }
+serde_yaml = { workspace = true, optional = true }
+toml = { workspace = true, optional = true, features = ["serde"] }
+url = { workspace = true, optional = true }
+
+[dev-dependencies]
+schematic_types = { path = ".", features = [
+    "indexmap",
+    "relative_path",
+    "serde",
+    "serde_json",
+    "serde_toml",
+    "serde_yaml",
+    "url",
+] }
+insta = { workspace = true }
+
+[features]
+default = []
+indexmap = []
+relative_path = ["dep:relative-path"]
+serde = ["dep:serde"]
+serde_json = ["dep:serde_json"]
+serde_toml = ["dep:toml"]
+serde_yaml = ["dep:serde_yaml"]
+url = ["dep:url"]
+
+[lints]
+workspace = true

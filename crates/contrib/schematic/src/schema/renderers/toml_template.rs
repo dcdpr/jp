@@ -1,0 +1,261 @@
+use std::{collections::BTreeMap, mem};
+
+use indexmap::IndexMap;
+use schematic_types::{
+    ArrayType, BooleanType, EnumType, FloatType, IntegerType, LiteralType, ObjectType, Schema,
+    SchemaType, StringType, StructType, TupleType, UnionType,
+};
+
+use super::template::{
+    EMPTY_STRING, TemplateContext, TemplateOptions, render_array, render_boolean, render_enum,
+    render_float, render_integer, render_literal, render_null, render_object, render_reference,
+    render_string, render_tuple, render_union, render_unknown, validate_root,
+};
+use crate::schema::{RenderResult, SchemaRenderer};
+
+struct Section {
+    comment: String,
+    table: StructType,
+}
+
+/// Renders TOML config templates.
+pub struct TomlTemplateRenderer {
+    ctx: TemplateContext,
+    schemas: IndexMap<String, Schema>,
+
+    arrays: BTreeMap<String, Section>,
+    tables: BTreeMap<String, Section>,
+}
+
+impl TomlTemplateRenderer {
+    #[allow(clippy::should_implement_trait)]
+    #[must_use]
+    pub fn default() -> Self {
+        TomlTemplateRenderer::new(TemplateOptions::default())
+    }
+
+    #[must_use]
+    pub fn new(options: TemplateOptions) -> Self {
+        TomlTemplateRenderer {
+            ctx: TemplateContext::new(options),
+            schemas: IndexMap::default(),
+            arrays: BTreeMap::new(),
+            tables: BTreeMap::new(),
+        }
+    }
+
+    fn extract_sections(&mut self, doc: &mut StructType) {
+        for (name, field) in &mut doc.fields {
+            self.ctx.push_stack(name);
+
+            let comment = self.ctx.create_field_comment(field);
+
+            match &mut field.schema.ty {
+                SchemaType::Array(array) => {
+                    let items_type =
+                        TemplateContext::resolve_schema(&array.items_type, &self.schemas).clone();
+
+                    if let SchemaType::Struct(mut table) = items_type.ty {
+                        let key = self.ctx.get_stack_key();
+
+                        field.hidden = true;
+
+                        self.extract_sections(&mut table);
+
+                        if !table.is_hidden() {
+                            self.arrays.insert(key, Section {
+                                comment,
+                                table: *table,
+                            });
+                        }
+                    }
+                }
+                SchemaType::Struct(table) => {
+                    let key = self.ctx.get_stack_key();
+
+                    field.hidden = true;
+
+                    self.extract_sections(table);
+
+                    if !table.is_hidden() {
+                        self.tables.insert(key, Section {
+                            comment,
+                            table: (**table).clone(),
+                        });
+                    }
+                }
+                _ => {}
+            }
+
+            self.ctx.pop_stack();
+        }
+    }
+}
+
+impl SchemaRenderer<String> for TomlTemplateRenderer {
+    fn is_reference(&self, _name: &str) -> bool {
+        false
+    }
+
+    fn render_array(&mut self, array: &ArrayType, _schema: &Schema) -> RenderResult<String> {
+        let key = self.ctx.get_stack_key();
+
+        if !self.ctx.is_expanded(&key) {
+            return Ok(render_array(array));
+        }
+
+        let items_type = TemplateContext::resolve_schema(&array.items_type, &self.schemas);
+
+        Ok(format!("[{}]", self.render_schema(&items_type)?))
+    }
+
+    fn render_boolean(&mut self, boolean: &BooleanType, _schema: &Schema) -> RenderResult<String> {
+        Ok(render_boolean(boolean))
+    }
+
+    fn render_enum(&mut self, enu: &EnumType, _schema: &Schema) -> RenderResult<String> {
+        Ok(render_enum(enu))
+    }
+
+    fn render_float(&mut self, float: &FloatType, _schema: &Schema) -> RenderResult<String> {
+        Ok(render_float(float))
+    }
+
+    fn render_integer(&mut self, integer: &IntegerType, _schema: &Schema) -> RenderResult<String> {
+        Ok(render_integer(integer))
+    }
+
+    fn render_literal(&mut self, literal: &LiteralType, _schema: &Schema) -> RenderResult<String> {
+        Ok(render_literal(literal))
+    }
+
+    fn render_null(&mut self, _schema: &Schema) -> RenderResult<String> {
+        Ok(render_null())
+    }
+
+    fn render_object(&mut self, object: &ObjectType, _schema: &Schema) -> RenderResult<String> {
+        let key = self.ctx.get_stack_key();
+        let value_type = TemplateContext::resolve_schema(&object.value_type, &self.schemas);
+
+        if !self.ctx.is_expanded(&key) || value_type.is_struct() {
+            return Ok(render_object(object));
+        }
+
+        let comments = self.ctx.options.comments;
+
+        // Objects are inline, so we can't show comments
+        self.ctx.options.comments = false;
+
+        let value = self.render_schema(&value_type)?;
+        let mut key = self.render_schema(&object.key_type)?;
+
+        if key == EMPTY_STRING {
+            key = "example".into();
+        }
+
+        self.ctx.options.comments = comments;
+
+        Ok(format!("{{ {key} = {value} }}"))
+    }
+
+    fn render_reference(&mut self, reference: &str, _schema: &Schema) -> RenderResult<String> {
+        if let Some(schema) = self.schemas.get(reference) {
+            return self.render_schema_without_reference(&schema.to_owned());
+        }
+
+        Ok(render_reference(reference))
+    }
+
+    fn render_string(&mut self, string: &StringType, _schema: &Schema) -> RenderResult<String> {
+        Ok(render_string(string))
+    }
+
+    fn render_struct(&mut self, structure: &StructType, _schema: &Schema) -> RenderResult<String> {
+        let mut out = vec![];
+
+        for (name, field) in &structure.fields {
+            if field.flatten {
+                continue;
+            }
+
+            self.ctx.push_stack(name);
+
+            if !self.ctx.is_hidden(field) {
+                let prop = format!(
+                    "{} = {}",
+                    name,
+                    self.render_schema(self.ctx.validate_schema_variant(
+                        self.ctx.get_stack_value().as_ref(),
+                        &field.schema
+                    ))?
+                );
+
+                out.push(self.ctx.create_field(field, &prop));
+            }
+
+            self.ctx.pop_stack();
+        }
+
+        if out.is_empty() {
+            return Ok("{}".into());
+        }
+
+        Ok(out.join(self.ctx.gap()))
+    }
+
+    fn render_tuple(&mut self, tuple: &TupleType, _schema: &Schema) -> RenderResult<String> {
+        render_tuple(tuple, |schema| self.render_schema(schema))
+    }
+
+    fn render_union(&mut self, uni: &UnionType, _schema: &Schema) -> RenderResult<String> {
+        render_union(uni, |schema| self.render_schema(schema))
+    }
+
+    fn render_unknown(&mut self, _schema: &Schema) -> RenderResult<String> {
+        Ok(render_unknown())
+    }
+
+    fn render(&mut self, schemas: IndexMap<String, Schema>) -> RenderResult {
+        self.schemas = schemas;
+
+        let mut root = validate_root(&self.schemas)?;
+        let fake_schema = Schema::default();
+
+        // Recursively extract all sections (arrays, objects)
+        if let SchemaType::Struct(doc) = &mut root.ty {
+            self.extract_sections(doc);
+        }
+
+        // Then render each section accordingly
+        let mut sections = vec![self.render_schema_without_reference(&root)?];
+
+        for (key, value) in mem::take(&mut self.arrays) {
+            sections.push(format!(
+                "{}[[{key}]]\n{}",
+                value.comment,
+                self.render_struct(&value.table, &fake_schema)?
+            ));
+        }
+
+        for (key, value) in mem::take(&mut self.tables) {
+            sections.push(format!(
+                "{}[{key}]\n{}",
+                value.comment,
+                self.render_struct(&value.table, &fake_schema)?
+            ));
+        }
+
+        let mut template = sections.join("\n\n");
+
+        // Inject the header and footer
+        template = format!(
+            "{}{template}{}",
+            self.ctx.options.header, self.ctx.options.footer
+        );
+
+        // And always add a trailing newline
+        template.push('\n');
+
+        Ok(template)
+    }
+}
