@@ -322,25 +322,49 @@ impl ToolCoordinator {
             .map_or(FormatMode::Ask, |c| c.format())
     }
 
-    /// Pre-render a tool call ahead of its approval prompt, if the tool
-    /// opts into `format = "unattended"`.
+    /// Pre-render a tool call ahead of its approval prompt.
+    ///
+    /// Built-in parameter styles ([`ParametersStyle::Json`],
+    /// [`ParametersStyle::FunctionCall`], [`ParametersStyle::Off`]) always
+    /// pre-render: they are pure transformations of the arguments map and
+    /// the user needs to see the rendered call to make an informed
+    /// approval decision.
+    ///
+    /// [`ParametersStyle::Custom`] shells out to a user-configured
+    /// command and is gated by [`FormatMode`]: it only pre-renders when
+    /// the tool opts in via `format = "unattended"`; otherwise rendering
+    /// is deferred until after approval.
     ///
     /// Returns:
     /// - `Ok(Some(content))` if pre-render fired successfully — caller
     ///   should skip the post-approval render and use this content.
-    /// - `Ok(None)` if pre-render didn't fire (`format = "ask"`) — caller
-    ///   should follow the existing post-approval render path.
-    /// - `Err(error_message)` if the formatter command failed — caller
-    ///   should treat this as a tool failure and skip prompting.
+    /// - `Ok(None)` if pre-render was suppressed (Custom style with
+    ///   `format = "ask"`) — caller should follow the existing
+    ///   post-approval render path.
+    /// - `Err(error_message)` if a custom formatter command failed —
+    ///   caller should treat this as a tool failure and skip prompting.
     pub(crate) async fn pre_render_for_prompt(
         &self,
         tool_name: &str,
         arguments: &Map<String, Value>,
         tool_renderer: &ToolRenderer,
     ) -> Result<Option<Option<String>>, String> {
-        if !matches!(self.format_mode(tool_name), FormatMode::Unattended) {
+        // `FormatMode::Ask` exists to defer side-effecting *custom*
+        // formatters until after approval — running a user-configured
+        // shell command before the user okays the tool would be
+        // surprising. Built-in styles are pure and have no side effects,
+        // so they always render before the prompt.
+        let should_pre_render = match self.parameter_style(tool_name) {
+            ParametersStyle::Custom(_) => {
+                matches!(self.format_mode(tool_name), FormatMode::Unattended)
+            }
+            ParametersStyle::Json | ParametersStyle::FunctionCall | ParametersStyle::Off => true,
+        };
+
+        if !should_pre_render {
             return Ok(None);
         }
+
         match self
             .render_approved_tool(tool_name, arguments, tool_renderer)
             .await
@@ -368,9 +392,13 @@ impl ToolCoordinator {
     /// 1. [`Self::decide_permission`] resolves the executor's run mode
     ///    against persisted answers and TTY availability.
     /// 2. If the decision is `NeedsPrompt`, pre-render the call via
-    ///    [`Self::pre_render_for_prompt`] when `format = "unattended"`,
-    ///    then prompt the user via [`ToolPrompter::prompt_permission`],
-    ///    then apply the result via [`Self::apply_permission_result`].
+    ///    [`Self::pre_render_for_prompt`] (always for built-in parameter
+    ///    styles; only when `format = "unattended"` for `Custom`
+    ///    formatters), then prompt the user via
+    ///    [`ToolPrompter::prompt_permission`], then apply the result via
+    ///    [`Self::apply_permission_result`]. If the user edited the
+    ///    arguments at the prompt, the pre-render is discarded so step 3
+    ///    re-renders with the args that will actually execute.
     /// 3. For approved tools, render the call (skipping if pre-rendered).
     /// 4. Return [`ToolCallDecision::Approved`], `Skipped`, or `Failed`.
     pub(crate) async fn resolve_tool_call_decision(
@@ -396,14 +424,11 @@ impl ToolCoordinator {
             PermissionDecision::NeedsPrompt { executor, info } => {
                 self.set_tool_state(&info.tool_id, ToolCallState::AwaitingPermission);
 
-                // Pre-render before the prompt for `format = "unattended"`
-                // tools. The user sees the rendered call as part of the
-                // approval decision rather than seeing only raw arguments.
-                //
-                // Caveat: if the user picks `e` (edit) and changes the
-                // arguments, the rendered output reflects pre-edit args.
-                // We accept that staleness for v1; the user is making the
-                // edit decision based on raw JSON anyway.
+                // Pre-render before the prompt so the user sees the
+                // rendered call (not raw arguments) when deciding.
+                // Built-in parameter styles always pre-render; Custom
+                // formatters are gated on `format = "unattended"`
+                // because they shell out to a user-controlled command.
                 let pre = match self
                     .pre_render_for_prompt(&info.tool_name, executor.arguments(), tool_renderer)
                     .await
@@ -418,9 +443,23 @@ impl ToolCoordinator {
                     }
                 };
 
+                // Snapshot the args we just rendered so we can detect a
+                // user edit. If `e` changes the arguments, the pre-render
+                // reflects pre-edit values and would diverge from what
+                // actually executes — drop it so step 3 re-renders with
+                // the post-edit args.
+                let pre_edit_args = executor.arguments().clone();
+
                 let result = prompter.prompt_permission(&info, mcp_client).await;
                 match self.apply_permission_result(result, &info, turn_state, executor) {
-                    Ok(executor) => (executor, pre),
+                    Ok(executor) => {
+                        let pre = if executor.arguments() == &pre_edit_args {
+                            pre
+                        } else {
+                            None
+                        };
+                        (executor, pre)
+                    }
                     Err(response) => return ToolCallDecision::Skipped(response),
                 }
             }

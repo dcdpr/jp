@@ -159,14 +159,22 @@ pub struct ToolsDefaultsConfig {
     #[setting(required)]
     pub run: RunMode,
 
-    /// When to run a tool's argument formatter.
+    /// When to run a tool's custom argument formatter relative to the
+    /// approval prompt.
     ///
-    /// - `ask`: Defer rendering until after approval (safe default).
-    /// - `unattended`: Run the formatter ahead of the approval prompt so
-    ///   the user sees the rendered call before deciding.
+    /// Only affects [`style::ParametersStyle::Custom`] (a user-configured
+    /// shell command). Built-in parameter styles (`json`, `function_call`,
+    /// `off`) are pure transformations and always render before the
+    /// prompt regardless of this field.
     ///
-    /// If unset, derives from [`run`](Self::run): `Ask`/`Edit` map to `Ask`,
-    /// `Unattended`/`Skip` map to `Unattended`.
+    /// - `ask`: Defer the custom formatter until after approval (safe
+    ///   default — keeps an untrusted shell command from running
+    ///   unprompted).
+    /// - `unattended`: Run the custom formatter ahead of the approval
+    ///   prompt so the user sees the rendered call before deciding.
+    ///
+    /// If unset, derives from [`run`](Self::run): `Ask`/`Edit`/`Skip`
+    /// map to `Ask`; `Unattended` maps to `Unattended`.
     pub format: Option<FormatMode>,
 
     /// How to deliver the results of the tool to the assistant.
@@ -306,11 +314,15 @@ pub struct ToolConfig {
     /// Overrides the global default.
     pub run: Option<RunMode>,
 
-    /// When to run the tool's argument formatter.
+    /// When to run the tool's custom argument formatter relative to the
+    /// approval prompt.
+    ///
+    /// Only affects [`style::ParametersStyle::Custom`]; see
+    /// [`ToolsDefaultsConfig::format`] for details.
     ///
     /// Overrides the global default. If unset, derives from
-    /// [`run`](Self::run): `Ask`/`Edit` map to `FormatMode::Ask`,
-    /// `Unattended`/`Skip` map to `FormatMode::Unattended`.
+    /// [`run`](Self::run): `Ask`/`Edit`/`Skip` map to `FormatMode::Ask`;
+    /// `Unattended` maps to `FormatMode::Unattended`.
     pub format: Option<FormatMode>,
 
     /// How to deliver the results of the tool to the assistant.
@@ -1155,12 +1167,19 @@ impl ToolConfigWithDefaults {
 
     /// Return the format mode of the tool.
     ///
+    /// Only affects [`style::ParametersStyle::Custom`] (a user-configured
+    /// shell command). Built-in parameter styles (`json`, `function_call`,
+    /// `off`) are pure transformations and always render before the
+    /// approval prompt regardless of this value — see
+    /// [`ToolsDefaultsConfig::format`] for the full contract.
+    ///
     /// If neither the tool nor the global defaults set a `format` value,
-    /// the mode is derived from [`run`](Self::run): `Ask`/`Edit` map to
-    /// `FormatMode::Ask` (formatter runs after approval, safe default for
-    /// untrusted tools); `Unattended`/`Skip` map to `FormatMode::Unattended`
-    /// (formatter can run freely; the tool was already going to run
-    /// without an approval prompt anyway).
+    /// the mode is derived from [`run`](Self::run): `Ask`/`Edit`/`Skip`
+    /// map to `FormatMode::Ask` (custom formatter runs after approval,
+    /// safe default for an untrusted shell command; `Skip` is grouped
+    /// here so we don't run a formatter for a tool that's about to be
+    /// discarded); `Unattended` maps to `FormatMode::Unattended` (the
+    /// tool was already going to run without an approval prompt anyway).
     #[must_use]
     pub fn format(&self) -> FormatMode {
         self.tool
