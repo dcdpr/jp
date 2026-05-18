@@ -340,12 +340,14 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     let root = tmp.path();
     let storage = root.join(".jp");
     let global_dir = root.join("global");
+    let user_data = root.join("user_data");
     let previous_cwd = env::current_dir().unwrap();
     let previous_jp_editor = env::var("JP_EDITOR").ok();
     let previous_visual = env::var("VISUAL").ok();
     let previous_editor = env::var("EDITOR").ok();
 
     unsafe { env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
+    unsafe { env::set_var("JP_USER_DATA_DIR", user_data.as_str()) };
     unsafe { env::remove_var("JP_EDITOR") };
     unsafe { env::remove_var("VISUAL") };
     unsafe { env::remove_var("EDITOR") };
@@ -412,6 +414,7 @@ fn query_model_override_persists_config_delta_through_run_inner() {
 
     env::set_current_dir(previous_cwd).unwrap();
     unsafe { env::remove_var("JP_GLOBAL_CONFIG_DIR") };
+    unsafe { env::remove_var("JP_USER_DATA_DIR") };
 
     match previous_jp_editor {
         Some(value) => unsafe { env::set_var("JP_EDITOR", value) },
@@ -434,6 +437,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     let root = tmp.path();
     let storage = root.join(".jp");
     let global_dir = root.join("global");
+    let user_data = root.join("user_data");
     let previous_cwd = env::current_dir().unwrap();
     let previous_jp_session = env::var("JP_SESSION").ok();
     let previous_jp_editor = env::var("JP_EDITOR").ok();
@@ -441,6 +445,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     let previous_editor = env::var("EDITOR").ok();
 
     unsafe { env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
+    unsafe { env::set_var("JP_USER_DATA_DIR", user_data.as_str()) };
     unsafe { env::set_var("JP_SESSION", "jp-cli-test-session") };
     unsafe { env::remove_var("JP_EDITOR") };
     unsafe { env::remove_var("VISUAL") };
@@ -524,6 +529,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
 
     env::set_current_dir(previous_cwd).unwrap();
     unsafe { env::remove_var("JP_GLOBAL_CONFIG_DIR") };
+    unsafe { env::remove_var("JP_USER_DATA_DIR") };
 
     match previous_jp_session {
         Some(value) => unsafe { env::set_var("JP_SESSION", value) },

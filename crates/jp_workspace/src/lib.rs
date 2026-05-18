@@ -13,7 +13,10 @@ pub mod session;
 pub(crate) mod session_mapping;
 mod state;
 
-use std::sync::{Arc, OnceLock};
+use std::{
+    env,
+    sync::{Arc, OnceLock},
+};
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
 pub use conversation_lock::{ConversationLock, ConversationMut, LockResult};
@@ -716,7 +719,37 @@ fn maybe_init_events(
     }
 }
 
+/// Environment variable used to override the user data directory.
+///
+/// When set, [`user_data_dir`] returns this path verbatim, taking precedence
+/// over `XDG_DATA_HOME` and the platform default. The path is JP-specific:
+/// no `jp` suffix is appended.
+const USER_DATA_DIR_ENV_VAR: &str = "JP_USER_DATA_DIR";
+
+/// Returns the directory JP stores its per-user data in.
+///
+/// Resolution order:
+///
+/// 1. `JP_USER_DATA_DIR` if set (used verbatim).
+/// 2. `$XDG_DATA_HOME/jp` if `XDG_DATA_HOME` is set to an absolute path.
+///    Honored on all platforms, not just Linux — on macOS and Windows this
+///    lets users who run JP alongside other XDG-aware tools keep their data
+///    in one place rather than under `~/Library/Application Support` or
+///    `%LOCALAPPDATA%`. Per the XDG Base Directory Specification, empty or
+///    relative values are treated as unset.
+/// 3. The platform default via `directories::ProjectDirs::data_local_dir`.
 pub fn user_data_dir() -> Result<Utf8PathBuf> {
+    if let Ok(path) = env::var(USER_DATA_DIR_ENV_VAR) {
+        return Ok(Utf8PathBuf::from(path));
+    }
+
+    if let Ok(xdg) = env::var("XDG_DATA_HOME") {
+        let xdg = Utf8PathBuf::from(xdg);
+        if xdg.is_absolute() {
+            return Ok(xdg.join(APPLICATION));
+        }
+    }
+
     directories::ProjectDirs::from("", "", APPLICATION)
         .ok_or(Error::MissingHome)?
         .data_local_dir()
