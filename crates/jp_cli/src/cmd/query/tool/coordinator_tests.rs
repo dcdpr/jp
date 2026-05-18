@@ -547,7 +547,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
         .resolve_tool_call_decision(
             executor,
             &prompter,
-            jp_mcp::Client::default(),
+            &jp_mcp::Client::default(),
             true,
             &mut turn_state,
             &tool_renderer,
