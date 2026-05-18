@@ -421,7 +421,9 @@ impl TryFrom<(ProviderId, &str)> for ModelIdConfig {
 #[derive(Debug, thiserror::Error)]
 pub enum ModelIdConfigError {
     /// Error when parsing `ModelIdConfig` from a string.
-    #[error("model ID config must match <provider>/<model>")]
+    #[error(
+        "model ID does not match a known alias nor matches the full ID format <provider>/<model>"
+    )]
     StrParse,
 
     /// Error when parsing `ProviderId`.
