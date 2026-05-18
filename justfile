@@ -181,13 +181,13 @@ pr-review NNN *ARGS: _install-jp
         printf "Resuming review on PR #{{NNN}} (%s)\n\n" "$existing" >&2
         jp query --id "$existing" --cfg=personas/pr-reviewer \
             --attach "gh:pull/{{NNN}}/diff" \
-            --attach "gh:pull/{{NNN}}/reviews" \
+            --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
     else
         printf "Reviewing PR #{{NNN}}\n\n" >&2
         jp query --new --title "$title" --cfg=personas/pr-reviewer \
             --attach "gh:pull/{{NNN}}/diff" \
-            --attach "gh:pull/{{NNN}}/reviews" \
+            --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
     fi
     printf "\nDraft review staged on https://github.com/dcdpr/jp/pull/{{NNN}}/files — open the page and submit it when ready.\n" >&2
@@ -245,15 +245,86 @@ pr-triage NNN *ARGS: _install-jp
         printf "Resuming triage on PR #{{NNN}} (%s)\n\n" "$existing" >&2
         jp query --id "$existing" --cfg=personas/pr-triager \
             --attach "gh:pull/{{NNN}}/diff" \
-            --attach "gh:pull/{{NNN}}/reviews" \
+            --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
     else
         printf "Triaging PR #{{NNN}}\n\n" >&2
         jp query --new --title "$title" --cfg=personas/pr-triager \
             --attach "gh:pull/{{NNN}}/diff" \
-            --attach "gh:pull/{{NNN}}/reviews" \
+            --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
     fi
+
+# Review the current diff with revdiff and send the annotations back to the
+# active jp conversation. ARGS are forwarded to revdiff (see `revdiff --help`):
+#
+#   just review                  # uncommitted changes (default)
+#   just review HEAD~3            # last 3 commits
+#   just review main              # current branch vs main
+#   just review --staged          # staged changes
+#
+# Exits silently if revdiff produces no annotations (e.g. you quit with `q`
+# without leaving notes, or `Q` to discard). The matching `git diff` is
+# attached so the assistant can resolve line-anchored notes against the same
+# context revdiff showed you. Sends to the active conversation; use
+# `jp conversation use <ID>` first to target a specific one.
+[group('jp')]
+[positional-arguments]
+review *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! command -v revdiff >/dev/null 2>&1; then
+        echo "revdiff not found on PATH." >&2
+        echo "Install via 'brew install umputun/apps/revdiff' or see" >&2
+        echo "https://github.com/umputun/revdiff/releases for binaries." >&2
+        exit 1
+    fi
+
+    # revdiff renders the TUI via /dev/tty, so capturing stdout doesn't
+    # break the interactive flow. Annotations land on stdout only on quit.
+    set +e
+    annotations=$(revdiff "$@")
+    rev_exit=$?
+    set -e
+    if [ "$rev_exit" -ne 0 ]; then
+        exit "$rev_exit"
+    fi
+
+    if [ -z "$annotations" ]; then
+        echo "No review annotations recorded; nothing to send." >&2
+        exit 0
+    fi
+
+    # Build a cmd:// URL mirroring revdiff's diff scope so the assistant
+    # sees the same diff revdiff showed (line numbers in the annotations
+    # are anchored to that exact diff). Positional args (refs, base..feat)
+    # forward as-is; --staged/--cached are git-diff-compatible. Other
+    # flags are revdiff-specific (--theme, --include, -A, ...) and would
+    # make `git diff` fail, so they're dropped.
+    diff_attach="cmd://git?arg=diff"
+    for arg in "$@"; do
+        case "$arg" in
+            --staged|--cached)
+                encoded=$(printf '%s' "$arg" | jq -sRr @uri)
+                diff_attach="${diff_attach}&arg=${encoded}"
+                ;;
+            -*) ;;
+            *)
+                encoded=$(printf '%s' "$arg" | jq -sRr @uri)
+                diff_attach="${diff_attach}&arg=${encoded}"
+                ;;
+        esac
+    done
+
+    preamble="Below are my review notes from \`revdiff\` on the diff you just produced. \
+    Each entry header is \`## path:line[-line] (+|-)\` (anchored to a specific position) \
+    or \`## path (file-level)\` (whole file). The matching \`git diff\` is attached so you \
+    can resolve those positions. Address each note with targeted edits only — no wholesale \
+    re-generation, no unrelated cleanup."
+
+    printf '%s\n\n%s\n' "$preamble" "$annotations" \
+        | jp query --attach "$diff_attach"
 
 # Review an RFD. Accepts a permanent number (41, 041) or a draft ID (D01).
 #
@@ -1057,23 +1128,40 @@ rfd-promote NNN: _install-jp
         new_basename="${num}-${slug}.md"
         new_file="docs/rfd/${new_basename}"
 
-        # Rewrite heading and status.
+        # Rewrite heading and status. Also strip `../` from markdown link
+        # targets: the file moves from `docs/rfd/drafts/` up to `docs/rfd/`,
+        # so any `[...](../foo.md)` backlink to a non-draft RFD would
+        # otherwise resolve one directory too high.
         sed \
             -e "s/^# RFD [A-Z]*[0-9]*:/# RFD ${num}:/" \
             -e "s/^- \*\*Status\*\*: Draft/- **Status**: Discussion/" \
+            -e 's|](\.\./|](|g' \
             "$file" > "$new_file"
         rm "$file"
 
         # Update cross-references in other RFDs: replace `RFD DNN` with
-        # `RFD NNN` in prose, and `DNN-slug.md` with the correct relative
-        # path to `NNN-slug.md` in link targets. Drafts under `drafts/`
-        # need a `../` prefix because the promoted file moved up a
-        # directory.
+        # `RFD NNN` in prose, `DNN-slug.md` with the correct relative
+        # path to `NNN-slug.md` in link targets, and standalone short
+        # mentions like `DNN` (e.g. "D27 also widens the scope") with
+        # the bare number `NNN`. Drafts under `drafts/` need a `../`
+        # prefix because the promoted file moved up a directory.
+        #
+        # The short-form pass runs last so the long-form and basename
+        # rewrites get first crack at their specific shapes (the
+        # basename rule adds the `../` prefix, which the short-form
+        # rule cannot). It runs twice, because sed's `g` flag consumes
+        # the leading boundary character of each match — back-to-back
+        # mentions like "D27 D27" need a second pass for the second
+        # one to be recognised.
         updated=0
         for other in docs/rfd/*.md docs/rfd/drafts/*.md; do
             [ -f "$other" ] || continue
             [ "$other" = "$new_file" ] && continue
-            if ! grep -q -e "RFD ${old_draft_id}" -e "${basename_f}" "$other"; then
+            if ! grep -qE \
+                    -e "RFD ${old_draft_id}" \
+                    -e "${basename_f}" \
+                    -e "(^|[^A-Za-z0-9_])${old_draft_id}([^A-Za-z0-9_]|\$)" \
+                    "$other"; then
                 continue
             fi
             if [ "$(dirname "$other")" = "docs/rfd/drafts" ]; then
@@ -1081,9 +1169,11 @@ rfd-promote NNN: _install-jp
             else
                 link_replacement="${new_basename}"
             fi
-            sed \
+            sed -E \
                 -e "s|RFD ${old_draft_id}|RFD ${num}|g" \
                 -e "s|${basename_f}|${link_replacement}|g" \
+                -e "s#(^|[^A-Za-z0-9_])${old_draft_id}([^A-Za-z0-9_]|\$)#\1${num}\2#g" \
+                -e "s#(^|[^A-Za-z0-9_])${old_draft_id}([^A-Za-z0-9_]|\$)#\1${num}\2#g" \
                 "$other" > "${other}.tmp"
             mv "${other}.tmp" "$other"
             echo "  updated ${old_draft_id} -> ${num} references in ${other}"
