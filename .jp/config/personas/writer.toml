@@ -7,6 +7,7 @@ fs_list_files.enable = true
 fs_grep_files.enable = true
 fs_grep_user_docs.enable = true
 github_pulls.enable = true
+github_pr_diff.enable = true
 github_issues.enable = true
 
 [conversation]

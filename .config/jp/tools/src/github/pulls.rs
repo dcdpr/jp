@@ -1,48 +1,37 @@
 use chrono::{DateTime, Utc};
-use jp_github::{models::repos::DiffEntryStatus, params};
+use jp_github::params;
 use url::Url;
 
-use super::auth;
-use crate::{
-    Result,
-    github::{ORG, REPO, handle_404},
-    to_xml, to_xml_with_root,
-    util::OneOrMany,
-};
+use super::{State, auth_optional, parse_repo};
+use crate::{Result, github::handle_404, to_xml};
 
-/// The status of a issue or pull request.
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum State {
-    Open,
-    Closed,
-}
+/// Comments-per-page when fetching a specific pull request. Matches the
+/// issues tool — long discussions are walked with the `page` parameter.
+const COMMENTS_PER_PAGE: u8 = 10;
 
 pub(crate) async fn github_pulls(
+    repository: Option<String>,
     number: Option<u64>,
     state: Option<State>,
-    file_diffs: Option<OneOrMany<String>>,
+    page: Option<u64>,
 ) -> Result<String> {
-    auth().await?;
+    auth_optional().await?;
 
-    let file_diffs = file_diffs.unwrap_or_default();
+    let (owner, repo) = parse_repo(repository)?;
+    let page = page.unwrap_or(1).max(1);
 
     match number {
-        Some(number) if !file_diffs.is_empty() => diff(number, file_diffs.into_vec()).await,
-        Some(number) => get(number).await,
-        None => list(state).await,
+        Some(number) => get(&owner, &repo, number, page).await,
+        None => list(&owner, &repo, state, page).await,
     }
 }
 
-async fn get(number: u64) -> Result<String> {
+async fn get(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> {
     #[derive(serde::Serialize)]
-    struct ChangedFile {
-        filename: String,
-        status: DiffEntryStatus,
-        additions: u64,
-        deletions: u64,
-        changes: u64,
-        previous_filename: Option<String>,
+    struct Comment {
+        author: String,
+        created_at: DateTime<Utc>,
+        body: Option<String>,
     }
 
     #[derive(serde::Serialize)]
@@ -57,32 +46,37 @@ async fn get(number: u64) -> Result<String> {
         closed_at: Option<DateTime<Utc>>,
         merged_at: Option<DateTime<Utc>>,
         merge_commit_sha: Option<String>,
-        changed_files: Vec<ChangedFile>,
+        changed_files_count: u64,
+        comments_count: u64,
+        comments_page: u64,
+        comments_per_page: u8,
+        comments: Vec<Comment>,
     }
 
-    let pull = jp_github::instance()
-        .pulls(ORG, REPO)
+    let client = jp_github::instance();
+
+    let pull = client
+        .pulls(owner, repo)
         .get(number)
         .await
-        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
+        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {owner}/{repo}")))?;
 
-    let page = jp_github::instance()
-        .pulls(ORG, REPO)
-        .list_files(number)
+    // PR conversation comments share the issues endpoint — `/issues/{N}/comments`
+    // returns the same thread shown in the "Conversation" tab. Inline review
+    // comments live on a different endpoint and aren't part of this scope.
+    let comments = client
+        .issues(owner, repo)
+        .list_comments(number)
+        .page(page)
+        .per_page(COMMENTS_PER_PAGE)
+        .send()
         .await
-        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
-
-    let changed_files = jp_github::instance()
-        .all_pages(page)
-        .await?
+        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {owner}/{repo}")))?
         .into_iter()
-        .map(|file| ChangedFile {
-            filename: file.filename,
-            status: file.status,
-            additions: file.additions,
-            deletions: file.deletions,
-            changes: file.changes,
-            previous_filename: file.previous_filename,
+        .map(|c| Comment {
+            author: c.user.login,
+            created_at: c.created_at,
+            body: c.body,
         })
         .collect();
 
@@ -102,50 +96,23 @@ async fn get(number: u64) -> Result<String> {
         closed_at: pull.closed_at,
         merged_at: pull.merged_at,
         merge_commit_sha: pull.merge_commit_sha,
-        changed_files,
+        changed_files_count: pull.changed_files,
+        comments_count: pull.comments,
+        comments_page: page,
+        comments_per_page: COMMENTS_PER_PAGE,
+        comments,
     })
 }
 
-async fn diff(number: u64, file_diffs: Vec<String>) -> Result<String> {
-    #[derive(serde::Serialize)]
-    struct ChangedFile {
-        filename: String,
-        status: DiffEntryStatus,
-        additions: u64,
-        deletions: u64,
-        changes: u64,
-        previous_filename: Option<String>,
-        patch: Option<String>,
-    }
+/// Items per page when listing pull requests. Fixed at 100 (the
+/// GitHub API max for this endpoint).
+const LIST_PER_PAGE: u8 = 100;
 
-    let page = jp_github::instance()
-        .pulls(ORG, REPO)
-        .list_files(number)
-        .await
-        .map_err(|e| handle_404(e, format!("Pull #{number} not found in {ORG}/{REPO}")))?;
-
-    let changed_files: Vec<_> = jp_github::instance()
-        .all_pages(page)
-        .await?
-        .into_iter()
-        .filter(|file| file_diffs.contains(&file.filename))
-        .map(|file| ChangedFile {
-            patch: file.patch,
-            filename: file.filename,
-            status: file.status,
-            additions: file.additions,
-            deletions: file.deletions,
-            changes: file.changes,
-            previous_filename: file.previous_filename,
-        })
-        .collect();
-
-    to_xml_with_root(&changed_files, "files")
-}
-
-async fn list(state: Option<State>) -> Result<String> {
+async fn list(owner: &str, repo: &str, state: Option<State>, page: u64) -> Result<String> {
     #[derive(serde::Serialize)]
     struct Pulls {
+        page: u64,
+        per_page: u8,
         pull: Vec<Pull>,
     }
 
@@ -168,17 +135,16 @@ async fn list(state: Option<State>) -> Result<String> {
         None => params::State::All,
     };
 
-    let page = jp_github::instance()
-        .pulls(ORG, REPO)
+    let pulls = jp_github::instance()
+        .pulls(owner, repo)
         .list()
         .state(state)
-        .per_page(100)
+        .page(page)
+        .per_page(LIST_PER_PAGE)
         .send()
         .await?;
 
-    let pull = jp_github::instance()
-        .all_pages(page)
-        .await?
+    let pull = pulls
         .into_iter()
         .map(|pull| Pull {
             number: pull.number,
@@ -198,5 +164,9 @@ async fn list(state: Option<State>) -> Result<String> {
         })
         .collect();
 
-    to_xml(Pulls { pull })
+    to_xml(Pulls {
+        page,
+        per_page: LIST_PER_PAGE,
+        pull,
+    })
 }

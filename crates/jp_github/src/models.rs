@@ -32,6 +32,28 @@ pub mod issues {
         pub created_at: DateTime<Utc>,
         pub closed_at: Option<DateTime<Utc>>,
         pub pull_request: Option<PullRequestLink>,
+        /// Total number of conversation comments on this issue or pull
+        /// request. The list endpoint and individual issue endpoint both
+        /// expose this — the field is missing from some payloads we don't
+        /// care about (e.g. event payloads), so it's defaulted to 0.
+        #[serde(default)]
+        pub comments: u64,
+    }
+
+    /// A conversation comment on an issue or pull request.
+    ///
+    /// Sourced from `/repos/{owner}/{repo}/issues/{number}/comments`, which
+    /// also serves PR conversation comments (PRs are issues for this
+    /// endpoint). Inline PR review comments live on a different endpoint
+    /// and are modeled separately by [`super::pulls::ReviewComment`].
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Comment {
+        pub id: u64,
+        pub user: User,
+        pub body: Option<String>,
+        pub html_url: Url,
+        pub created_at: DateTime<Utc>,
+        pub updated_at: Option<DateTime<Utc>>,
     }
 }
 
@@ -54,6 +76,18 @@ pub mod pulls {
         pub merge_commit_sha: Option<String>,
         pub head: Option<GitRef>,
         pub base: Option<GitRef>,
+        /// Total number of conversation comments on this pull request,
+        /// shared with the issue-comments endpoint. Inline review comments
+        /// are counted separately by GitHub and not reflected here.
+        /// Defaulted to 0 because the field is absent from some payloads
+        /// we don't care about (e.g. webhook events).
+        #[serde(default)]
+        pub comments: u64,
+        /// Total number of files changed in this pull request. Exposed by
+        /// the PR detail endpoint; defaulted to 0 because the field is
+        /// absent from list-style payloads.
+        #[serde(default)]
+        pub changed_files: u64,
     }
 
     /// A reference to a git object (branch tip or base).

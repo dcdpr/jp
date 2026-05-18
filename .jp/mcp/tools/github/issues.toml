@@ -4,17 +4,32 @@ run = "unattended"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Find one or more issues in the project's GitHub repository."
+summary = "Find one or more issues in a GitHub repository."
 
 examples = """
-List all issues:
+List open issues in the current project's repo:
+```json
+{"state": "open"}
+```
+
+List every issue (open and closed) by leaving `state` unset:
 ```json
 {}
 ```
 
-Get details for a specific issue:
+Get details for a specific issue, including the first page of comments:
 ```json
 {"number": 42}
+```
+
+Fetch an issue from a different repository:
+```json
+{"repository": "Swatinem/rust-cache", "number": 37}
+```
+
+Walk further into a long comment thread:
+```json
+{"repository": "Swatinem/rust-cache", "number": 37, "page": 2}
 ```
 """
 
@@ -23,11 +38,39 @@ inline_results = "off"
 results_file_link = "off"
 parameters = "function_call"
 
+[conversation.tools.github_issues.parameters.repository]
+type = "string"
+summary = "Repository to read issues from, in `owner/repo` form."
+description = """
+If unspecified, defaults to the current project's GitHub repository.
+"""
+
 [conversation.tools.github_issues.parameters.number]
 type = "integer"
 summary = "Issue number to get information about."
 description = """
-If unspecified, a list of all issues will be returned, without the
-issue contents. You can re-run the tool with the correct issue
-number to get more details about an issue.
+If unspecified, a single page of issues will be returned, without the
+issue contents or comments. Re-run the tool with the issue number to
+fetch its details and comments.
+"""
+
+[conversation.tools.github_issues.parameters.state]
+type = "string"
+enum = ["open", "closed"]
+summary = "Filter issues by their state."
+description = """
+If unspecified, both open and closed issues will be returned.
+"""
+
+[conversation.tools.github_issues.parameters.page]
+type = "integer"
+summary = "1-indexed page to fetch. Defaults to 1."
+description = """
+When `number` is set, selects a page of conversation comments (10 per
+page); the response includes `comments_count` (total) so you can tell
+when the thread is exhausted.
+
+When `number` is unset, selects a page of issues (100 per page). The
+response does not include a grand total — request the next page and
+stop when fewer than 100 issues come back.
 """

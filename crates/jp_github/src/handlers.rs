@@ -35,6 +35,8 @@ impl IssuesHandler {
             client: self.client.clone(),
             owner: self.owner.clone(),
             repo: self.repo.clone(),
+            state: params::State::Open,
+            page: 1,
             per_page: 30,
         }
     }
@@ -61,33 +63,120 @@ impl IssuesHandler {
             per_page: 100,
         }
     }
+
+    /// Begin building a single-page fetch of conversation comments for an
+    /// issue or pull request.
+    ///
+    /// Returns a single page rather than auto-paginating; callers that
+    /// need to step through long threads pass an explicit `page`. This
+    /// keeps responses bounded for LLM consumption — long discussions
+    /// would otherwise blow the context window.
+    #[must_use]
+    pub fn list_comments(&self, number: u64) -> IssueCommentListBuilder {
+        IssueCommentListBuilder {
+            client: self.client.clone(),
+            owner: self.owner.clone(),
+            repo: self.repo.clone(),
+            number,
+            page: 1,
+            per_page: 30,
+        }
+    }
 }
 
-pub struct IssueListBuilder {
+pub struct IssueCommentListBuilder {
     pub(crate) client: Octocrab,
     pub(crate) owner: String,
     pub(crate) repo: String,
+    pub(crate) number: u64,
+    pub(crate) page: u64,
     pub(crate) per_page: u8,
 }
 
-impl IssueListBuilder {
+impl IssueCommentListBuilder {
+    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
+    /// Set the number of comments per page (max 100 enforced by GitHub).
+    /// Defaults to 30.
     #[must_use]
     pub const fn per_page(mut self, per_page: u8) -> Self {
         self.per_page = per_page;
         self
     }
 
-    pub async fn send(self) -> Result<Page<models::issues::Issue>> {
-        let items = self
-            .client
-            .get_paginated(
-                &format!("/repos/{}/{}/issues", self.owner, self.repo),
-                vec![],
-                self.per_page,
-            )
-            .await?;
+    pub async fn send(self) -> Result<Vec<models::issues::Comment>> {
+        let query = vec![
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
 
-        Ok(Page::new(items))
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/issues/{}/comments",
+                    self.owner, self.repo, self.number
+                ),
+                &query,
+            )
+            .await
+    }
+}
+
+pub struct IssueListBuilder {
+    pub(crate) client: Octocrab,
+    pub(crate) owner: String,
+    pub(crate) repo: String,
+    pub(crate) state: params::State,
+    pub(crate) page: u64,
+    pub(crate) per_page: u8,
+}
+
+impl IssueListBuilder {
+    /// Filter the list by state. Defaults to `Open`, matching GitHub's
+    /// own default for this endpoint.
+    #[must_use]
+    pub const fn state(mut self, state: params::State) -> Self {
+        self.state = state;
+        self
+    }
+
+    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
+    #[must_use]
+    pub const fn per_page(mut self, per_page: u8) -> Self {
+        self.per_page = per_page;
+        self
+    }
+
+    /// Fetch a single page of issues.
+    ///
+    /// Deliberately does not auto-paginate: callers may be pointed at an
+    /// arbitrary repository, and walking every page of `rust-lang/rust`
+    /// (for example) would blow rate limits and any reasonable response
+    /// budget. Use [`Self::page`] to step through the list.
+    pub async fn send(self) -> Result<Vec<models::issues::Issue>> {
+        let query = vec![
+            ("state".to_owned(), self.state.as_str().to_owned()),
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
+
+        self.client
+            .get_json(
+                &format!("/repos/{}/{}/issues", self.owner, self.repo),
+                &query,
+            )
+            .await
     }
 }
 
@@ -186,17 +275,23 @@ impl PullsHandler {
             .await
     }
 
-    pub async fn list_files(&self, number: u64) -> Result<Page<models::repos::DiffEntry>> {
-        let items = self
-            .client
-            .get_paginated(
-                &format!("/repos/{}/{}/pulls/{number}/files", self.owner, self.repo),
-                vec![],
-                100,
-            )
-            .await?;
-
-        Ok(Page::new(items))
+    /// Begin building a single-page fetch of the files changed in a pull
+    /// request.
+    ///
+    /// Like the other list builders, this returns a single page rather
+    /// than auto-paginating — callers that need to walk every file step
+    /// through pages explicitly. Keeps responses bounded for arbitrary
+    /// repositories.
+    #[must_use]
+    pub fn list_files(&self, number: u64) -> PullFilesListBuilder {
+        PullFilesListBuilder {
+            client: self.client.clone(),
+            owner: self.owner.clone(),
+            repo: self.repo.clone(),
+            number,
+            page: 1,
+            per_page: 30,
+        }
     }
 
     /// Fetch a pull request as a unified diff.
@@ -367,6 +462,7 @@ impl PullsHandler {
             owner: self.owner.clone(),
             repo: self.repo.clone(),
             state: params::State::Open,
+            page: 1,
             per_page: 30,
         }
     }
@@ -718,11 +814,55 @@ impl PullReviewCreateBuilder {
     }
 }
 
+pub struct PullFilesListBuilder {
+    pub(crate) client: Octocrab,
+    pub(crate) owner: String,
+    pub(crate) repo: String,
+    pub(crate) number: u64,
+    pub(crate) page: u64,
+    pub(crate) per_page: u8,
+}
+
+impl PullFilesListBuilder {
+    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
+    /// Set the number of files per page (max 100 enforced by GitHub).
+    /// Defaults to 30.
+    #[must_use]
+    pub const fn per_page(mut self, per_page: u8) -> Self {
+        self.per_page = per_page;
+        self
+    }
+
+    pub async fn send(self) -> Result<Vec<models::repos::DiffEntry>> {
+        let query = vec![
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
+
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/pulls/{}/files",
+                    self.owner, self.repo, self.number
+                ),
+                &query,
+            )
+            .await
+    }
+}
+
 pub struct PullListBuilder {
     pub(crate) client: Octocrab,
     pub(crate) owner: String,
     pub(crate) repo: String,
     pub(crate) state: params::State,
+    pub(crate) page: u64,
     pub(crate) per_page: u8,
 }
 
@@ -733,24 +873,34 @@ impl PullListBuilder {
         self
     }
 
+    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
     #[must_use]
     pub const fn per_page(mut self, per_page: u8) -> Self {
         self.per_page = per_page;
         self
     }
 
-    pub async fn send(self) -> Result<Page<models::pulls::PullRequest>> {
-        let query = vec![("state".to_owned(), self.state.as_str().to_owned())];
-        let items = self
-            .client
-            .get_paginated(
-                &format!("/repos/{}/{}/pulls", self.owner, self.repo),
-                query,
-                self.per_page,
-            )
-            .await?;
+    /// Fetch a single page of pull requests. See [`IssueListBuilder::send`]
+    /// for why this does not auto-paginate.
+    pub async fn send(self) -> Result<Vec<models::pulls::PullRequest>> {
+        let query = vec![
+            ("state".to_owned(), self.state.as_str().to_owned()),
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
 
-        Ok(Page::new(items))
+        self.client
+            .get_json(
+                &format!("/repos/{}/{}/pulls", self.owner, self.repo),
+                &query,
+            )
+            .await
     }
 }
 

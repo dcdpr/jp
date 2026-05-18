@@ -7,7 +7,7 @@ use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::{Map, Value};
 use url::Url;
 
-use crate::util::ToolResult;
+use crate::util::{ToolResult, error};
 
 mod html;
 mod markdown;
@@ -24,6 +24,14 @@ pub(crate) async fn web_fetch(
     sections: Option<Vec<String>>,
     options: &Map<String, Value>,
 ) -> ToolResult {
+    // GitHub issue and PR pages render comments client-side, so the HTML
+    // pipeline returns near-empty results for one of the most common URL
+    // shapes a user will paste. Redirect to the dedicated tools rather
+    // than silently failing.
+    if let Some(redirect) = github_issue_or_pr_redirect(&url) {
+        return error(redirect);
+    }
+
     let options = match WebFetchOptions::parse(options) {
         Ok(options) => options,
         Err(error) => {
@@ -70,6 +78,43 @@ pub(super) fn is_binary(content_type: &str) -> bool {
         || ct.starts_with("application/octet-stream")
         || ct.starts_with("application/pdf")
         || ct.starts_with("application/zip")
+}
+
+/// If the URL points at a GitHub issue or PR, build a redirect message
+/// suggesting the dedicated tool. Returns `None` for any other URL.
+///
+/// We intentionally don't try to be smart about every kind of github.com
+/// URL — blobs, releases, the repo root, etc. continue through the HTML
+/// pipeline because for those the rendered HTML is enough.
+fn github_issue_or_pr_redirect(url: &Url) -> Option<String> {
+    if !matches!(url.host_str(), Some(host) if host.eq_ignore_ascii_case("github.com")) {
+        return None;
+    }
+
+    let segments: Vec<&str> = url.path_segments()?.filter(|s| !s.is_empty()).collect();
+    if segments.len() < 4 {
+        return None;
+    }
+
+    let tool = match segments.as_slice() {
+        [_, _, "issues", _, ..] => "github_issues",
+        // The files-changed tab is the common paste target for code reviews
+        // and maps to the dedicated diff tool. Other PR subpaths (commits,
+        // checks, conflicts) fall through to `github_pulls`, where the
+        // metadata+conversation answer is the closest fit.
+        [_, _, "pull" | "pulls", _, "files", ..] => "github_pr_diff",
+        [_, _, "pull" | "pulls", _, ..] => "github_pulls",
+        _ => return None,
+    };
+    let owner = segments[0];
+    let repo = segments[1];
+    let number: u64 = segments[3].parse().ok()?;
+
+    Some(format!(
+        "GitHub issue and PR pages render comments client-side, so `web_fetch` can't return them. \
+         Use the `{tool}` tool instead, for example:\n{{\"repository\": \"{owner}/{repo}\", \
+         \"number\": {number}}}"
+    ))
 }
 
 pub(super) fn truncate(content: &str, max: usize) -> String {

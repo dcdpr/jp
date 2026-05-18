@@ -17,7 +17,19 @@ fn issue_json(number: u64) -> Value {
         "user": {"login": "octocat"},
         "created_at": "2024-01-01T00:00:00Z",
         "closed_at": null,
-        "pull_request": null
+        "pull_request": null,
+        "comments": 0
+    })
+}
+
+fn issue_comment_json(id: u64, login: &str, body: &str) -> Value {
+    json!({
+        "id": id,
+        "user": { "login": login },
+        "body": body,
+        "html_url": format!("https://github.com/acme/widgets/issues/42#issuecomment-{id}"),
+        "created_at": "2024-02-01T00:00:00Z",
+        "updated_at": null
     })
 }
 
@@ -32,7 +44,21 @@ fn pull_json(number: u64) -> Value {
         "created_at": "2024-01-01T00:00:00Z",
         "closed_at": null,
         "merged_at": null,
-        "merge_commit_sha": null
+        "merge_commit_sha": null,
+        "comments": 0,
+        "changed_files": 0
+    })
+}
+
+fn diff_entry_json(filename: &str, patch: Option<&str>) -> Value {
+    json!({
+        "filename": filename,
+        "status": "modified",
+        "additions": 3,
+        "deletions": 1,
+        "changes": 4,
+        "previous_filename": null,
+        "patch": patch,
     })
 }
 
@@ -93,45 +119,95 @@ async fn current_user_maps_github_error_status_and_message() {
 }
 
 #[tokio::test]
-async fn issues_list_paginates_across_pages() {
+async fn issues_list_returns_requested_page_only() {
     let server = MockServer::start_async().await;
-    let page_1 = server
+    let mock = server
         .mock_async(|when, then| {
             when.method(GET)
                 .path("/repos/acme/widgets/issues")
+                .query_param("state", "open")
                 .query_param("per_page", "2")
-                .query_param("page", "1");
-            then.status(200)
-                .json_body(json!([issue_json(1), issue_json(2)]));
-        })
-        .await;
-    let page_2 = server
-        .mock_async(|when, then| {
-            when.method(GET)
-                .path("/repos/acme/widgets/issues")
-                .query_param("per_page", "2")
-                .query_param("page", "2");
-            then.status(200).json_body(json!([issue_json(3)]));
+                .query_param("page", "3");
+            then.status(200).json_body(json!([issue_json(5)]));
         })
         .await;
 
     let client = test_client(&server.base_url(), None);
-    let page = client
+    let issues = client
         .issues("acme", "widgets")
         .list()
+        .page(3)
         .per_page(2)
         .send()
         .await
         .expect("list issues");
 
-    let issues = client.all_pages(page).await.expect("all pages");
-    assert_eq!(issues.len(), 3);
-    assert_eq!(issues[0].number, 1);
-    assert_eq!(issues[1].number, 2);
-    assert_eq!(issues[2].number, 3);
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].number, 5);
+    mock.assert();
+}
 
-    page_1.assert();
-    page_2.assert();
+#[tokio::test]
+async fn issues_list_forwards_explicit_state_filter() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/issues")
+                .query_param("state", "closed")
+                .query_param("per_page", "100")
+                .query_param("page", "1");
+            then.status(200).json_body(json!([issue_json(9)]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let issues = client
+        .issues("acme", "widgets")
+        .list()
+        .state(params::State::Closed)
+        .per_page(100)
+        .send()
+        .await
+        .expect("list issues");
+
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].number, 9);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn issue_list_comments_returns_requested_page() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/issues/42/comments")
+                .query_param("per_page", "10")
+                .query_param("page", "2");
+            then.status(200).json_body(json!([
+                issue_comment_json(101, "alice", "first"),
+                issue_comment_json(102, "bob", "second")
+            ]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let comments = client
+        .issues("acme", "widgets")
+        .list_comments(42)
+        .page(2)
+        .per_page(10)
+        .send()
+        .await
+        .expect("list comments");
+
+    assert_eq!(comments.len(), 2);
+    assert_eq!(comments[0].id, 101);
+    assert_eq!(comments[0].user.login, "alice");
+    assert_eq!(comments[0].body.as_deref(), Some("first"));
+    assert_eq!(comments[1].id, 102);
+    mock.assert();
 }
 
 #[tokio::test]
@@ -500,6 +576,66 @@ async fn pulls_delete_review_treats_204_as_success() {
 }
 
 #[tokio::test]
+async fn pulls_list_files_returns_requested_page_only() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/pulls/42/files")
+                .query_param("per_page", "100")
+                .query_param("page", "2");
+            then.status(200).json_body(json!([
+                diff_entry_json("src/foo.rs", Some("@@ -1 +1 @@\n-a\n+b")),
+                diff_entry_json("src/bar.rs", None),
+            ]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let entries = client
+        .pulls("acme", "widgets")
+        .list_files(42)
+        .page(2)
+        .per_page(100)
+        .send()
+        .await
+        .expect("list files");
+
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].filename, "src/foo.rs");
+    assert_eq!(entries[0].patch.as_deref(), Some("@@ -1 +1 @@\n-a\n+b"));
+    assert_eq!(entries[1].filename, "src/bar.rs");
+    assert!(entries[1].patch.is_none());
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_get_exposes_changed_files_count() {
+    let server = MockServer::start_async().await;
+    let mut pr = pull_json(42);
+    pr["changed_files"] = json!(17);
+    pr["comments"] = json!(3);
+
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET).path("/repos/acme/widgets/pulls/42");
+            then.status(200).json_body(pr);
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let pull = client
+        .pulls("acme", "widgets")
+        .get(42)
+        .await
+        .expect("get pull");
+
+    assert_eq!(pull.changed_files, 17);
+    assert_eq!(pull.comments, 3);
+    mock.assert();
+}
+
+#[tokio::test]
 async fn pulls_list_uses_state_query() {
     let server = MockServer::start_async().await;
     let mock = server
@@ -508,21 +644,21 @@ async fn pulls_list_uses_state_query() {
                 .path("/repos/acme/widgets/pulls")
                 .query_param("state", "closed")
                 .query_param("per_page", "100")
-                .query_param("page", "1");
+                .query_param("page", "2");
             then.status(200).json_body(json!([pull_json(12)]));
         })
         .await;
 
     let client = test_client(&server.base_url(), None);
-    let page = client
+    let pulls = client
         .pulls("acme", "widgets")
         .list()
         .state(params::State::Closed)
+        .page(2)
         .per_page(100)
         .send()
         .await
         .expect("list pulls");
-    let pulls = client.all_pages(page).await.expect("all pages");
 
     assert_eq!(pulls.len(), 1);
     assert_eq!(pulls[0].number, 12);

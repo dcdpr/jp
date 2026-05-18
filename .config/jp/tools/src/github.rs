@@ -1,5 +1,5 @@
 use crate::{
-    Context, Error, Tool,
+    Context, Error, Result, Tool,
     util::{ToolResult, unknown_tool},
 };
 
@@ -7,6 +7,7 @@ mod create_issue_bug;
 mod create_issue_enhancement;
 mod create_issue_rfd_tracking;
 mod issues;
+mod pr_diff;
 mod pulls;
 mod repo;
 mod review;
@@ -15,18 +16,59 @@ use create_issue_bug::github_create_issue_bug;
 use create_issue_enhancement::github_create_issue_enhancement;
 use create_issue_rfd_tracking::github_create_issue_rfd_tracking;
 use issues::github_issues;
+use pr_diff::github_pr_diff;
 use pulls::github_pulls;
 use repo::{github_code_search, github_list_files, github_read_file};
 use review::{github_pr_review_add_comment, github_pr_review_add_reply};
 
+#[cfg(test)]
+#[path = "github_tests.rs"]
+mod tests;
+
 const ORG: &str = "dcdpr";
 const REPO: &str = "jp";
 
+/// Tool-level state filter for `github_issues` and `github_pulls`.
+///
+/// The underlying GitHub API supports `all` too, but exposing it
+/// explicitly is redundant — leaving the parameter unspecified at the
+/// tool boundary already means "both open and closed". Both tools map
+/// `None` to [`jp_github::params::State::All`] internally.
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum State {
+    Open,
+    Closed,
+}
+
+/// Parse a `repository` argument of the form `owner/repo`, defaulting to
+/// the project's own repo when unset.
+///
+/// Rejects malformed shapes (`owner/repo/extra`, `/repo`, `owner/`,
+/// `owner`) at the boundary rather than letting them interpolate into
+/// GitHub API paths and surface as opaque 404s.
+pub(crate) fn parse_repo(repository: Option<String>) -> Result<(String, String)> {
+    let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
+    let parts: Vec<&str> = repository.split('/').collect();
+    match parts.as_slice() {
+        [owner, repo] if !owner.is_empty() && !repo.is_empty() => {
+            Ok(((*owner).to_owned(), (*repo).to_owned()))
+        }
+        _ => Err("`repository` must be in the form of <owner>/<repo>".into()),
+    }
+}
+
+#[allow(clippy::too_many_lines, reason = "flat dispatch table")]
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("github_") {
-        "issues" => github_issues(t.opt_or_empty("number")?)
-            .await
-            .map(Into::into),
+        "issues" => github_issues(
+            t.opt("repository")?,
+            t.opt_or_empty("number")?,
+            t.opt("state")?,
+            t.opt("page")?,
+        )
+        .await
+        .map(Into::into),
 
         "create_issue_bug" => github_create_issue_bug(
             t.req("title")?,
@@ -68,9 +110,23 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         .await
         .map(Into::into),
 
-        "pulls" => github_pulls(t.opt("number")?, t.opt("state")?, t.opt("file_diffs")?)
-            .await
-            .map(Into::into),
+        "pulls" => github_pulls(
+            t.opt("repository")?,
+            t.opt("number")?,
+            t.opt("state")?,
+            t.opt("page")?,
+        )
+        .await
+        .map(Into::into),
+
+        "pr_diff" => github_pr_diff(
+            t.opt("repository")?,
+            t.req("number")?,
+            t.opt("files")?,
+            t.opt("page")?,
+        )
+        .await
+        .map(Into::into),
 
         "pr_review_add_comment" => {
             github_pr_review_add_comment(
@@ -118,12 +174,15 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     }
 }
 
-async fn auth() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    let token = std::env::var("JP_GITHUB_TOKEN")
-        .or_else(|_| std::env::var("GITHUB_TOKEN"))
-        .map_err(|_| {
-            "unable to get auth token. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token."
-        })?;
+/// Initialize the GitHub client with a token, verifying it works.
+///
+/// Use this for tools that modify state (`create_issue_*`,
+/// `pr_review_*`) or that hit endpoints which always require auth
+/// (GraphQL, search).
+async fn auth() -> Result<()> {
+    let token = read_token().ok_or(
+        "unable to get auth token. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token.",
+    )?;
 
     let octocrab = jp_github::Octocrab::builder()
         .personal_token(token)
@@ -141,6 +200,39 @@ async fn auth() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>
     }
 
     Ok(())
+}
+
+/// Initialize the GitHub client, falling back to anonymous access when no
+/// token is set.
+///
+/// Use this for read-only tools that work against public repos without
+/// auth. Anonymous requests get GitHub's 60-req/hour rate limit; the
+/// authenticated limit is 5000/hour. We do not verify the token here —
+/// the real request will surface a 401 if the token is bad, which is a
+/// better signal than a generic "can't authenticate" message.
+async fn auth_optional() -> Result<()> {
+    let mut builder = jp_github::Octocrab::builder();
+    if let Some(token) = read_token() {
+        builder = builder.personal_token(token);
+    }
+
+    let octocrab = builder
+        .build()
+        .map_err(|err| format!("unable to create github client: {err:#}"))?;
+
+    jp_github::initialise(octocrab);
+    Ok(())
+}
+
+fn read_token() -> Option<String> {
+    // Filter each variable individually so an empty primary value doesn't
+    // shadow a valid fallback. CI configs that set `JP_GITHUB_TOKEN=""`
+    // alongside a real `GITHUB_TOKEN` should still authenticate.
+    fn non_empty(name: &str) -> Option<String> {
+        std::env::var(name).ok().filter(|t| !t.is_empty())
+    }
+
+    non_empty("JP_GITHUB_TOKEN").or_else(|| non_empty("GITHUB_TOKEN"))
 }
 
 fn handle_404(error: jp_github::Error, msg: impl Into<String>) -> Error {
