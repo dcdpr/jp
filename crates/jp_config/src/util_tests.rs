@@ -150,7 +150,7 @@ fn test_build_without_required_fields() {
     .into();
 
     let error = build(partial.clone()).unwrap_err();
-    assert_matches!(error, Error::Schematic(MissingRequired{ fields }) if fields == vec!["conversation", "tools", "defaults", "run"]);
+    assert_matches!(error, Error::Schematic(MissingRequired{ fields }) if fields == vec!["conversation", "tools", "*", "run"]);
     partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
 
     build(partial).unwrap();
