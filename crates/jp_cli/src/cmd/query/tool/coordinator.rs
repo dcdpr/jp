@@ -396,7 +396,9 @@ impl ToolCoordinator {
     ///    styles; only when `format = "unattended"` for `Custom`
     ///    formatters), then prompt the user via
     ///    [`ToolPrompter::prompt_permission`], then apply the result via
-    ///    [`Self::apply_permission_result`].
+    ///    [`Self::apply_permission_result`]. If the user edited the
+    ///    arguments at the prompt, the pre-render is discarded so step 3
+    ///    re-renders with the args that will actually execute.
     /// 3. For approved tools, render the call (skipping if pre-rendered).
     /// 4. Return [`ToolCallDecision::Approved`], `Skipped`, or `Failed`.
     pub(crate) async fn resolve_tool_call_decision(
@@ -427,11 +429,6 @@ impl ToolCoordinator {
                 // Built-in parameter styles always pre-render; Custom
                 // formatters are gated on `format = "unattended"`
                 // because they shell out to a user-controlled command.
-                //
-                // Caveat: if the user picks `e` (edit) and changes the
-                // arguments, the rendered output reflects pre-edit args.
-                // We accept that staleness; the user is making the edit
-                // decision based on raw JSON anyway.
                 let pre = match self
                     .pre_render_for_prompt(&info.tool_name, executor.arguments(), tool_renderer)
                     .await
@@ -446,9 +443,23 @@ impl ToolCoordinator {
                     }
                 };
 
+                // Snapshot the args we just rendered so we can detect a
+                // user edit. If `e` changes the arguments, the pre-render
+                // reflects pre-edit values and would diverge from what
+                // actually executes — drop it so step 3 re-renders with
+                // the post-edit args.
+                let pre_edit_args = executor.arguments().clone();
+
                 let result = prompter.prompt_permission(&info, mcp_client).await;
                 match self.apply_permission_result(result, &info, turn_state, executor) {
-                    Ok(executor) => (executor, pre),
+                    Ok(executor) => {
+                        let pre = if executor.arguments() == &pre_edit_args {
+                            pre
+                        } else {
+                            None
+                        };
+                        (executor, pre)
+                    }
                     Err(response) => return ToolCallDecision::Skipped(response),
                 }
             }

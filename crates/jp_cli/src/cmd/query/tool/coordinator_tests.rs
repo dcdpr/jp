@@ -1,5 +1,8 @@
+use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
+use jp_editor::MockEditorBackend;
+use jp_inquire::prompt::MockPromptBackend;
 use jp_printer::{OutputFormat, Printer};
 use schematic::Config as _;
 
@@ -429,6 +432,142 @@ async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
     assert!(
         !output.contains("SHOULD-NOT-RUN"),
         "custom formatter must not have run; got: {output:?}"
+    );
+}
+
+/// Minimal `Executor` whose `set_arguments` actually mutates state.
+///
+/// `MockExecutor::set_arguments` is a no-op, which is fine for tests that
+/// don't exercise the prompt-edit path but useless for verifying the
+/// pre-render-invalidation logic in `resolve_tool_call_decision`.
+struct EditableExecutor {
+    tool_id: String,
+    tool_name: String,
+    arguments: Map<String, Value>,
+    permission_info: PermissionInfo,
+}
+
+#[async_trait]
+impl Executor for EditableExecutor {
+    fn tool_id(&self) -> &str {
+        &self.tool_id
+    }
+    fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+    fn arguments(&self) -> &Map<String, Value> {
+        &self.arguments
+    }
+    fn permission_info(&self) -> Option<PermissionInfo> {
+        Some(self.permission_info.clone())
+    }
+    fn set_arguments(&mut self, args: Value) {
+        if let Value::Object(map) = args {
+            self.arguments = map;
+        }
+    }
+    async fn execute(
+        &self,
+        _answers: &IndexMap<String, Value>,
+        _mcp_client: &jp_mcp::Client,
+        _root: &camino::Utf8Path,
+        _cancellation_token: tokio_util::sync::CancellationToken,
+    ) -> ExecutorResult {
+        unreachable!("resolve_tool_call_decision does not invoke execute()")
+    }
+}
+
+#[tokio::test]
+async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
+    // Regression: when the user picks `e` (edit) at the approval prompt
+    // and changes arguments, the previously-rendered call would otherwise
+    // remain as the rendered-of-record while the executor runs the
+    // post-edit args. For built-in styles under the default `run = ask`
+    // this now affects every tool, not just the rare `format = unattended`
+    // case the original caveat documented. Verify the pre-render gets
+    // invalidated and step 3 re-renders with the args that will execute.
+    let tool_config = ToolConfig::from_partial(
+        jp_config::conversation::tool::PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            run: Some(RunMode::Ask),
+            style: Some(PartialDisplayStyleConfig {
+                parameters: Some(ParametersStyle::FunctionCall),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        vec![],
+    )
+    .expect("valid tool config");
+
+    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
+    tools_config.insert("fs_delete_file".to_string(), tool_config);
+
+    let mut coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
+
+    let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let style_config = jp_config::AppConfig::new_test().style;
+    let tool_renderer = ToolRenderer::new(
+        printer.clone(),
+        style_config,
+        Utf8PathBuf::from("/tmp"),
+        false,
+    );
+
+    let mut pre_edit_args = Map::new();
+    pre_edit_args.insert("path".into(), Value::String("src/foo.rs".into()));
+    let executor: Box<dyn Executor> = Box::new(EditableExecutor {
+        tool_id: "call_1".into(),
+        tool_name: "fs_delete_file".into(),
+        arguments: pre_edit_args.clone(),
+        permission_info: PermissionInfo {
+            tool_id: "call_1".into(),
+            tool_name: "fs_delete_file".into(),
+            tool_source: ToolSource::Builtin { tool: None },
+            run_mode: RunMode::Ask,
+            arguments: Value::Object(pre_edit_args),
+        },
+    });
+
+    // The editor returns post-edit args `path: src/bar.rs`. The prompt
+    // backend picks `e` so the prompter routes through the editor.
+    let post_edit = serde_json::json!({"path": "src/bar.rs"});
+    let editor = MockEditorBackend::json(&post_edit);
+    let prompt_backend = MockPromptBackend::new().with_inline_responses(['e']);
+    let prompter = ToolPrompter::with_backends(
+        printer.clone(),
+        Some(Arc::new(editor)),
+        Arc::new(prompt_backend),
+    );
+
+    let mut turn_state = TurnState::default();
+
+    let decision = coordinator
+        .resolve_tool_call_decision(executor, &prompter, true, &mut turn_state, &tool_renderer)
+        .await;
+
+    match decision {
+        ToolCallDecision::Approved { executor, .. } => {
+            assert_eq!(
+                executor.arguments().get("path"),
+                Some(&Value::String("src/bar.rs".into())),
+                "executor must carry the post-edit args"
+            );
+        }
+        ToolCallDecision::Skipped(_) => panic!("Expected Approved, got Skipped"),
+        ToolCallDecision::Failed(_) => panic!("Expected Approved, got Failed"),
+    }
+
+    printer.flush();
+    let output = stderr.lock();
+    assert!(
+        output.contains("src/foo.rs"),
+        "pre-render with pre-edit args must be in scrollback; got: {output:?}"
+    );
+    assert!(
+        output.contains("src/bar.rs"),
+        "post-approval re-render must reflect post-edit args; got: {output:?}"
     );
 }
 
