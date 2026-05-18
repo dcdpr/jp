@@ -57,9 +57,11 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
         "create_file" => fs_create_file(ctx, &t.answers, t.req("path")?, t.opt("content")?).await,
 
-        "delete_file" => fs_delete_file(ctx.root, &t.answers, t.req("path")?).await,
+        "delete_file" => fs_delete_file(&ctx.root, &t.answers, t.req("path")?).await,
 
-        "move_file" => fs_move_file(ctx.root, &t.answers, t.req("source")?, t.req("target")?).await,
+        "move_file" => {
+            fs_move_file(&ctx.root, &t.answers, t.req("source")?, t.req("target")?).await
+        }
 
         "modify_file" => {
             fs_modify_file(

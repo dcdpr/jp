@@ -1,7 +1,6 @@
 use std::{
     fs::{self, File},
     io::Write as _,
-    path::PathBuf,
 };
 
 use crossterm::style::Stylize;
@@ -9,6 +8,7 @@ use jp_md::format::Formatter;
 use jp_tool::{Outcome, Question};
 use serde_json::{Map, Value};
 
+use super::utils::resolve_workspace_path;
 use crate::{
     Context,
     util::{ToolResult, error, fail},
@@ -20,19 +20,10 @@ pub(crate) async fn fs_create_file(
     path: String,
     content: Option<String>,
 ) -> ToolResult {
-    let p = PathBuf::from(&path);
-
-    if p.has_root() {
-        return error("Path must be relative.");
-    }
-
-    if p.iter().any(|c| c.len() > 100) {
-        return error("Individual path components must be less than 100 characters long.");
-    }
-
-    if p.iter().count() > 20 {
-        return error("Path must be less than 20 components long.");
-    }
+    let resolved = match resolve_workspace_path(&ctx.root, &path) {
+        Ok(r) => r,
+        Err(msg) => return error(msg),
+    };
 
     if ctx.action.is_format_arguments() {
         let lang = crate::util::lang_from_path(&path);
@@ -50,7 +41,7 @@ pub(crate) async fn fs_create_file(
         return Ok(response.into());
     }
 
-    let absolute_path = ctx.root.join(path.trim_start_matches('/'));
+    let absolute_path = resolved.absolute;
     if absolute_path.is_dir() {
         return error("Path is an existing directory.");
     }

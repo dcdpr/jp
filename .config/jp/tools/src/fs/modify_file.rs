@@ -19,7 +19,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use similar::{ChangeTag, TextDiff, udiff::UnifiedDiff};
 
-use super::utils::is_file_dirty_impl;
+use super::utils::{is_file_dirty_impl, resolve_workspace_path};
 use crate::{
     Context, Error,
     util::{
@@ -105,26 +105,24 @@ fn fs_modify_file_impl<R: ProcessRunner>(
         let mut applied_any = false;
 
         for target in &targets {
-            let clean = target.trim_start_matches('/');
-            let relative = Utf8PathBuf::from(clean);
-            let absolute = ctx.root.join(clean);
+            let resolved = match resolve_workspace_path(&ctx.root, target) {
+                Ok(r) => r,
+                Err(msg) => return error(msg),
+            };
 
             // Load file on first access.
-            if !files.contains_key(&relative) {
-                if !absolute.exists() {
-                    return error(format!("File does not exist: {clean}"));
+            if !files.contains_key(&resolved.relative) {
+                if !resolved.absolute.exists() {
+                    return error(format!("File does not exist: {target}"));
                 }
-                if !absolute.is_file() {
-                    return error(format!("Path is not a regular file: {clean}"));
+                if !resolved.absolute.is_file() {
+                    return error(format!("Path is not a regular file: {target}"));
                 }
-                let Ok(stripped) = absolute.strip_prefix(&ctx.root) else {
-                    return fail("Path is not within workspace root.");
-                };
-                let content = fs::read_to_string(&absolute)?;
-                files.insert(stripped.to_owned(), (content.clone(), content));
+                let content = fs::read_to_string(&resolved.absolute)?;
+                files.insert(resolved.relative.clone(), (content.clone(), content));
             }
 
-            let (_, current) = files.get_mut(&relative).unwrap();
+            let (_, current) = files.get_mut(&resolved.relative).unwrap();
             let contents = Content(current.clone());
             let result = if replace_using_regex {
                 contents.replace_regexp(&pattern.old, &pattern.new, replace_all, case_sensitive)
@@ -243,15 +241,12 @@ fn validate_patterns(patterns: &[Pattern]) -> Result<(), String> {
     Ok(())
 }
 
-/// Validates that every pattern has at least one target path, and all paths are
-/// relative.
+/// Validates that every pattern has at least one target path.
+///
+/// Per-path safety (relative, no `..`, within workspace root) is enforced
+/// when each target is resolved via `resolve_workspace_path` in the main
+/// loop. This function handles only structural concerns.
 fn validate_paths(default_path: Option<&str>, patterns: &[Pattern]) -> Result<(), String> {
-    // Check the default path if provided.
-    if let Some(p) = default_path {
-        validate_single_path(p)?;
-    }
-
-    // Every pattern must have a target: either from the default or its own paths.
     if default_path.is_none() {
         let missing: Vec<_> = patterns
             .iter()
@@ -269,26 +264,12 @@ fn validate_paths(default_path: Option<&str>, patterns: &[Pattern]) -> Result<()
         }
     }
 
-    // Validate per-pattern paths.
     for (i, pattern) in patterns.iter().enumerate() {
-        if let Some(paths) = &pattern.paths {
-            if paths.is_empty() {
-                return Err(format!("Pattern #{} has an empty `paths` array.", i + 1));
-            }
-            for p in paths.iter() {
-                validate_single_path(p)?;
-            }
+        if let Some(paths) = &pattern.paths
+            && paths.is_empty()
+        {
+            return Err(format!("Pattern #{} has an empty `paths` array.", i + 1));
         }
-    }
-
-    Ok(())
-}
-
-/// Validates a single file path.
-fn validate_single_path(path: &str) -> Result<(), String> {
-    let p = Utf8PathBuf::from(path);
-    if p.has_root() {
-        return Err(format!("Path must be relative: {path}"));
     }
 
     Ok(())

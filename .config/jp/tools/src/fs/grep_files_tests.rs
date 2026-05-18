@@ -5,6 +5,24 @@ use camino_tempfile::tempdir;
 use super::*;
 
 #[tokio::test]
+async fn rejects_workspace_escape() {
+    let tmp = tempdir().unwrap();
+    let result = fs_grep_files(
+        tmp.path(),
+        "anything".to_owned(),
+        None,
+        Some(vec!["../escape".to_owned()].into()),
+    )
+    .await;
+
+    let err = result.expect_err("escape attempt must be a hard error");
+    assert!(
+        err.to_string().contains("escape the workspace"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
 #[test_log::test]
 async fn test_grep_files() {
     struct TestCase {

@@ -2,11 +2,12 @@
 enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Move a file in the project's local filesystem."
+summary = "Move a file or directory in the project's local filesystem."
 
 examples = """
 ```json
-{"path": "src/old_name.rs", "new_path": "src/new_name.rs"}
+{"source": "src/old_name.rs", "target": "src/new_name.rs"}
+{"source": "docs/old-section", "target": "docs/new-section"}
 ```
 """
 
@@ -18,12 +19,14 @@ parameters = "function_call"
 [conversation.tools.fs_move_file.parameters.source]
 type = "string"
 required = true
-summary = "The current path of the file to move. The path must be relative to the project's root."
+summary = "The current path of the file or directory to move. The path must be relative to the project's root."
 
 [conversation.tools.fs_move_file.parameters.target]
 type = "string"
 required = true
-summary = "The new path for the file. The path must be relative to the project's root."
+summary = "The new path for the file or directory. The path must be relative to the project's root."
 description = """
 Parent directories will be created if they don't exist.
+To rename a directory in-place, pass the directory path — do not move its files one by one.
+When the source is a directory, the target must not already exist.
 """

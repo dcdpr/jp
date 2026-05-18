@@ -123,18 +123,7 @@ fn test_validate_patterns() {
 }
 
 mod validate_paths {
-    use camino_tempfile::NamedUtf8TempFile;
-
     use super::*;
-
-    #[test]
-    fn test_absolute_default_path() {
-        let path = NamedUtf8TempFile::new().unwrap();
-
-        let result = validate_paths(Some(path.path().as_str()), &pat("a", "b"));
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("relative"));
-    }
 
     #[test]
     fn test_relative_default_path() {
@@ -170,20 +159,6 @@ mod validate_paths {
         let msg = result.unwrap_err();
         assert!(msg.contains("#2"), "msg: {msg}");
         assert!(msg.contains("no target files"), "msg: {msg}");
-    }
-
-    #[test]
-    fn test_absolute_per_pattern_path() {
-        let path = NamedUtf8TempFile::new().unwrap();
-
-        let patterns = vec![Pattern {
-            old: "a".to_owned(),
-            new: "b".to_owned(),
-            paths: Some(OneOrMany::One(path.path().to_string())),
-        }];
-        let result = validate_paths(None, &patterns);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("relative"));
     }
 
     #[test]

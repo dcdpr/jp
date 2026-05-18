@@ -5,6 +5,7 @@ use grep_printer::StandardBuilder;
 use grep_regex::RegexMatcher;
 use grep_searcher::SearcherBuilder;
 
+use super::utils::clean_workspace_path;
 use crate::{Error, util::OneOrMany};
 
 pub(crate) async fn fs_grep_files(
@@ -13,13 +14,29 @@ pub(crate) async fn fs_grep_files(
     context: Option<usize>,
     paths: Option<OneOrMany<String>>,
 ) -> std::result::Result<String, Error> {
-    let absolute_paths: Vec<_> = paths
-        .as_deref()
-        .unwrap_or(&[String::new()])
-        .iter()
-        .map(|v| root.join(v.trim_start_matches('/')))
-        .filter(|v| v.exists())
-        .collect();
+    // `None` means "search the whole workspace." An explicit `Some(vec![])`
+    // means "search nothing" (preserved from the previous behavior). An
+    // empty string inside the list is treated as the workspace root.
+    // Non-empty entries are validated through `clean_workspace_path`, so
+    // escape attempts are a hard error rather than silently filtered.
+    let absolute_paths: Vec<Utf8PathBuf> = match paths.as_deref() {
+        None => vec![root.to_owned()],
+        Some(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for p in items {
+                if p.is_empty() {
+                    out.push(root.to_owned());
+                    continue;
+                }
+                let cleaned = clean_workspace_path(root, p)?;
+                let abs = root.join(&cleaned);
+                if abs.exists() {
+                    out.push(abs);
+                }
+            }
+            out
+        }
+    };
 
     // Guard against a common mistake LLMs seem to make when using this tool.
     // Often the pattern ends with an escaped double quote, which will cause the
