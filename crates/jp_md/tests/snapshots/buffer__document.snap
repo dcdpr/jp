@@ -84,10 +84,6 @@ description: "Source: document"
         indent: 4,
     },
     Block {
-        content: "",
-        indent: 4,
-    },
-    Block {
         content: "- Item C\n",
         indent: 0,
     },
@@ -856,14 +852,6 @@ description: "Source: document"
         indent: 6,
     },
     Block {
-        content: "",
-        indent: 6,
-    },
-    Block {
-        content: "",
-        indent: 4,
-    },
-    Block {
         content: "- Development\n",
         indent: 0,
     },
@@ -881,10 +869,6 @@ description: "Source: document"
     },
     Block {
         content: "- Library: Anyhow\n",
-        indent: 2,
-    },
-    Block {
-        content: "",
         indent: 2,
     },
     Block {

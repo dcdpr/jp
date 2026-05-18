@@ -95,9 +95,17 @@ impl<'w> TerminalWriter<'w> {
     /// Create a new terminal writer.
     ///
     /// `indent` seeds the initial prefix with that many spaces, so every
-    /// line of rendered content starts at the requested visual column. Used
-    /// by the streaming buffer to put nested list-item content at its
-    /// parent's content column.
+    /// wrap-routed line of rendered content (paragraphs, headers, list items,
+    /// blockquotes, inline-code wrap continuations) starts at the requested
+    /// visual column. Used by the streaming buffer to put nested list-item
+    /// content at its parent's content column.
+    ///
+    /// Note: pre-formatted content emitted via
+    /// [`write_raw`](Self::write_raw) (currently used for syntax-highlighted
+    /// code-block bodies) is *not* indented by this option. Callers that need
+    /// indented code lines should apply the indent at the call site before
+    /// rendering. The chat renderer does this with its `indent_lines` helper
+    /// when emitting `Event::FencedCode*` events from the streaming buffer.
     pub(crate) fn new(
         output: &'w mut dyn Write,
         width: usize,

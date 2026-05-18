@@ -598,6 +598,111 @@ fn test_buffer_ordered_outer_bullet_inner_nesting() {
 }
 
 #[test]
+fn test_buffer_triple_nested_pop_does_not_emit_empty_block() {
+    // Regression: when a deeply nested list reached the parent list's
+    // next marker at the head of the buffer, the `Terminator` arm in
+    // `handle_in_list` called `flush_list_segment(scan=0, ...)`, which
+    // drained nothing and emitted `Event::Block { content: "", indent
+    // = content_column }`. Now `scan == 0` pops back to the parent
+    // without emitting anything.
+    let input = "- Item B\n  - Nested B.1\n    - Deeply nested\n- Item C\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "- Item B\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "- Nested B.1\n".into(),
+            indent: 2,
+        },
+        Event::Block {
+            content: "- Deeply nested\n".into(),
+            indent: 4,
+        },
+    ]);
+    // No empty `Block { content: "", indent: 4 }` (or 2) between
+    // `- Deeply nested` and `- Item C`.
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "- Item C\n".into(),
+        indent: 0,
+    }]);
+}
+
+#[test]
+fn test_buffer_mixed_marker_at_same_column_starts_new_list() {
+    // Per CommonMark §5.2, two markers are siblings only if they share
+    // the same kind (bullet vs ordered) and delimiter character. A
+    // mismatched marker at the same column starts a *new* list.
+    //
+    // Regression: the classifier used to treat any marker at the
+    // current marker_column as a sibling, which incorrectly absorbed
+    // the bullet into the ordered list and bumped `items_flushed`,
+    // causing the subsequent `2. Two\n` to renumber to `3.`.
+    let input = "1. One\n- Bullet\n2. Two\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "1. One\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "- Bullet\n".into(),
+            indent: 0,
+        },
+    ]);
+    // The trailing `2. Two\n` is its own ordered list (start_number=2)
+    // with `items_flushed=0`, so it renumbers to itself — not to `3.`.
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "2. Two\n".into(),
+        indent: 0,
+    }]);
+}
+
+#[test]
+fn test_buffer_different_ordered_delimiter_starts_new_list() {
+    // `1.` and `2)` are different list types per CommonMark §5.2 —
+    // they share `is_ordered` but use different delimiters.
+    let input = "1. One\n2) Two\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![Event::Block {
+        content: "1. One\n".into(),
+        indent: 0,
+    }]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "2) Two\n".into(),
+        indent: 0,
+    }]);
+}
+
+#[test]
+fn test_buffer_different_bullet_char_starts_new_list() {
+    // `-`, `*`, `+` are distinct bullet kinds per CommonMark §5.2.
+    let input = "- One\n* Two\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let events: Vec<Event> = buf.by_ref().collect();
+
+    assert_eq!(events, vec![Event::Block {
+        content: "- One\n".into(),
+        indent: 0,
+    }]);
+    assert_eq!(buf.flush_events(), vec![Event::Flush {
+        content: "* Two\n".into(),
+        indent: 0,
+    }]);
+}
+
+#[test]
 fn test_buffer_two_blank_lines_terminate_list() {
     // Per CommonMark, two consecutive blank lines followed by
     // less-indented content end a list. The walk's `prev_blank` flag

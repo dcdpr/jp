@@ -499,6 +499,7 @@ impl Buffer {
     ///
     /// Blank lines and indented continuations (column > `marker_column`)
     /// are buffered, not flushed.
+    #[expect(clippy::too_many_lines)]
     fn handle_in_list(
         &mut self,
         marker_column: usize,
@@ -551,8 +552,15 @@ impl Buffer {
                 };
                 let line = &slice[..newline_pos];
                 let (indent, content) = get_indent(line);
-                let kind =
-                    classify_list_line(indent, content, marker_column, content_column, prev_blank);
+                let kind = classify_list_line(
+                    indent,
+                    content,
+                    marker_column,
+                    content_column,
+                    is_ordered,
+                    delimiter,
+                    prev_blank,
+                );
                 (newline_pos + 1, content.is_empty(), kind)
             };
 
@@ -606,6 +614,16 @@ impl Buffer {
                     scan += line_len;
                 }
                 ListLineKind::Terminator => {
+                    let next_state = self.pop_parent_or_boundary();
+                    if scan == 0 {
+                        // Nothing buffered for this list yet (e.g. the
+                        // parent's next marker arrived right after we
+                        // entered this nested list). Hand control back
+                        // to the parent state and let `next()` re-classify
+                        // the same line there, rather than emitting an
+                        // empty `Block`.
+                        return (None, next_state);
+                    }
                     let (event, _) = self.flush_list_segment(
                         scan,
                         marker_column,
@@ -615,7 +633,6 @@ impl Buffer {
                         start_number,
                         items_flushed,
                     );
-                    let next_state = self.pop_parent_or_boundary();
                     return (Some(event), next_state);
                 }
                 ListLineKind::Continuation => {
@@ -1115,21 +1132,34 @@ enum ListLineKind {
 }
 
 /// Classify a non-blank line for `handle_in_list`.
+///
+/// `is_ordered` and `delimiter` describe the active list's marker shape, used
+/// to distinguish sibling markers from markers that start a *new* list at the
+/// same column (per CommonMark §5.2: two markers are the same kind only if
+/// they share `is_ordered` and their delimiter character).
 fn classify_list_line(
     indent: usize,
     content: &str,
     marker_column: usize,
     content_column: usize,
+    is_ordered: bool,
+    delimiter: u8,
     prev_blank: bool,
 ) -> ListLineKind {
     if content.is_empty() {
         return ListLineKind::Continuation;
     }
 
-    let is_marker = is_list_marker(content);
+    let marker = parse_list_marker(content);
+    let is_marker = marker.is_some();
     let is_fence = is_fenced_code_start(content).is_some();
 
-    if indent == marker_column && is_marker {
+    // A marker is only a sibling of the current list if it matches the
+    // current list's kind (ordered vs bullet) and uses the same delimiter
+    // character. A mismatched marker at the same column starts a new list.
+    let is_sibling = marker.is_some_and(|m| m.is_ordered == is_ordered && m.delimiter == delimiter);
+
+    if indent == marker_column && is_sibling {
         return ListLineKind::SiblingMarker;
     }
 
@@ -1138,10 +1168,15 @@ fn classify_list_line(
     }
 
     let is_block_interrupter = indent <= 3 && is_block_starter(content);
-    // A list marker at less indent than this list's content column is
-    // always a terminator (it belongs to an enclosing list or the
-    // document level), regardless of `prev_blank`. A non-marker line
-    // only terminates after a blank line, otherwise it's lazy
+    // A list marker at less indent than this list's content column always
+    // terminates the current list — either it belongs to an enclosing list
+    // / document level (indent below `marker_column`), or it sits at the
+    // current `marker_column` with a different type or delimiter, starting
+    // a new list per CommonMark §5.2 (since `marker_column < content_column`
+    // is always true, this case also has `indent < content_column`). The
+    // sibling-shape check above only catches *matching* markers at
+    // `marker_column`; mismatched ones fall through to here. Non-marker
+    // lines only terminate after a blank line, otherwise they're lazy
     // continuation of the current paragraph.
     let is_outer_marker = is_marker && indent < content_column;
     if (indent < content_column && prev_blank) || is_outer_marker || is_block_interrupter {
