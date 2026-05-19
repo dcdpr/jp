@@ -28,6 +28,8 @@ pub type RenderResult<T = String> = std::result::Result<T, RenderError>;
 
 /// Renders [`SchemaType`]s to a distinct format (derived from generic `O`)
 /// for use within a [`SchemaGenerator`].
+///
+/// [`SchemaGenerator`]: crate::schema::SchemaGenerator
 pub trait SchemaRenderer<O = String> {
     /// Return true of the provided name is a referenced type.
     fn is_reference(&self, name: &str) -> bool;
@@ -88,6 +90,8 @@ pub trait SchemaRenderer<O = String> {
     }
 
     /// Like [`render_schema`] but does not check for references.
+    ///
+    /// [`render_schema`]: Self::render_schema
     fn render_schema_without_reference(&mut self, schema: &Schema) -> RenderResult<O> {
         match &schema.ty {
             SchemaType::Null => self.render_null(schema),
