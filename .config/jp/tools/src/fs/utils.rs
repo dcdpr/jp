@@ -161,7 +161,10 @@ struct CheckedPath {
 ///
 /// Rejects:
 ///
-/// - Absolute paths (`/etc/passwd`).
+/// - Absolute paths (`/etc/passwd`, `C:\foo`).
+/// - Rooted but not-fully-absolute paths (`\foo`, `\\server\share`). These
+///   are caught by `has_root()` even when `is_absolute()` would return
+///   false (Windows drive-relative paths).
 /// - Normalized paths that still contain a leading `..` (escape attempts).
 /// - Paths whose deepest existing ancestor, after symlink resolution, lies
 ///   outside the canonicalized workspace root (defeats `linkdir/foo` where
@@ -171,7 +174,11 @@ struct CheckedPath {
 fn check_workspace_path(root: &Utf8Path, path: &str) -> Result<CheckedPath, String> {
     let raw = Utf8PathBuf::from(path);
 
-    if raw.is_absolute() {
+    // `is_absolute()` and `has_root()` together cover every "rooted from
+    // the filesystem" shape across platforms. On Unix the two are
+    // equivalent. On Windows, `has_root()` catches `\foo` and UNC paths
+    // that `is_absolute()` (which also requires a drive prefix) misses.
+    if raw.is_absolute() || raw.has_root() {
         return Err("Path must be relative.".to_owned());
     }
 
@@ -202,7 +209,8 @@ fn check_workspace_path(root: &Utf8Path, path: &str) -> Result<CheckedPath, Stri
             }
             // After cleaning a relative path, only Normal, CurDir, and
             // ParentDir components can appear. RootDir/Prefix are impossible
-            // here because `is_absolute()` above already rejected them.
+            // here because the rooted-path checks above already rejected
+            // them.
             Utf8Component::CurDir | Utf8Component::RootDir | Utf8Component::Prefix(_) => {}
         }
     }

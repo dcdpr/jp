@@ -1,13 +1,12 @@
-use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
 use jp_tool::{Action, Outcome};
 use serde_json::Map;
 
 use super::*;
 
-fn format_ctx() -> Context {
+fn format_ctx(dir: &camino_tempfile::Utf8TempDir) -> Context {
     Context {
-        root: Utf8PathBuf::from("/tmp"),
+        root: dir.path().to_path_buf(),
         action: Action::FormatArguments,
     }
 }
@@ -28,7 +27,8 @@ fn unwrap_content(outcome: Outcome) -> String {
 
 #[tokio::test]
 async fn format_with_content_contains_ansi() {
-    let ctx = format_ctx();
+    let dir = tempdir().unwrap();
+    let ctx = format_ctx(&dir);
     let answers = Map::new();
     let content = Some("fn main() {}\n".to_owned());
 
@@ -55,7 +55,8 @@ async fn format_with_content_contains_ansi() {
 
 #[tokio::test]
 async fn format_rejects_absolute_path() {
-    let ctx = format_ctx();
+    let dir = tempdir().unwrap();
+    let ctx = format_ctx(&dir);
     let answers = Map::new();
 
     let result = fs_create_file(
@@ -80,7 +81,8 @@ async fn format_rejects_absolute_path() {
 
 #[tokio::test]
 async fn format_without_content() {
-    let ctx = format_ctx();
+    let dir = tempdir().unwrap();
+    let ctx = format_ctx(&dir);
     let answers = Map::new();
 
     let result = fs_create_file(ctx, &answers, "src/empty.rs".to_owned(), None)
