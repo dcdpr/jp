@@ -1,5 +1,6 @@
 use camino::Utf8Path;
 
+use super::utils::resolve_workspace_path;
 use crate::util::{ToolResult, error};
 
 pub(crate) async fn fs_read_file(
@@ -8,7 +9,11 @@ pub(crate) async fn fs_read_file(
     start_line: Option<usize>,
     end_line: Option<usize>,
 ) -> ToolResult {
-    let absolute_path = root.join(path.trim_start_matches('/'));
+    let resolved = match resolve_workspace_path(root, &path) {
+        Ok(r) => r,
+        Err(msg) => return error(msg),
+    };
+    let absolute_path = resolved.absolute;
     if !absolute_path.exists() {
         return error("File not found.");
     } else if !absolute_path.is_file() {

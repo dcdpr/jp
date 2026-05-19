@@ -1,6 +1,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use ignore::{WalkBuilder, WalkState};
 
+use super::utils::clean_workspace_path;
 use crate::{Error, util::OneOrMany};
 
 #[derive(Debug)]
@@ -39,24 +40,33 @@ pub(crate) async fn fs_list_files(
 
     let mut entries = vec![];
     for prefix in &prefixes {
-        let normalized = prefix.trim_start_matches('/');
-        let prefixed = root.join(normalized);
-
-        // When the prefix points to an existing directory, walk it directly.
-        // Otherwise, walk the parent directory and filter to entries whose
-        // root-relative path starts with the prefix. This supports partial
-        // filename prefixes like "docs/rfd/D".
+        // An empty prefix or bare `.` means "walk the whole workspace" —
+        // pre-PR callers used both interchangeably. Non-empty, non-`.`
+        // prefixes are validated through `clean_workspace_path`, which
+        // preserves the user's input shape so partial filename prefixes
+        // (`rfd/D`) still match output paths in the same form.
         let (walk_dir, path_filter): (Utf8PathBuf, Option<String>) =
-            if prefixed.is_dir() || normalized.is_empty() {
-                (prefixed, None)
+            if prefix.is_empty() || prefix == "." {
+                (root.to_owned(), None)
             } else {
-                let parent = prefixed
-                    .parent()
-                    .map_or_else(|| root.to_owned(), Utf8PathBuf::from);
-                (
-                    parent,
-                    Some(normalized.replace('/', std::path::MAIN_SEPARATOR_STR)),
-                )
+                let cleaned = clean_workspace_path(root, prefix)?;
+                let prefixed = root.join(&cleaned);
+
+                // When the prefix points to an existing directory, walk it
+                // directly. Otherwise, walk the parent directory and filter to
+                // entries whose root-relative path starts with the prefix. This
+                // supports partial filename prefixes like "docs/rfd/D".
+                if prefixed.is_dir() {
+                    (prefixed, None)
+                } else {
+                    let parent = prefixed
+                        .parent()
+                        .map_or_else(|| root.to_owned(), Utf8PathBuf::from);
+                    (
+                        parent,
+                        Some(cleaned.as_str().replace('/', std::path::MAIN_SEPARATOR_STR)),
+                    )
+                }
             };
 
         let (tx, matches) = crossbeam_channel::unbounded();
