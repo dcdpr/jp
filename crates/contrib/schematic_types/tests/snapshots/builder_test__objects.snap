@@ -1,0 +1,30 @@
+---
+source: crates/contrib/schematic_types/tests/builder_test.rs
+expression: "& input"
+---
+{
+  "ty": {
+    "type": "Object",
+    "key_type": {
+      "ty": {
+        "type": "String"
+      }
+    },
+    "value_type": {
+      "name": "Named",
+      "ty": {
+        "type": "Struct",
+        "fields": {
+          "field": {
+            "schema": {
+              "ty": {
+                "type": "Boolean"
+              }
+            }
+          }
+        },
+        "partial": false
+      }
+    }
+  }
+}

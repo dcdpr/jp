@@ -1,0 +1,171 @@
+use std::fmt;
+
+use crate::{
+    Schematic,
+    arrays::ArrayType,
+    bools::BooleanType,
+    enums::EnumType,
+    literals::{LiteralType, LiteralValue},
+    numbers::{FloatType, IntegerType},
+    objects::ObjectType,
+    schema::{Schema, SchemaField},
+    strings::StringType,
+    structs::StructType,
+    tuples::TupleType,
+    unions::UnionType,
+};
+
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+pub struct ReferenceType {
+    pub name: String,
+}
+
+impl fmt::Display for ReferenceType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.name)
+    }
+}
+
+/// All possible types within a schema.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(tag = "type"))]
+pub enum SchemaType {
+    Null,
+    #[default]
+    Unknown,
+    Array(Box<ArrayType>),
+    Boolean(Box<BooleanType>),
+    Enum(Box<EnumType>),
+    Float(Box<FloatType>),
+    Integer(Box<IntegerType>),
+    Literal(Box<LiteralType>),
+    Object(Box<ObjectType>),
+    Reference(Box<ReferenceType>),
+    Struct(Box<StructType>),
+    String(Box<StringType>),
+    Tuple(Box<TupleType>),
+    Union(Box<UnionType>),
+}
+
+impl SchemaType {
+    /// Return a `default` value from the inner schema type.
+    #[must_use]
+    pub fn get_default(&self) -> Option<&LiteralValue> {
+        match self {
+            SchemaType::Boolean(inner) => inner.default.as_ref(),
+            SchemaType::Enum(inner) => {
+                if let Some(index) = &inner.default_index
+                    && let Some(value) = inner.values.get(*index)
+                {
+                    return Some(value);
+                }
+
+                None
+            }
+            SchemaType::Float(inner) => inner.default.as_ref(),
+            SchemaType::Integer(inner) => inner.default.as_ref(),
+            SchemaType::String(inner) => inner.default.as_ref(),
+            SchemaType::Union(inner) => {
+                if let Some(index) = &inner.default_index
+                    && let Some(value) = inner.variants_types.get(*index)
+                {
+                    return value.get_default();
+                }
+
+                for variant in &inner.variants_types {
+                    if let Some(value) = variant.get_default() {
+                        return Some(value);
+                    }
+                }
+
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Return true if the schema is an explicit null.
+    #[must_use]
+    pub fn is_null(&self) -> bool {
+        matches!(self, SchemaType::Null)
+    }
+
+    /// Return true if the schema is nullable (a union with a null).
+    #[must_use]
+    pub fn is_nullable(&self) -> bool {
+        if let SchemaType::Union(uni) = self {
+            return uni.has_null();
+        }
+
+        false
+    }
+
+    /// Return true if the schema is a reference.
+    #[must_use]
+    pub fn is_reference(&self) -> bool {
+        matches!(self, SchemaType::Reference(_))
+    }
+
+    /// Return true if the schema is a struct.
+    #[must_use]
+    pub fn is_struct(&self) -> bool {
+        matches!(self, SchemaType::Struct(_))
+    }
+
+    /// Set the `default` of the inner schema type.
+    pub fn set_default(&mut self, default: LiteralValue) {
+        match self {
+            SchemaType::Boolean(inner) => {
+                inner.default = Some(default);
+            }
+            SchemaType::Float(inner) => {
+                inner.default = Some(default);
+            }
+            SchemaType::Integer(inner) => {
+                inner.default = Some(default);
+            }
+            SchemaType::String(inner) => {
+                inner.default = Some(default);
+            }
+            _ => {}
+        }
+    }
+
+    /// Add a field to the type if it's a struct.
+    pub fn add_field(&mut self, key: &str, value: impl Into<SchemaField>) {
+        if let SchemaType::Struct(map) = self {
+            map.fields.insert(key.to_owned(), Box::new(value.into()));
+        }
+    }
+}
+
+impl From<SchemaType> for Schema {
+    fn from(val: SchemaType) -> Self {
+        Schema::new(val)
+    }
+}
+
+impl Schematic for SchemaType {}
+
+impl fmt::Display for SchemaType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", match self {
+            Self::Null => "null".to_string(),
+            Self::Unknown => "unknown".to_string(),
+            Self::Array(inner) => inner.to_string(),
+            Self::Boolean(inner) => inner.to_string(),
+            Self::Enum(inner) => inner.to_string(),
+            Self::Float(inner) => inner.to_string(),
+            Self::Integer(inner) => inner.to_string(),
+            Self::Literal(inner) => inner.to_string(),
+            Self::Object(inner) => inner.to_string(),
+            Self::Reference(inner) => inner.to_string(),
+            Self::Struct(inner) => inner.to_string(),
+            Self::String(inner) => inner.to_string(),
+            Self::Tuple(inner) => inner.to_string(),
+            Self::Union(inner) => inner.to_string(),
+        })
+    }
+}

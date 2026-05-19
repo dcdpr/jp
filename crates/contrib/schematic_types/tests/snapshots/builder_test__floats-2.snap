@@ -1,0 +1,10 @@
+---
+source: crates/contrib/schematic_types/tests/builder_test.rs
+expression: "& input"
+---
+{
+  "ty": {
+    "type": "Float",
+    "kind": "F64"
+  }
+}

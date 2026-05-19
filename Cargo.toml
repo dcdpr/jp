@@ -37,7 +37,8 @@ jp_test = { path = "crates/jp_test" }
 jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
-grizzly = { path = "crates/contrib/grizzly" }
+grizzly = { path = "crates/contrib/grizzly", default-features = false }
+schematic = { path = "crates/contrib/schematic", default-features = false }
 
 ahash = { version = "0.8", default-features = false, features = ["runtime-rng", "std", "serde"] }
 assert_matches = { version = "1", default-features = false }
@@ -57,6 +58,7 @@ comrak = { version = "0.50", default-features = false }
 convert_case = { version = "0.11", default-features = false }
 crossbeam-channel = { version = "0.5", default-features = false }
 crossterm = { version = "0.29", default-features = false }
+darling = { version = "0.23", default-features = false }
 datetime_literal = { version = "0.1", default-features = false }
 dhat = { version = "0.3", default-features = false }
 directories = { version = "6", default-features = false }
@@ -81,6 +83,7 @@ indoc = { version = "2", default-features = false }
 infer = { version = "0.19", default-features = false }
 inquire = { git = "https://github.com/JeanMertz/inquire", branch = "merged", default-features = false } # <https://github.com/mikaelmello/inquire/pull/321>
 insta = { version = "1", default-features = false }
+json-strip-comments = { version = "3", default-features = false }
 libc = { version = "0.2", default-features = false }
 linkme = { version = "0.3", default-features = false }
 minijinja = { version = "2", default-features = false }
@@ -91,8 +94,10 @@ parking_lot = { version = "0.12", default-features = false, features = ["arc_loc
 paste = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
+proc-macro2 = { version = "1", default-features = false }
 proptest = { version = "1", default-features = false }
 quick-xml = { version = "0.39", default-features = false }
+quote = { version = "1", default-features = false }
 rayon = { version = "1", default-features = false }
 relative-path = { version = "2", default-features = false }
 reqwest = { version = "0.12", default-features = false }
@@ -102,13 +107,14 @@ rowan = { version = "0.16", default-features = false }
 rusqlite = { version = "0.38", default-features = false }
 saphyr = { git = "https://github.com/JeanMertz/saphyr", branch = "jean/fix-multinewline-endings", default-features = false } # <https://github.com/saphyr-rs/saphyr/pull/90>
 schemars = { version = "1.0.0-alpha.17", default-features = false }
-schematic = { version = "0.19", default-features = false }
 scraper = { version = "0.25", default-features = false }
 semver = { version = "1", default-features = false }
 serde = { version = "1", default-features = false }
+serde-content = { version = "0.1", default-features = false }
 serde-untagged = { version = "0.1", default-features = false }
 serde_json = { version = "1", default-features = false }
 serde_json5 = { version = "0.2", default-features = false }
+serde_path_to_error = { version = "0.1", default-features = false }
 serde_yaml = { version = "0.9", default-features = false }
 serial_test = { version = "3", default-features = false }
 sha1 = { version = "0.10", default-features = false }
@@ -116,6 +122,7 @@ sha2 = { version = "0.10", default-features = false }
 shlex = { version = "1", default-features = false }
 similar = { version = "2", default-features = false }
 strip-ansi-escapes = { version = "0.2", default-features = false }
+syn = { version = "2", default-features = false }
 syntect = { version = "5.3", default-features = false }
 test-log = { version = "0.2", default-features = false, features = ["trace"] }
 thiserror = { version = "2", default-features = false }
@@ -136,9 +143,7 @@ windows-sys = { version = "0.61", default-features = false }
 zip = { version = "2", default-features = false, features = ["bzip2"] }
 
 [patch.crates-io]
-miette = { git = "https://github.com/zkat/miette" } # <https://github.com/zkat/miette/pull/439>
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs" } # <https://github.com/m1guelpf/openai-responses-rs/pull/6>
-schematic = { git = "https://github.com/JeanMertz/schematic", branch = "merged" }
 
 [workspace.package]
 authors = ["Jean Mertz <git@jeanmertz.com>"]

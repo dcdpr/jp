@@ -1,0 +1,310 @@
+#![allow(dead_code)]
+
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
+    net::Ipv4Addr,
+    path::{Path, PathBuf},
+    time::Duration,
+};
+
+use insta::assert_snapshot;
+use schematic_types::*;
+
+fn test_builder<T: Schematic>() -> Schema {
+    SchemaBuilder::build_root::<T>()
+}
+
+macro_rules! assert_build {
+    ($ty:ty, $expected:expr, $val:literal) => {
+        let schema = test_builder::<$ty>();
+
+        assert_eq!(schema.ty, $expected);
+        assert_eq!(schema.to_string(), $val);
+
+        let input = serde_json::to_string_pretty(&schema).unwrap();
+
+        assert_snapshot!(&input);
+
+        let output: Schema = serde_json::from_str(&input).unwrap();
+
+        assert_eq!(schema, output);
+    };
+}
+
+pub struct Named {
+    pub field: bool,
+}
+
+impl Schematic for Named {
+    fn schema_name() -> Option<String> {
+        Some("Named".into())
+    }
+
+    fn build_schema(mut schema: SchemaBuilder) -> Schema {
+        schema.structure(StructType::new([("field".into(), schema.infer::<bool>())]))
+    }
+}
+
+#[test]
+fn primitives() {
+    assert_build!((), SchemaType::Null, "null");
+
+    assert_build!(bool, SchemaType::Boolean(Box::default()), "bool");
+
+    assert_build!(&bool, SchemaType::Boolean(Box::default()), "bool");
+
+    assert_build!(&mut bool, SchemaType::Boolean(Box::default()), "bool");
+
+    assert_build!(Box<bool>, SchemaType::Boolean(Box::default()), "bool");
+
+    assert_build!(
+        Option<bool>,
+        SchemaType::Union(Box::new(UnionType::new_any(vec![
+            SchemaType::Boolean(Box::default()),
+            SchemaType::Null
+        ]))),
+        "bool | null"
+    );
+}
+
+#[test]
+fn arrays() {
+    assert_build!(
+        Vec<String>,
+        SchemaType::Array(Box::new(ArrayType::new(SchemaType::String(Box::default())))),
+        "[string]"
+    );
+
+    assert_build!(
+        &[String],
+        SchemaType::Array(Box::new(ArrayType::new(SchemaType::String(Box::default())))),
+        "[string]"
+    );
+
+    assert_build!(
+        [String; 3],
+        SchemaType::Array(Box::new(ArrayType {
+            items_type: Box::new(Schema::string(StringType::default())),
+            max_length: Some(3),
+            min_length: Some(3),
+            ..ArrayType::default()
+        })),
+        "[string]"
+    );
+
+    assert_build!(
+        HashSet<String>,
+        SchemaType::Array(Box::new(ArrayType {
+            items_type: Box::new(Schema::string(StringType::default())),
+            unique: Some(true),
+            ..ArrayType::default()
+        })),
+        "[string]"
+    );
+
+    assert_build!(
+        BTreeSet<String>,
+        SchemaType::Array(Box::new(ArrayType {
+            items_type: Box::new(Schema::string(StringType::default())),
+            unique: Some(true),
+            ..ArrayType::default()
+        })),
+        "[string]"
+    );
+}
+
+#[test]
+fn integers() {
+    assert_build!(
+        u8,
+        SchemaType::Integer(Box::new(IntegerType::new_kind(IntegerKind::U8))),
+        "u8"
+    );
+
+    assert_build!(
+        i32,
+        SchemaType::Integer(Box::new(IntegerType::new_kind(IntegerKind::I32))),
+        "i32"
+    );
+}
+
+#[test]
+fn floats() {
+    assert_build!(
+        f32,
+        SchemaType::Float(Box::new(FloatType::new_kind(FloatKind::F32))),
+        "f32"
+    );
+
+    assert_build!(
+        f64,
+        SchemaType::Float(Box::new(FloatType::new_kind(FloatKind::F64))),
+        "f64"
+    );
+}
+
+#[test]
+fn objects() {
+    assert_build!(
+        HashMap<String, Named>,
+        SchemaType::Object(Box::new(ObjectType::new(
+            Schema::string(StringType::default()),
+            test_builder::<Named>(),
+        ))),
+        "{string: Named}"
+    );
+
+    assert_build!(
+        BTreeMap<u128, Named>,
+        SchemaType::Object(Box::new(ObjectType::new(
+            SchemaType::Integer(Box::new(IntegerType::new_kind(IntegerKind::U128))),
+            test_builder::<Named>(),
+        ))),
+        "{u128: Named}"
+    );
+}
+
+#[test]
+fn strings() {
+    assert_build!(
+        char,
+        SchemaType::String(Box::new(StringType {
+            max_length: Some(1),
+            min_length: Some(1),
+            ..StringType::default()
+        })),
+        "char"
+    );
+
+    assert_build!(&str, SchemaType::String(Box::default()), "string");
+
+    assert_build!(String, SchemaType::String(Box::default()), "string");
+
+    assert_build!(
+        &Path,
+        SchemaType::String(Box::new(StringType {
+            format: Some("path".into()),
+            ..StringType::default()
+        })),
+        "string:path"
+    );
+
+    assert_build!(
+        PathBuf,
+        SchemaType::String(Box::new(StringType {
+            format: Some("path".into()),
+            ..StringType::default()
+        })),
+        "string:path"
+    );
+
+    assert_build!(
+        Ipv4Addr,
+        SchemaType::String(Box::new(StringType {
+            format: Some("ipv4".into()),
+            ..StringType::default()
+        })),
+        "string:ipv4"
+    );
+
+    assert_build!(
+        Duration,
+        SchemaType::String(Box::new(StringType {
+            format: Some("duration".into()),
+            ..StringType::default()
+        })),
+        "string:duration"
+    );
+}
+
+struct TestStruct {
+    str: String,
+    num: usize,
+}
+
+impl Schematic for TestStruct {
+    fn schema_name() -> Option<String> {
+        Some("TestStruct".into())
+    }
+
+    fn build_schema(mut schema: SchemaBuilder) -> Schema {
+        schema.structure(StructType::new([
+            ("str".into(), schema.infer::<String>()),
+            ("num".into(), schema.infer::<usize>()),
+        ]))
+    }
+}
+
+#[test]
+fn structs() {
+    assert_build!(
+        TestStruct,
+        SchemaType::Struct(Box::new(StructType::new([
+            (
+                "str".into(),
+                Schema::new(SchemaType::String(Box::default()))
+            ),
+            (
+                "num".into(),
+                Schema::new(SchemaType::Integer(Box::new(IntegerType::new_kind(
+                    IntegerKind::Usize
+                ))))
+            ),
+        ]))),
+        "TestStruct"
+    );
+}
+
+#[test]
+fn tuples() {
+    assert_build!(
+        (bool, i16, f32, String),
+        SchemaType::Tuple(Box::new(TupleType::new(vec![
+            SchemaType::Boolean(Box::default()),
+            SchemaType::Integer(Box::new(IntegerType::new_kind(IntegerKind::I16))),
+            SchemaType::Float(Box::new(FloatType::new_kind(FloatKind::F32))),
+            SchemaType::String(Box::default())
+        ]))),
+        "(bool, i16, f32, string)"
+    );
+}
+
+pub struct Cycle {
+    pub values: HashMap<String, Cycle>,
+}
+
+impl Schematic for Cycle {
+    fn schema_name() -> Option<String> {
+        Some("Cycle".into())
+    }
+
+    fn build_schema(mut schema: SchemaBuilder) -> Schema {
+        schema.structure(StructType::new([(
+            "values".into(),
+            schema.infer::<HashMap<String, Cycle>>(),
+        )]))
+    }
+}
+
+#[test]
+fn supports_cycles() {
+    assert_eq!(
+        test_builder::<Cycle>().ty,
+        SchemaType::Struct(Box::new(StructType {
+            fields: BTreeMap::from_iter([(
+                "values".into(),
+                Box::new(SchemaField {
+                    schema: Schema::object(ObjectType::new(
+                        Schema::string(StringType::default()),
+                        SchemaType::Reference(Box::new(ReferenceType {
+                            name: "Cycle".into()
+                        })),
+                    )),
+                    ..Default::default()
+                })
+            ),]),
+            partial: false,
+            required: None
+        }))
+    );
+}
