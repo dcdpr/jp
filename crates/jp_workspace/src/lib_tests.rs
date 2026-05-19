@@ -852,13 +852,18 @@ fn user_data_dir_jp_user_data_dir_wins_over_xdg() {
 #[serial(env_vars)]
 fn user_data_dir_uses_xdg_data_home_when_absolute() {
     let _guard = UserDataDirEnvGuard::capture();
+    // Use tempdir so the path is absolute on every platform — a literal
+    // like `/tmp/jp-test/xdg` is relative on Windows and would fall
+    // through to the platform default.
+    let tmp = tempdir().unwrap();
+    let xdg_root = tmp.path();
     unsafe { env::remove_var("JP_USER_DATA_DIR") };
-    unsafe { env::set_var("XDG_DATA_HOME", "/tmp/jp-test/xdg") };
+    unsafe { env::set_var("XDG_DATA_HOME", xdg_root.as_str()) };
 
     let dir = user_data_dir().unwrap();
 
     // Absolute XDG path gets the `jp` application suffix.
-    assert_eq!(dir, Utf8PathBuf::from("/tmp/jp-test/xdg/jp"));
+    assert_eq!(dir, xdg_root.join("jp"));
 }
 
 #[test]
@@ -901,12 +906,16 @@ fn user_data_dir_falls_through_when_xdg_empty() {
 #[serial(env_vars)]
 fn user_data_dir_treats_empty_jp_user_data_dir_as_unset() {
     let _guard = UserDataDirEnvGuard::capture();
+    // tempdir for the same reason as the absolute-XDG test: a Unix-style
+    // literal isn't absolute on Windows.
+    let tmp = tempdir().unwrap();
+    let xdg_root = tmp.path();
     unsafe { env::set_var("JP_USER_DATA_DIR", "") };
-    unsafe { env::set_var("XDG_DATA_HOME", "/tmp/jp-test/xdg") };
+    unsafe { env::set_var("XDG_DATA_HOME", xdg_root.as_str()) };
 
     let dir = user_data_dir().unwrap();
 
     // Empty JP_USER_DATA_DIR must not short-circuit into an empty path that
     // callers would then resolve under the current working directory.
-    assert_eq!(dir, Utf8PathBuf::from("/tmp/jp-test/xdg/jp"));
+    assert_eq!(dir, xdg_root.join("jp"));
 }
