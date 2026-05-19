@@ -735,10 +735,6 @@ criteria = "safe-to-deploy"
 version = "0.0.19"
 criteria = "safe-to-deploy"
 
-[[exemptions.yaml_serde]]
-version = "0.10.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.yansi]]
 version = "1.0.1"
 criteria = "safe-to-run"

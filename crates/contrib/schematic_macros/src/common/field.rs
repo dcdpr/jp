@@ -348,7 +348,7 @@ impl Field<'_> {
                 Lit::Str(v) => quote! { LiteralValue::String(#v.into()) },
                 Lit::Int(v) => {
                     if v.suffix().starts_with('u') {
-                        quote! { LiteralValue::Uint(#v) }
+                        quote! { LiteralValue::UInt(#v) }
                     } else {
                         quote! { LiteralValue::Int(#v) }
                     }
