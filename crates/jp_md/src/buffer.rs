@@ -197,11 +197,10 @@ impl Buffer {
     /// otherwise).
     pub fn flush_events(&mut self) -> Vec<Event> {
         let raw = std::mem::take(&mut self.data);
-        if raw.is_empty() {
-            return Vec::new();
-        }
 
-        if let State::InList {
+        let events = if raw.is_empty() {
+            Vec::new()
+        } else if let State::InList {
             marker_column,
             content_column,
             is_ordered,
@@ -210,7 +209,7 @@ impl Buffer {
             items_flushed,
         } = self.state
         {
-            return Self::flush_list_events(
+            Self::flush_list_events(
                 &raw,
                 marker_column,
                 content_column,
@@ -218,14 +217,27 @@ impl Buffer {
                 delimiter,
                 start_number,
                 items_flushed,
-            );
-        }
-
-        let (content, indent) = match self.state {
-            State::InFencedCode { indent, .. } => (strip_lines_indent(&raw, indent), indent),
-            _ => (raw, self.current_indent()),
+            )
+        } else {
+            let (content, indent) = match self.state {
+                State::InFencedCode { indent, .. } => (strip_lines_indent(&raw, indent), indent),
+                _ => (raw, self.current_indent()),
+            };
+            vec![Event::Flush { content, indent }]
         };
-        vec![Event::Flush { content, indent }]
+
+        // `flush_events` is the explicit "wipe the slate" boundary:
+        // `ChatRenderer::flush()` calls this on every content-kind
+        // transition (reasoning ↔ message ↔ tool call, role headers,
+        // user echos), not only at end-of-stream. Any data pushed
+        // afterwards must be parsed in `AtBoundary` rather than as
+        // continuation of the just-flushed block, so reset the state
+        // and clear the parent stack on every path — including the
+        // empty-buffer fast path.
+        self.state = State::AtBoundary;
+        self.parents.clear();
+
+        events
     }
 
     /// Implements [`Self::flush_events`] for `InList` state: scan the

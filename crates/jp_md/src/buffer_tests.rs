@@ -380,6 +380,64 @@ fn test_buffer_flush_events_renumbers_partial_list_items() {
 }
 
 #[test]
+fn test_buffer_flush_events_resets_state() {
+    // After `flush_events`, the buffer should be in `AtBoundary` with
+    // no parents stack, so subsequent content is parsed as fresh
+    // top-level blocks rather than as continuation of the just-flushed
+    // block. `ChatRenderer::flush()` calls `flush_events` on every
+    // content-kind transition (reasoning ↔ message ↔ tool call, role
+    // headers, user echos), not only at process teardown — so a stale
+    // state here corrupts the next chunk's parsing.
+    let mut buf = Buffer::new();
+    buf.push("1. one\n2. two\n");
+
+    // First item flushes normally via `next()`.
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(events, vec![Event::block("1. one\n")]);
+
+    // flush_events drains the rest.
+    let flushed = buf.flush_events();
+    assert_eq!(flushed, vec![Event::Flush {
+        content: "2. two\n".into(),
+        indent: 0,
+    }]);
+
+    // A fresh paragraph after the flush must be parsed as a new
+    // top-level block, not as continuation of the previous list.
+    buf.push("paragraph\n\n");
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(events, vec![Event::block("paragraph\n\n")]);
+}
+
+#[test]
+fn test_buffer_flush_events_resets_state_empty_buffer_path() {
+    // The empty-buffer fast path also needs the reset: a caller may
+    // consume the last block, then call `flush_events` again as a
+    // "wipe the slate" no-op before pushing fresh content.
+    let mut buf = Buffer::new();
+    buf.push("- item\n");
+    // Buffer enters `InList` but doesn't flush yet (no sibling marker
+    // arrived). `next()` consumes nothing.
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert!(events.is_empty(), "got: {events:?}");
+
+    // Consume the item via `flush_events`.
+    let flushed = buf.flush_events();
+    assert_eq!(flushed, vec![Event::Flush {
+        content: "- item\n".into(),
+        indent: 0,
+    }]);
+
+    // A second `flush_events` with empty data must still reset.
+    assert_eq!(buf.flush_events(), Vec::<Event>::new());
+
+    // Fresh content parses as a paragraph, not as list continuation.
+    buf.push("paragraph\n\n");
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(events, vec![Event::block("paragraph\n\n")]);
+}
+
+#[test]
 fn test_buffer_partial_list_flush_renders_correctly_end_to_end() {
     // End-to-end guarantee for the test above: the rendered terminal
     // output renumbers all items sequentially even though the buffer
