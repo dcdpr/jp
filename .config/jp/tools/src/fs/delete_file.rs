@@ -1,10 +1,10 @@
-use std::{fs, io};
+use std::fs;
 
 use camino::Utf8Path;
 use jp_tool::{Outcome, Question};
 use serde_json::{Map, Value};
 
-use super::utils::{is_file_dirty, resolve_workspace_entry};
+use super::utils::{EntryKind, ResolvedPath, entry_kind, is_file_dirty, resolve_workspace_entry};
 use crate::util::{ToolResult, error};
 
 pub(crate) async fn fs_delete_file(
@@ -17,27 +17,18 @@ pub(crate) async fn fs_delete_file(
         Err(msg) => return error(msg),
     };
 
-    // Use `symlink_metadata` so a dangling symlink reads as "entry exists
-    // and is a symlink" rather than "missing." `fs::remove_file` later
-    // removes the link entry regardless of target health.
-    let meta = match fs::symlink_metadata(&resolved.absolute) {
-        Ok(m) => m,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            return error("Path points to non-existing entry");
+    match entry_kind(&resolved.absolute)? {
+        None => return error("Path points to non-existing entry"),
+        Some(EntryKind::Dir) => {
+            return error(
+                "Path is a directory. You can only delete files. Empty directories are \
+                 automatically deleted.",
+            );
         }
-        Err(e) => return Err(e.into()),
-    };
-
-    if meta.file_type().is_dir() {
-        return error(
-            "Path is a directory. You can only delete files. Empty directories are automatically \
-             deleted.",
-        );
+        // File, Symlink (live or dangling), Other — all removable via
+        // `fs::remove_file`, which unlinks the entry without following.
+        Some(_) => {}
     }
-
-    let Some(parent) = resolved.absolute.parent() else {
-        return error("Path has no parent");
-    };
 
     if is_file_dirty(root, &resolved.relative)? {
         match answers.get("delete_dirty_file").and_then(Value::as_bool) {
@@ -60,10 +51,39 @@ pub(crate) async fn fs_delete_file(
     fs::remove_file(&resolved.absolute)?;
     let mut msg = "File deleted.".to_owned();
 
-    if parent.read_dir()?.next().is_none() {
+    if let Some(parent) = empty_parent_to_remove(&resolved)? {
         fs::remove_dir(parent)?;
         msg.push_str(" Removed empty parent directory.");
     }
 
     Ok(msg.into())
 }
+
+/// Return the entry's intermediate parent directory if it is now empty and
+/// safe to remove.
+///
+/// "Intermediate" means: not the workspace root itself. The check is gated
+/// on the *relative* parent being non-empty, which is true exactly when the
+/// deleted entry lived in a subdirectory. This protects against deleting
+/// the workspace itself when the entry was at the top level — in that case
+/// `resolved.absolute.parent()` is the canonical workspace root, and
+/// removing it would either error (CWD/EBUSY) or, worse, succeed.
+fn empty_parent_to_remove(resolved: &ResolvedPath) -> Result<Option<&Utf8Path>, std::io::Error> {
+    let Some(rel_parent) = resolved.relative.parent() else {
+        return Ok(None);
+    };
+    if rel_parent.as_str().is_empty() {
+        return Ok(None);
+    }
+    let Some(parent) = resolved.absolute.parent() else {
+        return Ok(None);
+    };
+    if parent.read_dir()?.next().is_some() {
+        return Ok(None);
+    }
+    Ok(Some(parent))
+}
+
+#[cfg(test)]
+#[path = "delete_file_tests.rs"]
+mod tests;

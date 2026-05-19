@@ -380,6 +380,126 @@ fn symlink_source_renames_the_link_entry() {
 }
 
 #[test]
+fn moving_last_root_level_file_preserves_workspace() {
+    // Regression for the same bug as `delete_file`: when the source lived
+    // directly at the workspace root, the empty-parent cleanup used to
+    // walk up to the workspace itself. The relative-parent guard skips
+    // the cleanup for top-level entries.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("only.txt"), "hello").unwrap();
+
+    let result = fs_move_file_impl(
+        root,
+        &no_answers(),
+        "only.txt",
+        "moved.txt",
+        &clean_git_runner(),
+    )
+    .unwrap();
+
+    let msg = unwrap_success(result);
+    assert!(
+        !msg.contains("Removed empty parent"),
+        "must not attempt to remove the workspace root: {msg}"
+    );
+    assert!(
+        root.exists() && root.is_dir(),
+        "workspace root must survive"
+    );
+    assert!(root.join("moved.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn file_target_is_dangling_symlink_prompts_for_overwrite() {
+    // `is_file()` would have returned false here (the link target is
+    // missing) and the prompt would have been skipped, silently letting
+    // `fs::rename` replace the link. With `entry_kind` we see the entry
+    // is a symlink and route into the overwrite confirmation.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("src.txt"), "payload").unwrap();
+    std::os::unix::fs::symlink(
+        std::path::Path::new("/tmp/jp-tools-move-dangling-overwrite"),
+        root.join("dst.txt").as_std_path(),
+    )
+    .unwrap();
+
+    let result = fs_move_file_impl(
+        root,
+        &no_answers(),
+        "src.txt",
+        "dst.txt",
+        &never_git_runner(),
+    )
+    .unwrap();
+
+    let question = unwrap_needs_input(result);
+    assert_eq!(question.id, "overwrite_file");
+    // The destination link is still in place — the move hasn't happened yet.
+    let dst_meta = std::fs::symlink_metadata(root.join("dst.txt")).unwrap();
+    assert!(dst_meta.file_type().is_symlink());
+    assert_eq!(
+        std::fs::read_to_string(root.join("src.txt")).unwrap(),
+        "payload"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn file_target_is_dangling_symlink_overwrite_denied_errors() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::write(root.join("src.txt"), "payload").unwrap();
+    std::os::unix::fs::symlink(
+        std::path::Path::new("/tmp/jp-tools-move-dangling-deny"),
+        root.join("dst.txt").as_std_path(),
+    )
+    .unwrap();
+
+    let answers = answers(&[("overwrite_file", json!(false))]);
+    let result =
+        fs_move_file_impl(root, &answers, "src.txt", "dst.txt", &never_git_runner()).unwrap();
+
+    let msg = unwrap_error(result);
+    assert!(msg.contains("already exists"), "unexpected: {msg}");
+    // Nothing was moved; the source and link entry are both intact.
+    assert_eq!(
+        std::fs::read_to_string(root.join("src.txt")).unwrap(),
+        "payload"
+    );
+    let dst_meta = std::fs::symlink_metadata(root.join("dst.txt")).unwrap();
+    assert!(dst_meta.file_type().is_symlink());
+}
+
+#[cfg(unix)]
+#[test]
+fn dir_target_is_dangling_symlink_errors() {
+    // For directory sources, `exists()` would have followed the link to
+    // its missing target and returned false, bypassing the "target must
+    // not exist" rule. `entry_kind` catches the link entry itself.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("src/a.rs"), "").unwrap();
+    std::os::unix::fs::symlink(
+        std::path::Path::new("/tmp/jp-tools-move-dangling-dir"),
+        root.join("dst").as_std_path(),
+    )
+    .unwrap();
+
+    let result = fs_move_file_impl(root, &no_answers(), "src", "dst", &never_git_runner()).unwrap();
+
+    let msg = unwrap_error(result);
+    assert!(msg.contains("already exists"), "unexpected: {msg}");
+    // The source directory is intact and the destination link is intact.
+    assert!(root.join("src/a.rs").exists());
+    let dst_meta = std::fs::symlink_metadata(root.join("dst")).unwrap();
+    assert!(dst_meta.file_type().is_symlink());
+}
+
+#[test]
 fn dir_into_own_subtree_errors_without_mutation() {
     // `src` -> `src/nested/src` is impossible (a directory can't contain
     // itself). The pre-rename early guard must reject this *before* the

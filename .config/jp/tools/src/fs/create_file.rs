@@ -8,7 +8,7 @@ use jp_md::format::Formatter;
 use jp_tool::{Outcome, Question};
 use serde_json::{Map, Value};
 
-use super::utils::resolve_workspace_entry;
+use super::utils::{EntryKind, entry_kind, resolve_workspace_entry};
 use crate::{
     Context,
     util::{ToolResult, error, fail},
@@ -42,29 +42,23 @@ pub(crate) async fn fs_create_file(
     }
 
     let absolute_path = resolved.absolute;
-    if absolute_path.is_dir() {
-        return error("Path is an existing directory.");
-    }
-
-    // Refuse to write through a symlink. `resolve_workspace_entry` left the
-    // final component intact, so an existing symlink shows up here as a
-    // symlink in `symlink_metadata`. `File::open(O_CREAT)` would follow it
-    // and create whatever the link points at — silently if the target lies
-    // outside the workspace. Users who really want to replace a link can
-    // delete it first.
-    if absolute_path
-        .symlink_metadata()
-        .is_ok_and(|m| m.file_type().is_symlink())
-    {
-        return error("Path is an existing symlink. Delete it first.");
-    }
-
-    if absolute_path.exists() {
-        match answers.get("overwrite_file").and_then(Value::as_bool) {
+    match entry_kind(&absolute_path)? {
+        Some(EntryKind::Dir) => return error("Path is an existing directory."),
+        // Refuse to write through a symlink. `resolve_workspace_entry` left
+        // the final component intact, so an existing symlink shows up here
+        // as `Symlink`. `File::open(O_CREAT)` would follow it and create
+        // whatever the link points at — silently if the target lies outside
+        // the workspace. Users who really want to replace a link can delete
+        // it first.
+        Some(EntryKind::Symlink) => {
+            return error("Path is an existing symlink. Delete it first.");
+        }
+        Some(EntryKind::Other) => {
+            return error("Path exists but is not a regular file.");
+        }
+        Some(EntryKind::File) => match answers.get("overwrite_file").and_then(Value::as_bool) {
             Some(true) => {}
-            Some(false) => {
-                return error("Path points to existing file");
-            }
+            Some(false) => return error("Path points to existing file"),
             None => {
                 return Ok(Outcome::NeedsInput {
                     question: Question::boolean(
@@ -74,7 +68,8 @@ pub(crate) async fn fs_create_file(
                     .with_default(Value::Bool(false)),
                 });
             }
-        }
+        },
+        None => {}
     }
 
     let Some(parent) = absolute_path.parent() else {

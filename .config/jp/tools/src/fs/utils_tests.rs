@@ -43,6 +43,72 @@ fn test_is_file_dirty_not_a_git_repo() {
     assert!(!result);
 }
 
+mod entry_kind_helper {
+    use super::*;
+
+    #[test]
+    fn missing_returns_none() {
+        let dir = tempdir().unwrap();
+        let kind = entry_kind(&dir.path().join("ghost.txt")).unwrap();
+        assert_eq!(kind, None);
+    }
+
+    #[test]
+    fn regular_file_returns_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "").unwrap();
+        assert_eq!(entry_kind(&path).unwrap(), Some(EntryKind::File));
+    }
+
+    #[test]
+    fn directory_returns_dir() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("sub");
+        std::fs::create_dir(&path).unwrap();
+        assert_eq!(entry_kind(&path).unwrap(), Some(EntryKind::Dir));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_symlink_returns_symlink_not_target_kind() {
+        // The whole point: don't follow the link. Even when the target
+        // exists and is a regular file, `entry_kind` reports the entry
+        // itself — a symlink.
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("real.txt"), "").unwrap();
+        std::os::unix::fs::symlink(
+            std::path::Path::new("real.txt"),
+            dir.path().join("link.txt").as_std_path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            entry_kind(&dir.path().join("link.txt")).unwrap(),
+            Some(EntryKind::Symlink)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dangling_symlink_returns_symlink_not_none() {
+        // A dangling link still has an entry on disk. `is_file()` /
+        // `exists()` would lie about this and return false; `entry_kind`
+        // sees the link.
+        let dir = tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            std::path::Path::new("/tmp/jp-tools-entry-kind-dangling"),
+            dir.path().join("broken").as_std_path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            entry_kind(&dir.path().join("broken")).unwrap(),
+            Some(EntryKind::Symlink)
+        );
+    }
+}
+
 mod resolve_workspace_path {
     use super::*;
 

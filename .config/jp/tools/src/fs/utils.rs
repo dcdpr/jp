@@ -70,6 +70,57 @@ pub(super) fn count_dirty_paths_impl<R: ProcessRunner>(
     Ok(stdout.lines().filter(|l| !l.is_empty()).count())
 }
 
+/// Kind of filesystem entry, as observed via `symlink_metadata`.
+///
+/// Distinguishes the four shapes the fs tools care about. The resolver
+/// layer already rejects dangling-symlink ancestors at canonicalization
+/// time, so anything that reaches this helper has already passed the
+/// workspace-escape check; the only remaining question is what kind of
+/// entry sits at the final position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntryKind {
+    File,
+    Dir,
+    /// Live *or* dangling symlink at the final position. The link entry
+    /// exists; the resolver-level dangling check applies only to ancestors
+    /// and to the `path`-style resolver, not to entries reached via
+    /// [`resolve_workspace_entry`].
+    Symlink,
+    /// Block device, fifo, socket, etc. The fs tools refuse to operate on
+    /// these because `fs::rename`/`fs::remove_file`/`File::open` behavior
+    /// is too platform-dependent to be worth getting right.
+    Other,
+}
+
+/// Stat an entry without following a final-position symlink.
+///
+/// Returns `Ok(None)` when the entry does not exist and `Ok(Some(kind))`
+/// otherwise. Use this in place of `Utf8Path::is_dir`/`is_file`/`exists`
+/// whenever the caller has already routed through
+/// [`resolve_workspace_entry`] — those `Path` methods follow symlinks and
+/// will lie about a dangling final-position symlink (existence checks
+/// return `false` even though the entry is present and `fs::rename` will
+/// silently replace it).
+pub fn entry_kind(path: &Utf8Path) -> Result<Option<EntryKind>, io::Error> {
+    match path.symlink_metadata() {
+        Ok(m) => {
+            let ft = m.file_type();
+            let kind = if ft.is_symlink() {
+                EntryKind::Symlink
+            } else if ft.is_dir() {
+                EntryKind::Dir
+            } else if ft.is_file() {
+                EntryKind::File
+            } else {
+                EntryKind::Other
+            };
+            Ok(Some(kind))
+        }
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Maximum byte-length of any individual path component.
 const MAX_COMPONENT_LEN: usize = 100;
 
