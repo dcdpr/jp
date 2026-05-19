@@ -730,7 +730,10 @@ const USER_DATA_DIR_ENV_VAR: &str = "JP_USER_DATA_DIR";
 ///
 /// Resolution order:
 ///
-/// 1. `JP_USER_DATA_DIR` if set (used verbatim).
+/// 1. `JP_USER_DATA_DIR` if set to a non-empty value (used verbatim).
+///    Empty values are treated as unset to avoid silently redirecting
+///    persistent state into the current working directory when callers
+///    join relative paths onto the result.
 /// 2. `$XDG_DATA_HOME/jp` if `XDG_DATA_HOME` is set to an absolute path.
 ///    Honored on all platforms, not just Linux — on macOS and Windows this
 ///    lets users who run JP alongside other XDG-aware tools keep their data
@@ -739,7 +742,9 @@ const USER_DATA_DIR_ENV_VAR: &str = "JP_USER_DATA_DIR";
 ///    relative values are treated as unset.
 /// 3. The platform default via `directories::ProjectDirs::data_local_dir`.
 pub fn user_data_dir() -> Result<Utf8PathBuf> {
-    if let Ok(path) = env::var(USER_DATA_DIR_ENV_VAR) {
+    if let Ok(path) = env::var(USER_DATA_DIR_ENV_VAR)
+        && !path.is_empty()
+    {
         return Ok(Utf8PathBuf::from(path));
     }
 

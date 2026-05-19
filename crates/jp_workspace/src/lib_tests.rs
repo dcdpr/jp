@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, sync::Arc, time::Duration};
+use std::{collections::HashMap, env, fs, sync::Arc, time::Duration};
 
 use camino_tempfile::tempdir;
 use chrono::Utc;
@@ -14,6 +14,7 @@ use jp_storage::{
     value::read_json,
 };
 use parking_lot::RwLock;
+use serial_test::serial;
 use test_log::test;
 
 use super::*;
@@ -791,4 +792,121 @@ fn test_unarchive_nonexistent_returns_error() {
 
     let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
     assert!(ws.unarchive_conversation(&id).is_err());
+}
+
+/// Snapshot the two env vars [`user_data_dir`] depends on, so each test can
+/// freely mutate them and put the process state back the way it found it.
+struct UserDataDirEnvGuard {
+    jp: Option<String>,
+    xdg: Option<String>,
+}
+
+impl UserDataDirEnvGuard {
+    fn capture() -> Self {
+        Self {
+            jp: env::var("JP_USER_DATA_DIR").ok(),
+            xdg: env::var("XDG_DATA_HOME").ok(),
+        }
+    }
+}
+
+impl Drop for UserDataDirEnvGuard {
+    fn drop(&mut self) {
+        match &self.jp {
+            Some(value) => unsafe { env::set_var("JP_USER_DATA_DIR", value) },
+            None => unsafe { env::remove_var("JP_USER_DATA_DIR") },
+        }
+        match &self.xdg {
+            Some(value) => unsafe { env::set_var("XDG_DATA_HOME", value) },
+            None => unsafe { env::remove_var("XDG_DATA_HOME") },
+        }
+    }
+}
+
+#[test]
+#[serial(env_vars)]
+fn user_data_dir_uses_jp_user_data_dir_verbatim() {
+    let _guard = UserDataDirEnvGuard::capture();
+    unsafe { env::set_var("JP_USER_DATA_DIR", "/tmp/jp-test/user-data") };
+    unsafe { env::remove_var("XDG_DATA_HOME") };
+
+    let dir = user_data_dir().unwrap();
+
+    // Used verbatim: no `jp` suffix appended.
+    assert_eq!(dir, Utf8PathBuf::from("/tmp/jp-test/user-data"));
+}
+
+#[test]
+#[serial(env_vars)]
+fn user_data_dir_jp_user_data_dir_wins_over_xdg() {
+    let _guard = UserDataDirEnvGuard::capture();
+    unsafe { env::set_var("JP_USER_DATA_DIR", "/tmp/jp-test/user-data") };
+    unsafe { env::set_var("XDG_DATA_HOME", "/tmp/jp-test/xdg") };
+
+    let dir = user_data_dir().unwrap();
+
+    assert_eq!(dir, Utf8PathBuf::from("/tmp/jp-test/user-data"));
+}
+
+#[test]
+#[serial(env_vars)]
+fn user_data_dir_uses_xdg_data_home_when_absolute() {
+    let _guard = UserDataDirEnvGuard::capture();
+    unsafe { env::remove_var("JP_USER_DATA_DIR") };
+    unsafe { env::set_var("XDG_DATA_HOME", "/tmp/jp-test/xdg") };
+
+    let dir = user_data_dir().unwrap();
+
+    // Absolute XDG path gets the `jp` application suffix.
+    assert_eq!(dir, Utf8PathBuf::from("/tmp/jp-test/xdg/jp"));
+}
+
+#[test]
+#[serial(env_vars)]
+fn user_data_dir_falls_through_when_xdg_relative() {
+    let _guard = UserDataDirEnvGuard::capture();
+    unsafe { env::remove_var("JP_USER_DATA_DIR") };
+    unsafe { env::set_var("XDG_DATA_HOME", "relative/dir") };
+
+    let dir = user_data_dir().unwrap();
+
+    // Per the XDG spec, a relative XDG_DATA_HOME is treated as unset, so the
+    // platform default is used instead of `relative/dir/jp`.
+    assert_ne!(dir, Utf8PathBuf::from("relative/dir/jp"));
+    assert!(
+        dir.is_absolute(),
+        "expected platform default to be absolute, got {dir}"
+    );
+}
+
+#[test]
+#[serial(env_vars)]
+fn user_data_dir_falls_through_when_xdg_empty() {
+    let _guard = UserDataDirEnvGuard::capture();
+    unsafe { env::remove_var("JP_USER_DATA_DIR") };
+    unsafe { env::set_var("XDG_DATA_HOME", "") };
+
+    let dir = user_data_dir().unwrap();
+
+    // Empty XDG_DATA_HOME is treated as unset, not as a bare `/jp`.
+    assert_ne!(dir, Utf8PathBuf::from("/jp"));
+    assert_ne!(dir.as_str(), "");
+    assert!(
+        dir.is_absolute(),
+        "expected platform default to be absolute, got {dir}"
+    );
+}
+
+#[test]
+#[serial(env_vars)]
+fn user_data_dir_treats_empty_jp_user_data_dir_as_unset() {
+    let _guard = UserDataDirEnvGuard::capture();
+    unsafe { env::set_var("JP_USER_DATA_DIR", "") };
+    unsafe { env::set_var("XDG_DATA_HOME", "/tmp/jp-test/xdg") };
+
+    let dir = user_data_dir().unwrap();
+
+    // Empty JP_USER_DATA_DIR must not short-circuit into an empty path that
+    // callers would then resolve under the current working directory.
+    assert_eq!(dir, Utf8PathBuf::from("/tmp/jp-test/xdg/jp"));
 }

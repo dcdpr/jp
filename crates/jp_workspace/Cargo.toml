@@ -36,6 +36,7 @@ windows-sys = { workspace = true, features = ["Win32_UI_WindowsAndMessaging"] }
 
 [dev-dependencies]
 datetime_literal = { workspace = true }
+serial_test = { workspace = true }
 test-log = { workspace = true }
 
 [lints]
