@@ -1,10 +1,10 @@
-use std::fs;
+use std::{fs, io};
 
 use camino::Utf8Path;
 use jp_tool::{Outcome, Question};
 use serde_json::{Map, Value};
 
-use super::utils::{is_file_dirty, resolve_workspace_path};
+use super::utils::{is_file_dirty, resolve_workspace_entry};
 use crate::util::{ToolResult, error};
 
 pub(crate) async fn fs_delete_file(
@@ -12,20 +12,27 @@ pub(crate) async fn fs_delete_file(
     answers: &Map<String, Value>,
     path: String,
 ) -> ToolResult {
-    let resolved = match resolve_workspace_path(root, &path) {
+    let resolved = match resolve_workspace_entry(root, &path) {
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
 
-    if resolved.absolute.is_dir() {
+    // Use `symlink_metadata` so a dangling symlink reads as "entry exists
+    // and is a symlink" rather than "missing." `fs::remove_file` later
+    // removes the link entry regardless of target health.
+    let meta = match fs::symlink_metadata(&resolved.absolute) {
+        Ok(m) => m,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {
+            return error("Path points to non-existing entry");
+        }
+        Err(e) => return Err(e.into()),
+    };
+
+    if meta.file_type().is_dir() {
         return error(
             "Path is a directory. You can only delete files. Empty directories are automatically \
              deleted.",
         );
-    }
-
-    if !resolved.absolute.is_file() {
-        return error("Path points to non-existing file");
     }
 
     let Some(parent) = resolved.absolute.parent() else {

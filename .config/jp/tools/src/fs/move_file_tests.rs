@@ -344,11 +344,9 @@ fn empty_parent_directory_is_removed() {
 
 #[cfg(unix)]
 #[test]
-fn symlink_source_moves_target_file() {
-    // Documented surprise: `resolve_workspace_path` canonicalizes the source
-    // through the symlink, so we end up moving the target file rather than
-    // renaming the link. The link itself becomes dangling. See the
-    // `SourceKind` doc comment for the rationale.
+fn symlink_source_renames_the_link_entry() {
+    // Move operates on the directory entry the user named. `link.txt` is
+    // renamed in place; the target file it pointed at stays put.
     let dir = tempdir().unwrap();
     let root = dir.path();
     std::fs::write(root.join("real.txt"), "payload").unwrap();
@@ -368,13 +366,48 @@ fn symlink_source_moves_target_file() {
     .unwrap();
 
     unwrap_success(result);
-    // The underlying file moved; the symlink is left dangling.
-    assert!(!root.join("real.txt").exists());
+    // The target file is untouched.
     assert_eq!(
-        std::fs::read_to_string(root.join("moved.txt")).unwrap(),
+        std::fs::read_to_string(root.join("real.txt")).unwrap(),
         "payload"
     );
-    let link_meta = std::fs::symlink_metadata(root.join("link.txt")).unwrap();
-    assert!(link_meta.file_type().is_symlink());
-    assert!(!root.join("link.txt").exists()); // exists() follows the dangling link
+    // The link entry moved, and it is still a symlink (not a copy of the
+    // target).
+    let moved_meta = std::fs::symlink_metadata(root.join("moved.txt")).unwrap();
+    assert!(moved_meta.file_type().is_symlink());
+    // The original link path no longer exists.
+    assert!(std::fs::symlink_metadata(root.join("link.txt")).is_err());
+}
+
+#[test]
+fn dir_into_own_subtree_errors_without_mutation() {
+    // `src` -> `src/nested/src` is impossible (a directory can't contain
+    // itself). The pre-rename early guard must reject this *before* the
+    // intermediate parent directories are created, so a failed move
+    // doesn't leave stray directories behind.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join("src")).unwrap();
+    std::fs::write(root.join("src/a.rs"), "").unwrap();
+
+    let result = fs_move_file_impl(
+        root,
+        &no_answers(),
+        "src",
+        "src/nested/src",
+        &never_git_runner(),
+    )
+    .unwrap();
+
+    let msg = unwrap_error(result);
+    assert!(
+        msg.contains("subdirectory of itself"),
+        "unexpected error: {msg}"
+    );
+    // The workspace must not be mutated by a failed move.
+    assert!(
+        !root.join("src/nested").exists(),
+        "stray intermediate directory left behind"
+    );
+    assert!(root.join("src/a.rs").exists());
 }

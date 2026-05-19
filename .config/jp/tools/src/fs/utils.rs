@@ -79,38 +79,105 @@ const MAX_COMPONENT_COUNT: usize = 20;
 /// A user-supplied path that has been resolved against the workspace root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedPath {
-    /// Absolute path with the deepest existing ancestor canonicalized.
-    /// Guaranteed to lie within the canonical workspace root.
+    /// Absolute path inside the workspace.
+    ///
+    /// Always anchored in the canonicalized workspace root. The shape of
+    /// the final component depends on which resolver produced it: for
+    /// [`resolve_workspace_path`] it is the canonical target (symlinks
+    /// followed); for [`resolve_workspace_entry`] it is the directory
+    /// entry as named by the user (symlinks left intact).
     pub absolute: Utf8PathBuf,
 
     /// Path relative to the canonical workspace root.
     pub relative: Utf8PathBuf,
 }
 
-/// Resolve a user-supplied path against the workspace root.
+/// Resolve a user-supplied path against the workspace root, following
+/// symlinks all the way to the final component.
 ///
-/// See [`check_workspace_path`] for the validation contract. The returned
-/// `absolute` path is canonicalized through symlinks on existing ancestors,
-/// making it safe for I/O. Use this when the canonical form is what you want
-/// to operate on (writes, git interactions).
+/// Use this when the caller wants to operate on the *content* of the
+/// target — reading, modifying, or otherwise touching whatever the path
+/// ultimately points to. Read- and modify-style tools belong here
+/// (`fs_read_file`, `fs_modify_file`).
 ///
-/// For targets that do not yet exist (e.g. when creating a new file), only
-/// the deepest existing ancestor is canonicalized; the lexical remainder is
-/// appended as-is. This is safe because, after cleaning, the remainder
-/// contains only `Normal` components and cannot traverse upwards out of the
-/// canonicalized ancestor.
+/// For write tools that should operate on the directory entry itself
+/// (create, delete, rename), use [`resolve_workspace_entry`] instead — it
+/// does not follow a final symlink and so cannot be tricked into writing
+/// or unlinking through one.
+///
+/// For not-yet-existing targets, only the deepest existing ancestor is
+/// canonicalized; the lexical remainder is appended as-is. After cleaning,
+/// the remainder contains only `Normal` components and cannot traverse
+/// upwards out of the canonicalized ancestor.
+///
+/// Dangling symlinks at any position in the path are rejected — there is
+/// no canonical target to bound, so the workspace check cannot prove the
+/// path stays inside.
 pub fn resolve_workspace_path(root: &Utf8Path, path: &str) -> Result<ResolvedPath, String> {
-    let CheckedPath {
+    let ValidatedInput {
+        cleaned,
         canonical_root,
-        canonical_ancestor,
-        suffix,
-        ..
-    } = check_workspace_path(root, path)?;
+    } = validate_workspace_input(root, path)?;
+
+    let candidate = root.join(&cleaned);
+    let (canonical_ancestor, suffix) = check_ancestor_in_root(&candidate, &canonical_root)?;
 
     let absolute = if suffix.as_str().is_empty() {
-        canonical_ancestor.clone()
+        canonical_ancestor
     } else {
         canonical_ancestor.join(&suffix)
+    };
+
+    let relative = absolute
+        .strip_prefix(&canonical_root)
+        .map(Utf8Path::to_owned)
+        .map_err(|_| "Path escapes the workspace root.".to_owned())?;
+
+    Ok(ResolvedPath { absolute, relative })
+}
+
+/// Resolve a user-supplied path as a directory entry, canonicalizing only
+/// the *parent*.
+///
+/// The final component is preserved as-is: if it is an existing symlink,
+/// it is left intact rather than followed. This is the right primitive for
+/// tools that operate on the entry itself — create, delete, rename — where
+/// following the link would silently retarget the operation onto whatever
+/// the link points at.
+///
+/// All other validation rules from [`resolve_workspace_path`] still apply:
+/// the parent must canonicalize to somewhere inside `canonical_root`, no
+/// dangling-symlink ancestors, length limits, and so on.
+pub fn resolve_workspace_entry(root: &Utf8Path, path: &str) -> Result<ResolvedPath, String> {
+    let ValidatedInput {
+        cleaned,
+        canonical_root,
+    } = validate_workspace_input(root, path)?;
+
+    // `cleaned` is guaranteed non-empty by `validate_workspace_input`, so
+    // `file_name()` cannot return None here.
+    let final_name = cleaned
+        .file_name()
+        .ok_or_else(|| "Path has no final component.".to_owned())?
+        .to_owned();
+    let parent_rel = cleaned.parent().unwrap_or_else(|| Utf8Path::new(""));
+
+    let parent_candidate = if parent_rel.as_str().is_empty() {
+        root.to_owned()
+    } else {
+        root.join(parent_rel)
+    };
+
+    let (canonical_parent, parent_suffix) =
+        check_ancestor_in_root(&parent_candidate, &canonical_root)?;
+
+    // Reattach any not-yet-existing parent components, then the final name.
+    // The final name is never canonicalized or probed for symlink-ness — its
+    // shape is whatever the user supplied.
+    let absolute = if parent_suffix.as_str().is_empty() {
+        canonical_parent.join(&final_name)
+    } else {
+        canonical_parent.join(&parent_suffix).join(&final_name)
     };
 
     let relative = absolute
@@ -127,32 +194,36 @@ pub fn resolve_workspace_path(root: &Utf8Path, path: &str) -> Result<ResolvedPat
 /// caller's input shape — symlinks in existing ancestors are *checked* for
 /// escape but not *followed* in the returned path.
 ///
-/// Performs the same security checks as [`resolve_workspace_path`] (see
-/// [`check_workspace_path`] for the contract), but doesn't canonicalize the
-/// result. Use this when output paths should match what the user supplied
-/// (read/search tools); use `resolve_workspace_path` when you need the
-/// canonical form for I/O (write tools).
+/// Performs the same input validation as [`resolve_workspace_path`], but
+/// doesn't canonicalize the result. Use this when output paths should match
+/// what the user supplied (read/search tools).
 pub fn clean_workspace_path(root: &Utf8Path, path: &str) -> Result<Utf8PathBuf, String> {
-    Ok(check_workspace_path(root, path)?.cleaned)
+    let ValidatedInput {
+        cleaned,
+        canonical_root,
+    } = validate_workspace_input(root, path)?;
+
+    let candidate = root.join(&cleaned);
+    check_ancestor_in_root(&candidate, &canonical_root)?;
+
+    Ok(cleaned)
 }
 
-/// Output of `check_workspace_path`: the cleaned input form plus the canonical
-/// pieces needed by `resolve_workspace_path`. Internal — callers go through
-/// either `resolve_workspace_path` or `clean_workspace_path`.
-struct CheckedPath {
+/// Output of [`validate_workspace_input`]: the cleaned form plus the
+/// canonicalized workspace root. Each public resolver decides how to
+/// canonicalize the rest.
+struct ValidatedInput {
     /// Lexically-cleaned, non-canonical workspace-relative path.
     cleaned: Utf8PathBuf,
     /// Canonical workspace root (symlinks resolved).
     canonical_root: Utf8PathBuf,
-    /// Canonical absolute path of the deepest existing ancestor of
-    /// `root.join(cleaned)`.
-    canonical_ancestor: Utf8PathBuf,
-    /// Lexical remainder appended to `canonical_ancestor` to reach the
-    /// (possibly not-yet-existing) target. Empty when the full path exists.
-    suffix: Utf8PathBuf,
 }
 
-/// Run the shared validation pipeline for workspace-bound paths.
+/// Run the input-level validation shared by every workspace path resolver.
+///
+/// This only inspects the input and the workspace root — it does not touch
+/// the rest of the filesystem. Per-resolver canonicalization happens in
+/// [`check_ancestor_in_root`].
 ///
 /// The input is lexically normalized first (via `clean-path`), so
 /// `foo/../bar` is accepted and reduces to `bar`. Paths whose normalized
@@ -165,19 +236,20 @@ struct CheckedPath {
 /// - Rooted but not-fully-absolute paths (`\foo`, `\\server\share`). These
 ///   are caught by `has_root()` even when `is_absolute()` would return
 ///   false (Windows drive-relative paths).
+/// - `Prefix(_)` components (Windows drive-relative inputs like `C:foo`)
+///   that survive both rooted checks.
 /// - Normalized paths that still contain a leading `..` (escape attempts).
-/// - Paths whose deepest existing ancestor, after symlink resolution, lies
-///   outside the canonicalized workspace root (defeats `linkdir/foo` where
-///   `linkdir` is a symlink to `/etc`).
 /// - Components longer than 100 bytes, or paths with more than 20 components.
 /// - Empty paths.
-fn check_workspace_path(root: &Utf8Path, path: &str) -> Result<CheckedPath, String> {
+fn validate_workspace_input(root: &Utf8Path, path: &str) -> Result<ValidatedInput, String> {
     let raw = Utf8PathBuf::from(path);
 
-    // `is_absolute()` and `has_root()` together cover every "rooted from
-    // the filesystem" shape across platforms. On Unix the two are
-    // equivalent. On Windows, `has_root()` catches `\foo` and UNC paths
-    // that `is_absolute()` (which also requires a drive prefix) misses.
+    // `is_absolute()` and `has_root()` together cover most "rooted from
+    // the filesystem" shapes. On Unix the two are equivalent. On Windows,
+    // `has_root()` catches `\foo` and UNC paths that `is_absolute()`
+    // (which also requires a drive prefix) misses. The `Prefix(_)` arm
+    // below catches drive-relative inputs like `C:foo` that slip past
+    // both.
     if raw.is_absolute() || raw.has_root() {
         return Err("Path must be relative.".to_owned());
     }
@@ -186,8 +258,9 @@ fn check_workspace_path(root: &Utf8Path, path: &str) -> Result<CheckedPath, Stri
     // `./foo` to `foo`, and so on. Any `..` that cannot be cancelled by an
     // earlier component remains as a leading `..` in the cleaned path,
     // which we reject below as an escape attempt. The actual security
-    // boundary is the canonical-root `starts_with` check further down;
-    // this step just decides what to accept as input.
+    // boundary is the canonical-root `starts_with` check in
+    // `check_ancestor_in_root`; this step just decides what to accept as
+    // input.
     let cleaned: PathBuf = PathBuf::from(raw.as_str()).clean();
     let cleaned = Utf8PathBuf::from_path_buf(cleaned)
         .map_err(|p| format!("Path contains non-UTF-8 characters: {}", p.display()))?;
@@ -198,6 +271,12 @@ fn check_workspace_path(root: &Utf8Path, path: &str) -> Result<CheckedPath, Stri
             Utf8Component::ParentDir => {
                 return Err("Path must not escape the workspace root.".to_owned());
             }
+            Utf8Component::Prefix(_) => {
+                // Drive-relative (`C:foo`) and UNC-ish inputs slip past
+                // `is_absolute()` and `has_root()` on Windows. Treat any
+                // surviving prefix as a non-relative input.
+                return Err("Path must be relative.".to_owned());
+            }
             Utf8Component::Normal(name) => {
                 if name.len() > MAX_COMPONENT_LEN {
                     return Err(format!(
@@ -207,11 +286,10 @@ fn check_workspace_path(root: &Utf8Path, path: &str) -> Result<CheckedPath, Stri
                 }
                 normal_count += 1;
             }
-            // After cleaning a relative path, only Normal, CurDir, and
-            // ParentDir components can appear. RootDir/Prefix are impossible
-            // here because the rooted-path checks above already rejected
-            // them.
-            Utf8Component::CurDir | Utf8Component::RootDir | Utf8Component::Prefix(_) => {}
+            // After cleaning a relative path, RootDir is impossible (the
+            // rooted-path checks above rejected it). CurDir survives only
+            // as a bare `.` placeholder, which contributes nothing.
+            Utf8Component::CurDir | Utf8Component::RootDir => {}
         }
     }
 
@@ -228,25 +306,42 @@ fn check_workspace_path(root: &Utf8Path, path: &str) -> Result<CheckedPath, Stri
         .canonicalize_utf8()
         .map_err(|e| format!("Failed to canonicalize workspace root '{root}': {e}"))?;
 
-    let candidate = root.join(&cleaned);
-    let (canonical_ancestor, suffix) = canonicalize_existing_ancestor(&candidate)?;
+    Ok(ValidatedInput {
+        cleaned,
+        canonical_root,
+    })
+}
 
-    if !canonical_ancestor.starts_with(&canonical_root) {
+/// Canonicalize the deepest existing ancestor of `candidate` and verify it
+/// stays inside `canonical_root`.
+///
+/// Returns `(canonical_ancestor, lexical_suffix)`. When the full candidate
+/// exists, `lexical_suffix` is empty.
+fn check_ancestor_in_root(
+    candidate: &Utf8Path,
+    canonical_root: &Utf8Path,
+) -> Result<(Utf8PathBuf, Utf8PathBuf), String> {
+    let (canonical_ancestor, suffix) = canonicalize_existing_ancestor(candidate)?;
+
+    if !canonical_ancestor.starts_with(canonical_root) {
         return Err("Path escapes the workspace root.".to_owned());
     }
 
-    Ok(CheckedPath {
-        cleaned,
-        canonical_root,
-        canonical_ancestor,
-        suffix,
-    })
+    Ok((canonical_ancestor, suffix))
 }
 
 /// Walk up `path` until an existing ancestor can be canonicalized.
 ///
 /// Returns `(canonical_ancestor, lexical_suffix)`. When the full path exists,
 /// `lexical_suffix` is empty.
+///
+/// A `NotFound` from `canonicalize_utf8()` is normally treated as "this
+/// component doesn't exist yet, pop it and try the parent." The exception is
+/// when the component itself exists as a *dangling* symlink: `canonicalize`
+/// fails because the target is missing, but the entry is still there and
+/// `open(O_CREAT)` would follow it and create the target outside the
+/// workspace. We probe with `symlink_metadata` to tell the two cases apart
+/// and reject the symlink case.
 fn canonicalize_existing_ancestor(path: &Utf8Path) -> Result<(Utf8PathBuf, Utf8PathBuf), String> {
     let mut current = path.to_owned();
     let mut suffix: Vec<String> = Vec::new();
@@ -261,6 +356,11 @@ fn canonicalize_existing_ancestor(path: &Utf8Path) -> Result<(Utf8PathBuf, Utf8P
                 return Ok((canonical, remainder));
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                if current.symlink_metadata().is_ok() {
+                    return Err(format!(
+                        "Path '{current}' is a symlink with a missing or non-workspace target."
+                    ));
+                }
                 let Some(name) = current.file_name() else {
                     return Err(format!("Cannot find existing ancestor for path '{path}'."));
                 };

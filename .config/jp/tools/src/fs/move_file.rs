@@ -4,7 +4,7 @@ use camino::Utf8Path;
 use jp_tool::{Outcome, Question};
 use serde_json::{Map, Value};
 
-use super::utils::{count_dirty_paths_impl, is_file_dirty_impl, resolve_workspace_path};
+use super::utils::{count_dirty_paths_impl, is_file_dirty_impl, resolve_workspace_entry};
 use crate::{
     Error,
     util::{
@@ -15,12 +15,10 @@ use crate::{
 
 /// Kind of source entry being moved.
 ///
-/// Note on symlinks: `resolve_workspace_path` canonicalizes through symlinks,
-/// so a symlink-as-source resolves to its target before the rename. Moving a
-/// symlink therefore moves the underlying file (and breaks the link), rather
-/// than renaming the link itself. Symlinks pointing outside the workspace are
-/// rejected by the resolver. Callers that need link-preserving semantics
-/// should add a separate resolver primitive rather than special-case the move.
+/// Symlinks are treated as `File`: `resolve_workspace_entry` leaves the
+/// final component alone, so `fs::rename` renames the link entry itself
+/// rather than its target. The target is untouched and any other links to
+/// it stay intact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SourceKind {
     File,
@@ -43,11 +41,11 @@ fn fs_move_file_impl<R: ProcessRunner>(
     target: &str,
     runner: &R,
 ) -> ToolResult {
-    let src = match resolve_workspace_path(root, source) {
+    let src = match resolve_workspace_entry(root, source) {
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
-    let dst = match resolve_workspace_path(root, target) {
+    let dst = match resolve_workspace_entry(root, target) {
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
@@ -63,6 +61,17 @@ fn fs_move_file_impl<R: ProcessRunner>(
         Some(Err(message)) => return error(message),
         None => return error(format!("Source path '{source}' does not exist.")),
     };
+
+    // For directory moves, the destination must not lie inside the source's
+    // own subtree. `fs::rename` would fail with EINVAL, but only after
+    // `create_dir_all` had already materialized intermediate parents under
+    // `src` — leaving the workspace in a partial state after a failed move.
+    // Catch this before any state-mutating I/O.
+    if src_kind == SourceKind::Dir && dst.absolute.starts_with(&src.absolute) {
+        return error(format!(
+            "Cannot move directory '{source}' into a subdirectory of itself ('{target}')."
+        ));
+    }
 
     // Destination policy differs by source kind. For files we keep the
     // existing overwrite-with-confirmation behavior; for directories the
@@ -140,11 +149,9 @@ fn classify_source(
         Err(e) => return Err(e.into()),
     };
 
-    // After resolving, `symlink_metadata` reports the canonical target's type,
-    // not the original link's. A symlink would only show up here if the
-    // resolver returned an absolute path that itself is still a link, which is
-    // possible only for dangling links (no canonical target to follow). We
-    // accept those as files.
+    // `resolve_workspace_entry` leaves the final component alone, so
+    // `symlink_metadata` here describes the entry the user named. Symlinks
+    // are bundled with `File`: `fs::rename` will rename the link itself.
     let ft = meta.file_type();
     let kind = if ft.is_symlink() || ft.is_file() {
         Ok(SourceKind::File)

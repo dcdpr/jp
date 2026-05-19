@@ -180,6 +180,47 @@ mod resolve_workspace_path {
 
     #[cfg(unix)]
     #[test]
+    fn rejects_dangling_symlink_at_final_position() {
+        // Dangling symlinks at the final position let `canonicalize` return
+        // NotFound while the entry itself still exists. Without the
+        // `symlink_metadata` probe, the resolver would happily return the
+        // link path and `fs_create_file` would then follow it with
+        // `O_CREAT`, materializing the target outside the workspace.
+        let workspace = tempdir().unwrap();
+        // Point the symlink at something outside the workspace that does
+        // not exist — the link is broken.
+        std::os::unix::fs::symlink(
+            std::path::Path::new("/tmp/does-not-exist-jp-tools-test"),
+            workspace.path().join("dangling").as_std_path(),
+        )
+        .unwrap();
+
+        let err = resolve_workspace_path(workspace.path(), "dangling").unwrap_err();
+        assert!(
+            err.contains("symlink with a missing or non-workspace target"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_dangling_symlink_as_parent_component() {
+        let workspace = tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            std::path::Path::new("/tmp/also-does-not-exist-jp-tools-test"),
+            workspace.path().join("dangling").as_std_path(),
+        )
+        .unwrap();
+
+        let err = resolve_workspace_path(workspace.path(), "dangling/child.rs").unwrap_err();
+        assert!(
+            err.contains("symlink with a missing or non-workspace target"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn rejects_symlink_escape_for_existing_target() {
         let outside = tempdir().unwrap();
         let secret = outside.path().join("secret.txt");
@@ -241,6 +282,148 @@ mod resolve_workspace_path {
 
         // The canonical relative reflects the real location, not the symlink.
         assert_eq!(resolved.relative, Utf8PathBuf::from("real/foo.rs"));
+    }
+}
+
+mod resolve_workspace_entry {
+    use super::*;
+
+    // Shares input validation with `resolve_workspace_path`, so the
+    // input-shape rejection tests are not duplicated here — just spot-check
+    // a couple to make sure the wiring is in place.
+
+    #[test]
+    fn rejects_absolute_path() {
+        let dir = tempdir().unwrap();
+        let err = resolve_workspace_entry(dir.path(), "/etc/passwd").unwrap_err();
+        assert!(err.contains("relative"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn rejects_escaping_parent_dir() {
+        let dir = tempdir().unwrap();
+        let err = resolve_workspace_entry(dir.path(), "../../etc/passwd").unwrap_err();
+        assert!(
+            err.contains("escape the workspace"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_normal_path_to_existing_file() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("foo.rs"), "").unwrap();
+
+        let resolved = resolve_workspace_entry(dir.path(), "foo.rs").unwrap();
+
+        assert_eq!(resolved.relative, Utf8PathBuf::from("foo.rs"));
+    }
+
+    #[test]
+    fn accepts_not_yet_existing_nested_target() {
+        let dir = tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("a")).unwrap();
+
+        // `a` exists; `a/b` does not. The parent walk should produce
+        // `<canonical_root>/a/b/c.rs` with the suffix reattached after
+        // canonicalization.
+        let resolved = resolve_workspace_entry(dir.path(), "a/b/c.rs").unwrap();
+
+        assert_eq!(resolved.relative, Utf8PathBuf::from("a/b/c.rs"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_symlink_at_final_position() {
+        // The whole point of the entry resolver: do *not* follow a final
+        // symlink. The returned absolute path must still point at the link
+        // entry, not at its canonical target.
+        let workspace = tempdir().unwrap();
+        std::fs::write(workspace.path().join("real.txt"), "").unwrap();
+        std::os::unix::fs::symlink(
+            std::path::Path::new("real.txt"),
+            workspace.path().join("link.txt").as_std_path(),
+        )
+        .unwrap();
+
+        let resolved = resolve_workspace_entry(workspace.path(), "link.txt").unwrap();
+
+        assert_eq!(resolved.relative, Utf8PathBuf::from("link.txt"));
+        // The entry is reachable via its symlink name, and is itself a
+        // symlink — i.e. not canonicalized away.
+        let meta = std::fs::symlink_metadata(&resolved.absolute).unwrap();
+        assert!(meta.file_type().is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn accepts_dangling_symlink_at_final_position() {
+        // For entry operations a broken final-position symlink is a
+        // perfectly valid thing to name (delete it, rename it). The
+        // resolver must not reject it the way `resolve_workspace_path`
+        // does — only the *parent* canonicalization matters.
+        let workspace = tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            std::path::Path::new("/tmp/does-not-exist-jp-tools-entry"),
+            workspace.path().join("broken").as_std_path(),
+        )
+        .unwrap();
+
+        let resolved = resolve_workspace_entry(workspace.path(), "broken").unwrap();
+
+        assert_eq!(resolved.relative, Utf8PathBuf::from("broken"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlinked_parent_escape() {
+        // Parent canonicalization still has to land inside the workspace.
+        let outside = tempdir().unwrap();
+        std::fs::create_dir(outside.path().join("real")).unwrap();
+
+        let workspace = tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            outside.path().join("real").as_std_path(),
+            workspace.path().join("linkdir").as_std_path(),
+        )
+        .unwrap();
+
+        let err = resolve_workspace_entry(workspace.path(), "linkdir/new.rs").unwrap_err();
+        assert!(
+            err.contains("escapes the workspace"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_dangling_symlink_as_parent_component() {
+        // A broken parent symlink does mean we can't bound the target
+        // anywhere — reject, the same way `resolve_workspace_path` does.
+        let workspace = tempdir().unwrap();
+        std::os::unix::fs::symlink(
+            std::path::Path::new("/tmp/does-not-exist-jp-tools-entry-parent"),
+            workspace.path().join("dangling").as_std_path(),
+        )
+        .unwrap();
+
+        let err = resolve_workspace_entry(workspace.path(), "dangling/child.rs").unwrap_err();
+        assert!(
+            err.contains("symlink with a missing or non-workspace target"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_windows_drive_relative_input() {
+        // `C:foo` on Windows is *drive-relative* — it has a Prefix
+        // component but no root, so it slips past `is_absolute()` and
+        // `has_root()`. The `Prefix(_)` arm in `validate_workspace_input`
+        // is what stops it from reaching `root.join(...)`.
+        let dir = tempdir().unwrap();
+        let err = resolve_workspace_entry(dir.path(), "C:foo").unwrap_err();
+        assert!(err.contains("relative"), "unexpected error: {err}");
     }
 }
 

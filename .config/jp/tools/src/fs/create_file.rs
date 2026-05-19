@@ -8,7 +8,7 @@ use jp_md::format::Formatter;
 use jp_tool::{Outcome, Question};
 use serde_json::{Map, Value};
 
-use super::utils::resolve_workspace_path;
+use super::utils::resolve_workspace_entry;
 use crate::{
     Context,
     util::{ToolResult, error, fail},
@@ -20,7 +20,7 @@ pub(crate) async fn fs_create_file(
     path: String,
     content: Option<String>,
 ) -> ToolResult {
-    let resolved = match resolve_workspace_path(&ctx.root, &path) {
+    let resolved = match resolve_workspace_entry(&ctx.root, &path) {
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
@@ -44,6 +44,19 @@ pub(crate) async fn fs_create_file(
     let absolute_path = resolved.absolute;
     if absolute_path.is_dir() {
         return error("Path is an existing directory.");
+    }
+
+    // Refuse to write through a symlink. `resolve_workspace_entry` left the
+    // final component intact, so an existing symlink shows up here as a
+    // symlink in `symlink_metadata`. `File::open(O_CREAT)` would follow it
+    // and create whatever the link points at — silently if the target lies
+    // outside the workspace. Users who really want to replace a link can
+    // delete it first.
+    if absolute_path
+        .symlink_metadata()
+        .is_ok_and(|m| m.file_type().is_symlink())
+    {
+        return error("Path is an existing symlink. Delete it first.");
     }
 
     if absolute_path.exists() {
