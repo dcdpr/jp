@@ -93,10 +93,24 @@ pub struct TerminalWriter<'w> {
 
 impl<'w> TerminalWriter<'w> {
     /// Create a new terminal writer.
+    ///
+    /// `indent` seeds the initial prefix with that many spaces, so every
+    /// wrap-routed line of rendered content (paragraphs, headers, list items,
+    /// blockquotes, inline-code wrap continuations) starts at the requested
+    /// visual column. Used by the streaming buffer to put nested list-item
+    /// content at its parent's content column.
+    ///
+    /// Note: pre-formatted content emitted via
+    /// [`write_raw`](Self::write_raw) (currently used for syntax-highlighted
+    /// code-block bodies) is *not* indented by this option. Callers that need
+    /// indented code lines should apply the indent at the call site before
+    /// rendering. The chat renderer does this with its `indent_lines` helper
+    /// when emitting `Event::FencedCode*` events from the streaming buffer.
     pub(crate) fn new(
         output: &'w mut dyn Write,
         width: usize,
         default_background: Option<&DefaultBackground>,
+        indent: usize,
     ) -> Self {
         let default_background = default_background.cloned();
 
@@ -114,7 +128,7 @@ impl<'w> TerminalWriter<'w> {
             wrap_buffer: String::new(),
             escapes: Vec::new(),
             window: Vec::with_capacity(2),
-            prefix: String::new(),
+            prefix: " ".repeat(indent),
             column: 0,
             need_cr: 0,
             last_breakable: 0,
@@ -219,6 +233,11 @@ impl<'w> TerminalWriter<'w> {
 
         // Emit everything up to (and including escapes anchored at) break_pos.
         let first_part = self.merge_escapes(0, break_pos);
+        // Visual width of what we just emitted, which is the width of
+        // the wrapped line up to the break point. `self.column` still
+        // reflects the full unwrapped buffer width, so we can't reuse
+        // it for line-fill calculations.
+        let first_part_width = ansi::visual_width(&first_part);
         self.output.write_str(&first_part)?;
 
         // Partition the escapes:
@@ -235,7 +254,12 @@ impl<'w> TerminalWriter<'w> {
             }
         }
 
+        // Temporarily swap `self.column` to the actually-emitted width
+        // for the line-fill calculation. Restore after.
+        let saved_column = self.column;
+        self.column = first_part_width;
         self.emit_line_fill_direct()?;
+        self.column = saved_column;
         if attrs_at_break.is_active() {
             self.output.write_str(RESET)?;
         }

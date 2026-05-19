@@ -320,12 +320,272 @@ fn test_terminal_blockquote_nested() {
 }
 
 #[test]
+fn test_default_background_column_fill_with_indent() {
+    // When the renderer is seeded with a visual indent (from a Buffer
+    // event emitted inside a nested list item, say) and the active
+    // background uses `BackgroundFill::Column(target)`, the line fill
+    // should pad to `target` columns counting the seeded prefix.
+    let bg_param = "48;5;236";
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Column(20),
+        }),
+        indent: 4,
+    };
+
+    let rendered = Formatter::with_width(0)
+        .format_terminal_with("Hi\n", &opts)
+        .unwrap();
+
+    // Strip ANSI for column counting.
+    let plain = strip_ansi_for_test(&rendered);
+    let first_line = plain.lines().next().expect("at least one line");
+
+    // "    Hi" + padding to column 20 = 4 prefix + 2 content + 14 pad.
+    assert_eq!(
+        first_line.chars().count(),
+        20,
+        "line should be padded to column 20.\nLine: {first_line:?}\nFull: {rendered:?}"
+    );
+    assert!(
+        first_line.starts_with("    Hi"),
+        "line should start with seeded indent then content.\nLine: {first_line:?}"
+    );
+}
+
+#[test]
+fn test_default_background_terminal_fill_with_indent() {
+    // Same as above for `BackgroundFill::Terminal` (erase-to-EOL).
+    // The erase escape should appear after content (so the bg fills to
+    // the terminal edge from there). The seeded prefix doesn't affect
+    // the erase position; it's just rendered with the bg.
+    let bg_param = "48;5;236";
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Terminal,
+        }),
+        indent: 4,
+    };
+
+    let rendered = Formatter::with_width(0)
+        .format_terminal_with("Hi\n", &opts)
+        .unwrap();
+
+    assert!(
+        rendered.contains("\x1b[K"),
+        "output should contain erase-to-EOL.\n{rendered:?}"
+    );
+    // Strip ANSI; verify the prefix is preserved before the content.
+    let plain = strip_ansi_for_test(&rendered);
+    assert!(
+        plain.lines().next().unwrap().starts_with("    Hi"),
+        "output should begin with seeded prefix.\n{plain:?}"
+    );
+}
+
+#[test]
+fn test_default_background_column_fill_wraps_three_times() {
+    // Content long enough to wrap onto three lines should pad every
+    // line to the target column.
+    let bg_param = "48;5;236";
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Column(25),
+        }),
+        ..Default::default()
+    };
+
+    // Each ~10-char chunk forces a wrap at width=15.
+    let input = "alpha bravo charlie delta echo foxtrot golf hotel.\n";
+    let rendered = Formatter::with_width(15)
+        .format_terminal_with(input, &opts)
+        .unwrap();
+
+    let plain = strip_ansi_for_test(&rendered);
+    let lines: Vec<&str> = plain.lines().collect();
+    assert!(
+        lines.len() >= 3,
+        "expected 3+ wrapped lines. Got: {plain:?}"
+    );
+    for (i, line) in lines.iter().enumerate() {
+        assert_eq!(
+            line.chars().count(),
+            25,
+            "line {i} should be padded to column 25.\nLine: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn test_default_background_column_fill_with_inline_code_at_wrap() {
+    // When an inline code span sits at the wrap boundary, the bg-fill
+    // pad should still use the wrapped-line width, not the unwrapped
+    // buffer width, and the inline code's own bg shouldn't bleed into
+    // the padding spaces.
+    let bg_param = "48;5;236";
+    let bg_escape = format!("\x1b[{bg_param}m");
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Column(30),
+        }),
+        ..Default::default()
+    };
+
+    let input = "prefix `inline code spans here` suffix\n";
+    let rendered = Formatter::with_width(20)
+        .format_terminal_with(input, &opts)
+        .unwrap();
+
+    // Every line's plaintext width should equal target.
+    let plain = strip_ansi_for_test(&rendered);
+    for (i, line) in plain.lines().enumerate() {
+        assert_eq!(
+            line.chars().count(),
+            30,
+            "line {i} should be padded to column 30.\nLine: {line:?}\nFull plain: {plain:?}"
+        );
+    }
+
+    // The trailing pad spaces on each line should be under the default
+    // (reasoning) bg, not the inline-code bg. Approximate check: each
+    // line should end with the default bg escape somewhere before the
+    // pad spaces start.
+    for line in rendered.lines() {
+        if let Some(idx) = line.rfind("\x1b[48;") {
+            assert!(
+                line[idx..].starts_with(&bg_escape),
+                "last bg escape on line should be the default bg.\nLine: {line:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn test_default_background_column_fill_exact_width() {
+    // Content that fits exactly at target column - 0 pad spaces.
+    let bg_param = "48;5;236";
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Column(5),
+        }),
+        ..Default::default()
+    };
+
+    // "Hello" is exactly 5 chars.
+    let rendered = Formatter::with_width(0)
+        .format_terminal_with("Hello\n", &opts)
+        .unwrap();
+    let plain = strip_ansi_for_test(&rendered);
+    assert_eq!(plain.lines().next().unwrap().chars().count(), 5);
+}
+
+#[test]
+fn test_default_background_column_fill_content_exceeds_target() {
+    // Content wider than the target column should not be truncated;
+    // the pad calculation saturates at 0.
+    let bg_param = "48;5;236";
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Column(5),
+        }),
+        ..Default::default()
+    };
+
+    let rendered = Formatter::with_width(0)
+        .format_terminal_with("Hello world\n", &opts)
+        .unwrap();
+    let plain = strip_ansi_for_test(&rendered);
+    let line = plain.lines().next().unwrap();
+    assert!(
+        line.starts_with("Hello world"),
+        "content should be preserved.\nLine: {line:?}"
+    );
+    // Content is 11 chars; pad to 5 yields 0 pad. Line is 11 chars.
+    assert_eq!(line.chars().count(), 11);
+}
+
+#[test]
+fn test_default_background_column_fill_no_indent_wrapped() {
+    // Pre-existing-baseline: does `BackgroundFill::Column` already work
+    // correctly with wrapped lines when there is no seeded indent?
+    let bg_param = "48;5;236";
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Column(30),
+        }),
+        ..Default::default()
+    };
+
+    let input = "This is a fairly long paragraph that will wrap.\n";
+    let rendered = Formatter::with_width(20)
+        .format_terminal_with(input, &opts)
+        .unwrap();
+
+    let plain = strip_ansi_for_test(&rendered);
+    let lines: Vec<&str> = plain.lines().collect();
+    assert!(lines.len() >= 2, "expected wrapping. Got: {plain:?}");
+
+    for (i, line) in lines.iter().enumerate() {
+        assert_eq!(
+            line.chars().count(),
+            30,
+            "line {i} should be padded to column 30.\nLine: {line:?}\nFull: {plain:?}"
+        );
+    }
+}
+
+#[test]
+fn test_default_background_column_fill_with_indent_wrapped() {
+    // When width-wrapping is active and content wraps, the continuation
+    // line should *also* start with the seeded prefix, and the column
+    // fill should still pad to `target`.
+    let bg_param = "48;5;236";
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: bg_param.into(),
+            fill: BackgroundFill::Column(30),
+        }),
+        indent: 4,
+    };
+
+    // Long enough to wrap at width=20.
+    let input = "This is a fairly long paragraph that will wrap.\n";
+    let rendered = Formatter::with_width(20)
+        .format_terminal_with(input, &opts)
+        .unwrap();
+
+    let plain = strip_ansi_for_test(&rendered);
+    let lines: Vec<&str> = plain.lines().collect();
+    assert!(lines.len() >= 2, "expected wrapping. Got: {plain:?}");
+
+    for (i, line) in lines.iter().enumerate() {
+        assert!(
+            line.starts_with("    "),
+            "line {i} should start with seeded prefix.\nLine: {line:?}\nFull: {plain:?}"
+        );
+        assert_eq!(
+            line.chars().count(),
+            30,
+            "line {i} should be padded to column 30.\nLine: {line:?}\nFull: {plain:?}"
+        );
+    }
+}
+
+#[test]
 fn test_default_background_terminal_fill() {
     let opts = TerminalOptions {
         default_background: Some(DefaultBackground {
             param: "48;5;236".into(),
             fill: BackgroundFill::Terminal,
         }),
+        ..Default::default()
     };
 
     // With wrapping enabled (width > 0)
@@ -376,6 +636,7 @@ fn test_inline_code_wrap_uses_default_bg_for_fill() {
             param: reasoning_bg.into(),
             fill: BackgroundFill::Terminal,
         }),
+        ..Default::default()
     };
 
     // A paragraph with inline code near the wrap boundary.
@@ -419,6 +680,7 @@ fn test_inline_code_wrap_prefix_uses_reasoning_bg() {
             param: reasoning_bg.into(),
             fill: BackgroundFill::Terminal,
         }),
+        ..Default::default()
     };
 
     // List item where the inline code span crosses the wrap boundary.
@@ -456,6 +718,7 @@ fn test_inline_code_wrap_preserves_code_bg_on_content() {
             param: reasoning_bg.into(),
             fill: BackgroundFill::Terminal,
         }),
+        ..Default::default()
     };
 
     // Same input as prefix test — wrap happens inside the code span.
@@ -569,6 +832,7 @@ fn test_code_block_inherits_default_background() {
             param: bg_param.into(),
             fill: BackgroundFill::Terminal,
         }),
+        ..Default::default()
     };
 
     let input = "```rust\nfn main() {}\n```\n";
@@ -599,6 +863,7 @@ fn test_list_continuation_has_background_on_prefix() {
             param: bg_param.into(),
             fill: BackgroundFill::Terminal,
         }),
+        ..Default::default()
     };
 
     // A list item long enough to wrap at width=40.

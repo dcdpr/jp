@@ -111,8 +111,8 @@ impl EventFixup for OrphanedFenceFixup {
         // and swallow the closing fence.
         if self.suppressing {
             return match event {
-                Event::FencedCodeLine(text) => Some(Event::Block(text)),
-                Event::FencedCodeEnd(_) => {
+                Event::FencedCodeLine { content, indent } => Some(Event::Block { content, indent }),
+                Event::FencedCodeEnd { .. } => {
                     self.suppressing = false;
                     None
                 }
@@ -121,17 +121,20 @@ impl EventFixup for OrphanedFenceFixup {
         }
 
         match &event {
-            Event::Block(content) => {
+            Event::Block { content, .. } => {
                 self.prev_had_embedded_fence = has_embedded_fence(content);
                 Some(event)
             }
-            Event::FencedCodeStart { language, .. }
-                if self.prev_had_embedded_fence && language.is_empty() =>
-            {
+            Event::FencedCodeStart {
+                language, indent, ..
+            } if self.prev_had_embedded_fence && language.is_empty() => {
                 self.prev_had_embedded_fence = false;
                 self.suppressing = true;
                 // Convert the fence itself to a block.
-                Some(Event::Block(format!("{event}\n")))
+                Some(Event::Block {
+                    content: format!("{event}\n"),
+                    indent: *indent,
+                })
             }
             _ => {
                 self.prev_had_embedded_fence = false;
@@ -155,15 +158,20 @@ impl EventFixup for FenceEscalationFixup {
                 language,
                 fence_type,
                 fence_length,
+                indent,
             } => Some(Event::FencedCodeStart {
                 language,
                 fence_type,
                 fence_length: fence_length.max(5),
+                indent,
             }),
-            Event::FencedCodeEnd(fence) => {
+            Event::FencedCodeEnd { fence, indent } => {
                 let ch = fence.chars().next().unwrap_or('`');
                 let len = fence.len().max(5);
-                Some(Event::FencedCodeEnd(ch.to_string().repeat(len)))
+                Some(Event::FencedCodeEnd {
+                    fence: ch.to_string().repeat(len),
+                    indent,
+                })
             }
             other => Some(other),
         }

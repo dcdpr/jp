@@ -66,6 +66,22 @@ pub struct TerminalOptions {
     /// When set, the renderer applies this background and restores it after
     /// inline elements (like code spans) that set their own background.
     pub default_background: Option<DefaultBackground>,
+
+    /// Visual indent (in spaces) applied to wrap-routed rendered content.
+    ///
+    /// The streaming buffer sets this when emitting events from inside a
+    /// nested list item, so the renderer puts paragraphs, headers, list
+    /// items, blockquotes, and inline-code wrap continuations at the
+    /// correct visual column. `0` (the default) means no indent — content
+    /// renders at column 0.
+    ///
+    /// Note: pre-formatted content (currently syntax-highlighted code-block
+    /// bodies) is *not* indented by this option. The streaming pipeline
+    /// avoids this gap by emitting fenced code as separate `FencedCode*`
+    /// events and applying the indent at the chat-renderer level (see
+    /// `indent_lines` in the chat renderer), so the public contract here
+    /// only promises indentation for wrap-routed content.
+    pub indent: usize,
 }
 
 /// A formatter for markdown text.
@@ -257,6 +273,7 @@ impl Formatter {
             &self.theme,
             options.default_background.as_ref(),
             self.inline_code_bg.as_ref(),
+            options.indent,
             &mut buf,
         )?;
 

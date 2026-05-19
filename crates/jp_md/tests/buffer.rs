@@ -26,9 +26,7 @@ fn test_buffer_chunks() {
         for event in &mut buffer {
             chunks.push(event);
         }
-        if let Some(flushed) = buffer.flush() {
-            chunks.push(jp_md::buffer::Event::Flush(flushed));
-        }
+        chunks.extend(buffer.flush_events());
 
         insta::with_settings!({
             description => format!("Source: {}", name),

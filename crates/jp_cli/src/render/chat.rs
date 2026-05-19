@@ -284,30 +284,37 @@ impl ChatRenderer {
                 continue;
             };
             match event {
-                Event::Block(text) | Event::Flush(text) => self.print_block(&text),
-                Event::FencedCodeStart { ref language, .. } => {
+                Event::Block { content, indent } | Event::Flush { content, indent } => {
+                    self.print_block(&content, indent);
+                }
+                Event::FencedCodeStart {
+                    ref language,
+                    indent,
+                    ..
+                } => {
                     self.code_block = Some(self.formatter.begin_code_block(language));
-                    let bg = self.terminal_options().default_background;
+                    let bg = self.terminal_options(0).default_background;
                     let rendered = self
                         .formatter
                         .render_code_fence(&format!("{event}\n"), bg.as_ref());
-                    self.print_code(&rendered);
+                    self.print_code(&rendered, indent);
                 }
-                Event::FencedCodeLine(line) => {
-                    let bg = self.terminal_options().default_background;
+                Event::FencedCodeLine { content, indent } => {
+                    let bg = self.terminal_options(0).default_background;
                     let rendered = if let Some(ref mut state) = self.code_block {
-                        self.formatter.render_code_line(&line, state, bg.as_ref())
+                        self.formatter
+                            .render_code_line(&content, state, bg.as_ref())
                     } else {
-                        line
+                        content
                     };
-                    self.print_code(&rendered);
+                    self.print_code(&rendered, indent);
                 }
-                Event::FencedCodeEnd(fence) => {
-                    let bg = self.terminal_options().default_background;
+                Event::FencedCodeEnd { fence, indent } => {
+                    let bg = self.terminal_options(0).default_background;
                     let rendered = self
                         .formatter
                         .render_closing_fence(&format!("{fence}\n"), bg.as_ref());
-                    self.print_code(&rendered);
+                    self.print_code(&rendered, indent);
                     self.code_block = None;
                 }
             }
@@ -317,14 +324,20 @@ impl ChatRenderer {
     /// Print a raw code string with the code typewriter delay.
     ///
     /// The content is already highlighted and has background applied by
-    /// the formatter's streaming code block API.
-    fn print_code(&self, content: &str) {
+    /// the formatter's streaming code block API. `indent` is the visual
+    /// column the renderer should put each line at (used when the code
+    /// block is inside a list item).
+    fn print_code(&self, content: &str, indent: usize) {
         let delay = self.config.typewriter.code_delay;
-        self.printer
-            .print(content.to_string().typewriter(delay.into()));
+        let content = if indent == 0 {
+            content.to_string()
+        } else {
+            indent_lines(content, indent)
+        };
+        self.printer.print(content.typewriter(delay.into()));
     }
 
-    fn print_block(&self, block: &str) {
+    fn print_block(&self, block: &str, indent: usize) {
         // Skip whitespace-only blocks. These can appear when the LLM emits
         // blank text content blocks (e.g. "\n\n" between interleaved thinking
         // blocks) that survive a buffer flush.
@@ -332,7 +345,7 @@ impl ChatRenderer {
             return;
         }
 
-        let opts = self.terminal_options();
+        let opts = self.terminal_options(indent);
         let formatted = self
             .formatter
             .format_terminal_with(block, &opts)
@@ -342,8 +355,9 @@ impl ChatRenderer {
         self.printer.print(formatted.typewriter(delay.into()));
     }
 
-    /// Build per-block terminal options based on the current content kind.
-    fn terminal_options(&self) -> TerminalOptions {
+    /// Build per-block terminal options based on the current content kind
+    /// and visual indent.
+    fn terminal_options(&self, indent: usize) -> TerminalOptions {
         TerminalOptions {
             default_background: if self.last_content_kind == Some(ContentKind::Reasoning) {
                 self.config
@@ -356,6 +370,7 @@ impl ChatRenderer {
             } else {
                 None
             },
+            indent,
         }
     }
 
@@ -364,8 +379,14 @@ impl ChatRenderer {
         // If we're mid-code-block, the stream ended without a closing fence.
         // Emit what we have as raw text.
         self.code_block = None;
-        if let Some(remaining) = self.buffer.flush() {
-            self.print_block(&remaining);
+        for ev in self.buffer.flush_events() {
+            match ev {
+                Event::Block { content, indent } | Event::Flush { content, indent } => {
+                    self.print_block(&content, indent);
+                }
+                // flush_events doesn't emit fenced-code events.
+                _ => {}
+            }
         }
     }
 
@@ -450,6 +471,25 @@ fn build_role_header_line(label: &str, suffix: Option<&str>, width: usize, prett
     } else {
         format!("{unstyled}{dashes}")
     }
+}
+
+/// Prepend `indent` spaces to every line of `content`.
+///
+/// Used to indent streaming code-block lines that originate from inside a
+/// list item. ANSI escape sequences are preserved as-is — they don't
+/// affect visual indentation.
+fn indent_lines(content: &str, indent: usize) -> String {
+    let prefix = " ".repeat(indent);
+    let mut out = String::with_capacity(content.len() + indent);
+    let mut at_line_start = true;
+    for ch in content.chars() {
+        if at_line_start && ch != '\n' {
+            out.push_str(&prefix);
+        }
+        out.push(ch);
+        at_line_start = ch == '\n';
+    }
+    out
 }
 
 fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {

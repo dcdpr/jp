@@ -5,7 +5,7 @@ use super::*;
 #[test]
 fn write_prefix_single_byte_no_panic() {
     let mut buf = String::new();
-    let mut w = TerminalWriter::new(&mut buf, 80, None);
+    let mut w = TerminalWriter::new(&mut buf, 80, None, 0);
 
     write!(w.prefix, ">").unwrap();
 
@@ -20,7 +20,7 @@ fn write_prefix_single_byte_no_panic() {
 #[test]
 fn write_prefix_empty() {
     let mut buf = String::new();
-    let mut w = TerminalWriter::new(&mut buf, 80, None);
+    let mut w = TerminalWriter::new(&mut buf, 80, None, 0);
 
     w.output("hello\nworld", true).unwrap();
     w.finish().unwrap();

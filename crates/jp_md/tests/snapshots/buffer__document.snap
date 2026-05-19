@@ -3,729 +3,1010 @@ source: crates/jp_md/tests/buffer.rs
 description: "Source: document"
 ---
 [
-    Block(
-        "This document demos standard and GFM Markdown syntax. It is structured to reach approximately 500\nlines.\n",
-    ),
-    Block(
-        "# JP Project Documentation\n",
-    ),
-    Block(
-        "## Syntax Demonstration\n",
-    ),
-    Block(
-        "### 1\\. Headers\n",
-    ),
-    Block(
-        "# H1\n",
-    ),
-    Block(
-        "## H2\n",
-    ),
-    Block(
-        "### H3\n",
-    ),
-    Block(
-        "#### H4\n",
-    ),
-    Block(
-        "##### H5\n",
-    ),
-    Block(
-        "###### H6\n",
-    ),
-    Block(
-        "-----\n",
-    ),
-    Block(
-        "### 2\\. Emphasis\n",
-    ),
-    Block(
-        "*Italic text* with asterisks. *Italic text* with underscores. **Bold\ntext** with double asterisks. __Bold text__ with double underscores. ***Bold\nand italic*** with triple asterisks. ~~Strikethrough text~~ using double tildes.\n-----\n",
-    ),
-    Block(
-        "### 3\\. Lists\n",
-    ),
-    Block(
-        "#### Unordered Lists\n",
-    ),
-    Block(
-        "- Item A\n",
-    ),
-    Block(
-        "- Item B\n",
-    ),
-    Block(
-        "  - Nested Item B.1\n",
-    ),
-    Block(
-        "  - Nested Item B.2\n    - Deeply nested item\n",
-    ),
-    Block(
-        "- Item C\n",
-    ),
-    Block(
-        "- Alternative bullet\n",
-    ),
-    Block(
-        "- Another item\n",
-    ),
-    Block(
-        "- Plus bullet\n",
-    ),
-    Block(
-        "- Final item\n",
-    ),
-    Block(
-        "#### Ordered Lists\n",
-    ),
-    Block(
-        "1. First item\n",
-    ),
-    Block(
-        "2. Second item\n",
-    ),
-    Block(
-        "   1. Sub-item 1\n",
-    ),
-    Block(
-        "   2. Sub-item 2\n",
-    ),
-    Block(
-        "3. Third item\n",
-    ),
-    Block(
-        "#### Task Lists\n",
-    ),
-    Block(
-        "- [x] Implement Rust CLI parser\n",
-    ),
-    Block(
-        "- [x] Integrate LLM API\n",
-    ),
-    Block(
-        "- [ ] Add unit tests for `git` module\n",
-    ),
-    Block(
-        "- [ ] Refactor context loading\n",
-    ),
-    Block(
-        "- [ ] Documentation update\n-----\n",
-    ),
-    Block(
-        "### 4\\. Links and Images\n",
-    ),
-    Block(
-        "[JP Repository](https://github.com/example/jp) [Internal Reference to\nHeaders](#1-headers) Link with title: [Google](https://google.com \"Search Engine\")\nReference-style links: [Rust][1] is used for performance. [LLM][2] provides intelligence.\n\n",
-    ),
-    Block(
-        "![JP Logo](https://via.placeholder.com/150 \"JP Logo\")\n-----\n",
-    ),
-    Block(
-        "### 5\\. Blockquotes\n",
-    ),
-    Block(
-        "> JP is a Rust-based command-line toolkit. It integrates into existing workflows.\n\n",
-    ),
-    Block(
-        "\\>\\> Nested blockquote for citations. \\>\n\n",
-    ),
-    Block(
-        "> Back to primary blockquote level.\n\n",
-    ),
-    Block(
-        "-----\n",
-    ),
-    Block(
-        "### 6\\. Code Blocks\n",
-    ),
-    Block(
-        "Inline code: `let x = 5;`\nRust Fenced Code Block:\n\n",
-    ),
+    Block {
+        content: "This document demos standard and GFM Markdown syntax. It is structured to reach approximately 500\nlines.\n",
+        indent: 0,
+    },
+    Block {
+        content: "# JP Project Documentation\n",
+        indent: 0,
+    },
+    Block {
+        content: "## Syntax Demonstration\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 1\\. Headers\n",
+        indent: 0,
+    },
+    Block {
+        content: "# H1\n",
+        indent: 0,
+    },
+    Block {
+        content: "## H2\n",
+        indent: 0,
+    },
+    Block {
+        content: "### H3\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### H4\n",
+        indent: 0,
+    },
+    Block {
+        content: "##### H5\n",
+        indent: 0,
+    },
+    Block {
+        content: "###### H6\n",
+        indent: 0,
+    },
+    Block {
+        content: "-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 2\\. Emphasis\n",
+        indent: 0,
+    },
+    Block {
+        content: "*Italic text* with asterisks. *Italic text* with underscores. **Bold\ntext** with double asterisks. __Bold text__ with double underscores. ***Bold\nand italic*** with triple asterisks. ~~Strikethrough text~~ using double tildes.\n-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 3\\. Lists\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Unordered Lists\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Item A\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Item B\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Nested Item B.1\n",
+        indent: 2,
+    },
+    Block {
+        content: "- Nested Item B.2\n",
+        indent: 2,
+    },
+    Block {
+        content: "- Deeply nested item\n",
+        indent: 4,
+    },
+    Block {
+        content: "- Item C\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Alternative bullet\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Another item\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Plus bullet\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Final item\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Ordered Lists\n",
+        indent: 0,
+    },
+    Block {
+        content: "1. First item\n",
+        indent: 0,
+    },
+    Block {
+        content: "2. Second item\n",
+        indent: 0,
+    },
+    Block {
+        content: "1. Sub-item 1\n",
+        indent: 3,
+    },
+    Block {
+        content: "2. Sub-item 2\n",
+        indent: 3,
+    },
+    Block {
+        content: "3. Third item\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Task Lists\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Implement Rust CLI parser\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Integrate LLM API\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Add unit tests for `git` module\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Refactor context loading\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Documentation update\n",
+        indent: 0,
+    },
+    Block {
+        content: "-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 4\\. Links and Images\n",
+        indent: 0,
+    },
+    Block {
+        content: "[JP Repository](https://github.com/example/jp) [Internal Reference to\nHeaders](#1-headers) Link with title: [Google](https://google.com \"Search Engine\")\nReference-style links: [Rust][1] is used for performance. [LLM][2] provides intelligence.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "![JP Logo](https://via.placeholder.com/150 \"JP Logo\")\n-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 5\\. Blockquotes\n",
+        indent: 0,
+    },
+    Block {
+        content: "> JP is a Rust-based command-line toolkit. It integrates into existing workflows.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "\\>\\> Nested blockquote for citations. \\>\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "> Back to primary blockquote level.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 6\\. Code Blocks\n",
+        indent: 0,
+    },
+    Block {
+        content: "Inline code: `let x = 5;`\nRust Fenced Code Block:\n\n",
+        indent: 0,
+    },
     FencedCodeStart {
         language: "rust",
         fence_type: Backtick,
         fence_length: 3,
+        indent: 0,
     },
-    FencedCodeLine(
-        "fn main() {\n",
-    ),
-    FencedCodeLine(
-        "    let project = \"JP\";\n",
-    ),
-    FencedCodeLine(
-        "    println!(\"Hello from {}!\", project);\n",
-    ),
-    FencedCodeLine(
-        "\n",
-    ),
-    FencedCodeLine(
-        "    for i in 0..5 {\n",
-    ),
-    FencedCodeLine(
-        "        process_task(i);\n",
-    ),
-    FencedCodeLine(
-        "    }\n",
-    ),
-    FencedCodeLine(
-        "}\n",
-    ),
-    FencedCodeLine(
-        "\n",
-    ),
-    FencedCodeLine(
-        "fn process_task(id: usize) {\n",
-    ),
-    FencedCodeLine(
-        "    match id {\n",
-    ),
-    FencedCodeLine(
-        "        0 => println!(\"Task 0 started\"),\n",
-    ),
-    FencedCodeLine(
-        "        _ => println!(\"Continuing...\"),\n",
-    ),
-    FencedCodeLine(
-        "    }\n",
-    ),
-    FencedCodeLine(
-        "}\n",
-    ),
-    FencedCodeEnd(
-        "```",
-    ),
-    Block(
-        "Bash Script:\n\n",
-    ),
+    FencedCodeLine {
+        content: "fn main() {\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    let project = \"JP\";\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    println!(\"Hello from {}!\", project);\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    for i in 0..5 {\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "        process_task(i);\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    }\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "}\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "fn process_task(id: usize) {\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    match id {\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "        0 => println!(\"Task 0 started\"),\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "        _ => println!(\"Continuing...\"),\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    }\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "}\n",
+        indent: 0,
+    },
+    FencedCodeEnd {
+        fence: "```",
+        indent: 0,
+    },
+    Block {
+        content: "Bash Script:\n\n",
+        indent: 0,
+    },
     FencedCodeStart {
         language: "bash",
         fence_type: Backtick,
         fence_length: 3,
+        indent: 0,
     },
-    FencedCodeLine(
-        "#!/bin/bash\n",
-    ),
-    FencedCodeLine(
-        "# Install JP\n",
-    ),
-    FencedCodeLine(
-        "cargo install --path .\n",
-    ),
-    FencedCodeLine(
-        "jp --version\n",
-    ),
-    FencedCodeEnd(
-        "```",
-    ),
-    Block(
-        "JSON Configuration:\n\n",
-    ),
+    FencedCodeLine {
+        content: "#!/bin/bash\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "# Install JP\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "cargo install --path .\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "jp --version\n",
+        indent: 0,
+    },
+    FencedCodeEnd {
+        fence: "```",
+        indent: 0,
+    },
+    Block {
+        content: "JSON Configuration:\n\n",
+        indent: 0,
+    },
     FencedCodeStart {
         language: "json",
         fence_type: Backtick,
         fence_length: 3,
+        indent: 0,
     },
-    FencedCodeLine(
-        "{\n",
-    ),
-    FencedCodeLine(
-        "  \"name\": \"jp\",\n",
-    ),
-    FencedCodeLine(
-        "  \"version\": \"0.1.0\",\n",
-    ),
-    FencedCodeLine(
-        "  \"features\": [\"llm\", \"git\", \"filesystem\"]\n",
-    ),
-    FencedCodeLine(
-        "}\n",
-    ),
-    FencedCodeEnd(
-        "```",
-    ),
-    Block(
-        "-----\n",
-    ),
-    Block(
-        "### 7\\. Tables\n",
-    ),
-    Block(
-        "| Feature | Status | Priority |\n| :-- | :-: | --: |\n| Rust CLI | Stable | High |\n| LLM Integration | Beta | High |\n| Shell Hook | Alpha | Medium |\n| Plugins | Planning | Low |\n| UI Refactor | Pending | Medium |\n| Command | Description | Example |\n| --- | --- | --- |\n| `jp ask` | Query the LLM | `jp ask \"How to regex?\"` |\n| `jp scan` | Contextual search | `jp scan ./src` |\n| `jp test` | Generate tests | `jp test module.rs` |\n-----\n",
-    ),
-    Block(
-        "### 8\\. Footnotes\n",
-    ),
-    Block(
-        "Here is a footnote reference[^1]. And another one regarding Rust[^2].\n[^1]: Footnote content at the bottom.\n[^2]: Rust is a systems programming language.\n-----\n",
-    ),
-    Block(
-        "### 9\\. Horizontal Rules\n",
-    ),
-    Block(
-        "Three asterisks:\n-----\n",
-    ),
-    Block(
-        "## Three dashes:\n",
-    ),
-    Block(
-        "Three underscores:\n-----\n",
-    ),
-    Block(
-        "-----\n",
-    ),
-    Block(
-        "### 10\\. Escaping\n",
-    ),
-    Block(
-        "*Literal Asterisks\\* [Literal Brackets] # Not a header\n-----\n",
-    ),
-    Block(
-        "### 11\\. Large Scale Content Simulation\n",
-    ),
-    Block(
-        "The following sections repeat patterns to reach the line length requirement.\n",
-    ),
-    Block(
-        "#### Developer Notes: Module `core`\n",
-    ),
-    Block(
-        "The core module handles the main loop and signal handling.\n\n",
-    ),
-    Block(
-        "- `src/main.rs`: Entry point.\n",
-    ),
-    Block(
-        "- `src/cli.rs`: Command line argument parsing using `clap`.\n",
-    ),
-    Block(
-        "- `src/error.rs`: Custom error types for the toolkit.\n",
-    ),
-    Block(
-        "#### Developer Notes: Module `llm`\n",
-    ),
-    Block(
-        "Interface for multiple providers.\n\n",
-    ),
-    Block(
-        "1. OpenAI\n",
-    ),
-    Block(
-        "2. Anthropic\n",
-    ),
-    Block(
-        "3. Local (Ollama)\n\n",
-    ),
+    FencedCodeLine {
+        content: "{\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "  \"name\": \"jp\",\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "  \"version\": \"0.1.0\",\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "  \"features\": [\"llm\", \"git\", \"filesystem\"]\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "}\n",
+        indent: 0,
+    },
+    FencedCodeEnd {
+        fence: "```",
+        indent: 0,
+    },
+    Block {
+        content: "-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 7\\. Tables\n",
+        indent: 0,
+    },
+    Block {
+        content: "| Feature | Status | Priority |\n| :-- | :-: | --: |\n| Rust CLI | Stable | High |\n| LLM Integration | Beta | High |\n| Shell Hook | Alpha | Medium |\n| Plugins | Planning | Low |\n| UI Refactor | Pending | Medium |\n| Command | Description | Example |\n| --- | --- | --- |\n| `jp ask` | Query the LLM | `jp ask \"How to regex?\"` |\n| `jp scan` | Contextual search | `jp scan ./src` |\n| `jp test` | Generate tests | `jp test module.rs` |\n-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 8\\. Footnotes\n",
+        indent: 0,
+    },
+    Block {
+        content: "Here is a footnote reference[^1]. And another one regarding Rust[^2].\n[^1]: Footnote content at the bottom.\n[^2]: Rust is a systems programming language.\n-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 9\\. Horizontal Rules\n",
+        indent: 0,
+    },
+    Block {
+        content: "Three asterisks:\n-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "## Three dashes:\n",
+        indent: 0,
+    },
+    Block {
+        content: "Three underscores:\n-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 10\\. Escaping\n",
+        indent: 0,
+    },
+    Block {
+        content: "*Literal Asterisks\\* [Literal Brackets] # Not a header\n-----\n",
+        indent: 0,
+    },
+    Block {
+        content: "### 11\\. Large Scale Content Simulation\n",
+        indent: 0,
+    },
+    Block {
+        content: "The following sections repeat patterns to reach the line length requirement.\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Developer Notes: Module `core`\n",
+        indent: 0,
+    },
+    Block {
+        content: "The core module handles the main loop and signal handling.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "- `src/main.rs`: Entry point.\n",
+        indent: 0,
+    },
+    Block {
+        content: "- `src/cli.rs`: Command line argument parsing using `clap`.\n",
+        indent: 0,
+    },
+    Block {
+        content: "- `src/error.rs`: Custom error types for the toolkit.\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Developer Notes: Module `llm`\n",
+        indent: 0,
+    },
+    Block {
+        content: "Interface for multiple providers.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "1. OpenAI\n",
+        indent: 0,
+    },
+    Block {
+        content: "2. Anthropic\n",
+        indent: 0,
+    },
+    Block {
+        content: "3. Local (Ollama)\n\n\n",
+        indent: 0,
+    },
     FencedCodeStart {
         language: "rust",
         fence_type: Backtick,
         fence_length: 3,
+        indent: 0,
     },
-    FencedCodeLine(
-        "pub trait Provider {\n",
-    ),
-    FencedCodeLine(
-        "    fn complete(&self, prompt: &str) -> Result<String, Error>;\n",
-    ),
-    FencedCodeLine(
-        "}\n",
-    ),
-    FencedCodeEnd(
-        "```",
-    ),
-    Block(
-        "#### Detailed Feature Matrix\n",
-    ),
-    Block(
-        "| Component | Unit Tested | Integration Tested | Docstrings |\n| --- | --- | --- | --- |\n| Parser | Yes | Yes | Yes |\n| Encoder | Yes | No | Yes |\n| Buffer | No | No | Partial |\n| Logger | Yes | Yes | Yes |\n| Config | Yes | No | Yes |\n| API Client | No | Yes | Yes |\n| State | Yes | Yes | Partial |\n| Cache | Yes | No | Yes |\n| Registry | No | No | No |\n| Pipeline | Yes | Yes | Yes |\n| Formatter | Yes | No | Yes |\n| Sanitizer | No | No | Yes |\n| Dispatcher | Yes | Yes | Yes |\n| Watcher | No | No | No |\n| Runner | Yes | Yes | Yes |\n",
-    ),
-    Block(
-        "#### Extended Task List for Beta Release\n",
-    ),
-    Block(
-        "- [x] Fix memory leak in `tokenizer`\n",
-    ),
-    Block(
-        "- [x] Update dependencies\n",
-    ),
-    Block(
-        "- [x] Implement `--dry-run`\n",
-    ),
-    Block(
-        "- [ ] Profile async runtime\n",
-    ),
-    Block(
-        "- [ ] Add telemetry opt-out\n",
-    ),
-    Block(
-        "- [ ] Create man pages\n",
-    ),
-    Block(
-        "- [ ] Benchmarking suite\n",
-    ),
-    Block(
-        "- [ ] Refactor `PromptManager`\n",
-    ),
-    Block(
-        "- [ ] Support YAML configs\n",
-    ),
-    Block(
-        "- [ ] Implement retry logic\n",
-    ),
-    Block(
-        "- [ ] Add progress bars\n",
-    ),
-    Block(
-        "- [ ] Optimize build size\n",
-    ),
-    Block(
-        "- [ ] Update README examples\n",
-    ),
-    Block(
-        "- [ ] Security audit\n",
-    ),
-    Block(
-        "- [ ] License check\n",
-    ),
-    Block(
-        "- [ ] CI/CD optimization\n",
-    ),
-    Block(
-        "- [ ] Dockerfile creation\n",
-    ),
-    Block(
-        "- [ ] Shell completions (Zsh)\n",
-    ),
-    Block(
-        "- [ ] Shell completions (Fish)\n",
-    ),
-    Block(
-        "- [ ] Shell completions (Bash)\n",
-    ),
-    Block(
-        "- [ ] Error message clarity review\n",
-    ),
-    Block(
-        "- [ ] Logging verbosity levels\n",
-    ),
-    Block(
-        "- [ ] Environment variable overrides\n",
-    ),
-    Block(
-        "- [ ] Configuration merging logic\n",
-    ),
-    Block(
-        "- [ ] Plugin API stabilization\n",
-    ),
-    Block(
-        "- [ ] Metadata extraction\n",
-    ),
-    Block(
-        "- [ ] Context window management\n",
-    ),
-    Block(
-        "- [ ] Token counting utility\n",
-    ),
-    Block(
-        "- [ ] Stream response handling\n",
-    ),
-    Block(
-        "- [ ] Keyboard interrupt handling\n",
-    ),
-    Block(
-        "- [ ] Terminal color support\n",
-    ),
-    Block(
-        "- [ ] Windows support validation\n",
-    ),
-    Block(
-        "- [ ] macOS support validation\n",
-    ),
-    Block(
-        "- [ ] Linux support validation\n",
-    ),
-    Block(
-        "#### Sample Configuration Example\n",
-    ),
+    FencedCodeLine {
+        content: "pub trait Provider {\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    fn complete(&self, prompt: &str) -> Result<String, Error>;\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "}\n",
+        indent: 0,
+    },
+    FencedCodeEnd {
+        fence: "```",
+        indent: 0,
+    },
+    Block {
+        content: "#### Detailed Feature Matrix\n",
+        indent: 0,
+    },
+    Block {
+        content: "| Component | Unit Tested | Integration Tested | Docstrings |\n| --- | --- | --- | --- |\n| Parser | Yes | Yes | Yes |\n| Encoder | Yes | No | Yes |\n| Buffer | No | No | Partial |\n| Logger | Yes | Yes | Yes |\n| Config | Yes | No | Yes |\n| API Client | No | Yes | Yes |\n| State | Yes | Yes | Partial |\n| Cache | Yes | No | Yes |\n| Registry | No | No | No |\n| Pipeline | Yes | Yes | Yes |\n| Formatter | Yes | No | Yes |\n| Sanitizer | No | No | Yes |\n| Dispatcher | Yes | Yes | Yes |\n| Watcher | No | No | No |\n| Runner | Yes | Yes | Yes |\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Extended Task List for Beta Release\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Fix memory leak in `tokenizer`\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Update dependencies\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Implement `--dry-run`\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Profile async runtime\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Add telemetry opt-out\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Create man pages\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Benchmarking suite\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Refactor `PromptManager`\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Support YAML configs\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Implement retry logic\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Add progress bars\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Optimize build size\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Update README examples\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Security audit\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] License check\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] CI/CD optimization\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Dockerfile creation\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Shell completions (Zsh)\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Shell completions (Fish)\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Shell completions (Bash)\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Error message clarity review\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Logging verbosity levels\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Environment variable overrides\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Configuration merging logic\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Plugin API stabilization\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Metadata extraction\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Context window management\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Token counting utility\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Stream response handling\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Keyboard interrupt handling\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Terminal color support\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Windows support validation\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] macOS support validation\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [ ] Linux support validation\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Sample Configuration Example\n",
+        indent: 0,
+    },
     FencedCodeStart {
         language: "toml",
         fence_type: Backtick,
         fence_length: 3,
+        indent: 0,
     },
-    FencedCodeLine(
-        "[general]\n",
-    ),
-    FencedCodeLine(
-        "editor = \"vim\"\n",
-    ),
-    FencedCodeLine(
-        "timeout = 30\n",
-    ),
-    FencedCodeLine(
-        "\n",
-    ),
-    FencedCodeLine(
-        "[llm]\n",
-    ),
-    FencedCodeLine(
-        "model = \"gpt-4\"\n",
-    ),
-    FencedCodeLine(
-        "temperature = 0.7\n",
-    ),
-    FencedCodeLine(
-        "\n",
-    ),
-    FencedCodeLine(
-        "[features]\n",
-    ),
-    FencedCodeLine(
-        "git_integration = true\n",
-    ),
-    FencedCodeLine(
-        "auto_copy = false\n",
-    ),
-    FencedCodeEnd(
-        "```",
-    ),
-    Block(
-        "#### Code Snippet: CLI Definition\n",
-    ),
+    FencedCodeLine {
+        content: "[general]\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "editor = \"vim\"\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "timeout = 30\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "[llm]\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "model = \"gpt-4\"\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "temperature = 0.7\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "[features]\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "git_integration = true\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "auto_copy = false\n",
+        indent: 0,
+    },
+    FencedCodeEnd {
+        fence: "```",
+        indent: 0,
+    },
+    Block {
+        content: "#### Code Snippet: CLI Definition\n",
+        indent: 0,
+    },
     FencedCodeStart {
         language: "rust",
         fence_type: Backtick,
         fence_length: 3,
+        indent: 0,
     },
-    FencedCodeLine(
-        "use clap::{Parser, Subcommand};\n",
-    ),
-    FencedCodeLine(
-        "\n",
-    ),
-    FencedCodeLine(
-        "#[derive(Parser)]\n",
-    ),
-    FencedCodeLine(
-        "#[command(name = \"jp\")]\n",
-    ),
-    FencedCodeLine(
-        "pub struct Cli {\n",
-    ),
-    FencedCodeLine(
-        "    #[command(subcommand)]\n",
-    ),
-    FencedCodeLine(
-        "    pub command: Commands,\n",
-    ),
-    FencedCodeLine(
-        "}\n",
-    ),
-    FencedCodeLine(
-        "\n",
-    ),
-    FencedCodeLine(
-        "#[derive(Subcommand)]\n",
-    ),
-    FencedCodeLine(
-        "pub enum Commands {\n",
-    ),
-    FencedCodeLine(
-        "    Ask { query: String },\n",
-    ),
-    FencedCodeLine(
-        "    Fix { file: String },\n",
-    ),
-    FencedCodeLine(
-        "}\n",
-    ),
-    FencedCodeEnd(
-        "```",
-    ),
-    Block(
-        "#### Citation Block\n",
-    ),
-    Block(
-        "> \"Good code is its own best documentation. As you're about to add a comment, ask\n> yourself, 'How can I improve the code so that this comment isn't needed?'\" — Steve McConnell\n\n",
-    ),
-    Block(
-        "#### Repetitive Content for Length\n",
-    ),
-    Block(
-        "Repeating the logic of the toolkit:\n\n",
-    ),
-    Block(
-        "1. Initialize the environment.\n",
-    ),
-    Block(
-        "2. Read the configuration file.\n",
-    ),
-    Block(
-        "3. Parse the command line arguments.\n",
-    ),
-    Block(
-        "4. Execute the requested subcommand.\n",
-    ),
-    Block(
-        "5. Return the result to the user.\nDetailed Step 1: Initialize the environment.\n\n",
-    ),
-    Block(
-        "- Check for required environment variables.\n",
-    ),
-    Block(
-        "- Initialize the logger.\n",
-    ),
-    Block(
-        "- Set up panic handlers.\nDetailed Step 2: Read configuration.\n\n",
-    ),
-    Block(
-        "- Look for `~/.config/jp/config.toml`.\n",
-    ),
-    Block(
-        "- Look for `.jp.toml` in current directory.\n",
-    ),
-    Block(
-        "- Merge configurations.\nDetailed Step 3: Parse arguments.\n\n",
-    ),
-    Block(
-        "- Use `clap` for efficient parsing.\n",
-    ),
-    Block(
-        "- Validate inputs.\n",
-    ),
-    Block(
-        "#### Extended Table for Formatting Test\n",
-    ),
-    Block(
-        "| Row ID | Description | Metadata | Active |\n| :-- | :-- | :-- | :-: |\n| 001 | Initialization | Init sequence | ✅ |\n| 002 | Tokenization | LLM pre-proc | ✅ |\n| 003 | Inference | API call | ✅ |\n| 004 | Post-processing | Regex clean | ❌ |\n| 005 | Rendering | Terminal output | ✅ |\n| 006 | Caching | File based | ✅ |\n| 007 | Auth | API Keys | ✅ |\n| 008 | History | Sqlite | ❌ |\n| 009 | Export | Markdown | ✅ |\n| 010 | Import | Codebase | ✅ |\n| 011 | Diagnostics | Health check | ✅ |\n| 012 | Update | Self-update | ❌ |\n| 013 | Help | Documentation | ✅ |\n| 014 | Version | Semantic | ✅ |\n| 015 | Telemetry | Usage stats | ❌ |\n",
-    ),
-    Block(
-        "#### More Nested Lists\n",
-    ),
-    Block(
-        "- Systems\n",
-    ),
-    Block(
-        "  - Hardware\n    - CPU\n    - RAM\n    - Storage\n",
-    ),
-    Block(
-        "  - Software\n    - OS\n      - Kernel\n      - Drivers\n    - User Space\n      - Shell\n      - Utilities\n",
-    ),
-    Block(
-        "- Development\n",
-    ),
-    Block(
-        "  - Language: Rust\n",
-    ),
-    Block(
-        "  - Framework: Tokio\n",
-    ),
-    Block(
-        "  - Library: Serde\n",
-    ),
-    Block(
-        "  - Library: Anyhow\n",
-    ),
-    Block(
-        "#### Code Snippet: File I/O\n",
-    ),
+    FencedCodeLine {
+        content: "use clap::{Parser, Subcommand};\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "#[derive(Parser)]\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "#[command(name = \"jp\")]\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "pub struct Cli {\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    #[command(subcommand)]\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    pub command: Commands,\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "}\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "#[derive(Subcommand)]\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "pub enum Commands {\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    Ask { query: String },\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    Fix { file: String },\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "}\n",
+        indent: 0,
+    },
+    FencedCodeEnd {
+        fence: "```",
+        indent: 0,
+    },
+    Block {
+        content: "#### Citation Block\n",
+        indent: 0,
+    },
+    Block {
+        content: "> \"Good code is its own best documentation. As you're about to add a comment, ask\n> yourself, 'How can I improve the code so that this comment isn't needed?'\" — Steve McConnell\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Repetitive Content for Length\n",
+        indent: 0,
+    },
+    Block {
+        content: "Repeating the logic of the toolkit:\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "1. Initialize the environment.\n",
+        indent: 0,
+    },
+    Block {
+        content: "2. Read the configuration file.\n",
+        indent: 0,
+    },
+    Block {
+        content: "3. Parse the command line arguments.\n",
+        indent: 0,
+    },
+    Block {
+        content: "4. Execute the requested subcommand.\n",
+        indent: 0,
+    },
+    Block {
+        content: "5. Return the result to the user.\nDetailed Step 1: Initialize the environment.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Check for required environment variables.\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Initialize the logger.\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Set up panic handlers.\nDetailed Step 2: Read configuration.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Look for `~/.config/jp/config.toml`.\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Look for `.jp.toml` in current directory.\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Merge configurations.\nDetailed Step 3: Parse arguments.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Use `clap` for efficient parsing.\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Validate inputs.\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Extended Table for Formatting Test\n",
+        indent: 0,
+    },
+    Block {
+        content: "| Row ID | Description | Metadata | Active |\n| :-- | :-- | :-- | :-: |\n| 001 | Initialization | Init sequence | ✅ |\n| 002 | Tokenization | LLM pre-proc | ✅ |\n| 003 | Inference | API call | ✅ |\n| 004 | Post-processing | Regex clean | ❌ |\n| 005 | Rendering | Terminal output | ✅ |\n| 006 | Caching | File based | ✅ |\n| 007 | Auth | API Keys | ✅ |\n| 008 | History | Sqlite | ❌ |\n| 009 | Export | Markdown | ✅ |\n| 010 | Import | Codebase | ✅ |\n| 011 | Diagnostics | Health check | ✅ |\n| 012 | Update | Self-update | ❌ |\n| 013 | Help | Documentation | ✅ |\n| 014 | Version | Semantic | ✅ |\n| 015 | Telemetry | Usage stats | ❌ |\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### More Nested Lists\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Systems\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Hardware\n",
+        indent: 2,
+    },
+    Block {
+        content: "- CPU\n",
+        indent: 4,
+    },
+    Block {
+        content: "- RAM\n",
+        indent: 4,
+    },
+    Block {
+        content: "- Storage\n",
+        indent: 4,
+    },
+    Block {
+        content: "- Software\n",
+        indent: 2,
+    },
+    Block {
+        content: "- OS\n",
+        indent: 4,
+    },
+    Block {
+        content: "- Kernel\n",
+        indent: 6,
+    },
+    Block {
+        content: "- Drivers\n",
+        indent: 6,
+    },
+    Block {
+        content: "- User Space\n",
+        indent: 4,
+    },
+    Block {
+        content: "- Shell\n",
+        indent: 6,
+    },
+    Block {
+        content: "- Utilities\n",
+        indent: 6,
+    },
+    Block {
+        content: "- Development\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Language: Rust\n",
+        indent: 2,
+    },
+    Block {
+        content: "- Framework: Tokio\n",
+        indent: 2,
+    },
+    Block {
+        content: "- Library: Serde\n",
+        indent: 2,
+    },
+    Block {
+        content: "- Library: Anyhow\n",
+        indent: 2,
+    },
+    Block {
+        content: "#### Code Snippet: File I/O\n",
+        indent: 0,
+    },
     FencedCodeStart {
         language: "rust",
         fence_type: Backtick,
         fence_length: 3,
+        indent: 0,
     },
-    FencedCodeLine(
-        "use std::fs::File;\n",
-    ),
-    FencedCodeLine(
-        "use std::io::{self, Read};\n",
-    ),
-    FencedCodeLine(
-        "\n",
-    ),
-    FencedCodeLine(
-        "fn read_config(path: &str) -> io::Result<String> {\n",
-    ),
-    FencedCodeLine(
-        "    let mut file = File::open(path)?;\n",
-    ),
-    FencedCodeLine(
-        "    let mut contents = String::new();\n",
-    ),
-    FencedCodeLine(
-        "    file.read_to_string(&mut contents)?;\n",
-    ),
-    FencedCodeLine(
-        "    Ok(contents)\n",
-    ),
-    FencedCodeLine(
-        "}\n",
-    ),
-    FencedCodeEnd(
-        "```",
-    ),
-    Block(
-        "#### Markdown Special Cases\n",
-    ),
-    Block(
-        "HTML entities: © & ™ ± Escaped pipe in table:\n\n",
-    ),
-    Block(
-        "| Column 1 | Column 2 |\n| --- | --- |\n| Use \\| to escape | Works |\n",
-    ),
-    Block(
-        "#### LaTeX (Math) Examples (If supported by renderer)\n",
-    ),
-    Block(
-        "Inline: $E = mc^2$\nBlock: $$ \\frac{n!}{k!(n-k)!} = \\binom{n}{k} $$\n",
-    ),
-    Block(
-        "#### Final Summary List\n",
-    ),
-    Block(
-        "- [x] Headings\n",
-    ),
-    Block(
-        "- [x] Text styles\n",
-    ),
-    Block(
-        "- [x] Nested lists\n",
-    ),
-    Block(
-        "- [x] Code blocks\n",
-    ),
-    Block(
-        "- [x] Tables\n",
-    ),
-    Block(
-        "- [x] Blockquotes\n",
-    ),
-    Block(
-        "- [x] Horizontal rules\n",
-    ),
-    Block(
-        "- [x] Images\n",
-    ),
-    Block(
-        "- [x] Links\n",
-    ),
-    Block(
-        "- [x] Task lists\n",
-    ),
-    Block(
-        "- [x] Footnotes\n",
-    ),
-    Block(
-        "- [x] Math\n",
-    ),
-    Block(
-        "- [x] HTML Entities\n",
-    ),
-    Block(
-        "- [x] Escaping\n",
-    ),
-    Block(
-        "#### Footer Information\n",
-    ),
-    Flush(
-        "Document generated for testing JP toolkit rendering capabilities. Last updated: 2023-10-27\nMaintainer: Jean-Pierre (AI)\n(End of Demo Document)\n",
-    ),
+    FencedCodeLine {
+        content: "use std::fs::File;\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "use std::io::{self, Read};\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "fn read_config(path: &str) -> io::Result<String> {\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    let mut file = File::open(path)?;\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    let mut contents = String::new();\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    file.read_to_string(&mut contents)?;\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "    Ok(contents)\n",
+        indent: 0,
+    },
+    FencedCodeLine {
+        content: "}\n",
+        indent: 0,
+    },
+    FencedCodeEnd {
+        fence: "```",
+        indent: 0,
+    },
+    Block {
+        content: "#### Markdown Special Cases\n",
+        indent: 0,
+    },
+    Block {
+        content: "HTML entities: © & ™ ± Escaped pipe in table:\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "| Column 1 | Column 2 |\n| --- | --- |\n| Use \\| to escape | Works |\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### LaTeX (Math) Examples (If supported by renderer)\n",
+        indent: 0,
+    },
+    Block {
+        content: "Inline: $E = mc^2$\nBlock: $$ \\frac{n!}{k!(n-k)!} = \\binom{n}{k} $$\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Final Summary List\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Headings\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Text styles\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Nested lists\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Code blocks\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Tables\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Blockquotes\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Horizontal rules\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Images\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Links\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Task lists\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Footnotes\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Math\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] HTML Entities\n",
+        indent: 0,
+    },
+    Block {
+        content: "- [x] Escaping\n",
+        indent: 0,
+    },
+    Block {
+        content: "#### Footer Information\n",
+        indent: 0,
+    },
+    Flush {
+        content: "Document generated for testing JP toolkit rendering capabilities. Last updated: 2023-10-27\nMaintainer: Jean-Pierre (AI)\n(End of Demo Document)\n",
+        indent: 0,
+    },
 ]

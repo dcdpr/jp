@@ -3,22 +3,36 @@ source: crates/jp_md/tests/buffer.rs
 description: "Source: mixed-list-bullets"
 ---
 [
-    Block(
-        "JP is a Rust-based command-line toolkit designed to augment software development workflows. You can initialize the\nenvironment by running `jp init` in your terminal. This tool bridges the gap between local codebases and LLMs.\nVisit the [Rust website](https://www.rust-lang.org/) for more information on the language.\n\n",
-    ),
-    Block(
-        "The architecture focuses on low latency and extensibility. Users can define custom prompts within the\n`config.toml` file to suit specific project needs. For further details, check the [repository](https://github.com/).\n\n",
-    ),
-    Block(
-        "- Core functionalities:\n",
-    ),
-    Block(
-        "  * Automated code review.\n",
-    ),
-    Block(
-        "  * Unit test generation.\n    + Support for `cargo test`.\n    + Mocking complex dependencies.\n",
-    ),
-    Flush(
-        "  * Refactoring suggestions.\n",
-    ),
+    Block {
+        content: "JP is a Rust-based command-line toolkit designed to augment software development workflows. You can initialize the\nenvironment by running `jp init` in your terminal. This tool bridges the gap between local codebases and LLMs.\nVisit the [Rust website](https://www.rust-lang.org/) for more information on the language.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "The architecture focuses on low latency and extensibility. Users can define custom prompts within the\n`config.toml` file to suit specific project needs. For further details, check the [repository](https://github.com/).\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Core functionalities:\n",
+        indent: 0,
+    },
+    Block {
+        content: "* Automated code review.\n",
+        indent: 2,
+    },
+    Block {
+        content: "* Unit test generation.\n",
+        indent: 2,
+    },
+    Block {
+        content: "+ Support for `cargo test`.\n",
+        indent: 4,
+    },
+    Block {
+        content: "+ Mocking complex dependencies.\n",
+        indent: 4,
+    },
+    Flush {
+        content: "* Refactoring suggestions.\n",
+        indent: 2,
+    },
 ]
