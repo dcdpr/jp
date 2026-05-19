@@ -114,6 +114,25 @@ async fn test_list_files() {
 }
 
 #[tokio::test]
+async fn dot_prefix_lists_workspace_root() {
+    // Regression: pre-PR, `prefixes: ["."]` walked the workspace via
+    // `root.join(".")`. The new validator rejects bare `.`, so the
+    // workspace-root sentinel needs to be honored alongside `""`.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("a.txt"), "").unwrap();
+    std::fs::write(root.join("b.txt"), "").unwrap();
+
+    let files = fs_list_files(root, Some(vec![".".to_owned()].into()), None)
+        .await
+        .unwrap();
+
+    let mut listed = files.into_files();
+    listed.sort();
+    assert_eq!(listed, vec!["a.txt".to_owned(), "b.txt".to_owned()]);
+}
+
+#[tokio::test]
 #[test_log::test]
 async fn test_empty_list() {
     let tmp = tempdir().unwrap();

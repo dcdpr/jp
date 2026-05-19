@@ -5,6 +5,31 @@ use camino_tempfile::tempdir;
 use super::*;
 
 #[tokio::test]
+async fn dot_means_workspace_root() {
+    // Regression: pre-PR, `paths: ["."]` resolved via `root.join(".")` and
+    // walked the workspace. The new validator rejects bare `.` because
+    // `clean-path` normalizes it to a `CurDir`-only path. Both grep_files
+    // and list_files special-case `.` alongside `""` to preserve the
+    // workspace-root sentinel.
+    let tmp = tempdir().unwrap();
+    std::fs::write(tmp.path().join("hello.txt"), "world").unwrap();
+
+    let matches = fs_grep_files(
+        tmp.path(),
+        "world".to_owned(),
+        None,
+        Some(vec![".".to_owned()].into()),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        matches.contains("hello.txt"),
+        "expected match in workspace root, got: {matches}"
+    );
+}
+
+#[tokio::test]
 async fn rejects_workspace_escape() {
     let tmp = tempdir().unwrap();
     let result = fs_grep_files(

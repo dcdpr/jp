@@ -25,9 +25,17 @@ pub(crate) async fn fs_delete_file(
                  automatically deleted.",
             );
         }
-        // File, Symlink (live or dangling), Other — all removable via
+        // Refuse on unusual entry types for consistency with `create_file`
+        // and `move_file::classify_source`. `fs::remove_file` would happily
+        // unlink a socket/FIFO/device, but the user-facing tool is "delete
+        // a file" — surfacing the kind lets the user reach for a different
+        // tool if they actually meant it.
+        Some(EntryKind::Other) => {
+            return error("Path is not a regular file, symlink, or directory.");
+        }
+        // File and Symlink (live or dangling) — both removable via
         // `fs::remove_file`, which unlinks the entry without following.
-        Some(_) => {}
+        Some(EntryKind::File | EntryKind::Symlink) => {}
     }
 
     if is_file_dirty(root, &resolved.relative)? {

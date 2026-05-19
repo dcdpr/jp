@@ -16,7 +16,8 @@ pub(crate) async fn fs_grep_files(
 ) -> std::result::Result<String, Error> {
     // `None` means "search the whole workspace." An explicit `Some(vec![])`
     // means "search nothing" (preserved from the previous behavior). An
-    // empty string inside the list is treated as the workspace root.
+    // empty string or bare `.` inside the list is treated as the workspace
+    // root — pre-PR callers used both interchangeably via `root.join(p)`.
     // Non-empty entries are validated through `clean_workspace_path`, so
     // escape attempts are a hard error rather than silently filtered.
     let absolute_paths: Vec<Utf8PathBuf> = match paths.as_deref() {
@@ -24,7 +25,7 @@ pub(crate) async fn fs_grep_files(
         Some(items) => {
             let mut out = Vec::with_capacity(items.len());
             for p in items {
-                if p.is_empty() {
+                if p.is_empty() || p == "." {
                     out.push(root.to_owned());
                     continue;
                 }

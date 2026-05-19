@@ -137,6 +137,40 @@ async fn deleting_missing_path_errors() {
     }
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn deleting_socket_entry_errors() {
+    // Sockets (and FIFOs, block/char devices) map to `EntryKind::Other`.
+    // `fs::remove_file` would happily unlink them, but the user-facing
+    // tool is "delete a file" — surface the kind so the user can reach
+    // for a different tool if they actually meant it.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    let socket_path = root.join("my.sock");
+    // Bind keeps the file in place; tempdir cleanup will unlink it.
+    let _listener = std::os::unix::net::UnixListener::bind(socket_path.as_std_path()).unwrap();
+
+    let result = fs_delete_file(root, &no_answers(), "my.sock".to_owned())
+        .await
+        .unwrap();
+
+    match result {
+        Outcome::Error { message, .. } => {
+            assert!(
+                message.contains("regular file"),
+                "unexpected error: {message}"
+            );
+        }
+        other => panic!("expected Error, got {other:?}"),
+    }
+    // The socket entry should still be in place.
+    let meta = std::fs::symlink_metadata(&socket_path).unwrap();
+    assert!(
+        !meta.file_type().is_file() && !meta.file_type().is_dir(),
+        "socket entry should still exist as a non-file, non-dir"
+    );
+}
+
 #[tokio::test]
 async fn deleting_directory_errors() {
     let dir = tempdir().unwrap();
