@@ -165,7 +165,7 @@ impl ToolRenderer {
         &self,
         name: &str,
         arguments: &Map<String, Value>,
-        cmd: ToolCommandConfig,
+        cmd: CommandConfig,
     ) -> RenderOutcome {
         match format_args_custom(name, arguments, cmd, &self.root).await {
             Ok(content) if !content.is_empty() => {
@@ -578,7 +578,7 @@ fn format_args_json(arguments: Map<String, Value>) -> String {
 async fn format_args_custom(
     tool_name: &str,
     arguments: &Map<String, Value>,
-    cmd: ToolCommandConfig,
+    cmd: CommandConfig,
     root: &Utf8Path,
 ) -> Result<String, String> {
     let ctx = serde_json::json!({
