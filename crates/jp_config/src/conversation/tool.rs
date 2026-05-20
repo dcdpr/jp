@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tracing::warn;
 
+pub use crate::types::command::{
+    CommandConfig, CommandConfigOrString, PartialCommandConfig, PartialCommandConfigOrString,
+};
 use crate::{
-    BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     assistant::PartialAssistantConfig,
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
@@ -468,166 +470,6 @@ impl ToPartial for ToolConfig {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
-        }
-    }
-}
-
-/// Command configuration, either as a string or a complete configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
-#[config(rename_all = "snake_case", serde(untagged))]
-#[serde(untagged)]
-pub enum CommandConfigOrString {
-    /// A single string, which is interpreted as the command to run.
-    String(String),
-
-    /// A complete command configuration.
-    #[setting(nested)]
-    Config(ToolCommandConfig),
-}
-
-impl fmt::Display for CommandConfigOrString {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::String(v) => write!(f, "{v}"),
-            Self::Config(v) => write!(f, "{v}"),
-        }
-    }
-}
-
-impl AssignKeyValue for PartialCommandConfigOrString {
-    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
-        match kv.key_string().as_str() {
-            "" => *self = kv.try_object_or_from_str()?,
-            _ => match self {
-                Self::String(_) => return missing_key(&kv),
-                Self::Config(config) => config.assign(kv)?,
-            },
-        }
-
-        Ok(())
-    }
-}
-
-impl PartialConfigDelta for PartialCommandConfigOrString {
-    fn delta(&self, next: Self) -> Self {
-        match (self, next) {
-            (Self::Config(prev), Self::Config(next)) => Self::Config(prev.delta(next)),
-            (_, next) => next,
-        }
-    }
-}
-
-impl ToPartial for CommandConfigOrString {
-    fn to_partial(&self) -> Self::Partial {
-        match self {
-            Self::String(v) => Self::Partial::String(v.to_owned()),
-            Self::Config(v) => Self::Partial::Config(v.to_partial()),
-        }
-    }
-}
-
-impl FromStr for PartialCommandConfigOrString {
-    type Err = BoxedError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::String(s.to_owned()))
-    }
-}
-
-impl CommandConfigOrString {
-    /// Return the command configuration.
-    ///
-    /// If the configuration is a string, it is interpreted as a shell command.
-    #[must_use]
-    pub fn command(self) -> ToolCommandConfig {
-        match self {
-            Self::String(v) => {
-                let mut iter = v.split_whitespace().map(str::to_owned);
-
-                ToolCommandConfig {
-                    program: iter.next().unwrap_or_default(),
-                    args: iter.collect(),
-                    shell: false,
-                }
-            }
-            Self::Config(v) => v,
-        }
-    }
-}
-
-/// Tool command configuration.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
-#[config(rename_all = "snake_case")]
-pub struct ToolCommandConfig {
-    /// The program to run.
-    pub program: String,
-
-    /// The arguments to pass to the program.
-    #[setting(default = vec![])]
-    pub args: Vec<String>,
-
-    /// Whether to run the command in a shell.
-    ///
-    /// If this is enabled, a shell will be invoked to run the command. This
-    /// allows for things like piping and subshells.
-    ///
-    /// NOTE that setting this to `true` implies that JP will always ask for
-    /// confirmation before running the tool, for security reasons.
-    #[setting(default)]
-    pub shell: bool,
-}
-
-impl fmt::Display for ToolCommandConfig {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.shell {
-            writeln!(f, "/bin/sh -c'")?;
-        }
-
-        write!(f, "{}", self.program)?;
-        for arg in &self.args {
-            write!(f, " {arg}")?;
-        }
-
-        if self.shell {
-            write!(f, "'")?;
-        }
-
-        Ok(())
-    }
-}
-
-impl AssignKeyValue for PartialToolCommandConfig {
-    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
-        match kv.key_string().as_str() {
-            "" => kv.try_merge_object(self)?,
-            "program" => self.program = kv.try_some_string()?,
-            _ if kv.p("args") => kv.try_some_vec_of_strings(&mut self.args)?,
-            "shell" => self.shell = kv.try_some_bool()?,
-            _ => return missing_key(&kv),
-        }
-
-        Ok(())
-    }
-}
-
-impl PartialConfigDelta for PartialToolCommandConfig {
-    fn delta(&self, next: Self) -> Self {
-        Self {
-            program: delta_opt(self.program.as_ref(), next.program),
-            args: delta_opt_vec(self.args.as_ref(), next.args),
-            shell: delta_opt(self.shell.as_ref(), next.shell),
-        }
-    }
-}
-
-impl ToPartial for ToolCommandConfig {
-    fn to_partial(&self) -> Self::Partial {
-        let defaults = Self::Partial::default();
-
-        Self::Partial {
-            program: partial_opt(&self.program, defaults.program),
-            args: partial_opt(&self.args, defaults.args),
-            shell: partial_opt(&self.shell, defaults.shell),
         }
     }
 }
@@ -1111,7 +953,7 @@ impl ToolConfigWithDefaults {
 
     /// Return the command to run the tool.
     #[must_use]
-    pub fn command(&self) -> Option<ToolCommandConfig> {
+    pub fn command(&self) -> Option<CommandConfig> {
         self.tool
             .command
             .clone()

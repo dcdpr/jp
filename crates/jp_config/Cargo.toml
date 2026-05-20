@@ -40,6 +40,7 @@ serde-untagged = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 serde_json5 = { workspace = true }
 serde_yaml = { workspace = true }
+shlex = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true, features = ["parse", "serde", "display", "preserve_order"] }
 toml_edit = { workspace = true, features = ["parse", "display"] }

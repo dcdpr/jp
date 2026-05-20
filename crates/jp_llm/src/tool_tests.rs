@@ -556,7 +556,7 @@ fn test_split_trims_whitespace() {
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_renders_null_args_as_valid_json() {
-    use jp_config::conversation::tool::ToolCommandConfig;
+    use jp_config::conversation::tool::CommandConfig;
 
     let ctx = json!({
         "tool": {
@@ -575,7 +575,7 @@ async fn test_run_tool_command_renders_null_args_as_valid_json() {
         },
     });
 
-    let command = ToolCommandConfig {
+    let command = CommandConfig {
         program: "echo".to_owned(),
         args: vec!["{{tool}}".to_owned()],
         shell: false,
@@ -608,7 +608,7 @@ async fn test_run_tool_command_renders_null_args_as_valid_json() {
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_renders_scalar_strings_raw() {
-    use jp_config::conversation::tool::ToolCommandConfig;
+    use jp_config::conversation::tool::CommandConfig;
 
     let ctx = json!({
         "tool": {
@@ -616,7 +616,7 @@ async fn test_run_tool_command_renders_scalar_strings_raw() {
         },
     });
 
-    let command = ToolCommandConfig {
+    let command = CommandConfig {
         program: "echo".to_owned(),
         args: vec!["{{tool.arguments.title}}".to_owned()],
         shell: false,
@@ -640,13 +640,13 @@ async fn test_run_tool_command_renders_scalar_strings_raw() {
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_renders_null_scalar_as_literal_null() {
-    use jp_config::conversation::tool::ToolCommandConfig;
+    use jp_config::conversation::tool::CommandConfig;
 
     let ctx = json!({
         "tool": { "arguments": { "maybe": null } },
     });
 
-    let command = ToolCommandConfig {
+    let command = CommandConfig {
         program: "echo".to_owned(),
         args: vec!["{{tool.arguments.maybe}}".to_owned()],
         shell: false,
@@ -672,7 +672,7 @@ async fn test_run_tool_command_renders_null_scalar_as_literal_null() {
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_rfd_draft_title_rendering() {
-    use jp_config::conversation::tool::ToolCommandConfig;
+    use jp_config::conversation::tool::CommandConfig;
 
     let ctx = json!({
         "tool": {
@@ -684,7 +684,7 @@ async fn test_run_tool_command_rfd_draft_title_rendering() {
     });
 
     // Mimic the real `just rfd-draft {{variant}} {{title}}` template.
-    let command = ToolCommandConfig {
+    let command = CommandConfig {
         program: "printf".to_owned(),
         args: vec![
             "%s|%s".to_owned(),
@@ -716,13 +716,13 @@ async fn test_run_tool_command_rfd_draft_title_rendering() {
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_tojson_filter_on_scalar_still_works() {
-    use jp_config::conversation::tool::ToolCommandConfig;
+    use jp_config::conversation::tool::CommandConfig;
 
     let ctx = json!({
         "tool": { "arguments": { "title": "Hello" } },
     });
 
-    let command = ToolCommandConfig {
+    let command = CommandConfig {
         program: "echo".to_owned(),
         args: vec!["{{tool.arguments.title | tojson}}".to_owned()],
         shell: false,

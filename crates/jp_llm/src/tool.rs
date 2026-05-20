@@ -9,7 +9,7 @@ pub use builtin::BuiltinTool;
 use camino::Utf8Path;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{
-    OneOrManyTypes, ToolCommandConfig, ToolConfigWithDefaults, ToolParameterConfig, ToolSource,
+    CommandConfig, OneOrManyTypes, ToolConfigWithDefaults, ToolParameterConfig, ToolSource,
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_mcp::{
@@ -400,13 +400,13 @@ fn format_tool_template_value(
 /// spawned child. Both are requested via `Stdio::piped()`, so this is not
 /// expected to happen in practice.
 pub async fn run_tool_command(
-    command: ToolCommandConfig,
+    command: CommandConfig,
     ctx: Value,
     root: &Utf8Path,
     cancellation_token: CancellationToken,
     trace_as: Option<ToolTrace<'_>>,
 ) -> Result<CommandResult, ToolError> {
-    let ToolCommandConfig {
+    let CommandConfig {
         program,
         args,
         shell,
