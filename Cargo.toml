@@ -144,7 +144,7 @@ unicode-width = { version = "0.2", default-features = false }
 url = { version = "2", default-features = false }
 which = { version = "8", default-features = false }
 windows-sys = { version = "0.61", default-features = false }
-zip = { version = "2", default-features = false, features = ["bzip2"] }
+zip = { version = "2", default-features = false }
 
 [patch.crates-io]
 openai_responses = { git = "https://github.com/JeanMertz/openai-responses-rs" } # <https://github.com/m1guelpf/openai-responses-rs/pull/6>

@@ -33,7 +33,8 @@ enum Command {
         #[arg(short, long)]
         version: Option<String>,
 
-        /// Root directory to save the documentation to (defaults to temp dir).
+        /// Root directory to save the documentation to (defaults to the
+        /// user cache directory, e.g. `~/Library/Caches/bookworm/crates`).
         #[arg(short, long)]
         root: Option<PathBuf>,
     },
