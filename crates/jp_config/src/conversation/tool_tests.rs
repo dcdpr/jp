@@ -181,7 +181,7 @@ fn test_tool_config_command() {
     );
 
     let cfg = CommandConfigOrString::from_partial(p.command.clone().unwrap(), vec![]).unwrap();
-    assert_eq!(cfg.command(), ToolCommandConfig {
+    assert_eq!(cfg.command(), CommandConfig {
         program: "cargo".to_owned(),
         args: vec!["check".to_owned()],
         shell: false,
@@ -195,17 +195,15 @@ fn test_tool_config_command() {
     p.assign(kv).unwrap();
     assert_eq!(
         p.command,
-        Some(PartialCommandConfigOrString::Config(
-            PartialToolCommandConfig {
-                program: Some("cargo".to_owned()),
-                args: Some(vec!["check".to_owned(), "--verbose".to_owned()]),
-                shell: Some(true),
-            }
-        ))
+        Some(PartialCommandConfigOrString::Config(PartialCommandConfig {
+            program: Some("cargo".to_owned()),
+            args: Some(vec!["check".to_owned(), "--verbose".to_owned()]),
+            shell: Some(true),
+        }))
     );
 
     let cfg = CommandConfigOrString::from_partial(p.command.unwrap(), vec![]).unwrap();
-    assert_eq!(cfg.command(), ToolCommandConfig {
+    assert_eq!(cfg.command(), CommandConfig {
         program: "cargo".to_owned(),
         args: vec!["check".to_owned(), "--verbose".to_owned()],
         shell: true,

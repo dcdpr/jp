@@ -79,4 +79,16 @@ fn test_editor_config_path() {
     let _env = EnvVarGuard::set("JP_EDITOR2", "doesnotexist");
     p.envs = vec!["JP_EDITOR2".into()];
     assert_eq!(p.path(), None);
+
+    // Env-var values are shlex-split; the first token is the binary, args
+    // are preserved by `command()` (verified separately) and dropped by
+    // `path()`. The binary must still be on PATH.
+    let _env = EnvVarGuard::set("JP_EDITOR3", "vi --readonly");
+    p.envs = vec!["JP_EDITOR3".into()];
+    assert!(p.path().unwrap().to_string().ends_with("/bin/vi"));
+
+    // Unbalanced quoting causes the env var to be skipped.
+    let _env = EnvVarGuard::set("JP_EDITOR4", "vi 'unterminated");
+    p.envs = vec!["JP_EDITOR4".into()];
+    assert_eq!(p.path(), None);
 }

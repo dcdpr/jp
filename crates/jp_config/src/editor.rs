@@ -27,12 +27,18 @@ pub struct EditorConfig {
     ///
     /// Defaults to `JP_EDITOR`, `VISUAL`, and `EDITOR`.
     ///
-    /// Note that for security reasons, the value of these environment variables
-    /// are split by whitespace, and only the first element is used for the
-    /// command. Meaning, you cannot set `JP_EDITOR="subl -w"`, because it will
-    /// only run `subl`. You can either create your own wrapper script, and call
-    /// that directly (e.g. `sublw`), or set the `cmd` option to `subl -w`, as
-    /// that will use all elements of the command.
+    /// Values are parsed using shell-word semantics (via `shlex`): the first
+    /// token is the program, remaining tokens are arguments. Shell
+    /// metacharacters like `|`, `&&`, or `>` are not interpreted — set
+    /// `cmd` instead for full shell-mode parsing. Examples:
+    ///
+    /// - `JP_EDITOR="subl -w"` runs `subl` with `-w`.
+    /// - `JP_EDITOR='code --wait --new-window'` runs `code` with two args.
+    /// - `JP_EDITOR='nvim -c "set ft=md"'` runs `nvim` with args `-c` and
+    ///   `set ft=md`.
+    ///
+    /// Values with unbalanced quoting are skipped (the next env var in the
+    /// list is tried).
     #[setting(
         default = vec!["JP_EDITOR".into(), "VISUAL".into(), "EDITOR".into()],
         merge = schematic::merge::append_vec,
@@ -87,37 +93,40 @@ impl EditorConfig {
     ///
     /// If no command is configured, and no configured environment variables are
     /// set, returns `None`.
+    ///
+    /// Env-var values are split with [`shlex::split`] so `JP_EDITOR="code -w"`
+    /// correctly runs `code` with `-w` as an argument. Values with unbalanced
+    /// quoting are skipped. The `cmd` field uses full shell-mode parsing (via
+    /// `duct_sh::sh_dangerous`) for backwards compatibility with shell
+    /// metacharacters like `&&` and `|`.
     #[must_use]
     pub fn command(&self) -> Option<Expression> {
         self.cmd.clone().map(duct_sh::sh_dangerous).or_else(|| {
             self.envs.iter().find_map(|v| {
-                env::var(v)
-                    .ok()
-                    .filter(|s| {
-                        s.split_ascii_whitespace()
-                            .next()
-                            .is_some_and(|c| which::which(c).is_ok())
-                    })
-                    .map(|s| {
-                        duct::cmd::<&str, &[&str]>(
-                            s.split_ascii_whitespace().next().unwrap_or(&s),
-                            &[],
-                        )
-                    })
+                let value = env::var(v).ok()?;
+                let mut parts = shlex::split(&value)?.into_iter();
+                let program = parts.next()?;
+                if which::which(&program).is_err() {
+                    return None;
+                }
+                let args: Vec<String> = parts.collect();
+                Some(duct::cmd(program, args))
             })
         })
     }
 
     /// Return the path to the editor, if any.
+    ///
+    /// For env-var fallback, the first shlex token is taken as the binary;
+    /// any additional arguments are dropped (use [`Self::command`] when the
+    /// caller can invoke the program with arguments).
     #[must_use]
     pub fn path(&self) -> Option<Utf8PathBuf> {
         self.cmd.as_ref().map(Utf8PathBuf::from).or_else(|| {
             self.envs.iter().find_map(|v| {
-                env::var(v).ok().and_then(|s| {
-                    s.split_ascii_whitespace()
-                        .next()
-                        .and_then(|c| which::which(c).ok().and_then(|p| p.try_into().ok()))
-                })
+                let value = env::var(v).ok()?;
+                let program = shlex::split(&value)?.into_iter().next()?;
+                which::which(&program).ok().and_then(|p| p.try_into().ok())
             })
         })
     }

@@ -1,6 +1,7 @@
 //! Extended configuration types.
 
 pub mod color;
+pub mod command;
 pub mod extending_path;
 pub mod json_value;
 pub mod map;
