@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use schematic::{PartialConfig as _, SchemaBuilder, SchemaType, schema::LiteralValue};
+use schematic::{SchemaBuilder, SchemaType, schema::LiteralValue};
 use serde_json::json;
 
 use super::*;

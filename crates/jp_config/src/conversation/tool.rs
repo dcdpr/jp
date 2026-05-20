@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tracing::warn;
 
+pub use crate::types::command::{
+    CommandConfig, CommandConfigOrString, PartialCommandConfig, PartialCommandConfigOrString,
+};
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     assistant::PartialAssistantConfig,
@@ -15,10 +18,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_vec},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
-    types::{
-        command::{CommandConfig, CommandConfigOrString, PartialCommandConfigOrString},
-        json_value::JsonValue,
-    },
+    types::json_value::JsonValue,
     util::merge_nested_indexmap,
 };
 
