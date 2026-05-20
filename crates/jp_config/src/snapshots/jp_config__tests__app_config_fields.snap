@@ -75,6 +75,8 @@ expression: "AppConfig::fields()"
     "conversation.tools.*.style.inline_results",
     "conversation.tools.*.style.parameters",
     "conversation.tools.*.style.results_file_link",
+    "conversation.tools.*.style.error.inline_results",
+    "conversation.tools.*.style.error.results_file_link",
     "conversation.title.generate.auto",
     "conversation.title.generate.model",
     "conversation.inquiry.assistant.model",

@@ -1038,13 +1038,14 @@ impl ToolCoordinator {
                         .get(&index)
                         .map(|t| t.tool_name.clone())
                         .unwrap_or_default();
+                    let is_error = response.result.is_err();
                     let (inline_results, results_file_link) = self
                         .tools_config
                         .get(&tool_name)
                         .map(|c| {
                             (
-                                c.style().inline_results.clone(),
-                                c.style().results_file_link.clone(),
+                                c.style().inline_results(is_error).clone(),
+                                c.style().results_file_link(is_error).clone(),
                             )
                         })
                         .unwrap_or_default();
@@ -1252,13 +1253,14 @@ impl ToolCoordinator {
     ) {
         match result {
             ExecutorResult::Completed(response) => {
+                let is_error = response.result.is_err();
                 let (inline_results, results_file_link) = self
                     .tools_config
                     .get(&tool.tool_name)
                     .map(|c| {
                         (
-                            c.style().inline_results.clone(),
-                            c.style().results_file_link.clone(),
+                            c.style().inline_results(is_error).clone(),
+                            c.style().results_file_link(is_error).clone(),
                         )
                     })
                     .unwrap_or_default();

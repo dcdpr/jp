@@ -16,7 +16,7 @@ use jp_config::{
     conversation::tool::{
         CommandConfigOrString, PartialCommandConfigOrString, PartialToolConfig, QuestionConfig,
         QuestionTarget, RunMode, ToolConfig, ToolSource,
-        style::{DisplayStyleConfig, InlineResults, LinkStyle, ParametersStyle},
+        style::{DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle},
     },
     model::id::{self, Name, PartialModelIdConfig, ProviderId},
 };
@@ -2634,6 +2634,10 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             inline_results: InlineResults::Off,
             results_file_link: LinkStyle::Off,
             parameters: ParametersStyle::FunctionCall,
+            error: ErrorStyleConfig {
+                inline_results: None,
+                results_file_link: None,
+            },
         });
 
         // Configure tools with FunctionCall style for readable output.
