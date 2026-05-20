@@ -9,7 +9,6 @@ use serde_json::{Map, Value};
 use tracing::warn;
 
 use crate::{
-    BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     assistant::PartialAssistantConfig,
     conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
@@ -17,10 +16,7 @@ use crate::{
     fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::{
-        command::{
-            CommandConfig, CommandConfigOrString, PartialCommandConfig,
-            PartialCommandConfigOrString,
-        },
+        command::{CommandConfig, CommandConfigOrString, PartialCommandConfigOrString},
         json_value::JsonValue,
     },
     util::merge_nested_indexmap,
