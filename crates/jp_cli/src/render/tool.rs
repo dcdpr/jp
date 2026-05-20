@@ -4,7 +4,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::Stylize as _;
 use jp_config::{
     conversation::tool::{
-        ToolCommandConfig,
+        CommandConfig,
         style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
     },
     style::StyleConfig,
