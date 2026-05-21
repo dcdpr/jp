@@ -1,0 +1,319 @@
+[[assistant.system_prompt_sections]]
+tag = "JP Config: What This Crate Is"
+content = """\
+`jp_config` is the typed configuration tree for JP. It is the source \
+of truth for every option JP exposes — model providers, conversation \
+behavior, tool execution policy, rendering style, plugins, user identity, \
+and more.
+
+The crate is built on the in-tree `schematic` framework \
+(`crates/contrib/schematic`), which provides:
+
+- Paired partial / resolved type generation per `#[derive(Config)]` struct.
+- Layered loading with per-field merge strategies.
+- Environment-variable parsing (`JP_CFG_*`).
+- Schema introspection (`Schema`, `SchemaBuilder`).
+
+`AppConfig` is the root. Every nested section is its own \
+`#[derive(Config)]` struct in the same crate. The pipeline that drives this \
+crate — file I/O, ancestor walking, CLI overrides — lives in \
+`jp_cli::config_pipeline` and `jp_config::fs::ConfigLoader`. The crate \
+itself is types and merge primitives only.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "JP Config: Resolved vs Partial Types"
+content = """\
+Every config type has two forms:
+
+- `FooConfig` — **resolved**. Every field is present. Built from a partial \
+  via `Config::from_partial`. Consumed by the rest of JP at runtime.
+
+- `PartialFooConfig` — **partial**. Every field is `Option<T>`. The merge \
+  form. Loading, layering, env-var injection, CLI overrides, and \
+  conversation-stream deltas all operate on partials.
+
+The flow is: load each layer as a partial → merge partials → finalize into \
+a resolved config → use.
+
+**One footgun to remember.** `Config::from_partial` does **not** apply \
+`#[setting(default = ...)]` values — those are only injected by \
+`PartialConfig::finalize` (called via `default_values`). Calling \
+`from_partial` on an unfinalized partial silently falls back to Rust's \
+`Default` trait — `""` for `String`, `0` for `u16`, etc. Always go through \
+`AppConfig::from_partial_with_defaults`, which merges schematic defaults as \
+a base layer before converting.
+
+Three traits make a new config type participate in the pipeline:
+
+- `PartialConfigDelta` — produce the diff between two partials. Used to \
+  record minimal deltas in the conversation stream.
+- `FillDefaults` — gap-fill `None` fields from a defaults partial without \
+  applying merge strategies. Distinct from `PartialConfig::merge`, which \
+  dispatches per-field strategies (`append_vec`, `preserve`, …).
+- `ToPartial` — re-derive a partial from a resolved value. Used when \
+  re-emitting deltas or constructing test fixtures.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "JP Config: Layered Loading"
+content = """\
+Layers are applied in this order, with later layers overriding earlier ones:
+
+1. Schematic defaults (`#[setting(default = ...)]`).
+2. User-global config (`~/.config/jp/config.toml`; platform-specific path).
+3. Ancestor workspace configs walked up from CWD, unless `inherit = false` \
+   stops the walk.
+4. The current workspace config (`.jp/config.toml`).
+5. `extends` files declared by any loaded config (paths relative to the \
+   declaring file; globs allowed).
+6. `--cfg <name>` files resolved against `config_load_paths`.
+7. Environment variables (`JP_CFG_*`).
+8. Conversation-stream deltas (per-turn overrides).
+9. CLI overrides (`--cfg-set key=value`).
+
+Merging is per-field. The `#[setting(merge = ...)]` attribute on a field \
+controls the strategy: `replace` (default), `append_vec`, `preserve`, or a \
+custom merge function. When writing or reviewing code that touches a config \
+field, the merge strategy is part of the public contract — check the field \
+declaration before assuming.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "JP Config: Boundary Discipline"
+content = """\
+`jp_config` is **types only** plus the in-memory merge primitives. It does \
+not:
+
+- Open files. (File loading lives in `jp_config::fs::ConfigLoader`, which is \
+  explicitly the I/O-aware corner.)
+- Talk to the CLI parser.
+- Render anything to the terminal.
+- Decide where the workspace root lives.
+
+The orchestration that drives this crate lives in `jp_cli::config_pipeline` \
+and `jp_workspace`. New runtime concerns belong there, not in `jp_config`. \
+If a change to a config type starts pulling in I/O, terminal rendering, or \
+workspace-walking logic, the boundary is wrong — push the new code up to \
+the consumer instead.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "JP Config: Doc Comments Are User Documentation"
+content = """\
+Doc comments on `*Config` types and their fields in this crate are \
+**user-facing documentation**. They are surfaced through two channels:
+
+- **The auto-generated `config.toml` produced by `jp init`.** Each `///` \
+  on a field becomes a `# ...` comment next to its key. A user setting up \
+  their workspace reads these lines as they decide which defaults to tune.
+
+- **The JSON Schema exported for programmatic consumption.** JP is a \
+  toolkit meant to be embedded in users' workflows; tools and scripts built \
+  on top of JP consume the schema for validation, generation, and editor \
+  integrations. Each `///` becomes the `description` field of the \
+  corresponding schema property.
+
+Write each comment as if it were a paragraph in the configuration manual, \
+because it is.
+
+- **Write for the user holding a TOML file, not the contributor holding the \
+  Rust source.** The reader wants to know: what does this key do, what \
+  values can I put here, what happens if I leave it unset? They do not want \
+  `#[setting(...)]` attribute trivia, partial-vs-resolved distinctions, or \
+  notes about the schematic macro.
+
+- **Lead with the user-visible behavior.** The first sentence has to land \
+  standalone — it's the line the user reads in their editor while deciding \
+  whether to uncomment the key.
+
+- **State the default and the effect of omitting the field.** \
+  "Defaults to `5`. Set to `0` to disable." or "If unset, falls back to \
+  `parent_field`." This is the single most useful fact for a config field.
+
+- **List accepted values explicitly for enums.** A user reading \
+  `style.parameters = "..."` in their editor cannot follow an intra-doc \
+  link to a Rust enum. Name the values directly: `json`, `function_call`, \
+  `off`, `<command>`.
+
+- **Use config keys, not Rust names.** Reference `style.parameters` (what \
+  the user writes), not `CallStyleConfig::parameters` (what the contributor \
+  sees). Cross-doc links like `[`Foo`](Self::foo)` make sense in API docs \
+  but render as noise in TOML comments — keep them out of `*Config` \
+  comments unless they actually help the user.
+
+- **Module-level `//!` is the section preamble.** It renders above the \
+  `[section]` header in the generated TOML. Treat it as the opening of a \
+  configuration guide for that section — what the section is for, the \
+  canonical TOML example, the most useful one or two settings.
+
+- **No history references.** "Used to be on the inner config" belongs in a \
+  commit message, not the user's `config.toml`.
+
+- **No implementation leak.** "Lives at `style.error.*` on the wire (not \
+  flattened)" leaks the Rust mechanism. Just say "Lives at `style.error.*`" \
+  or — better — show the TOML directly.
+"""
+
+[[assistant.instructions]]
+title = "JP Config: Doc Comment Examples"
+description = """\
+Concrete contrasts for `*Config` fields and modules in the `jp_config` \
+crate. The "bad" versions are real patterns the assistant has produced and \
+been corrected on.\
+"""
+items = [
+    """\
+    **Lead with what the user sees.** The first sentence is what lands in \
+    their TOML or schema description.\
+    """,
+    """\
+    **State the default and what omitting the key does.** Put this near \
+    the top, not as an aside.\
+    """,
+    """\
+    **List enum values explicitly.** A reader in a TOML file can't click \
+    an intra-doc link.\
+    """,
+    """\
+    **Reference config keys, not Rust paths.** `style.parameters`, not \
+    `CallStyleConfig::parameters`.\
+    """,
+    """\
+    **Keep schematic and partial/resolved talk out of the comment.** The \
+    user doesn't have that vocabulary.\
+    """,
+    """\
+    **Module-level `//!` opens the section.** Show the canonical TOML, \
+    don't list helper functions.\
+    """,
+]
+
+[[assistant.instructions.examples]]
+good = """\
+/// Whether to hide this tool's calls from terminal output.
+///
+/// When `true`, the tool executes normally and its events are recorded,
+/// but no call header, arguments, or results are rendered to the terminal.
+#[setting(default = false)]
+pub hidden: bool,\
+"""
+bad = """\
+/// Whether to hide this tool's calls from terminal output.
+///
+/// This used to be on the inner config, but was moved here so it applies
+/// to both request and response rendering.
+#[setting(default = false)]
+pub hidden: bool,\
+"""
+reason = """\
+The bad version pulls the reader into history they don't have, and lands in \
+the user's `config.toml` as a confusing `# This used to be on…` line. The \
+good version describes the current behavior directly.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// Overrides for rendering failed tool call responses.
+///
+/// Unset fields fall back to the matching field on `style.response`.
+///
+/// ```toml
+/// [tools.my_tool.style.error]
+/// inline_results = "full"
+/// ```
+pub error: ErrorStyleConfig,\
+"""
+bad = """\
+/// Overlay applied on top of [`response`](Self::response) for failed
+/// tool call responses.
+///
+/// Each field on [`ErrorStyleConfig`] is optional and falls back to
+/// the matching field on `response` when unset. Lives at
+/// `style.error.*` on the wire (not flattened) to signal that it's
+/// a sub-block of `style`, not a peer.
+pub error: ErrorStyleConfig,\
+"""
+reason = """\
+The bad version leaks Rust-attribute mechanics ("not flattened on the wire") \
+and gestures at a comparison the user has no context for. The good version \
+uses the config key the user actually writes and shows them how.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// How to display the tool call parameters.
+///
+/// - `json`: Show as a JSON block.
+/// - `function_call`: Show as `tool_name(arg = "value")` syntax.
+/// - `off`: Don't display parameters.
+/// - `<command>`: Shell out to a custom formatter command.
+#[setting(default)]
+pub parameters: ParametersStyle,\
+"""
+bad = """\
+/// How to display the tool call parameters.
+///
+/// See [`ParametersStyle`] for the available variants.
+#[setting(default)]
+pub parameters: ParametersStyle,\
+"""
+reason = """\
+The user reads this in their TOML file or editor. They cannot follow an \
+intra-doc link — there is nothing to click. List the values they can \
+actually write.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// Maximum retry attempts for transient errors.
+///
+/// Defaults to `5`. Set to `0` to disable retries entirely.
+///
+/// Retryable errors include rate limits, timeouts, connection errors,
+/// and transient server errors (5xx). Authentication failures and
+/// invalid requests are never retried regardless of this setting.
+#[setting(default = 5)]
+pub max_retries: u32,\
+"""
+bad = """\
+/// Maximum retry attempts for transient errors.
+///
+/// Retryable errors include rate limits, timeouts, connection errors,
+/// and transient server errors (5xx). Non-retryable errors (auth
+/// failures, unknown models, invalid requests) are never retried
+/// regardless of this setting.
+#[setting(default = 5)]
+pub max_retries: u32,\
+"""
+reason = """\
+Both versions are accurate, but the good version puts the most useful fact \
+for the user — the default and how to disable — first. A reader scanning \
+their generated `config.toml` needs that information up front.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+//! Style settings for tool call rendering.
+//!
+//! Controls how tool calls and their results appear in the terminal —
+//! how arguments are formatted, whether results are inlined or truncated,
+//! and how the call header looks.
+//!
+//! ```toml
+//! [style.tool_call]
+//! parameters = "function_call"
+//! inline_results = "head"
+//! ```\
+"""
+bad = """\
+//! Tool call style.
+//!
+//! Defines `ToolCallConfig` and its partial. See `style.rs` for the
+//! parent module.\
+"""
+reason = """\
+The bad version describes the file from the contributor's point of view. \
+The good version opens the section as the user reads it in their generated \
+TOML — names what the section is for and shows a canonical example.\
+"""

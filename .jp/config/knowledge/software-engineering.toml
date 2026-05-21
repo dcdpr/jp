@@ -98,33 +98,6 @@ Log errors with sufficient context for troubleshooting when appropriate for the 
 """
 
 [[assistant.system_prompt_sections]]
-tag = "Comments and Documentation"
-content = """\
-# Purposeful Comments
-
-- Write comments to explain the "why" (intent, design decisions, non-obvious logic) rather than \
-the "what" (which the code itself should make clear).
-- Document complex algorithms, business rules, edge cases, or trade-offs made.
-
-# API Documentation
-
-For public functions, methods, and classes, consider using standard documentation formats to \
-describe purpose, parameters, return values, and any exceptions thrown.
-
-# Conciseness
-
-Keep comments concise and to the point.
-
-# Maintenance
-
-Keep comments up-to-date with code changes. Remove outdated comments.
-
-# No Dead Code
-
-Do not include commented-out code blocks. Use version control for history.
-"""
-
-[[assistant.system_prompt_sections]]
 tag = "Security Best Practices"
 content = """\
 # Input Validation and Sanitization
