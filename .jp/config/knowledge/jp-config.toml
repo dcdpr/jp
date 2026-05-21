@@ -15,10 +15,12 @@ The crate is built on the in-tree `schematic` framework \
 - Schema introspection (`Schema`, `SchemaBuilder`).
 
 `AppConfig` is the root. Every nested section is its own \
-`#[derive(Config)]` struct in the same crate. The pipeline that drives this \
-crate — file I/O, ancestor walking, CLI overrides — lives in \
-`jp_cli::config_pipeline` and `jp_config::fs::ConfigLoader`. The crate \
-itself is types and merge primitives only.
+`#[derive(Config)]` struct in the same crate. The orchestration that \
+drives this crate — workspace discovery, CLI parsing, conversation \
+layering — lives in `jp_cli::config_pipeline` and `jp_workspace`. The \
+crate's own type tree is pure; file I/O and `extends`-graph traversal \
+are contained in the dedicated `jp_config::fs` and `jp_config::util` \
+submodules (see the Boundary Discipline section).
 """
 
 [[assistant.system_prompt_sections]]
@@ -26,12 +28,20 @@ tag = "JP Config: Resolved vs Partial Types"
 content = """\
 Every config type has two forms:
 
-- `FooConfig` — **resolved**. Every field is present. Built from a partial \
-  via `Config::from_partial`. Consumed by the rest of JP at runtime.
+- `FooConfig` — **resolved**. Consumed by the rest of JP at runtime. \
+  Most fields are concrete values, but resolved configs can still \
+  carry `Option<T>` where the absence of a value is itself meaningful \
+  (e.g. `AssistantConfig::name`, `AssistantConfig::system_prompt`).
 
-- `PartialFooConfig` — **partial**. Every field is `Option<T>`. The merge \
-  form. Loading, layering, env-var injection, CLI overrides, and \
-  conversation-stream deltas all operate on partials.
+- `PartialFooConfig` — **partial**. The merge form. Leaf scalars become \
+  `Option<T>`. Nested configs become their own partial type (e.g. \
+  `model: PartialModelConfig`). Fields declared with \
+  `#[setting(partial_via = ...)]` are wrapped in their merge wrapper \
+  (`MergeableVec<T::Partial>` for vectors, `MergeableString` for \
+  strings) rather than `Option<T>` — so an "absent" mergeable vec is \
+  an empty `MergeableVec`, not `None`. Loading, layering, env-var \
+  injection, CLI overrides, and conversation-stream deltas all \
+  operate on partials.
 
 The flow is: load each layer as a partial → merge partials → finalize into \
 a resolved config → use.
@@ -48,9 +58,10 @@ Three traits make a new config type participate in the pipeline:
 
 - `PartialConfigDelta` — produce the diff between two partials. Used to \
   record minimal deltas in the conversation stream.
-- `FillDefaults` — gap-fill `None` fields from a defaults partial without \
-  applying merge strategies. Distinct from `PartialConfig::merge`, which \
-  dispatches per-field strategies (`append_vec`, `preserve`, …).
+- `FillDefaults` — gap-fill `None` (or empty merge-wrapper) fields from \
+  a defaults partial without applying merge strategies. Distinct from \
+  `PartialConfig::merge`, which dispatches per-field strategies \
+  (`append_vec`, `preserve`, …).
 - `ToPartial` — re-derive a partial from a resolved value. Used when \
   re-emitting deltas or constructing test fixtures.
 """
@@ -58,19 +69,40 @@ Three traits make a new config type participate in the pipeline:
 [[assistant.system_prompt_sections]]
 tag = "JP Config: Layered Loading"
 content = """\
-Layers are applied in this order, with later layers overriding earlier ones:
+Loading is staged. The base layer (files + env) is built once by \
+`jp_cli::load_base_partial`, then `ConfigPipeline` (in \
+`jp_cli::config_pipeline`) sandwiches the per-conversation layer and \
+`--cfg` overrides on top. Command-specific CLI flags are applied last, \
+by each command's `apply_cli_config`.
 
-1. Schematic defaults (`#[setting(default = ...)]`).
-2. User-global config (`~/.config/jp/config.toml`; platform-specific path).
-3. Ancestor workspace configs walked up from CWD, unless `inherit = false` \
-   stops the walk.
-4. The current workspace config (`.jp/config.toml`).
-5. `extends` files declared by any loaded config (paths relative to the \
-   declaring file; globs allowed).
-6. `--cfg <name>` files resolved against `config_load_paths`.
-7. Environment variables (`JP_CFG_*`).
-8. Conversation-stream deltas (per-turn overrides).
-9. CLI overrides (`--cfg-set key=value`).
+Layers are applied in this order, with later layers overriding earlier \
+ones:
+
+1. Schematic defaults (`#[setting(default = ...)]`), injected by \
+   `PartialConfig::finalize` / `AppConfig::from_partial_with_defaults`.
+2. User-global config (`~/.config/jp/config.toml`; platform-specific \
+   path via `jp_config::fs::user_global_config_dir`).
+3. Workspace config (`<workspace_root>/.jp/config.toml`).
+4. The `.jp.toml` chain walked up from CWD to the workspace root, \
+   shallowest first (deeper / more specific files override shallower \
+   ones). `inherit = false` on a loaded partial stops the merge.
+5. User-workspace config \
+   (`$XDG_DATA_HOME/jp/<workspace_id>/config.{toml,json,yaml,…}`).
+6. Environment variables (`JP_CFG_*`).
+7. Per-conversation deltas (applied by \
+   `ConfigPipeline::partial_with_conversation`).
+8. `--cfg` arguments. A single `--cfg` accepts either `KEY=VALUE`, a \
+   JSON object, an `@path`, or a bare path resolved against \
+   `config_load_paths`. Multiple `--cfg` flags compose in declaration \
+   order.
+9. Command-specific CLI flags applied by `Command::apply_cli_config` \
+   after the pipeline.
+
+`extends` is **not** a single global layer. Each loaded file may declare \
+`extends`; `jp_config::util::load_config_file_with_extends` loads its \
+`before`-extends, then the file itself, then its `after`-extends — per \
+file, with cycle and depth checks via `ExtendsStack`. Globs are allowed \
+and paths are resolved relative to the declaring file.
 
 Merging is per-field. The `#[setting(merge = ...)]` attribute on a field \
 controls the strategy: `replace` (default), `append_vec`, `preserve`, or a \
@@ -82,20 +114,28 @@ declaration before assuming.
 [[assistant.system_prompt_sections]]
 tag = "JP Config: Boundary Discipline"
 content = """\
-`jp_config` is **types only** plus the in-memory merge primitives. It does \
-not:
+The config structs and merge primitives in `jp_config` are **pure**: no \
+file I/O, no CLI parsing, no terminal rendering, no workspace \
+discovery. That covers every `#[derive(Config)]` type, plus `delta`, \
+`fill`, `partial`, `internal::merge`, `assignment`, and the schematic \
+glue.
 
-- Open files. (File loading lives in `jp_config::fs::ConfigLoader`, which is \
-  explicitly the I/O-aware corner.)
-- Talk to the CLI parser.
-- Render anything to the terminal.
-- Decide where the workspace root lives.
+I/O lives in two dedicated submodules inside `jp_config`:
 
-The orchestration that drives this crate lives in `jp_cli::config_pipeline` \
-and `jp_workspace`. New runtime concerns belong there, not in `jp_config`. \
-If a change to a config type starts pulling in I/O, terminal rendering, or \
-workspace-walking logic, the boundary is wrong — push the new code up to \
-the consumer instead.
+- `jp_config::fs` — reads, creates, and edits config files \
+  (`ConfigLoader`, `ConfigFile`, `user_global_config_dir`, format \
+  detection, format-preserving TOML merges).
+- `jp_config::util` — walks the `extends` graph, loads partials from a \
+  path, and recurses up parent directories.
+
+Higher-level orchestration — which files to load, plumbing `--cfg` flags, \
+picking the workspace root, rendering anything to the terminal — lives \
+in `jp_cli::config_pipeline` and `jp_workspace`. New runtime concerns \
+belong there, not in `jp_config`. Conversely: do not reject valid \
+changes to `jp_config::fs` or `jp_config::util` on the grounds that \
+"`jp_config` doesn't do I/O" — it does, by design, in those two \
+modules. The line worth holding is that the type tree itself stays \
+pure.
 """
 
 [[assistant.system_prompt_sections]]
