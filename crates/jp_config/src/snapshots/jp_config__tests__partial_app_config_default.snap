@@ -58,6 +58,10 @@ PartialAppConfig {
                     inline_results: None,
                     results_file_link: None,
                     parameters: None,
+                    error: PartialErrorStyleConfig {
+                        inline_results: None,
+                        results_file_link: None,
+                    },
                 },
             },
             tools: {},

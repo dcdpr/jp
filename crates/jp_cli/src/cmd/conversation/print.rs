@@ -1,5 +1,7 @@
 use jp_config::{
-    conversation::tool::style::{self, DisplayStyleConfig, InlineResults, ParametersStyle},
+    conversation::tool::style::{
+        self, DisplayStyleConfig, ErrorStyleConfig, InlineResults, ParametersStyle,
+    },
     style::{reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
 use jp_workspace::ConversationHandle;
@@ -16,6 +18,10 @@ const BRIEF_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     parameters: ParametersStyle::Off,
     inline_results: InlineResults::Off,
     results_file_link: style::LinkStyle::Off,
+    error: ErrorStyleConfig {
+        inline_results: None,
+        results_file_link: None,
+    },
 };
 
 /// Chat-mode tool display style: tool calls are fully hidden.
@@ -24,6 +30,10 @@ const CHAT_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     parameters: ParametersStyle::Off,
     inline_results: InlineResults::Off,
     results_file_link: style::LinkStyle::Off,
+    error: ErrorStyleConfig {
+        inline_results: None,
+        results_file_link: None,
+    },
 };
 
 /// Full-mode tool display style: everything visible, nothing truncated.
@@ -32,6 +42,10 @@ const FULL_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     parameters: ParametersStyle::Json,
     inline_results: InlineResults::Full,
     results_file_link: style::LinkStyle::Full,
+    error: ErrorStyleConfig {
+        inline_results: None,
+        results_file_link: None,
+    },
 };
 
 #[derive(Debug, clap::Args)]

@@ -131,16 +131,15 @@ impl TurnRenderer {
                     let name = self.tool_names.get(&resp.id);
                     let default_style = &self.tools_config.defaults.style;
                     let tool_cfg = name.and_then(|n| self.tools_config.get(n));
-                    let style = tool_cfg
-                        .as_ref()
-                        .map_or(default_style, ToolConfigWithDefaults::style);
+                    let tool_style = tool_cfg.as_ref().map_or(default_style, |c| c.style());
+                    let is_error = resp.result.is_err();
+                    let hidden = tool_style.hidden;
+                    let inline_results = tool_style.inline_results(is_error);
+                    let results_file_link = tool_style.results_file_link(is_error);
 
-                    if !style.hidden {
-                        self.tool.render_result(
-                            resp,
-                            &style.inline_results,
-                            &style.results_file_link,
-                        );
+                    if !hidden {
+                        self.tool
+                            .render_result(resp, inline_results, results_file_link);
                     }
                 }
 

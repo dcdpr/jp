@@ -334,7 +334,8 @@ pub struct ToolConfig {
 
     /// How to display the results of the tool in the terminal.
     ///
-    /// Overrides the global default.
+    /// Overrides the global default. The error overlay lives at
+    /// `style.error.*` (see [`DisplayStyleConfig::error`]).
     #[setting(nested)]
     pub style: Option<DisplayStyleConfig>,
 

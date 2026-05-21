@@ -2,7 +2,10 @@ use indexmap::IndexMap;
 use jp_config::conversation::tool::{
     Enable, PartialOneOrManyTypes, PartialToolConfig, PartialToolParameterConfig, RunMode,
     ToolSource,
-    style::{InlineResults, LinkStyle, ParametersStyle, PartialDisplayStyleConfig},
+    style::{
+        InlineResults, LinkStyle, ParametersStyle, PartialDisplayStyleConfig,
+        PartialErrorStyleConfig,
+    },
 };
 
 pub fn all() -> IndexMap<String, PartialToolConfig> {
@@ -34,6 +37,7 @@ pub fn describe_tools() -> PartialToolConfig {
             inline_results: Some(InlineResults::Off),
             results_file_link: Some(LinkStyle::Off),
             parameters: Some(ParametersStyle::Off),
+            error: PartialErrorStyleConfig::default(),
         }),
         ..Default::default()
     }

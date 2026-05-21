@@ -1,4 +1,23 @@
 //! Display style configuration for tools.
+//!
+//! User-facing shape under `[style]`:
+//!
+//! ```toml
+//! [tools.my_tool.style]
+//! hidden = false           # applies to both request and response
+//! parameters = "json"      # how arguments are rendered on the call
+//! inline_results = "full"  # how successful results are rendered
+//! results_file_link = "osc8"
+//!
+//! [tools.my_tool.style.error]
+//! inline_results = "full"  # overrides on top of `style` for failed results
+//! ```
+//!
+//! [`ErrorStyleConfig`] (`error`) is a per-field overlay applied when the
+//! tool result is `Err`. Unset overlay fields take their value from the
+//! matching top-level field. The overlay is typed separately so the
+//! error path can grow its own fields (severity styling, alternate
+//! sinks, etc.) independently of the success path.
 
 use std::{fmt, num::ParseIntError, str::FromStr};
 
@@ -11,10 +30,12 @@ use crate::{
     conversation::tool::CommandConfigOrString,
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
-    partial::{ToPartial, partial_opt},
+    partial::{ToPartial, partial_opt, partial_opts},
 };
 
 /// Display style configuration.
+///
+/// See the [module-level docs](self) for the user-facing TOML shape.
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct DisplayStyleConfig {
@@ -49,16 +70,61 @@ pub struct DisplayStyleConfig {
     /// - `<command>`: Use a custom command to format the parameters.
     #[setting(default)]
     pub parameters: ParametersStyle,
+
+    /// Per-field overrides applied when the tool result is `Err`. Unset
+    /// overlay fields take their value from the matching top-level field.
+    ///
+    /// Sub-fields appear under `[style.error]` in TOML.
+    #[setting(nested)]
+    pub error: ErrorStyleConfig,
+}
+
+impl DisplayStyleConfig {
+    /// Return the effective [`InlineResults`] for a tool response.
+    ///
+    /// For error responses, the `style.error.inline_results` overlay is
+    /// applied on top of `style.inline_results`. Successful responses
+    /// read `style.inline_results` directly.
+    #[must_use]
+    pub fn inline_results(&self, is_error: bool) -> &InlineResults {
+        if is_error {
+            self.error
+                .inline_results
+                .as_ref()
+                .unwrap_or(&self.inline_results)
+        } else {
+            &self.inline_results
+        }
+    }
+
+    /// Return the effective [`LinkStyle`] for the results-file link of a
+    /// tool response.
+    ///
+    /// For error responses, the `style.error.results_file_link` overlay
+    /// is applied on top of `style.results_file_link`. Successful
+    /// responses read `style.results_file_link` directly.
+    #[must_use]
+    pub fn results_file_link(&self, is_error: bool) -> &LinkStyle {
+        if is_error {
+            self.error
+                .results_file_link
+                .as_ref()
+                .unwrap_or(&self.results_file_link)
+        } else {
+            &self.results_file_link
+        }
+    }
 }
 
 impl AssignKeyValue for PartialDisplayStyleConfig {
-    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "hidden" => self.hidden = kv.try_some_bool()?,
             "inline_results" => self.inline_results = kv.try_some_from_str()?,
             "results_file_link" => self.results_file_link = kv.try_some_from_str()?,
             "parameters" => self.parameters = kv.try_some_from_str()?,
+            _ if kv.p("error") => self.error.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -73,6 +139,7 @@ impl PartialConfigDelta for PartialDisplayStyleConfig {
             inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
             results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
             parameters: delta_opt(self.parameters.as_ref(), next.parameters),
+            error: self.error.delta(next.error),
         }
     }
 }
@@ -84,6 +151,7 @@ impl FillDefaults for PartialDisplayStyleConfig {
             inline_results: self.inline_results.or(defaults.inline_results),
             results_file_link: self.results_file_link.or(defaults.results_file_link),
             parameters: self.parameters.or(defaults.parameters),
+            error: self.error.fill_from(defaults.error),
         }
     }
 }
@@ -97,6 +165,66 @@ impl ToPartial for DisplayStyleConfig {
             inline_results: partial_opt(&self.inline_results, defaults.inline_results),
             results_file_link: partial_opt(&self.results_file_link, defaults.results_file_link),
             parameters: partial_opt(&self.parameters, defaults.parameters),
+            error: self.error.to_partial(),
+        }
+    }
+}
+
+/// Per-field overrides for rendering failed tool call responses.
+///
+/// Each field is optional. Callers resolve an unset field by reading the
+/// matching field from the parent [`DisplayStyleConfig`].
+#[derive(Debug, Clone, PartialEq, Default, Config)]
+#[config(rename_all = "snake_case")]
+pub struct ErrorStyleConfig {
+    /// Override for [`DisplayStyleConfig::inline_results`].
+    pub inline_results: Option<InlineResults>,
+
+    /// Override for [`DisplayStyleConfig::results_file_link`].
+    pub results_file_link: Option<LinkStyle>,
+}
+
+impl AssignKeyValue for PartialErrorStyleConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
+            "inline_results" => self.inline_results = kv.try_some_from_str()?,
+            "results_file_link" => self.results_file_link = kv.try_some_from_str()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialErrorStyleConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
+            results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
+        }
+    }
+}
+
+impl FillDefaults for PartialErrorStyleConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            inline_results: self.inline_results.or(defaults.inline_results),
+            results_file_link: self.results_file_link.or(defaults.results_file_link),
+        }
+    }
+}
+
+impl ToPartial for ErrorStyleConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            inline_results: partial_opts(self.inline_results.as_ref(), defaults.inline_results),
+            results_file_link: partial_opts(
+                self.results_file_link.as_ref(),
+                defaults.results_file_link,
+            ),
         }
     }
 }
