@@ -3,6 +3,8 @@ extends = [
     "../knowledge/software-engineering.toml",
     "../knowledge/architecture.toml",
     "../knowledge/software-laws.toml",
+    "../knowledge/code-comments.toml",
+    "../knowledge/jp-config.toml",
     "../skill/read-files.toml",
     "../skill/web.toml",
     "../skill/github-reader.toml",

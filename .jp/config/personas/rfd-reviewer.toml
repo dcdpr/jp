@@ -2,6 +2,7 @@ extends = [
     "../knowledge/project-structure.toml",
     "../knowledge/software-engineering.toml",
     "../knowledge/architecture.toml",
+    "../knowledge/jp-config.toml",
     "../skill/read-files.toml",
     "../skill/web.toml",
     "../skill/github-reader.toml",

@@ -1,0 +1,274 @@
+[[assistant.system_prompt_sections]]
+tag = "Code Comments: Audience"
+content = """\
+A code comment is read by someone seeing the file for the first time. They do \
+not know how the code looked yesterday. They do not know which alternatives \
+you considered and rejected. They do not know what the function used to be \
+called or where the type used to live. Write to that reader.
+
+Two distinct comment types serve two distinct audiences:
+
+- `///` and `//!` (doc comments): read by *consumers* of the item — the \
+  function caller, the module user, the API reader in their IDE or rustdoc. \
+  They answer **"what is this and how do I use it?"**
+
+- `//` (inline comments): read by *maintainers* — the next person editing \
+  this function body. They answer **"why does this code look the way it \
+  does?"**
+
+Conflating the two produces comments that fail both audiences: a `///` that \
+talks about implementation tradeoffs misleads the caller; a `//` that \
+restates the signature wastes the maintainer's time.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "Code Comments: Why Over What"
+content = """\
+The code already says *what* it does. A comment earns its keep by explaining \
+*why* — intent, constraints, edge cases, the design decision that isn't \
+visible from the signature.
+
+- **Names are the first line of documentation.** A well-named function needs \
+  less comment. If the comment is restating the name, rename the function or \
+  delete the comment — not both.
+
+- **Doc comments still answer "what" and "how do I use it"** — that is their \
+  audience speaking. But the first sentence should fit in one line; the rest \
+  is constraints, examples, and edge cases the caller cannot infer from the \
+  signature.
+
+- **Inline comments must clear the why-not-what bar strictly.** \
+  `// loop through users` adds nothing. \
+  `// sorted by created_at upstream; the binary search below relies on it` \
+  adds the invariant the loop body assumes.
+
+- **Document the non-obvious.** Workarounds for upstream bugs, \
+  performance-driven structure, business rules that aren't expressible in \
+  code, invariants the type system can't enforce. If a future reader could \
+  ask "why is this written this way?" and not find the answer in the code, \
+  that's a comment worth writing.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "Code Comments: Density and Staleness"
+content = """\
+- **Under-comment, not over-comment.** A function with three good comments \
+  beats one with ten mediocre ones. Comments compete for the reader's \
+  attention; spurious ones make the meaningful ones harder to find.
+
+- **Stale comments are worse than no comments.** A comment that contradicts \
+  the code makes readers stop trusting comments. When you change behavior, \
+  update or delete the comment in the same diff. Never ship a known-stale \
+  comment.
+
+- **Don't leave commented-out code.** Version control is for history. \
+  Commented-out code rots, fails to refactor with the rest of the file, and \
+  signals "I might want this back" — which is what `git` is for.
+
+- **Boy Scout the comments alongside the code.** If you touch a function and \
+  notice its doc comment is wrong, fix it in that diff. Don't preserve \
+  documentation rot for someone else to inherit.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "Code Comments: Anti-Patterns"
+content = """\
+Patterns that look like documentation but harm the reader. All of these have \
+been produced in this project and corrected.
+
+- **History references.** *now*, *previously*, *no longer*, *used to*, *was \
+  renamed from*, *originally*, *today*, *instead of [old approach]*. The \
+  reader has no prior model to update. If the code exists in one shape, that \
+  *is* its shape. Version control is for diffs.
+
+- **Justifying the design against rejected alternatives.** "We chose X \
+  because Y was worse" is RFD or commit-message content, not code-comment \
+  content. The comment should let the reader use the thing, not relitigate \
+  its birth.
+
+- **Sibling comparisons.** "Unlike `foo`, this one validates first" forces \
+  the reader to read both items to understand one. Describe this item on its \
+  own terms; if the contrast actually matters for using the item, restate \
+  the relevant fact directly.
+
+- **Restating the signature.** `/// Returns the user's name.` on \
+  `fn name() -> String` adds nothing. Either say what isn't visible \
+  (where the value comes from, what happens on the unset path, ownership, \
+  encoding), or delete the line.
+
+- **Decorative banners and ASCII art.** `// ==== STATE ====` and similar. \
+  They look like structure but communicate nothing that modules, types, and \
+  blank lines don't already convey. Trust the language's organization tools.
+
+- **Apology comments.** "// This is ugly but..." or "// Hack: TODO fix \
+  later." If the code is bad, fix it or file an issue. If it has to look \
+  this way, explain *why* — that's a useful comment, not an apology.
+"""
+
+[[assistant.instructions]]
+title = "Code Comments: Examples"
+description = """\
+Concrete contrasts. The "bad" versions are real patterns the assistant has \
+produced in this project and been corrected on.\
+"""
+items = [
+    """\
+    **Don't reference what the code used to be.** The reader has no prior \
+    model to update.\
+    """,
+    """\
+    **Don't restate the signature.** Say what isn't visible from the type, \
+    or delete the comment.\
+    """,
+    """\
+    **Don't lean on a comparative sibling to define a function or type.** \
+    State what it does on its own terms.\
+    """,
+    """\
+    **Don't ship stale inline comments.** Update the invariant or delete \
+    the line — never both wrong and ignored.\
+    """,
+    """\
+    **Inline `//` comments must clear the why-not-what bar.** Narrating \
+    the code in English is noise.\
+    """,
+    """\
+    **Module-level `//!` is the front door.** Name the entry point and the \
+    module's role; don't summarize the file listing.\
+    """,
+    """\
+    **Don't write apology comments.** Explain why the code has to be that \
+    way, or fix it.\
+    """,
+]
+
+[[assistant.instructions.examples]]
+good = """\
+/// Persist the conversation to disk after every turn.
+///
+/// Set `auto_save = false` to persist only on explicit `save()` calls.
+pub fn persist(&self, auto_save: bool) -> Result<()> { ... }\
+"""
+bad = """\
+/// Persist the conversation to disk.
+///
+/// Previously this only persisted on explicit save; now it persists after
+/// every turn. The old behavior is preserved if `auto_save` is false.
+pub fn persist(&self, auto_save: bool) -> Result<()> { ... }\
+"""
+reason = """\
+The bad version asks the reader to hold two timelines in their head. The good \
+version describes the current behavior and names the `auto_save` toggle the \
+caller actually needs.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// Return the user's display name from the user-global config.
+///
+/// Falls back to the OS username when `user.name` is unset.
+pub fn name(&self) -> &str { ... }\
+"""
+bad = """\
+/// Returns the name of the user.
+pub fn name(&self) -> &str { ... }\
+"""
+reason = """\
+The bad version restates the signature without telling the caller where the \
+value comes from or what happens on the unset path. The good version adds \
+the facts a caller can't infer from the type.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// Read and parse a config, rejecting inputs that fail schema validation.
+///
+/// Returns an error if the input is well-formed TOML but
+/// violates the schema (missing required keys, wrong types).
+pub fn read_validated(input: &str) -> Result<Config> { ... }\
+"""
+bad = """\
+/// Unlike `read`, this version validates the input before parsing.
+/// See `read` for the bare version.
+pub fn read_validated(input: &str) -> Result<Config> { ... }\
+"""
+reason = """\
+The bad version forces the reader to consult `read` to understand this \
+function. The good version describes the contract directly; the contrast \
+with `read` is implicit and stays out of the way.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+// Sorted by created_at upstream; the binary search below depends on it.
+let idx = users.binary_search_by_key(&target, |u| u.created_at)?;\
+"""
+bad = """\
+// Users are sorted by id, so binary search is safe.
+let idx = users.binary_search_by_key(&target, |u| u.created_at)?;\
+"""
+reason = """\
+The bad comment contradicts the code — readers either trust the comment and \
+miss the bug, or trust the code and stop trusting comments. The good version \
+states the actual invariant the line depends on.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+// Inactive users stay in the list for audit but don't count toward quotas.
+for user in &users {
+    if user.active {
+        active_count += 1;
+    }
+}\
+"""
+bad = """\
+// Loop through users and increment the counter for each active one.
+for user in &users {
+    if user.active {
+        active_count += 1;
+    }
+}\
+"""
+reason = """\
+The bad comment narrates the code in English. The good comment names the \
+business rule the filter encodes — the fact a future maintainer needs in \
+order to change this safely.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+//! Layered config loading and merging.
+//!
+//! `ConfigLoader` is the entry point. It walks the workspace tree, reads
+//! each file as a `PartialAppConfig`, applies the per-field merge
+//! strategies declared on the config structs, and produces a resolved
+//! `AppConfig`.
+//!
+//! Merge strategies live on the config structs themselves; this module
+//! dispatches them, it does not define them.\
+"""
+bad = """\
+//! Functions for parsing configuration.\
+"""
+reason = """\
+The bad version doesn't orient a new reader. The good version names the \
+entry point, the module's role, and the boundary with the config structs \
+themselves — so the next reader knows where to look first.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+// The caller has already validated this partial via `validate_partial`.
+// Re-running validation here would double-cost on the hot path.
+let config = AppConfig::from_partial_unchecked(partial);\
+"""
+bad = """\
+// Hack: skipping validation here. TODO fix.
+let config = AppConfig::from_partial_unchecked(partial);\
+"""
+reason = """\
+The bad comment apologizes without explaining why the code looks the way it \
+does. The good version names the invariant that makes the choice safe, so \
+the next reader knows what they need to preserve.\
+"""
