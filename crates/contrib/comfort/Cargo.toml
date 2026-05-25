@@ -1,0 +1,36 @@
+[package]
+description = "Semantic line-break formatter for Rust doc comments."
+name = "comfort"
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+cargo_metadata = { workspace = true }
+clap = { workspace = true, features = ["std", "derive", "help", "usage", "error-context"] }
+comrak = { workspace = true }
+ignore = { workspace = true }
+ra-ap-rustc_lexer = { workspace = true }
+regex = { workspace = true, features = ["std", "perf", "unicode-perl"] }
+similar = { workspace = true, features = ["text"] }
+textwrap = { workspace = true }
+thiserror = { workspace = true }
+unicode-segmentation = { workspace = true }
+unicode-width = { workspace = true }
+
+[dev-dependencies]
+indoc = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false

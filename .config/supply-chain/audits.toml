@@ -21,6 +21,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.49.0 -> 0.50.0"
 
+[[audits.comrak]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.50.0 -> 0.52.0"
+
 [[audits.datetime_literal]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -41,6 +46,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.16.2 -> 0.17.0"
 
+[[audits.finl_unicode]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "1.4.0"
+
 [[audits.futf]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -55,6 +65,11 @@ version = "0.5.3"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.36.1"
+
+[[audits.imara-diff]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.2.0"
 
 [[audits.infer]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -110,6 +125,11 @@ version = "9.0.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.38.4 -> 0.39.2"
+
+[[audits.ra-ap-rustc_lexer]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.167.0"
 
 [[audits.rand_xorshift]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -1004,6 +1024,12 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2021-10-02"
 end = "2027-02-13"
+
+[[trusted.unicode-properties]]
+criteria = "safe-to-deploy"
+user-id = 1139 # Manish Goregaokar (Manishearth)
+start = "2023-07-27"
+end = "2027-05-21"
 
 [[trusted.unsafe-libyaml]]
 criteria = "safe-to-deploy"
