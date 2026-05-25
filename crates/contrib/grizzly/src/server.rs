@@ -83,10 +83,6 @@ pub struct NoteSearchRequest {
     #[serde(deserialize_with = "deserialize_string_or_vec")]
     pub queries: Vec<String>,
 
-    /// Number of context lines around each match (default: 3).
-    #[serde(default = "default_context")]
-    pub context: usize,
-
     /// Filter: only search notes with ALL of these tags.
     #[serde(default)]
     pub tags: Vec<String>,
@@ -108,10 +104,6 @@ pub struct NoteCreateRequest {
     /// Note content body.
     #[serde(default)]
     pub content: String,
-}
-
-fn default_context() -> usize {
-    3
 }
 
 fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -179,8 +171,11 @@ impl GrizzlyService {
     }
 
     #[tool(
-        description = "Search Bear notes by content. Returns matching lines with surrounding \
-                       context. Results are formatted with line numbers."
+        description = "Search Bear notes by content. Returns metadata (id, title, tags, \
+                       updated_at), a short snippet showing the match, and the line numbers where \
+                       the query matched. The response is size-bounded by design. To read full \
+                       content, follow up with `note_get`, passing the returned line numbers via \
+                       its `lines` parameter."
     )]
     async fn note_search(
         &self,
@@ -192,7 +187,6 @@ impl GrizzlyService {
             queries: req.queries,
             tags: req.tags,
             ids: req.ids,
-            context: req.context,
             ..Default::default()
         };
 

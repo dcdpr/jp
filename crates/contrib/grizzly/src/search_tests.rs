@@ -4,7 +4,6 @@ use crate::BearDb;
 fn search(db: &BearDb, queries: Vec<&str>) -> Vec<SearchMatch> {
     db.search(&SearchParams {
         queries: queries.into_iter().map(Into::into).collect(),
-        context: 1,
         ..Default::default()
     })
     .unwrap()
@@ -30,7 +29,6 @@ fn search_with_tag_filter() {
     let results = search_with(&db, &SearchParams {
         queries: vec!["25-minute".into()],
         tags: vec!["productivity".into()],
-        context: 1,
         ..Default::default()
     });
 
@@ -44,7 +42,6 @@ fn search_with_tag_filter_no_match() {
     let results = search_with(&db, &SearchParams {
         queries: vec!["productivity".into()],
         tags: vec!["personal".into()],
-        context: 1,
         ..Default::default()
     });
 
@@ -52,19 +49,18 @@ fn search_with_tag_filter_no_match() {
 }
 
 #[test]
-fn search_context_lines() {
+fn line_hits_reports_matching_line_numbers() {
     let db = BearDb::in_memory().unwrap();
     let results = search_with(&db, &SearchParams {
         queries: vec!["capturing".into()],
-        context: 0,
         ..Default::default()
     });
 
     // "capturing" is on line 2 of note-1
     assert_eq!(results.len(), 1);
-    assert_eq!(results[0].groups.len(), 1);
-    assert_eq!(results[0].groups[0].lines.len(), 1);
-    assert_eq!(results[0].groups[0].lines[0].0, 2); // line 2 (1-indexed)
+    assert_eq!(results[0].line_hits, vec![2]);
+    assert_eq!(results[0].total_hits, 1);
+    assert_eq!(results[0].snippet.as_ref().unwrap().line, 2);
 }
 
 #[test]
@@ -112,7 +108,6 @@ fn result_limit() {
     let results = search_with(&db, &SearchParams {
         queries: vec!["e".into()], // broad query, matches multiple notes
         limit: 1,
-        context: 1,
         ..Default::default()
     });
 
@@ -124,14 +119,24 @@ fn title_in_xml_output() {
     let m = SearchMatch {
         note_id: "abc-123".into(),
         title: "My Note".into(),
-        groups: vec![MatchGroup {
-            lines: vec![(1, "first line".into())],
-        }],
+        tags: vec!["work".into()],
+        updated_at: Some("2024-01-01 00:00:00".into()),
+        line_hits: vec![1],
+        total_hits: 1,
+        snippet: Some(Snippet {
+            line: 1,
+            text: "first line".into(),
+        }),
     };
 
     let xml = m.to_xml();
     assert!(xml.contains(r#"note-id="abc-123""#));
     assert!(xml.contains(r#"title="My Note""#));
+    assert!(xml.contains(r#"tags="work""#));
+    assert!(xml.contains(r#"updated-at="2024-01-01 00:00:00""#));
+    assert!(xml.contains(r#"total-hits="1""#));
+    assert!(xml.contains(r#"<snippet line="1">first line</snippet>"#));
+    assert!(xml.contains("<hits>1</hits>"));
 }
 
 #[test]
@@ -139,7 +144,11 @@ fn title_xml_escaping() {
     let m = SearchMatch {
         note_id: "x".into(),
         title: r#"Notes & "Quotes" <stuff>"#.into(),
-        groups: vec![],
+        tags: vec![],
+        updated_at: None,
+        line_hits: vec![],
+        total_hits: 0,
+        snippet: None,
     };
 
     let xml = m.to_xml();
@@ -147,24 +156,23 @@ fn title_xml_escaping() {
 }
 
 #[test]
-fn match_to_xml_groups() {
+fn xml_lists_all_line_hits() {
     let m = SearchMatch {
         note_id: "abc-123".into(),
         title: "Test".into(),
-        groups: vec![
-            MatchGroup {
-                lines: vec![(10, "line ten".into()), (11, "line eleven".into())],
-            },
-            MatchGroup {
-                lines: vec![(50, "line fifty".into())],
-            },
-        ],
+        tags: vec![],
+        updated_at: None,
+        line_hits: vec![10, 11, 50],
+        total_hits: 3,
+        snippet: Some(Snippet {
+            line: 10,
+            text: "line ten".into(),
+        }),
     };
 
     let xml = m.to_xml();
-    assert!(xml.contains("010: line ten"));
-    assert!(xml.contains("..."));
-    assert!(xml.contains("050: line fifty"));
+    assert!(xml.contains("<hits>10, 11, 50</hits>"));
+    assert!(xml.contains(r#"<snippet line="10">line ten</snippet>"#));
 }
 
 #[test]
@@ -173,7 +181,6 @@ fn fts_mode_word_search() {
     let results = search_with(&db, &SearchParams {
         queries: vec!["productivity".into()],
         mode: SearchMode::Fts,
-        context: 1,
         ..Default::default()
     });
     assert_eq!(results.len(), 1);
@@ -187,7 +194,6 @@ fn like_mode_substring() {
     let results = search_with(&db, &SearchParams {
         queries: vec!["prod".into()],
         mode: SearchMode::Like,
-        context: 1,
         ..Default::default()
     });
     assert_eq!(results.len(), 1);
@@ -201,7 +207,6 @@ fn fts_mode_with_tag_filter() {
         queries: vec!["intervals".into()],
         tags: vec!["productivity".into()],
         mode: SearchMode::Fts,
-        context: 1,
         ..Default::default()
     });
     assert_eq!(results.len(), 1);
@@ -216,7 +221,6 @@ fn fts_mode_tag_filter_excludes() {
         queries: vec!["productivity".into()],
         tags: vec!["personal".into()],
         mode: SearchMode::Fts,
-        context: 1,
         ..Default::default()
     });
     assert!(results.is_empty());
@@ -229,7 +233,6 @@ fn auto_falls_back_to_like_for_short_queries() {
     // and too short for trigram (< 3 chars), so Auto falls back to LIKE
     let results = search_with(&db, &SearchParams {
         queries: vec!["pr".into()],
-        context: 1,
         ..Default::default()
     });
     assert_eq!(results.len(), 1);
@@ -242,7 +245,6 @@ fn auto_uses_fts_when_available() {
     // "productivity" is a full word — FTS5 should handle it directly
     let results = search_with(&db, &SearchParams {
         queries: vec!["productivity".into()],
-        context: 1,
         ..Default::default()
     });
     assert_eq!(results.len(), 1);
@@ -255,7 +257,6 @@ fn wildcard_query_with_tag_filter() {
     let results = search_with(&db, &SearchParams {
         queries: vec!["*".into()],
         tags: vec!["productivity".into()],
-        context: 1,
         ..Default::default()
     });
     assert_eq!(results.len(), 2);
@@ -271,7 +272,6 @@ fn wildcard_query_with_nested_tag_filter() {
     let results = search_with(&db, &SearchParams {
         queries: vec!["*".into()],
         tags: vec!["projects/jp".into()],
-        context: 1,
         ..Default::default()
     });
     assert_eq!(results.len(), 1);
@@ -284,7 +284,6 @@ fn nested_tag_filter_with_content_query() {
     let results = search_with(&db, &SearchParams {
         queries: vec!["capturing".into()],
         tags: vec!["projects/jp".into()],
-        context: 1,
         ..Default::default()
     });
     assert_eq!(results.len(), 1);
@@ -298,8 +297,114 @@ fn nested_tag_filter_excludes_untagged() {
     let results = search_with(&db, &SearchParams {
         queries: vec!["intervals".into()],
         tags: vec!["projects/jp".into()],
-        context: 1,
         ..Default::default()
     });
     assert!(results.is_empty());
+}
+
+#[test]
+fn result_carries_tags_and_updated_at() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search(&db, vec!["productivity"]);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].note_id, "note-1");
+    assert_eq!(results[0].tags, vec!["productivity", "projects/jp"]);
+    assert!(results[0].updated_at.is_some());
+}
+
+#[test]
+fn title_only_match_previews_first_content_line() {
+    // "Pomodoro" appears in the title of note-2 but not in its content.
+    // Bear notes typically embed the title in the first content line too,
+    // so test data: query for "Shopping" which matches note-3 title; first
+    // content line is "Eggs".
+    let db = BearDb::in_memory().unwrap();
+    let results = search(&db, vec!["Shopping"]);
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].note_id, "note-3");
+    assert_eq!(results[0].total_hits, 0);
+    assert!(results[0].line_hits.is_empty());
+    let snippet = results[0]
+        .snippet
+        .as_ref()
+        .expect("snippet for content note");
+    assert_eq!(snippet.line, 1);
+    assert_eq!(snippet.text, "Eggs");
+}
+
+#[test]
+fn extract_caps_line_hits_but_reports_full_total() {
+    let content = (1..=100)
+        .map(|n| format!("line {n} target"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let (line_hits, total_hits, snippet) =
+        extract_hits_and_snippet(&content, &["target".into()], 5, 200);
+
+    assert_eq!(line_hits.len(), 5);
+    assert_eq!(line_hits, vec![1, 2, 3, 4, 5]);
+    assert_eq!(total_hits, 100);
+    assert_eq!(snippet.unwrap().line, 1);
+}
+
+#[test]
+fn extract_returns_no_snippet_for_empty_content() {
+    let (line_hits, total_hits, snippet) =
+        extract_hits_and_snippet("", &["anything".into()], 20, 200);
+
+    assert!(line_hits.is_empty());
+    assert_eq!(total_hits, 0);
+    assert!(snippet.is_none());
+}
+
+#[test]
+fn make_snippet_short_line_returned_unchanged() {
+    let line = "hello world";
+    assert_eq!(make_snippet(line, 0, 200), "hello world");
+}
+
+#[test]
+fn make_snippet_truncates_long_line_with_ellipses() {
+    // 1000 'a' chars with the match at position 500.
+    let line: String = "a".repeat(1000);
+    let snippet = make_snippet(&line, 500, 50);
+
+    // Leading + trailing ellipsis, ~50 chars in between.
+    assert!(snippet.starts_with('\u{2026}'));
+    assert!(snippet.ends_with('\u{2026}'));
+    assert_eq!(snippet.chars().count(), 52); // 50 + 2 ellipses
+}
+
+#[test]
+fn make_snippet_at_line_start_no_leading_ellipsis() {
+    let line: String = "a".repeat(1000);
+    let snippet = make_snippet(&line, 0, 50);
+
+    assert!(!snippet.starts_with('\u{2026}'));
+    assert!(snippet.ends_with('\u{2026}'));
+}
+
+#[test]
+fn make_snippet_at_line_end_no_trailing_ellipsis() {
+    let line: String = "a".repeat(1000);
+    let snippet = make_snippet(&line, 1000, 50);
+
+    assert!(snippet.starts_with('\u{2026}'));
+    assert!(!snippet.ends_with('\u{2026}'));
+}
+
+#[test]
+fn make_snippet_handles_multibyte_chars() {
+    // 1000 é chars (2 bytes each). Each is one char but two bytes.
+    let line: String = "é".repeat(1000);
+    let snippet = make_snippet(&line, line.len() / 2, 50);
+
+    // Result must still be valid UTF-8 and contain ~50 é characters.
+    assert!(snippet.starts_with('\u{2026}'));
+    assert!(snippet.ends_with('\u{2026}'));
+    let inner = snippet.trim_matches('\u{2026}');
+    assert!(inner.chars().all(|c| c == 'é'));
 }
