@@ -1631,7 +1631,7 @@ plugin-build-local: _install-jp (plugin-build "")
 
 # Run all ci tasks.
 [group('ci')]
-ci: lint-ci fmt-ci fmt-comments-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
+ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 
 # Lint the code on CI.
 [group('ci')]

@@ -2,6 +2,8 @@ use std::{path::PathBuf, sync::LazyLock};
 
 use reqwest::header::{self, USER_AGENT};
 
+use crate::dl;
+
 pub(crate) static GLOBAL_CLIENT: LazyLock<Client> = LazyLock::new(Client::default);
 
 pub(crate) struct Client {
@@ -23,7 +25,7 @@ impl Default for Client {
             .expect("Client::default()");
 
         Self {
-            crates_path: std::env::temp_dir().join("bookworm/crates"),
+            crates_path: dl::default_crates_root(),
             http_client,
         }
     }
