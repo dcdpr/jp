@@ -1631,7 +1631,7 @@ plugin-build-local: _install-jp (plugin-build "")
 
 # Run all ci tasks.
 [group('ci')]
-ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
+ci: lint-ci fmt-ci fmt-comments-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 
 # Lint the code on CI.
 [group('ci')]
@@ -1642,6 +1642,11 @@ lint-ci: (_rustup_component "clippy") _install_ci_matchers
 [group('ci')]
 fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
     cargo fmt --all --check
+
+# Check Rust doc-comment formatting on CI.
+[group('ci')]
+fmt-comments-ci: _install-comfort _install_ci_matchers
+    comfort --check --workspace
 
 # Test the code on CI.
 [group('ci')]
@@ -1705,6 +1710,9 @@ vet-ci: (_install "cargo-vet@" + vet_version)
 
 @_install-jp *args:
     cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
+
+@_install-comfort *args:
+    cargo install {{quiet_flag}} --locked --path crates/contrib/comfort {{args}}
 
 @_install-binstall:
     command -v cargo-binstall >/dev/null 2>&1 || { \
