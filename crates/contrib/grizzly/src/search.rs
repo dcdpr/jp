@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashSet},
+    collections::{HashMap, HashSet},
     rc::Rc,
 };
 
@@ -32,14 +32,25 @@ pub struct SearchParams {
     /// Only search notes with these IDs.
     pub ids: Vec<String>,
 
-    /// Number of context lines around each match.
-    pub context: usize,
-
     /// Maximum number of notes to return (default: 50).
     pub limit: usize,
 
     /// Search backend to use.
     pub mode: SearchMode,
+
+    /// Maximum characters in each result's snippet text (default: 200).
+    ///
+    /// Longer matching lines are truncated with `…` and centered on the
+    /// match. Callers should use `note_get` with the returned line numbers
+    /// to fetch full content when the snippet is insufficient.
+    pub snippet_chars: usize,
+
+    /// Maximum number of line numbers reported in `SearchMatch::line_hits`
+    /// (default: 20).
+    ///
+    /// `SearchMatch::total_hits` always reports the true count, so callers
+    /// know when this cap kicked in.
+    pub max_line_hits: usize,
 }
 
 impl Default for SearchParams {
@@ -48,9 +59,10 @@ impl Default for SearchParams {
             queries: vec![],
             tags: vec![],
             ids: vec![],
-            context: 3,
             limit: 50,
             mode: SearchMode::default(),
+            snippet_chars: 200,
+            max_line_hits: 20,
         }
     }
 }
@@ -72,14 +84,20 @@ impl SearchParams {
                 .collect(),
             tags: self.tags.clone(),
             ids: self.ids.clone(),
-            context: self.context,
             limit: self.limit,
             mode: self.mode,
+            snippet_chars: self.snippet_chars,
+            max_line_hits: self.max_line_hits,
         }
     }
 }
 
-/// A search result with matching lines from a note.
+/// A bounded summary of a matching note.
+///
+/// Carries metadata plus a short snippet showing why the note matched. To
+/// read full content, the caller should follow up with `note_get`, passing
+/// the values from `line_hits` (or ranges around them) via its `lines`
+/// parameter.
 pub struct SearchMatch {
     /// The note's unique identifier.
     pub note_id: String,
@@ -87,37 +105,74 @@ pub struct SearchMatch {
     /// The note's title (as stored by Bear).
     pub title: String,
 
-    /// Groups of line numbers and their content.
-    /// Groups are separated by gaps (non-consecutive lines).
-    pub groups: Vec<MatchGroup>,
+    /// The note's tags.
+    pub tags: Vec<String>,
+
+    /// When the note was last modified, if known.
+    pub updated_at: Option<String>,
+
+    /// 1-indexed line numbers in the note's content where the query matched.
+    ///
+    /// Capped at `SearchParams::max_line_hits`; check `total_hits` for the
+    /// true count. Empty for title-only matches.
+    pub line_hits: Vec<usize>,
+
+    /// Total number of content lines that matched the query.
+    ///
+    /// May exceed `line_hits.len()` when capped.
+    pub total_hits: usize,
+
+    /// A short excerpt centered on the first match.
+    ///
+    /// `None` only when the note has no content at all.
+    pub snippet: Option<Snippet>,
 }
 
-/// A contiguous group of matching/context lines.
-pub struct MatchGroup {
-    pub lines: Vec<(usize, String)>,
+/// A short text excerpt with the line it came from.
+pub struct Snippet {
+    /// 1-indexed source line.
+    pub line: usize,
+
+    /// Excerpt text. Prefixed/suffixed with `…` when truncated.
+    pub text: String,
 }
 
 impl SearchMatch {
     /// Format as pseudo-XML for LLM consumption.
+    ///
+    /// The output is intentionally compact and size-bounded. To read full
+    /// content, the caller should follow up with `note_get`, passing
+    /// `line_hits` (or a range around them) via its `lines` parameter.
     #[must_use]
     pub fn to_xml(&self) -> String {
         let mut out = format!(
-            "<match note-id=\"{}\" title=\"{}\">",
-            self.note_id,
+            "<match note-id=\"{}\" title=\"{}\" tags=\"{}\" updated-at=\"{}\" total-hits=\"{}\">",
+            xml_escape(&self.note_id),
             xml_escape(&self.title),
+            xml_escape(&self.tags.join(" ")),
+            xml_escape(self.updated_at.as_deref().unwrap_or("unknown")),
+            self.total_hits,
         );
 
-        for (idx, group) in self.groups.iter().enumerate() {
-            if idx > 0 {
-                out.push_str("\n...");
-            }
-            out.push('\n');
-            for (line_num, text) in &group.lines {
-                out.push_str(&format!("{line_num:03}: {text}\n"));
-            }
+        if let Some(snippet) = &self.snippet {
+            out.push_str(&format!(
+                "\n  <snippet line=\"{}\">{}</snippet>",
+                snippet.line,
+                xml_escape(&snippet.text),
+            ));
         }
 
-        out.push_str("</match>");
+        if !self.line_hits.is_empty() {
+            let hits = self
+                .line_hits
+                .iter()
+                .map(usize::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push_str(&format!("\n  <hits>{hits}</hits>"));
+        }
+
+        out.push_str("\n</match>");
         out
     }
 }
@@ -192,16 +247,29 @@ fn execute_fts(conn: &Connection, cte: &str, params: &SearchParams) -> Result<Ve
     }
     fts_results.truncate(params.limit);
 
+    let note_ids: Vec<String> = fts_results.iter().map(|r| r.note_id.clone()).collect();
+    let meta = fetch_metadata(conn, cte, &note_ids)?;
+
     Ok(fts_results
         .into_iter()
         .map(|r| {
             let content = r.content.unwrap_or_default();
-            let groups = extract_matching_lines(&content, &params.queries, params.context);
+            let (line_hits, total_hits, snippet) = extract_hits_and_snippet(
+                &content,
+                &params.queries,
+                params.max_line_hits,
+                params.snippet_chars,
+            );
 
+            let m = meta.get(&r.note_id);
             SearchMatch {
                 note_id: r.note_id,
                 title: r.title,
-                groups,
+                tags: m.map(|m| m.tags.clone()).unwrap_or_default(),
+                updated_at: m.and_then(|m| m.updated_at.clone()),
+                line_hits,
+                total_hits,
+                snippet,
             }
         })
         .collect())
@@ -376,89 +444,205 @@ fn execute_like(conn: &Connection, cte: &str, params: &SearchParams) -> Result<V
         })?
         .collect::<std::result::Result<Vec<_>, _>>()?;
 
+    let note_ids: Vec<String> = scored_notes.iter().map(|n| n.id.clone()).collect();
+    let meta = fetch_metadata(conn, cte, &note_ids)?;
+
     let mut matches = vec![];
     for note in scored_notes {
         let content = note.content.unwrap_or_default();
-        let groups = extract_matching_lines(&content, &params.queries, params.context);
+        let (line_hits, total_hits, snippet) = extract_hits_and_snippet(
+            &content,
+            &params.queries,
+            params.max_line_hits,
+            params.snippet_chars,
+        );
 
+        let m = meta.get(&note.id);
         matches.push(SearchMatch {
             note_id: note.id,
             title: note.title,
-            groups,
+            tags: m.map(|m| m.tags.clone()).unwrap_or_default(),
+            updated_at: m.and_then(|m| m.updated_at.clone()),
+            line_hits,
+            total_hits,
+            snippet,
         });
     }
 
     // Secondary sort: within the same SQL score tier, notes with more
-    // content-level line hits come first.
+    // content-level hits come first.
     // (SQL already orders by score DESC, so this is a stable tiebreaker.)
-    matches.sort_by(|a, b| {
-        let a_lines: usize = a.groups.iter().map(|g| g.lines.len()).sum();
-        let b_lines: usize = b.groups.iter().map(|g| g.lines.len()).sum();
-        b_lines.cmp(&a_lines)
-    });
+    matches.sort_by_key(|m| std::cmp::Reverse(m.total_hits));
 
     Ok(matches)
 }
 
-/// Find matching lines in content and group them with context.
-fn extract_matching_lines(content: &str, queries: &[String], context: usize) -> Vec<MatchGroup> {
+/// Find matching lines and produce a snippet showing the best match.
+///
+/// Returns `(line_hits, total_hits, snippet)`. `line_hits` is truncated to
+/// `max_line_hits`; `total_hits` is always the full count. When no content
+/// line matches the query (title-only match), `line_hits` is empty and the
+/// snippet previews the first non-empty content line. `snippet` is `None`
+/// only when the note has no content at all.
+fn extract_hits_and_snippet(
+    content: &str,
+    queries: &[String],
+    max_line_hits: usize,
+    snippet_chars: usize,
+) -> (Vec<usize>, usize, Option<Snippet>) {
     let lines: Vec<&str> = content.lines().collect();
+    let lowered_queries: Vec<String> = queries
+        .iter()
+        .filter(|q| !q.trim().is_empty())
+        .map(|q| q.to_lowercase())
+        .collect();
 
-    // Find lines matching any query
-    let mut hit_lines = BTreeSet::new();
-    for query in queries {
-        let lower_query = query.to_lowercase();
+    let mut hits: Vec<usize> = vec![];
+    let mut first_hit: Option<(usize, usize)> = None; // (line_idx, byte_pos)
+
+    if !lowered_queries.is_empty() {
         for (idx, line) in lines.iter().enumerate() {
-            if line.to_lowercase().contains(&lower_query) {
-                hit_lines.insert(idx);
+            let lowered = line.to_lowercase();
+            let mut earliest: Option<usize> = None;
+            for q in &lowered_queries {
+                if let Some(pos) = lowered.find(q) {
+                    earliest = Some(earliest.map_or(pos, |p| p.min(pos)));
+                }
+            }
+
+            if let Some(pos) = earliest {
+                hits.push(idx + 1); // 1-indexed
+                if first_hit.is_none() {
+                    first_hit = Some((idx, pos));
+                }
             }
         }
     }
 
-    if hit_lines.is_empty() {
-        // Title-only match; show first few lines as preview
-        let end = lines.len().min(context * 2 + 1);
-        if end == 0 {
-            return vec![];
-        }
-        let group_lines = (0..end).map(|i| (i + 1, lines[i].to_string())).collect();
-        return vec![MatchGroup { lines: group_lines }];
+    let total_hits = hits.len();
+
+    let snippet = if let Some((line_idx, match_pos)) = first_hit {
+        Some(Snippet {
+            line: line_idx + 1,
+            text: make_snippet(lines[line_idx], match_pos, snippet_chars),
+        })
+    } else {
+        // Title-only match (or empty query): preview the first non-empty line.
+        lines
+            .iter()
+            .enumerate()
+            .find(|(_, l)| !l.trim().is_empty())
+            .map(|(idx, line)| Snippet {
+                line: idx + 1,
+                text: make_snippet(line, 0, snippet_chars),
+            })
+    };
+
+    if hits.len() > max_line_hits {
+        hits.truncate(max_line_hits);
     }
 
-    // Expand hits with context
-    let mut visible = BTreeSet::new();
-    for &hit in &hit_lines {
-        let start = hit.saturating_sub(context);
-        let end = (hit + context + 1).min(lines.len());
-        for i in start..end {
-            visible.insert(i);
-        }
+    (hits, total_hits, snippet)
+}
+
+/// Truncate `line` to roughly `max_chars` characters, centered on
+/// `match_byte_pos`. Prefixes and/or suffixes the result with `…` when
+/// truncation actually happened.
+///
+/// `match_byte_pos` is a hint and is clamped to the line's byte length, so
+/// callers can safely pass approximate positions derived from a lower-cased
+/// copy of the line.
+fn make_snippet(line: &str, match_byte_pos: usize, max_chars: usize) -> String {
+    let char_count = line.chars().count();
+    if char_count <= max_chars {
+        return line.to_string();
     }
 
-    // Group consecutive lines
-    let mut groups = vec![];
-    let mut current_group: Vec<(usize, String)> = vec![];
-    let mut prev: Option<usize> = None;
+    let half = max_chars / 2;
+    let clamped_pos = match_byte_pos.min(line.len());
+    let match_char_pos = line[..clamped_pos].chars().count();
 
-    for &idx in &visible {
-        if let Some(p) = prev
-            && idx != p + 1
-            && !current_group.is_empty()
-        {
-            groups.push(MatchGroup {
-                lines: std::mem::take(&mut current_group),
-            });
-        }
-        current_group.push((idx + 1, lines[idx].to_string())); // 1-indexed
-        prev = Some(idx);
+    let mut start_char = match_char_pos.saturating_sub(half);
+    let end_char = (start_char + max_chars).min(char_count);
+    start_char = end_char.saturating_sub(max_chars);
+
+    let start_byte = line.char_indices().nth(start_char).map_or(0, |(b, _)| b);
+    let end_byte = line
+        .char_indices()
+        .nth(end_char)
+        .map_or(line.len(), |(b, _)| b);
+
+    let mut out = String::with_capacity(end_byte - start_byte + 8);
+    if start_char > 0 {
+        out.push('…');
     }
-    if !current_group.is_empty() {
-        groups.push(MatchGroup {
-            lines: current_group,
+    out.push_str(&line[start_byte..end_byte]);
+    if end_char < char_count {
+        out.push('…');
+    }
+    out
+}
+
+struct NoteMeta {
+    tags: Vec<String>,
+    updated_at: Option<String>,
+}
+
+/// Fetch tags and `updated_at` for a batch of note IDs in one query.
+fn fetch_metadata(
+    conn: &Connection,
+    cte: &str,
+    note_ids: &[String],
+) -> Result<HashMap<String, NoteMeta>> {
+    if note_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    rusqlite::vtab::array::load_module(conn)?;
+
+    let values = Rc::new(
+        note_ids
+            .iter()
+            .cloned()
+            .map(Value::from)
+            .collect::<Vec<_>>(),
+    );
+    let bind: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(values)];
+    let refs: Vec<&dyn rusqlite::types::ToSql> = bind.iter().map(AsRef::as_ref).collect();
+
+    let sql = format!(
+        "{cte}
+         SELECT n.id, n.updated_at, t.name
+         FROM notes n
+         LEFT JOIN note_tags nt ON nt.note_id = n.id
+         LEFT JOIN tags t ON t.id = nt.tag_id
+         WHERE n.id IN rarray(?1)
+         ORDER BY n.id, t.name"
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let mut out: HashMap<String, NoteMeta> = HashMap::new();
+
+    let rows = stmt.query_map(refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<String>>(2)?,
+        ))
+    })?;
+
+    for row in rows {
+        let (id, updated_at, tag) = row?;
+        let entry = out.entry(id).or_insert(NoteMeta {
+            tags: vec![],
+            updated_at,
         });
+        if let Some(t) = tag {
+            entry.tags.push(t);
+        }
     }
 
-    groups
+    Ok(out)
 }
 
 fn xml_escape(s: &str) -> String {

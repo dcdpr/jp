@@ -212,7 +212,6 @@ fn get_notes(query: &Query, db: &BearDb) -> Result<Vec<Note>, Box<dyn Error + Se
                 .search(&SearchParams {
                     queries: vec![query.clone()],
                     tags: tags.clone(),
-                    context: 0,
                     ..Default::default()
                 })
                 .map_err(|e| e.to_string())?;

@@ -10,7 +10,7 @@ pub mod tag;
 pub use db::BearDb;
 pub use error::Error;
 pub use note::Note;
-pub use search::{SearchMatch, SearchMode, SearchParams};
+pub use search::{SearchMatch, SearchMode, SearchParams, Snippet};
 pub use tag::Tag;
 
 type Result<T> = std::result::Result<T, Error>;
