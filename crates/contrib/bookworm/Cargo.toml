@@ -1,8 +1,8 @@
 [package]
-name = "bookworm"
 description = "Rust crate documentation MCP server"
 edition = "2024"
 license = "MIT"
+name = "bookworm"
 publish = false
 version = "0.1.0"
 
@@ -28,7 +28,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 url = { workspace = true, features = ["serde"] }
-zip = { workspace = true, features = ["bzip2", "deflate"] }
+zip = { workspace = true, features = ["bzip2", "deflate-flate2-zlib-rs"] }
 
 [dev-dependencies]
 camino-tempfile = { workspace = true }

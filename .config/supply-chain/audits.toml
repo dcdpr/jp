@@ -6,6 +6,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.4.4 -> 0.5.2"
 
+[[audits.bzip2]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.2 -> 0.6.1"
+
 [[audits.bzip2-sys]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -76,10 +81,20 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.19.0"
 
+[[audits.libbz2-rs-sys]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.1 -> 0.2.5"
+
 [[audits.libsqlite3-sys]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.35.0 -> 0.36.0"
+
+[[audits.libz-rs-sys]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.2 -> 0.5.5"
 
 [[audits.mac]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -206,6 +221,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.7 -> 0.3.8"
 
+[[audits.simd-adler32]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.8 -> 0.3.9"
+
 [[audits.siphasher]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -261,6 +281,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.4.5 -> 0.5.1"
 
+[[audits.typed-path]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.12.3"
+
 [[audits.unarray]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -280,6 +305,16 @@ version = "0.2.3"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.36.1"
+
+[[audits.zip]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "2.4.2 -> 8.6.0"
+
+[[audits.zlib-rs]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.3 -> 0.5.5"
 
 [[trusted.aho-corasick]]
 criteria = "safe-to-deploy"
@@ -610,6 +645,12 @@ criteria = "safe-to-deploy"
 user-id = 55123 # rust-lang-owner
 start = "2024-08-15"
 end = "2027-02-13"
+
+[[trusted.libz-rs-sys]]
+criteria = "safe-to-deploy"
+user-id = 1303
+start = "2024-02-23"
+end = "2027-05-25"
 
 [[trusted.linkme]]
 criteria = "safe-to-deploy"
@@ -1264,6 +1305,12 @@ criteria = "safe-to-deploy"
 user-id = 6743 # Ed Page (epage)
 start = "2023-02-22"
 end = "2027-02-13"
+
+[[trusted.zlib-rs]]
+criteria = "safe-to-deploy"
+user-id = 1303
+start = "2024-02-23"
+end = "2027-05-25"
 
 [[trusted.zmij]]
 criteria = "safe-to-deploy"
