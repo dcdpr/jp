@@ -1,0 +1,45 @@
+[conversation.tools.debug_jp_profile_heap]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Profile a `jp` command with the `dhat` heap profiler, producing a Markdown report. Adds significant runtime overhead."
+
+examples = """
+Profile heap usage of a fork:
+```json
+{"args": ["c", "fork"]}
+```
+
+Profile against an empty user data dir (no conversations cloned in):
+```json
+{"args": ["c", "ls"], "clone_user_data": false}
+```
+"""
+
+[conversation.tools.debug_jp_profile_heap.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.debug_jp_profile_heap.parameters.args]
+required = true
+type = "array"
+summary = "Argument vector passed to `jp`, excluding the binary name."
+description = """
+The arguments form the full `jp` command line. For example, \
+`["c", "fork"]` runs `jp c fork` inside the sandbox.
+"""
+items = { type = "string" }
+
+[conversation.tools.debug_jp_profile_heap.parameters.clone_user_data]
+type = "boolean"
+summary = "Whether to clone the current user data into the sandbox. Defaults to true."
+description = """
+When `true`, the user-global data directory (conversations, sessions, …) is \
+cloned into the sandbox via copy-on-write where supported. The profile run \
+sees real workspace data without any risk to the original.
+
+When `false`, the sandbox starts with an empty data directory.
+"""
