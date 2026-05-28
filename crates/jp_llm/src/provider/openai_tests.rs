@@ -356,7 +356,7 @@ mod ensure_strict_schema {
             }
         });
 
-        enforce_strict_object_structure(&mut schema);
+        ensure_strict_schema(&mut schema);
 
         // Should not add a second "null".
         assert_eq!(
@@ -379,7 +379,7 @@ mod ensure_strict_schema {
             }
         });
 
-        enforce_strict_object_structure(&mut schema);
+        ensure_strict_schema(&mut schema);
 
         let items = &schema["items"];
         assert_eq!(items["required"], json!(["a", "b"]));
@@ -589,7 +589,7 @@ mod ensure_strict_schema {
 
     #[test]
     fn allof_multiple_elements_merged() {
-        let input = schema(json!({
+        let out = run(json!({
             "allOf": [
                 {
                     "type": "object",
@@ -610,36 +610,30 @@ mod ensure_strict_schema {
 
     #[test]
     fn null_default_stripped() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "string",
             "default": null
         }));
-
-        let out = transform_schema(input);
 
         assert!(out.get("default").is_none());
     }
 
     #[test]
     fn non_null_default_preserved() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "string",
             "default": "hello"
         }));
-
-        let out = transform_schema(input);
 
         assert_eq!(out["default"], "hello");
     }
 
     #[test]
     fn const_preserved_unchanged() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "string",
             "const": "tool_call.my_tool.call_123"
         }));
-
-        let out = transform_schema(input);
 
         assert_eq!(out["const"], "tool_call.my_tool.call_123");
     }
