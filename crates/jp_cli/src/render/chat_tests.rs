@@ -425,6 +425,69 @@ fn test_text_before_and_after_code_block() {
     );
 }
 
+/// Regression for two bugs in the fence-inside-list-item render path:
+///
+/// 1. Visible content in syntax-highlighted code lines was indented N columns
+///    too far right, because `indent_lines` treated the syntect-appended
+///    `\x1b[0m` (reset emitted *after* the trailing `\n`) as the start of a new
+///    line and added an extra prefix to it.
+/// 2. The closing fence inside a list item was followed by a spurious blank
+///    line, breaking the visual flow of the surrounding list.
+#[test]
+fn test_fence_inside_list_item_indents_correctly_and_no_trailing_blank() {
+    let mut config = AppConfig::new_test();
+    config.style.markdown.theme = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "\
+1. Workspace config grants:
+   ```toml
+   [[conversation.tools.fs_modify_file.access.fs]]
+      path = \".\"
+      read = true
+   ```
+2. Conversation adds a mount.
+"
+        .into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let plain = strip_ansi(&out.lock());
+    let lines: Vec<&str> = plain.lines().collect();
+
+    // Code content lines inside the list item stay at the list's
+    // content_column (3) + their own intra-block indent. The TOML
+    // table content was at column 6 in the source; it must render at
+    // column 6, not 9.
+    assert!(
+        lines.iter().any(|l| *l == "      path = \".\""),
+        "`path = \".\"` should render at column 6. Got:\n{plain}"
+    );
+    assert!(
+        lines.iter().any(|l| *l == "      read = true"),
+        "`read = true` should render at column 6. Got:\n{plain}"
+    );
+
+    // Closing fence sits at the opening fence's column (3).
+    assert!(
+        lines.iter().any(|l| *l == "   `````"),
+        "closing fence should render at column 3. Got:\n{plain}"
+    );
+
+    // No blank line between the closing fence and the next list item.
+    let fence_idx = lines
+        .iter()
+        .position(|l| *l == "   `````")
+        .expect("closing fence missing");
+    assert_eq!(
+        lines.get(fence_idx + 1),
+        Some(&"2. Conversation adds a mount."),
+        "next list item should sit directly under the closing fence. Got:\n{plain}"
+    );
+}
+
 #[test]
 fn test_fenced_code_block_syntax_highlighting() {
     let mut config = AppConfig::new_test();

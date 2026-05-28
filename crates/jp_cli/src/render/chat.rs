@@ -38,7 +38,10 @@ use jp_config::style::{
 use jp_conversation::event::ChatResponse;
 use jp_md::{
     buffer::{Buffer, Event, EventFixup, FenceEscalationFixup, OrphanedFenceFixup},
-    format::{BackgroundFill, CodeBlockState, DefaultBackground, Formatter, TerminalOptions},
+    format::{
+        BackgroundFill, CodeBlockState, DefaultBackground, Formatter, TerminalOptions,
+        render_separator,
+    },
 };
 use jp_printer::{PrintableExt as _, Printer};
 use tokio_util::sync::CancellationToken;
@@ -311,9 +314,19 @@ impl ChatRenderer {
                 }
                 Event::FencedCodeEnd { fence, indent } => {
                     let bg = self.terminal_options(0).default_background;
-                    let rendered = self
+                    // At top level (indent == 0), append a blank-line
+                    // separator to keep the conventional gap between a
+                    // closing fence and the next block. Inside a list
+                    // item (indent > 0) the separator would break the
+                    // visual flow of the list, so we emit the fence on
+                    // its own and let the next event handle its own
+                    // separation.
+                    let mut rendered = self
                         .formatter
-                        .render_closing_fence(&format!("{fence}\n"), bg.as_ref());
+                        .render_code_fence(&format!("{fence}\n"), bg.as_ref());
+                    if indent == 0 {
+                        rendered.push_str(&render_separator(bg.as_ref()));
+                    }
                     self.print_code(&rendered, indent);
                     self.code_block = None;
                 }
@@ -475,19 +488,43 @@ fn build_role_header_line(label: &str, suffix: Option<&str>, width: usize, prett
 
 /// Prepend `indent` spaces to every line of `content`.
 ///
-/// Used to indent streaming code-block lines that originate from inside a
-/// list item. ANSI escape sequences are preserved as-is — they don't
-/// affect visual indentation.
+/// Used to indent streaming code-block lines that originate from inside a list
+/// item.
+/// ANSI escape sequences are zero-width and don't count as visible content: the
+/// indent prefix is emitted before the first *visible* character on a new line,
+/// not before any leading escapes.
+/// This matters because syntax highlighters routinely close a line with
+/// `\n\x1b[0m` (reset *after* the newline); without this rule, the trailing
+/// reset would be misread as the start of a new line and trigger an extra
+/// prefix, pushing the next line's visible content `indent` columns too far
+/// right.
 fn indent_lines(content: &str, indent: usize) -> String {
     let prefix = " ".repeat(indent);
     let mut out = String::with_capacity(content.len() + indent);
-    let mut at_line_start = true;
+    let mut needs_prefix = true;
+    let mut in_escape = false;
     for ch in content.chars() {
-        if at_line_start && ch != '\n' {
-            out.push_str(&prefix);
+        if in_escape {
+            out.push(ch);
+            // CSI/SGR sequences end at the first ASCII letter; the
+            // `~` is included for the rare 7-bit final byte some
+            // sequences use. Good enough for syntect output.
+            if ch.is_ascii_alphabetic() || ch == '~' {
+                in_escape = false;
+            }
+        } else if ch == '\x1b' {
+            out.push(ch);
+            in_escape = true;
+        } else if ch == '\n' {
+            out.push(ch);
+            needs_prefix = true;
+        } else {
+            if needs_prefix {
+                out.push_str(&prefix);
+                needs_prefix = false;
+            }
+            out.push(ch);
         }
-        out.push(ch);
-        at_line_start = ch == '\n';
     }
     out
 }
