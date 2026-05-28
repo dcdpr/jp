@@ -94,7 +94,13 @@ fn with_package_argument_is_passed_through_to_both_tools() {
         ])
         .returns_success("")
         .expect("comfort")
-        .args(&["--list-changed", "--package", "my_pkg"])
+        .args(&[
+            "--list-changed",
+            "--format-markdown",
+            "--reference-links",
+            "--package",
+            "my_pkg",
+        ])
         .returns_success("");
 
     let result = cargo_format_impl(&ctx, Some("my_pkg"), &runner).unwrap();
@@ -109,7 +115,12 @@ fn without_package_uses_workspace_scope_on_both_tools() {
         .args(&["fmt", "--all", "--", "--color=never", "--files-with-diff"])
         .returns_success("")
         .expect("comfort")
-        .args(&["--list-changed", "--workspace"])
+        .args(&[
+            "--list-changed",
+            "--format-markdown",
+            "--reference-links",
+            "--workspace",
+        ])
         .returns_success("");
 
     let result = cargo_format_impl(&ctx, None, &runner).unwrap();
