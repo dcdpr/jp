@@ -16,115 +16,163 @@ fn ctx() -> (Utf8TempDir, Context) {
 }
 
 #[test]
-fn test_cargo_format_no_files_to_format() {
+fn no_changes_anywhere_reports_nothing_to_format() {
     let (_dir, ctx) = ctx();
-    let runner = MockProcessRunner::success("");
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("");
 
+    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
     assert_eq!(result.unwrap_content(), "No files to format.");
 }
 
 #[test]
-fn test_cargo_format_with_files() {
+fn rustfmt_changes_only_lists_those_files() {
     let (_dir, ctx) = ctx();
-    let stdout = format!("{root}/src/main.rs\n{root}/src/lib.rs", root = ctx.root);
-    let runner = MockProcessRunner::success(stdout);
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let rustfmt_stdout = format!("{root}/src/main.rs\n{root}/src/lib.rs", root = ctx.root);
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(rustfmt_stdout)
+        .expect("comfort")
+        .returns_success("");
 
+    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
-        "Formatted files:\n- src/main.rs\n- src/lib.rs"
+        "Formatted files:\n- src/lib.rs\n- src/main.rs"
     );
 }
 
 #[test]
-fn test_cargo_format_with_package() {
+fn comfort_changes_only_lists_those_files() {
+    let (_dir, ctx) = ctx();
+    let comfort_stdout = format!("{}/crates/foo/src/lib.rs", ctx.root);
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success(comfort_stdout);
+
+    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    assert_eq!(
+        result.unwrap_content(),
+        "Formatted files:\n- crates/foo/src/lib.rs"
+    );
+}
+
+#[test]
+fn overlapping_changes_are_deduplicated_and_sorted() {
+    let (_dir, ctx) = ctx();
+    let rustfmt_stdout = format!("{root}/src/b.rs\n{root}/src/a.rs", root = ctx.root);
+    let comfort_stdout = format!("{root}/src/a.rs\n{root}/src/c.rs", root = ctx.root);
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(rustfmt_stdout)
+        .expect("comfort")
+        .returns_success(comfort_stdout);
+
+    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    assert_eq!(
+        result.unwrap_content(),
+        "Formatted files:\n- src/a.rs\n- src/b.rs\n- src/c.rs"
+    );
+}
+
+#[test]
+fn with_package_argument_is_passed_through_to_both_tools() {
     let (_dir, ctx) = ctx();
     let runner = MockProcessRunner::builder()
         .expect("cargo")
         .args(&[
             "fmt",
-            "--package=my_package",
+            "--package=my_pkg",
             "--",
             "--color=never",
             "--files-with-diff",
         ])
+        .returns_success("")
+        .expect("comfort")
+        .args(&["--list-changed", "--package", "my_pkg"])
         .returns_success("");
 
-    let result = cargo_format_impl(&ctx, Some("my_package".to_string()), &runner).unwrap();
-
+    let result = cargo_format_impl(&ctx, Some("my_pkg"), &runner).unwrap();
     assert_eq!(result.unwrap_content(), "No files to format.");
 }
 
 #[test]
-fn test_cargo_format_without_package_uses_all() {
+fn without_package_uses_workspace_scope_on_both_tools() {
     let (_dir, ctx) = ctx();
     let runner = MockProcessRunner::builder()
         .expect("cargo")
         .args(&["fmt", "--all", "--", "--color=never", "--files-with-diff"])
+        .returns_success("")
+        .expect("comfort")
+        .args(&["--list-changed", "--workspace"])
         .returns_success("");
 
     let result = cargo_format_impl(&ctx, None, &runner).unwrap();
-
     assert_eq!(result.unwrap_content(), "No files to format.");
 }
 
 #[test]
-fn test_cargo_format_trims_root_path() {
+fn rustfmt_failure_short_circuits_before_running_comfort() {
     let (_dir, ctx) = ctx();
-    let stdout = format!("{}/crates/tools/src/main.rs", ctx.root);
-    let runner = MockProcessRunner::success(stdout);
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
-
-    assert_eq!(
-        result.unwrap_content(),
-        "Formatted files:\n- crates/tools/src/main.rs"
-    );
-}
-
-#[test]
-fn test_cargo_format_command_failure() {
-    let (_dir, ctx) = ctx();
+    // Single expectation: comfort should never be reached.
     let runner = MockProcessRunner::builder()
-        .expect_any()
+        .expect("cargo")
         .returns(ProcessOutput {
             stdout: String::new(),
-            stderr: "error: could not format files".to_string(),
+            stderr: "error: could not format files".to_owned(),
             status: ExitCode::from_code(1),
         });
 
     let result = cargo_format_impl(&ctx, None, &runner).unwrap();
-
     match result {
         Outcome::Error { message, .. } => {
-            assert_eq!(
-                message,
-                "Cargo command failed: error: could not format files"
-            );
+            assert_eq!(message, "cargo fmt failed: error: could not format files");
         }
         _ => panic!("Expected Outcome::Error, got: {result:?}"),
     }
 }
 
 #[test]
-fn test_cargo_format_with_trailing_newline() {
+fn comfort_failure_is_reported_even_when_rustfmt_succeeded() {
     let (_dir, ctx) = ctx();
-    let stdout = format!("{root}/src/main.rs\n{root}/src/lib.rs\n", root = ctx.root);
-    let runner = MockProcessRunner::success(stdout);
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "comfort: parse error".to_owned(),
+            status: ExitCode::from_code(2),
+        });
 
-    assert_eq!(
-        result.unwrap_content(),
-        "Formatted files:\n- src/main.rs\n- src/lib.rs"
-    );
+    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    match result {
+        Outcome::Error { message, .. } => {
+            assert_eq!(message, "comfort failed: comfort: parse error");
+        }
+        _ => panic!("Expected Outcome::Error, got: {result:?}"),
+    }
 }
 
 #[test]
-fn test_cargo_format_single_file() {
+fn trailing_newlines_in_output_are_tolerated() {
     let (_dir, ctx) = ctx();
-    let stdout = format!("{}/src/main.rs", ctx.root);
-    let runner = MockProcessRunner::success(stdout);
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let rustfmt_stdout = format!("{root}/src/main.rs\n", root = ctx.root);
+    let comfort_stdout = format!("{root}/src/lib.rs\n\n", root = ctx.root);
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(rustfmt_stdout)
+        .expect("comfort")
+        .returns_success(comfort_stdout);
 
-    assert_eq!(result.unwrap_content(), "Formatted files:\n- src/main.rs");
+    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    assert_eq!(
+        result.unwrap_content(),
+        "Formatted files:\n- src/lib.rs\n- src/main.rs"
+    );
 }

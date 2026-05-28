@@ -3,7 +3,7 @@ enable = false
 run = "unattended"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-description = "run `cargo fmt`"
+description = "format Rust code: runs `cargo fmt` and then `comfort` to reflow doc-comment paragraphs"
 
 [conversation.tools.cargo_format.style]
 inline_results = "off"
