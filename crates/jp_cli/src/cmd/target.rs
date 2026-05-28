@@ -253,7 +253,7 @@ pub(crate) enum ConversationTarget {
 /// Filters applied to the interactive conversation picker.
 ///
 /// Each field restricts the picker to conversations matching that criterion.
-/// All fields default to `false` (no filter = show everything).
+/// All fields default to `false` / `None` (no filter = show everything).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct PickerFilter {
     /// Show only pinned conversations.
@@ -267,11 +267,28 @@ pub(crate) struct PickerFilter {
 
     /// Pre-populate the picker's filter input with this text.
     pub query: Option<String>,
+
+    /// Restrict the picker to this set of conversation IDs.
+    ///
+    /// Composed on top of the partition filters above.
+    /// Used by callers that pre-compute a candidate set (e.g.
+    /// `c use --grep`) and want the picker to draw only from that set.
+    pub candidate_ids: Option<Vec<ConversationId>>,
 }
 
 impl PickerFilter {
     /// Test whether a conversation passes this filter.
-    fn matches(&self, c: &jp_conversation::Conversation, is_session_conversation: bool) -> bool {
+    fn matches(
+        &self,
+        id: ConversationId,
+        c: &jp_conversation::Conversation,
+        is_session_conversation: bool,
+    ) -> bool {
+        if let Some(candidates) = &self.candidate_ids
+            && !candidates.contains(&id)
+        {
+            return false;
+        }
         if self.pinned && !c.is_pinned() {
             return false;
         }
@@ -639,16 +656,21 @@ fn build_picker_items(
         .map(|s| workspace.session_conversation_ids(s))
         .unwrap_or_default();
 
-    let mut items: Vec<_> = workspace
+    let mut rows: Vec<PickerRow> = workspace
         .conversations()
-        .filter(|(id, c)| filter.matches(c, session_ids.contains(id)))
-        .map(|(id, c)| {
-            let label = match &c.title {
-                Some(t) => format!("{id}  {t}"),
-                None => id.to_string(),
-            };
-            (*id, label)
+        .filter(|(id, c)| filter.matches(**id, c, session_ids.contains(id)))
+        .map(|(id, c)| PickerRow {
+            id: *id,
+            time_str: format_relative(Some(c.last_activated_at)),
+            title: c.title.clone(),
         })
+        .collect();
+
+    let time_width = rows.iter().map(|r| r.time_str.len()).max().unwrap_or(0);
+
+    let mut items: Vec<(ConversationId, String)> = rows
+        .drain(..)
+        .map(|r| (r.id, format_picker_label(&r, time_width)))
         .collect();
 
     // Sort pinned conversations first (by pinned_at descending),
@@ -681,6 +703,52 @@ fn build_picker_items(
     items
 }
 
+/// Intermediate row before label formatting.
+/// Held just long enough to compute the time-column width across all rows.
+struct PickerRow {
+    id: ConversationId,
+    time_str: String,
+    title: Option<String>,
+}
+
+/// Format a conversation's reference timestamp as a relative duration.
+///
+/// Returns an empty string when `when` is `None` so callers can omit the column
+/// for items with no recorded timestamp.
+fn format_relative(when: Option<chrono::DateTime<chrono::Utc>>) -> String {
+    use chrono::Utc;
+
+    let Some(when) = when else {
+        return String::new();
+    };
+    let Ok(dur) = (Utc::now() - when).to_std() else {
+        // Timestamp is in the future. Treat as "now".
+        return "now".to_string();
+    };
+    timeago::Formatter::new().convert(dur)
+}
+
+/// Render a picker row label.
+///
+/// Layout: `{id} {time_str:<time_width} {title}` when both time and title are
+/// present; `{id} {time_str}` when only time is present; `{id}` alone
+/// otherwise.
+/// The time column is padded to `time_width` so titles align across rows.
+fn format_picker_label(row: &PickerRow, time_width: usize) -> String {
+    match (row.time_str.is_empty(), row.title.as_deref()) {
+        (false, Some(title)) => format!(
+            "{}  {:<width$}  {}",
+            row.id,
+            row.time_str,
+            title,
+            width = time_width,
+        ),
+        (false, None) => format!("{}  {}", row.id, row.time_str),
+        (true, Some(title)) => format!("{}  {}", row.id, title),
+        (true, None) => row.id.to_string(),
+    }
+}
+
 /// Single-select interactive conversation picker.
 fn pick_conversation(
     workspace: &Workspace,
@@ -711,18 +779,34 @@ fn pick_conversation(
 /// Sorted by `archived_at` descending (most recently archived first).
 fn build_archived_picker_items(
     workspace: &Workspace,
-    _filter: &PickerFilter,
+    filter: &PickerFilter,
 ) -> Vec<(ConversationId, String)> {
     use chrono::{DateTime, Utc};
 
-    let mut items: Vec<(ConversationId, String, Option<DateTime<Utc>>)> = workspace
+    let mut rows: Vec<(PickerRow, Option<DateTime<Utc>>)> = workspace
         .archived_conversations()
+        .filter(|(id, _)| filter.candidate_ids.as_ref().is_none_or(|s| s.contains(id)))
         .map(|(id, c)| {
-            let label = match &c.title {
-                Some(t) => format!("{id}  {t}"),
-                None => id.to_string(),
+            let row = PickerRow {
+                id,
+                time_str: format_relative(c.archived_at),
+                title: c.title.clone(),
             };
-            (id, label, c.archived_at)
+            (row, c.archived_at)
+        })
+        .collect();
+
+    let time_width = rows
+        .iter()
+        .map(|(r, _)| r.time_str.len())
+        .max()
+        .unwrap_or(0);
+
+    let mut items: Vec<(ConversationId, String, Option<DateTime<Utc>>)> = rows
+        .drain(..)
+        .map(|(r, archived_at)| {
+            let label = format_picker_label(&r, time_width);
+            (r.id, label, archived_at)
         })
         .collect();
 

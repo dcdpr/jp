@@ -178,3 +178,73 @@ fn archived_keyword_name() {
         Some("+archived")
     );
 }
+
+// --- Picker label formatting ------------------------------------------------
+
+fn picker_row(id_secs: u64, time_str: &str, title: Option<&str>) -> PickerRow {
+    use chrono::Utc;
+    let id = ConversationId::try_from(
+        chrono::DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(id_secs),
+    )
+    .unwrap();
+    PickerRow {
+        id,
+        time_str: time_str.to_string(),
+        title: title.map(str::to_owned),
+    }
+}
+
+#[test]
+fn format_picker_label_id_only() {
+    let row = picker_row(1000, "", None);
+    let label = format_picker_label(&row, 0);
+    assert_eq!(label, row.id.to_string());
+}
+
+#[test]
+fn format_picker_label_with_title_only() {
+    let row = picker_row(1000, "", Some("My title"));
+    let label = format_picker_label(&row, 0);
+    assert_eq!(label, format!("{}  My title", row.id));
+}
+
+#[test]
+fn format_picker_label_with_time_only() {
+    let row = picker_row(1000, "3 days ago", None);
+    let label = format_picker_label(&row, 10);
+    assert_eq!(label, format!("{}  3 days ago", row.id));
+}
+
+#[test]
+fn format_picker_label_with_time_and_title_pads_time_column() {
+    // The time column is right-padded to the given width so titles align.
+    let row = picker_row(1000, "3 days ago", Some("My title"));
+    let label = format_picker_label(&row, 14);
+    // 14 chars for time column → "3 days ago    " (4 trailing spaces).
+    assert_eq!(label, format!("{}  3 days ago      My title", row.id));
+}
+
+#[test]
+fn format_relative_none_is_empty_string() {
+    assert_eq!(format_relative(None), "");
+}
+
+#[test]
+fn format_relative_future_is_now() {
+    use chrono::{Duration, Utc};
+    let future = Utc::now() + Duration::hours(1);
+    assert_eq!(format_relative(Some(future)), "now");
+}
+
+#[test]
+fn format_relative_past_uses_timeago_words() {
+    use chrono::{Duration, Utc};
+    let past = Utc::now() - Duration::days(3);
+    let out = format_relative(Some(past));
+    // timeago's exact wording can vary across versions, but "day" should
+    // always appear for a 3-day-old timestamp.
+    assert!(
+        out.contains("day"),
+        "expected 'day' in relative time, got: {out}"
+    );
+}

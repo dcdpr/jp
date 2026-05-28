@@ -101,26 +101,25 @@ fn ts(secs: i64) -> DateTime<Utc> {
 
 #[test]
 fn creation_range_is_set() {
-    assert!(!CreationRange::default().is_set());
-    assert!(
-        CreationRange {
-            from: Some(ts(1000).into()),
-            until: None,
-        }
-        .is_set()
-    );
-    assert!(
-        CreationRange {
-            from: None,
-            until: Some(ts(1000).into()),
-        }
-        .is_set()
-    );
+    let empty: CreationRange = CreationRange::default();
+    assert!(!empty.is_set());
+
+    let from_only: CreationRange = CreationRange {
+        from: Some(ts(1000).into()),
+        until: None,
+    };
+    assert!(from_only.is_set());
+
+    let until_only: CreationRange = CreationRange {
+        from: None,
+        until: Some(ts(1000).into()),
+    };
+    assert!(until_only.is_set());
 }
 
 #[test]
 fn creation_range_from_inclusive() {
-    let range = CreationRange {
+    let range: CreationRange = CreationRange {
         from: Some(ts(1000).into()),
         until: None,
     };
@@ -135,7 +134,7 @@ fn creation_range_from_inclusive() {
 
 #[test]
 fn creation_range_until_exclusive() {
-    let range = CreationRange {
+    let range: CreationRange = CreationRange {
         from: None,
         until: Some(ts(2000).into()),
     };
@@ -148,7 +147,7 @@ fn creation_range_until_exclusive() {
 
 #[test]
 fn creation_range_half_open() {
-    let range = CreationRange {
+    let range: CreationRange = CreationRange {
         from: Some(ts(1000).into()),
         until: Some(ts(2000).into()),
     };
@@ -162,7 +161,7 @@ fn creation_range_half_open() {
 
 #[test]
 fn creation_range_unset_accepts_everything() {
-    let range = CreationRange::default();
+    let range: CreationRange = CreationRange::default();
     assert!(range.matches(make_id(0)));
     assert!(range.matches(make_id(1_000_000_000)));
 }
@@ -204,4 +203,30 @@ fn clap_conflicts_range_with_positional_id() {
         err.to_string().contains("cannot be used with"),
         "expected clap conflict error, got: {err}"
     );
+}
+
+#[derive(Debug, Parser)]
+#[command(name = "test-creation-range-permissive")]
+struct PermissiveRangeWithIds {
+    #[command(flatten)]
+    _target: PositionalIds<true, true>,
+
+    #[command(flatten)]
+    range: CreationRange<false>,
+}
+
+#[test]
+fn clap_permissive_range_composes_with_positional_id() {
+    // `CreationRange<false>` is the candidate-filter variant used by `c use`.
+    // It must *not* conflict with the positional id, so combinations like
+    // `jp c use ?p --from 3w` parse successfully.
+    let id = ConversationId::try_from(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()).unwrap();
+    let cmd = PermissiveRangeWithIds::try_parse_from([
+        "test-creation-range-permissive",
+        &id.to_string(),
+        "--from",
+        "3w",
+    ])
+    .expect("non-exclusive range should compose with positional id");
+    assert!(cmd.range.from.is_some());
 }
