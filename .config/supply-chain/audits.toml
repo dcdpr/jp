@@ -156,6 +156,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.4.0"
 
+[[audits.reflink-copy]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.1.29"
+
 [[audits.rmcp]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
