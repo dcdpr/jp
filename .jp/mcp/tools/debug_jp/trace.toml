@@ -1,0 +1,79 @@
+[conversation.tools.debug_jp_trace]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Capture a `JP_DEBUG=1` trace log from a `jp` command and render it in a compact logfmt-like format."
+
+examples = """
+Trace a fork at the default level (`info`):
+```json
+{"args": ["c", "fork"]}
+```
+
+Drill in to debug-level events from the config layer only:
+```json
+{"args": ["c", "fork"], "level": "debug", "target": "jp_config"}
+```
+
+Find every event mentioning a specific path:
+```json
+{"args": ["c", "fork"], "level": "trace", "grep": "/Users/jean/.jp"}
+```
+"""
+
+[conversation.tools.debug_jp_trace.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.debug_jp_trace.parameters.args]
+required = true
+type = "array"
+summary = "Argument vector passed to `jp`, excluding the binary name."
+description = """
+The arguments form the full `jp` command line. For example, \
+`["c", "fork"]` runs `jp c fork` inside the sandbox.
+"""
+items = { type = "string" }
+
+[conversation.tools.debug_jp_trace.parameters.level]
+type = "string"
+summary = "Minimum log level to include in the report. Defaults to `info`."
+description = """
+Accepted values: `trace`, `debug`, `info`, `warn`, `error` (case-insensitive).
+
+Events strictly below this level are excluded.
+The raw JSONL on disk always contains every event regardless of this filter.
+"""
+
+[conversation.tools.debug_jp_trace.parameters.target]
+type = "string"
+summary = "Restrict to events whose `target` contains this substring (case-insensitive)."
+description = """
+Matches against the `target` field — the Rust module path where the event \
+was emitted, e.g. `jp_config::util` or `jp_conversation::stream`. Substring, \
+not exact match.
+"""
+
+[conversation.tools.debug_jp_trace.parameters.grep]
+type = "string"
+summary = "Restrict to events whose target, message, fields, or spans contain this substring (case-insensitive)."
+description = """
+A single needle that's matched against the full searchable text of each \
+event: target + message + every field's key=value + every span name.
+
+For more specific filtering, pair with `target` and/or a stricter `level`.
+"""
+
+[conversation.tools.debug_jp_trace.parameters.clone_user_data]
+type = "boolean"
+summary = "Whether to clone the current user data into the sandbox. Defaults to true."
+description = """
+When `true`, the user-global data directory (conversations, sessions, …) is \
+cloned into the sandbox via copy-on-write where supported. The trace run \
+sees real workspace data without any risk to the original.
+
+When `false`, the sandbox starts with an empty data directory.
+"""

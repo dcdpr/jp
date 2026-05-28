@@ -1,0 +1,60 @@
+[conversation.tools.debug_jp_profile_sampling]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Profile a `jp` command with wall-clock sampling via macOS `sample(1)`, producing a Markdown report. macOS only."
+
+examples = """
+Profile a fork against the current active conversation:
+```json
+{"args": ["c", "fork"]}
+```
+
+Profile a query against a known conversation, with a shorter sample ceiling:
+```json
+{"args": ["c", "show", "jp-c12345"], "duration_secs": 30}
+```
+
+Profile against an empty user data dir (no conversations cloned in):
+```json
+{"args": ["c", "ls"], "clone_user_data": false}
+```
+"""
+
+[conversation.tools.debug_jp_profile_sampling.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.debug_jp_profile_sampling.parameters.args]
+required = true
+type = "array"
+summary = "Argument vector passed to `jp`, excluding the binary name."
+description = """
+The arguments form the full `jp` command line. For example, \
+`["c", "fork"]` runs `jp c fork` inside the sandbox.
+"""
+items = { type = "string" }
+
+[conversation.tools.debug_jp_profile_sampling.parameters.duration_secs]
+type = "integer"
+summary = "Maximum wall-clock sampling duration in seconds. Defaults to 120."
+description = """
+Upper bound on `sample(1)`'s run time. Sampling stops earlier when the \
+profiled `jp` process exits, so this only protects against runaway commands.
+"""
+
+[conversation.tools.debug_jp_profile_sampling.parameters.clone_user_data]
+type = "boolean"
+summary = "Whether to clone the current user data into the sandbox. Defaults to true."
+description = """
+When `true`, the user-global data directory (conversations, sessions, …) is \
+cloned into the sandbox via copy-on-write where supported. The profile run \
+sees real workspace data without any risk to the original.
+
+When `false`, the sandbox starts with an empty data directory. Useful for \
+profiling commands that don't depend on existing conversations (e.g. `jp \
+init`-like flows).
+"""
