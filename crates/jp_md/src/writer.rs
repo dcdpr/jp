@@ -5,9 +5,12 @@
 //! separately from visible text, and managing background fills across line
 //! breaks.
 //!
-//! The AST renderer in [`render`](crate::render) drives this writer by calling
-//! [`output`](TerminalWriter::output) for visible text and
-//! [`write_escape`](TerminalWriter::write_escape) for ANSI codes.
+//! The AST renderer in [`render`] drives this writer by calling [`output`] for
+//! visible text and [`write_escape`] for ANSI codes.
+//!
+//! [`output`]: TerminalWriter::output
+//! [`render`]: crate::render
+//! [`write_escape`]: TerminalWriter::write_escape
 
 use std::{
     cmp::max,
@@ -30,8 +33,9 @@ pub struct TerminalWriter<'w> {
     wrap_buffer: String,
 
     /// ANSI escape sequences keyed by byte offset in `wrap_buffer`.
-    /// Each `(offset, code)` means "emit `code` just before the byte
-    /// at `offset`". Offsets equal to `wrap_buffer.len()` are valid.
+    /// Each `(offset, code)` means "emit `code` just before the byte at
+    /// `offset`".
+    /// Offsets equal to `wrap_buffer.len()` are valid.
     escapes: Vec<(usize, String)>,
 
     /// The last two bytes written (for newline detection).
@@ -75,16 +79,22 @@ pub struct TerminalWriter<'w> {
     /// This is the renderer's running view of the *intended* state — i.e. the
     /// state implied by every escape ever pushed since the last full reset.
     /// It is not necessarily the state the terminal is in right now: some of
-    /// those escapes may still be sitting in [`escapes`](Self::escapes),
-    /// waiting to be flushed.
+    /// those escapes may still be sitting in [`escapes`], waiting to be
+    /// flushed.
+    ///
+    /// [`escapes`]: Self::escapes
     pub(crate) attrs: AnsiState,
 
     /// ANSI state at the start of the current `wrap_buffer` batch.
     ///
-    /// Replaying every escape in [`escapes`](Self::escapes) on top of this
-    /// state yields [`attrs`](Self::attrs). Used during wrap-break to
-    /// reconstruct the state at an arbitrary byte offset (specifically, at the
-    /// break point) without losing escapes that were recorded past it.
+    /// Replaying every escape in [`escapes`] on top of this state yields
+    /// [`attrs`].
+    /// Used during wrap-break to reconstruct the state at an arbitrary byte
+    /// offset (specifically, at the break point) without losing escapes that
+    /// were recorded past it.
+    ///
+    /// [`attrs`]: Self::attrs
+    /// [`escapes`]: Self::escapes
     batch_initial_attrs: AnsiState,
 
     /// Optional default background color for all content.
@@ -97,15 +107,19 @@ impl<'w> TerminalWriter<'w> {
     /// `indent` seeds the initial prefix with that many spaces, so every
     /// wrap-routed line of rendered content (paragraphs, headers, list items,
     /// blockquotes, inline-code wrap continuations) starts at the requested
-    /// visual column. Used by the streaming buffer to put nested list-item
-    /// content at its parent's content column.
+    /// visual column.
+    /// Used by the streaming buffer to put nested list-item content at its
+    /// parent's content column.
     ///
-    /// Note: pre-formatted content emitted via
-    /// [`write_raw`](Self::write_raw) (currently used for syntax-highlighted
-    /// code-block bodies) is *not* indented by this option. Callers that need
-    /// indented code lines should apply the indent at the call site before
-    /// rendering. The chat renderer does this with its `indent_lines` helper
-    /// when emitting `Event::FencedCode*` events from the streaming buffer.
+    /// Note: pre-formatted content emitted via [`write_raw`] (currently used
+    /// for syntax-highlighted code-block bodies) is *not* indented by this
+    /// option.
+    /// Callers that need indented code lines should apply the indent at the
+    /// call site before rendering.
+    /// The chat renderer does this with its `indent_lines` helper when emitting
+    /// `Event::FencedCode*` events from the streaming buffer.
+    ///
+    /// [`write_raw`]: Self::write_raw
     pub(crate) fn new(
         output: &'w mut dyn Write,
         width: usize,
@@ -155,9 +169,9 @@ impl<'w> TerminalWriter<'w> {
 
     /// Record an ANSI escape at the current position in the wrap buffer.
     ///
-    /// The escape is stored in a side-channel and injected into the
-    /// output at the correct byte offset when the buffer is flushed or
-    /// split by the wrapping logic.
+    /// The escape is stored in a side-channel and injected into the output at
+    /// the correct byte offset when the buffer is flushed or split by the
+    /// wrapping logic.
     pub(crate) fn write_escape(&mut self, code: &str) -> fmt::Result {
         if self.width == 0 {
             self.output.write_str(code)
@@ -168,8 +182,8 @@ impl<'w> TerminalWriter<'w> {
         }
     }
 
-    /// Merge visible text from `wrap_buffer[start..end]` with ANSI escapes
-    /// that fall within that byte range.
+    /// Merge visible text from `wrap_buffer[start..end]` with ANSI escapes that
+    /// fall within that byte range.
     fn merge_escapes(&self, start: usize, end: usize) -> String {
         let text = &self.wrap_buffer[start..end];
         let mut result = String::with_capacity(text.len() * 2);
@@ -213,20 +227,23 @@ impl<'w> TerminalWriter<'w> {
 
     /// Soft-wrap the current wrap buffer at `last_breakable`.
     ///
-    /// Splits `wrap_buffer` at the last breakable space and starts a fresh
-    /// line with the prefix and the remainder. Escapes are partitioned by
-    /// their offset:
+    /// Splits `wrap_buffer` at the last breakable space and starts a fresh line
+    /// with the prefix and the remainder.
+    /// Escapes are partitioned by their offset:
     ///
     /// - Escapes at offsets `≤ break_pos` are folded into the *first part*
-    ///   (already done by [`merge_escapes`](Self::merge_escapes)) and replayed
-    ///   onto [`batch_initial_attrs`](Self::batch_initial_attrs) to derive
-    ///   the attribute state at the break point.
+    ///   (already done by [`merge_escapes`]) and replayed onto
+    ///   [`batch_initial_attrs`] to derive the attribute state at the break
+    ///   point.
     /// - Escapes at offsets `> break_pos` belong to the *rest* and are
-    ///   re-anchored onto the new buffer at
-    ///   `prefix.len() + (offset - rest_start)`. Dropping them — as a
-    ///   previous version of this code did — caused mid-line attribute
-    ///   changes (e.g. opening `**`) to bleed back to the start of the
-    ///   continuation line.
+    ///   re-anchored onto the new buffer at `prefix.len() + (offset -
+    ///   rest_start)`.
+    ///   Dropping them — as a previous version of this code did — caused
+    ///   mid-line attribute changes (e.g. opening `**`) to bleed back to the
+    ///   start of the continuation line.
+    ///
+    /// [`batch_initial_attrs`]: Self::batch_initial_attrs
+    /// [`merge_escapes`]: Self::merge_escapes
     fn wrap_break(&mut self) -> fmt::Result {
         let break_pos = self.last_breakable;
         let rest_start = break_pos + 1;
@@ -371,7 +388,7 @@ impl<'w> TerminalWriter<'w> {
         Ok(())
     }
 
-    /// Write the accumulated prefix (blockquote `> `, list indent, etc.).
+    /// Write the accumulated prefix (blockquote ` >  `, list indent, etc.).
     fn write_prefix(&mut self) -> fmt::Result {
         if self.prefix.is_empty() {
             return Ok(());
@@ -400,6 +417,7 @@ impl<'w> TerminalWriter<'w> {
     /// Emit the background fill for the current line.
     ///
     /// Depending on the [`BackgroundFill`] mode this either:
+    ///
     /// - does nothing (`Content`),
     /// - pads with spaces to a fixed column (`Column`),
     /// - emits `\x1b[K` to fill to the terminal edge (`Terminal`).
@@ -432,8 +450,10 @@ impl<'w> TerminalWriter<'w> {
         Ok(())
     }
 
-    /// Like [`emit_line_fill`](Self::emit_line_fill) but writes directly to the
-    /// output writer. Used in the wrap-break path.
+    /// Like [`emit_line_fill`] but writes directly to the output writer.
+    /// Used in the wrap-break path.
+    ///
+    /// [`emit_line_fill`]: Self::emit_line_fill
     fn emit_line_fill_direct(&mut self) -> fmt::Result {
         let Some(ref bg) = self.default_background else {
             return Ok(());
@@ -567,8 +587,8 @@ impl<'w> TerminalWriter<'w> {
     /// Write pre-formatted content directly to output, bypassing wrapping.
     ///
     /// Flushes any pending wrap buffer content first, emits pending newlines,
-    /// then writes `s` directly. Resets line tracking state afterward (column,
-    /// `begin_line`, window).
+    /// then writes `s` directly.
+    /// Resets line tracking state afterward (column, `begin_line`, window).
     ///
     /// When a default background is active, the background escape is injected
     /// at the start of each line and line-fill is applied before each newline,

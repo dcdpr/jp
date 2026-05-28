@@ -19,30 +19,30 @@ pub enum State {
     ///
     /// While in this state, indented content at any column greater than
     /// `marker_column` is treated as continuation of the current item.
-    /// In particular, content at column 4 is *not* treated as an indented
-    /// code block — that classification only applies at block boundaries
-    /// outside a list.
+    /// In particular, content at column 4 is *not* treated as an indented code
+    /// block — that classification only applies at block boundaries outside a
+    /// list.
     ///
-    /// When a fence or a deeper list marker appears inside the item,
-    /// the buffer pushes the current `InList` state onto its parents
-    /// stack and switches to the inner state. On close, the parent is
-    /// popped back.
+    /// When a fence or a deeper list marker appears inside the item, the buffer
+    /// pushes the current `InList` state onto its parents stack and switches to
+    /// the inner state.
+    /// On close, the parent is popped back.
     InList {
-        /// Column where the list's markers appear. Sibling items must
-        /// share this column.
+        /// Column where the list's markers appear.
+        /// Sibling items must share this column.
         marker_column: usize,
-        /// Column where item content (post-marker) starts. Deeper
-        /// markers seen at this column or beyond start a nested list.
+        /// Column where item content (post-marker) starts.
+        /// Deeper markers seen at this column or beyond start a nested list.
         content_column: usize,
-        /// Whether the list is ordered (digit + delim). Bullet otherwise.
+        /// Whether the list is ordered (digit + delim).
+        /// Bullet otherwise.
         is_ordered: bool,
-        /// The marker delimiter character: `.` or `)` for ordered, `-`/
-        /// `*`/`+` for bullet.
+        /// The marker delimiter character: `.` or `)` for ordered, `-`/ `*`/`+`
+        /// for bullet.
         delimiter: u8,
-        /// For ordered lists, the marker number on the first item. Used
-        /// to renumber emitted items so the output is consistent with
-        /// CommonMark's renumbering even though we stream items
-        /// individually.
+        /// For ordered lists, the marker number on the first item.
+        /// Used to renumber emitted items so the output is consistent with
+        /// CommonMark's renumbering even though we stream items individually.
         start_number: u32,
         /// Number of items already flushed from this list.
         items_flushed: u32,
@@ -58,15 +58,15 @@ pub enum State {
 
         /// The indentation of the opening fence.
         ///
-        /// When the fence is inside a list item, this is the parent
-        /// list's `content_column`; code lines have this many leading
-        /// spaces stripped before emission.
+        /// When the fence is inside a list item, this is the parent list's
+        /// `content_column`; code lines have this many leading spaces stripped
+        /// before emission.
         indent: usize,
 
-        /// Nesting depth of inner fenced code blocks. When an inner fence
-        /// opening (backticks + language tag) is seen, this increments;
-        /// a bare closing fence decrements. The outer block only closes
-        /// when depth reaches 0.
+        /// Nesting depth of inner fenced code blocks.
+        /// When an inner fence opening (backticks + language tag) is seen, this
+        /// increments; a bare closing fence decrements.
+        /// The outer block only closes when depth reaches 0.
         depth: usize,
     },
 
@@ -101,8 +101,8 @@ impl FenceType {
 /// Represents the 7 types of HTML blocks defined by the CommonMark spec.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HtmlBlockRule {
-    /// Type 1: `<script>`, `<pre>`, `<style>`, `<textarea>`
-    /// Ends with matching closing tag.
+    /// Type 1: `<script>`, `<pre>`, `<style>`, `<textarea>` Ends with matching
+    /// closing tag.
     Type1(HtmlType1Tag),
     /// Type 2: `<!-- ... -->`
     Type2,
@@ -112,11 +112,9 @@ pub enum HtmlBlockRule {
     Type4,
     /// Type 5: `<![CDATA[ ... ]]>`
     Type5,
-    /// Type 6: `<div...` etc.
-    /// Ends with a blank line.
+    /// Type 6: `<div...` etc. Ends with a blank line.
     Type6(HtmlType6Tag),
-    /// Type 7: `<foo...`
-    /// Ends with a blank line, cannot interrupt a paragraph.
+    /// Type 7: `<foo...` Ends with a blank line, cannot interrupt a paragraph.
     Type7,
 }
 

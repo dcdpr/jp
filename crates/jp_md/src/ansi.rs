@@ -1,8 +1,8 @@
 //! Shared ANSI SGR escape constants and state tracking.
 //!
-//! This module provides the escape sequences, state tracking, and visual
-//! width computation used by both the terminal renderer (`render.rs`) and
-//! the table formatter (`table.rs`).
+//! This module provides the escape sequences, state tracking, and visual width
+//! computation used by both the terminal renderer (`render.rs`) and the table
+//! formatter (`table.rs`).
 
 /// SGR: Bold on.
 pub const BOLD_START: &str = "\x1b[1m";
@@ -39,9 +39,9 @@ pub const RESET: &str = "\x1b[0m";
 
 /// Tracks which ANSI SGR attributes are currently active.
 ///
-/// Used to close formatting at line breaks and re-open it on the next
-/// line, both for the terminal renderer's incremental wrapping and the
-/// table formatter's batch wrapping.
+/// Used to close formatting at line breaks and re-open it on the next line,
+/// both for the terminal renderer's incremental wrapping and the table
+/// formatter's batch wrapping.
 #[derive(Debug, Clone, Default)]
 #[expect(clippy::struct_excessive_bools)]
 pub struct AnsiState {
@@ -81,8 +81,8 @@ impl AnsiState {
             || self.background.is_some()
     }
 
-    /// Update the tracked state from a complete ANSI escape sequence
-    /// (e.g. `"\x1b[1m"`).
+    /// Update the tracked state from a complete ANSI escape sequence (e.g.
+    /// `"\x1b[1m"`).
     pub(crate) fn update(&mut self, esc: &str) {
         match esc {
             BOLD_START => self.bold = true,
@@ -161,10 +161,9 @@ impl AnsiState {
 
 /// Calculate the visual width of a string, ignoring ANSI escape sequences.
 ///
-/// Strips ANSI escape sequences, then delegates to
-/// `UnicodeWidthStr::width()` which correctly handles multi-codepoint
-/// sequences like emoji presentation (VS16), ZWJ sequences, and
-/// script-specific ligatures.
+/// Strips ANSI escape sequences, then delegates to `UnicodeWidthStr::width()`
+/// which correctly handles multi-codepoint sequences like emoji presentation
+/// (VS16), ZWJ sequences, and script-specific ligatures.
 pub fn visual_width(s: &str) -> usize {
     use unicode_width::UnicodeWidthStr as _;
 

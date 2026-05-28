@@ -1,7 +1,7 @@
 use super::*;
 
-/// Regression test: a 1-byte prefix used to underflow in `write_prefix`
-/// because `prefix.len() - 2` wraps to `usize::MAX`.
+/// Regression test: a 1-byte prefix used to underflow in `write_prefix` because
+/// `prefix.len() - 2` wraps to `usize::MAX`.
 #[test]
 fn write_prefix_single_byte_no_panic() {
     let mut buf = String::new();
@@ -16,7 +16,8 @@ fn write_prefix_single_byte_no_panic() {
     assert!(buf.contains('>'), "prefix byte should appear in output");
 }
 
-/// Sanity check: empty prefix still works (was already guarded by early return).
+/// Sanity check: empty prefix still works (was already guarded by early
+/// return).
 #[test]
 fn write_prefix_empty() {
     let mut buf = String::new();

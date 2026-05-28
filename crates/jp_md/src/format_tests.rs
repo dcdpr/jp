@@ -216,8 +216,8 @@ fn test_no_trailing_background_after_wrapped_inline_code() {
 }
 
 /// Assert that no line in the formatted terminal output has an unclosed
-/// background color escape (which would cause the terminal to render
-/// the background color for the remainder of the line).
+/// background color escape (which would cause the terminal to render the
+/// background color for the remainder of the line).
 #[track_caller]
 fn assert_no_bg_bleed(formatter: &Formatter, input: &str, case: &str) {
     let output = formatter.format_terminal(input).unwrap();
@@ -757,11 +757,12 @@ fn test_inline_code_wrap_preserves_code_bg_on_content() {
     );
 }
 
-/// Regression: when a wrap-break landed between the *last breakable space*
-/// and the start of an inline span (e.g. `**bold**` opened mid-line), the
-/// escapes recorded past the break point were dropped. The continuation
-/// line was then re-stylized using `attrs.restore_sequence()`, which
-/// promoted the style (here: bold) onto text that should have been plain.
+/// Regression: when a wrap-break landed between the *last breakable space* and
+/// the start of an inline span (e.g.
+/// `**bold**` opened mid-line), the escapes recorded past the break point were
+/// dropped.
+/// The continuation line was then re-stylized using `attrs.restore_sequence()`,
+/// which promoted the style (here: bold) onto text that should have been plain.
 #[test]
 fn test_strong_does_not_bleed_across_wrap() {
     // Width chosen so:
@@ -1037,9 +1038,10 @@ fn test_thematic_break_line_style_uses_terminal_width() {
 }
 
 /// Regression: the terminal renderer used to emit `<!-- end list -->` between
-/// adjacent lists (and before indented code blocks) — a CommonMark
-/// round-trip hint borrowed from comrak's serializer that has no business
-/// appearing in terminal output. See also: `format_list` in `render.rs`.
+/// adjacent lists (and before indented code blocks) — a CommonMark round-trip
+/// hint borrowed from comrak's serializer that has no business appearing in
+/// terminal output.
+/// See also: `format_list` in `render.rs`.
 #[test]
 fn test_terminal_no_end_list_marker_between_adjacent_lists() {
     let formatter = Formatter::new();

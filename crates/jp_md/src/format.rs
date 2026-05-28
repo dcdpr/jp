@@ -41,8 +41,8 @@ pub enum HrStyle {
     /// Render the original markdown (`---`).
     Markdown,
 
-    /// Render a continuous unicode horizontal line (`─`) spanning the full line
-    /// width (based on `wrap_width`).
+    /// Render a continuous unicode horizontal line (`─`) spanning the full
+    /// line width (based on `wrap_width`).
     #[default]
     Line,
 }
@@ -69,27 +69,29 @@ pub struct TerminalOptions {
 
     /// Visual indent (in spaces) applied to wrap-routed rendered content.
     ///
-    /// The streaming buffer sets this when emitting events from inside a
-    /// nested list item, so the renderer puts paragraphs, headers, list
-    /// items, blockquotes, and inline-code wrap continuations at the
-    /// correct visual column. `0` (the default) means no indent — content
-    /// renders at column 0.
+    /// The streaming buffer sets this when emitting events from inside a nested
+    /// list item, so the renderer puts paragraphs, headers, list items,
+    /// blockquotes, and inline-code wrap continuations at the correct visual
+    /// column.
+    /// `0` (the default) means no indent — content renders at column 0.
     ///
     /// Note: pre-formatted content (currently syntax-highlighted code-block
-    /// bodies) is *not* indented by this option. The streaming pipeline
-    /// avoids this gap by emitting fenced code as separate `FencedCode*`
-    /// events and applying the indent at the chat-renderer level (see
-    /// `indent_lines` in the chat renderer), so the public contract here
-    /// only promises indentation for wrap-routed content.
+    /// bodies) is *not* indented by this option.
+    /// The streaming pipeline avoids this gap by emitting fenced code as
+    /// separate `FencedCode*` events and applying the indent at the
+    /// chat-renderer level (see `indent_lines` in the chat renderer), so the
+    /// public contract here only promises indentation for wrap-routed content.
     pub indent: usize,
 }
 
 /// A formatter for markdown text.
 pub struct Formatter {
-    /// Target line width for wrapping. `0` disables wrapping.
+    /// Target line width for wrapping.
+    /// `0` disables wrapping.
     width: usize,
 
-    /// Maximum visual width for a single table column. `0` = unlimited.
+    /// Maximum visual width for a single table column.
+    /// `0` = unlimited.
     table_max_column_width: usize,
 
     /// Resolved syntax highlighting theme.
@@ -101,8 +103,8 @@ pub struct Formatter {
     /// Actual terminal width in columns, if known.
     ///
     /// Used by [`HrStyle::Line`] to render a horizontal line spanning the full
-    /// terminal width. When `None`, the configured `width` is used as a
-    /// fallback.
+    /// terminal width.
+    /// When `None`, the configured `width` is used as a fallback.
     terminal_width: Option<usize>,
 
     /// Override background color for inline code spans.
@@ -187,9 +189,9 @@ impl Formatter {
 
     /// Set the actual terminal width in columns.
     ///
-    /// When [`HrStyle::Line`] is active, horizontal rules are rendered as
-    /// a unicode line spanning this width. If not set, the configured
-    /// `width` is used instead.
+    /// When [`HrStyle::Line`] is active, horizontal rules are rendered as a
+    /// unicode line spanning this width.
+    /// If not set, the configured `width` is used instead.
     #[must_use]
     pub const fn terminal_width(mut self, width: usize) -> Self {
         self.terminal_width = Some(width);
@@ -198,8 +200,8 @@ impl Formatter {
 
     /// Override the background color for inline code spans.
     ///
-    /// When set, inline code uses this color instead of the theme's
-    /// background. The color is pre-resolved to an SGR `(param, escape)` pair.
+    /// When set, inline code uses this color instead of the theme's background.
+    /// The color is pre-resolved to an SGR `(param, escape)` pair.
     #[must_use]
     pub fn inline_code_bg(mut self, param: Option<String>) -> Self {
         self.inline_code_bg = param.map(|p| {
@@ -232,13 +234,15 @@ impl Formatter {
         self.render_terminal(text, &TerminalOptions::default(), false)
     }
 
-    /// Like [`format_terminal`](Self::format_terminal), but with per-call
-    /// options that control rendering behaviour for this specific block.
+    /// Like [`format_terminal`], but with per-call options that control
+    /// rendering behaviour for this specific block.
     ///
     /// # Errors
     ///
     /// Returns an error if `fmt::Error` is returned when formatting the
     /// markdown.
+    ///
+    /// [`format_terminal`]: Self::format_terminal
     pub fn format_terminal_with(
         &self,
         text: &str,
@@ -247,8 +251,9 @@ impl Formatter {
         self.render_terminal(text, options, true)
     }
 
-    /// Core terminal rendering. When `auto_separator` is true, appends
-    /// an inter-block blank line unless the AST ends with a tight list.
+    /// Core terminal rendering.
+    /// When `auto_separator` is true, appends an inter-block blank line unless
+    /// the AST ends with a tight list.
     fn render_terminal(
         &self,
         text: &str,
@@ -332,8 +337,10 @@ impl Formatter {
     /// Begin a streaming code block for the given language.
     ///
     /// Returns a [`CodeBlockState`] that tracks syntax highlighting across
-    /// lines. Pass it to [`render_code_line`](Self::render_code_line) for
-    /// each line.
+    /// lines.
+    /// Pass it to [`render_code_line`] for each line.
+    ///
+    /// [`render_code_line`]: Self::render_code_line
     #[must_use]
     pub fn begin_code_block(&self, language: &str) -> CodeBlockState {
         let highlight = self
@@ -397,8 +404,8 @@ impl Formatter {
 /// Opaque state for a streaming code block.
 ///
 /// Created by [`Formatter::begin_code_block`], passed to
-/// [`Formatter::render_code_line`] for each line. Tracks syntax
-/// highlighting across lines without exposing internal types.
+/// [`Formatter::render_code_line`] for each line.
+/// Tracks syntax highlighting across lines without exposing internal types.
 pub struct CodeBlockState {
     /// Saved highlighting state, if the language was recognized.
     highlight: Option<SavedHighlightState>,
@@ -406,8 +413,8 @@ pub struct CodeBlockState {
 
 /// Check if the last top-level node in a comrak AST is a tight list.
 ///
-/// Used to suppress the inter-block separator for streaming mid-list
-/// items, which are each rendered as standalone single-item lists.
+/// Used to suppress the inter-block separator for streaming mid-list items,
+/// which are each rendered as standalone single-item lists.
 fn ends_with_tight_list<'a>(root: &'a comrak::nodes::AstNode<'a>) -> bool {
     let Some(last) = root.last_child() else {
         return false;
@@ -418,8 +425,8 @@ fn ends_with_tight_list<'a>(root: &'a comrak::nodes::AstNode<'a>) -> bool {
     )
 }
 
-/// Render an inter-block separator (blank line) with optional background
-/// fill. Used between blocks and after closing code fences.
+/// Render an inter-block separator (blank line) with optional background fill.
+/// Used between blocks and after closing code fences.
 #[must_use]
 pub fn render_separator(background: Option<&DefaultBackground>) -> String {
     match background {
@@ -438,9 +445,8 @@ pub fn render_separator(background: Option<&DefaultBackground>) -> String {
     }
 }
 
-/// Apply an optional default background to content, injecting the
-/// background escape at the start of each line and line-fill before
-/// each newline.
+/// Apply an optional default background to content, injecting the background
+/// escape at the start of each line and line-fill before each newline.
 #[must_use]
 pub fn apply_line_background(content: &str, background: Option<&DefaultBackground>) -> String {
     let Some(bg) = background else {

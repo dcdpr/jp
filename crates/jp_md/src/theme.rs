@@ -1,7 +1,7 @@
 //! Theme resolution for syntax highlighting.
 //!
-//! Resolves a [`Theme`] from the user's configuration
-//! using [`two_face`]'s bundled theme assets (curated by the `bat` project).
+//! Resolves a [`Theme`] from the user's configuration using [`two_face`]'s
+//! bundled theme assets (curated by the `bat` project).
 //!
 //! [`Theme`]: syntect::highlighting::Theme
 
@@ -26,8 +26,8 @@ const DEFAULT_LIGHT: EmbeddedThemeName = EmbeddedThemeName::MonokaiExtendedLight
 /// `"Dracula"`, `"Nord"`, `"Monokai Extended"`, `"Solarized (dark)"`).
 /// If the name doesn't match any embedded theme, the default is used.
 ///
-/// Returns a cloned `Theme` so callers can own it without lifetime ties to
-/// the embedded theme set.
+/// Returns a cloned `Theme` so callers can own it without lifetime ties to the
+/// embedded theme set.
 #[must_use]
 pub fn resolve(name: Option<&str>) -> Theme {
     let themes = theme::extra();

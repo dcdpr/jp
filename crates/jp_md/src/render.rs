@@ -4,21 +4,23 @@
 //! CommonMark-like output with inline ANSI escape codes for terminal styling.
 //!
 //! Unlike comrak's built-in `format_commonmark`, this renderer is aware of ANSI
-//! escape sequences and excludes them from line-width calculations. This
-//! prevents the soft-wrapping logic from splitting escape sequences across line
-//! boundaries, which would cause background colors to bleed to the end of
+//! escape sequences and excludes them from line-width calculations.
+//! This prevents the soft-wrapping logic from splitting escape sequences across
+//! line boundaries, which would cause background colors to bleed to the end of
 //! terminal lines.
 //!
 //! # Design
 //!
 //! The renderer is split into two layers:
 //!
-//! - [`TerminalWriter`] (in [`writer`](crate::writer)) handles the low-level
-//!   output concerns: word-wrapping, ANSI escape tracking, column counting,
-//!   and line-fill management.
+//! - [`TerminalWriter`] (in [`writer`]) handles the low-level output concerns:
+//!   word-wrapping, ANSI escape tracking, column counting, and line-fill
+//!   management.
 //!
 //! - [`TerminalFormatter`] (this module) walks the comrak AST and drives the
 //!   writer, emitting CommonMark syntax and ANSI escapes for each node.
+//!
+//! [`writer`]: crate::writer
 
 use std::{
     cmp::max,
@@ -309,9 +311,10 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
     ///
     /// Note: comrak's CommonMark serializer emits `<!-- end list -->` after a
     /// list that is immediately followed by another list or an indented code
-    /// block, to disambiguate them on re-parse. The terminal renderer has no
-    /// round-trip obligation — its output is never re-parsed as markdown — so
-    /// we deliberately omit that marker to avoid visual noise.
+    /// block, to disambiguate them on re-parse.
+    /// The terminal renderer has no round-trip obligation — its output is
+    /// never re-parsed as markdown — so we deliberately omit that marker to
+    /// avoid visual noise.
     fn format_list(&mut self, node: Node<'a>, entering: bool) {
         let ol_start = match node.data().value {
             NodeValue::List(NodeList {
@@ -913,8 +916,8 @@ pub fn theme_bg(theme: &Theme) -> (String, String) {
 
 /// Returns the SGR parameter and escape for blockquote foreground color.
 ///
-/// Uses the theme's gutter foreground color if available, falling back to
-/// 8-bit gray (color 248).
+/// Uses the theme's gutter foreground color if available, falling back to 8-bit
+/// gray (color 248).
 fn theme_blockquote_fg(theme: &Theme) -> (String, String) {
     theme.settings.gutter_foreground.map_or_else(
         || ("38;5;248".to_string(), "\x1b[38;5;248m".to_string()),
@@ -928,8 +931,9 @@ fn theme_blockquote_fg(theme: &Theme) -> (String, String) {
 
 /// Syntax-highlight a code block using `syntect`.
 ///
-/// Returns `Some(highlighted)` on success, or `None` if the language is
-/// empty or not recognized. The caller should fall back to plain rendering.
+/// Returns `Some(highlighted)` on success, or `None` if the language is empty
+/// or not recognized.
+/// The caller should fall back to plain rendering.
 fn highlight_code_block(literal: &str, language: &str, theme: &Theme) -> Option<String> {
     if language.is_empty() {
         return None;
