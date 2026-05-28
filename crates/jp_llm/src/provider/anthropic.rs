@@ -1113,7 +1113,11 @@ fn create_request(
             // enabled, use the default strategy.
             _ => Map::from_iter([(
                 "edits".into(),
-                json!([{"type": "clear_tool_uses_20250919"}]),
+                json!([
+                  {
+                    "type": "clear_tool_uses_20250919"
+                  }
+                ]),
             )]),
         };
 
@@ -1128,7 +1132,23 @@ fn create_request(
 
 #[expect(clippy::too_many_lines)]
 fn map_model(model: types::Model) -> Result<ModelDetails> {
+    #[expect(clippy::match_same_arms)]
     let details = match model.id.as_str() {
+        "claude-opus-4-8" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
+            context_window: Some(1_000_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::adaptive(true, true)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: Some(true),
+            features: vec![
+                "interleaved-thinking",
+                "context-editing",
+                "adaptive-thinking",
+            ],
+        },
         "claude-opus-4-7" | "claude-opus-4-7-20260416" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),

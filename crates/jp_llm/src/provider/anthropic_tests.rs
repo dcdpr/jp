@@ -269,6 +269,39 @@ fn test_opus_4_6_max_effort_mapping() {
     assert_eq!(output_config.effort, Some(Effort::Max));
 }
 
+/// Verify the `map_model` arm for Claude Opus 4.8 produces the expected
+/// `ModelDetails`.
+/// This is the regression test that catches typos in the declarative model
+/// table.
+#[test]
+fn test_map_model_opus_4_8() {
+    let model = types::Model {
+        id: "claude-opus-4-8".to_string(),
+        display_name: "Claude Opus 4.8".to_string(),
+        created_at: String::new(),
+        model_type: "model".to_string(),
+    };
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(
+        details.id,
+        (PROVIDER, "claude-opus-4-8").try_into().unwrap()
+    );
+    assert_eq!(details.display_name.as_deref(), Some("Claude Opus 4.8"));
+    assert_eq!(details.context_window, Some(1_000_000));
+    assert_eq!(details.max_output_tokens, Some(128_000));
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::adaptive(true, true))
+    );
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert!(details.features.contains(&"adaptive-thinking"));
+    assert!(details.features.contains(&"interleaved-thinking"));
+    assert!(details.features.contains(&"context-editing"));
+}
+
 /// Unit test: Verify budget-based model (Opus 4.5) still uses Enabled thinking.
 #[test]
 fn test_opus_4_5_uses_budgetted_thinking() {
