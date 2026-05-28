@@ -1,7 +1,225 @@
-mod enforce_strict_object_structure {
+mod make_schema_nullable {
     use serde_json::json;
 
-    use super::super::enforce_strict_object_structure;
+    use super::super::make_schema_nullable;
+
+    #[test]
+    fn primitive_string_extends_type_array() {
+        let mut schema = json!({ "type": "string" });
+
+        make_schema_nullable(&mut schema);
+
+        assert_eq!(schema, json!({ "type": ["string", "null"] }));
+    }
+
+    #[test]
+    fn primitive_integer_extends_type_array() {
+        let mut schema = json!({ "type": "integer", "description": "age" });
+
+        make_schema_nullable(&mut schema);
+
+        assert_eq!(
+            schema,
+            json!({ "type": ["integer", "null"], "description": "age" })
+        );
+    }
+
+    #[test]
+    fn array_uses_anyof_and_keeps_items_with_type() {
+        // OpenAI's strict validator rejects `{type: ["array", "null"],
+        // items: ...}` because `items` becomes orphaned from the array
+        // variant of the type union. Use `anyOf` to keep `items` paired
+        // with `type: array`.
+        let mut schema = json!({
+            "type": "array",
+            "items": { "type": "string" }
+        });
+
+        make_schema_nullable(&mut schema);
+
+        assert_eq!(
+            schema,
+            json!({
+                "anyOf": [
+                    { "type": "array", "items": { "type": "string" } },
+                    { "type": "null" }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn array_lifts_description_to_outer_wrapper() {
+        let mut schema = json!({
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "list of paths"
+        });
+
+        make_schema_nullable(&mut schema);
+
+        assert_eq!(
+            schema,
+            json!({
+                "anyOf": [
+                    { "type": "array", "items": { "type": "string" } },
+                    { "type": "null" }
+                ],
+                "description": "list of paths"
+            })
+        );
+    }
+
+    #[test]
+    fn object_uses_anyof_and_keeps_properties_with_type() {
+        // Same rationale as nullable arrays: lifting `properties` out of
+        // the type union via `anyOf` keeps them paired with `type: object`.
+        let mut schema = json!({
+            "type": "object",
+            "properties": { "name": { "type": "string" } },
+            "required": ["name"]
+        });
+
+        make_schema_nullable(&mut schema);
+
+        assert_eq!(
+            schema,
+            json!({
+                "anyOf": [
+                    {
+                        "type": "object",
+                        "properties": { "name": { "type": "string" } },
+                        "required": ["name"]
+                    },
+                    { "type": "null" }
+                ]
+            })
+        );
+    }
+
+    #[test]
+    fn already_nullable_string_is_unchanged() {
+        let mut schema = json!({ "type": ["string", "null"] });
+
+        make_schema_nullable(&mut schema);
+
+        assert_eq!(schema, json!({ "type": ["string", "null"] }));
+    }
+
+    #[test]
+    fn already_anyof_nullable_array_is_unchanged() {
+        // Idempotent: a schema that's already been made nullable via
+        // anyOf shouldn't be re-wrapped.
+        let mut schema = json!({
+            "anyOf": [
+                { "type": "array", "items": { "type": "string" } },
+                { "type": "null" }
+            ]
+        });
+        let original = schema.clone();
+
+        make_schema_nullable(&mut schema);
+
+        assert_eq!(schema, original);
+    }
+}
+
+mod parameters_with_strict_mode {
+    use indexmap::IndexMap;
+    use jp_config::conversation::tool::{OneOrManyTypes, ToolParameterConfig};
+    use serde_json::json;
+
+    use super::super::parameters_with_strict_mode;
+
+    fn cfg(kind: &str) -> ToolParameterConfig {
+        ToolParameterConfig {
+            kind: OneOrManyTypes::One(kind.to_owned()),
+            default: None,
+            required: false,
+            summary: None,
+            description: None,
+            examples: None,
+            enumeration: vec![],
+            items: None,
+            properties: IndexMap::default(),
+        }
+    }
+
+    /// Regression for the `crate_search_items.kinds` schema rejected by
+    /// OpenAI's strict validator with "array schema missing items" when
+    /// the parameter is encoded as `{type: ["array", "null"], items: ...}`.
+    #[test]
+    fn nullable_array_parameter_renders_as_anyof() {
+        let mut params = IndexMap::new();
+        params.insert("crate_name".to_owned(), ToolParameterConfig {
+            required: true,
+            ..cfg("string")
+        });
+        params.insert("kinds".to_owned(), ToolParameterConfig {
+            items: Some(Box::new(cfg("string"))),
+            ..cfg("array")
+        });
+
+        let schema = parameters_with_strict_mode(params, true);
+
+        let kinds = &schema["properties"]["kinds"];
+        assert!(
+            kinds.get("anyOf").is_some(),
+            "nullable array must use anyOf form, got: {kinds}"
+        );
+        assert_eq!(
+            kinds["anyOf"],
+            json!([
+                { "type": "array", "items": { "type": "string" } },
+                { "type": "null" }
+            ])
+        );
+        // Strict mode still requires every property in `required`.
+        assert_eq!(schema["required"], json!(["crate_name", "kinds"]));
+    }
+
+    #[test]
+    fn nullable_primitive_parameter_keeps_type_array_form() {
+        let mut params = IndexMap::new();
+        params.insert("label".to_owned(), cfg("string"));
+
+        let schema = parameters_with_strict_mode(params, true);
+
+        assert_eq!(
+            schema["properties"]["label"]["type"],
+            json!(["string", "null"])
+        );
+    }
+
+    #[test]
+    fn required_array_parameter_is_not_wrapped() {
+        let mut params = IndexMap::new();
+        params.insert("paths".to_owned(), ToolParameterConfig {
+            required: true,
+            items: Some(Box::new(cfg("string"))),
+            ..cfg("array")
+        });
+
+        let schema = parameters_with_strict_mode(params, true);
+
+        let paths = &schema["properties"]["paths"];
+        assert_eq!(paths["type"], json!("array"));
+        assert_eq!(paths["items"], json!({ "type": "string" }));
+        assert!(paths.get("anyOf").is_none());
+    }
+}
+
+mod ensure_strict_schema {
+    use serde_json::{Value, json};
+
+    use super::super::ensure_strict_schema;
+
+    /// Helper to call `ensure_strict_schema` on a JSON value and return it.
+    /// Lets test fixtures stay in their natural `json!({...})` form.
+    fn run(mut schema: Value) -> Value {
+        ensure_strict_schema(&mut schema);
+        schema
+    }
 
     #[test]
     fn no_required_adds_all_properties() {
@@ -13,7 +231,7 @@ mod enforce_strict_object_structure {
             }
         });
 
-        enforce_strict_object_structure(&mut schema);
+        ensure_strict_schema(&mut schema);
 
         assert_eq!(schema["additionalProperties"], json!(false));
         assert_eq!(schema["required"], json!(["name", "age"]));
@@ -40,17 +258,93 @@ mod enforce_strict_object_structure {
             "required": ["old", "new"]
         });
 
-        enforce_strict_object_structure(&mut schema);
+        ensure_strict_schema(&mut schema);
 
         assert_eq!(schema["required"], json!(["old", "new", "paths"]));
         // old and new were already required, types unchanged.
         assert_eq!(schema["properties"]["old"]["type"], json!("string"));
         assert_eq!(schema["properties"]["new"]["type"], json!("string"));
-        // paths was optional, now nullable.
+        // paths was optional and is an array — nullability is encoded as
+        // anyOf so that `items` stays paired with `type: array`.
         assert_eq!(
-            schema["properties"]["paths"]["type"],
-            json!(["array", "null"])
+            schema["properties"]["paths"],
+            json!({
+                "anyOf": [
+                    { "type": "array", "items": { "type": "string" } },
+                    { "type": "null" }
+                ]
+            })
         );
+    }
+
+    #[test]
+    fn nullable_object_property_uses_anyof() {
+        // Latent twin of the nullable-array bug: a `{type: ["object",
+        // "null"], properties: ...}` shape would orphan `properties`
+        // for OpenAI's strict validator the same way `items` gets
+        // orphaned for arrays. The inner object variant must also get
+        // the full strict treatment (additionalProperties, required).
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "string" },
+                "meta": {
+                    "type": "object",
+                    "properties": {
+                        "author": { "type": "string" }
+                    }
+                }
+            },
+            "required": ["id"]
+        });
+
+        ensure_strict_schema(&mut schema);
+
+        let meta = &schema["properties"]["meta"];
+        let variants = meta["anyOf"].as_array().expect("anyOf array");
+        assert_eq!(variants.len(), 2);
+        // Inner object variant gets strict treatment via the recursion.
+        assert_eq!(variants[0]["type"], json!("object"));
+        assert_eq!(variants[0]["additionalProperties"], json!(false));
+        assert_eq!(variants[0]["required"], json!(["author"]));
+        // The inner object's `author` was newly required, so it's nullable.
+        assert_eq!(
+            variants[0]["properties"]["author"]["type"],
+            json!(["string", "null"])
+        );
+        assert_eq!(variants[1], json!({ "type": "null" }));
+    }
+
+    #[test]
+    fn nested_object_in_properties_gets_strict_treatment() {
+        // A non-nullable nested object inside `properties` must still
+        // get `additionalProperties: false` and an expanded `required`
+        // list. The recursion has to descend into each property value,
+        // not just stop at the `properties` dict.
+        let mut schema = json!({
+            "type": "object",
+            "properties": {
+                "inner": {
+                    "type": "object",
+                    "properties": {
+                        "x": { "type": "string" },
+                        "y": { "type": "integer" }
+                    },
+                    "required": ["x"]
+                }
+            },
+            "required": ["inner"]
+        });
+
+        ensure_strict_schema(&mut schema);
+
+        let inner = &schema["properties"]["inner"];
+        assert_eq!(inner["additionalProperties"], json!(false));
+        assert_eq!(inner["required"], json!(["x", "y"]));
+        // `x` was already required, stays as-is.
+        assert_eq!(inner["properties"]["x"]["type"], json!("string"));
+        // `y` was newly required, becomes nullable.
+        assert_eq!(inner["properties"]["y"]["type"], json!(["integer", "null"]));
     }
 
     #[test]
@@ -104,42 +398,34 @@ mod enforce_strict_object_structure {
             "required": ["x", "y"]
         });
 
-        enforce_strict_object_structure(&mut schema);
+        ensure_strict_schema(&mut schema);
 
         assert_eq!(schema["required"], json!(["x", "y"]));
         // Both were already required, types stay as-is.
         assert_eq!(schema["properties"]["x"]["type"], json!("string"));
         assert_eq!(schema["properties"]["y"]["type"], json!("string"));
     }
-}
 
-mod transform_schema {
-    use serde_json::{Map, Value, json};
-
-    use super::super::transform_schema;
-
-    #[expect(clippy::needless_pass_by_value)]
-    fn schema(v: Value) -> Map<String, Value> {
-        v.as_object().unwrap().clone()
-    }
+    // ----- Tests below originally targeted the standalone
+    // ----- `transform_schema` function for structured outputs. They now
+    // ----- exercise the same merged `ensure_strict_schema` function
+    // ----- through the `run()` helper.
 
     #[test]
     fn additional_properties_false_forced_on_objects() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "object",
             "properties": {
                 "name": { "type": "string" }
             }
         }));
 
-        let out = transform_schema(input);
-
         assert_eq!(out["additionalProperties"], json!(false));
     }
 
     #[test]
     fn additional_properties_true_overridden_to_false() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "object",
             "properties": {
                 "name": { "type": "string" }
@@ -147,29 +433,17 @@ mod transform_schema {
             "additionalProperties": true
         }));
 
-        let out = transform_schema(input);
-
         assert_eq!(out["additionalProperties"], json!(false));
     }
 
     #[test]
-    fn all_properties_forced_into_required() {
-        let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "name": { "type": "string" },
-                "age": { "type": "integer" }
-            }
-        }));
-
-        let out = transform_schema(input);
-
-        assert_eq!(out["required"], json!(["name", "age"]));
-    }
-
-    #[test]
-    fn existing_required_overwritten_to_all_properties() {
-        let input = schema(json!({
+    fn existing_required_expanded_with_nullable_optionals() {
+        // OpenAI strict mode requires all properties in `required`,
+        // but the docs explicitly say optional fields are emulated
+        // via a union with null. We preserve the user's intent by
+        // making previously-optional fields nullable rather than
+        // silently demanding the model emit a value for them.
+        let out = run(json!({
             "type": "object",
             "properties": {
                 "name": { "type": "string" },
@@ -178,36 +452,22 @@ mod transform_schema {
             "required": ["name"]
         }));
 
-        let out = transform_schema(input);
-
-        // Both properties must be required in strict mode.
         assert_eq!(out["required"], json!(["name", "age"]));
+        // `name` was already required, type unchanged.
+        assert_eq!(out["properties"]["name"]["type"], json!("string"));
+        // `age` was newly required, made nullable so the model can
+        // emit null to omit it.
+        assert_eq!(out["properties"]["age"]["type"], json!(["integer", "null"]));
     }
 
-    #[test]
-    fn nested_objects_get_strict_treatment() {
-        let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "inner": {
-                    "type": "object",
-                    "properties": {
-                        "x": { "type": "string" }
-                    }
-                }
-            }
-        }));
-
-        let out = transform_schema(input);
-
-        let inner = out["properties"]["inner"].as_object().unwrap();
-        assert_eq!(inner["additionalProperties"], json!(false));
-        assert_eq!(inner["required"], json!(["x"]));
-    }
+    // Note: a non-required nested object test is covered above by
+    // `nested_object_in_properties_gets_strict_treatment`, which marks
+    // `inner` as required so the strict treatment lands at the
+    // expected level rather than inside an `anyOf` wrapper.
 
     #[test]
     fn defs_recursively_processed() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "object",
             "properties": {
                 "step": { "$ref": "#/$defs/Step" }
@@ -222,17 +482,15 @@ mod transform_schema {
             }
         }));
 
-        let out = transform_schema(input);
-
         // $defs is kept (OpenAI supports it natively).
-        let step_def = out["$defs"]["Step"].as_object().unwrap();
+        let step_def = &out["$defs"]["Step"];
         assert_eq!(step_def["additionalProperties"], json!(false));
         assert_eq!(step_def["required"], json!(["explanation"]));
     }
 
     #[test]
     fn standalone_ref_kept_as_is() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "object",
             "properties": {
                 "step": { "$ref": "#/$defs/Step" }
@@ -247,15 +505,17 @@ mod transform_schema {
             }
         }));
 
-        let out = transform_schema(input);
-
         // Standalone $ref should stay.
         assert_eq!(out["properties"]["step"]["$ref"], "#/$defs/Step");
     }
 
     #[test]
     fn ref_with_siblings_unraveled() {
-        let input = schema(json!({
+        // `required: ["name"]` on the Person def keeps the test
+        // focused on $ref unraveling — without it, `name` would also
+        // be made nullable, which is correct but tangential to this
+        // test's purpose.
+        let out = run(json!({
             "type": "object",
             "properties": {
                 "person": {
@@ -263,19 +523,19 @@ mod transform_schema {
                     "description": "The main person"
                 }
             },
+            "required": ["person"],
             "$defs": {
                 "Person": {
                     "type": "object",
                     "properties": {
                         "name": { "type": "string" }
-                    }
+                    },
+                    "required": ["name"]
                 }
             }
         }));
 
-        let out = transform_schema(input);
-
-        let person = out["properties"]["person"].as_object().unwrap();
+        let person = &out["properties"]["person"];
         // $ref should be removed, definition inlined.
         assert!(person.get("$ref").is_none());
         assert_eq!(person["type"], "object");
@@ -287,7 +547,7 @@ mod transform_schema {
 
     #[test]
     fn anyof_variants_processed() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "object",
             "properties": {
                 "item": {
@@ -304,17 +564,15 @@ mod transform_schema {
             }
         }));
 
-        let out = transform_schema(input);
-
         let variants = out["properties"]["item"]["anyOf"].as_array().unwrap();
-        let obj_variant = variants[0].as_object().unwrap();
+        let obj_variant = &variants[0];
         assert_eq!(obj_variant["additionalProperties"], json!(false));
         assert_eq!(obj_variant["required"], json!(["name"]));
     }
 
     #[test]
     fn allof_single_element_merged() {
-        let input = schema(json!({
+        let out = run(json!({
             "allOf": [{
                 "type": "object",
                 "properties": {
@@ -322,8 +580,6 @@ mod transform_schema {
                 }
             }]
         }));
-
-        let out = transform_schema(input);
 
         assert!(out.get("allOf").is_none());
         assert_eq!(out["type"], "object");
@@ -346,8 +602,6 @@ mod transform_schema {
                 }
             ]
         }));
-
-        let out = transform_schema(input);
 
         assert!(out.get("allOf").is_none());
         assert_eq!(out["type"], "object");
@@ -392,7 +646,7 @@ mod transform_schema {
 
     #[test]
     fn array_items_recursively_processed() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "array",
             "items": {
                 "type": "object",
@@ -402,9 +656,7 @@ mod transform_schema {
             }
         }));
 
-        let out = transform_schema(input);
-
-        let items = out["items"].as_object().unwrap();
+        let items = &out["items"];
         assert_eq!(items["additionalProperties"], json!(false));
         assert_eq!(items["required"], json!(["id"]));
     }
@@ -412,7 +664,7 @@ mod transform_schema {
     /// The inquiry schema should get strict treatment.
     #[test]
     fn inquiry_schema_transforms_correctly() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "object",
             "properties": {
                 "inquiry_id": {
@@ -427,8 +679,6 @@ mod transform_schema {
             "additionalProperties": false
         }));
 
-        let out = transform_schema(input);
-
         // const should be preserved (OpenAI supports it).
         assert_eq!(
             out["properties"]["inquiry_id"]["const"],
@@ -441,21 +691,22 @@ mod transform_schema {
     /// The `title_schema` should get strict treatment applied.
     #[test]
     fn title_schema_gets_strict_treatment() {
-        let input = crate::title::title_schema(3);
-        let out = transform_schema(input);
+        let mut input = Value::Object(crate::title::title_schema(3));
+        ensure_strict_schema(&mut input);
 
-        assert_eq!(out["additionalProperties"], json!(false));
-        assert_eq!(out["required"], json!(["titles"]));
+        assert_eq!(input["additionalProperties"], json!(false));
+        assert_eq!(input["required"], json!(["titles"]));
 
-        let titles = out["properties"]["titles"].as_object().unwrap();
-        let items = titles["items"].as_object().unwrap();
+        let titles = &input["properties"]["titles"];
+        let items = &titles["items"];
         assert_eq!(items["type"], "string");
     }
 
-    /// Docs example: definitions with $ref.
+    /// Docs example: definitions with $ref. Verbatim from
+    /// <https://platform.openai.com/docs/guides/structured-outputs>.
     #[test]
     fn definitions_example_from_docs() {
-        let input = schema(json!({
+        let out = run(json!({
             "type": "object",
             "properties": {
                 "steps": {
@@ -471,19 +722,19 @@ mod transform_schema {
                         "explanation": { "type": "string" },
                         "output": { "type": "string" }
                     },
+                    "required": ["explanation", "output"],
                     "additionalProperties": false
                 }
             },
+            "required": ["steps", "final_answer"],
             "additionalProperties": false
         }));
-
-        let out = transform_schema(input);
 
         // Root object: all properties required.
         assert_eq!(out["required"], json!(["steps", "final_answer"]));
 
         // $defs preserved, step def gets required added.
-        let step_def = out["$defs"]["step"].as_object().unwrap();
+        let step_def = &out["$defs"]["step"];
         assert_eq!(step_def["required"], json!(["explanation", "output"]));
         assert_eq!(step_def["additionalProperties"], json!(false));
 

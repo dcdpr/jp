@@ -284,7 +284,11 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     let text = match thread.events.schema() {
         Some(schema) => Some(types::TextConfig {
             format: types::TextFormat::JsonSchema {
-                schema: Value::Object(transform_schema(schema)),
+                schema: {
+                    let mut v = Value::Object(schema);
+                    ensure_strict_schema(&mut v);
+                    v
+                },
                 description: "Structured output".to_owned(),
                 name: "structured_output".to_owned(),
                 strict: Some(true),
@@ -1176,126 +1180,155 @@ impl TryFrom<&OpenaiConfig> for Openai {
     }
 }
 
-/// Transform a JSON schema for OpenAI's strict structured output mode.
+/// Transforms a JSON schema in place into OpenAI's strict-mode shape.
 ///
-/// OpenAI's structured outputs require:
-/// - `additionalProperties: false` on all objects
-/// - All properties listed in `required`
-/// - `allOf` is not supported and must be flattened
+/// At each node of the schema tree:
 ///
-/// Additionally handles:
-/// - Unraveling `$ref` that has sibling properties (OpenAI doesn't support
-///   `$ref` alongside other keys)
-/// - Recursively processing `$defs`/`definitions`, `properties`, `items`, and
-///   `anyOf`
-/// - Stripping `null` defaults
+/// - Objects get `additionalProperties: false` and every property
+///   listed in `required`.
+/// - Properties that were not originally in `required` are made nullable
+///   (via [`make_schema_nullable`]) so the model can emit `null` to omit
+///   them — preserving the schema author's intent that those fields are
+///   optional (per OpenAI's docs: "it is possible to emulate an optional
+///   parameter by using a union type with null").
+/// - Recursion descends into every property value, into `items`, into
+///   each `anyOf` variant, into `$defs`/`definitions`, and into the
+///   entries of an `allOf`.
+/// - `allOf` is flattened into the parent schema (OpenAI's strict mode
+///   doesn't accept composition keywords).
+/// - `null` defaults are stripped (no meaningful distinction in strict
+///   mode).
+/// - A `$ref` with sibling properties is unravelled by inlining the
+///   resolved definition and re-running on the merged result (OpenAI
+///   supports standalone `$ref` but not alongside other keys).
 ///
-/// Unlike Google, OpenAI supports `$ref`/`$defs` and `const` natively, so those
-/// are left in place when standalone.
+/// Mirrors the recursion pattern of OpenAI's own SDK helper
+/// (`_ensure_strict_json_schema` in `openai-python`), with two
+/// intentional differences:
+///
+/// 1. The Python SDK only sets `additionalProperties: false` if it's
+///    missing; we overwrite even if it's `true`. Forgiving rather than
+///    rejecting an upstream mistake that OpenAI would otherwise refuse.
+/// 2. The Python SDK doesn't inject nullability — Pydantic emits the
+///    `anyOf: [..., null]` form upstream. Our function-calling
+///    pipeline goes through `ToolParameterConfig` which encodes
+///    optionality as `required: bool`, so we have to bridge that here.
 ///
 /// See: <https://platform.openai.com/docs/guides/structured-outputs>
-fn transform_schema(src: Map<String, Value>) -> Map<String, Value> {
-    let root = Value::Object(src.clone());
-    process_schema(src, &root)
+fn ensure_strict_schema(schema: &mut Value) {
+    let root = schema.clone();
+    process_strict(schema, &root);
 }
 
-/// Core recursive processor for a single schema node.
-fn process_schema(mut src: Map<String, Value>, root: &Value) -> Map<String, Value> {
-    // Recursively process $defs/definitions in place.
+fn process_strict(schema: &mut Value, root: &Value) {
+    let Value::Object(map) = schema else {
+        return;
+    };
+
+    // 1. Recurse into $defs / definitions.
     for key in ["$defs", "definitions"] {
-        if let Some(Value::Object(defs)) = src.remove(key) {
-            let processed: Map<String, Value> = defs
-                .into_iter()
-                .map(|(k, v)| (k, resolve_and_process(v, root)))
-                .collect();
-            src.insert(key.into(), Value::Object(processed));
+        if let Some(Value::Object(defs)) = map.get_mut(key) {
+            for def_schema in defs.values_mut() {
+                process_strict(def_schema, root);
+            }
         }
     }
 
-    // Force `additionalProperties: false` on all objects.
-    // The docs require this for strict mode.
-    if src.get("type").and_then(Value::as_str) == Some("object") {
-        src.insert("additionalProperties".into(), Value::Bool(false));
-    }
+    // 2. Strict object treatment + nullability injection for any
+    //    previously-optional properties.
+    if is_object_type(map.get("type")) {
+        map.insert("additionalProperties".to_owned(), false.into());
 
-    // Force all properties into `required` (strict mode requirement).
-    if let Some(Value::Object(props)) = src.get("properties") {
-        let keys: Vec<Value> = props.keys().map(|k| Value::String(k.clone())).collect();
-        src.insert("required".into(), Value::Array(keys));
-    }
+        if let Some(Value::Object(props)) = map.get("properties") {
+            let prev_required: Vec<String> = map
+                .get("required")
+                .and_then(Value::as_array)
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default();
 
-    // Recursively process object properties.
-    if let Some(Value::Object(props)) = src.remove("properties") {
-        let processed: Map<String, Value> = props
-            .into_iter()
-            .map(|(k, v)| (k, resolve_and_process(v, root)))
-            .collect();
-        src.insert("properties".into(), Value::Object(processed));
-    }
+            let newly_required: Vec<String> = props
+                .keys()
+                .filter(|k| !prev_required.iter().any(|r| r == *k))
+                .cloned()
+                .collect();
 
-    // Recursively process array items.
-    if let Some(items) = src.remove("items") {
-        src.insert("items".into(), resolve_and_process(items, root));
-    }
+            let all_keys: Vec<Value> = props.keys().map(|k| Value::String(k.clone())).collect();
+            map.insert("required".to_owned(), Value::Array(all_keys));
 
-    // Recursively process anyOf variants.
-    if let Some(Value::Array(variants)) = src.remove("anyOf") {
-        src.insert(
-            "anyOf".into(),
-            Value::Array(
-                variants
-                    .into_iter()
-                    .map(|v| resolve_and_process(v, root))
-                    .collect(),
-            ),
-        );
-    }
-
-    // Flatten `allOf` — not supported by OpenAI.
-    // Merge all entries into the parent schema; later entries yield to
-    // earlier ones (and to keys already present on the parent).
-    if let Some(Value::Array(entries)) = src.remove("allOf") {
-        for entry in entries {
-            if let Value::Object(entry_map) = resolve_and_process(entry, root) {
-                for (k, v) in entry_map {
-                    src.entry(k).or_insert(v);
+            // Make previously-optional properties nullable *before*
+            // recursing into them, so nullability lands on the typed
+            // variant inside any resulting `anyOf` wrapper and the
+            // recursion then descends into that variant.
+            if let Some(Value::Object(props)) = map.get_mut("properties") {
+                for key in &newly_required {
+                    if let Some(prop_schema) = props.get_mut(key) {
+                        make_schema_nullable(prop_schema);
+                    }
                 }
             }
         }
     }
 
-    // Strip `null` defaults (no meaningful distinction for strict mode).
-    if src.get("default") == Some(&Value::Null) {
-        src.remove("default");
+    // 3. Recurse into property values, items, and anyOf variants.
+    if let Some(Value::Object(props)) = map.get_mut("properties") {
+        for prop_schema in props.values_mut() {
+            process_strict(prop_schema, root);
+        }
+    }
+    if let Some(items) = map.get_mut("items") {
+        process_strict(items, root);
+    }
+    if let Some(Value::Array(variants)) = map.get_mut("anyOf") {
+        for variant in variants.iter_mut() {
+            process_strict(variant, root);
+        }
     }
 
-    // Unravel `$ref` when it has sibling properties.
-    // OpenAI supports standalone `$ref` but not alongside other keys.
-    if src.contains_key("$ref")
-        && src.len() > 1
-        && let Some(Value::String(ref_path)) = src.remove("$ref")
+    // 4. Flatten `allOf` into the parent. Earlier entries (and keys
+    //    already on the parent) take precedence. OpenAI's strict mode
+    //    rejects composition keywords, so even multi-entry `allOf`
+    //    must collapse.
+    if let Some(Value::Array(entries)) = map.remove("allOf") {
+        for mut entry in entries {
+            process_strict(&mut entry, root);
+            if let Value::Object(entry_map) = entry {
+                for (k, v) in entry_map {
+                    map.entry(k).or_insert(v);
+                }
+            }
+        }
+    }
+
+    // 5. Strip `null` defaults.
+    if map.get("default") == Some(&Value::Null) {
+        map.remove("default");
+    }
+
+    // 6. Unravel `$ref` with siblings. OpenAI supports standalone
+    //    `$ref` but not alongside other keys.
+    if map.contains_key("$ref")
+        && map.len() > 1
+        && let Some(Value::String(ref_path)) = map.remove("$ref")
     {
         if let Some(resolved) = resolve_ref(&ref_path, root) {
             // Current schema properties take priority over the
             // resolved definition's.
             let mut merged = resolved;
-            for (k, v) in src {
+            for (k, v) in std::mem::take(map) {
                 merged.insert(k, v);
             }
-            return process_schema(merged, root);
+            *map = merged;
+            // Re-run on the inlined result.
+            process_strict(schema, root);
+            return;
         }
         // Failed to resolve — put it back.
-        src.insert("$ref".into(), Value::String(ref_path));
-    }
-
-    src
-}
-
-/// Recursively process a value that may be a schema object.
-fn resolve_and_process(value: Value, root: &Value) -> Value {
-    match value {
-        Value::Object(map) => Value::Object(process_schema(map, root)),
-        other => other,
+        map.insert("$ref".to_owned(), Value::String(ref_path));
     }
 }
 
@@ -1338,23 +1371,22 @@ pub(crate) fn parameters_with_strict_mode(
         .into_iter()
         .map(|(k, mut cfg)| {
             sanitize_parameter(&mut cfg);
-
-            if strict && !cfg.required {
-                make_config_nullable(&mut cfg);
-            }
+            let needs_null = strict && !cfg.required;
 
             let mut schema = cfg.to_json_schema();
 
-            // If `strict` mode is enabled, we have to adhere to the following
-            // rules:
-            //
-            // - `additionalProperties` must be set to `false` for each object
-            // in the `parameters`.
-            // - All fields in `properties` must be marked as `required`.
+            if needs_null {
+                make_schema_nullable(&mut schema);
+            }
+
+            // If `strict` mode is enabled, the schema for each parameter
+            // must satisfy: `additionalProperties: false` on every
+            // object, all fields in `required`, and optional fields
+            // emulated via nullability.
             //
             // See: <https://platform.openai.com/docs/guides/function-calling#strict-mode>
             if strict {
-                enforce_strict_object_structure(&mut schema);
+                ensure_strict_schema(&mut schema);
             }
 
             (k, schema)
@@ -1369,65 +1401,6 @@ pub(crate) fn parameters_with_strict_mode(
     ])
 }
 
-/// Recursively sets `additionalProperties: false` and ensures nested objects
-/// have all their properties marked as required.
-///
-/// Properties that were not originally required are made nullable so the
-/// model can send `null` to omit them.
-fn enforce_strict_object_structure(schema: &mut Value) {
-    match schema {
-        Value::Object(map) => {
-            if is_object_type(map.get("type")) {
-                map.insert("additionalProperties".to_owned(), false.into());
-
-                if let Some(Value::Object(props)) = map.get("properties") {
-                    // Collect which properties were originally required.
-                    let prev_required: Vec<String> = map
-                        .get("required")
-                        .and_then(Value::as_array)
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(Value::as_str)
-                                .map(str::to_owned)
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    // Find properties that need to become nullable.
-                    let newly_required: Vec<String> = props
-                        .keys()
-                        .filter(|k| !prev_required.iter().any(|r| r == *k))
-                        .cloned()
-                        .collect();
-
-                    // ALL properties must be in `required` for strict mode.
-                    let all_keys: Vec<Value> =
-                        props.keys().map(|k| Value::String(k.clone())).collect();
-                    map.insert("required".to_owned(), Value::Array(all_keys));
-
-                    // Make previously-optional properties nullable.
-                    if let Some(Value::Object(props)) = map.get_mut("properties") {
-                        for key in &newly_required {
-                            if let Some(prop_schema) = props.get_mut(key) {
-                                make_schema_nullable(prop_schema);
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Recurse into children
-            for (key, value) in map.iter_mut() {
-                if key == "properties" || key == "items" || key == "anyOf" {
-                    enforce_strict_object_structure(value);
-                }
-            }
-        }
-        Value::Array(arr) => arr.iter_mut().for_each(enforce_strict_object_structure),
-        _ => {}
-    }
-}
-
 /// Check whether a JSON schema `type` value includes `"object"`.
 ///
 /// Handles both `"object"` (string) and `["object", "null"]` (array)
@@ -1440,41 +1413,91 @@ fn is_object_type(type_value: Option<&Value>) -> bool {
     }
 }
 
-/// Injects nullability into a raw JSON schema value's `type` field.
+/// Keys that stay at the outer level when wrapping a structured schema
+/// in `anyOf` for nullability. Everything else moves into the typed
+/// variant alongside `type`/`items`/`properties`.
+const NULLABLE_OUTER_KEYS: &[&str] = &["description", "title", "default", "examples"];
+
+/// Injects nullability into a raw JSON schema value.
 ///
-/// Used by [`enforce_strict_object_structure`] for properties that were
-/// optional but must now appear in `required`.
+/// The encoding depends on the underlying type:
+///
+/// - **Primitives** (`string`, `integer`, `number`, `boolean`) extend
+///   their `type` field to include `"null"` — `{"type": "string"}`
+///   becomes `{"type": ["string", "null"]}`. This matches OpenAI's
+///   documented optional-field example for strict mode.
+/// - **Structured types** (`array`, `object`) wrap the typed schema in
+///   `anyOf`, lifting descriptive metadata out to the outer level —
+///   `{"type": "array", "items": ..., "description": "..."}` becomes
+///   `{"anyOf": [{"type": "array", "items": ...}, {"type": "null"}],
+///   "description": "..."}`. OpenAI's strict validator rejects the
+///   `type` array form for structured types because it treats the
+///   sibling constraints (`items`, `properties`) as orphaned from the
+///   typed variant; Pydantic (OpenAI's own SDK) emits the same `anyOf`
+///   shape for `Optional[List[T]]` and `Optional[BaseModel]`.
+///
+/// Idempotent: a schema that's already nullable (via either encoding)
+/// is returned unchanged.
 fn make_schema_nullable(schema: &mut Value) {
-    if let Value::Object(map) = schema {
-        match map.get("type") {
-            Some(Value::String(t)) if t != "null" => {
-                let original = t.clone();
+    let Value::Object(map) = schema else {
+        return;
+    };
+
+    let Some(type_val) = map.get("type").cloned() else {
+        // No `type` key — could be `anyOf` (already nullable) or `$ref`.
+        // Nothing for us to inject here.
+        return;
+    };
+
+    let already_nullable = match &type_val {
+        Value::String(t) => t == "null",
+        Value::Array(arr) => arr.iter().any(|v| v.as_str() == Some("null")),
+        _ => false,
+    };
+    if already_nullable {
+        return;
+    }
+
+    let is_structured = |t: &str| matches!(t, "array" | "object");
+    let needs_anyof = match &type_val {
+        Value::String(t) => is_structured(t),
+        Value::Array(arr) => arr.iter().any(|v| v.as_str().is_some_and(is_structured)),
+        _ => false,
+    };
+
+    if !needs_anyof {
+        match type_val {
+            Value::String(t) => {
                 map.insert(
                     "type".to_owned(),
-                    Value::Array(vec![original.into(), "null".into()]),
+                    Value::Array(vec![Value::String(t), "null".into()]),
                 );
             }
-            Some(Value::Array(arr)) if !arr.iter().any(|v| v.as_str() == Some("null")) => {
-                let mut arr = arr.clone();
+            Value::Array(mut arr) => {
                 arr.push("null".into());
                 map.insert("type".to_owned(), Value::Array(arr));
             }
             _ => {}
         }
+        return;
     }
-}
 
-/// Injects nullability into the JSON schema.
-fn make_config_nullable(cfg: &mut ToolParameterConfig) {
-    match &mut cfg.kind {
-        OneOrManyTypes::One(t) if t != "null" => {
-            cfg.kind = OneOrManyTypes::Many(vec![t.clone(), "null".to_owned()]);
-        }
-        OneOrManyTypes::Many(types) if !types.iter().any(|t| t == "null") => {
-            types.push("null".to_owned());
-        }
-        _ => {}
-    }
+    // Structured: split the schema into a typed variant (everything
+    // that's a constraint on the value) and an outer wrapper carrying
+    // descriptive metadata.
+    let owned = std::mem::take(map);
+    let (outer, inner): (Map<String, Value>, Map<String, Value>) = owned
+        .into_iter()
+        .partition(|(k, _)| NULLABLE_OUTER_KEYS.contains(&k.as_str()));
+
+    map.extend(outer);
+    map.insert(
+        "anyOf".to_owned(),
+        Value::Array(vec![
+            Value::Object(inner),
+            Value::Object(Map::from_iter([("type".to_owned(), "null".into())])),
+        ]),
+    );
 }
 
 /// Sanitizes the parameter shape to fit Openai's limitations. specifically
