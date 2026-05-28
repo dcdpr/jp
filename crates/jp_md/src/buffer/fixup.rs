@@ -1,8 +1,9 @@
 //! Post-processing fixups for buffer events.
 //!
 //! Fixups are stateful transformers that sit between the [`Buffer`] iterator
-//! and the consumer. They handle LLM-specific quirks that don't belong in the
-//! core markdown parsing logic.
+//! and the consumer.
+//! They handle LLM-specific quirks that don't belong in the core markdown
+//! parsing logic.
 //!
 //! [`Buffer`]: super::Buffer
 
@@ -10,17 +11,19 @@ use super::Event;
 
 /// A stateful event transformer.
 ///
-/// Each fixup inspects events as they pass through and can rewrite,
-/// suppress, or pass them unchanged. Fixups may hold state across
-/// events (e.g. remembering properties of the previous block).
+/// Each fixup inspects events as they pass through and can rewrite, suppress,
+/// or pass them unchanged.
+/// Fixups may hold state across events (e.g. remembering properties of the
+/// previous block).
 pub trait EventFixup {
-    /// Process a single event. Returns `None` to suppress the event,
-    /// or `Some(event)` (possibly modified) to pass it through.
+    /// Process a single event.
+    /// Returns `None` to suppress the event, or `Some(event)` (possibly
+    /// modified) to pass it through.
     fn process(&mut self, event: Event) -> Option<Event>;
 }
 
-/// Wraps a buffer iterator and applies a chain of [`EventFixup`]s to
-/// each emitted event.
+/// Wraps a buffer iterator and applies a chain of [`EventFixup`]s to each
+/// emitted event.
 pub struct FixupChain<I> {
     /// The underlying event source.
     inner: I,
@@ -55,8 +58,9 @@ impl<I: Iterator<Item = Event>> Iterator for FixupChain<I> {
 }
 
 /// Check if a block contains a fence pattern embedded mid-line (not at the
-/// start). This indicates the LLM started a code block at the end of a
-/// paragraph line, and a subsequent bare fence is likely the orphaned close.
+/// start).
+/// This indicates the LLM started a code block at the end of a paragraph line,
+/// and a subsequent bare fence is likely the orphaned close.
 fn has_embedded_fence(block: &str) -> bool {
     for line in block.lines() {
         let trimmed = line.trim_start();
@@ -74,17 +78,18 @@ fn has_embedded_fence(block: &str) -> bool {
 
 /// Fixes orphaned closing fences from mid-line code fence patterns.
 ///
-/// When an LLM produces backticks mid-line (e.g. `text:```lang`),
-/// the bare closing fence on the next line gets misinterpreted as a
-/// new code block opening. This fixup detects when a `Block` contains
-/// such an embedded fence pattern and converts the following bare
-/// `FencedCodeStart` (no language tag) into a `Block` instead.
+/// When an LLM produces backticks mid-line (e.g.
+/// `text:```lang`), the bare closing fence on the next line gets misinterpreted
+/// as a new code block opening.
+/// This fixup detects when a `Block` contains such an embedded fence pattern
+/// and converts the following bare `FencedCodeStart` (no language tag) into a
+/// `Block` instead.
 pub struct OrphanedFenceFixup {
     /// Whether the previous block had an embedded fence pattern.
     prev_had_embedded_fence: bool,
     /// When true, we're inside a fake code block from an orphaned fence.
-    /// All `FencedCodeLine` events become `Block` events, and
-    /// `FencedCodeEnd` is suppressed.
+    /// All `FencedCodeLine` events become `Block` events, and `FencedCodeEnd`
+    /// is suppressed.
     suppressing: bool,
 }
 
@@ -146,9 +151,9 @@ impl EventFixup for OrphanedFenceFixup {
 
 /// Escalates fence lengths so rendered output safely contains inner fences.
 ///
-/// Rewrites `FencedCodeStart` and `FencedCodeEnd` events to use at least
-/// 5 backticks/tildes, so 3-backtick inner fences render as literal
-/// content in the output.
+/// Rewrites `FencedCodeStart` and `FencedCodeEnd` events to use at least 5
+/// backticks/tildes, so 3-backtick inner fences render as literal content in
+/// the output.
 pub struct FenceEscalationFixup;
 
 impl EventFixup for FenceEscalationFixup {

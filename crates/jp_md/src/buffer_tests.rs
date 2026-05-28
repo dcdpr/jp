@@ -22,9 +22,10 @@ impl TestCase<'_> {
 }
 
 /// Helper for tests that expected the old `Buffer::flush() -> Option<String>`
-/// API. Asserts the buffer's remaining content (via `flush_events`) matches
-/// `expected` as a *single* trailing `Flush` event with indent=0, or `None`
-/// for an empty buffer.
+/// API.
+/// Asserts the buffer's remaining content (via `flush_events`) matches
+/// `expected` as a *single* trailing `Flush` event with indent=0, or `None` for
+/// an empty buffer.
 #[track_caller]
 fn assert_partial_flush(buf: &mut Buffer, expected: Option<&str>, name: &str) {
     let events = buf.flush_events();
@@ -766,6 +767,11 @@ fn test_buffer_two_blank_lines_terminate_list() {
     // less-indented content end a list. The walk's `prev_blank` flag
     // is sticky across consecutive blanks, so we see this through:
     // blank → blank → non-marker at less indent → Terminator.
+    //
+    // The item Block keeps the trailing blank lines so the renderer
+    // preserves the visual separator to the next Block. The same blank
+    // lines also remain in the buffer (then consumed by the AtBoundary
+    // trim before the paragraph is processed).
     let input = "1. Item\n\n\nparagraph at column 0\n\n";
     let mut buf = Buffer::new();
     buf.push(input);
@@ -779,6 +785,195 @@ fn test_buffer_two_blank_lines_terminate_list() {
         Event::block("paragraph at column 0\n\n"),
     ]);
     assert_eq!(buf.flush_events(), Vec::<Event>::new());
+}
+
+#[test]
+fn test_buffer_unindented_paragraph_after_nested_list_terminates_outer() {
+    // Regression: a non-marker line at column 0 after a blank line
+    // must terminate the OUTER list, not be folded into the outer
+    // item's lazy continuation. Previously, the nested list's flush
+    // consumed the blank line that signalled termination, leaving the
+    // outer state without `prev_blank=true`. The fix asymmetrically
+    // captures the trailing blank in the Block content (so the
+    // renderer keeps the visual separator) while leaving it in the
+    // buffer (so the parent state picks up `prev_blank=true`), and
+    // initialises `prev_blank` from any leading blank consumed at
+    // entry to `handle_in_list`.
+    let input = "- Outer\n  - Inner\n\nparagraph\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let mut events: Vec<Event> = buf.by_ref().collect();
+    events.extend(buf.flush_events());
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "- Outer\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "- Inner\n\n".into(),
+            indent: 2,
+        },
+        Event::Flush {
+            content: "paragraph\n".into(),
+            indent: 0,
+        },
+    ]);
+}
+
+#[test]
+fn test_buffer_unindented_paragraph_after_nested_list_with_following_block() {
+    // Same as above, but with a trailing top-level heading so the
+    // paragraph is emitted as a streaming `Block`, not a `Flush`. This
+    // exercises the path where `handle_in_list` pops to `AtBoundary`
+    // and `handle_buffering_paragraph` collects the paragraph.
+    let input = "- Outer\n  - Inner\n\nparagraph at column 0\n\n# Heading\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let mut events: Vec<Event> = buf.by_ref().collect();
+    events.extend(buf.flush_events());
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "- Outer\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "- Inner\n\n".into(),
+            indent: 2,
+        },
+        Event::Block {
+            content: "paragraph at column 0\n\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "# Heading\n".into(),
+            indent: 0,
+        },
+    ]);
+}
+
+#[test]
+fn test_buffer_terminated_list_renders_blank_before_next_block() {
+    // Regression: an earlier iteration of the terminator fix stripped
+    // the trailing blank from the last item's Block, which collapsed
+    // into the next Block at render time because the renderer only
+    // emits a trailing blank when the source had one (list items don't
+    // auto-add a blank like paragraphs do). The Block must keep the
+    // trailing blank in its content.
+    use crate::format::{Formatter, TerminalOptions};
+
+    let cases = [
+        // List → paragraph.
+        (
+            "1. a\n2. b\n3. c\n\nParagraph after.\n",
+            "3. c",
+            "Paragraph after.",
+        ),
+        // List → heading.
+        ("- a\n- b\n\n## Heading\n", "- b", "## Heading"),
+    ];
+
+    let f = Formatter::with_width(0);
+    for (input, last_item, next_line) in cases {
+        let mut buf = Buffer::new();
+        buf.push(input);
+        let mut events: Vec<Event> = buf.by_ref().collect();
+        events.extend(buf.flush_events());
+
+        let mut rendered = String::new();
+        for ev in &events {
+            if let Event::Block { content, indent } | Event::Flush { content, indent } = ev {
+                let opts = TerminalOptions {
+                    indent: *indent,
+                    ..Default::default()
+                };
+                rendered.push_str(&f.format_terminal_with(content, &opts).unwrap());
+            }
+        }
+
+        let plain = strip_ansi(&rendered);
+        let lines: Vec<&str> = plain.lines().collect();
+        let last_idx = lines
+            .iter()
+            .position(|l| *l == last_item)
+            .unwrap_or_else(|| panic!("missing `{last_item}`.\nRendered:\n{plain}"));
+        assert_eq!(
+            lines.get(last_idx + 1),
+            Some(&""),
+            "blank line missing between `{last_item}` and `{next_line}`.\nRendered:\n{plain}"
+        );
+    }
+}
+
+#[test]
+fn test_buffer_unindented_paragraph_after_nested_list_renders_at_column_0() {
+    // End-to-end guarantee: the user's reported input renders the
+    // trailing paragraph flush left, not indented as a continuation
+    // of the outer item.
+    use crate::format::{Formatter, TerminalOptions};
+
+    let input = "- Outer\n  - Inner\n\nparagraph\n\n# Heading\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let mut events: Vec<Event> = buf.by_ref().collect();
+    events.extend(buf.flush_events());
+
+    let f = Formatter::with_width(0);
+    let mut rendered = String::new();
+    for ev in &events {
+        if let Event::Block { content, indent } | Event::Flush { content, indent } = ev {
+            let opts = TerminalOptions {
+                indent: *indent,
+                ..Default::default()
+            };
+            rendered.push_str(&f.format_terminal_with(content, &opts).unwrap());
+        }
+    }
+
+    let plain = strip_ansi(&rendered);
+    assert!(
+        plain.lines().any(|l| l == "paragraph"),
+        "`paragraph` should render at column 0.\nRendered:\n{plain}"
+    );
+    assert!(
+        !plain.lines().any(|l| l == "  paragraph"),
+        "`paragraph` must NOT render at column 2 as a continuation.\nRendered:\n{plain}"
+    );
+}
+
+#[test]
+fn test_buffer_indented_paragraph_after_nested_list_stays_continuation() {
+    // Sibling case to the above: when the paragraph IS indented to the
+    // outer item's `content_column`, it remains a continuation of the
+    // outer item per CommonMark §5.2 and renders at that indent. The
+    // fix must not accidentally promote legitimate continuations.
+    //
+    // The nested item's Block keeps the trailing blank in its content
+    // (so the renderer preserves the separator) while leaving the same
+    // blank in the buffer for the outer to consume as a leading blank.
+    // The outer's continuation Flush sits at the outer item's
+    // `content_column` of 2.
+    let input = "- Outer\n  - Inner\n\n  Continuation of outer\n";
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let mut events: Vec<Event> = buf.by_ref().collect();
+    events.extend(buf.flush_events());
+
+    assert_eq!(events, vec![
+        Event::Block {
+            content: "- Outer\n".into(),
+            indent: 0,
+        },
+        Event::Block {
+            content: "- Inner\n\n".into(),
+            indent: 2,
+        },
+        Event::Flush {
+            content: "Continuation of outer\n".into(),
+            indent: 2,
+        },
+    ]);
 }
 
 #[test]

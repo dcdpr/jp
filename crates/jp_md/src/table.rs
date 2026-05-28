@@ -1,9 +1,9 @@
 //! ANSI-aware table formatting for terminal output.
 //!
 //! This module renders comrak `Table` AST nodes as aligned, padded tables with
-//! proper column alignment markers. It handles ANSI escape sequences in cell
-//! content correctly by computing visual width (ignoring invisible escape
-//! bytes) for padding calculations.
+//! proper column alignment markers.
+//! It handles ANSI escape sequences in cell content correctly by computing
+//! visual width (ignoring invisible escape bytes) for padding calculations.
 //!
 //! Cell content that exceeds the configured maximum column width is
 //! word-wrapped across multiple visual rows, preserving ANSI formatting state
@@ -11,9 +11,9 @@
 //!
 //! # Usage
 //!
-//! Called from the terminal renderer when it encounters a `Table` node. The
-//! renderer passes the table node and receives a fully formatted string that it
-//! writes directly to output.
+//! Called from the terminal renderer when it encounters a `Table` node.
+//! The renderer passes the table node and receives a fully formatted string
+//! that it writes directly to output.
 
 use std::{cmp::min, fmt::Write as _};
 
@@ -33,8 +33,8 @@ type Node<'a> = &'a comrak::nodes::AstNode<'a>;
 pub struct TableOptions {
     /// Maximum visual width for any single column.
     ///
-    /// Cells exceeding this width are word-wrapped across multiple rows. `0`
-    /// means unlimited.
+    /// Cells exceeding this width are word-wrapped across multiple rows.
+    /// `0` means unlimited.
     pub max_column_width: usize,
 }
 
@@ -50,6 +50,7 @@ impl TableOptions {
 /// Returns `None` if the node isn't a valid table structure.
 ///
 /// The function:
+///
 /// 1. Walks the table's children to extract rows and cells.
 /// 2. Renders each cell's inline content using the terminal renderer (with
 ///    `width: 0` to disable wrapping inside cells).
@@ -267,8 +268,9 @@ fn pad_cell(content: &str, target_width: usize, alignment: TableAlignment) -> St
 /// width.
 ///
 /// Returns a `Vec` of lines, each fitting within `max_width` visible
-/// characters. Words are split at space boundaries; a single word longer than
-/// `max_width` is hard-broken at the character level.
+/// characters.
+/// Words are split at space boundaries; a single word longer than `max_width`
+/// is hard-broken at the character level.
 ///
 /// ANSI escape state is properly closed at each line break and re-opened on the
 /// continuation line.

@@ -24,10 +24,11 @@ const TYPE5_START_TAG: &str = "<![CDATA[";
 
 /// An event yielded by the buffer.
 ///
-/// Every event carries an `indent` field giving the visual column at which
-/// the consumer should render the event's content. This is used by the
-/// streaming buffer to emit events from inside nested containers (list
-/// items, fenced code inside list items) at their correct visual indent.
+/// Every event carries an `indent` field giving the visual column at which the
+/// consumer should render the event's content.
+/// This is used by the streaming buffer to emit events from inside nested
+/// containers (list items, fenced code inside list items) at their correct
+/// visual indent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// A complete block of markdown (e.g., a paragraph, a header, a list item).
@@ -63,7 +64,8 @@ pub enum Event {
 
     /// The end of a fenced code block.
     FencedCodeEnd {
-        /// The closing fence string (e.g. ` ``` ` or `~~~~~`).
+        /// The closing fence string (e.g.
+        /// ` ``` ` or `~~~~~`).
         fence: String,
         /// Visual indent (in spaces) the renderer should apply.
         indent: usize,
@@ -154,10 +156,11 @@ pub struct Buffer {
 
     /// Stack of saved parent states for nested containers.
     ///
-    /// When entering a nested context (e.g., a fence inside a list item,
-    /// or a list inside a list item), the current state is pushed here
-    /// and replaced with the inner state. When the inner state closes,
-    /// the parent is popped back as the active state.
+    /// When entering a nested context (e.g., a fence inside a list item, or a
+    /// list inside a list item), the current state is pushed here and replaced
+    /// with the inner state.
+    /// When the inner state closes, the parent is popped back as the active
+    /// state.
     parents: Vec<State>,
 }
 
@@ -184,17 +187,16 @@ impl Buffer {
 
     /// Drain all remaining content and emit it as a sequence of events.
     ///
-    /// Called at the end of the stream. For a `Buffer` that's mid-list
-    /// with several complete items still queued (because the buffer
-    /// can't flush an item until the next line is fully received),
-    /// this emits each complete item as its own `Block` event with
-    /// the correct renumbered marker and visual indent. The trailing
-    /// partial segment becomes the final `Flush` event.
+    /// Called at the end of the stream.
+    /// For a `Buffer` that's mid-list with several complete items still queued
+    /// (because the buffer can't flush an item until the next line is fully
+    /// received), this emits each complete item as its own `Block` event with
+    /// the correct renumbered marker and visual indent.
+    /// The trailing partial segment becomes the final `Flush` event.
     ///
-    /// For non-list states the entire remainder is emitted as a
-    /// single `Flush` event with the active indent (stripping the
-    /// fence's indent for `InFencedCode`, leaving content as-is
-    /// otherwise).
+    /// For non-list states the entire remainder is emitted as a single `Flush`
+    /// event with the active indent (stripping the fence's indent for
+    /// `InFencedCode`, leaving content as-is otherwise).
     pub fn flush_events(&mut self) -> Vec<Event> {
         let raw = std::mem::take(&mut self.data);
 
@@ -240,10 +242,10 @@ impl Buffer {
         events
     }
 
-    /// Implements [`Self::flush_events`] for `InList` state: scan the
-    /// remaining buffer for sibling-marker boundaries, emit each
-    /// complete preceding item as a `Block` (renumbered against the
-    /// list's start), and emit the final segment as a `Flush`.
+    /// Implements [`Self::flush_events`] for `InList` state: scan the remaining
+    /// buffer for sibling-marker boundaries, emit each complete preceding item
+    /// as a `Block` (renumbered against the list's start), and emit the final
+    /// segment as a `Flush`.
     fn flush_list_events(
         raw: &str,
         marker_column: usize,
@@ -331,8 +333,8 @@ impl Buffer {
         }
     }
 
-    /// Handles the `AtBoundary` state: we are at a block boundary. We inspect
-    /// the start of the buffer to decide what block we're in.
+    /// Handles the `AtBoundary` state: we are at a block boundary.
+    /// We inspect the start of the buffer to decide what block we're in.
     fn handle_at_boundary(&mut self) -> (Option<Event>, State) {
         // Trim leading blank lines, as they are just block separators.
         let trimmed_buffer = self.data.trim_start_matches('\n');
@@ -434,8 +436,8 @@ impl Buffer {
         (None, State::BufferingParagraph)
     }
 
-    /// Handles `BufferingParagraph`: we're in a paragraph-like block. We need
-    /// to find its terminator.
+    /// Handles `BufferingParagraph`: we're in a paragraph-like block.
+    /// We need to find its terminator.
     fn handle_buffering_paragraph(&mut self) -> (Option<Event>, State) {
         let mut terminator_pos: Option<usize> = None;
         let mut flush_len: usize = 0;
@@ -498,19 +500,20 @@ impl Buffer {
 
     /// Handles `InList`: we're inside a list, buffering the current item.
     ///
-    /// Walks the buffer line by line, looking for a safe flush point. A
-    /// flush is safe at:
+    /// Walks the buffer line by line, looking for a safe flush point.
+    /// A flush is safe at:
     ///
-    /// - A sibling marker at column == `marker_column` (the current item
-    ///   is complete; the new marker starts the next item). Stay in this
-    ///   state.
-    /// - A line at column ≤ `marker_column` that is not a list marker, when
-    ///   it either is a block starter (header, HR, fenced code, HTML block)
-    ///   or follows a blank line. The list has ended. Transition back to
-    ///   `AtBoundary`.
+    /// - A sibling marker at column == `marker_column` (the current item is
+    ///   complete; the new marker starts the next item).
+    ///   Stay in this state.
+    /// - A line at column ≤ `marker_column` that is not a list marker, when it
+    ///   either is a block starter (header, HR, fenced code, HTML block) or
+    ///   follows a blank line.
+    ///   The list has ended.
+    ///   Transition back to `AtBoundary`.
     ///
-    /// Blank lines and indented continuations (column > `marker_column`)
-    /// are buffered, not flushed.
+    /// Blank lines and indented continuations (column \> `marker_column`) are
+    /// buffered, not flushed.
     #[expect(clippy::too_many_lines)]
     fn handle_in_list(
         &mut self,
@@ -532,10 +535,18 @@ impl Buffer {
 
         // Drop a single leading blank line: it belongs to the trailing
         // separator of whatever block was emitted just before us (e.g.
-        // a closing fence), not to the next item. Multiple blanks are
-        // left for the walk's `prev_blank` logic to interpret — two
-        // blank lines + less-indented content should still terminate
-        // the list.
+        // a closing fence, or a nested list that terminated on a blank).
+        // Multiple blanks are left for the walk's `prev_blank` logic to
+        // interpret — two blank lines + less-indented content should
+        // still terminate the list.
+        //
+        // The blank itself carries signal: it means the immediately
+        // preceding scope ended on a blank line. Initialise `prev_blank`
+        // from that so the walk's terminator check (`prev_blank &&
+        // indent < content_column`) fires on the very first line, which
+        // matters when a popped child consumed the blank as part of its
+        // own flush and left us with a less-indented non-marker at the
+        // head of the buffer.
         let leading_blank = leading_blank_line_bytes(&self.data);
         if leading_blank > 0 {
             self.data.drain(..leading_blank);
@@ -552,7 +563,13 @@ impl Buffer {
         }
 
         let mut scan = 0_usize;
-        let mut prev_blank = false;
+        // Byte offset just past the last non-blank line we've walked.
+        // Used by the `Terminator` branch to flush only the item's
+        // actual content and leave trailing blank lines in the buffer,
+        // so the popped-to parent state can pick up the same
+        // `prev_blank=true` signal that triggered the termination here.
+        let mut last_content_end = 0_usize;
+        let mut prev_blank = leading_blank > 0;
 
         while scan < self.data.len() {
             // Compute line shape without holding a borrow on the buffer
@@ -587,9 +604,11 @@ impl Buffer {
                     if scan == 0 {
                         prev_blank = false;
                         scan += line_len;
+                        last_content_end = scan;
                         continue;
                     }
                     let (event, new_state) = self.flush_list_segment(
+                        scan,
                         scan,
                         marker_column,
                         content_column,
@@ -603,6 +622,7 @@ impl Buffer {
                 ListLineKind::NestedContainer => {
                     if scan > 0 {
                         let (event, new_state) = self.flush_list_segment(
+                            scan,
                             scan,
                             marker_column,
                             content_column,
@@ -624,10 +644,18 @@ impl Buffer {
                     // Fall through as continuation defensively.
                     prev_blank = false;
                     scan += line_len;
+                    last_content_end = scan;
                 }
                 ListLineKind::Terminator => {
                     let next_state = self.pop_parent_or_boundary();
-                    if scan == 0 {
+                    // Flush only this scope's actual content; leave any
+                    // trailing blank lines in the buffer so the popped-to
+                    // parent state can see them and apply its own
+                    // termination check. Without this, a paragraph at
+                    // less indent than the parent's `content_column`
+                    // would be misclassified as a lazy continuation of
+                    // the parent item.
+                    if last_content_end == 0 {
                         // Nothing buffered for this list yet (e.g. the
                         // parent's next marker arrived right after we
                         // entered this nested list). Hand control back
@@ -636,8 +664,15 @@ impl Buffer {
                         // empty `Block`.
                         return (None, next_state);
                     }
+                    // Capture content up to `scan` (including any trailing
+                    // blank lines we walked past) so the rendered Block
+                    // keeps the visual separator to the next sibling Block;
+                    // drain only up to `last_content_end` so those same
+                    // blank lines stay in the buffer for the parent state
+                    // to see as `prev_blank=true`.
                     let (event, _) = self.flush_list_segment(
                         scan,
+                        last_content_end,
                         marker_column,
                         content_column,
                         is_ordered,
@@ -650,6 +685,7 @@ impl Buffer {
                 ListLineKind::Continuation => {
                     prev_blank = false;
                     scan += line_len;
+                    last_content_end = scan;
                 }
             }
         }
@@ -658,9 +694,10 @@ impl Buffer {
     }
 
     /// If the buffer starts with a nested list marker or a fence at
-    /// `content_column` or deeper, return the transition that enters
-    /// that nested container. The caller is responsible for pushing the
-    /// current `InList` state onto `parents` before returning.
+    /// `content_column` or deeper, return the transition that enters that
+    /// nested container.
+    /// The caller is responsible for pushing the current `InList` state onto
+    /// `parents` before returning.
     fn maybe_enter_nested_from_list_head(
         &mut self,
         marker_column: usize,
@@ -707,16 +744,26 @@ impl Buffer {
         None
     }
 
-    /// Drain `flush_pos` bytes from the buffer and emit them as a Block.
+    /// Capture `content_end` bytes as the Block content and drain `drain_end`
+    /// bytes from the buffer.
     ///
-    /// The first line of the segment is inspected to decide whether the
-    /// segment is an item-style flush (starts with this list's marker) or
-    /// a paragraph-style flush (continuation content inside the item).
-    /// Item flushes are renumbered against `start_number + items_flushed`
-    /// for ordered lists, and the returned `items_flushed` is incremented.
+    /// In the common case (`SiblingMarker`, `NestedContainer`), the two are
+    /// equal: drain the same bytes that go into the Block.
+    /// The `Terminator` branch passes `content_end > drain_end` to keep
+    /// trailing blank lines *both* in the emitted Block (so the renderer
+    /// preserves the visual separation between this item and whatever follows)
+    /// *and* in the buffer (so the popped-to parent state can pick up
+    /// `prev_blank=true`).
+    ///
+    /// The first line of the segment is inspected to decide whether the segment
+    /// is an item-style flush (starts with this list's marker) or a
+    /// paragraph-style flush (continuation content inside the item).
+    /// Item flushes are renumbered against `start_number + items_flushed` for
+    /// ordered lists, and the returned `items_flushed` is incremented.
     fn flush_list_segment(
         &mut self,
-        flush_pos: usize,
+        content_end: usize,
+        drain_end: usize,
         marker_column: usize,
         content_column: usize,
         is_ordered: bool,
@@ -724,7 +771,12 @@ impl Buffer {
         start_number: u32,
         items_flushed: u32,
     ) -> (Event, State) {
-        let raw: String = self.data.drain(..flush_pos).collect();
+        debug_assert!(
+            drain_end <= content_end,
+            "drain_end ({drain_end}) must not exceed content_end ({content_end})"
+        );
+        let raw: String = self.data[..content_end].to_string();
+        self.data.drain(..drain_end);
         let first_line = raw.lines().next().unwrap_or("");
         let (first_indent, first_content) = get_indent(first_line);
         let is_item = first_indent == marker_column && is_list_marker(first_content);
@@ -853,8 +905,8 @@ impl Buffer {
     /// Handles `InFencedCode`: we process one line at a time.
     ///
     /// Tracks nesting depth so that inner fenced code blocks (which LLMs
-    /// frequently produce inside markdown code blocks) don't prematurely
-    /// close the outer block.
+    /// frequently produce inside markdown code blocks) don't prematurely close
+    /// the outer block.
     fn handle_in_fenced_code(
         &mut self,
         fence_type: FenceType,
@@ -1065,7 +1117,8 @@ impl Iterator for Buffer {
 
 /// Check if content (after indent stripping) starts with a list marker.
 ///
-/// Matches unordered (`- `, `* `, `+ `) and ordered (`1. `, `2) `) markers.
+/// Matches unordered (` -  `, ` *  `, ` +  `) and ordered (` 1.  `, ` 2)  `)
+/// markers.
 fn is_list_marker(content: &str) -> bool {
     parse_list_marker(content).is_some()
 }
@@ -1073,19 +1126,21 @@ fn is_list_marker(content: &str) -> bool {
 /// A parsed list marker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ListMarker {
-    /// Visual width of the marker including the trailing space, e.g.
-    /// 2 for `- `, 3 for `1. `, 4 for `10. `.
+    /// Visual width of the marker including the trailing space, e.g. 2 for `-`,
+    /// 3 for ` 1.  `, 4 for ` 10.  `.
     marker_width: usize,
     /// Whether the marker is ordered (digits + delimiter).
     is_ordered: bool,
     /// The delimiter byte: `.` or `)` for ordered, `-`/`*`/`+` for bullet.
     delimiter: u8,
-    /// For ordered markers, the number value. `0` for bullet markers.
+    /// For ordered markers, the number value.
+    /// `0` for bullet markers.
     number: u32,
 }
 
 /// Parse a list marker at the start of `content`, returning its shape if
-/// present. `content` should already have leading whitespace stripped.
+/// present.
+/// `content` should already have leading whitespace stripped.
 fn parse_list_marker(content: &str) -> Option<ListMarker> {
     let bytes = content.as_bytes();
 
@@ -1118,14 +1173,14 @@ fn parse_list_marker(content: &str) -> Option<ListMarker> {
     })
 }
 
-/// Count the number of leading bytes in `s` that form *a single* blank
-/// line (only spaces and tabs, terminated by `\n`). Returns `0` if the
-/// content doesn't begin with a blank line.
+/// Count the number of leading bytes in `s` that form *a single* blank line
+/// (only spaces and tabs, terminated by `\n`).
+/// Returns `0` if the content doesn't begin with a blank line.
 ///
-/// Used at the start of `handle_in_list` to consume the trailing
-/// separator left behind by a just-closed inner block (e.g. a fenced
-/// code block). Stops after one line so two-blank-lines-end-of-list
-/// semantics still propagate to the walk.
+/// Used at the start of `handle_in_list` to consume the trailing separator left
+/// behind by a just-closed inner block (e.g. a fenced code block).
+/// Stops after one line so two-blank-lines-end-of-list semantics still
+/// propagate to the walk.
 fn leading_blank_line_bytes(s: &str) -> usize {
     let bytes = s.as_bytes();
     let mut idx = 0;
@@ -1144,11 +1199,11 @@ fn leading_blank_line_bytes(s: &str) -> usize {
 enum ListLineKind {
     /// A sibling marker at this list's `marker_column`.
     SiblingMarker,
-    /// A list marker or fenced code start at `content_column` or deeper
-    /// — a nested container inside the current item.
+    /// A list marker or fenced code start at `content_column` or deeper — a
+    /// nested container inside the current item.
     NestedContainer,
-    /// A line that terminates the list: less-indented after a blank, or
-    /// a block interrupter at <= 3 spaces.
+    /// A line that terminates the list: less-indented after a blank, or a block
+    /// interrupter at \<= 3 spaces.
     Terminator,
     /// Any other non-blank line: continuation of the current item.
     Continuation,
@@ -1158,8 +1213,8 @@ enum ListLineKind {
 ///
 /// `is_ordered` and `delimiter` describe the active list's marker shape, used
 /// to distinguish sibling markers from markers that start a *new* list at the
-/// same column (per CommonMark §5.2: two markers are the same kind only if
-/// they share `is_ordered` and their delimiter character).
+/// same column (per CommonMark §5.2: two markers are the same kind only if they
+/// share `is_ordered` and their delimiter character).
 fn classify_list_line(
     indent: usize,
     content: &str,
@@ -1238,9 +1293,10 @@ fn strip_lines_indent(raw: &str, max_strip: usize) -> String {
 
 /// Rewrite the leading ordered-list marker number in `content` to `new`.
 ///
-/// `delimiter` is the marker's delimiter byte (`.` or `)`); used to confirm
-/// the leading marker shape before rewriting. If the content does not start
-/// with a matching marker, it is returned unchanged.
+/// `delimiter` is the marker's delimiter byte (`.` or `)`); used to confirm the
+/// leading marker shape before rewriting.
+/// If the content does not start with a matching marker, it is returned
+/// unchanged.
 fn renumber_first_marker(content: String, new: u32, delimiter: u8) -> String {
     let bytes = content.as_bytes();
     let digit_count = bytes.iter().take_while(|b| b.is_ascii_digit()).count();
