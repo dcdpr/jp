@@ -9,6 +9,7 @@ mod parser;
 mod render;
 mod schema;
 mod session;
+mod shared;
 mod signals;
 mod timer;
 

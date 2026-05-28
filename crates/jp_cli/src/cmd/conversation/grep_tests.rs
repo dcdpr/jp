@@ -737,57 +737,6 @@ fn test_context_ranges_single() {
     assert_eq!(ranges, vec![(2, 2)]);
 }
 
-fn collect_lines(kind: &EventKind) -> Vec<String> {
-    event_lines(kind)
-        .into_iter()
-        .map(std::borrow::Cow::into_owned)
-        .collect()
-}
-
-#[test]
-fn test_event_text_content_chat_request() {
-    let kind = EventKind::ChatRequest("hello world".into());
-    assert_eq!(collect_lines(&kind), vec!["hello world".to_string()]);
-}
-
-#[test]
-fn test_event_text_content_chat_response_message() {
-    let kind = EventKind::ChatResponse(ChatResponse::message("response text"));
-    assert_eq!(collect_lines(&kind), vec!["response text".to_string()]);
-}
-
-#[test]
-fn test_event_text_content_chat_response_reasoning() {
-    let kind = EventKind::ChatResponse(ChatResponse::reasoning("thinking..."));
-    assert_eq!(collect_lines(&kind), vec!["thinking...".to_string()]);
-}
-
-#[test]
-fn test_event_text_content_turn_start() {
-    let kind = EventKind::TurnStart(jp_conversation::event::TurnStart);
-    assert!(collect_lines(&kind).is_empty());
-}
-
-#[test]
-fn test_event_scope_mapping() {
-    assert_eq!(
-        event_scope(&EventKind::ChatRequest("x".into())),
-        Some(ConcreteScope::User)
-    );
-    assert_eq!(
-        event_scope(&EventKind::ChatResponse(ChatResponse::message("x"))),
-        Some(ConcreteScope::Assistant)
-    );
-    assert_eq!(
-        event_scope(&EventKind::ChatResponse(ChatResponse::reasoning("x"))),
-        Some(ConcreteScope::Reasoning)
-    );
-    assert_eq!(
-        event_scope(&EventKind::TurnStart(jp_conversation::event::TurnStart)),
-        None
-    );
-}
-
 #[test]
 fn test_expand_scopes_empty_is_all() {
     let expanded = expand_scopes(&[]);

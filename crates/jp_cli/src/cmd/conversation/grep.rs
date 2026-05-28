@@ -1,12 +1,8 @@
-use std::{
-    borrow::Cow,
-    collections::HashSet,
-    fmt::{self, Write as _},
-};
+use std::{borrow::Cow, collections::HashSet, fmt::Write as _};
 
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
-use jp_conversation::{ConversationId, EventKind, event::ChatResponse};
+use jp_conversation::ConversationId;
 use jp_workspace::ConversationHandle;
 use rayon::prelude::*;
 use serde_json::json;
@@ -16,6 +12,7 @@ use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds},
     ctx::Ctx,
     output::print_json,
+    shared::search::{ConcreteScope, contains_substr, event_lines, event_scope, title_for},
 };
 
 /// Maximum number of characters to show from a matching line.
@@ -384,54 +381,8 @@ enum Scope {
     Inquiry,
 }
 
-/// Leaf scopes — the actual partitioning of conversation content. There is no
-/// meta-scope here, so this is what the search pipeline filters against.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum ConcreteScope {
-    Title,
-    User,
-    Assistant,
-    Reasoning,
-    Structured,
-    ToolCall,
-    ToolResult,
-    Inquiry,
-}
-
-impl ConcreteScope {
-    const ALL: [Self; 8] = [
-        Self::Title,
-        Self::User,
-        Self::Assistant,
-        Self::Reasoning,
-        Self::Structured,
-        Self::ToolCall,
-        Self::ToolResult,
-        Self::Inquiry,
-    ];
-
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Title => "title",
-            Self::User => "user",
-            Self::Assistant => "assistant",
-            Self::Reasoning => "reasoning",
-            Self::Structured => "structured",
-            Self::ToolCall => "tool-call",
-            Self::ToolResult => "tool-result",
-            Self::Inquiry => "inquiry",
-        }
-    }
-}
-
-impl fmt::Display for ConcreteScope {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-/// Whether the wanted scope set contains anything sourced from the event
-/// stream (i.e. something beyond `Title`).
+/// Whether the wanted scope set contains anything sourced from the event stream
+/// (i.e. something beyond `Title`).
 fn needs_events_for(wanted: &HashSet<ConcreteScope>) -> bool {
     wanted.iter().any(|s| *s != ConcreteScope::Title)
 }
@@ -523,25 +474,12 @@ fn collect_scope_hits(
     }
 }
 
-fn title_for(ctx: &Ctx, handle: &ConversationHandle) -> Option<String> {
-    ctx.workspace
-        .metadata(handle)
-        .ok()
-        .and_then(|m| m.title.clone())
-}
-
 /// Return indices of lines that match the pattern.
 fn matching_lines(lines: &[&str], pattern: &str, ignore_case: bool) -> Vec<usize> {
     lines
         .iter()
         .enumerate()
-        .filter(|(_, line)| {
-            if ignore_case {
-                line.to_lowercase().contains(pattern)
-            } else {
-                line.contains(pattern)
-            }
-        })
+        .filter(|(_, line)| contains_substr(line, pattern, ignore_case))
         .map(|(i, _)| i)
         .collect()
 }
@@ -565,59 +503,6 @@ fn context_ranges(indices: &[usize], ctx: usize, count: usize) -> Vec<(usize, us
     }
 
     ranges
-}
-
-/// Which concrete scope an event kind's text belongs to, if any.
-fn event_scope(kind: &EventKind) -> Option<ConcreteScope> {
-    match kind {
-        EventKind::ChatRequest(_) => Some(ConcreteScope::User),
-        EventKind::ChatResponse(ChatResponse::Message { .. }) => Some(ConcreteScope::Assistant),
-        EventKind::ChatResponse(ChatResponse::Reasoning { .. }) => Some(ConcreteScope::Reasoning),
-        EventKind::ChatResponse(ChatResponse::Structured { .. }) => Some(ConcreteScope::Structured),
-        EventKind::ToolCallRequest(_) => Some(ConcreteScope::ToolCall),
-        EventKind::ToolCallResponse(_) => Some(ConcreteScope::ToolResult),
-        EventKind::InquiryRequest(_) => Some(ConcreteScope::Inquiry),
-        EventKind::InquiryResponse(_) | EventKind::TurnStart(_) => None,
-    }
-}
-
-/// Extract all searchable text lines from an event.
-///
-/// Lines may be borrowed from the event or owned (tool call arguments are
-/// serialized on demand).
-fn event_lines(kind: &EventKind) -> Vec<Cow<'_, str>> {
-    match kind {
-        EventKind::ChatRequest(req) => req.content.lines().map(Cow::Borrowed).collect(),
-        EventKind::ChatResponse(ChatResponse::Message { message }) => {
-            message.lines().map(Cow::Borrowed).collect()
-        }
-        EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
-            reasoning.lines().map(Cow::Borrowed).collect()
-        }
-        EventKind::ChatResponse(ChatResponse::Structured { data }) => data
-            .as_str()
-            .iter()
-            .flat_map(|text| text.lines())
-            .map(Cow::Borrowed)
-            .collect(),
-        EventKind::ToolCallRequest(req) => {
-            let mut out: Vec<Cow<'_, str>> = req.name.lines().map(Cow::Borrowed).collect();
-            if !req.arguments.is_empty() {
-                // Pretty-print so keys/values land on their own lines; that
-                // gives meaningful `--context` behavior and avoids having one
-                // giant blob.
-                if let Ok(json) = serde_json::to_string_pretty(&req.arguments) {
-                    for line in json.lines() {
-                        out.push(Cow::Owned(line.to_owned()));
-                    }
-                }
-            }
-            out
-        }
-        EventKind::ToolCallResponse(resp) => resp.content().lines().map(Cow::Borrowed).collect(),
-        EventKind::InquiryRequest(req) => req.question.text.lines().map(Cow::Borrowed).collect(),
-        EventKind::InquiryResponse(_) | EventKind::TurnStart(_) => vec![],
-    }
 }
 
 /// Truncate a line to `max` characters, appending `...` if truncated.
