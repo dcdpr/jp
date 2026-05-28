@@ -22,14 +22,27 @@ pub(crate) struct Fork {
     #[arg(long)]
     from: Option<TimeThreshold>,
 
-    /// Ignore all conversation events *after* the specified timestamp.
+    /// Ignore all conversation events at or after the specified timestamp.
     ///
-    /// Timestamp can be relative (5days, 2mins, etc) or absolute. Can be used
-    /// in combination with `--until`.
+    /// Exclusive: an event at exactly this timestamp is dropped.
+    /// Timestamp can be relative (5days, 2mins, etc) or absolute.
+    /// Composes with `--from` to form a half-open `[from, until)` range.
     #[arg(long)]
     until: Option<TimeThreshold>,
 
-    /// Fork the last N turns of the conversation. Defaults to 1.
+    /// Fork the first N turns of the conversation.
+    /// Defaults to 1.
+    ///
+    /// Can be combined with `--last` to keep both the leading and trailing
+    /// windows while dropping the turns in between.
+    #[arg(long, short = 'f')]
+    first: Option<Option<usize>>,
+
+    /// Fork the last N turns of the conversation.
+    /// Defaults to 1.
+    ///
+    /// Can be combined with `--first` to keep both the leading and trailing
+    /// windows while dropping the turns in between.
     #[arg(long, short = 'l')]
     last: Option<Option<usize>>,
 
@@ -48,11 +61,16 @@ impl Fork {
             let lock = fork_conversation(ctx, source, |events| {
                 events.retain(|event| {
                     self.from.is_none_or(|t| event.timestamp >= *t)
-                        && self.until.is_none_or(|t| event.timestamp <= *t)
+                        && self.until.is_none_or(|t| event.timestamp < *t)
                 });
 
-                if let Some(last) = self.last {
-                    events.retain_last_turns(last.unwrap_or(1));
+                let first = self.first.map(|v| v.unwrap_or(1));
+                let last = self.last.map(|v| v.unwrap_or(1));
+                match (first, last) {
+                    (None, None) => {}
+                    (Some(f), None) => events.retain_first_turns(f),
+                    (None, Some(l)) => events.retain_last_turns(l),
+                    (Some(f), Some(l)) => events.retain_first_and_last_turns(f, l),
                 }
             })?;
 

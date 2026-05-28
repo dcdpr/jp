@@ -155,3 +155,112 @@ fn retain_last_turns_zero_clears() {
 
     assert_eq!(stream.iter_turns().len(), 0);
 }
+
+#[test]
+fn retain_first_turns_keeps_first_n() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::message("A1.\n\n"), ts(0, 0, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
+        ConversationEvent::new(ChatResponse::message("A2.\n\n"), ts(0, 1, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
+    ]);
+
+    stream.retain_first_turns(1);
+
+    let turns: Vec<_> = stream.iter_turns().collect();
+    assert_eq!(turns.len(), 1);
+    let req = turns[0]
+        .iter()
+        .find_map(|e| e.event.as_chat_request())
+        .unwrap();
+    assert_eq!(req.content, "Q1");
+}
+
+#[test]
+fn retain_first_turns_noop_when_fewer_turns() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+    ]);
+
+    stream.retain_first_turns(5);
+
+    assert_eq!(stream.iter_turns().len(), 1);
+}
+
+#[test]
+fn retain_first_turns_zero_clears() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+    ]);
+
+    stream.retain_first_turns(0);
+
+    assert_eq!(stream.iter_turns().len(), 0);
+}
+
+#[test]
+fn retain_first_and_last_turns_keeps_both_windows() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
+        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
+        ConversationEvent::new(TurnStart, ts(0, 3, 0)),
+        ConversationEvent::new(ChatRequest::from("Q4"), ts(0, 3, 1)),
+    ]);
+
+    // 4 turns, keep first 1 + last 2 — drop turn 2.
+    stream.retain_first_and_last_turns(1, 2);
+
+    let requests: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.as_chat_request())
+        .map(|r| r.content.clone())
+        .collect();
+    assert_eq!(requests, vec!["Q1", "Q3", "Q4"]);
+}
+
+#[test]
+fn retain_first_and_last_turns_noop_when_fits() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
+        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
+    ]);
+
+    // 3 turns; first 2 + last 2 = 4 >= 3, no-op.
+    stream.retain_first_and_last_turns(2, 2);
+
+    assert_eq!(stream.iter_turns().len(), 3);
+}
+
+#[test]
+fn retain_first_and_last_turns_zero_zero_clears() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
+    ]);
+
+    stream.retain_first_and_last_turns(0, 0);
+
+    assert_eq!(stream.iter_turns().len(), 0);
+}

@@ -36,6 +36,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: None,
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -78,6 +79,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: None,
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -130,6 +132,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: None,
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -184,6 +187,7 @@ fn test_conversation_fork() {
                 from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap().into()),
                 until: None,
                 last: None,
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -237,6 +241,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap().into()),
                 last: None,
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -271,15 +276,16 @@ fn test_conversation_fork() {
             assert: |convs, _| {
                 assert_eq!(convs.len(), 2);
                 assert_eq!(convs[0].2.iter().count(), 3);
-                // +1 for injected TurnStart
-                assert_eq!(convs[1].2.iter().count(), 3);
+                // --until is exclusive: 00:01:00 event is dropped, only 00:00:00 survives.
+                // +1 for injected TurnStart.
+                assert_eq!(convs[1].2.iter().count(), 2);
                 assert_eq!(
                     convs[0].2.last().unwrap().event.timestamp,
                     Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
                 );
                 assert_eq!(
                     convs[1].2.last().unwrap().event.timestamp,
-                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
+                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
                 );
             },
         }),
@@ -290,6 +296,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: Some(None),
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -367,6 +374,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: Some(Some(2)),
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -443,6 +451,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: Some(Some(10)),
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -487,6 +496,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: Some(Some(1)),
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -521,6 +531,198 @@ fn test_conversation_fork() {
                 assert_eq!(convs[1].2.iter().count(), 3);
             },
         }),
+        ("with first (default 1)", TestCase {
+            args: Fork {
+                target: PositionalIds::default(),
+                activate: false,
+                from: None,
+                until: None,
+                last: None,
+                first: Some(None),
+                title: None,
+            },
+            setup: |ctx| {
+                let id = ConversationId::try_from(ctx.now()).unwrap();
+                ctx.workspace.create_conversation_with_id(
+                    id,
+                    Conversation::default().with_last_activated_at(ctx.now()),
+                    ctx.config(),
+                );
+
+                let h = ctx.workspace.acquire_conversation(&id).unwrap();
+                let lock = ctx.workspace.test_lock(h);
+                lock.as_mut().update_events(|e| {
+                    e.extend(vec![
+                        ConversationEvent::new(
+                            TurnStart,
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatRequest::from("first question"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatResponse::message("first answer"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            TurnStart,
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatRequest::from("second question"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 4, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatResponse::message("second answer"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 5, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            TurnStart,
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 6, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatRequest::from("third question"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 7, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatResponse::message("third answer"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 8, 0).unwrap(),
+                        ),
+                    ]);
+                });
+                id
+            },
+            assert: |convs, _| {
+                assert_eq!(convs.len(), 2);
+                assert_eq!(convs[0].2.iter().count(), 9);
+                // forked has first turn only: TurnStart + request + response
+                assert_eq!(convs[1].2.iter().count(), 3);
+                assert_eq!(
+                    convs[1].2.first().unwrap().event.timestamp,
+                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                );
+                assert_eq!(
+                    convs[1].2.last().unwrap().event.timestamp,
+                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+                );
+            },
+        }),
+        ("with first 2 and last 1", TestCase {
+            args: Fork {
+                target: PositionalIds::default(),
+                activate: false,
+                from: None,
+                until: None,
+                last: Some(Some(1)),
+                first: Some(Some(2)),
+                title: None,
+            },
+            setup: |ctx| {
+                let id = ConversationId::try_from(ctx.now()).unwrap();
+                ctx.workspace.create_conversation_with_id(
+                    id,
+                    Conversation::default().with_last_activated_at(ctx.now()),
+                    ctx.config(),
+                );
+
+                let h = ctx.workspace.acquire_conversation(&id).unwrap();
+                let lock = ctx.workspace.test_lock(h);
+                lock.as_mut().update_events(|e| {
+                    e.extend(vec![
+                        ConversationEvent::new(
+                            TurnStart,
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatRequest::from("Q1"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            TurnStart,
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatRequest::from("Q2"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            TurnStart,
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 4, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatRequest::from("Q3"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 5, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            TurnStart,
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 6, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatRequest::from("Q4"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 7, 0).unwrap(),
+                        ),
+                    ]);
+                });
+                id
+            },
+            assert: |convs, _| {
+                assert_eq!(convs.len(), 2);
+                // First 2 + last 1 of 4 turns — drop turn 3 (Q3).
+                let requests: Vec<_> = convs[1]
+                    .2
+                    .iter()
+                    .filter_map(|e| e.event.as_chat_request())
+                    .map(|r| r.content.clone())
+                    .collect();
+                assert_eq!(requests, vec!["Q1", "Q2", "Q4"]);
+            },
+        }),
+        ("with first exceeding turn count", TestCase {
+            args: Fork {
+                target: PositionalIds::default(),
+                activate: false,
+                from: None,
+                until: None,
+                last: None,
+                first: Some(Some(10)),
+                title: None,
+            },
+            setup: |ctx| {
+                let id = ConversationId::try_from(ctx.now()).unwrap();
+                ctx.workspace.create_conversation_with_id(
+                    id,
+                    Conversation::default().with_last_activated_at(ctx.now()),
+                    ctx.config(),
+                );
+
+                let h = ctx.workspace.acquire_conversation(&id).unwrap();
+                let lock = ctx.workspace.test_lock(h);
+                lock.as_mut().update_events(|e| {
+                    e.extend(vec![
+                        ConversationEvent::new(
+                            TurnStart,
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatRequest::from("only question"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatResponse::message("only answer"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
+                        ),
+                    ]);
+                });
+                id
+            },
+            assert: |convs, _| {
+                assert_eq!(convs.len(), 2);
+                // All events kept since --first 10 > 1 turn.
+                assert_eq!(convs[0].2.iter().count(), 3);
+                assert_eq!(convs[1].2.iter().count(), 3);
+            },
+        }),
         ("with custom title", TestCase {
             args: Fork {
                 target: PositionalIds::default(),
@@ -528,6 +730,7 @@ fn test_conversation_fork() {
                 from: None,
                 until: None,
                 last: None,
+                first: None,
                 title: Some("my custom title".to_owned()),
             },
             setup: |ctx| {
@@ -558,6 +761,7 @@ fn test_conversation_fork() {
                 from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap().into()),
                 until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap().into()),
                 last: None,
+                first: None,
                 title: None,
             },
             setup: |ctx| {
@@ -596,23 +800,20 @@ fn test_conversation_fork() {
             assert: |convs, _| {
                 assert_eq!(convs.len(), 2);
                 assert_eq!(convs[0].2.iter().count(), 4);
-                // +1 for injected TurnStart
-                assert_eq!(convs[1].2.iter().count(), 3);
+                // `[from, until)` is half-open: 00:01:00 is kept (from is inclusive),
+                // 00:02:00 is dropped (until is exclusive). +1 for injected TurnStart.
+                assert_eq!(convs[1].2.iter().count(), 2);
                 assert_eq!(
                     convs[0].2.first().unwrap().event.timestamp,
                     Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
                 );
                 assert_eq!(
-                    convs[1].2.first().unwrap().event.timestamp,
+                    convs[1].2.last().unwrap().event.timestamp,
                     Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
                 );
                 assert_eq!(
                     convs[0].2.last().unwrap().event.timestamp,
                     Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap()
-                );
-                assert_eq!(
-                    convs[1].2.last().unwrap().event.timestamp,
-                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
                 );
             },
         }),
@@ -765,6 +966,7 @@ fn fork_targets_correct_source() {
         from: None,
         until: None,
         last: None,
+        first: None,
         title: Some("forked-from-b".to_owned()),
     };
     let handle_b = ctx.workspace.acquire_conversation(&id_b).unwrap();
