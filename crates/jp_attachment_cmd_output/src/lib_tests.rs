@@ -74,6 +74,14 @@ fn test_uri_to_command_hierarchical() {
             "cmd://?arg=%2Dl&arg=%2Da&arg=%2Dh",
             Err("Invalid command URI"),
         ),
+        (
+            "cmd://date?arg=%2B%25Y%2D%25m%2D%25d&description=Current%20Date",
+            Ok(Command {
+                cmd: "date".to_string(),
+                args: vec!["+%Y-%m-%d".to_string()],
+                description: Some("Current Date".to_string()),
+            }),
+        ),
     ];
 
     for (uri, expected) in cases {
