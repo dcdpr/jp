@@ -362,28 +362,6 @@ impl ConversationStream {
         TurnMut::new(self)
     }
 
-    /// Push an event with a config delta.
-    ///
-    /// If the event has a config delta that is not empty, it will be added to
-    /// the stream *before* the event is pushed.
-    fn push_with_config_delta(&mut self, event: impl Into<ConversationEventWithConfig>) {
-        let ConversationEventWithConfig { event, config } = event.into();
-
-        let last_config = self
-            .last()
-            .map_or_else(|| self.base_config.to_partial(), |v| v.config);
-        let config_delta = last_config.delta(config);
-
-        if !config_delta.is_empty() {
-            self.add_config_delta(ConfigDelta {
-                delta: Box::new(config_delta),
-                timestamp: event.timestamp,
-            });
-        }
-
-        self.push(event);
-    }
-
     /// Push a [`ConversationEvent`] onto the stream.
     fn push(&mut self, event: impl Into<ConversationEvent>) {
         self.events
@@ -964,8 +942,27 @@ impl ConversationStream {
 
 impl Extend<ConversationEventWithConfig> for ConversationStream {
     fn extend<T: IntoIterator<Item = ConversationEventWithConfig>>(&mut self, iter: T) {
+        // Cache the running tail config across iterations. Without this, every
+        // push falls through `push_with_config_delta` → `self.last()`, which
+        // walks the whole stream and deep-clones `PartialAppConfig` on each
+        // step — making `extend(n)` O(n²) in clones.
+        let mut tail = self
+            .last()
+            .map_or_else(|| self.base_config.to_partial(), |v| v.config);
+
         for v in iter {
-            self.push_with_config_delta(v);
+            let ConversationEventWithConfig { event, config } = v;
+            let config_delta = tail.delta(config.clone());
+
+            if !config_delta.is_empty() {
+                self.add_config_delta(ConfigDelta {
+                    delta: Box::new(config_delta),
+                    timestamp: event.timestamp,
+                });
+            }
+
+            tail = config;
+            self.push(event);
         }
     }
 }

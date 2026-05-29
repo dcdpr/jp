@@ -894,3 +894,75 @@ fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
     let result = ConversationStream::from_parts(base_config, events).unwrap();
     assert_eq!(result.len(), 2); // TurnStart + ChatRequest
 }
+
+/// Characterization test: extending an empty stream from a source stream
+/// reproduces the source's observed iter sequence and serialized shape.
+///
+/// Guards the `Extend<ConversationEventWithConfig>` impl — fork uses it to
+/// clone a conversation's events into a fresh destination stream.
+#[test]
+fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
+    let mut partial1 = jp_config::PartialAppConfig::empty();
+    partial1.conversation.tools.defaults.run = Some(RunMode::Unattended);
+
+    let mut partial2 = jp_config::PartialAppConfig::empty();
+    partial2.style.code.color = Some(false);
+
+    // Build a source stream with two turns and a config delta before each.
+    let mut source = ConversationStream::new_test();
+    source.add_config_delta(ConfigDelta {
+        delta: Box::new(partial1),
+        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    });
+    source.push(ConversationEvent::new(
+        TurnStart,
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    ));
+    source.push(ConversationEvent::new(
+        ChatRequest::from("Q1"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+    source.push(ConversationEvent::new(
+        ChatResponse::message("A1"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+    ));
+    source.add_config_delta(ConfigDelta {
+        delta: Box::new(partial2),
+        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+    });
+    source.push(ConversationEvent::new(
+        TurnStart,
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+    ));
+    source.push(ConversationEvent::new(
+        ChatRequest::from("Q2"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 4).unwrap(),
+    ));
+    source.push(ConversationEvent::new(
+        ChatResponse::message("A2"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 5).unwrap(),
+    ));
+
+    // Build a fresh destination with the same base config and created_at,
+    // then extend it from the source.
+    let mut dest =
+        ConversationStream::new(source.base_config()).with_created_at(source.created_at);
+    dest.extend(source.clone());
+
+    // 1. The iter sequence must match between source and dest.
+    let source_view: Vec<_> = source
+        .iter()
+        .map(|e| (e.event.clone(), e.config))
+        .collect();
+    let dest_view: Vec<_> = dest
+        .iter()
+        .map(|e| (e.event.clone(), e.config))
+        .collect();
+    assert_eq!(source_view, dest_view);
+
+    // 2. The serialized storage shape must match. Extending an empty stream
+    //    from a source must reproduce the source's on-disk form exactly.
+    let source_parts = source.to_parts().unwrap();
+    let dest_parts = dest.to_parts().unwrap();
+    assert_eq!(source_parts, dest_parts);
+}
