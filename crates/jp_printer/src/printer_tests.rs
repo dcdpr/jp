@@ -136,6 +136,42 @@ fn test_default_format_strips_ansi() {
 }
 
 #[test]
+fn split_ansi_across_tasks_is_stripped() {
+    // Regression for issue 683. `writeln!` + crossterm emit a single SGR
+    // sequence across several `write_str` calls, and each call becomes its own
+    // print task. If stripping doesn't persist parser state across tasks, the
+    // CSI introducers get dropped while the parameter bytes survive, producing
+    // cruft like `38;5;11m1mgit_diff`.
+    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+
+    let pieces = [
+        "\x1b[", "38;", "5;11", "m", "\x1b[", "1", "m", "git_diff", "\x1b[0m",
+    ];
+    for piece in pieces {
+        printer.print(piece);
+    }
+    printer.flush();
+
+    assert_eq!(*out.lock(), "git_diff");
+}
+
+#[test]
+fn ansi_state_is_independent_per_stream() {
+    // A sequence left open on one stream must not consume bytes destined for
+    // the other: each stream needs its own parser state.
+    let (printer, out, err) = Printer::memory(OutputFormat::Text);
+
+    printer.print("\x1b[");
+    printer.eprint("\x1b[");
+    printer.print("31mred");
+    printer.eprint("32mgreen");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "red");
+    assert_eq!(*err.lock(), "green");
+}
+
+#[test]
 fn json_println_wraps_in_ndjson() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
 

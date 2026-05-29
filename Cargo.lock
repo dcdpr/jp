@@ -2407,6 +2407,7 @@ dependencies = [
  "serde_json",
  "strip-ansi-escapes",
  "tracing",
+ "vte",
 ]
 
 [[package]]

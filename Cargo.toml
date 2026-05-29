@@ -144,6 +144,7 @@ typetag = { version = "0.2", default-features = false }
 unicode-segmentation = { version = "1", default-features = false }
 unicode-width = { version = "0.2", default-features = false }
 url = { version = "2", default-features = false }
+vte = { version = "0.14", default-features = false }
 which = { version = "8", default-features = false }
 windows-sys = { version = "0.61", default-features = false }
 zip = { version = "8", default-features = false }

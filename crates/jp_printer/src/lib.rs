@@ -27,6 +27,7 @@
     reason = "we don't host the docs, and use them mainly for LSP integration"
 )]
 
+mod ansi;
 mod printer;
 mod typewriter;
 
