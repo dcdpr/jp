@@ -149,15 +149,16 @@ async fn test_timer_reasoning_then_message() {
     );
 }
 
-/// Regression: tool call → Timer reasoning → tool call must not leave a
-/// stray blank line on stdout.
+/// Regression: tool call → Timer reasoning → tool call must not leave a stray
+/// blank line on stdout.
 ///
-/// Timer reasoning is ephemeral chrome on stderr; it produces no
-/// persistent stdout output. The previous implementation routed Timer
-/// through `flush_on_transition`, which eagerly committed a blank-line
-/// separator on stdout when leaving a `ToolCall` block. Subsequent tool
-/// calls (or other ephemeral content) never "earned" that separator
-/// back, leaving an orphan blank line between consecutive tool calls.
+/// Timer reasoning is ephemeral chrome on stderr; it produces no persistent
+/// stdout output.
+/// The previous implementation routed Timer through `flush_on_transition`,
+/// which eagerly committed a blank-line separator on stdout when leaving a
+/// `ToolCall` block.
+/// Subsequent tool calls (or other ephemeral content) never "earned" that
+/// separator back, leaving an orphan blank line between consecutive tool calls.
 #[tokio::test]
 async fn test_no_separator_for_tool_call_timer_reasoning_tool_call() {
     let mut config = AppConfig::new_test();
@@ -422,6 +423,69 @@ fn test_text_before_and_after_code_block() {
     assert!(
         output.contains("After"),
         "Text after code block should render, got: {output:?}"
+    );
+}
+
+/// Regression for two bugs in the fence-inside-list-item render path:
+///
+/// 1. Visible content in syntax-highlighted code lines was indented N columns
+///    too far right, because `indent_lines` treated the syntect-appended
+///    `\x1b[0m` (reset emitted *after* the trailing `\n`) as the start of a new
+///    line and added an extra prefix to it.
+/// 2. The closing fence inside a list item was followed by a spurious blank
+///    line, breaking the visual flow of the surrounding list.
+#[test]
+fn test_fence_inside_list_item_indents_correctly_and_no_trailing_blank() {
+    let mut config = AppConfig::new_test();
+    config.style.markdown.theme = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "\
+1. Workspace config grants:
+   ```toml
+   [[conversation.tools.fs_modify_file.access.fs]]
+      path = \".\"
+      read = true
+   ```
+2. Conversation adds a mount.
+"
+        .into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let plain = strip_ansi(&out.lock());
+    let lines: Vec<&str> = plain.lines().collect();
+
+    // Code content lines inside the list item stay at the list's
+    // content_column (3) + their own intra-block indent. The TOML
+    // table content was at column 6 in the source; it must render at
+    // column 6, not 9.
+    assert!(
+        lines.contains(&"      path = \".\""),
+        "`path = \".\"` should render at column 6. Got:\n{plain}"
+    );
+    assert!(
+        lines.contains(&"      read = true"),
+        "`read = true` should render at column 6. Got:\n{plain}"
+    );
+
+    // Closing fence sits at the opening fence's column (3).
+    assert!(
+        lines.contains(&"   `````"),
+        "closing fence should render at column 3. Got:\n{plain}"
+    );
+
+    // No blank line between the closing fence and the next list item.
+    let fence_idx = lines
+        .iter()
+        .position(|l| *l == "   `````")
+        .expect("closing fence missing");
+    assert_eq!(
+        lines.get(fence_idx + 1),
+        Some(&"2. Conversation adds a mount."),
+        "next list item should sit directly under the closing fence. Got:\n{plain}"
     );
 }
 
