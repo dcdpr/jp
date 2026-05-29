@@ -1,8 +1,9 @@
 /// A macro to make `tokio::select!` more ergonomic.
 ///
 /// This macro is a drop-in replacement for `tokio::select!` that works exactly
-/// the same, but supports rustfmt. It uses closure syntax which rustfmt
-/// supports with support for `if branches` and the "biased" keyword.
+/// the same, but supports rustfmt.
+/// It uses closure syntax which rustfmt supports with support for `if branches`
+/// and the "biased" keyword.
 ///
 /// ```rust,ignore
 /// select!(

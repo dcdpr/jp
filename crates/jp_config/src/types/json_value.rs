@@ -1,8 +1,9 @@
 //! A recursive JSON value that participates in schematic's `Config` system.
 //!
 //! Wraps [`serde_json::Value`] with [`Config`], [`PartialConfig`], and
-//! [`AssignKeyValue`] implementations. Merge behavior is delegated to the
-//! existing `Mergeable*` types based on the JSON value type:
+//! [`AssignKeyValue`] implementations.
+//! Merge behavior is delegated to the existing `Mergeable*` types based on the
+//! JSON value type:
 //!
 //! - **Arrays** → [`MergeableVec`]
 //! - **Objects** → [`MergeableMap`]
@@ -10,8 +11,9 @@
 //! - **Primitives** → last-writer-wins replace
 //!
 //! Each type supports an annotation shape `{ value = <V>, strategy = "<S>" }`
-//! with type-appropriate strategies. See the respective module docs for
-//! available strategies. Without an annotation, the defaults are:
+//! with type-appropriate strategies.
+//! See the respective module docs for available strategies.
+//! Without an annotation, the defaults are:
 //!
 //! - Arrays: replace
 //! - Objects: deep-merge
@@ -36,20 +38,22 @@ use crate::{
 ///
 /// Transparently serializes/deserializes as a [`serde_json::Value`].
 ///
-/// See the [module documentation](self) for merge semantics.
+/// See the [module documentation] for merge semantics.
 ///
 /// # Assignment
 ///
-/// Implements [`AssignKeyValue`] for arbitrary dot-path assignment. Given
-/// `options.web.port=3000`, the type builds the nested structure
-/// `{"web": {"port": 3000}}` automatically. Intermediate objects are created
-/// on demand.
+/// Implements [`AssignKeyValue`] for arbitrary dot-path assignment.
+/// Given `options.web.port=3000`, the type builds the nested structure `{"web":
+/// {"port": 3000}}` automatically.
+/// Intermediate objects are created on demand.
 ///
 /// # Partial identity
 ///
-/// `JsonValue` is its own `Partial` type. The "not set" state is represented
-/// by absence from the containing `IndexMap`, not by a sentinel value within
-/// `JsonValue` itself.
+/// `JsonValue` is its own `Partial` type.
+/// The "not set" state is represented by absence from the containing
+/// `IndexMap`, not by a sentinel value within `JsonValue` itself.
+///
+/// [module documentation]: self
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct JsonValue(pub Value);
@@ -88,8 +92,8 @@ impl From<JsonValue> for Value {
 
 /// Merge `next` into `base` by delegating to the appropriate `Mergeable*` type.
 ///
-/// Annotations (`{ value, strategy }`) are detected first so the dispatch
-/// is based on the inner value type, not the wrapper object.
+/// Annotations (`{ value, strategy }`) are detected first so the dispatch is
+/// based on the inner value type, not the wrapper object.
 fn merge_values(base: &mut Value, next: Value) {
     // Peek: if next is an annotation, route by the inner value's type.
     let dispatch_type = if let Value::Object(ref map) = next
@@ -163,8 +167,9 @@ fn merge_as_map(base: &mut Value, next: Value) {
 /// Merge as `MergeableVec<JsonValue>`.
 ///
 /// Note: the default for unannotated arrays in `JsonValue` is *replace*, not
-/// append (which is `MergeableVec`'s default). Plain arrays are wrapped in a
-/// `Merged` with `Replace` strategy to get the right behavior.
+/// append (which is `MergeableVec`'s default).
+/// Plain arrays are wrapped in a `Merged` with `Replace` strategy to get the
+/// right behavior.
 fn merge_as_vec(base: &mut Value, next: Value) {
     let next_vec = if next.is_array() {
         // Plain array (no annotation): default to replace.
@@ -227,8 +232,9 @@ fn merge_as_string(base: &mut Value, next: Value) {
 /// Strip merge annotations from a value tree for finalize.
 ///
 /// After all merges, values inserted via the Vacant path (single config layer)
-/// may still contain the annotation wrapper. This walks the tree and unwraps
-/// them by attempting deserialization as each `Mergeable*` type.
+/// may still contain the annotation wrapper.
+/// This walks the tree and unwraps them by attempting deserialization as each
+/// `Mergeable*` type.
 fn strip_annotations(value: &mut Value) {
     match value {
         Value::Object(map) => {

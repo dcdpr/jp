@@ -1,7 +1,7 @@
 //! Assistant-specific configuration for Jean-Pierre.
 //!
-//! These configuration options tweak the behavior of the assistant. The
-//! "assistant" is defined as the technique powering the response generation
+//! These configuration options tweak the behavior of the assistant.
+//! The "assistant" is defined as the technique powering the response generation
 //! (typically a GPT/LLM model), with additional options built on top for
 //! improved performance.
 
@@ -64,9 +64,9 @@ pub struct AssistantConfig {
     /// A list of instructions for the assistant.
     ///
     /// Instructions are similar to system prompts but are organized into a list
-    /// of titled sections. This allows for better organization and easier
-    /// overriding or extending of specific instructions when merging multiple
-    /// configurations.
+    /// of titled sections.
+    /// This allows for better organization and easier overriding or extending
+    /// of specific instructions when merging multiple configurations.
     #[setting(
         nested,
         partial_via = MergeableVec::<InstructionsConfig>,

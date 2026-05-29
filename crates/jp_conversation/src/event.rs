@@ -22,8 +22,8 @@ pub use self::{
     turn::TurnStart,
 };
 
-/// Key used in `ConversationEvent::metadata` to indicate that a cache breakpoint
-/// should be placed on this event.
+/// Key used in `ConversationEvent::metadata` to indicate that a cache
+/// breakpoint should be placed on this event.
 pub const CACHE_BREAKPOINT_KEY: &str = "cache_breakpoint";
 
 /// Key used in `ConversationEvent::metadata` to store base64-encoded rendered
@@ -350,24 +350,26 @@ impl ConversationEvent {
 pub enum EventKind {
     /// A turn start event.
     ///
-    /// This event marks the beginning of a new turn in the conversation. A turn
-    /// groups together a user's chat request through the assistant's final
-    /// response, including any intermediate tool calls.
+    /// This event marks the beginning of a new turn in the conversation.
+    /// A turn groups together a user's chat request through the assistant's
+    /// final response, including any intermediate tool calls.
     TurnStart(TurnStart),
 
     /// A chat request event.
     ///
-    /// This event is usually triggered by the user, but can also be
-    /// triggered automatically. It always originates from the client-side
-    /// (e.g. the `jp` binary, or some other client).
+    /// This event is usually triggered by the user, but can also be triggered
+    /// automatically.
+    /// It always originates from the client-side (e.g. the `jp` binary, or some
+    /// other client).
     ChatRequest(ChatRequest),
 
     /// A chat response event.
     ///
-    /// This event MUST be in response to a `ChatRequest` event. Multiple
-    /// responses can be sent for a single request. This happens for example
-    /// when the assistant reasons about the request before answering. The
-    /// reasoning and answering are separate `ChatResponse` events.
+    /// This event MUST be in response to a `ChatRequest` event.
+    /// Multiple responses can be sent for a single request.
+    /// This happens for example when the assistant reasons about the request
+    /// before answering.
+    /// The reasoning and answering are separate `ChatResponse` events.
     ChatResponse(ChatResponse),
 
     /// A tool call request event.
@@ -385,9 +387,9 @@ pub enum EventKind {
 
     /// An inquiry request event.
     ///
-    /// This event indicates that an inquiry is being made by either a tool,
-    /// the assistant or the user to which *some entity* has to respond
-    /// (using `InquiryResponse` with the proper answer).
+    /// This event indicates that an inquiry is being made by either a tool, the
+    /// assistant or the user to which *some entity* has to respond (using
+    /// `InquiryResponse` with the proper answer).
     InquiryRequest(InquiryRequest),
 
     /// An inquiry response event.
@@ -416,8 +418,9 @@ impl EventKind {
     ///
     /// Internal events (turn markers, inquiry exchanges) are filtered out
     /// before the conversation stream reaches any provider's message conversion
-    /// logic. Uses an allowlist so new event types are invisible to providers
-    /// by default.
+    /// logic.
+    /// Uses an allowlist so new event types are invisible to providers by
+    /// default.
     #[must_use]
     pub const fn is_provider_visible(&self) -> bool {
         matches!(

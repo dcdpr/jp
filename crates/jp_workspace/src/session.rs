@@ -2,41 +2,46 @@
 //!
 //! Per-session conversation tracking.
 //!
-//! A **session** is a terminal context — a tab, window, tmux pane, or scripting
-//! environment. Each session independently tracks which conversation it is
-//! working on, so multiple terminals in the same workspace can run different
-//! conversations in parallel without interfering with each other.
+//! A **session** is a terminal context — a tab, window, tmux pane, or
+//! scripting environment.
+//! Each session independently tracks which conversation it is working on, so
+//! multiple terminals in the same workspace can run different conversations in
+//! parallel without interfering with each other.
 //!
-//! This module defines the domain types for session identity. The actual
-//! resolution logic (checking environment variables, calling platform APIs)
-//! lives in `jp_cli::session`. The session-to-conversation mapping — which
-//! conversation is active in which session — is in the sibling
-//! `session_mapping` module.
+//! This module defines the domain types for session identity.
+//! The actual resolution logic (checking environment variables, calling
+//! platform APIs) lives in `jp_cli::session`.
+//! The session-to-conversation mapping — which conversation is active in which
+//! session — is in the sibling `session_mapping` module.
 //!
 //! # Why Sessions Matter
 //!
-//! Each terminal gets its own conversation pointer. Two tabs open in the same
-//! workspace can run independent queries simultaneously — tool calls in one
-//! session don't interleave with events from another, and starting a new
-//! conversation in one terminal doesn't affect any other terminal.
+//! Each terminal gets its own conversation pointer.
+//! Two tabs open in the same workspace can run independent queries
+//! simultaneously — tool calls in one session don't interleave with events
+//! from another, and starting a new conversation in one terminal doesn't affect
+//! any other terminal.
 //!
 //! # Identity Resolution
 //!
 //! Session identity is resolved using a three-layer strategy, checked in order:
 //!
-//! 1. **`$JP_SESSION`** — Explicit override. Any non-empty string. Takes
-//!    priority over everything else. Useful for CI, scripts, SSH, or any
-//!    environment where automatic detection is unreliable.
+//! 1. **`$JP_SESSION`** — Explicit override.
+//!    Any non-empty string.
+//!    Takes priority over everything else.
+//!    Useful for CI, scripts, SSH, or any environment where automatic detection
+//!    is unreliable.
 //!
 //! 2. **Platform-specific detection** — On Unix, `getsid(0)` returns the
-//!    session leader PID (typically the shell spawned by the terminal). On
-//!    Windows, `GetConsoleWindow()` returns the console host HWND. Both are
-//!    unique per tab/pane and stable across subshells and tmux detach/reattach.
+//!    session leader PID (typically the shell spawned by the terminal).
+//!    On Windows, `GetConsoleWindow()` returns the console host HWND.
+//!    Both are unique per tab/pane and stable across subshells and tmux
+//!    detach/reattach.
 //!
 //! 3. **Terminal environment variables** — `$TMUX_PANE`, `$WEZTERM_PANE`,
 //!    `$TERM_SESSION_ID` (macOS Terminal.app), `$ITERM_SESSION_ID` (iTerm2).
-//!    Only variables with per-tab or per-pane granularity are used. Per-window
-//!    variables like `$WT_SESSION`, `$KITTY_WINDOW_ID`, and
+//!    Only variables with per-tab or per-pane granularity are used.
+//!    Per-window variables like `$WT_SESSION`, `$KITTY_WINDOW_ID`, and
 //!    `$ALACRITTY_WINDOW_ID` are deliberately excluded because multiple tabs in
 //!    the same window share the value.
 //!
@@ -46,11 +51,12 @@
 //!
 //! # Provenance and Stale Detection
 //!
-//! Each session identity records its [`SessionSource`] — how it was determined.
+//! Each session identity records its [`SessionSource`] — how it was
+//! determined.
 //! This drives stale mapping cleanup:
 //!
 //! | Source   | Stale detection                            |
-//! |----------|--------------------------------------------|
+//! | -------- | ------------------------------------------ |
 //! | `Getsid` | Delete only when the session leader PID is |
 //! |          | confirmed dead. A live process keeps its   |
 //! |          | session unconditionally.                   |
@@ -72,22 +78,23 @@
 //! ~/.local/share/jp/workspace/<workspace-id>/sessions/<session-key>.json
 //! ```
 //!
-//! The `<session-key>` is the [`SessionId`] value (PID string, HWND string,
-//! or `$JP_SESSION` value). The file contains a `SessionMapping` with the
-//! session's conversation history.
+//! The `<session-key>` is the [`SessionId`] value (PID string, HWND string, or
+//! `$JP_SESSION` value).
+//! The file contains a `SessionMapping` with the session's conversation
+//! history.
 //!
 //! # Module Boundaries
 //!
-//! | Location              | Concern                                 |
-//! |-----------------------|-----------------------------------------|
-//! | This module           | Domain types (`SessionId`,              |
-//! |                       | `SessionSource`, `Session`)             |
-//! | `session_mapping`     | Session-to-conversation mapping         |
-//! |                       | (`SessionMapping`, `Workspace` methods) |
-//! | `jp_cli::session`     | Resolution logic (`resolve()`, platform |
-//! |                       | APIs, env var checks)                   |
-//! | `SessionBackend`      | Storage I/O (`load_session`,            |
-//! |                       | `save_session`)                         |
+//! | Location          | Concern                                 |
+//! | ----------------- | --------------------------------------- |
+//! | This module       | Domain types (`SessionId`,              |
+//! |                   | `SessionSource`, `Session`)             |
+//! | `session_mapping` | Session-to-conversation mapping         |
+//! |                   | (`SessionMapping`, `Workspace` methods) |
+//! | `jp_cli::session` | Resolution logic (`resolve()`, platform |
+//! |                   | APIs, env var checks)                   |
+//! | `SessionBackend`  | Storage I/O (`load_session`,            |
+//! |                   | `save_session`)                         |
 //!
 //! See: `docs/rfd/020-parallel-conversations.md`
 //!
@@ -151,10 +158,11 @@ pub enum SessionSource {
     /// An environment variable provided the session identity.
     ///
     /// Covers `$JP_SESSION`, `$TMUX_PANE`, `$WEZTERM_PANE`, etc. Stale
-    /// detection is not possible for these — cleanup relies on checking whether
-    /// the referenced conversation still exists.
+    /// detection is not possible for these — cleanup relies on checking
+    /// whether the referenced conversation still exists.
     Env {
-        /// The name of the environment variable (e.g. `"JP_SESSION"`).
+        /// The name of the environment variable (e.g.
+        /// `"JP_SESSION"`).
         key: String,
     },
 }

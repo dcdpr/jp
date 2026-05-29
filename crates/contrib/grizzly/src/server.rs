@@ -71,15 +71,17 @@ pub struct NoteGetRequest {
     /// One or more note IDs to fetch.
     pub ids: Vec<String>,
 
-    /// Optional line ranges. Each element can be an integer (single line) or a
-    /// string like "10:20" for a range.
+    /// Optional line ranges.
+    /// Each element can be an integer (single line) or a string like "10:20"
+    /// for a range.
     #[serde(default)]
     pub lines: Vec<Value>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct NoteSearchRequest {
-    /// Search queries. Can be a single string or an array of strings.
+    /// Search queries.
+    /// Can be a single string or an array of strings.
     #[serde(deserialize_with = "deserialize_string_or_vec")]
     pub queries: Vec<String>,
 
@@ -97,7 +99,7 @@ pub struct NoteCreateRequest {
     /// Title of the new note.
     pub title: String,
 
-    /// Tags to apply (without the # prefix).
+    /// Tags to apply (without the \# prefix).
     #[serde(default)]
     pub tags: Vec<String>,
 

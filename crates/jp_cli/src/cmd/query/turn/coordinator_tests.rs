@@ -240,11 +240,11 @@ fn test_prepare_continuation() {
     assert_eq!(coordinator.peek_partial_content(), None);
 }
 
-/// Tests the multi-part tool call flow: an initial Part with name+id
-/// (empty arguments) marks the tool as "preparing", and the Flush
-/// after the final Part appends the complete request to the conversation
-/// stream. The state machine transitions to Executing on Finished if any
-/// unresponded tool-call request is in the current turn.
+/// Tests the multi-part tool call flow: an initial Part with name+id (empty
+/// arguments) marks the tool as "preparing", and the Flush after the final Part
+/// appends the complete request to the conversation stream.
+/// The state machine transitions to Executing on Finished if any unresponded
+/// tool-call request is in the current turn.
 #[test]
 fn test_multi_part_tool_call_deferred_to_flush() {
     let mut stream = ConversationStream::new_test();
@@ -426,12 +426,11 @@ fn test_structured_not_routed_to_chat_renderer() {
     );
 }
 
-/// Regression: if the user interrupts before any chunk has arrived and
-/// chooses Continue, the next assistant event MUST emit a fresh role
-/// header. The previous behaviour forced `assistant_header_rendered =
-/// true` in `reset_for_continuation`, which suppressed the header
-/// unconditionally and left the resumed output without a `── jp …`
-/// boundary.
+/// Regression: if the user interrupts before any chunk has arrived and chooses
+/// Continue, the next assistant event MUST emit a fresh role header.
+/// The previous behaviour forced `assistant_header_rendered = true` in
+/// `reset_for_continuation`, which suppressed the header unconditionally and
+/// left the resumed output without a `── jp …` boundary.
 #[test]
 fn interrupt_continue_before_first_chunk_emits_assistant_header_on_resume() {
     let mut stream = ConversationStream::new_test();
@@ -463,9 +462,10 @@ fn interrupt_continue_before_first_chunk_emits_assistant_header_on_resume() {
     );
 }
 
-/// Regression: a Reply interrupt inserts a new `ChatRequest` boundary,
-/// which in replay would render a labeled user header AND a fresh
-/// assistant header for the following content. Live mode must match.
+/// Regression: a Reply interrupt inserts a new `ChatRequest` boundary, which in
+/// replay would render a labeled user header AND a fresh assistant header for
+/// the following content.
+/// Live mode must match.
 #[test]
 fn interrupt_reply_renders_user_header_for_new_request() {
     let mut stream = ConversationStream::new_test();
@@ -513,8 +513,9 @@ fn interrupt_reply_renders_user_header_for_new_request() {
 }
 
 /// A `Flush` that produces a `ToolCallRequest` surfaces it as a committed
-/// event. The shell uses this signal directly instead of inspecting the stream
-/// tail, so the dispatch trigger is unambiguous.
+/// event.
+/// The shell uses this signal directly instead of inspecting the stream tail,
+/// so the dispatch trigger is unambiguous.
 #[test]
 fn flush_producing_tool_call_surfaces_request_as_committed_event() {
     let mut stream = ConversationStream::new_test();
@@ -553,9 +554,9 @@ fn flush_producing_tool_call_surfaces_request_as_committed_event() {
 
 /// Regression for the duplicate-render bug: a second `Flush` after the
 /// tool-call buffer has already been drained must NOT re-fire dispatch.
-/// The previous implementation inferred dispatch from the stream tail,
-/// which kept pointing at the prior `ToolCallRequest`; the new contract
-/// drives dispatch off `EventBuilder::handle_flush`, which is idempotent.
+/// The previous implementation inferred dispatch from the stream tail, which
+/// kept pointing at the prior `ToolCallRequest`; the new contract drives
+/// dispatch off `EventBuilder::handle_flush`, which is idempotent.
 #[test]
 fn duplicate_flush_after_tool_call_does_not_surface_request() {
     let mut stream = ConversationStream::new_test();

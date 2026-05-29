@@ -2,16 +2,18 @@
 //!
 //! Two types provide guard-scoped persistence:
 //!
-//! - [`ConversationLock`] — exclusive access to a conversation. When backed by
-//!   storage, holds an OS-level `flock` for cross-process exclusion. For
-//!   in-memory workspaces the flock is absent, but the type-level guarantee
-//!   (only one lock per conversation) still holds within the process. Provides
-//!   read access and produces [`ConversationMut`] scopes for writes.
+//! - [`ConversationLock`] — exclusive access to a conversation.
+//!   When backed by storage, holds an OS-level `flock` for cross-process
+//!   exclusion.
+//!   For in-memory workspaces the flock is absent, but the type-level guarantee
+//!   (only one lock per conversation) still holds within the process.
+//!   Provides read access and produces [`ConversationMut`] scopes for writes.
 //!
-//! - [`ConversationMut`] — a mutable scope over a conversation. Automatically
-//!   persists modified data to disk when dropped (if a persist backend is
-//!   configured). Uses a callback-based API for writes to make it structurally
-//!   impossible to hold a write lock guard across `.await` points.
+//! - [`ConversationMut`] — a mutable scope over a conversation.
+//!   Automatically persists modified data to disk when dropped (if a persist
+//!   backend is configured).
+//!   Uses a callback-based API for writes to make it structurally impossible to
+//!   hold a write lock guard across `.await` points.
 //!
 //! # Type Hierarchy
 //!
@@ -53,11 +55,13 @@
 //!
 //! # Persistence Model
 //!
-//! - **`flush()?`** — explicit persist at checkpoints (e.g., after each turn in
-//!   the LLM loop). I/O errors propagate via `?`, halting the loop.
-//! - **`Drop`** — safety net. If the `ConversationMut` drops while dirty (e.g.,
-//!   due to `?` unwinding), `Drop` persists the data. Errors are logged but
-//!   cannot be propagated from `Drop`.
+//! - **`flush()?`** — explicit persist at checkpoints (e.g., after each turn
+//!   in the LLM loop).
+//!   I/O errors propagate via `?`, halting the loop.
+//! - **`Drop`** — safety net.
+//!   If the `ConversationMut` drops while dirty (e.g., due to `?` unwinding),
+//!   `Drop` persists the data.
+//!   Errors are logged but cannot be propagated from `Drop`.
 //!
 //! Long-running loops should call `flush()` at each checkpoint so disk errors
 //! halt immediately rather than letting the loop continue with unsaved data.
@@ -80,15 +84,15 @@ pub enum LockResult {
     /// Lock acquired successfully.
     Acquired(ConversationLock),
 
-    /// Another process holds the lock. The handle is returned so the caller can
-    /// retry without re-acquiring it.
+    /// Another process holds the lock.
+    /// The handle is returned so the caller can retry without re-acquiring it.
     AlreadyLocked(ConversationHandle),
 }
 
 /// Cross-process exclusive access to a conversation.
 ///
-/// Proves that the `flock` is held. Provides read access and produces
-/// [`ConversationMut`] scopes for writes.
+/// Proves that the `flock` is held.
+/// Provides read access and produces [`ConversationMut`] scopes for writes.
 ///
 /// The lock is held for the entire lifetime of this value and released when
 /// dropped (or when a `ConversationMut` created via [`into_mut`] drops).
@@ -140,9 +144,11 @@ impl ConversationLock {
         self.events.read()
     }
 
-    /// Create a short-lived mutable scope. Persists on drop.
+    /// Create a short-lived mutable scope.
+    /// Persists on drop.
     ///
-    /// The lock retains the flock — it outlives the returned `ConversationMut`.
+    /// The lock retains the flock — it outlives the returned
+    /// `ConversationMut`.
     /// Use this for multiple mutation phases within a single lock session
     /// (e.g., the turn loop in `jp query`).
     #[must_use]
@@ -159,8 +165,9 @@ impl ConversationLock {
 
     /// Consume the lock into a mutable scope that owns the flock.
     ///
-    /// The flock is released when the `ConversationMut` drops. Use this for
-    /// brief, one-shot mutations (e.g., `conversation edit`, `config set`).
+    /// The flock is released when the `ConversationMut` drops.
+    /// Use this for brief, one-shot mutations (e.g., `conversation edit`,
+    /// `config set`).
     #[must_use]
     pub fn into_mut(self) -> ConversationMut {
         ConversationMut {
@@ -214,16 +221,18 @@ impl ConversationMut {
 
     /// Read conversation metadata.
     ///
-    /// Returns a `RwLockReadGuard`. Do **not** hold this across `.await`
-    /// points — clone the data and drop the guard first.
+    /// Returns a `RwLockReadGuard`.
+    /// Do **not** hold this across `.await` points — clone the data and drop
+    /// the guard first.
     pub fn metadata(&self) -> RwLockReadGuard<'_, Conversation> {
         self.metadata.read()
     }
 
     /// Read the conversation event stream.
     ///
-    /// Returns a `RwLockReadGuard`. Do **not** hold this across `.await`
-    /// points — clone the data and drop the guard first.
+    /// Returns a `RwLockReadGuard`.
+    /// Do **not** hold this across `.await` points — clone the data and drop
+    /// the guard first.
     pub fn events(&self) -> RwLockReadGuard<'_, ConversationStream> {
         self.events.read()
     }
@@ -231,7 +240,8 @@ impl ConversationMut {
     /// Mutate conversation metadata through a callback.
     ///
     /// The write guard is acquired for the duration of the callback and
-    /// released when `f` returns. The dirty flag is set unconditionally.
+    /// released when `f` returns.
+    /// The dirty flag is set unconditionally.
     ///
     /// The callback's return value is forwarded, so `?` composes naturally:
     ///
@@ -254,7 +264,8 @@ impl ConversationMut {
     /// Mutate the conversation event stream through a callback.
     ///
     /// The write guard is acquired for the duration of the callback and
-    /// released when `f` returns. The dirty flag is set unconditionally.
+    /// released when `f` returns.
+    /// The dirty flag is set unconditionally.
     ///
     /// ```ignore
     /// conv.update_events(|events| {
@@ -281,14 +292,15 @@ impl ConversationMut {
     /// Persist the current state to disk immediately.
     ///
     /// Long-running loops **must** call this at each checkpoint (e.g., after
-    /// each turn in the LLM loop) so that I/O errors propagate immediately
-    /// via `?`. The `Drop` implementation is a safety net for `?` unwinding —
-    /// it persists partial state but swallows errors.
+    /// each turn in the LLM loop) so that I/O errors propagate immediately via
+    /// `?`.
+    /// The `Drop` implementation is a safety net for `?` unwinding — it
+    /// persists partial state but swallows errors.
     ///
     /// Takes `&mut self` to prevent calling while a write guard from
-    /// `update_events()` or `update_metadata()` is held (which would
-    /// deadlock). In practice this is already enforced by the callback API,
-    /// but `&mut self` makes it explicit.
+    /// `update_events()` or `update_metadata()` is held (which would deadlock).
+    /// In practice this is already enforced by the callback API, but `&mut
+    /// self` makes it explicit.
     ///
     /// After a successful flush, the dirty flag is cleared.
     pub fn flush(&mut self) -> crate::error::Result<()> {
@@ -313,8 +325,8 @@ impl ConversationMut {
 
     /// Clear the dirty flag without persisting.
     ///
-    /// Used by `remove_conversation` to prevent `Drop` from persisting
-    /// data that's about to be deleted.
+    /// Used by `remove_conversation` to prevent `Drop` from persisting data
+    /// that's about to be deleted.
     pub(crate) fn clear_dirty(&self) {
         self.dirty.store(false, Ordering::Relaxed);
     }

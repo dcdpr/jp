@@ -368,8 +368,8 @@ fn create_request(
 
 /// Map a Gemini model to a `ModelDetails`.
 ///
-/// See: <https://ai.google.dev/gemini-api/docs/models>
-/// See: <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
+/// See: <https://ai.google.dev/gemini-api/docs/models> See:
+/// <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
 #[expect(clippy::too_many_lines)]
 fn map_model(model: types::Model) -> ModelDetails {
     let name = model.base_model_id.as_str();
@@ -710,9 +710,12 @@ impl TryFrom<&GoogleConfig> for Google {
     }
 }
 
-/// Transform a JSON schema to conform to Google's structured output constraints.
+/// Transform a JSON schema to conform to Google's structured output
+/// constraints.
 ///
-/// Google's Gemini API supports a subset of JSON Schema. This transformation:
+/// Google's Gemini API supports a subset of JSON Schema.
+/// This transformation:
+///
 /// - Inlines `$ref` references by replacing them with the referenced `$defs`
 /// - Removes `$defs`/`definitions` from the output after inlining
 /// - Rewrites `const` to `enum` with a single value (Google ignores `const`)
@@ -834,7 +837,8 @@ fn resolve_and_process(value: Value, defs: &Map<String, Value>) -> Value {
     }
 }
 
-/// Look up a `$ref` path (e.g. `#/$defs/MyType`) in the definitions map.
+/// Look up a `$ref` path (e.g.
+/// `#/$defs/MyType`) in the definitions map.
 fn resolve_ref(ref_path: &str, defs: &Map<String, Value>) -> Option<Map<String, Value>> {
     let name = ref_path.rsplit("defs/").next().unwrap_or(ref_path);
     defs.get(name).and_then(Value::as_object).cloned()
@@ -1047,8 +1051,9 @@ fn is_corrupted_thought_signature(err: &StreamError) -> bool {
 }
 
 /// Build a patch to remove the oldest `google_thought_signature` from the
-/// conversation. Google's error doesn't identify which block is bad, so we
-/// degrade one at a time starting from the oldest.
+/// conversation.
+/// Google's error doesn't identify which block is bad, so we degrade one at a
+/// time starting from the oldest.
 fn build_thought_signature_patch(
     request: &types::GenerateContentRequest,
 ) -> Option<Vec<EventPatch>> {

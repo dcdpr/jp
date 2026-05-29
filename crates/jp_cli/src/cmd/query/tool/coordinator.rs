@@ -10,9 +10,12 @@
 //! 2. Results stream in as tools complete (not all at once)
 //! 3. When a tool needs user input, a prompt is shown while other tools
 //!    continue running in the background
-//! 4. After the user answers, the tool is restarted with the accumulated answers
+//! 4. After the user answers, the tool is restarted with the accumulated
+//!    answers
 //! 5. This continues until all tools have completed
 //! 6. Results are returned in the original request order
+//!
+//! <!-- end list -->
 //!
 //! ```text
 //! ┌───────────────────────────────────────────────────────────────┐
@@ -50,17 +53,19 @@
 //! When a tool returns `NeedsInput`, the coordinator checks the configuration:
 //!
 //! - **User target**: Prompt is shown via `spawn_blocking` (other tools keep
-//!   running). When answered, the tool is restarted with the answer.
+//!   running).
+//!   When answered, the tool is restarted with the answer.
 //! - **LLM target**: The question is formatted as a response asking the LLM to
-//!   re-run the tool with the answer. The tool is marked as completed.
+//!   re-run the tool with the answer.
+//!   The tool is marked as completed.
 //! - **Static answer**: Pre-populated before first execution, so the tool
 //!   should never ask for this input.
 //!
 //! # Non-Blocking Prompts
 //!
 //! Interactive prompts run on a blocking thread (`spawn_blocking`) so the async
-//! event loop continues processing other tool results. If multiple tools need
-//! input, prompts are queued and shown sequentially.
+//! event loop continues processing other tool results.
+//! If multiple tools need input, prompts are queued and shown sequentially.
 //!
 //! # Thread Safety
 //!
@@ -152,9 +157,10 @@ enum ExecutionEvent {
 #[derive(Debug)]
 pub struct ExecutionResult {
     /// Tool responses paired with the plan index supplied by the caller in
-    /// `executors`. Indices may be sparse when the caller's plan also
-    /// contains pre-resolved tools that bypass execution; merging those
-    /// back into the original stream order is the caller's job.
+    /// `executors`.
+    /// Indices may be sparse when the caller's plan also contains pre-resolved
+    /// tools that bypass execution; merging those back into the original stream
+    /// order is the caller's job.
     pub responses: Vec<(usize, ToolCallResponse)>,
     pub restart_requested: bool,
 }
@@ -198,25 +204,27 @@ pub enum PermissionDecision {
 /// per-tool permission pipeline.
 ///
 /// This wraps the full decide → pre-render → prompt → apply → post-render
-/// flow into one of three terminal states. Callers map this into their own
-/// storage shape (see the streaming path in `turn_loop.rs` and the batch
-/// path in [`ToolCoordinator::run_permission_phase`]).
+/// flow into one of three terminal states.
+/// Callers map this into their own storage shape (see the streaming path in
+/// `turn_loop.rs` and the batch path in
+/// [`ToolCoordinator::run_permission_phase`]).
 pub enum ToolCallDecision {
-    /// Tool is approved and ready to be queued for execution. Includes any
-    /// rendered argument content from the formatter — the caller is
-    /// responsible for persisting it (typically into a `ToolCallRequest`
+    /// Tool is approved and ready to be queued for execution.
+    /// Includes any rendered argument content from the formatter — the caller
+    /// is responsible for persisting it (typically into a `ToolCallRequest`
     /// event's metadata).
     Approved {
         executor: Box<dyn Executor>,
         rendered_arguments: Option<String>,
     },
-    /// Tool was skipped: persisted "n", `RunMode::Skip`, or user declined
-    /// at the prompt. The response is the synthesized skip message ready
-    /// to be appended to the conversation stream.
+    /// Tool was skipped: persisted "n", `RunMode::Skip`, or user declined at
+    /// the prompt.
+    /// The response is the synthesized skip message ready to be appended to the
+    /// conversation stream.
     Skipped(ToolCallResponse),
     /// Tool failed before it could run — typically because a custom-format
-    /// formatter command errored. The response tells the LLM the tool was
-    /// not executed and may be retried.
+    /// formatter command errored.
+    /// The response tells the LLM the tool was not executed and may be retried.
     Failed(ToolCallResponse),
 }
 
@@ -269,9 +277,9 @@ pub struct ToolCoordinator {
     tools_config: ToolsConfig,
     executor_source: Box<dyn ExecutorSource>,
     cancellation_token: CancellationToken,
-    /// Rendered custom argument output accumulated during the permission
-    /// phase. Keyed by tool call ID. Drained by the turn loop to write
-    /// into event metadata.
+    /// Rendered custom argument output accumulated during the permission phase.
+    /// Keyed by tool call ID.
+    /// Drained by the turn loop to write into event metadata.
     rendered_arguments: HashMap<String, String>,
 }
 
@@ -289,8 +297,9 @@ impl ToolCoordinator {
 
     /// Drain accumulated rendered argument content.
     ///
-    /// Returns `(tool_call_id, rendered_content)` pairs collected during
-    /// the permission phase. The caller writes these into event metadata.
+    /// Returns `(tool_call_id, rendered_content)` pairs collected during the
+    /// permission phase.
+    /// The caller writes these into event metadata.
     pub fn drain_rendered_arguments(&mut self) -> HashMap<String, String> {
         std::mem::take(&mut self.rendered_arguments)
     }
@@ -314,8 +323,8 @@ impl ToolCoordinator {
             .unwrap_or_default()
     }
 
-    /// Return the format mode for a tool, falling back to `Ask` if the
-    /// tool is unknown (untrusted-by-default).
+    /// Return the format mode for a tool, falling back to `Ask` if the tool is
+    /// unknown (untrusted-by-default).
     pub fn format_mode(&self, tool_name: &str) -> FormatMode {
         self.tools_config
             .get(tool_name)
@@ -326,23 +335,24 @@ impl ToolCoordinator {
     ///
     /// Built-in parameter styles ([`ParametersStyle::Json`],
     /// [`ParametersStyle::FunctionCall`], [`ParametersStyle::Off`]) always
-    /// pre-render: they are pure transformations of the arguments map and
-    /// the user needs to see the rendered call to make an informed
-    /// approval decision.
+    /// pre-render: they are pure transformations of the arguments map and the
+    /// user needs to see the rendered call to make an informed approval
+    /// decision.
     ///
-    /// [`ParametersStyle::Custom`] shells out to a user-configured
-    /// command and is gated by [`FormatMode`]: it only pre-renders when
-    /// the tool opts in via `format = "unattended"`; otherwise rendering
-    /// is deferred until after approval.
+    /// [`ParametersStyle::Custom`] shells out to a user-configured command and
+    /// is gated by [`FormatMode`]: it only pre-renders when the tool opts in
+    /// via `format = "unattended"`; otherwise rendering is deferred until after
+    /// approval.
     ///
     /// Returns:
-    /// - `Ok(Some(content))` if pre-render fired successfully — caller
-    ///   should skip the post-approval render and use this content.
-    /// - `Ok(None)` if pre-render was suppressed (Custom style with
-    ///   `format = "ask"`) — caller should follow the existing
-    ///   post-approval render path.
-    /// - `Err(error_message)` if a custom formatter command failed —
-    ///   caller should treat this as a tool failure and skip prompting.
+    ///
+    /// - `Ok(Some(content))` if pre-render fired successfully — caller should
+    ///   skip the post-approval render and use this content.
+    /// - `Ok(None)` if pre-render was suppressed (Custom style with `format =
+    ///   "ask"`) — caller should follow the existing post-approval render
+    ///   path.
+    /// - `Err(error_message)` if a custom formatter command failed — caller
+    ///   should treat this as a tool failure and skip prompting.
     pub(crate) async fn pre_render_for_prompt(
         &self,
         tool_name: &str,
@@ -377,28 +387,29 @@ impl ToolCoordinator {
     /// Single-tool permission pipeline.
     ///
     /// Encapsulates the full decide → pre-render → prompt → apply →
-    /// post-render flow. Returns a [`ToolCallDecision`] that the caller
-    /// maps to its storage shape.
+    /// post-render flow.
+    /// Returns a [`ToolCallDecision`] that the caller maps to its storage
+    /// shape.
     ///
     /// This is the seam where new permission-related features should land:
     /// telemetry, sandboxing decisions, alternate prompting modes — anything
     /// that needs to apply uniformly to both the streaming path (in
     /// `turn_loop.rs`) and the batch/restart path
-    /// ([`Self::run_permission_phase`]). Both paths funnel through here, so
-    /// changes don't drift between sites.
+    /// ([`Self::run_permission_phase`]).
+    /// Both paths funnel through here, so changes don't drift between sites.
     ///
     /// # Pipeline steps
     ///
-    /// 1. [`Self::decide_permission`] resolves the executor's run mode
-    ///    against persisted answers and TTY availability.
+    /// 1. [`Self::decide_permission`] resolves the executor's run mode against
+    ///    persisted answers and TTY availability.
     /// 2. If the decision is `NeedsPrompt`, pre-render the call via
     ///    [`Self::pre_render_for_prompt`] (always for built-in parameter
-    ///    styles; only when `format = "unattended"` for `Custom`
-    ///    formatters), then prompt the user via
-    ///    [`ToolPrompter::prompt_permission`], then apply the result via
-    ///    [`Self::apply_permission_result`]. If the user edited the
-    ///    arguments at the prompt, the pre-render is discarded so step 3
-    ///    re-renders with the args that will actually execute.
+    ///    styles; only when `format = "unattended"` for `Custom` formatters),
+    ///    then prompt the user via [`ToolPrompter::prompt_permission`], then
+    ///    apply the result via [`Self::apply_permission_result`].
+    ///    If the user edited the arguments at the prompt, the pre-render is
+    ///    discarded so step 3 re-renders with the args that will actually
+    ///    execute.
     /// 3. For approved tools, render the call (skipping if pre-rendered).
     /// 4. Return [`ToolCallDecision::Approved`], `Skipped`, or `Failed`.
     pub(crate) async fn resolve_tool_call_decision(
@@ -522,8 +533,9 @@ impl ToolCoordinator {
 
     /// Returns pre-configured static answers for a tool's questions.
     ///
-    /// These are answers set in the tool configuration (e.g. `questions.confirm.answer = true`)
-    /// that bypass both user prompts and LLM inquiries.
+    /// These are answers set in the tool configuration (e.g.
+    /// `questions.confirm.answer = true`) that bypass both user prompts and LLM
+    /// inquiries.
     pub(crate) fn static_answers_for_all_questions(
         &self,
         tool_name: &str,
@@ -551,18 +563,18 @@ impl ToolCoordinator {
 
     /// Resets internal state for a new execution cycle.
     ///
-    /// Call this when the streaming phase has already prepared executors
-    /// and decided permissions, so the executing phase starts with a
-    /// fresh cancellation token.
+    /// Call this when the streaming phase has already prepared executors and
+    /// decided permissions, so the executing phase starts with a fresh
+    /// cancellation token.
     pub fn reset_for_execution(&mut self) {
         self.cancellation_token = CancellationToken::new();
     }
 
     /// Prepares executors for the given tool call requests.
     ///
-    /// Tools that cannot be resolved (e.g. missing from config or
-    /// definitions) are returned as pre-built error responses rather
-    /// than failing the entire batch.
+    /// Tools that cannot be resolved (e.g. missing from config or definitions)
+    /// are returned as pre-built error responses rather than failing the entire
+    /// batch.
     pub fn prepare(&mut self, requests: Vec<ToolCallRequest>) -> Vec<(usize, ToolCallResponse)> {
         self.executors.clear();
         self.clear_tool_states();
@@ -581,8 +593,8 @@ impl ToolCoordinator {
 
     /// Prepares a single executor for a tool call request.
     ///
-    /// Returns the executor on success, or an error response if the tool
-    /// cannot be resolved (e.g. missing from config or definitions).
+    /// Returns the executor on success, or an error response if the tool cannot
+    /// be resolved (e.g. missing from config or definitions).
     pub fn prepare_one(
         &mut self,
         request: ToolCallRequest,
@@ -613,13 +625,16 @@ impl ToolCoordinator {
 
     /// Renders the tool call header and arguments after permission approval.
     ///
-    /// For non-Custom styles: prints the header with inline-formatted arguments.
-    /// For Custom style: runs the custom formatter command, then prints header +
-    /// custom output atomically. If the custom formatter fails, nothing is
-    /// printed and [`RenderOutcome::Suppressed`] is returned — the caller
-    /// should abort execution and return an error response to the LLM.
-    /// For hidden tools: renders nothing but returns `Rendered` (hidden tools
-    /// still execute).
+    /// For non-Custom styles: prints the header with inline-formatted
+    /// arguments.
+    /// For Custom style: runs the custom formatter command, then prints header
+    ///
+    /// - custom output atomically.
+    ///   If the custom formatter fails, nothing is printed and
+    ///   [`RenderOutcome::Suppressed`] is returned — the caller should abort
+    ///   execution and return an error response to the LLM.
+    ///   For hidden tools: renders nothing but returns `Rendered` (hidden tools
+    ///   still execute).
     pub(crate) async fn render_approved_tool(
         &self,
         tool_name: &str,
@@ -638,10 +653,12 @@ impl ToolCoordinator {
 
     /// Determines permission for a single tool without blocking on user input.
     ///
-    /// Does NOT render any output. Rendering happens after the permission
-    /// decision via [`render_approved_tool`].
+    /// Does NOT render any output.
+    /// Rendering happens after the permission decision via
+    /// [`render_approved_tool`].
     ///
     /// Returns one of:
+    ///
     /// - `Approved` — tool can run immediately (unattended, persisted "y",
     ///   non-interactive)
     /// - `Skipped` — tool should not run (persisted "n")

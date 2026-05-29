@@ -123,9 +123,10 @@ fn map_model(model: LocalModel) -> Result<ModelDetails> {
 /// Index convention: 0 = reasoning, 1 = message content, 2+ = tool calls.
 ///
 /// Ollama guarantees that thinking tokens arrive before content/tool call
-/// tokens. We exploit this by flushing the reasoning stream (index 0) as soon
-/// as the first content or tool call chunk appears, ensuring the reasoning
-/// event precedes content and tool call events in the history.
+/// tokens.
+/// We exploit this by flushing the reasoning stream (index 0) as soon as the
+/// first content or tool call chunk appears, ensuring the reasoning event
+/// precedes content and tool call events in the history.
 fn map_event(
     event: ChatMessageResponse,
     is_structured: bool,
@@ -367,8 +368,8 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Result<Vec<ToolInfo>> {
         .collect::<Result<Vec<_>>>()
 }
 
-/// Poor-man's version of API-based tool choice. Needed until Ollama has
-/// first-class support for tool choice.
+/// Poor-man's version of API-based tool choice.
+/// Needed until Ollama has first-class support for tool choice.
 fn tool_choice_to_system_message(choice: &ToolChoice) -> Option<ChatMessage> {
     let (ToolChoice::Function(_) | ToolChoice::Required) = choice else {
         return None;

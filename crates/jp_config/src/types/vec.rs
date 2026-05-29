@@ -23,13 +23,16 @@ use crate::{delta::PartialConfigDelta, fill::FillDefaults, partial::ToPartial};
 /// - When used in other types that implement [`schematic::Config`], the
 ///   [`Config::Partial`] associated type of that type will have the regular
 ///   `MergeableVec` type for the relevant field *NOT* the
-///   [`PartialMergeableVec`] type. This is inline with how `schematic` works
-///   for other container types such as `Vec` and `HashMap`.
+///   [`PartialMergeableVec`] type.
+///   This is inline with how `schematic` works for other container types such
+///   as `Vec` and `HashMap`.
 ///
 /// - At this moment, this type does *not* implement [`AssignKeyValue`], unlike
-///   e.g. [`MergeableString`]. This is because the generic `T` means that it is
-///   not immediately clear how we would parse the provided value; would we
-///   parse it as [`MergedVec`] or as `T`? This can be changed later, if needed.
+///   e.g. [`MergeableString`].
+///   This is because the generic `T` means that it is not immediately clear how
+///   we would parse the provided value; would we parse it as [`MergedVec`] or
+///   as `T`?
+///   This can be changed later, if needed.
 ///
 /// [`AssignKeyValue`]: crate::AssignKeyValue
 /// [`MergeableString`]: super::string::MergeableString
@@ -91,9 +94,9 @@ impl<T> MergeableVec<T> {
 
     /// Returns `true` if the `MergeableVec` is empty.
     ///
-    /// A `Merged` variant with no items but with metadata (e.g. `dedup` or
-    /// `strategy`) is NOT considered empty, because the metadata must still
-    /// participate in merges.
+    /// A `Merged` variant with no items but with metadata (e.g.
+    /// `dedup` or `strategy`) is NOT considered empty, because the metadata
+    /// must still participate in merges.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         match self {
@@ -300,7 +303,8 @@ pub struct MergedVec<T> {
     /// Accepts `true`, `false`, or `"inherit"`.
     ///
     /// When `true`, items already present in the merged result are skipped.
-    /// Comparison uses `PartialEq`. Order is preserved (first occurrence wins).
+    /// Comparison uses `PartialEq`.
+    /// Order is preserved (first occurrence wins).
     ///
     /// This flag is "sticky": once a non-discarded config in the merge chain
     /// sets it to `true`, all subsequent merges for this field will deduplicate

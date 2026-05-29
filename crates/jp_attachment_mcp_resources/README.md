@@ -7,10 +7,11 @@ but prefix the URI with `mcp+` to ensure this attachment handler is used.
 
 ## Usage
 
-As an example, for the
-[`github-mcp-server`](https://github.com/github/github-mcp-server), for any of
-its listed [resources](https://github.com/github/github-mcp-server#resources):
+As an example, for the [`github-mcp-server`], for any of its listed [resources]:
 
 ```sh
 jp attachment add "mcp+repo://{owner}/{repo}/contents{/path*}"
 ```
+
+[`github-mcp-server`]: https://github.com/github/github-mcp-server
+[resources]: https://github.com/github/github-mcp-server#resources

@@ -3,12 +3,12 @@
 //! Converts a compact field definition string into a JSON Schema object.
 //! Accepts either the concise DSL syntax or raw JSON Schema passthrough.
 //!
-//! See [RFD 030](https://jp.computer/rfd/030-schema-dsl) for the full syntax
-//! reference.
+//! See [RFD 030] for the full syntax reference.
 //!
 //! # DSL Syntax
 //!
-//! Fields are separated by commas or newlines. Each field has the form:
+//! Fields are separated by commas or newlines.
+//! Each field has the form:
 //!
 //! ```text
 //! [?] name [type] [: description]
@@ -21,18 +21,18 @@
 //!
 //! ## Types
 //!
-//! | DSL                 | JSON Schema                              |
-//! |---------------------|------------------------------------------|
-//! | `str` / `string`    | `{"type": "string"}`                     |
-//! | `int` / `integer`   | `{"type": "integer"}`                    |
-//! | `float` / `number`  | `{"type": "number"}`                     |
-//! | `bool` / `boolean`  | `{"type": "boolean"}`                    |
-//! | `any`               | `{}` (no constraint)                     |
-//! | `[string]`          | `{"type": "array", "items": {"type":`    |
-//! |                     | `"string"}}`                             |
-//! | `[string\|int]`     | array with `anyOf` items                 |
-//! | `[string]\|int`     | field-level union (`anyOf`)              |
-//! | `{ name, age int }` | nested object                            |
+//! | DSL                 | JSON Schema                           |
+//! | ------------------- | ------------------------------------- |
+//! | `str` / `string`    | `{"type": "string"}`                  |
+//! | `int` / `integer`   | `{"type": "integer"}`                 |
+//! | `float` / `number`  | `{"type": "number"}`                  |
+//! | `bool` / `boolean`  | `{"type": "boolean"}`                 |
+//! | `any`               | `{}` (no constraint)                  |
+//! | `[string]`          | `{"type": "array", "items": {"type":` |
+//! |                     | `"string"}}`                          |
+//! | `[string\|int]`     | array with `anyOf` items              |
+//! | `[string]\|int`     | field-level union (`anyOf`)           |
+//! | `{ name, age int }` | nested object                         |
 //!
 //! ## Descriptions
 //!
@@ -66,6 +66,8 @@
 //! // JSON passthrough
 //! let s = parse_schema_dsl(r#"{"type":"object","properties":{"x":{"type":"string"}}}"#).unwrap();
 //! ```
+//!
+//! [RFD 030]: https://jp.computer/rfd/030-schema-dsl
 
 use serde_json::json;
 
@@ -175,8 +177,8 @@ impl<'a> Parser<'a> {
         Some(c)
     }
 
-    /// Skip spaces, tabs, and `\<newline>` line continuations. Does NOT skip
-    /// bare newlines (those are field separators).
+    /// Skip spaces, tabs, and `\<newline>` line continuations.
+    /// Does NOT skip bare newlines (those are field separators).
     fn skip_ws(&mut self) {
         loop {
             match self.peek() {
@@ -229,8 +231,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Read an unquoted field name. Accepts any character that isn't reserved
-    /// by the grammar.
+    /// Read an unquoted field name.
+    /// Accepts any character that isn't reserved by the grammar.
     fn read_name(&mut self) -> Option<&'a str> {
         let start = self.pos;
         while let Some(c) = self.peek() {
@@ -256,7 +258,8 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// Read a keyword-style word: `[a-zA-Z0-9_-]+`. Used for type keywords.
+    /// Read a keyword-style word: `[a-zA-Z0-9_-]+`.
+    /// Used for type keywords.
     fn read_keyword(&mut self) -> Option<&'a str> {
         let start = self.pos;
         while let Some(c) = self.peek() {
@@ -349,10 +352,12 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Try to parse a type expression. Returns `None` if the next token doesn't
-    /// look like a type (e.g. it's `:`, `,`, `\n`, or EOF).
+    /// Try to parse a type expression.
+    /// Returns `None` if the next token doesn't look like a type (e.g. it's
+    /// `:`, `,`, `\n`, or EOF).
     ///
     /// If the next token is a word that is NOT a type keyword, returns an error
+    ///
     /// - within a field definition, a word after the name must be a valid type.
     fn try_parse_type_expr(&mut self) -> Result<Option<SchemaType>, ParseError> {
         match self.peek() {

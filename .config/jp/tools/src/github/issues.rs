@@ -5,8 +5,9 @@ use url::Url;
 use super::{State, auth_optional, parse_repo};
 use crate::{Result, github::handle_404, to_xml};
 
-/// Comments-per-page when fetching a specific issue. Fixed at 10 to keep
-/// responses bounded; long threads are walked with the `page` parameter.
+/// Comments-per-page when fetching a specific issue.
+/// Fixed at 10 to keep responses bounded; long threads are walked with the
+/// `page` parameter.
 const COMMENTS_PER_PAGE: u8 = 10;
 
 pub(crate) async fn github_issues(
@@ -92,9 +93,9 @@ async fn get_issue(owner: &str, repo: &str, number: u64, page: u64) -> Result<St
     })
 }
 
-/// Items per page when listing issues. Fixed at 100 (the GitHub API
-/// max for this endpoint) so a single response covers as much ground
-/// as possible while staying bounded.
+/// Items per page when listing issues.
+/// Fixed at 100 (the GitHub API max for this endpoint) so a single response
+/// covers as much ground as possible while staying bounded.
 const LIST_PER_PAGE: u8 = 100;
 
 async fn get_issues(owner: &str, repo: &str, state: Option<State>, page: u64) -> Result<String> {

@@ -17,8 +17,8 @@ pub enum HrStyle {
     /// Render the original markdown (`---`).
     Markdown,
 
-    /// Render a continuous unicode horizontal line (`─`) spanning the full line
-    /// width (based on `wrap_width`).
+    /// Render a continuous unicode horizontal line (`─`) spanning the full
+    /// line width (based on `wrap_width`).
     #[default]
     Line,
 }
@@ -51,16 +51,16 @@ pub struct MarkdownConfig {
 
     /// Syntax highlighting theme for code blocks.
     ///
-    /// Uses `bat` / `syntect` theme names (e.g. `"Monokai Extended"`,
-    /// `"OneHalfDark"`, `"base16"`).
+    /// Uses `bat` / `syntect` theme names (e.g.
+    /// `"Monokai Extended"`, `"OneHalfDark"`, `"base16"`).
     #[setting(default = "gruvbox-dark")]
     pub theme: Option<String>,
 
     /// How horizontal rules are rendered in terminal output.
     ///
     /// - `markdown`: render the original CommonMark syntax (`---`).
-    /// - `line`: render a continuous unicode horizontal line (`─`) spanning the
-    ///   [`Self::wrap_width`].
+    /// - `line`: render a continuous unicode horizontal line (`─`) spanning
+    ///   the [`Self::wrap_width`].
     #[setting(default)]
     pub hr_style: HrStyle,
 }

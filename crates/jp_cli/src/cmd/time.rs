@@ -6,13 +6,14 @@ use chrono::{DateTime, Utc};
 use clap::{Arg, ArgGroup, ArgMatches, Command, FromArgMatches, builder::TypedValueParser};
 use jp_conversation::ConversationId;
 
-/// A point in time parsed from a conversation ID, a relative duration
-/// (`3w`, `30d`), or an absolute date/datetime (`2026-01-01`, RFC 3339).
+/// A point in time parsed from a conversation ID, a relative duration (`3w`,
+/// `30d`), or an absolute date/datetime (`2026-01-01`, RFC 3339).
 ///
-/// Stored as an absolute `DateTime<Utc>`. Relative durations are subtracted
-/// from `Utc::now()` at parse time. Conversation IDs resolve to their
-/// embedded creation timestamp, which makes `--from jp-c…` a convenient
-/// shorthand for `--from <when-that-conversation-was-created>`.
+/// Stored as an absolute `DateTime<Utc>`.
+/// Relative durations are subtracted from `Utc::now()` at parse time.
+/// Conversation IDs resolve to their embedded creation timestamp, which makes
+/// `--from jp-c…` a convenient shorthand for `--from
+/// <when-that-conversation-was-created>`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TimeThreshold(pub DateTime<Utc>);
 

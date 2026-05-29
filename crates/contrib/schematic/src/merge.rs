@@ -36,8 +36,9 @@ pub fn prepend_vec<T, C>(prev: Vec<T>, next: Vec<T>, _: &C) -> MergeResult<Vec<T
     Ok(Some(new))
 }
 
-/// Shallow merge the next [`BTreeMap`] into the previous [`BTreeMap`]. Any items in the
-/// next [`BTreeMap`] will overwrite items in the previous [`BTreeMap`] of the same key.
+/// Shallow merge the next [`BTreeMap`] into the previous [`BTreeMap`].
+/// Any items in the next [`BTreeMap`] will overwrite items in the previous
+/// [`BTreeMap`] of the same key.
 #[deprecated(note = "Use `merge_iter` instead")]
 pub fn merge_btreemap<K, V, C>(
     prev: BTreeMap<K, V>,
@@ -50,7 +51,8 @@ where
     merge_iter(prev, next, c)
 }
 
-/// Shallow merge the next [`BTreeSet`] into the previous [`BTreeSet`], overwriting duplicates.
+/// Shallow merge the next [`BTreeSet`] into the previous [`BTreeSet`],
+/// overwriting duplicates.
 #[deprecated(note = "Use `merge_iter` instead")]
 pub fn merge_btreeset<T, C>(prev: BTreeSet<T>, next: BTreeSet<T>, c: &C) -> MergeResult<BTreeSet<T>>
 where
@@ -59,8 +61,9 @@ where
     merge_iter(prev, next, c)
 }
 
-/// Shallow merge the next [`HashMap`] into the previous [`HashMap`]. Any items in the
-/// next [`HashMap`] will overwrite items in the previous [`HashMap`] of the same key.
+/// Shallow merge the next [`HashMap`] into the previous [`HashMap`].
+/// Any items in the next [`HashMap`] will overwrite items in the previous
+/// [`HashMap`] of the same key.
 #[deprecated(note = "Use `merge_iter` instead")]
 pub fn merge_hashmap<K, V, C, S>(
     prev: HashMap<K, V, S>,
@@ -74,7 +77,8 @@ where
     merge_iter(prev, next, c)
 }
 
-/// Shallow merge the next [`HashSet`] into the previous [`HashSet`], overwriting duplicates.
+/// Shallow merge the next [`HashSet`] into the previous [`HashSet`],
+/// overwriting duplicates.
 #[deprecated(note = "Use `merge_iter` instead")]
 pub fn merge_hashset<T, C, S>(
     prev: HashSet<T, S>,

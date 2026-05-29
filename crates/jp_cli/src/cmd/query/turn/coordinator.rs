@@ -31,7 +31,8 @@ use crate::cmd::query::{interrupt::InterruptAction, stream::TurnView};
 /// [`TurnState`]: super::state::TurnState
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnPhase {
-    /// No active turn. Waiting for `start_turn`.
+    /// No active turn.
+    /// Waiting for `start_turn`.
     Idle,
     /// Receiving chunks from LLM.
     Streaming,
@@ -40,21 +41,23 @@ pub enum TurnPhase {
     /// Turn completed successfully (or stopped by user with "save").
     ///
     /// When a turn reaches this phase, the shell should persist the
-    /// conversation and exit the turn loop. This includes both normal
-    /// completion (LLM finished with no tool calls) and user-initiated
-    /// stop (Ctrl+C → "Stop").
+    /// conversation and exit the turn loop.
+    /// This includes both normal completion (LLM finished with no tool calls)
+    /// and user-initiated stop (Ctrl+C → "Stop").
     Complete,
     /// Turn aborted by user (discard without saving).
     ///
     /// When a turn reaches this phase, the shell should exit the turn loop
-    /// WITHOUT persisting. Any partial content is discarded.
+    /// WITHOUT persisting.
+    /// Any partial content is discarded.
     Aborted,
 }
 
 /// Outcome returned by [`TurnCoordinator::handle_event`].
 ///
-/// `action` describes turn-state control flow. `committed` describes the
-/// conversation event, if any, that was appended while handling the input.
+/// `action` describes turn-state control flow.
+/// `committed` describes the conversation event, if any, that was appended
+/// while handling the input.
 /// Keeping these separate avoids smuggling event-builder details into the turn
 /// state machine's action enum while still letting the shell react immediately
 /// to newly committed tool calls.
@@ -88,16 +91,17 @@ pub enum CommittedEvent {
     /// No relevant event was committed.
     None,
 
-    /// A [`ToolCallRequest`] was committed. The shell should run the
-    /// permission/preparation pipeline immediately so prompts appear at the
-    /// same streaming boundary as before.
+    /// A [`ToolCallRequest`] was committed.
+    /// The shell should run the permission/preparation pipeline immediately so
+    /// prompts appear at the same streaming boundary as before.
     ToolCallRequest(ToolCallRequest),
 }
 
 /// Actions returned by the Turn Coordinator to be executed by the shell.
 ///
 /// The coordinator is a pure state machine - it doesn't perform I/O directly.
-/// Instead, it returns actions that the shell (the `handle_turn` loop) executes.
+/// Instead, it returns actions that the shell (the `handle_turn` loop)
+/// executes.
 #[derive(Debug)]
 pub enum Action {
     /// Continue processing events (no action needed from shell).
@@ -107,8 +111,8 @@ pub enum Action {
     ///
     /// The actual list of tool calls to execute is derived from the
     /// conversation stream by [`build_execution_plan`], not carried here.
-    /// The state machine only signals the phase transition; the shell
-    /// derives the work from the durable source of truth.
+    /// The state machine only signals the phase transition; the shell derives
+    /// the work from the durable source of truth.
     ///
     /// [`build_execution_plan`]: crate::cmd::query::tool::build_execution_plan
     ExecuteTools,
@@ -123,18 +127,21 @@ pub enum Action {
 /// Orchestrates a single turn of conversation with the LLM.
 ///
 /// A turn consists of one or more cycles:
+///
 /// 1. User sends a query
 /// 2. LLM streams a response (may include tool calls)
 /// 3. If tool calls: execute them, send results, goto 2
 /// 4. If no tool calls: turn complete
 ///
 /// The coordinator manages:
+///
 /// - State transitions based on events
 /// - Event accumulation via `EventBuilder`
 /// - Chat rendering via [`ChatRenderer`]
 /// - Pending tool calls for execution
 ///
 /// It does NOT:
+///
 /// - Perform I/O (delegated to shell via `Action`)
 /// - Execute tools (delegated to `ToolCoordinator`)
 /// - Handle retries
@@ -151,7 +158,8 @@ pub struct TurnCoordinator {
     json_emitter: Option<JsonEmitter>,
 
     /// Display name to stamp onto interrupt-reply [`ChatRequest`]s for
-    /// transcript attribution. `None` means the request stays unattributed.
+    /// transcript attribution.
+    /// `None` means the request stays unattributed.
     ///
     /// [`ChatRequest`]: jp_conversation::event::ChatRequest
     author: Option<String>,
@@ -184,17 +192,18 @@ impl TurnCoordinator {
         }
     }
 
-    /// Start a new turn, emitting [`TurnStart`] and the user's
-    /// [`ChatRequest`] into the stream in the correct order.
+    /// Start a new turn, emitting [`TurnStart`] and the user's [`ChatRequest`]
+    /// into the stream in the correct order.
     ///
-    /// The turn index is derived from the number of existing `TurnStart`
-    /// events in the stream.
+    /// The turn index is derived from the number of existing `TurnStart` events
+    /// in the stream.
     ///
-    /// Does NOT render the user's request to the terminal. The caller (e.g.
+    /// Does NOT render the user's request to the terminal.
+    /// The caller (e.g.
     /// `query.rs` after an editor session) is responsible for echoing the
     /// request via [`TurnView::render_user_request`] when desired — most
-    /// invocations do not need an echo since the user already saw their
-    /// own input on the terminal.
+    /// invocations do not need an echo since the user already saw their own
+    /// input on the terminal.
     ///
     /// [`TurnStart`]: jp_conversation::event::TurnStart
     pub fn start_turn(&mut self, stream: &mut ConversationStream, request: ChatRequest) {
@@ -320,7 +329,8 @@ impl TurnCoordinator {
     /// # Returns
     ///
     /// - `Action::SendFollowUp` if responses were processed and a follow-up
-    ///   cycle should begin. The caller should reset `tool_choice` to `Auto`.
+    ///   cycle should begin.
+    ///   The caller should reset `tool_choice` to `Auto`.
     /// - `Action::Continue` if not in `Executing` phase (no-op).
     pub fn handle_tool_responses(
         &mut self,
@@ -366,15 +376,15 @@ impl TurnCoordinator {
 
     /// Flush the renderer's internal markdown buffer to the printer.
     ///
-    /// Call this before `Printer::flush_instant()` on interrupt, so any
-    /// partial content sitting in the renderer's block buffer gets queued
-    /// to the printer and becomes visible before the interrupt menu appears.
+    /// Call this before `Printer::flush_instant()` on interrupt, so any partial
+    /// content sitting in the renderer's block buffer gets queued to the
+    /// printer and becomes visible before the interrupt menu appears.
     pub fn flush_renderer(&mut self) {
         self.view.flush();
     }
 
-    /// Mark that tool calls are about to be rendered, so the next
-    /// content chunk gets a blank line separator.
+    /// Mark that tool calls are about to be rendered, so the next content chunk
+    /// gets a blank line separator.
     pub fn transition_to_tool_call(&mut self) {
         self.view.enter_tool_call(false);
     }
@@ -389,8 +399,8 @@ impl TurnCoordinator {
 
     /// Handle a hard quit signal during streaming.
     ///
-    /// Injects any partial content into the stream and transitions to
-    /// Complete so that the turn loop persists and exits.
+    /// Injects any partial content into the stream and transitions to Complete
+    /// so that the turn loop persists and exits.
     pub fn handle_quit(&mut self, stream: &mut ConversationStream) {
         if let Some(content) = self.peek_partial_content() {
             self.push_event(stream, ChatResponse::message(&content));
@@ -402,8 +412,9 @@ impl TurnCoordinator {
     /// Handle an interrupt action during LLM streaming.
     ///
     /// Transitions the state machine based on the user's choice from the
-    /// interrupt menu. Content injection (partial content, prefill, replies) is
-    /// handled here to keep the state machine self-contained.
+    /// interrupt menu.
+    /// Content injection (partial content, prefill, replies) is handled here to
+    /// keep the state machine self-contained.
     pub fn handle_streaming_interrupt(
         &mut self,
         action: InterruptAction,
@@ -464,14 +475,16 @@ impl TurnCoordinator {
     /// Handle an interrupt action during tool execution.
     ///
     /// Tool interrupts have different semantics than streaming interrupts:
+    ///
     /// - `ToolCancelled`: Cancel tools and continue with cancelled responses
     /// - `RestartTool`: Cancel and restart tool execution
     ///
     /// The actual cancellation is signaled via the `CancellationToken` which
-    /// the caller must manage. This method only handles state transitions.
+    /// the caller must manage.
+    /// This method only handles state transitions.
     /// Currently a no-op reserved for future state transitions.
-    /// The shell handles cancellation via [`CancellationToken`] and restart
-    /// via [`ToolSignalResult`].
+    /// The shell handles cancellation via [`CancellationToken`] and restart via
+    /// [`ToolSignalResult`].
     ///
     /// [`CancellationToken`]: tokio_util::sync::CancellationToken
     /// [`ToolSignalResult`]: crate::cmd::query::interrupt::signals::ToolSignalResult
@@ -502,15 +515,16 @@ impl TurnCoordinator {
     }
 }
 
-/// Returns `true` if the most recent turn contains any `ToolCallRequest`
-/// that lacks a matching `ToolCallResponse` anywhere in the stream.
+/// Returns `true` if the most recent turn contains any `ToolCallRequest` that
+/// lacks a matching `ToolCallResponse` anywhere in the stream.
 ///
-/// Used by the state machine to decide whether to transition into the
-/// executing phase. Looking across all turns for responses (rather than
-/// just the current turn) is intentional: in correct operation responses
-/// always live in the same turn as their request, but the cross-turn check
-/// makes the predicate robust against any future code path that might
-/// commit responses to a different turn.
+/// Used by the state machine to decide whether to transition into the executing
+/// phase.
+/// Looking across all turns for responses (rather than just the current turn)
+/// is intentional: in correct operation responses always live in the same turn
+/// as their request, but the cross-turn check makes the predicate robust
+/// against any future code path that might commit responses to a different
+/// turn.
 fn has_unresponded_tool_calls_in_current_turn(stream: &ConversationStream) -> bool {
     let responded_ids: std::collections::HashSet<&str> = stream
         .iter()

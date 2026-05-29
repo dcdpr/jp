@@ -5,8 +5,8 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use super::error::ConfigError;
 
-/// Represents a partial configuration of the base [`Config`], with all settings marked as optional
-/// by wrapping the values in [`Option`].
+/// Represents a partial configuration of the base [`Config`], with all settings
+/// marked as optional by wrapping the values in [`Option`].
 pub trait PartialConfig:
     Clone + Default + DeserializeOwned + Schematic + Serialize + Sized
 {
@@ -21,28 +21,34 @@ pub trait PartialConfig:
     /// Return whether the configuration is empty.
     fn is_empty(&self) -> bool;
 
-    /// Return a partial configuration with values populated with default values for settings
-    /// marked with `#[setting(default)]`. Unmarked settings will be [`None`].
+    /// Return a partial configuration with values populated with default values
+    /// for settings marked with `#[setting(default)]`.
+    /// Unmarked settings will be [`None`].
     ///
-    /// If a default value fails to parse or cast into the correct type, an error is returned.
+    /// If a default value fails to parse or cast into the correct type, an
+    /// error is returned.
     fn default_values(context: &Self::Context) -> Result<Option<Self>, ConfigError>;
 
-    /// Return a partial configuration with values populated from environment variables
-    /// for settings marked with `#[setting(env)]`. Unmarked settings will be [`None`].
+    /// Return a partial configuration with values populated from environment
+    /// variables for settings marked with `#[setting(env)]`.
+    /// Unmarked settings will be [`None`].
     ///
-    /// If an environment variable does not exist, the value will be [`None`]. If
-    /// the variable fails to parse or cast into the correct type, an error is returned.
+    /// If an environment variable does not exist, the value will be [`None`].
+    /// If the variable fails to parse or cast into the correct type, an error
+    /// is returned.
     #[cfg(feature = "env")]
     fn env_values() -> Result<Option<Self>, ConfigError>;
 
-    /// Finalize the partial configuration by consuming it and populating all fields with a value.
-    /// Defaults values from [`PartialConfig::default_values`] will be applied first, followed
-    /// by merging the current partial, and lastly environment variable values from
-    /// [`PartialConfig::env_values`].
+    /// Finalize the partial configuration by consuming it and populating all
+    /// fields with a value.
+    /// Defaults values from [`PartialConfig::default_values`] will be applied
+    /// first, followed by merging the current partial, and lastly environment
+    /// variable values from [`PartialConfig::env_values`].
     fn finalize(self, context: &Self::Context) -> Result<Self, ConfigError>;
 
-    /// Merge another partial configuration into this one and clone values when applicable. The
-    /// following merge strategies are applied:
+    /// Merge another partial configuration into this one and clone values when
+    /// applicable.
+    /// The following merge strategies are applied:
     ///
     /// - Current [`None`] values are replaced with the next value if [`Some`].
     /// - Current [`Some`] values are merged with the next value if [`Some`],
@@ -50,11 +56,13 @@ pub trait PartialConfig:
     fn merge(&mut self, context: &Self::Context, next: Self) -> Result<(), ConfigError>;
 }
 
-/// Represents the final configuration, with all settings populated with a value.
+/// Represents the final configuration, with all settings populated with a
+/// value.
 pub trait Config: Sized + Schematic {
     type Partial: PartialConfig;
 
-    /// Convert a partial configuration into a full configuration, with all values populated.
+    /// Convert a partial configuration into a full configuration, with all
+    /// values populated.
     ///
     /// # Errors
     ///
@@ -71,7 +79,8 @@ pub trait Config: Sized + Schematic {
 
 /// Represents an enumerable setting for use within a [`Config`].
 pub trait ConfigEnum: Sized + Schematic {
-    /// Return a list of all variants for the enum. Only unit variants are supported.
+    /// Return a list of all variants for the enum.
+    /// Only unit variants are supported.
     fn variants() -> Vec<Self>;
 }
 

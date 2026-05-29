@@ -30,8 +30,8 @@ pub struct Id(String);
 impl Id {
     /// Generate a globally unique workspace ID.
     ///
-    /// Generating a new ID **DOES NOT** persist it to disk. Use [`Id::store`]
-    /// to persist the ID.
+    /// Generating a new ID **DOES NOT** persist it to disk.
+    /// Use [`Id::store`] to persist the ID.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -103,7 +103,8 @@ impl FromStr for Id {
 /// Generates a fixed-length ID from a timestamp using Base63 encoding.
 ///
 /// Takes the least significant digits of the Base63 representation of the
-/// timestamp. Pads with '0' if the representation is too short.
+/// timestamp.
+/// Pads with '0' if the representation is too short.
 fn generate_id_from_timestamp(ts: u128) -> Id {
     if ts == 0 {
         return Id("0".repeat(ID_LEN));

@@ -10,8 +10,9 @@ use crate::{
 
 /// Create a tracking issue for an RFD.
 ///
-/// The title, label, and body structure are fixed. Only the RFD number,
-/// title text, filename slug, and task list are caller-provided.
+/// The title, label, and body structure are fixed.
+/// Only the RFD number, title text, filename slug, and task list are
+/// caller-provided.
 pub(crate) async fn github_create_issue_rfd_tracking(
     rfd_number: String,
     rfd_title: String,

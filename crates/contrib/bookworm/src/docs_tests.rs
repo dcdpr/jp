@@ -6,13 +6,15 @@ use super::*;
 /// without docs.rs scaffolding).
 ///
 /// Notable features:
+///
 /// - `<pre class="rust item-decl">` carries the top-level signature.
 /// - The type's prose lives inside `<details class="toggle top-doc">`, which
-///   wraps a `<div class="docblock">`. Older rustdoc emits the docblock as a
-///   direct child of `<main>`; we test that fallback below.
-/// - Variants and impls use `<section id="...">` wrappers; the docblock is
-///   the next sibling, OR the next sibling of `<summary>` if the section is
-///   inside a `<details>` toggle.
+///   wraps a `<div class="docblock">`.
+///   Older rustdoc emits the docblock as a direct child of `<main>`; we test
+///   that fallback below.
+/// - Variants and impls use `<section id="...">` wrappers; the docblock is the
+///   next sibling, OR the next sibling of `<summary>` if the section is inside
+///   a `<details>` toggle.
 const RUSTDOC_PAGE: &str = r##"<!DOCTYPE html>
 <html>
 <head><title>Value in serde_json::value - Rust</title></head>
@@ -70,8 +72,8 @@ const RUSTDOC_PAGE: &str = r##"<!DOCTYPE html>
 </html>"##;
 
 /// Older rustdoc shape: top-doc is a direct `<div class="docblock">` child of
-/// `<main>`, no `<details class="toggle top-doc">` wrapper. We keep this
-/// fallback so older downloaded docsets still extract.
+/// `<main>`, no `<details class="toggle top-doc">` wrapper.
+/// We keep this fallback so older downloaded docsets still extract.
 const RUSTDOC_PAGE_NO_TOGGLE: &str = r#"<!DOCTYPE html>
 <html>
 <body>

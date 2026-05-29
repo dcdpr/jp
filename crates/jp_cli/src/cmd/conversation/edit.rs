@@ -38,9 +38,9 @@ pub(crate) struct Edit {
     /// Toggle the conversation between user and workspace-scoped.
     ///
     /// A user-scoped conversation is stored on your local machine and is not
-    /// part of the workspace storage. This means, when using a VCS, user
-    /// conversations are not stored in the VCS, but are otherwise identical to
-    /// workspace conversations.
+    /// part of the workspace storage.
+    /// This means, when using a VCS, user conversations are not stored in the
+    /// VCS, but are otherwise identical to workspace conversations.
     #[arg(long, group = "property")]
     local: Option<Option<bool>>,
 
@@ -56,7 +56,8 @@ pub(crate) struct Edit {
     /// Without a value, toggles: removes expiration if set, or sets it to
     /// expire immediately (when no longer active) if unset.
     ///
-    /// Accepts a duration (e.g. `1h`, `30m`) or `now` for immediate expiration.
+    /// Accepts a duration (e.g.
+    /// `1h`, `30m`) or `now` for immediate expiration.
     #[arg(long = "tmp", group = "property", conflicts_with = "no_expires_at")]
     expires_at: Option<Option<ExpirationDuration>>,
 

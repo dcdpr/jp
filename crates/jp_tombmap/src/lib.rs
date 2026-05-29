@@ -49,8 +49,8 @@ where
 impl<K, V> TombMap<K, V, RandomState> {
     /// Creates an empty `HashMap`.
     ///
-    /// The hash map is initially created with a capacity of 0, so it will not allocate until it
-    /// is first inserted into.
+    /// The hash map is initially created with a capacity of 0, so it will not
+    /// allocate until it is first inserted into.
     ///
     /// # Examples
     ///
@@ -67,8 +67,9 @@ impl<K, V> TombMap<K, V, RandomState> {
     /// Creates an empty `HashMap` with at least the specified capacity.
     ///
     /// The hash map will be able to hold at least `capacity` elements without
-    /// reallocating. This method is allowed to allocate for more elements than
-    /// `capacity`. If `capacity` is zero, the hash map will not allocate.
+    /// reallocating.
+    /// This method is allowed to allocate for more elements than `capacity`.
+    /// If `capacity` is zero, the hash map will not allocate.
     ///
     /// # Examples
     ///
@@ -89,10 +90,11 @@ impl<K, V, S> TombMap<K, V, S> {
     ///
     /// The created map has the default initial capacity.
     ///
-    /// Warning: `hash_builder` is normally randomly generated, and
-    /// is designed to allow `HashMaps` to be resistant to attacks that
-    /// cause many collisions and very poor performance. Setting it
-    /// manually using this function can expose a `DoS` attack vector.
+    /// Warning: `hash_builder` is normally randomly generated, and is designed
+    /// to allow `HashMaps` to be resistant to attacks that cause many
+    /// collisions and very poor performance.
+    /// Setting it manually using this function can expose a `DoS` attack
+    /// vector.
     ///
     /// The `hash_builder` passed should implement the [`BuildHasher`] trait for
     /// the `HashMap` to be useful, see its documentation for details.
@@ -119,16 +121,18 @@ impl<K, V, S> TombMap<K, V, S> {
     /// `hasher` to hash the keys.
     ///
     /// The hash map will be able to hold at least `capacity` elements without
-    /// reallocating. This method is allowed to allocate for more elements than
-    /// `capacity`. If `capacity` is zero, the hash map will not allocate.
+    /// reallocating.
+    /// This method is allowed to allocate for more elements than `capacity`.
+    /// If `capacity` is zero, the hash map will not allocate.
     ///
-    /// Warning: `hasher` is normally randomly generated, and
-    /// is designed to allow `HashMaps` to be resistant to attacks that
-    /// cause many collisions and very poor performance. Setting it
-    /// manually using this function can expose a `DoS` attack vector.
+    /// Warning: `hasher` is normally randomly generated, and is designed to
+    /// allow `HashMaps` to be resistant to attacks that cause many collisions
+    /// and very poor performance.
+    /// Setting it manually using this function can expose a `DoS` attack
+    /// vector.
     ///
-    /// The `hasher` passed should implement the [`BuildHasher`] trait for
-    /// the `HashMap` to be useful, see its documentation for details.
+    /// The `hasher` passed should implement the [`BuildHasher`] trait for the
+    /// `HashMap` to be useful, see its documentation for details.
     ///
     /// # Examples
     ///
@@ -182,8 +186,8 @@ impl<K, V, S> TombMap<K, V, S> {
     ///
     /// # Performance
     ///
-    /// In the current implementation, iterating over keys takes O(capacity) time
-    /// instead of O(len) because it internally visits empty buckets too.
+    /// In the current implementation, iterating over keys takes O(capacity)
+    /// time instead of O(len) because it internally visits empty buckets too.
     pub fn keys(&self) -> hash_map::Keys<'_, K, V> {
         self.live.keys()
     }
@@ -208,8 +212,8 @@ impl<K, V, S> TombMap<K, V, S> {
     ///
     /// # Performance
     ///
-    /// In the current implementation, iterating over keys takes O(capacity) time
-    /// instead of O(len) because it internally visits empty buckets too.
+    /// In the current implementation, iterating over keys takes O(capacity)
+    /// time instead of O(len) because it internally visits empty buckets too.
     #[inline]
     pub fn into_keys(self) -> hash_map::IntoKeys<K, V> {
         self.live.into_keys()
@@ -232,8 +236,8 @@ impl<K, V, S> TombMap<K, V, S> {
     ///
     /// # Performance
     ///
-    /// In the current implementation, iterating over values takes O(capacity) time
-    /// instead of O(len) because it internally visits empty buckets too.
+    /// In the current implementation, iterating over values takes O(capacity)
+    /// time instead of O(len) because it internally visits empty buckets too.
     pub fn values(&self) -> hash_map::Values<'_, K, V> {
         self.live.values()
     }
@@ -259,8 +263,8 @@ impl<K, V, S> TombMap<K, V, S> {
     ///
     /// # Performance
     ///
-    /// In the current implementation, iterating over values takes O(capacity) time
-    /// instead of O(len) because it internally visits empty buckets too.
+    /// In the current implementation, iterating over values takes O(capacity)
+    /// time instead of O(len) because it internally visits empty buckets too.
     pub fn values_mut(&mut self) -> hash_map::ValuesMut<'_, K, V> {
         self.live.values_mut()
     }
@@ -285,8 +289,8 @@ impl<K, V, S> TombMap<K, V, S> {
     ///
     /// # Performance
     ///
-    /// In the current implementation, iterating over values takes O(capacity) time
-    /// instead of O(len) because it internally visits empty buckets too.
+    /// In the current implementation, iterating over values takes O(capacity)
+    /// time instead of O(len) because it internally visits empty buckets too.
     #[inline]
     pub fn into_values(self) -> hash_map::IntoValues<K, V> {
         self.live.into_values()
@@ -315,8 +319,8 @@ impl<K, V, S> TombMap<K, V, S> {
         self.live.iter()
     }
 
-    /// An iterator visiting all key-value pairs in arbitrary order,
-    /// with mutable references to the values.
+    /// An iterator visiting all key-value pairs in arbitrary order, with
+    /// mutable references to the values.
     /// The iterator element type is `(&'a K, Mut<'a, K, V>)`.
     ///
     /// # Examples
@@ -448,7 +452,8 @@ where
 {
     /// Retains only the elements specified by the predicate.
     ///
-    /// In other words, remove all pairs `(k, v)` for which `f(&k, &mut v)` returns `false`.
+    /// In other words, remove all pairs `(k, v)` for which `f(&k, &mut v)`
+    /// returns `false`.
     /// The elements are visited in unsorted (and unspecified) order.
     ///
     /// # Examples
@@ -480,12 +485,13 @@ where
         });
     }
 
-    /// Clears the map, returning all key-value pairs as an iterator. Keeps the
-    /// allocated memory for reuse.
+    /// Clears the map, returning all key-value pairs as an iterator.
+    /// Keeps the allocated memory for reuse.
     ///
     /// If the returned iterator is dropped before being fully consumed, it
-    /// drops the remaining key-value pairs. The returned iterator keeps a
-    /// mutable borrow on the map to optimize its implementation.
+    /// drops the remaining key-value pairs.
+    /// The returned iterator keeps a mutable borrow on the map to optimize its
+    /// implementation.
     ///
     /// # Examples
     ///
@@ -545,9 +551,11 @@ where
     S: BuildHasher,
 {
     /// Reserves capacity for at least `additional` more elements to be inserted
-    /// in the `HashMap`. The collection may reserve more space to speculatively
-    /// avoid frequent reallocations. After calling `reserve`,
-    /// capacity will be greater than or equal to `self.len() + additional`.
+    /// in the `HashMap`.
+    /// The collection may reserve more space to speculatively avoid frequent
+    /// reallocations.
+    /// After calling `reserve`, capacity will be greater than or equal to
+    /// `self.len() + additional`.
     /// Does nothing if capacity is already sufficient.
     ///
     /// # Panics
@@ -566,17 +574,18 @@ where
         self.live.reserve(additional);
     }
 
-    /// Tries to reserve capacity for at least `additional` more elements to be inserted
-    /// in the `HashMap`. The collection may reserve more space to speculatively
-    /// avoid frequent reallocations. After calling `try_reserve`,
-    /// capacity will be greater than or equal to `self.len() + additional` if
-    /// it returns `Ok(())`.
+    /// Tries to reserve capacity for at least `additional` more elements to be
+    /// inserted in the `HashMap`.
+    /// The collection may reserve more space to speculatively avoid frequent
+    /// reallocations.
+    /// After calling `try_reserve`, capacity will be greater than or equal to
+    /// `self.len() + additional` if it returns `Ok(())`.
     /// Does nothing if capacity is already sufficient.
     ///
     /// # Errors
     ///
-    /// If the capacity overflows, or the allocator reports a failure, then an error
-    /// is returned.
+    /// If the capacity overflows, or the allocator reports a failure, then an
+    /// error is returned.
     ///
     /// # Examples
     ///
@@ -592,9 +601,10 @@ where
         self.live.try_reserve(additional)
     }
 
-    /// Shrinks the capacity of the map as much as possible. It will drop
-    /// down as much as possible while maintaining the internal rules
-    /// and possibly leaving some space in accordance with the resize policy.
+    /// Shrinks the capacity of the map as much as possible.
+    /// It will drop down as much as possible while maintaining the internal
+    /// rules and possibly leaving some space in accordance with the resize
+    /// policy.
     ///
     /// # Examples
     ///
@@ -613,9 +623,10 @@ where
         self.live.shrink_to_fit();
     }
 
-    /// Shrinks the capacity of the map with a lower limit. It will drop
-    /// down no lower than the supplied limit while maintaining the internal rules
-    /// and possibly leaving some space in accordance with the resize policy.
+    /// Shrinks the capacity of the map with a lower limit.
+    /// It will drop down no lower than the supplied limit while maintaining the
+    /// internal rules and possibly leaving some space in accordance with the
+    /// resize policy.
     ///
     /// If the current capacity is less than the lower limit, this is a no-op.
     ///
@@ -638,7 +649,8 @@ where
         self.live.shrink_to(min_capacity);
     }
 
-    /// Gets the given key's corresponding entry in the map for in-place manipulation.
+    /// Gets the given key's corresponding entry in the map for in-place
+    /// manipulation.
     ///
     /// # Examples
     ///
@@ -668,9 +680,8 @@ where
 
     /// Returns a reference to the value corresponding to the key.
     ///
-    /// The key may be any borrowed form of the map's key type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
-    /// the key type.
+    /// The key may be any borrowed form of the map's key type, but [`Hash`] and
+    /// [`Eq`] on the borrowed form *must* match those for the key type.
     ///
     /// # Examples
     ///
@@ -691,15 +702,18 @@ where
         self.live.get(k)
     }
 
-    /// Returns the key-value pair corresponding to the supplied key. This is
-    /// potentially useful:
+    /// Returns the key-value pair corresponding to the supplied key.
+    /// This is potentially useful:
+    ///
     /// - for key types where non-identical keys can be considered equal;
-    /// - for getting the `&K` stored key value from a borrowed `&Q` lookup key; or
-    /// - for getting a reference to a key with the same lifetime as the collection.
+    /// - for getting the `&K` stored key value from a borrowed `&Q` lookup key;
+    ///   or
+    /// - for getting a reference to a key with the same lifetime as the
+    ///   collection.
     ///
     /// The supplied key may be any borrowed form of the map's key type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
-    /// the key type.
+    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for the key
+    /// type.
     ///
     /// # Examples
     ///
@@ -761,8 +775,10 @@ where
 
     /// Attempts to get mutable references to `N` values in the map at once.
     ///
-    /// Returns an array of length `N` with the results of each query. For soundness, at most one
-    /// mutable reference will be returned to any value. `None` will be used if the key is missing.
+    /// Returns an array of length `N` with the results of each query.
+    /// For soundness, at most one mutable reference will be returned to any
+    /// value.
+    /// `None` will be used if the key is missing.
     ///
     /// # Panics
     ///
@@ -812,20 +828,18 @@ where
         self.live.get_disjoint_mut(ks)
     }
 
-    /// Attempts to get mutable references to `N` values in the map at once, without validating that
-    /// the values are unique.
+    /// Attempts to get mutable references to `N` values in the map at once,
+    /// without validating that the values are unique.
     ///
-    /// Returns an array of length `N` with the results of each query. `None` will be used if
-    /// the key is missing.
+    /// Returns an array of length `N` with the results of each query.
+    /// `None` will be used if the key is missing.
     ///
-    /// For a safe alternative see [`get_disjoint_mut`](`HashMap::get_disjoint_mut`).
+    /// For a safe alternative see [`get_disjoint_mut`].
     ///
     /// # Safety
     ///
-    /// Calling this method with overlapping keys is *[undefined behavior]* even if the resulting
-    /// references are not used.
-    ///
-    /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
+    /// Calling this method with overlapping keys is *[undefined behavior]* even
+    /// if the resulting references are not used.
     ///
     /// # Examples
     ///
@@ -855,6 +869,9 @@ where
     /// // Missing keys result in None
     /// assert_eq!(got, [Some(&mut 1807), None]);
     /// ```
+    ///
+    /// [`get_disjoint_mut`]: `HashMap::get_disjoint_mut`
+    /// [undefined behavior]: https://doc.rust-lang.org/reference/behavior-considered-undefined.html
     #[inline]
     #[doc(alias = "get_many_unchecked_mut")]
     pub unsafe fn get_disjoint_unchecked_mut<Q, const N: usize>(
@@ -870,9 +887,8 @@ where
 
     /// Returns `true` if the map contains a value for the specified key.
     ///
-    /// The key may be any borrowed form of the map's key type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
-    /// the key type.
+    /// The key may be any borrowed form of the map's key type, but [`Hash`] and
+    /// [`Eq`] on the borrowed form *must* match those for the key type.
     ///
     /// # Examples
     ///
@@ -895,9 +911,8 @@ where
 
     /// Returns a mutable reference to the value corresponding to the key.
     ///
-    /// The key may be any borrowed form of the map's key type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
-    /// the key type.
+    /// The key may be any borrowed form of the map's key type, but [`Hash`] and
+    /// [`Eq`] on the borrowed form *must* match those for the key type.
     ///
     /// # Examples
     ///
@@ -929,11 +944,10 @@ where
     /// If the map did not have this key present, [`None`] is returned.
     ///
     /// If the map did have this key present, the value is updated, and the old
-    /// value is returned. The key is not updated, though; this matters for
-    /// types that can be `==` without being identical. See the [module-level
-    /// documentation] for more.
-    ///
-    /// [module-level documentation]: std::collections#insert-and-complex-keys
+    /// value is returned.
+    /// The key is not updated, though; this matters for types that can be `==`
+    /// without being identical.
+    /// See the [module-level documentation] for more.
     ///
     /// # Examples
     ///
@@ -948,6 +962,8 @@ where
     /// assert_eq!(map.insert(37, "c"), Some("b"));
     /// assert_eq!(map[&37], "c");
     /// ```
+    ///
+    /// [module-level documentation]: std::collections#insert-and-complex-keys
     #[inline]
     pub fn insert(&mut self, k: K, v: V) -> Option<V>
     where
@@ -966,9 +982,8 @@ where
     /// Removes a key from the map, returning the value at the key if the key
     /// was previously in the map.
     ///
-    /// The key may be any borrowed form of the map's key type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
-    /// the key type.
+    /// The key may be any borrowed form of the map's key type, but [`Hash`] and
+    /// [`Eq`] on the borrowed form *must* match those for the key type.
     ///
     /// # Examples
     ///
@@ -996,8 +1011,8 @@ where
     /// was previously in the map.
     ///
     /// As opposed to [`TombMap::remove`], this method does not mark the key as
-    /// removed. It *does* unmark the key as modified, since the key no longer
-    /// exists.
+    /// removed.
+    /// It *does* unmark the key as modified, since the key no longer exists.
     #[inline]
     pub fn remove_untracked<Q>(&mut self, k: &Q) -> Option<V>
     where
@@ -1011,9 +1026,8 @@ where
     /// Removes a key from the map, returning the stored key and value if the
     /// key was previously in the map.
     ///
-    /// The key may be any borrowed form of the map's key type, but
-    /// [`Hash`] and [`Eq`] on the borrowed form *must* match those for
-    /// the key type.
+    /// The key may be any borrowed form of the map's key type, but [`Hash`] and
+    /// [`Eq`] on the borrowed form *must* match those for the key type.
     ///
     /// # Examples
     ///
@@ -1099,7 +1113,8 @@ impl<K, V, S> Default for TombMap<K, V, S>
 where
     S: Default,
 {
-    /// Creates an empty `HashMap<K, V, S>`, with the `Default` value for the hasher.
+    /// Creates an empty `HashMap<K, V, S>`, with the `Default` value for the
+    /// hasher.
     #[inline]
     fn default() -> TombMap<K, V, S> {
         TombMap::with_hasher(Default::default())
@@ -1143,8 +1158,8 @@ where
 {
     /// Converts a `[(K, V); N]` into a `HashMap<K, V>`.
     ///
-    /// If any entries in the array have equal keys,
-    /// all but one of the corresponding values will be dropped.
+    /// If any entries in the array have equal keys, all but one of the
+    /// corresponding values will be dropped.
     ///
     /// # Examples
     ///
@@ -1231,7 +1246,8 @@ impl<'a, K, V> Mut<'a, K, V> {
         self.value
     }
 
-    /// Converts the `Mut` into a mutable reference to the value with the lifetime of the map.
+    /// Converts the `Mut` into a mutable reference to the value with the
+    /// lifetime of the map.
     ///
     /// This will mark the key as modified.
     #[inline]
@@ -1374,8 +1390,8 @@ impl<K, V, S> IntoIterator for TombMap<K, V, S> {
     type IntoIter = hash_map::IntoIter<K, V>;
 
     /// Creates a consuming iterator, that is, one that moves each key-value
-    /// pair out of the map in arbitrary order. The map cannot be used after
-    /// calling this.
+    /// pair out of the map in arbitrary order.
+    /// The map cannot be used after calling this.
     ///
     /// # Examples
     ///
@@ -1394,8 +1410,8 @@ impl<K, V, S> IntoIterator for TombMap<K, V, S> {
 }
 
 impl<'a, K, V> Entry<'a, K, V> {
-    /// Ensures a value is in the entry by inserting the default if empty, and returns
-    /// a mutable reference to the value in the entry.
+    /// Ensures a value is in the entry by inserting the default if empty, and
+    /// returns a mutable reference to the value in the entry.
     ///
     /// # Examples
     ///
@@ -1421,8 +1437,9 @@ impl<'a, K, V> Entry<'a, K, V> {
         }
     }
 
-    /// Ensures a value is in the entry by inserting the result of the default function if empty,
-    /// and returns a mutable reference to the value in the entry.
+    /// Ensures a value is in the entry by inserting the result of the default
+    /// function if empty, and returns a mutable reference to the value in the
+    /// entry.
     ///
     /// # Examples
     ///
@@ -1447,12 +1464,14 @@ impl<'a, K, V> Entry<'a, K, V> {
         }
     }
 
-    /// Ensures a value is in the entry by inserting, if empty, the result of the default function.
-    /// This method allows for generating key-derived values for insertion by providing the default
-    /// function a reference to the key that was moved during the `.entry(key)` method call.
+    /// Ensures a value is in the entry by inserting, if empty, the result of
+    /// the default function.
+    /// This method allows for generating key-derived values for insertion by
+    /// providing the default function a reference to the key that was moved
+    /// during the `.entry(key)` method call.
     ///
-    /// The reference to the moved key is provided so that cloning or copying the key is
-    /// unnecessary, unlike with `.or_insert_with(|| ... )`.
+    /// The reference to the moved key is provided so that cloning or copying
+    /// the key is unnecessary, unlike with `.or_insert_with(|| ... )`.
     ///
     /// # Examples
     ///
@@ -1642,8 +1661,6 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
     /// If you need a reference to the `OccupiedEntry` which may outlive the
     /// destruction of the `Entry` value, see [`into_mut`].
     ///
-    /// [`into_mut`]: Self::into_mut
-    ///
     /// # Examples
     ///
     /// ```
@@ -1663,6 +1680,8 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
     ///
     /// assert_eq!(map["poneyland"], 24);
     /// ```
+    ///
+    /// [`into_mut`]: Self::into_mut
     #[inline]
     pub fn get_mut(&mut self) -> &mut V
     where
@@ -1675,12 +1694,10 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
         self.base.get_mut()
     }
 
-    /// Converts the `OccupiedEntry` into a mutable reference to the value in the entry
-    /// with a lifetime bound to the map itself.
+    /// Converts the `OccupiedEntry` into a mutable reference to the value in
+    /// the entry with a lifetime bound to the map itself.
     ///
     /// If you need multiple references to the `OccupiedEntry`, see [`get_mut`].
-    ///
-    /// [`get_mut`]: Self::get_mut
     ///
     /// # Examples
     ///
@@ -1697,6 +1714,8 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
     ///
     /// assert_eq!(map["poneyland"], 22);
     /// ```
+    ///
+    /// [`get_mut`]: Self::get_mut
     #[inline]
     #[must_use]
     pub fn into_mut(mut self) -> &'a mut V
@@ -1831,8 +1850,8 @@ impl<'a, K: 'a, V: 'a> VacantEntry<'a, K, V> {
         self.base.into_key()
     }
 
-    /// Sets the value of the entry with the `VacantEntry`'s key,
-    /// and returns a mutable reference to it.
+    /// Sets the value of the entry with the `VacantEntry`'s key, and returns a
+    /// mutable reference to it.
     ///
     /// # Examples
     ///
@@ -1857,8 +1876,8 @@ impl<'a, K: 'a, V: 'a> VacantEntry<'a, K, V> {
         self.base.insert(value)
     }
 
-    /// Sets the value of the entry with the `VacantEntry`'s key,
-    /// and returns an `OccupiedEntry`.
+    /// Sets the value of the entry with the `VacantEntry`'s key, and returns an
+    /// `OccupiedEntry`.
     ///
     /// # Examples
     ///
@@ -1898,8 +1917,8 @@ where
 {
     /// Constructs a `HashMap<K, V>` from an iterator of key-value pairs.
     ///
-    /// If the iterator produces any pairs with equal keys,
-    /// all but one of the corresponding values will be dropped.
+    /// If the iterator produces any pairs with equal keys, all but one of the
+    /// corresponding values will be dropped.
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> TombMap<K, V, S> {
         let mut map = TombMap::with_hasher(Default::default());
         map.extend(iter);
@@ -1907,8 +1926,8 @@ where
     }
 }
 
-/// Inserts all new key-values from the iterator and replaces values with existing
-/// keys with new values returned from the iterator.
+/// Inserts all new key-values from the iterator and replaces values with
+/// existing keys with new values returned from the iterator.
 impl<K, V, S> Extend<(K, V)> for TombMap<K, V, S>
 where
     K: Eq + Hash + Clone,

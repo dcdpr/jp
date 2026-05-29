@@ -1,7 +1,7 @@
 //! Command plugin configuration.
 //!
-//! Per-plugin settings that control installation, execution policy,
-//! checksum pinning, and opaque options passed through to the plugin.
+//! Per-plugin settings that control installation, execution policy, checksum
+//! pinning, and opaque options passed through to the plugin.
 
 use schematic::Config;
 use serde_json::Value;
@@ -58,8 +58,8 @@ pub struct CommandPluginConfig {
     /// Whether to auto-install this plugin from the registry if it is missing.
     ///
     /// When `true`, JP will download and install the plugin binary from the
-    /// registry on first invocation. Defaults to the global
-    /// `plugins.auto_install` setting.
+    /// registry on first invocation.
+    /// Defaults to the global `plugins.auto_install` setting.
     pub install: Option<bool>,
 
     /// Execution policy.
@@ -71,8 +71,9 @@ pub struct CommandPluginConfig {
 
     /// Pinned binary checksum.
     ///
-    /// When set, JP refuses to run the plugin if the binary's checksum
-    /// doesn't match. This protects against unexpected binary changes.
+    /// When set, JP refuses to run the plugin if the binary's checksum doesn't
+    /// match.
+    /// This protects against unexpected binary changes.
     /// Uses the same `ChecksumConfig` as MCP servers.
     #[setting(nested)]
     pub checksum: Option<ChecksumConfig>,
@@ -80,8 +81,8 @@ pub struct CommandPluginConfig {
     /// Opaque options passed to the plugin in the `init` message.
     ///
     /// JP does not validate these — they are forwarded as-is in the config
-    /// section of the init message. The plugin is responsible for parsing
-    /// and error reporting.
+    /// section of the init message.
+    /// The plugin is responsible for parsing and error reporting.
     pub options: Option<Value>,
 }
 

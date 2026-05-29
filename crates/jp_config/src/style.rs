@@ -68,8 +68,8 @@ pub struct StyleConfig {
 
     /// Lock-wait progress indicator.
     ///
-    /// Configures the timer shown while waiting for a conversation lock
-    /// held by another session to be released.
+    /// Configures the timer shown while waiting for a conversation lock held by
+    /// another session to be released.
     #[setting(nested)]
     pub lock_wait: LockWaitConfig,
 

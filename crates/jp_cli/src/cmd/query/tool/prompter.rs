@@ -1,12 +1,14 @@
 //! Interactive prompts for tool execution.
 //!
 //! The `ToolPrompter` handles all interactive prompts during tool execution:
+//!
 //! - Permission prompts (run/skip/edit)
 //! - Question prompts (tool-specific input)
 //! - Result edit prompts
 //!
 //! This keeps all I/O in the CLI layer, following the "functional core,
-//! imperative shell" principle. The `jp_llm` crate remains pure.
+//! imperative shell" principle.
+//! The `jp_llm` crate remains pure.
 
 use std::{io::Write as _, sync::Arc};
 
@@ -28,8 +30,8 @@ pub const PERMISSION_QUESTION_ID: &str = "__permission__";
 
 /// Constructs a stable `InquiryId` for a tool's permission prompt.
 ///
-/// Format: `"<tool_name>.__permission__"`. This is stable across
-/// different invocations of the same tool within a turn.
+/// Format: `"<tool_name>.__permission__"`.
+/// This is stable across different invocations of the same tool within a turn.
 #[must_use]
 pub fn permission_inquiry_id(tool_name: &str) -> InquiryId {
     InquiryId::new(format!("{tool_name}.{PERMISSION_QUESTION_ID}"))
@@ -37,8 +39,8 @@ pub fn permission_inquiry_id(tool_name: &str) -> InquiryId {
 
 /// Constructs a stable `InquiryId` for a tool question.
 ///
-/// Format: `"<tool_name>.<question_id>"`. This is stable across
-/// different invocations of the same tool within a turn.
+/// Format: `"<tool_name>.<question_id>"`.
+/// This is stable across different invocations of the same tool within a turn.
 #[must_use]
 pub fn tool_question_inquiry_id(tool_name: &str, question_id: &str) -> InquiryId {
     InquiryId::new(format!("{tool_name}.{question_id}"))
@@ -82,10 +84,11 @@ enum EditResult {
 /// This struct centralizes all interactive I/O for tools, allowing the
 /// coordinator to track when prompts are active.
 ///
-/// Uses type-erased backends (`Arc<dyn ...>`) to allow runtime injection
-/// of mock backends for testing.
+/// Uses type-erased backends (`Arc<dyn ...>`) to allow runtime injection of
+/// mock backends for testing.
 pub struct ToolPrompter {
-    /// Editor backend for edit modes. If `None`, edit mode falls back to Ask.
+    /// Editor backend for edit modes.
+    /// If `None`, edit mode falls back to Ask.
     editor: Option<Arc<dyn EditorBackend>>,
 
     /// Prompt backend for interactive prompts.
@@ -146,13 +149,15 @@ impl ToolPrompter {
     /// Prompts the user for permission to run a tool.
     ///
     /// Based on the `run_mode`, this may:
+    ///
     /// - Show an interactive prompt (Ask)
     /// - Open an editor for arguments (Edit)
     /// - Return immediately (Unattended)
     ///
     /// # Returns
     ///
-    /// - `PermissionResult::Run` if the user approved (with possibly modified args)
+    /// - `PermissionResult::Run` if the user approved (with possibly modified
+    ///   args)
     /// - `PermissionResult::Skip` if the user declined
     pub fn prompt_permission(&self, info: &PermissionInfo) -> Result<PermissionResult, Error> {
         match info.run_mode {
@@ -362,10 +367,12 @@ impl ToolPrompter {
         }
     }
 
-    /// Opens an editor for the user to provide reasoning for skipping tool execution.
+    /// Opens an editor for the user to provide reasoning for skipping tool
+    /// execution.
     ///
-    /// The editor is pre-populated with a placeholder prompt. If the user empties
-    /// the content or leaves only the placeholder, a default reason is returned.
+    /// The editor is pre-populated with a placeholder prompt.
+    /// If the user empties the content or leaves only the placeholder, a
+    /// default reason is returned.
     fn edit_text(&self, placeholder: &str) -> Result<Option<String>, Error> {
         let Some(editor) = &self.editor else {
             return Err(Error::Editor("No editor configured".to_string()));
@@ -383,7 +390,8 @@ impl ToolPrompter {
         }
     }
 
-    /// Opens an editor for the user to modify tool result before delivery to LLM.
+    /// Opens an editor for the user to modify tool result before delivery to
+    /// LLM.
     ///
     /// # Returns
     ///
@@ -457,14 +465,15 @@ impl ToolPrompter {
     /// Prompts the user for a tool-specific question.
     ///
     /// This handles different question types:
+    ///
     /// - Boolean (yes/no with optional persistence)
     /// - Select (choose from options)
     /// - Text (free text input)
     ///
     /// # Returns
     ///
-    /// A `QuestionResult` containing the answer and `persist_level` which indicates
-    /// whether the answer should be remembered for this turn.
+    /// A `QuestionResult` containing the answer and `persist_level` which
+    /// indicates whether the answer should be remembered for this turn.
     pub fn prompt_question(&self, question: &jp_tool::Question) -> Result<QuestionResult, Error> {
         let mut writer = self.printer.prompt_writer();
 
@@ -511,6 +520,7 @@ impl ToolPrompter {
     /// Prompts for a boolean answer with git-style options.
     ///
     /// Options:
+    ///
     /// - `y` = yes, just this once
     /// - `Y` = yes, and remember for this turn
     /// - `n` = no, just this once
@@ -585,8 +595,8 @@ fn build_permission_question(tool_name: &str, tool_source: &ToolSource) -> Strin
 /// Converts `SelectOption`s to `InlineOption`s for the prompt backend.
 ///
 /// Each option's value must be a single-character string (used as the key).
-/// The description becomes the help text. Options with non-single-char values
-/// are skipped.
+/// The description becomes the help text.
+/// Options with non-single-char values are skipped.
 fn select_options_to_inline(options: &[SelectOption]) -> Vec<InlineOption> {
     options
         .iter()

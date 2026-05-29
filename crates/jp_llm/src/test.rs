@@ -615,8 +615,8 @@ pub async fn run_chat_completion(
 
 /// Load a test fixture file as a binary attachment.
 ///
-/// The file is read from `crates/jp_llm/tests/fixtures/{path}` and its type
-/// is detected via `infer`.
+/// The file is read from `crates/jp_llm/tests/fixtures/{path}` and its type is
+/// detected via `infer`.
 pub(crate) fn fixture_attachment(path: impl AsRef<Path>) -> Attachment {
     let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
     let full = base.join(path.as_ref());

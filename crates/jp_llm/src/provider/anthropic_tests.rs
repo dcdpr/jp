@@ -181,7 +181,8 @@ fn test_opus_4_7_xhigh_effort_mapping() {
     assert_eq!(output_config.effort, Some(Effort::XHigh));
 }
 
-/// Unit test: Verify `XHigh` effort falls back to `High` for Opus 4.6 (no xhigh support).
+/// Unit test: Verify `XHigh` effort falls back to `High` for Opus 4.6 (no xhigh
+/// support).
 #[test]
 fn test_opus_4_6_xhigh_falls_back_to_high() {
     let model = ModelDetails {
@@ -341,8 +342,8 @@ fn test_opus_4_5_uses_budgetted_thinking() {
     assert!(request.output_config.is_none());
 }
 
-/// Verify structured output sets `output_config.format` when the last event
-/// is a `ChatRequest` with a schema.
+/// Verify structured output sets `output_config.format` when the last event is
+/// a `ChatRequest` with a schema.
 #[test]
 fn test_structured_output_sets_format() {
     let model = ModelDetails {
@@ -519,8 +520,8 @@ fn test_adaptive_thinking_with_structured_output() {
 
 /// When reasoning is enabled and `tool_choice` is forced, `create_request`
 /// should downgrade to auto + system prompt nudge, and return a
-/// `ForcedToolFallback` so `call()` can retry with forced `tool_choice`
-/// and thinking disabled.
+/// `ForcedToolFallback` so `call()` can retry with forced `tool_choice` and
+/// thinking disabled.
 #[test]
 fn test_forced_tool_with_reasoning_returns_fallback() {
     use crate::tool::{ToolDefinition, ToolDocs};
@@ -588,9 +589,9 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
     );
 }
 
-/// With multiple tools, `Function("specific")` is NOT normalized to
-/// `Required` and the fallback should carry `Tool { name }` so the
-/// retry targets that specific tool.
+/// With multiple tools, `Function("specific")` is NOT normalized to `Required`
+/// and the fallback should carry `Tool { name }` so the retry targets that
+/// specific tool.
 #[test]
 fn test_forced_tool_function_multi_tool_preserves_name() {
     use crate::tool::{ToolDefinition, ToolDocs};
@@ -833,8 +834,8 @@ fn test_find_merge_point_edge_cases() {
     }
 }
 
-/// When the last event is an assistant message and the model does NOT have
-/// the "prefill" feature, a synthetic user "continue" message is appended.
+/// When the last event is an assistant message and the model does NOT have the
+/// "prefill" feature, a synthetic user "continue" message is appended.
 #[test]
 fn test_continue_injected_when_prefill_unsupported() {
     let model = ModelDetails {
@@ -930,8 +931,8 @@ fn test_prefill_preserved_for_supported_models() {
     assert_eq!(request.messages.len(), 2); // user, assistant
 }
 
-/// Normal flow: last event is a user message. No injection needed regardless
-/// of prefill support.
+/// Normal flow: last event is a user message.
+/// No injection needed regardless of prefill support.
 #[test]
 fn test_no_injection_when_last_message_is_user() {
     let model = ModelDetails {

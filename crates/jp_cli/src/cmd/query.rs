@@ -2,8 +2,8 @@
 //!
 //! # Architecture Overview
 //!
-//! The query command handles conversational interactions with LLMs. It uses a
-//! component-based architecture with clear separation of concerns.
+//! The query command handles conversational interactions with LLMs.
+//! It uses a component-based architecture with clear separation of concerns.
 //!
 //! # Key Components
 //!
@@ -13,11 +13,11 @@
 //! - [`EventBuilder`]: Accumulates streamed chunks by index and produces
 //!   complete [`ConversationEvent`]s on flush.
 //!
-//! - [`ChatRenderer`]: Renders LLM output (reasoning and messages) to
-//!   the terminal with display mode support.
+//! - [`ChatRenderer`]: Renders LLM output (reasoning and messages) to the
+//!   terminal with display mode support.
 //!
-//! - [`StreamRetryState`]: Single source of
-//!   truth for stream retry logic (backoff, notification, state flushing).
+//! - [`StreamRetryState`]: Single source of truth for stream retry logic
+//!   (backoff, notification, state flushing).
 //!
 //! - [`ToolCoordinator`]: Manages parallel tool execution.
 //!
@@ -37,14 +37,14 @@
 //! See `docs/architecture/query-stream-pipeline.md` for the full design
 //! document.
 //!
-//! [`TurnCoordinator`]: turn::coordinator::TurnCoordinator
-//! [`EventBuilder`]: jp_llm::event_builder::EventBuilder
-//! [`ConversationEvent`]: jp_conversation::event::ConversationEvent
 //! [`ChatRenderer`]: crate::render::ChatRenderer
-//! [`StreamRetryState`]: stream::retry::StreamRetryState
+//! [`ConversationEvent`]: jp_conversation::event::ConversationEvent
+//! [`EventBuilder`]: jp_llm::event_builder::EventBuilder
 //! [`InterruptHandler`]: interrupt::handler::InterruptHandler
+//! [`StreamRetryState`]: stream::retry::StreamRetryState
 //! [`ToolCallRequest`]: jp_conversation::event::ToolCallRequest
 //! [`ToolCallResponse`]: jp_conversation::event::ToolCallResponse
+//! [`TurnCoordinator`]: turn::coordinator::TurnCoordinator
 
 mod interrupt;
 mod stream;
@@ -122,8 +122,9 @@ type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + 
 
 #[derive(Debug, Default, clap::Args)]
 pub(crate) struct Query {
-    /// The query to send. If not provided, uses `$JP_EDITOR`, `$VISUAL` or
-    /// `$EDITOR` to open edit the query in an editor.
+    /// The query to send.
+    /// If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit
+    /// the query in an editor.
     #[arg(value_parser = string_or_path)]
     query: Option<Vec<String>>,
 
@@ -138,9 +139,8 @@ pub(crate) struct Query {
     ///
     /// Accepts either a full JSON Schema object or a concise DSL:
     ///
-    ///   -s 'summary'                   → single string field
-    ///   -s 'name, age int, bio'        → mixed types
-    ///   -s 'summary: a brief summary'  → field with description
+    /// \-s 'summary' → single string field -s 'name, age int, bio' → mixed
+    /// types -s 'summary: a brief summary' → field with description
     ///
     /// See: <https://jp.computer/rfd/030-schema-dsl>
     #[arg(short = 's', long, value_parser = string_or_path.try_map(parse_schema))]
@@ -149,8 +149,9 @@ pub(crate) struct Query {
     /// Replay the last message in the conversation.
     ///
     /// If a query is provided, it will be appended to the end of the previous
-    /// message. If no query is provided, $EDITOR will open with the last
-    /// message in the conversation.
+    /// message.
+    /// If no query is provided, $EDITOR will open with the last message in the
+    /// conversation.
     #[arg(long = "replay", conflicts_with = "new")]
     replay: bool,
 
@@ -199,8 +200,9 @@ pub(crate) struct Query {
     /// Whether and how to edit the query.
     ///
     /// Setting this flag to `true`, omitting it, or using it as a boolean flag
-    /// (e.g. `--edit`) will use the default editor configured elsewhere, or
-    /// return an error if no editor is configured and one is required.
+    /// (e.g.
+    /// `--edit`) will use the default editor configured elsewhere, or return an
+    /// error if no editor is configured and one is required.
     ///
     /// If set to `false`, the editor will be disabled (similar to `--no-edit`),
     /// which might result in an error if the editor is required.
@@ -216,23 +218,24 @@ pub(crate) struct Query {
     #[arg(short = 'E', long = "no-edit", conflicts_with = "edit")]
     no_edit: bool,
 
-    /// Pre-fill the editor with the last assistant message quoted as a
-    /// markdown blockquote (each line prefixed with `> `).
+    /// Pre-fill the editor with the last assistant message quoted as a markdown
+    /// blockquote (each line prefixed with ` >  `).
     ///
     /// Useful for inline replies: open `$EDITOR` with the assistant's last
-    /// response pre-quoted, then intersperse your replies between the
-    /// quoted lines (mutt/email style). The complete buffer — quotes plus
-    /// your replies — becomes your next message.
+    /// response pre-quoted, then intersperse your replies between the quoted
+    /// lines (mutt/email style).
+    /// The complete buffer — quotes plus your replies — becomes your next
+    /// message.
     ///
-    /// Forces the editor open by default; respects `--no-edit` /
-    /// `--edit=false` if explicitly suppressed, in which case the quoted
-    /// text is sent as-is. Composes with `--replay`: the quote is taken
-    /// from the stream *after* the replayed turn has been trimmed, i.e.
-    /// the assistant message preceding the turn being replayed.
+    /// Forces the editor open by default; respects `--no-edit` / `--edit=false`
+    /// if explicitly suppressed, in which case the quoted text is sent as-is.
+    /// Composes with `--replay`: the quote is taken from the stream *after* the
+    /// replayed turn has been trimmed, i.e. the assistant message preceding the
+    /// turn being replayed.
     ///
-    /// If no prior assistant message exists in this conversation, a
-    /// warning is emitted and the editor opens with whatever other content
-    /// was seeded (query, stdin, or empty).
+    /// If no prior assistant message exists in this conversation, a warning is
+    /// emitted and the editor opens with whatever other content was seeded
+    /// (query, stdin, or empty).
     #[arg(long = "quote")]
     quote: bool,
 
@@ -283,16 +286,17 @@ pub(crate) struct Query {
     /// Set a custom title for the conversation.
     ///
     /// Applied to the resolved conversation (new, forked, or resumed) before
-    /// the turn runs. Skips title auto-generation for new conversations —
-    /// your title wins. Mutually exclusive with `--no-title`.
+    /// the turn runs.
+    /// Skips title auto-generation for new conversations — your title wins.
+    /// Mutually exclusive with `--no-title`.
     #[arg(long = "title", conflicts_with = "no_title")]
     title: Option<String>,
 
     /// Disable the title for the conversation.
     ///
-    /// Clears any existing title on the resolved conversation (new, forked,
-    /// or resumed) and skips auto-generation for this run. Mutually
-    /// exclusive with `--title`.
+    /// Clears any existing title on the resolved conversation (new, forked, or
+    /// resumed) and skips auto-generation for this run.
+    /// Mutually exclusive with `--title`.
     #[arg(long = "no-title", conflicts_with = "title")]
     no_title: bool,
 
@@ -300,9 +304,9 @@ pub(crate) struct Query {
     ///
     /// If a value is provided, the tool matching the value will be used.
     ///
-    /// Note that this setting is *not* persisted across queries. To persist
-    /// tool choice behavior, set the `assistant.tool_choice` field in a
-    /// configuration file.
+    /// Note that this setting is *not* persisted across queries.
+    /// To persist tool choice behavior, set the `assistant.tool_choice` field
+    /// in a configuration file.
     #[arg(short = 'u', long = "tool-use")]
     tool_use: Option<Option<String>>,
 
@@ -517,8 +521,8 @@ impl Query {
     /// Build the chat request for this query.
     ///
     /// Returns the editor details and the [`ChatRequest`], if non-empty.
-    /// The request is **not** added to the stream — that is the
-    /// responsibility of [`TurnCoordinator::start_turn`].
+    /// The request is **not** added to the stream — that is the responsibility
+    /// of [`TurnCoordinator::start_turn`].
     ///
     /// [`TurnCoordinator::start_turn`]: turn::TurnCoordinator::start_turn
     fn build_conversation(
@@ -773,10 +777,10 @@ impl Query {
 
     /// Returns `true` if editing is explicitly enabled.
     ///
-    /// This means the `--edit` flag was provided (but not `--edit=false`),
-    /// or `--quote` was provided (which implies editing). In either case the
-    /// editor should be opened, regardless of whether a query is provided as
-    /// an argument.
+    /// This means the `--edit` flag was provided (but not `--edit=false`), or
+    /// `--quote` was provided (which implies editing).
+    /// In either case the editor should be opened, regardless of whether a
+    /// query is provided as an argument.
     fn force_edit(&self) -> bool {
         !self.force_no_edit() && (self.edit.is_some() || self.quote)
     }
@@ -830,8 +834,8 @@ impl Query {
 /// Return the most recent assistant message text in the stream.
 ///
 /// Walks the stream in reverse and returns the first `ChatResponse::Message` it
-/// encounters. Reasoning, structured-data responses, and tool calls are
-/// skipped.
+/// encounters.
+/// Reasoning, structured-data responses, and tool calls are skipped.
 fn last_assistant_message(stream: &ConversationStream) -> Option<&str> {
     stream
         .iter()
@@ -840,7 +844,7 @@ fn last_assistant_message(stream: &ConversationStream) -> Option<&str> {
         .find_map(|r| r.as_message())
 }
 
-/// Prefix each line of `text` with `> ` for use as a markdown blockquote.
+/// Prefix each line of `text` with ` >  ` for use as a markdown blockquote.
 ///
 /// Empty lines are emitted as just `>` (no trailing space) so the blockquote
 /// stays visually continuous across paragraph breaks while avoiding
@@ -861,7 +865,8 @@ fn blockquote(text: &str) -> String {
 /// A single tool selection directive from the CLI.
 ///
 /// Directives are evaluated left-to-right, allowing users to compose tool sets
-/// precisely (e.g. `--no-tools --tool=write --no-tools=fs_modify_file`).
+/// precisely (e.g.
+/// `--no-tools --tool=write --no-tools=fs_modify_file`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ToolDirective {
     EnableAll,
@@ -1008,9 +1013,9 @@ fn fork_conversation(
 
 /// Apply `--title` / `--no-title` to the resolved conversation.
 ///
-/// Both flags act on `metadata.title` directly so the run ends with the
-/// title the user asked for, regardless of whether the conversation is new,
-/// freshly forked (which inherits the source's title), or resumed:
+/// Both flags act on `metadata.title` directly so the run ends with the title
+/// the user asked for, regardless of whether the conversation is new, freshly
+/// forked (which inherits the source's title), or resumed:
 ///
 /// - `--title T` sets the title to `Some(T)`.
 /// - `--no-title` clears any existing title.
@@ -1132,8 +1137,8 @@ impl IntoPartialAppConfig for Query {
 
 /// Build the sorted list of system prompt sections from assistant config.
 ///
-/// Used by both [`build_thread`] and [`LlmInquiryBackend`] construction
-/// to ensure the inquiry backend sees the same sections as the main thread.
+/// Used by both [`build_thread`] and [`LlmInquiryBackend`] construction to
+/// ensure the inquiry backend sees the same sections as the main thread.
 ///
 /// [`LlmInquiryBackend`]: crate::cmd::query::tool::inquiry::LlmInquiryBackend
 pub(super) fn build_sections(assistant: &AssistantConfig, has_tools: bool) -> Vec<SectionConfig> {
@@ -1389,8 +1394,8 @@ fn parse_schema(s: String) -> Result<schemars::Schema> {
         .map_err(Into::into)
 }
 
-/// Parse the `--fork` value. Empty string means "all turns", a number means
-/// "keep last N turns".
+/// Parse the `--fork` value.
+/// Empty string means "all turns", a number means "keep last N turns".
 fn parse_fork_turns(s: &str) -> std::result::Result<Option<usize>, String> {
     if s.is_empty() {
         return Ok(None);

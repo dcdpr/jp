@@ -111,8 +111,8 @@ impl ToolDocs {
 /// The outcome of a tool execution.
 ///
 /// This type represents the possible results of executing a tool's underlying
-/// command or MCP call, without any interactive prompts. The caller is
-/// responsible for:
+/// command or MCP call, without any interactive prompts.
+/// The caller is responsible for:
 ///
 /// 1. Handling permission prompts **before** calling
 ///    [`ToolDefinition::execute()`].
@@ -159,6 +159,7 @@ pub enum ExecutionOutcome {
     /// Tool needs additional input before it can complete.
     ///
     /// The caller should:
+    ///
     /// 1. Present the question to the user (or delegate to the assistant)
     /// 2. Collect the answer
     /// 3. Call [`ToolDefinition::execute()`] again with the answer in `answers`
@@ -189,8 +190,9 @@ impl ExecutionOutcome {
     /// # Note
     ///
     /// For [`ExecutionOutcome::NeedsInput`], this returns a placeholder
-    /// response. The caller should typically handle `NeedsInput` specially
-    /// rather than converting it directly to a response.
+    /// response.
+    /// The caller should typically handle `NeedsInput` specially rather than
+    /// converting it directly to a response.
     #[must_use]
     pub fn into_response(self) -> ToolCallResponse {
         match self {
@@ -226,7 +228,8 @@ impl ExecutionOutcome {
         matches!(self, Self::Cancelled { .. })
     }
 
-    /// Returns `true` if this is a `Completed` outcome with a successful result.
+    /// Returns `true` if this is a `Completed` outcome with a successful
+    /// result.
     #[must_use]
     pub fn is_success(&self) -> bool {
         matches!(self, Self::Completed { result: Ok(_), .. })
@@ -235,9 +238,9 @@ impl ExecutionOutcome {
 
 /// Result of running a tool command.
 ///
-/// This is the single parsing point for all tool command output. Both tool
-/// execution and argument formatting go through this type, ensuring consistent
-/// handling of `Outcome` variants (including error traces).
+/// This is the single parsing point for all tool command output.
+/// Both tool execution and argument formatting go through this type, ensuring
+/// consistent handling of `Outcome` variants (including error traces).
 #[derive(Debug)]
 pub enum CommandResult {
     /// Tool produced content.
@@ -263,8 +266,8 @@ pub enum CommandResult {
 
     /// stdout wasn't valid `Outcome` JSON.
     ///
-    /// Falls back to treating stdout as plain text. The `success` flag
-    /// indicates the process exit status.
+    /// Falls back to treating stdout as plain text.
+    /// The `success` flag indicates the process exit status.
     RawOutput {
         /// Raw stdout content.
         stdout: String,
@@ -280,8 +283,9 @@ pub enum CommandResult {
 impl CommandResult {
     /// Format a transient error message including trace details.
     ///
-    /// If the trace is empty, returns just the message. Otherwise appends
-    /// the trace entries so the LLM (or user) can see the root cause.
+    /// If the trace is empty, returns just the message.
+    /// Otherwise appends the trace entries so the LLM (or user) can see the
+    /// root cause.
     #[must_use]
     pub fn format_error(message: &str, trace: &[String]) -> String {
         if trace.is_empty() {
@@ -349,11 +353,12 @@ pub struct ToolTrace<'a> {
 /// `{{tool.arguments.title}}` produces the bare string, not a JSON-quoted one.
 /// Composites (sequences, maps, other iterables) serialize as JSON, so
 /// `{{tool}}` and `{{context}}` produce valid JSON blobs without needing an
-/// explicit `| tojson` filter at every call site. `null`/undefined render as
-/// the literal `null`, matching the JSON convention used by tool authors.
+/// explicit `| tojson` filter at every call site.
+/// `null`/undefined render as the literal `null`, matching the JSON convention
+/// used by tool authors.
 ///
-/// Safe strings (e.g. the output of the `tojson` filter) pass through
-/// unchanged so explicit opt-in JSON rendering continues to work.
+/// Safe strings (e.g. the output of the `tojson` filter) pass through unchanged
+/// so explicit opt-in JSON rendering continues to work.
 fn format_tool_template_value(
     out: &mut minijinja::Output<'_>,
     _state: &minijinja::State<'_, '_>,
@@ -386,7 +391,8 @@ fn format_tool_template_value(
 /// Run a tool command asynchronously with cancellation support.
 ///
 /// This is the **single entry point** for running tool commands (both execution
-/// and argument formatting). It handles:
+/// and argument formatting).
+/// It handles:
 ///
 /// 1. Template rendering via [`minijinja`]
 /// 2. Process spawning via Tokio's [`Command`]
@@ -397,8 +403,9 @@ fn format_tool_template_value(
 /// # Panics
 ///
 /// Panics if tokio fails to attach the piped stdout/stderr handles to the
-/// spawned child. Both are requested via `Stdio::piped()`, so this is not
-/// expected to happen in practice.
+/// spawned child.
+/// Both are requested via `Stdio::piped()`, so this is not expected to happen
+/// in practice.
 pub async fn run_tool_command(
     command: CommandConfig,
     ctx: Value,
@@ -544,8 +551,8 @@ async fn forward_stderr(
 
 /// Parse raw command output into a [`CommandResult`].
 ///
-/// Tries to deserialize stdout as [`jp_tool::Outcome`]. If that fails,
-/// falls back to [`CommandResult::RawOutput`].
+/// Tries to deserialize stdout as [`jp_tool::Outcome`].
+/// If that fails, falls back to [`CommandResult::RawOutput`].
 fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandResult {
     let stdout_str = String::from_utf8_lossy(stdout);
 
@@ -589,32 +596,37 @@ impl ToolDefinition {
     /// Execute the tool without any interactive prompts.
     ///
     /// This is a pure execution method that runs the tool's underlying command
-    /// or MCP call and returns an [`ExecutionOutcome`]. All interactive
-    /// decisions (permission prompts, result editing, question handling) are
-    /// the caller's responsibility.
+    /// or MCP call and returns an [`ExecutionOutcome`].
+    /// All interactive decisions (permission prompts, result editing, question
+    /// handling) are the caller's responsibility.
     ///
     /// # Arguments
     ///
-    /// * `id` - The tool call ID for correlation with the request
-    /// * `arguments` - The tool arguments (caller is responsible for any pre-processing)
-    /// * `answers` - Pre-provided answers to tool questions (from previous `NeedsInput`)
-    /// * `config` - Tool configuration
-    /// * `mcp_client` - MCP client for MCP tool execution
-    /// * `root` - Working directory for local tool execution
-    /// * `cancellation_token` - Token to cancel long-running execution
-    /// * `builtin_executors` - Registry of builtin tools
+    /// - `id` - The tool call ID for correlation with the request
+    /// - `arguments` - The tool arguments (caller is responsible for any
+    ///   pre-processing)
+    /// - `answers` - Pre-provided answers to tool questions (from previous
+    ///   `NeedsInput`)
+    /// - `config` - Tool configuration
+    /// - `mcp_client` - MCP client for MCP tool execution
+    /// - `root` - Working directory for local tool execution
+    /// - `cancellation_token` - Token to cancel long-running execution
+    /// - `builtin_executors` - Registry of builtin tools
     ///
     /// # Returns
     ///
-    /// - [`ExecutionOutcome::Completed`] - Tool finished (check inner `Result` for success/error)
+    /// - [`ExecutionOutcome::Completed`] - Tool finished (check inner `Result`
+    ///   for success/error)
     /// - [`ExecutionOutcome::NeedsInput`] - Tool needs user input to continue
-    /// - [`ExecutionOutcome::Cancelled`] - Execution was cancelled via the token
+    /// - [`ExecutionOutcome::Cancelled`] - Execution was cancelled via the
+    ///   token
     ///
     /// # Errors
     ///
     /// Returns [`ToolError`] for infrastructure errors (spawn failure, missing
-    /// command, etc.). Tool-level errors (command returned non-zero) are
-    /// returned as `Ok(ExecutionOutcome::Completed { result: Err(...) })`.
+    /// command, etc.).
+    /// Tool-level errors (command returned non-zero) are returned as
+    /// `Ok(ExecutionOutcome::Completed { result: Err(...) })`.
     ///
     /// # Example
     ///
@@ -683,8 +695,9 @@ impl ToolDefinition {
 
     /// Execute a local tool and return the outcome.
     ///
-    /// This is the pure execution path for local tools. It validates arguments,
-    /// runs the command, and converts the result to an `ExecutionOutcome`.
+    /// This is the pure execution path for local tools.
+    /// It validates arguments, runs the command, and converts the result to an
+    /// `ExecutionOutcome`.
     async fn execute_local(
         &self,
         id: String,
@@ -749,8 +762,9 @@ impl ToolDefinition {
 
     /// Execute an MCP tool and return the outcome.
     ///
-    /// This is the pure execution path for MCP tools. It calls the MCP server
-    /// and converts the result to an `ExecutionOutcome`.
+    /// This is the pure execution path for MCP tools.
+    /// It calls the MCP server and converts the result to an
+    /// `ExecutionOutcome`.
     async fn execute_mcp(
         &self,
         id: String,
@@ -874,8 +888,9 @@ impl ToolDefinition {
 /// If the text is short (single line, ≤120 chars), it is returned as the
 /// summary with no remaining description.
 ///
-/// Otherwise, the first sentence is extracted as the summary. A sentence
-/// ends at `. ` or `.\n`. The remainder becomes the description.
+/// Otherwise, the first sentence is extracted as the summary.
+/// A sentence ends at ` .  ` or `.\n`.
+/// The remainder becomes the description.
 pub(crate) fn split_description(text: &str) -> (String, Option<String>) {
     let text = text.trim();
 
@@ -938,10 +953,11 @@ pub(crate) fn split_description(text: &str) -> (String, Option<String>) {
 
 /// Fill in configured default values for missing parameters.
 ///
-/// LLMs commonly omit parameters that have a `default` in the JSON schema,
-/// even when those parameters are marked `required`. This function patches
-/// the arguments map before validation so that such omissions don't cause
-/// spurious "missing argument" errors and unnecessary LLM retries.
+/// LLMs commonly omit parameters that have a `default` in the JSON schema, even
+/// when those parameters are marked `required`.
+/// This function patches the arguments map before validation so that such
+/// omissions don't cause spurious "missing argument" errors and unnecessary LLM
+/// retries.
 fn apply_parameter_defaults(
     arguments: &mut Map<String, Value>,
     parameters: &IndexMap<String, ToolParameterConfig>,
@@ -1028,9 +1044,9 @@ fn validate_tool_arguments(
 
 /// Resolve all enabled tool definitions from config.
 ///
-/// If `forced_tool` is provided (e.g. from `ToolChoice::Function`), that
-/// tool is included even when its `enable()` check returns `false`. This
-/// prevents a mismatch between `tool_choice` and the declared tools list,
+/// If `forced_tool` is provided (e.g. from `ToolChoice::Function`), that tool
+/// is included even when its `enable()` check returns `false`.
+/// This prevents a mismatch between `tool_choice` and the declared tools list,
 /// which some providers (notably Google/Gemini) reject outright.
 pub async fn tool_definitions(
     configs: impl Iterator<Item = (&str, ToolConfigWithDefaults)>,
@@ -1359,9 +1375,10 @@ fn merge_mcp_param(
 /// Merge a user-provided description with an MCP server description.
 ///
 /// If the user provided a description containing `{{description}}`, the MCP
-/// description is substituted in. If the user provided a description without
-/// the template, it takes precedence. If no user description exists, the MCP
-/// description is used as-is.
+/// description is substituted in.
+/// If the user provided a description without the template, it takes
+/// precedence.
+/// If no user description exists, the MCP description is used as-is.
 fn merge_description(user: Option<String>, mcp: Option<&str>) -> Option<String> {
     match (user, mcp) {
         (None, Some(mcp)) => Some(mcp.to_owned()),

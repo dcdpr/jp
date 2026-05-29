@@ -20,9 +20,10 @@ use super::ToolDefinition;
 /// # Design
 ///
 /// The executor is intentionally simple - it just executes tools with given
-/// answers. All decision-making about question targets, static answers, and how
-/// to handle `NeedsInput` is done by the coordinator, which has access to the
-/// tool configuration.
+/// answers.
+/// All decision-making about question targets, static answers, and how to
+/// handle `NeedsInput` is done by the coordinator, which has access to the tool
+/// configuration.
 #[async_trait]
 pub trait Executor: Send + Sync {
     /// Returns the tool call ID.
@@ -33,9 +34,11 @@ pub trait Executor: Send + Sync {
 
     /// Returns the tool call arguments.
     ///
-    /// This is separate from [`permission_info()`](Self::permission_info)
-    /// because arguments are always available, while permission info is only
-    /// present for tools that require a permission prompt.
+    /// This is separate from [`permission_info()`] because arguments are always
+    /// available, while permission info is only present for tools that require
+    /// a permission prompt.
+    ///
+    /// [`permission_info()`]: Self::permission_info
     fn arguments(&self) -> &Map<String, Value>;
 
     /// Returns information needed for permission prompting.
@@ -47,26 +50,29 @@ pub trait Executor: Send + Sync {
     /// Updates the arguments to use for execution.
     ///
     /// This is called after permission prompting if the user edited the
-    /// arguments (via `RunMode::Edit`). The new arguments replace the original
-    /// arguments from the tool call request.
+    /// arguments (via `RunMode::Edit`).
+    /// The new arguments replace the original arguments from the tool call
+    /// request.
     fn set_arguments(&mut self, args: Value);
 
     /// Executes the tool once with the given answers.
     ///
-    /// This method performs a single execution pass. If the tool needs
-    /// additional input, it returns `ExecutorResult::NeedsInput` and the
-    /// coordinator handles prompting and retrying.
+    /// This method performs a single execution pass.
+    /// If the tool needs additional input, it returns
+    /// `ExecutorResult::NeedsInput` and the coordinator handles prompting and
+    /// retrying.
     ///
     /// The executor doesn't know how questions should be answered - it just
-    /// reports that input is needed. The coordinator looks up the tool
-    /// configuration to determine whether to prompt the user or ask the LLM.
+    /// reports that input is needed.
+    /// The coordinator looks up the tool configuration to determine whether to
+    /// prompt the user or ask the LLM.
     ///
     /// # Arguments
     ///
-    /// * `answers` - Accumulated answers from previous `NeedsInput` responses
-    /// * `mcp_client` - MCP client for remote tool execution
-    /// * `root` - Project root directory
-    /// * `cancellation_token` - Token to cancel execution
+    /// - `answers` - Accumulated answers from previous `NeedsInput` responses
+    /// - `mcp_client` - MCP client for remote tool execution
+    /// - `root` - Project root directory
+    /// - `cancellation_token` - Token to cancel execution
     async fn execute(
         &self,
         answers: &IndexMap<String, Value>,
@@ -83,8 +89,8 @@ pub trait Executor: Send + Sync {
 pub trait ExecutorSource: Send + Sync {
     /// Creates an executor for the given tool call request.
     ///
-    /// Returns `None` if the tool cannot be resolved (e.g. missing
-    /// from the definitions).
+    /// Returns `None` if the tool cannot be resolved (e.g. missing from the
+    /// definitions).
     fn create(
         &self,
         request: ToolCallRequest,
@@ -95,8 +101,9 @@ pub trait ExecutorSource: Send + Sync {
 /// Result of a tool execution attempt.
 ///
 /// Tools may need multiple rounds of execution if they require additional
-/// input. This enum allows the executor to return control to the coordinator,
-/// which decides how to handle the `NeedsInput` case by looking up the question
+/// input.
+/// This enum allows the executor to return control to the coordinator, which
+/// decides how to handle the `NeedsInput` case by looking up the question
 /// configuration.
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)] // NeedsInput variant is larger but rarely used
@@ -107,8 +114,9 @@ pub enum ExecutorResult {
     /// Tool needs additional input before it can continue.
     ///
     /// The executor doesn't know who should answer - it just reports that input
-    /// is needed. The coordinator looks up the question configuration to
-    /// determine the target:
+    /// is needed.
+    /// The coordinator looks up the question configuration to determine the
+    /// target:
     ///
     /// - `User`: Prompt the user interactively, then restart the tool
     /// - `Assistant`: Format a response asking the LLM to re-run with answers
@@ -291,8 +299,8 @@ impl TestExecutorSource {
 
     /// Returns stub [`ToolDefinition`]s for all registered tool names.
     ///
-    /// Useful for passing to `run_turn_loop` so the availability check
-    /// accepts the tools this source can handle.
+    /// Useful for passing to `run_turn_loop` so the availability check accepts
+    /// the tools this source can handle.
     #[must_use]
     pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
         self.factories

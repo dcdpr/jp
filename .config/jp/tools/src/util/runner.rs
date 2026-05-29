@@ -92,8 +92,10 @@ pub struct RunnerOpts<'a> {
     pub macos_sandbox_profile: Option<&'a str>,
 
     /// If `true`, the process inherits NO environment variables from the
-    /// parent. Only the variables in `env` are set. Use this for sandboxed
-    /// processes to prevent leaking secrets via env vars.
+    /// parent.
+    /// Only the variables in `env` are set.
+    /// Use this for sandboxed processes to prevent leaking secrets via env
+    /// vars.
     pub clean_env: bool,
 }
 
@@ -272,7 +274,8 @@ impl MockProcessRunner {
         Self::builder().expect_any().returns_error(stderr)
     }
 
-    /// Create a mock that expects no commands. Panics if any command is run.
+    /// Create a mock that expects no commands.
+    /// Panics if any command is run.
     pub fn never_called() -> Self {
         Self {
             expectations: Arc::new(Mutex::new(VecDeque::new())),

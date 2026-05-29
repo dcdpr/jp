@@ -92,9 +92,9 @@ impl Set {
 
 /// File target for `config set`.
 ///
-/// Mutually exclusive with `--id` (conversation targeting). When none of these
-/// flags are set and no `--id` is given, the workspace config file is used as
-/// the default.
+/// Mutually exclusive with `--id` (conversation targeting).
+/// When none of these flags are set and no `--id` is given, the workspace
+/// config file is used as the default.
 #[derive(Debug, Clone, Copy, Default, PartialEq, clap::Args)]
 #[group(required = false, multiple = false)]
 struct FileTarget {

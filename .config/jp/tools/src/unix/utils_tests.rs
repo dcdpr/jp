@@ -19,7 +19,8 @@ fn ctx() -> (camino_tempfile::Utf8TempDir, Context) {
     (dir, ctx)
 }
 
-/// Simulated filesystem for tests. Only these paths "exist".
+/// Simulated filesystem for tests.
+/// Only these paths "exist".
 ///
 /// Normalizes backslashes so the mock works on Windows where
 /// `clean_path::clean` rewrites `/` to `\`.

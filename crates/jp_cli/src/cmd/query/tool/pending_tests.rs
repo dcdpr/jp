@@ -35,9 +35,9 @@ fn empty_stream_yields_empty_plan() {
     assert!(plan.is_empty());
 }
 
-/// Plan items appear in document order, indexed 0..N. This matches the
-/// `perm_tool_index` numbering of the previous design and what
-/// `commit_tool_responses` expects when merging Vecs by index.
+/// Plan items appear in document order, indexed 0..
+/// N. This matches the `perm_tool_index` numbering of the previous design and
+/// what `commit_tool_responses` expects when merging Vecs by index.
 #[test]
 fn plan_items_are_in_document_order() {
     let mut stream = ConversationStream::new_test();
@@ -72,9 +72,10 @@ fn plan_items_are_in_document_order() {
 }
 
 /// Already-responded requests are skipped — this is what makes the
-/// stream-as-source-of-truth design work across multiple cycles within a
-/// single turn. Cycle 1's requests have responses by cycle 2; only cycle
-/// 2's new unresponded requests should appear in the plan.
+/// stream-as-source-of-truth design work across multiple cycles within a single
+/// turn.
+/// Cycle 1's requests have responses by cycle 2; only cycle 2's new unresponded
+/// requests should appear in the plan.
 #[test]
 fn responded_requests_are_skipped() {
     let mut stream = ConversationStream::new_test();
@@ -99,10 +100,11 @@ fn responded_requests_are_skipped() {
     assert_eq!(items[0].index, 0);
 }
 
-/// Orphans interleaved with non-orphan items must keep the plan index
-/// they would have occupied in document order. The downstream
-/// `commit_tool_responses` sorts by that index, so any other choice would
-/// reorder responses relative to their requests in the persisted stream.
+/// Orphans interleaved with non-orphan items must keep the plan index they
+/// would have occupied in document order.
+/// The downstream `commit_tool_responses` sorts by that index, so any other
+/// choice would reorder responses relative to their requests in the persisted
+/// stream.
 #[test]
 fn orphan_index_matches_stream_position() {
     let mut stream = ConversationStream::new_test();
@@ -138,10 +140,11 @@ fn orphan_index_matches_stream_position() {
 }
 
 /// A request in the stream without a matching pending entry is reported as
-/// orphaned. In normal operation this should never happen — the streaming
-/// phase always populates pending for every request it adds. Treating it
-/// as a hard error gives us early signal if a future code path bypasses
-/// the prep flow.
+/// orphaned.
+/// In normal operation this should never happen — the streaming phase always
+/// populates pending for every request it adds.
+/// Treating it as a hard error gives us early signal if a future code path
+/// bypasses the prep flow.
 #[test]
 fn unmatched_request_is_reported_as_orphaned() {
     let mut stream = ConversationStream::new_test();
@@ -163,10 +166,10 @@ fn unmatched_request_is_reported_as_orphaned() {
     assert_eq!(orphaned[0].1.id, "ghost");
 }
 
-/// The plan walks only the current (most recent) turn. Tool calls from a
-/// prior turn — even unresponded ones — must not leak in. The top-level
-/// `query.rs` sanitize pass and the per-cycle sanitize in `run_turn_loop`
-/// handle prior-turn orphans separately.
+/// The plan walks only the current (most recent) turn.
+/// Tool calls from a prior turn — even unresponded ones — must not leak in.
+/// The top-level `query.rs` sanitize pass and the per-cycle sanitize in
+/// `run_turn_loop` handle prior-turn orphans separately.
 #[test]
 fn previous_turn_requests_are_ignored() {
     let mut stream = ConversationStream::new_test();
@@ -196,9 +199,9 @@ fn previous_turn_requests_are_ignored() {
     assert_eq!(items[0].request.id, "new");
 }
 
-/// `take` returns each entry exactly once. The signature reflects the
-/// invariant: an `ExecutionPlan` consumes its corresponding pending
-/// entries, leaving the cache empty for the next cycle.
+/// `take` returns each entry exactly once.
+/// The signature reflects the invariant: an `ExecutionPlan` consumes its
+/// corresponding pending entries, leaving the cache empty for the next cycle.
 #[test]
 fn build_consumes_pending_entries() {
     let mut stream = ConversationStream::new_test();

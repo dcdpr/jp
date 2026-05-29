@@ -413,8 +413,8 @@ mod apply_patterns_content {
         ]);
     }
 
-    /// Regression: multiline replacement where old and new have the same
-    /// number of lines but different content.
+    /// Regression: multiline replacement where old and new have the same number
+    /// of lines but different content.
     #[test]
     fn test_edge_case_changing_line_count() {
         let old = "/// A tool call response event - the result of executing a tool.\n///\n/// \
@@ -1411,8 +1411,8 @@ mod auto_approve {
         assert_eq!(after, "goodbye world\n");
     }
 
-    /// Without heuristics (default "always" trigger), the same small edit
-    /// still triggers the inquiry.
+    /// Without heuristics (default "always" trigger), the same small edit still
+    /// triggers the inquiry.
     #[test]
     fn test_small_edit_without_heuristics_triggers_inquiry() {
         let (_dir, ctx) = ctx();
@@ -1437,8 +1437,8 @@ mod auto_approve {
         });
     }
 
-    /// Large edit exceeding the changed-lines threshold still triggers
-    /// inquiry even with heuristics on.
+    /// Large edit exceeding the changed-lines threshold still triggers inquiry
+    /// even with heuristics on.
     #[test]
     fn test_large_edit_still_triggers_inquiry() {
         let (_dir, ctx) = ctx();

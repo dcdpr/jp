@@ -1,6 +1,7 @@
 //! Integration tests for the `unix_utils` sandbox on macOS.
 //!
 //! These tests run actual utilities inside `sandbox-exec` and verify that:
+//!
 //! - Workspace files are readable.
 //! - Sensitive paths (`/Users`, `/tmp`) are blocked.
 //! - File writes are blocked.

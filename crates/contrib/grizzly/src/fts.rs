@@ -1,8 +1,8 @@
 //! FTS5 full-text search tables and queries.
 //!
-//! Creates temporary in-memory FTS5 virtual tables populated from Bear's
-//! notes, then queries them with BM25 ranking (unicode61 tokenizer) or
-//! substring matching (trigram tokenizer).
+//! Creates temporary in-memory FTS5 virtual tables populated from Bear's notes,
+//! then queries them with BM25 ranking (unicode61 tokenizer) or substring
+//! matching (trigram tokenizer).
 
 use rusqlite::Connection;
 
@@ -70,8 +70,8 @@ pub fn search_trigrams(
 /// Build an FTS5 MATCH query from user search terms.
 ///
 /// Each term is double-quoted (phrase match) and multiple terms are combined
-/// with AND. Quoting prevents FTS5 operators in user input from being
-/// interpreted.
+/// with AND.
+/// Quoting prevents FTS5 operators in user input from being interpreted.
 fn build_query(queries: &[String]) -> String {
     queries
         .iter()

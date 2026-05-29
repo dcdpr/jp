@@ -10,14 +10,16 @@ use crate::Task;
 #[derive(Debug, Default)]
 pub struct TaskHandler {
     tasks: JoinSet<Result<Box<dyn Task>, Box<dyn Error + Send + Sync>>>,
-    /// Soft-cancellation signal. Firing it asks each task's `run()` to
-    /// return promptly; well-behaved tasks then proceed to their `sync()`
-    /// phase under [`TaskHandler::sync`]. Tasks that don't observe the
-    /// token are force-aborted after the grace window.
+    /// Soft-cancellation signal.
+    /// Firing it asks each task's `run()` to return promptly; well-behaved
+    /// tasks then proceed to their `sync()` phase under [`TaskHandler::sync`].
+    /// Tasks that don't observe the token are force-aborted after the grace
+    /// window.
     cancel_token: CancellationToken,
-    /// Hard-cancellation signal. Firing it short-circuits both the soft
-    /// wait and the grace window in [`TaskHandler::sync`], force-aborts
-    /// the `JoinSet`, and skips the workspace-sync iteration entirely.
+    /// Hard-cancellation signal.
+    /// Firing it short-circuits both the soft wait and the grace window in
+    /// [`TaskHandler::sync`], force-aborts the `JoinSet`, and skips the
+    /// workspace-sync iteration entirely.
     /// Tasks that had completed their `run()` cleanly lose their pending
     /// workspace mutation.
     force_token: CancellationToken,
@@ -32,8 +34,8 @@ impl TaskHandler {
 
     /// Returns a clone of the soft-cancellation token.
     ///
-    /// Cancelling the token signals every task's `run()` to stop. The
-    /// `sync()` phase still runs for tasks that returned cleanly.
+    /// Cancelling the token signals every task's `run()` to stop.
+    /// The `sync()` phase still runs for tasks that returned cleanly.
     #[must_use]
     pub fn cancel_token(&self) -> CancellationToken {
         self.cancel_token.clone()
@@ -42,7 +44,8 @@ impl TaskHandler {
     /// Returns a clone of the hard-cancellation token.
     ///
     /// Cancelling the token force-aborts the `JoinSet` and skips the
-    /// workspace-sync iteration. Pending workspace mutations are dropped.
+    /// workspace-sync iteration.
+    /// Pending workspace mutations are dropped.
     #[must_use]
     pub fn force_token(&self) -> CancellationToken {
         self.force_token.clone()

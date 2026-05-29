@@ -3,8 +3,8 @@ use jp_github::models::repos::DiffEntryStatus;
 use super::{auth_optional, parse_repo};
 use crate::{Result, github::handle_404, to_xml, to_xml_with_root, util::OneOrMany};
 
-/// Files per page when enumerating changed files. Fixed at 100 (the
-/// GitHub API max for `/pulls/{N}/files`).
+/// Files per page when enumerating changed files.
+/// Fixed at 100 (the GitHub API max for `/pulls/{N}/files`).
 const FILES_PER_PAGE: u8 = 100;
 
 pub(crate) async fn github_pr_diff(
@@ -28,10 +28,10 @@ pub(crate) async fn github_pr_diff(
 
 /// List a page of changed files without their patches.
 ///
-/// The `patch` field is intentionally omitted here — for a typical PR
-/// (dozens of files) the patches together easily blow the LLM context
-/// window. The caller picks which files they actually need and re-calls
-/// with `files: [...]` to get those patches specifically.
+/// The `patch` field is intentionally omitted here — for a typical PR (dozens
+/// of files) the patches together easily blow the LLM context window.
+/// The caller picks which files they actually need and re-calls with `files:
+/// [...]` to get those patches specifically.
 async fn enumerate(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> {
     #[derive(serde::Serialize)]
     struct ChangedFile {
@@ -95,11 +95,11 @@ async fn enumerate(owner: &str, repo: &str, number: u64, page: u64) -> Result<St
 
 /// Fetch patches for a specific set of files.
 ///
-/// Searches a single page of the changed-files list (per `page`) and
-/// returns matching files with their `patch` field included. Files not
-/// found on the requested page get an explicit `not_found` entry — the
-/// LLM can either bump `page` or call `enumerate` mode to find which
-/// page each file lives on.
+/// Searches a single page of the changed-files list (per `page`) and returns
+/// matching files with their `patch` field included.
+/// Files not found on the requested page get an explicit `not_found` entry —
+/// the LLM can either bump `page` or call `enumerate` mode to find which page
+/// each file lives on.
 async fn fetch(
     owner: &str,
     repo: &str,

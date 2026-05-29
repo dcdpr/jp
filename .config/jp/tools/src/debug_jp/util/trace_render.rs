@@ -7,21 +7,22 @@
 //! HH:MM:SS.mmm  LEVEL  target  message  k=v k="quoted v"  [span > span]
 //! ```
 //!
-//! - Timestamp trimmed to time-of-day with millisecond precision; the date
-//!   is fixed for a single profile run and shown in the report headline.
+//! - Timestamp trimmed to time-of-day with millisecond precision; the date is
+//!   fixed for a single profile run and shown in the report headline.
 //! - Level left-padded to 5 chars so subsequent columns align.
 //! - Target padded to the width of the widest target in the rendered subset
 //!   (capped at [`TARGET_PAD_CAP`]).
-//! - Fields rendered as `k=v` pairs in their original insertion order. `v`
-//!   is unquoted when it's a simple token; quoted with backslash-escaped
-//!   quotes otherwise. Values are never truncated — reports go to an
-//!   assistant that can parse long lines.
+//! - Fields rendered as `k=v` pairs in their original insertion order.
+//!   `v` is unquoted when it's a simple token; quoted with backslash-escaped
+//!   quotes otherwise.
+//!   Values are never truncated — reports go to an assistant that can parse
+//!   long lines.
 //! - Span stack appended as `[outer > inner]` when present.
 //! - Runs of consecutive byte-identical events (same level/target/message/
-//!   fields/spans, timestamp ignored) collapse into one line suffixed
-//!   `× N`. Different values — same target+message with different fields,
-//!   for instance — are kept distinct so the noise of "same call, varying
-//!   args" remains visible.
+//!   fields/spans, timestamp ignored) collapse into one line suffixed `× N`.
+//!   Different values — same target+message with different fields, for
+//!   instance — are kept distinct so the noise of "same call, varying args"
+//!   remains visible.
 //!
 //! [`tracing_subscriber::fmt::format::Compact`]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/format/struct.Compact.html
 
@@ -31,13 +32,14 @@ use serde_json::Value;
 
 use crate::debug_jp::util::{launch::LaunchResult, trace_parse::TraceEvent};
 
-/// Hard ceiling on target column padding. Targets longer than this are
-/// printed at full width, breaking alignment for that row but not blowing
-/// the column out for the whole report.
+/// Hard ceiling on target column padding.
+/// Targets longer than this are printed at full width, breaking alignment for
+/// that row but not blowing the column out for the whole report.
 const TARGET_PAD_CAP: usize = 40;
 
-/// Hard cap on event lines emitted to the report. Beyond this we truncate
-/// with a hint to narrow the filter; the full JSONL is still on disk.
+/// Hard cap on event lines emitted to the report.
+/// Beyond this we truncate with a hint to narrow the filter; the full JSONL is
+/// still on disk.
 const SOFT_CAP: usize = 400;
 
 /// Paths to the sidecar files written alongside the rendered report.
@@ -165,8 +167,8 @@ fn write_event(out: &mut String, event: &TraceEvent, target_width: usize, run_co
 /// Render captured stdout and stderr, each in its own fenced section.
 ///
 /// The marker line jp writes to stderr to advertise the trace log path is
-/// stripped here — it's noise once you can already see the path in the
-/// report footer.
+/// stripped here — it's noise once you can already see the path in the report
+/// footer.
 fn write_streams(out: &mut String, launch: &LaunchResult) {
     if !launch.stdout.is_empty() {
         let _ = writeln!(out, "## stdout\n");
@@ -192,8 +194,9 @@ fn write_footer(out: &mut String, paths: OutputPaths<'_>) {
     let _ = writeln!(out, "- Stderr: `{}`", paths.stderr);
 }
 
-/// Drop the `Full trace log written to: <path>` line jp emits when
-/// `JP_DEBUG=1` is set. The path is already in the footer.
+/// Drop the `Full trace log written to: <path>` line jp emits when `JP_DEBUG=1`
+/// is set.
+/// The path is already in the footer.
 fn strip_trace_path_marker(stderr: &str) -> String {
     stderr
         .lines()
@@ -205,8 +208,9 @@ fn strip_trace_path_marker(stderr: &str) -> String {
 /// Extract `HH:MM:SS.mmm` from an RFC3339 timestamp.
 ///
 /// `tracing-subscriber`'s JSON output uses UTC with a `Z` suffix, e.g.
-/// `2026-05-25T21:44:04.572200Z`. We chop off the date (shown in the
-/// headline anyway) and trim fractional seconds to milliseconds.
+/// `2026-05-25T21:44:04.572200Z`.
+/// We chop off the date (shown in the headline anyway) and trim fractional
+/// seconds to milliseconds.
 fn format_time(ts: &str) -> String {
     let after_t = ts.split_once('T').map_or(ts, |(_, t)| t);
     let without_z = after_t.trim_end_matches('Z');

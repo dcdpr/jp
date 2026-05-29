@@ -171,8 +171,8 @@ fn uri_to_command(uri: &Url) -> Result<Command, Box<dyn Error + Send + Sync>> {
 
 /// Parse an opaque-path URL like `cmd:git diff --cached`.
 ///
-/// The path is split using shell-word rules, so quoting works:
-/// `cmd:git commit -m 'hello world'` produces `["git", "commit", "-m", "hello world"]`
+/// The path is split using shell-word rules, so quoting works: `cmd:git commit
+/// -m 'hello world'` produces `["git", "commit", "-m", "hello world"]`
 fn parse_opaque_command(uri: &Url) -> Result<Command, Box<dyn Error + Send + Sync>> {
     let parts = shlex::split(uri.path()).ok_or("Invalid shell quoting in command")?;
     let (cmd, args) = parts.split_first().ok_or("Empty command")?;

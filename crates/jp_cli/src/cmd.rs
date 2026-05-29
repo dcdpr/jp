@@ -167,7 +167,8 @@ pub(crate) type Output = std::result::Result<(), Error>;
 pub(crate) struct Error {
     /// The error code.
     ///
-    /// Used to exit the CLI with a specific exit code. This is usually `1`.
+    /// Used to exit the CLI with a specific exit code.
+    /// This is usually `1`.
     pub(super) code: NonZeroU8,
 
     /// The optional error message to be displayed to the user.

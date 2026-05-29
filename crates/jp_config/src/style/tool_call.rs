@@ -32,8 +32,9 @@ pub struct ToolCallConfig {
     /// "Calling tool X" header while arguments are still streaming.
     ///
     /// Note: the "Calling tool X" header itself is always shown immediately
-    /// when the tool name is known. This config only controls the animated
-    /// suffix that indicates arguments are still being received.
+    /// when the tool name is known.
+    /// This config only controls the animated suffix that indicates arguments
+    /// are still being received.
     #[setting(nested)]
     pub preparing: PreparingConfig,
 }
@@ -58,8 +59,8 @@ pub struct ProgressConfig {
     pub interval_ms: u32,
 }
 
-/// Configuration for the "(receiving arguments…)" indicator shown while
-/// tool call arguments are still streaming from the LLM.
+/// Configuration for the "(receiving arguments…)" indicator shown while tool
+/// call arguments are still streaming from the LLM.
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct PreparingConfig {
@@ -72,8 +73,9 @@ pub struct PreparingConfig {
 
     /// Delay in seconds before appending the "(receiving arguments…)" suffix.
     ///
-    /// The "Calling tool X" header is always shown immediately. This delay
-    /// controls when the animated "(receiving arguments… Ns)" suffix appears.
+    /// The "Calling tool X" header is always shown immediately.
+    /// This delay controls when the animated "(receiving arguments… Ns)"
+    /// suffix appears.
     /// Set to 0 to show the suffix immediately.
     #[setting(default = 3)]
     pub delay_secs: u32,

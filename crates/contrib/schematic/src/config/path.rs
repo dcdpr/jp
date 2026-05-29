@@ -13,7 +13,8 @@ pub enum PathSegment {
     Unknown,
 }
 
-/// Represents the path from the configuration root to a nested field or field value.
+/// Represents the path from the configuration root to a nested field or field
+/// value.
 #[derive(Clone, Debug, Default)]
 pub struct Path {
     /// List of path segments.
@@ -27,8 +28,8 @@ impl Path {
         Self { segments }
     }
 
-    /// Create a new instance and append the provided [`PathSegment`]
-    /// to the end of the current path.
+    /// Create a new instance and append the provided [`PathSegment`] to the end
+    /// of the current path.
     #[must_use]
     pub fn join(&self, segment: PathSegment) -> Self {
         let mut path = self.clone();
@@ -36,22 +37,22 @@ impl Path {
         path
     }
 
-    /// Create a new instance and append an `Index` [`PathSegment`]
-    /// to the end of the current path.
+    /// Create a new instance and append an `Index` [`PathSegment`] to the end
+    /// of the current path.
     #[must_use]
     pub fn join_index(&self, index: usize) -> Self {
         self.join(PathSegment::Index(index))
     }
 
-    /// Create a new instance and append an `Key` [`PathSegment`]
-    /// to the end of the current path.
+    /// Create a new instance and append an `Key` [`PathSegment`] to the end of
+    /// the current path.
     #[must_use]
     pub fn join_key(&self, key: impl Display) -> Self {
         self.join(PathSegment::Key(format!("{key}")))
     }
 
-    /// Create a new instance and append another [`Path`]
-    /// to the end of the current path.
+    /// Create a new instance and append another [`Path`] to the end of the
+    /// current path.
     #[must_use]
     pub fn join_path(&self, other: &Self) -> Self {
         let mut path = self.clone();
@@ -59,8 +60,8 @@ impl Path {
         path
     }
 
-    /// Create a new instance and append an `Variant` [`PathSegment`]
-    /// to the end of the current path.
+    /// Create a new instance and append an `Variant` [`PathSegment`] to the end
+    /// of the current path.
     #[must_use]
     pub fn join_variant(&self, variant: &str) -> Self {
         self.join(PathSegment::Variant(variant.to_owned()))

@@ -1,8 +1,9 @@
 //! Filesystem-backed storage backend.
 //!
 //! [`FsStorageBackend`] wraps [`Storage`] and implements all four backend
-//! traits. The `Storage` struct remains as an internal implementation detail;
-//! external code interacts through the traits.
+//! traits.
+//! The `Storage` struct remains as an internal implementation detail; external
+//! code interacts through the traits.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
@@ -29,8 +30,9 @@ use crate::{
 
 /// Filesystem-backed storage that delegates to `Storage`.
 ///
-/// Implements all four backend traits. Also exposes filesystem-specific methods
-/// (path accessors, etc.) that are not part of the trait surface.
+/// Implements all four backend traits.
+/// Also exposes filesystem-specific methods (path accessors, etc.) that are not
+/// part of the trait surface.
 #[derive(Debug, Clone)]
 pub struct FsStorageBackend {
     storage: Storage,
@@ -91,9 +93,9 @@ impl FsStorageBackend {
 
     /// List orphaned lock file paths in user storage.
     ///
-    /// Filesystem-specific: returns full paths for direct file removal. The
-    /// trait method [`LockBackend::list_orphaned_locks`] returns conversation
-    /// IDs instead.
+    /// Filesystem-specific: returns full paths for direct file removal.
+    /// The trait method [`LockBackend::list_orphaned_locks`] returns
+    /// conversation IDs instead.
     #[must_use]
     pub fn list_orphaned_lock_files(&self) -> Vec<Utf8PathBuf> {
         self.storage.list_orphaned_lock_files()
@@ -101,9 +103,9 @@ impl FsStorageBackend {
 
     /// List session mapping file paths in user storage.
     ///
-    /// Filesystem-specific: returns full paths. The trait method
-    /// [`SessionBackend::list_session_keys`] returns just the session key
-    /// strings.
+    /// Filesystem-specific: returns full paths.
+    /// The trait method [`SessionBackend::list_session_keys`] returns just the
+    /// session key strings.
     #[must_use]
     pub fn list_session_files(&self) -> Vec<Utf8PathBuf> {
         self.storage.list_session_files()
@@ -133,8 +135,8 @@ impl FsStorageBackend {
 
     /// Find the directory path for a conversation by ID.
     ///
-    /// Searches both workspace and user storage roots. Returns `None` if no
-    /// matching directory exists.
+    /// Searches both workspace and user storage roots.
+    /// Returns `None` if no matching directory exists.
     #[must_use]
     pub fn find_conversation_dir(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
         self.storage.find_conversation_dir(id)
@@ -152,7 +154,8 @@ impl FsStorageBackend {
         self.storage.conversation_metadata_path(id)
     }
 
-    /// Path to a conversation's `base_config.json` file, if the directory exists.
+    /// Path to a conversation's `base_config.json` file, if the directory
+    /// exists.
     #[must_use]
     pub fn conversation_base_config_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
         self.storage.conversation_base_config_path(id)
@@ -326,13 +329,15 @@ impl ConversationLockGuard for ConversationFileLock {}
 
 #[cfg(debug_assertions)]
 impl FsStorageBackend {
-    /// Write a minimal valid conversation to storage. For test fixture setup.
+    /// Write a minimal valid conversation to storage.
+    /// For test fixture setup.
     #[doc(hidden)]
     pub fn write_test_conversation(&self, id: &ConversationId, conversation: &Conversation) {
         self.storage.write_test_conversation(id, conversation);
     }
 
-    /// Read the raw persisted events file content. For test assertions.
+    /// Read the raw persisted events file content.
+    /// For test assertions.
     #[doc(hidden)]
     #[must_use]
     pub fn read_test_events_raw(&self, id: &ConversationId) -> Option<String> {

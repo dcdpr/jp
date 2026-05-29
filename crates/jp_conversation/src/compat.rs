@@ -1,21 +1,22 @@
 //! Backward-compatible deserialization for [`PartialAppConfig`].
 //!
 //! When the [`AppConfig`] schema evolves (fields added, removed, or renamed),
-//! old conversation data may reference fields that no longer exist. The
-//! standard serde `deny_unknown_fields` on `Partial*Config` types causes
+//! old conversation data may reference fields that no longer exist.
+//! The standard serde `deny_unknown_fields` on `Partial*Config` types causes
 //! deserialization to fail entirely.
 //!
 //! This module provides schema-aware stripping: before deserializing, we walk
 //! the JSON value alongside the current `AppConfig` schema and remove any keys
-//! that don't exist in the schema. If deserialization still fails after
-//! stripping (e.g. a field's type changed), we fall back to an empty config.
+//! that don't exist in the schema.
+//! If deserialization still fails after stripping (e.g. a field's type
+//! changed), we fall back to an empty config.
 
 use jp_config::{AppConfig, PartialAppConfig, Schema, SchemaType};
 use serde_json::Value;
 use tracing::warn;
 
-/// Deserialize a [`PartialAppConfig`] from a raw JSON value, tolerating
-/// schema changes.
+/// Deserialize a [`PartialAppConfig`] from a raw JSON value, tolerating schema
+/// changes.
 ///
 /// 1. Strips unknown fields using the current [`AppConfig`] schema.
 /// 2. Attempts typed deserialization.
@@ -50,8 +51,8 @@ pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
 /// Recursively strip JSON object keys that don't exist in the schema.
 ///
 /// At each [`SchemaType::Struct`] level, retains only keys present in the
-/// schema's field map and recurses into nested struct fields. Non-struct values
-/// (leaves, arrays, enums) are left untouched.
+/// schema's field map and recurses into nested struct fields.
+/// Non-struct values (leaves, arrays, enums) are left untouched.
 ///
 /// Structs with any [`flatten`]ed field are skipped for stripping, because the
 /// flattened field's entries appear as sibling keys that aren't in the schema's

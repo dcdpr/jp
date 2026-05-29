@@ -372,8 +372,8 @@ fn visible_index_two_visible_events() {
 }
 
 /// Reproduces the bug: when an `InquiryRequest` sits between the last
-/// `ToolCallRequest` and the synthetic `ToolCallResponse`, the old code
-/// would place the breakpoint on the non-visible `InquiryRequest`.
+/// `ToolCallRequest` and the synthetic `ToolCallResponse`, the old code would
+/// place the breakpoint on the non-visible `InquiryRequest`.
 #[test]
 fn visible_index_skips_inquiry_request() {
     let mut events = ConversationStream::new_test();

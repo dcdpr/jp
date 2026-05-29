@@ -13,7 +13,8 @@ use crate::{
 };
 
 /// Upper bound on how many commits we'll return, regardless of what the caller
-/// asks for. Keeps context size bounded.
+/// asks for.
+/// Keeps context size bounded.
 const MAX_COUNT: usize = 50;
 const DEFAULT_COUNT: usize = 20;
 

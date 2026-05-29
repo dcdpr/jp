@@ -25,8 +25,8 @@ use jp_conversation::event::{InquiryId, InquiryResponse};
 pub struct TurnState {
     /// Inquiry responses remembered for the duration of the turn.
     ///
-    /// The caller mints the [`InquiryId`] and decides the convention. For
-    /// tool permission prompts this is `"<tool_name>.__permission__"`, for
+    /// The caller mints the [`InquiryId`] and decides the convention.
+    /// For tool permission prompts this is `"<tool_name>.__permission__"`, for
     /// tool questions it's `"<tool_name>.<question_id>"`.
     pub persisted_inquiry_responses: IndexMap<InquiryId, InquiryResponse>,
 

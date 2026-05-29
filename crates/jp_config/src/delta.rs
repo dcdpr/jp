@@ -5,8 +5,8 @@ use schematic::PartialConfig;
 /// Calculate the delta between two partial configurations.
 ///
 /// It takes `self`, and should check for any value in `next` that differs from
-/// `self`. If a value differs, it must be returned in the final
-/// [`PartialConfig`].
+/// `self`.
+/// If a value differs, it must be returned in the final [`PartialConfig`].
 ///
 /// If no difference is found, the field should be set to `None` for optional
 /// values, or `next` for non-optional values.

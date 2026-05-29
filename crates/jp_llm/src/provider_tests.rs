@@ -99,9 +99,9 @@ async fn tool_call_required_no_reasoning(provider: ProviderId, test_name: &str) 
     run_test(provider, test_name, requests).await
 }
 
-/// With reasoning, some models do not support "forced" tool calls, so
-/// provider implementations should fall back to trying to instruct the
-/// model to use the tool through regular textual instructions.
+/// With reasoning, some models do not support "forced" tool calls, so provider
+/// implementations should fall back to trying to instruct the model to use the
+/// tool through regular textual instructions.
 async fn tool_call_required_reasoning(provider: ProviderId, test_name: &str) -> Result {
     let requests = vec![
         tool_call_base(provider)

@@ -17,8 +17,8 @@ use super::{
 };
 use crate::helpers::strip_bom;
 
-/// The result of loading a configuration. Includes the final configuration,
-/// and all layers that were loaded.
+/// The result of loading a configuration.
+/// Includes the final configuration, and all layers that were loaded.
 #[derive(Serialize)]
 pub struct ConfigLoadResult<T: Config> {
     /// Final configuration, after all layers are merged.
@@ -28,8 +28,8 @@ pub struct ConfigLoadResult<T: Config> {
     pub layers: Vec<Layer<T>>,
 }
 
-/// A system for loading configuration from multiple sources in multiple formats,
-/// and generating a final result after merging and validating layers.
+/// A system for loading configuration from multiple sources in multiple
+/// formats, and generating a final result after merging and validating layers.
 pub struct ConfigLoader<T: Config> {
     _config: PhantomData<T>,
     formats: Vec<Arc<dyn SourceFormat<T::Partial>>>,
@@ -51,7 +51,8 @@ impl<T: Config> Default for ConfigLoader<T> {
 }
 
 impl<T: Config> ConfigLoader<T> {
-    /// Create a new config loader and auto-register formats based on enabled features.
+    /// Create a new config loader and auto-register formats based on enabled
+    /// features.
     #[must_use]
     pub fn new() -> Self {
         #[allow(unused_mut)]
@@ -111,9 +112,10 @@ impl<T: Config> ConfigLoader<T> {
         self.load_with_context(&context)
     }
 
-    /// Load, parse, and merge all sources into a final configuration
-    /// with the provided context. Context will be passed to all applicable
-    /// default and merge functions defined with `#[setting]`.
+    /// Load, parse, and merge all sources into a final configuration with the
+    /// provided context.
+    /// Context will be passed to all applicable default and merge functions
+    /// defined with `#[setting]`.
     #[instrument(name = "load_config", skip_all)]
     pub fn load_with_context(
         &self,
@@ -130,9 +132,9 @@ impl<T: Config> ConfigLoader<T> {
         })
     }
 
-    /// Load, parse, and merge all sources into a partial configuration
-    /// with the provided context. This does not inherit default values
-    /// or environment variables.
+    /// Load, parse, and merge all sources into a partial configuration with the
+    /// provided context.
+    /// This does not inherit default values or environment variables.
     ///
     /// Partials can be converted to full with [`Config::from_partial`].
     #[instrument(name = "load_partial_config", skip_all)]

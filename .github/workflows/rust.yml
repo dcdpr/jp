@@ -30,6 +30,7 @@ jobs:
     outputs:
       lint: ${{ steps.filter.outputs.lint }}
       fmt: ${{ steps.filter.outputs.fmt }}
+      fmt-comments: ${{ steps.filter.outputs.fmt-comments }}
       test: ${{ steps.filter.outputs.test }}
       docs: ${{ steps.filter.outputs.docs }}
       coverage: ${{ steps.filter.outputs.coverage }}
@@ -78,6 +79,7 @@ jobs:
 
           set_task lint "$source|^\.clippy\.toml$"
           set_task fmt "$rust|^\.rustfmt\.toml$|$workflow|$justfile"
+          set_task fmt-comments "$rust|$workflow|$justfile"
           set_task test "$source|$snapshots"
           set_task docs "$source"
           set_task coverage "$source|$snapshots"
@@ -91,7 +93,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        task: [lint, fmt, test, docs, coverage, deny, insta, shear, vet]
+        task: [lint, fmt, fmt-comments, test, docs, coverage, deny, insta, shear, vet]
         include:
           - task: test
             os: windows-latest
@@ -106,6 +108,7 @@ jobs:
           TASK: ${{ matrix.task }}
           LINT: ${{ needs.changes.outputs.lint }}
           FMT: ${{ needs.changes.outputs.fmt }}
+          FMT_COMMENTS: ${{ needs.changes.outputs.fmt-comments }}
           TEST: ${{ needs.changes.outputs.test }}
           DOCS: ${{ needs.changes.outputs.docs }}
           COVERAGE: ${{ needs.changes.outputs.coverage }}
@@ -119,6 +122,7 @@ jobs:
           case "$TASK" in
             lint) run="$LINT" ;;
             fmt) run="$FMT" ;;
+            fmt-comments) run="$FMT_COMMENTS" ;;
             test) run="$TEST" ;;
             docs) run="$DOCS" ;;
             coverage) run="$COVERAGE" ;;

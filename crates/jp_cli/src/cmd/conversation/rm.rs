@@ -68,9 +68,10 @@ impl Rm {
     /// Resolve handles by applying the range filter over the workspace.
     ///
     /// Extracted from `run` so the filter step can be exercised in tests
-    /// without driving the async confirmation/lock path. This is the
-    /// load-bearing line between `--from/--until` and actual deletion;
-    /// regressing it would silently turn a range delete into a full wipe.
+    /// without driving the async confirmation/lock path.
+    /// This is the load-bearing line between `--from/--until` and actual
+    /// deletion; regressing it would silently turn a range delete into a full
+    /// wipe.
     fn resolve_filtered(
         &self,
         workspace: &Workspace,

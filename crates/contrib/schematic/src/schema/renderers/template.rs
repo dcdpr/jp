@@ -22,7 +22,8 @@ pub struct TemplateOptions {
     /// Characters to prefix a comment line.
     pub comment_prefix: String,
 
-    /// Custom values for each field. Supports dot notation.
+    /// Custom values for each field.
+    /// Supports dot notation.
     pub custom_values: HashMap<String, Schema>,
 
     /// List of array and object field names to expand and render a fake item.
@@ -49,8 +50,8 @@ pub struct TemplateOptions {
     /// Print the list of enum values for enum fields.
     pub print_enum_values: bool,
 
-    /// List of custom environment variables to use for fields. Supports dot
-    /// notation.
+    /// List of custom environment variables to use for fields.
+    /// Supports dot notation.
     pub env_vars: HashMap<String, String>,
 }
 

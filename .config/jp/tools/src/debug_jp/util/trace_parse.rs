@@ -1,8 +1,8 @@
 //! Parser for `JP_DEBUG=1` JSON-per-line trace logs.
 //!
-//! Each line is a `tracing-subscriber::fmt::json()`-formatted event. We keep
-//! parsing tolerant: a malformed line is skipped, not fatal, so a single
-//! truncated trailing line doesn't lose the whole report.
+//! Each line is a `tracing-subscriber::fmt::json()`-formatted event.
+//! We keep parsing tolerant: a malformed line is skipped, not fatal, so a
+//! single truncated trailing line doesn't lose the whole report.
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -18,8 +18,9 @@ pub(crate) enum Level {
 }
 
 impl Level {
-    /// Parse a case-insensitive level name. Accepts `WARNING` as an alias
-    /// for `WARN` because some external trace producers emit it that way.
+    /// Parse a case-insensitive level name.
+    /// Accepts `WARNING` as an alias for `WARN` because some external trace
+    /// producers emit it that way.
     #[must_use]
     pub(crate) fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_uppercase().as_str() {
@@ -53,11 +54,11 @@ pub(crate) struct TraceEvent {
     pub target: String,
     /// Human-readable message (extracted out of `fields.message`).
     pub message: String,
-    /// All structured fields other than `message`. Order is preserved by
-    /// `serde_json`'s `preserve_order` feature.
+    /// All structured fields other than `message`.
+    /// Order is preserved by `serde_json`'s `preserve_order` feature.
     pub fields: Map<String, Value>,
-    /// Span stack, root-first. Empty when the event was emitted outside a
-    /// span.
+    /// Span stack, root-first.
+    /// Empty when the event was emitted outside a span.
     pub spans: Vec<String>,
 }
 

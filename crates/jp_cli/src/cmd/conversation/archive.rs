@@ -15,18 +15,19 @@ use crate::{
 
 /// Archive conversations.
 ///
-/// Without IDs, archives the session's active conversation (same fallback
-/// chain as `jp c show`: session active → `conversation.default_id` →
-/// picker). With IDs, archives each one. Prompts for confirmation when
-/// archiving pinned or active conversations (suppress with `--yes`).
+/// Without IDs, archives the session's active conversation (same fallback chain
+/// as `jp c show`: session active → `conversation.default_id` → picker).
+/// With IDs, archives each one.
+/// Prompts for confirmation when archiving pinned or active conversations
+/// (suppress with `--yes`).
 ///
-/// Use `--from`/`--until` to archive a range of conversations by creation
-/// date, or `--inactive-since` to archive everything unused since a given
-/// time. The three filters AND together when combined.
+/// Use `--from`/`--until` to archive a range of conversations by creation date,
+/// or `--inactive-since` to archive everything unused since a given time.
+/// The three filters AND together when combined.
 ///
-/// Archived conversations are hidden from listings and pickers. Use `jp c ls
-/// --archived` to list them, `jp c unarchive` to restore them, or `jp c use
-/// archived` to unarchive and activate.
+/// Archived conversations are hidden from listings and pickers.
+/// Use `jp c ls --archived` to list them, `jp c unarchive` to restore them, or
+/// `jp c use archived` to unarchive and activate.
 #[derive(Debug, clap::Args)]
 pub(crate) struct Archive {
     #[command(flatten)]
@@ -38,9 +39,9 @@ pub(crate) struct Archive {
 
     /// Archive all conversations inactive since a given time.
     ///
-    /// Accepts the same formats as `--from`. Filters on `last_activated_at`
-    /// (when the conversation was last used) rather than its creation date,
-    /// which makes this distinct from `--until`.
+    /// Accepts the same formats as `--from`.
+    /// Filters on `last_activated_at` (when the conversation was last used)
+    /// rather than its creation date, which makes this distinct from `--until`.
     #[arg(long, conflicts_with = "id")]
     inactive_since: Option<TimeThreshold>,
 
@@ -97,7 +98,8 @@ impl Archive {
         Ok(())
     }
 
-    /// AND-composition of the active filter flags. Pure for testability.
+    /// AND-composition of the active filter flags.
+    /// Pure for testability.
     fn matches(&self, id: ConversationId, conv: &Conversation) -> bool {
         self.range.matches(id)
             && self

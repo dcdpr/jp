@@ -1,13 +1,13 @@
 //! Type-level access control for conversations.
 //!
 //! [`ConversationHandle`] is a move-only token proving that a conversation ID
-//! exists in the workspace index. It is obtained through
-//! [`Workspace::acquire_conversation`] and consumed by
+//! exists in the workspace index.
+//! It is obtained through [`Workspace::acquire_conversation`] and consumed by
 //! [`Workspace::lock_conversation`] to produce a [`ConversationLock`].
 //!
+//! [`ConversationLock`]: super::ConversationLock
 //! [`Workspace::acquire_conversation`]: super::Workspace::acquire_conversation
 //! [`Workspace::lock_conversation`]: super::Workspace::lock_conversation
-//! [`ConversationLock`]: super::ConversationLock
 
 use jp_conversation::ConversationId;
 

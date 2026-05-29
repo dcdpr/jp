@@ -22,8 +22,9 @@ const ALLOWED_UTILS: &[&str] = &[
 const MAX_OUTPUT_BYTES: usize = 100_000;
 
 /// Characters that tools commonly use to separate multiple values within a
-/// single argument. Splitting on these before scanning ensures that
-/// `/etc/passwd:/etc/shadow` or `--path=/a;/b` are checked individually.
+/// single argument.
+/// Splitting on these before scanning ensures that `/etc/passwd:/etc/shadow` or
+/// `--path=/a;/b` are checked individually.
 const ARG_DELIMITERS: &[char] = &['=', ':', ';', ',', ' ', '\t', '\n', '\0'];
 
 pub(crate) fn unix_utils(
@@ -115,17 +116,17 @@ fn truncate(s: &str) -> String {
 /// Each argument goes through two passes:
 ///
 /// 1. **Whole-argument pass** — the argument is normalized with
-///    `clean_path::clean` and scanned as-is. This catches paths that
-///    contain delimiter characters (e.g. a file literally named
-///    `foo:bar`).
-/// 2. **Fragment pass** — the argument is split on common delimiters
-///    (`=`, `:`, `;`, `,`, whitespace, null), each fragment is
-///    normalized independently, and scanned. This catches multi-path
-///    arguments like `/etc/passwd:/etc/shadow` and resolves `..`
-///    sequences that only simplify within an individual fragment.
+///    `clean_path::clean` and scanned as-is.
+///    This catches paths that contain delimiter characters (e.g. a file
+///    literally named `foo:bar`).
+/// 2. **Fragment pass** — the argument is split on common delimiters (`=`,
+///    `:`, `;`, `,`, whitespace, null), each fragment is normalized
+///    independently, and scanned.
+///    This catches multi-path arguments like `/etc/passwd:/etc/shadow` and
+///    resolves `..` sequences that only simplify within an individual fragment.
 ///
-/// Within each pass, every byte position is checked for path-start
-/// characters (`/`, `~`, `.`).
+/// Within each pass, every byte position is checked for path-start characters
+/// (`/`, `~`, `.`).
 ///
 /// The `exists` function is injected for testability — production passes
 /// `Path::exists`, tests pass a closure controlling which paths "exist".
@@ -220,12 +221,14 @@ fn scan_fragment(
 /// Build a macOS Seatbelt sandbox profile for a resolved binary.
 ///
 /// Deny-default with a dynamically constructed allow-list:
+///
 /// - `(literal "/")` — root directory traversal.
 /// - `/dev` — stdio file descriptors.
 /// - Workspace root — the files the tool should operate on.
-/// - Symlink chain ancestors — every directory from the `which` path to
-///   the canonical binary, including resolved directory symlinks (e.g.
-///   `/etc` → `/private/etc`). Required for `execvp` traversal.
+/// - Symlink chain ancestors — every directory from the `which` path to the
+///   canonical binary, including resolved directory symlinks (e.g.
+///   `/etc` → `/private/etc`).
+///   Required for `execvp` traversal.
 /// - Canonical binary directory — the real executable.
 /// - Transitive library directories — from `otool -L`.
 /// - Per-util extra paths — e.g. timezone data for `date`.
@@ -288,9 +291,10 @@ fn extra_read_paths(util: &str) -> &'static [&'static str] {
 
 /// Build a minimal environment for the sandboxed process.
 ///
-/// The parent's environment is NOT inherited (`clean_env: true`). Only
-/// the variables returned here are set. This prevents leaking secrets
-/// like API keys, SSH agent sockets, or home directory paths.
+/// The parent's environment is NOT inherited (`clean_env: true`).
+/// Only the variables returned here are set.
+/// This prevents leaking secrets like API keys, SSH agent sockets, or home
+/// directory paths.
 fn sandbox_env(util: &str) -> Vec<(String, String)> {
     let mut env = vec![
         // PATH is needed by some tools that spawn sub-processes.
@@ -353,10 +357,11 @@ fn resolve_binary(util: &str) -> Result<ResolvedBinary, std::io::Error> {
 /// Walk the symlink chain from `path` to the real file, collecting every
 /// directory the sandbox needs to traverse.
 ///
-/// For each link in the chain, adds every ancestor directory up to `/`
-/// (since `sandbox-exec` needs `subpath` access to each intermediate
-/// directory for `execvp` traversal). Also resolves directory symlinks
-/// (e.g. `/etc` → `/private/etc`) so their real paths are included.
+/// For each link in the chain, adds every ancestor directory up to `/` (since
+/// `sandbox-exec` needs `subpath` access to each intermediate directory for
+/// `execvp` traversal).
+/// Also resolves directory symlinks (e.g.
+/// `/etc` → `/private/etc`) so their real paths are included.
 fn collect_symlink_dirs(path: &Path) -> Vec<String> {
     let mut dirs = Vec::new();
     let mut current = path.to_path_buf();

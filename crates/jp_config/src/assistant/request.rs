@@ -22,7 +22,8 @@ pub struct RequestConfig {
     /// Maximum retry attempts for transient errors.
     ///
     /// Retryable errors include rate limits, timeouts, connection errors, and
-    /// transient server errors (5xx). Set to 0 to disable retries.
+    /// transient server errors (5xx).
+    /// Set to 0 to disable retries.
     ///
     /// Non-retryable errors (auth failures, unknown models, invalid requests)
     /// are never retried regardless of this setting.
@@ -113,13 +114,15 @@ impl ToPartial for RequestConfig {
 /// Controls whether the provider should apply prompt caching.
 ///
 /// Providers map these values to their native caching mechanisms:
+///
 /// - Anthropic: `cache_control` annotations and automatic caching
 /// - Other providers: provider-specific caching hints
 ///
 /// When `Off`, the provider skips all caching annotations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CachePolicy {
-    /// No caching. The provider skips all cache annotations.
+    /// No caching.
+    /// The provider skips all cache annotations.
     Off,
 
     /// Standard caching with provider-default TTL (typically ~5 minutes).
@@ -129,8 +132,9 @@ pub enum CachePolicy {
     /// Extended caching with longer TTL (typically ~1 hour where supported).
     Long,
 
-    /// Custom duration. Not all providers support arbitrary durations;
-    /// unsupported values are rounded to the nearest available option.
+    /// Custom duration.
+    /// Not all providers support arbitrary durations; unsupported values are
+    /// rounded to the nearest available option.
     Custom(Duration),
 }
 

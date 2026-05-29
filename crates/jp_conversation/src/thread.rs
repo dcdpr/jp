@@ -123,10 +123,11 @@ pub struct Thread {
 
 /// The decomposed parts of a [`Thread`], ready for provider consumption.
 ///
-/// System content (prompt, sections) is rendered to strings. Attachments are
-/// passed through as-is so that each provider can convert them to its native
-/// format. Conversation events are filtered to exclude internal types that
-/// providers should never see.
+/// System content (prompt, sections) is rendered to strings.
+/// Attachments are passed through as-is so that each provider can convert them
+/// to its native format.
+/// Conversation events are filtered to exclude internal types that providers
+/// should never see.
 pub struct ThreadParts {
     /// Rendered system content (prompt + sections).
     pub system_parts: Vec<String>,
@@ -142,10 +143,11 @@ impl Thread {
     /// Decompose the thread into rendered system parts, raw attachments, and
     /// filtered events.
     ///
-    /// System prompt and sections are rendered to strings. Attachments are
-    /// passed through unconverted — each provider is responsible for converting
-    /// them to its native format (e.g. Anthropic document blocks, Gemini inline
-    /// data, or XML for providers without native support).
+    /// System prompt and sections are rendered to strings.
+    /// Attachments are passed through unconverted — each provider is
+    /// responsible for converting them to its native format (e.g.
+    /// Anthropic document blocks, Gemini inline data, or XML for providers
+    /// without native support).
     ///
     /// Events are filtered via `EventKind::is_provider_visible()` to exclude
     /// internal types.
@@ -180,8 +182,9 @@ impl Thread {
 
 /// Serialize text attachments to an XML `<documents>` block.
 ///
-/// Binary attachments are silently skipped. Callers that support binary
-/// content should handle those separately via the raw attachments.
+/// Binary attachments are silently skipped.
+/// Callers that support binary content should handle those separately via the
+/// raw attachments.
 ///
 /// # Errors
 ///
@@ -213,7 +216,8 @@ pub fn text_attachments_to_xml(attachments: &[Attachment]) -> Result<Option<Stri
 
 /// Structure for document collection
 ///
-/// See: <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips>
+/// See:
+/// <https://docs.anthropic.com/en/docs/build-with-claude/prompt-engineering/long-context-tips>
 #[derive(Debug, Serialize)]
 #[serde(rename = "documents", rename_all = "camelCase")]
 pub struct Documents {

@@ -388,8 +388,8 @@ fn test_workspace_persist_single_conversation_via_lock() {
     assert!(id2_metadata.is_none());
 }
 
-/// Regression test: files in a local conversation's user-storage directory
-/// must survive persistence.
+/// Regression test: files in a local conversation's user-storage directory must
+/// survive persistence.
 #[test]
 fn test_persist_preserves_files_in_user_storage() {
     let tmp = tempdir().unwrap();

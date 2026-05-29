@@ -1,8 +1,8 @@
 //! `profile_jp_heap` — dhat heap profile of a `jp` command.
 //!
-//! Builds `jp` with the `dhat` feature, runs it inside a [`Sandbox`], finds
-//! the heap-profile JSON dhat writes to the sandbox's `tmp/profiling/` dir,
-//! copies it back to the real workspace, then parses and renders a report.
+//! Builds `jp` with the `dhat` feature, runs it inside a [`Sandbox`], finds the
+//! heap-profile JSON dhat writes to the sandbox's `tmp/profiling/` dir, copies
+//! it back to the real workspace, then parses and renders a report.
 
 use std::{
     fs,
@@ -24,8 +24,8 @@ use crate::{
     util::{ToolResult, error},
 };
 
-/// Tool entrypoint. Dispatches between the format-args preview and the live
-/// execution.
+/// Tool entrypoint.
+/// Dispatches between the format-args preview and the live execution.
 #[allow(clippy::unused_async, reason = "awaited by the debug_jp dispatcher")]
 pub(crate) async fn debug_jp_profile_heap(ctx: &Context, t: &Tool) -> ToolResult {
     let args: Vec<String> = t.req("args")?;
@@ -86,8 +86,9 @@ fn format_preview(args: &[String], clone_user_data: bool) -> String {
     out
 }
 
-/// Live execution path. Builds dhat-instrumented jp, runs it, finds the
-/// heap JSON, parses + renders. Returns the Markdown report.
+/// Live execution path.
+/// Builds dhat-instrumented jp, runs it, finds the heap JSON, parses + renders.
+/// Returns the Markdown report.
 fn run(workspace_root: &Utf8Path, args: &[String], clone_user_data: bool) -> ToolResult {
     let sandbox = Sandbox::create(workspace_root, SandboxOpts { clone_user_data })?;
 
@@ -136,9 +137,9 @@ fn run(workspace_root: &Utf8Path, args: &[String], clone_user_data: bool) -> Too
 /// Locate the `heap-*.json` file dhat wrote during this run.
 ///
 /// The sandbox starts clean (no `tmp/profiling/`), so any file matching the
-/// pattern was produced by the run we just executed. Picks the
-/// most-recently-modified one defensively, in case dhat writes more than
-/// one (it normally doesn't).
+/// pattern was produced by the run we just executed.
+/// Picks the most-recently-modified one defensively, in case dhat writes more
+/// than one (it normally doesn't).
 fn find_latest_heap_json(dir: &Utf8Path) -> Result<Utf8PathBuf, Error> {
     if !dir.exists() {
         return Err(format!(

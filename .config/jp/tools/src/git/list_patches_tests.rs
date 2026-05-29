@@ -5,8 +5,8 @@ use camino_tempfile::tempdir;
 use super::*;
 use crate::util::runner::MockProcessRunner;
 
-/// Compute the expected ID for a hunk so test fixtures stay readable
-/// instead of hardcoding hex strings.
+/// Compute the expected ID for a hunk so test fixtures stay readable instead of
+/// hardcoding hex strings.
 fn id_for(hunk: &str) -> String {
     super::super::hunk::hunk_id(hunk)
 }

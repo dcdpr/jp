@@ -5,8 +5,8 @@
 //! - `gh://{owner}/{repo}/pull/{number}/diff` — the PR's title, description,
 //!   changed-files summary, and unified diff, attached as one text resource.
 //! - `gh://{owner}/{repo}/pull/{number}/reviews` — the PR's review summaries
-//!   and inline comments (including the authenticated user's pending
-//!   drafts), attached as one markdown resource.
+//!   and inline comments (including the authenticated user's pending drafts),
+//!   attached as one markdown resource.
 //!
 //! Both resource types support a shortform that resolves owner/repo to the
 //! project-rooted defaults (`dcdpr/jp`):
@@ -15,32 +15,34 @@
 //! - `gh:pull/{number}/reviews`
 //!
 //! The handler uses `JP_GITHUB_TOKEN` (or `GITHUB_TOKEN`) from the environment
-//! for authentication, via [`jp_github::Octocrab`]. No global state is held —
-//! each fetch builds its own client.
+//! for authentication, via [`jp_github::Octocrab`].
+//! No global state is held — each fetch builds its own client.
 //!
 //! ## Filtering
 //!
 //! ### Diff (`/diff`)
 //!
 //! The unified diff is filtered by file path before being attached, to keep
-//! generated and lockfile noise out of the LLM context. The default exclusion
-//! list is opinionated; override via query parameters:
+//! generated and lockfile noise out of the LLM context.
+//! The default exclusion list is opinionated; override via query parameters:
 //!
 //! - `?exclude=glob1,glob2` — adds patterns on top of the defaults.
-//! - `?no_defaults=true` — drops the built-in defaults; only `?exclude` patterns
-//!   apply.
+//! - `?no_defaults=true` — drops the built-in defaults; only `?exclude`
+//!   patterns apply.
 //!
 //! ### Reviews (`/reviews`)
 //!
 //! Outdated comments — those GitHub has marked as no longer matching the
-//! current diff — are skipped by default. The header reports how many were
-//! hidden. Comments are fetched via GraphQL
-//! (`pullRequest.reviewThreads`), so each carries the canonical `outdated`
-//! flag and a reliable line / side anchor even when REST returns null.
+//! current diff — are skipped by default.
+//! The header reports how many were hidden.
+//! Comments are fetched via GraphQL (`pullRequest.reviewThreads`), so each
+//! carries the canonical `outdated` flag and a reliable line / side anchor even
+//! when REST returns null.
 //!
-//! - `?include_outdated=true` — include outdated comments. They render with
-//!   their original anchor (`original_line` etc.) and pick up an `outdated`
-//!   marker both on the anchor header and on each comment's label.
+//! - `?include_outdated=true` — include outdated comments.
+//!   They render with their original anchor (`original_line` etc.) and pick up
+//!   an `outdated` marker both on the anchor header and on each comment's
+//!   label.
 
 use std::{
     collections::{BTreeSet, HashMap},
@@ -169,8 +171,9 @@ enum ResourceKind {
 /// Owner/repo used by the shortform `gh:pull/N/diff`.
 ///
 /// The shortform is project-rooted: anyone using `gh:pull/N/diff` in this
-/// workspace means "pull #N of the JP project." Hardcoded to match the
-/// rest of the project-specific tooling that already targets `dcdpr/jp`.
+/// workspace means "pull \#N of the JP project."
+/// Hardcoded to match the rest of the project-specific tooling that already
+/// targets `dcdpr/jp`.
 const SHORTFORM_OWNER: &str = "dcdpr";
 const SHORTFORM_REPO: &str = "jp";
 
@@ -290,9 +293,10 @@ async fn fetch(uri: &Url) -> Result<Attachment, Box<dyn Error + Send + Sync>> {
 }
 
 /// Build a fresh `Octocrab` client using `JP_GITHUB_TOKEN` (or `GITHUB_TOKEN`)
-/// from the environment. The attachment handler runs in `jp_cli`'s main
-/// process and does not share the global `jp_github::instance()` set up by
-/// the tools subprocess, so we build a local client.
+/// from the environment.
+/// The attachment handler runs in `jp_cli`'s main process and does not share
+/// the global `jp_github::instance()` set up by the tools subprocess, so we
+/// build a local client.
 fn build_client() -> Result<Octocrab, Box<dyn Error + Send + Sync>> {
     let token = std::env::var("JP_GITHUB_TOKEN")
         .or_else(|_| std::env::var("GITHUB_TOKEN"))
@@ -374,21 +378,21 @@ async fn fetch_pr_diff(
 /// Did the unified-diff endpoint reject the PR for being too large?
 ///
 /// GitHub returns HTTP 406 (Not Acceptable) for `application/vnd.github.diff`
-/// once the diff exceeds 20,000 lines. The same status is unlikely to come
-/// back from this endpoint for any other reason, so a status-only check is
-/// sufficient — we don't pattern-match the human-readable message because
-/// GitHub has rewritten it before.
+/// once the diff exceeds 20,000 lines.
+/// The same status is unlikely to come back from this endpoint for any other
+/// reason, so a status-only check is sufficient — we don't pattern-match the
+/// human-readable message because GitHub has rewritten it before.
 fn is_diff_too_large(err: &GhError) -> bool {
     matches!(err, GhError::GitHub { source, .. } if source.status_code.as_u16() == 406)
 }
 
 /// Walk every page of `/pulls/{N}/files` for the given PR.
 ///
-/// `list_files` now returns a single page per request; this helper does
-/// the auto-paginating walk that the attachment used to get for free.
-/// Capped at 10 pages (1000 files at the maximum per-page size) to bound
-/// the cost on pathological PRs — monorepo refactors of that scale are
-/// rare enough that truncating with a notice is fine.
+/// `list_files` now returns a single page per request; this helper does the
+/// auto-paginating walk that the attachment used to get for free.
+/// Capped at 10 pages (1000 files at the maximum per-page size) to bound the
+/// cost on pathological PRs — monorepo refactors of that scale are rare enough
+/// that truncating with a notice is fine.
 async fn fetch_all_changed_files(
     client: &Octocrab,
     owner: &str,
@@ -421,24 +425,25 @@ struct SynthesizedDiff {
     text: String,
     included: usize,
     excluded: usize,
-    /// Files whose `patch` field was `None` — GitHub omits it for files
-    /// that are too large (~3000 lines) or binary. The `diff --git` header
-    /// is still emitted so the LLM can see *which* files changed even when
-    /// the hunks are missing.
+    /// Files whose `patch` field was `None` — GitHub omits it for files that
+    /// are too large (~3000 lines) or binary.
+    /// The `diff --git` header is still emitted so the LLM can see *which*
+    /// files changed even when the hunks are missing.
     truncated: usize,
 }
 
 /// Build a unified-diff-like blob from the per-file entries returned by
-/// `/pulls/{N}/files`. Used as the fallback when the unified-diff endpoint
-/// exceeds GitHub's 20k-line cap.
+/// `/pulls/{N}/files`.
+/// Used as the fallback when the unified-diff endpoint exceeds GitHub's
+/// 20k-line cap.
 ///
 /// The output is *not* a byte-for-byte equivalent of `git diff`: GitHub's
 /// per-file `patch` field starts at the first hunk (`@@ ...`) and omits the
-/// `index`/`---`/`+++` lines. We add the `diff --git a/PATH b/PATH` header
-/// per file so downstream consumers (and the LLM) can still identify file
-/// boundaries the standard way. Renames and copies get the usual
-/// `rename from`/`rename to` (or `copy from`/`copy to`) markers, mirroring
-/// what `git diff` would emit.
+/// `index`/`---`/`+++` lines.
+/// We add the `diff --git a/PATH b/PATH` header per file so downstream
+/// consumers (and the LLM) can still identify file boundaries the standard way.
+/// Renames and copies get the usual `rename from`/`rename to` (or `copy
+/// from`/`copy to`) markers, mirroring what `git diff` would emit.
 fn synthesize_diff_from_files(entries: &[DiffEntry], patterns: &[Pattern]) -> SynthesizedDiff {
     let mut text = String::new();
     let mut included = 0_usize;
@@ -537,8 +542,8 @@ async fn fetch_pr_reviews(
 /// Drop outdated comments unless the URI opted into them.
 ///
 /// Returns the number of comments hidden — zero when `include_outdated` is
-/// set, otherwise the count that was removed. The caller passes that count
-/// into the renderer so the header can surface it.
+/// set, otherwise the count that was removed.
+/// The caller passes that count into the renderer so the header can surface it.
 ///
 /// `outdated` is read directly from each comment, populated from GitHub's
 /// canonical GraphQL `reviewThreads.isOutdated` flag at fetch time.
@@ -568,11 +573,12 @@ fn compile_excludes(
     Ok(patterns)
 }
 
-/// Splits a unified diff into per-file sections, filters by path, and
-/// returns the kept text plus counts of included/excluded files.
+/// Splits a unified diff into per-file sections, filters by path, and returns
+/// the kept text plus counts of included/excluded files.
 ///
-/// File boundary is the `diff --git a/PATH b/PATH` line. Anything before
-/// the first such line is preserved as-is (rare; usually empty).
+/// File boundary is the `diff --git a/PATH b/PATH` line.
+/// Anything before the first such line is preserved as-is (rare; usually
+/// empty).
 fn filter_diff(diff: &str, excludes: &[Pattern]) -> (String, usize, usize) {
     let mut included = 0_usize;
     let mut excluded = 0_usize;
@@ -703,7 +709,8 @@ fn format_git_ref(r: &jp_github::models::pulls::GitRef) -> String {
 /// 1. Header with counts.
 /// 2. "Reviews" section: per-review summary line, sorted by `submitted_at`.
 /// 3. "Inline comments by file" section: comments grouped by file, then by
-///    anchor (line range + side). Replies nest under their parent.
+///    anchor (line range + side).
+///    Replies nest under their parent.
 #[allow(
     clippy::too_many_lines,
     reason = "linear render, splitting hurts readability"
@@ -874,8 +881,9 @@ fn render_comment(
 }
 
 /// Render a comment's anchor: `Line N (SIDE)` or `Lines A-B (SIDE)`,
-/// occasionally with a mixed-side multi-line marker. Outdated comments fall
-/// back to their `original_*` anchor and pick up an `(outdated)` suffix.
+/// occasionally with a mixed-side multi-line marker.
+/// Outdated comments fall back to their `original_*` anchor and pick up an
+/// `(outdated)` suffix.
 fn format_anchor(c: &ReviewComment) -> String {
     // Prefer live fields, fall back to historical (`original_*`) when the
     // live ones are missing — typically the case for outdated comments

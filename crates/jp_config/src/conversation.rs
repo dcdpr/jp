@@ -196,9 +196,10 @@ impl ToPartial for InquiryConfig {
 
 /// Assistant configuration overrides for inquiry requests.
 ///
-/// Mirrors [`AssistantConfig`](crate::assistant::AssistantConfig) but with all
-/// fields optional and no defaults. Unset fields are filled from the parent
-/// assistant config at runtime.
+/// Mirrors [`AssistantConfig`] but with all fields optional and no defaults.
+/// Unset fields are filled from the parent assistant config at runtime.
+///
+/// [`AssistantConfig`]: crate::assistant::AssistantConfig
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct AssistantOverrideConfig {
@@ -285,7 +286,8 @@ impl ToPartial for AssistantOverrideConfig {
 /// Which conversation to default to when no session mapping exists.
 ///
 /// This is read during conversation resolution, before the full config is
-/// built. It cannot be set per-conversation (circular dependency).
+/// built.
+/// It cannot be set per-conversation (circular dependency).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Schematic)]
 #[serde(rename_all = "snake_case")]
 pub enum DefaultConversationId {

@@ -100,9 +100,9 @@ impl std::str::FromStr for AttachmentUrlOrPath {
 
 /// Rewrite a JP ID shorthand into a `jp://` URL.
 ///
-/// Returns `None` if `s` doesn't parse as a valid JP ID. A directory
-/// literally named `jp-c1234` would still match — prefix it with `./` to
-/// force the path interpretation.
+/// Returns `None` if `s` doesn't parse as a valid JP ID.
+/// A directory literally named `jp-c1234` would still match — prefix it with
+/// `./` to force the path interpretation.
 fn jp_id_shorthand_to_url(s: &str) -> Option<Url> {
     let (id_part, query) = s
         .find('?')

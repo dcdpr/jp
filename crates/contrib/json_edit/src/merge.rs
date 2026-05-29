@@ -4,9 +4,10 @@ use crate::{ast::Document, error::MergeError};
 
 /// Recursively merge a [`serde_json::Value`] into a [`Document`].
 ///
-/// Only keys present in `source` are touched. When both the target and source
-/// have an object for the same key, the merge recurses. Otherwise the source
-/// value overwrites the target.
+/// Only keys present in `source` are touched.
+/// When both the target and source have an object for the same key, the merge
+/// recurses.
+/// Otherwise the source value overwrites the target.
 ///
 /// Untouched content (comments, whitespace, key order) is preserved.
 pub fn deep_merge(doc: &Document, source: &Value) -> Result<(), MergeError> {

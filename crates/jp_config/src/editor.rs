@@ -22,23 +22,24 @@ pub struct EditorConfig {
     /// If unset, falls back to `envs`.
     pub cmd: Option<String>,
 
-    /// The environment variables to use for editing text. Used if `cmd` is
-    /// unset.
+    /// The environment variables to use for editing text.
+    /// Used if `cmd` is unset.
     ///
     /// Defaults to `JP_EDITOR`, `VISUAL`, and `EDITOR`.
     ///
     /// Values are parsed using shell-word semantics (via `shlex`): the first
-    /// token is the program, remaining tokens are arguments. Shell
-    /// metacharacters like `|`, `&&`, or `>` are not interpreted — set
-    /// `cmd` instead for full shell-mode parsing. Examples:
+    /// token is the program, remaining tokens are arguments.
+    /// Shell metacharacters like `|`, `&&`, or `>` are not interpreted — set
+    /// `cmd` instead for full shell-mode parsing.
+    /// Examples:
     ///
     /// - `JP_EDITOR="subl -w"` runs `subl` with `-w`.
     /// - `JP_EDITOR='code --wait --new-window'` runs `code` with two args.
-    /// - `JP_EDITOR='nvim -c "set ft=md"'` runs `nvim` with args `-c` and
-    ///   `set ft=md`.
+    /// - `JP_EDITOR='nvim -c "set ft=md"'` runs `nvim` with args `-c` and `set
+    ///   ft=md`.
     ///
-    /// Values with unbalanced quoting are skipped (the next env var in the
-    /// list is tried).
+    /// Values with unbalanced quoting are skipped (the next env var in the list
+    /// is tried).
     #[setting(
         default = vec!["JP_EDITOR".into(), "VISUAL".into(), "EDITOR".into()],
         merge = schematic::merge::append_vec,
@@ -95,8 +96,9 @@ impl EditorConfig {
     /// set, returns `None`.
     ///
     /// Env-var values are split with [`shlex::split`] so `JP_EDITOR="code -w"`
-    /// correctly runs `code` with `-w` as an argument. Values with unbalanced
-    /// quoting are skipped. The `cmd` field uses full shell-mode parsing (via
+    /// correctly runs `code` with `-w` as an argument.
+    /// Values with unbalanced quoting are skipped.
+    /// The `cmd` field uses full shell-mode parsing (via
     /// `duct_sh::sh_dangerous`) for backwards compatibility with shell
     /// metacharacters like `&&` and `|`.
     #[must_use]
@@ -117,9 +119,9 @@ impl EditorConfig {
 
     /// Return the path to the editor, if any.
     ///
-    /// For env-var fallback, the first shlex token is taken as the binary;
-    /// any additional arguments are dropped (use [`Self::command`] when the
-    /// caller can invoke the program with arguments).
+    /// For env-var fallback, the first shlex token is taken as the binary; any
+    /// additional arguments are dropped (use [`Self::command`] when the caller
+    /// can invoke the program with arguments).
     #[must_use]
     pub fn path(&self) -> Option<Utf8PathBuf> {
         self.cmd.as_ref().map(Utf8PathBuf::from).or_else(|| {

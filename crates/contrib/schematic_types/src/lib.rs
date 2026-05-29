@@ -31,15 +31,18 @@ pub use unions::*;
 
 /// Defines a schema that represents the shape of the implementing type.
 pub trait Schematic {
-    /// Define a name for this schema type. Names are required for non-primitive values
-    /// as a means to link references, and avoid cycles.
+    /// Define a name for this schema type.
+    /// Names are required for non-primitive values as a means to link
+    /// references, and avoid cycles.
     #[must_use]
     fn schema_name() -> Option<String> {
         None
     }
 
-    /// Create and return a schema that models the structure of the implementing type.
-    /// The schema can be used to generate code, documentation, or other artifacts.
+    /// Create and return a schema that models the structure of the implementing
+    /// type.
+    /// The schema can be used to generate code, documentation, or other
+    /// artifacts.
     #[must_use]
     fn build_schema(mut schema: SchemaBuilder) -> Schema {
         schema.build()

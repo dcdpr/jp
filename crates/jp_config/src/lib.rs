@@ -98,8 +98,9 @@ pub struct AppConfig {
     /// Directories to search for additional configuration files.
     ///
     /// Files in these directories can be loaded on demand using the `--cfg`
-    /// flag. Use this to organize reusable configurations, such as personas or
-    /// tool sets.
+    /// flag.
+    /// Use this to organize reusable configurations, such as personas or tool
+    /// sets.
     ///
     /// For example, to load `.jp/agents/dev.toml`, add `.jp/agents` to this
     /// list and run `jp query --cfg dev`.
@@ -110,8 +111,8 @@ pub struct AppConfig {
     ///
     /// Paths are relative to the current config file.
     ///
-    /// Files are allowed to be glob patterns, and will be expanded to a list
-    /// of files to extend.
+    /// Files are allowed to be glob patterns, and will be expanded to a list of
+    /// files to extend.
     ///
     /// Note that extended files ARE loaded by default, in contrast to
     /// [`Self::config_load_paths`].
@@ -121,10 +122,10 @@ pub struct AppConfig {
     /// Assistant configuration.
     ///
     /// The assistant is the component that takes user input, and uses an LLM to
-    /// generate a response. This configuration allows you to tweak the
-    /// assistant, such as the name of the assistant, which LLM model the
-    /// assistant should use, the system prompt to use, or specific instructions
-    /// for the assistant.
+    /// generate a response.
+    /// This configuration allows you to tweak the assistant, such as the name
+    /// of the assistant, which LLM model the assistant should use, the system
+    /// prompt to use, or specific instructions for the assistant.
     #[setting(nested)]
     pub assistant: AssistantConfig,
 
@@ -145,8 +146,9 @@ pub struct AppConfig {
     /// Editor configuration.
     ///
     /// Tweak how Jean-Pierre opens files for editing, for example when editing
-    /// a message to send to the assistant. This allows you to use your own
-    /// editor of choice, optionally with custom startup options, etc.
+    /// a message to send to the assistant.
+    /// This allows you to use your own editor of choice, optionally with custom
+    /// startup options, etc.
     #[setting(nested)]
     pub editor: EditorConfig,
 
@@ -165,16 +167,17 @@ pub struct AppConfig {
 
     /// Plugin configuration.
     ///
-    /// Controls plugin installation, execution policy, and per-plugin
-    /// options for command plugins (standalone binaries).
+    /// Controls plugin installation, execution policy, and per-plugin options
+    /// for command plugins (standalone binaries).
     #[setting(nested)]
     pub plugins: PluginsConfig,
 
     /// User configuration.
     ///
-    /// Captures display attributes of whoever is running JP, used for
-    /// per-turn attribution in transcripts. Symmetric with [`AssistantConfig`]
-    /// — the human side of the user/assistant pair.
+    /// Captures display attributes of whoever is running JP, used for per-turn
+    /// attribution in transcripts.
+    /// Symmetric with [`AssistantConfig`] — the human side of the
+    /// user/assistant pair.
     #[setting(nested)]
     pub user: UserConfig,
 }
@@ -283,9 +286,10 @@ impl AppConfig {
     ///
     /// Schematic's [`Config::from_partial`] does **not** apply
     /// `#[setting(default)]` values — those are only injected by
-    /// [`PartialConfig::finalize`]. Calling `from_partial` directly on a
-    /// partial that hasn't been finalized will silently fall back to the Rust
-    /// `Default` trait (e.g. `""` for `String`, `0` for `u16`).
+    /// [`PartialConfig::finalize`].
+    /// Calling `from_partial` directly on a partial that hasn't been finalized
+    /// will silently fall back to the Rust `Default` trait (e.g.
+    /// `""` for `String`, `0` for `u16`).
     ///
     /// This method merges [`PartialConfig::default_values`] as a base layer
     /// before converting, so callers don't need to manage the finalize step
@@ -430,11 +434,11 @@ impl AppConfig {
     /// Resolve all model ID aliases in the configuration.
     ///
     /// Converts every `ModelIdOrAliasConfig::Alias` to
-    /// `ModelIdOrAliasConfig::Id` using `providers.llm.aliases`. After this
-    /// call, no `Alias` variants remain in the configuration.
+    /// `ModelIdOrAliasConfig::Id` using `providers.llm.aliases`.
+    /// After this call, no `Alias` variants remain in the configuration.
     ///
-    /// This should be called once after `from_partial`, before the config
-    /// is shared via `Arc`.
+    /// This should be called once after `from_partial`, before the config is
+    /// shared via `Arc`.
     ///
     /// # Errors
     ///
@@ -502,12 +506,13 @@ impl PartialAppConfig {
 
     /// Resolve any model ID aliases in this partial config.
     ///
-    /// Converts `PartialModelIdOrAliasConfig::Alias` variants to `Id` using
-    /// the given alias map. Unresolvable aliases are left as-is (they'll
-    /// produce errors when finalized into an `AppConfig`).
+    /// Converts `PartialModelIdOrAliasConfig::Alias` variants to `Id` using the
+    /// given alias map.
+    /// Unresolvable aliases are left as-is (they'll produce errors when
+    /// finalized into an `AppConfig`).
     ///
-    /// Call this before storing a `PartialAppConfig` as a `ConfigDelta` in
-    /// a conversation stream to maintain the invariant that stream configs
+    /// Call this before storing a `PartialAppConfig` as a `ConfigDelta` in a
+    /// conversation stream to maintain the invariant that stream configs
     /// contain only resolved model IDs.
     pub fn resolve_model_aliases(
         &mut self,

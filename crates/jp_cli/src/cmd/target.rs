@@ -1,19 +1,20 @@
 //! Conversation targeting and resolution.
 //!
 //! Commands declare what conversations they need via
-//! [`ConversationLoadRequest`]. The startup pipeline in `run_inner` resolves
-//! that request into concrete [`ConversationHandle`]s and optionally loads
-//! per-conversation config.
+//! [`ConversationLoadRequest`].
+//! The startup pipeline in `run_inner` resolves that request into concrete
+//! [`ConversationHandle`]s and optionally loads per-conversation config.
 //!
 //! The resolution rules for the `targets` field:
 //!
-//! - `None`: command doesn't need any conversations. Zero handles returned.
+//! - `None`: command doesn't need any conversations.
+//!   Zero handles returned.
 //! - `Some([])`: need one, resolve from session mapping → picker → error.
 //! - `Some([target])`: single target (keyword, ID, or picker).
 //! - `Some([id1, id2, ...])`: multiple explicit IDs.
 //!
-//! See also [`super::conversation_id`] for the shared clap argument types
-//! that produce [`ConversationTarget`] values.
+//! See also [`super::conversation_id`] for the shared clap argument types that
+//! produce [`ConversationTarget`] values.
 
 use std::{
     collections::HashMap,
@@ -31,20 +32,21 @@ use crate::{
 
 /// A command's declaration of what conversations it needs.
 ///
-/// Returned by each command's `conversation_load_request()` method. The
-/// startup pipeline resolves this into `Vec<ConversationHandle>`.
+/// Returned by each command's `conversation_load_request()` method.
+/// The startup pipeline resolves this into `Vec<ConversationHandle>`.
 pub(crate) struct ConversationLoadRequest {
     /// Parsed conversation targets from CLI arguments.
     ///
-    /// - `None`: no conversations needed (e.g. `jp c ls`, `jp query --new`)
+    /// - `None`: no conversations needed (e.g.
+    ///   `jp c ls`, `jp query --new`)
     /// - `Some(vec![])`: need one, resolve from session/picker
     /// - `Some(vec![target])`: single target (keyword, ID, or picker)
     /// - `Some(vec![id1, id2])`: multiple explicit IDs
     ///
     /// When all targets are literal `Id` values, they are resolved in
-    /// accumulation mode (all IDs collected). When any target is a keyword
-    /// or `Picker`, the list is treated as a fallback chain (first success
-    /// wins, errors skip to the next target).
+    /// accumulation mode (all IDs collected).
+    /// When any target is a keyword or `Picker`, the list is treated as a
+    /// fallback chain (first success wins, errors skip to the next target).
     pub targets: Option<Vec<ConversationTarget>>,
 
     /// Whether the command accepts multiple conversations.
@@ -60,8 +62,9 @@ pub(crate) struct ConversationLoadRequest {
 
     /// Which resolved handle (by index) should be used for config loading.
     ///
-    /// `None` means no per-conversation config. `Some(0)` is the common case
-    /// for commands that need config from their target conversation.
+    /// `None` means no per-conversation config.
+    /// `Some(0)` is the common case for commands that need config from their
+    /// target conversation.
     pub config_conversation: Option<usize>,
 }
 
@@ -129,8 +132,8 @@ impl ConversationLoadRequest {
         }
     }
 
-    /// Use explicit targets if non-empty, otherwise resolve from
-    /// session/picker with config loading.
+    /// Use explicit targets if non-empty, otherwise resolve from session/picker
+    /// with config loading.
     pub fn explicit_or_session_with_config(args: &dyn ConversationIds) -> Self {
         if args.ids().is_empty() {
             Self::from_session_with_config()
@@ -154,8 +157,8 @@ impl ConversationLoadRequest {
         }
     }
 
-    /// Use explicit targets if non-empty, otherwise try the session's
-    /// previous conversation, falling back to the interactive picker.
+    /// Use explicit targets if non-empty, otherwise try the session's previous
+    /// conversation, falling back to the interactive picker.
     pub fn explicit_or_previous(args: &dyn ConversationIds) -> Self {
         if args.ids().is_empty() {
             Self::explicit(vec![
@@ -303,8 +306,9 @@ impl PickerFilter {
 impl ConversationTarget {
     /// Parse a raw string into a conversation target.
     ///
-    /// Empty string triggers picker mode. Recognized keywords resolve to their
-    /// respective variants. Anything else is parsed as a conversation ID.
+    /// Empty string triggers picker mode.
+    /// Recognized keywords resolve to their respective variants.
+    /// Anything else is parsed as a conversation ID.
     pub(crate) fn parse(s: &str) -> Self {
         match s {
             // Interactive pickers
@@ -387,7 +391,8 @@ impl ConversationTarget {
     /// Resolve this target to concrete conversation IDs.
     ///
     /// Returns an empty vec for `Picker` — the caller must handle interactive
-    /// selection separately. Returns multiple IDs for `AllSession`.
+    /// selection separately.
+    /// Returns multiple IDs for `AllSession`.
     pub(crate) fn resolve(
         &self,
         workspace: &Workspace,
@@ -595,7 +600,8 @@ fn resolve_from_session_or_picker(
 /// Resolve the `conversation.default_id` config value to a concrete ID.
 ///
 /// Returns `None` for `Ask` or unset (fall through to picker), or if the target
-/// cannot be resolved (e.g. `Previous` with no session history).
+/// cannot be resolved (e.g.
+/// `Previous` with no session history).
 fn resolve_default_id(
     default_id: DefaultConversationId,
     workspace: &Workspace,
@@ -644,9 +650,9 @@ fn resolve_multi_picker(
 
 /// Build the sorted, labeled conversation list for the picker.
 ///
-/// Pinned conversations sort first (by `pinned_at` descending), then
-/// non-pinned by `last_activated_at` descending. The session's active
-/// conversation is forced to the top.
+/// Pinned conversations sort first (by `pinned_at` descending), then non-pinned
+/// by `last_activated_at` descending.
+/// The session's active conversation is forced to the top.
 fn build_picker_items(
     workspace: &Workspace,
     session: Option<&Session>,

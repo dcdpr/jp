@@ -601,15 +601,17 @@ mod extract_preview_after_heading {
 }
 
 /// Tests covering rustdoc-generated item pages (the docs.rs / `cargo doc`
-/// shape). Two structural quirks matter:
+/// shape).
+/// Two structural quirks matter:
 ///
-/// - Method/variant/assoc-type signatures live inside `<section id="...">`
-///   and the docs are in a sibling `<div class="docblock">`, optionally
-///   wrapped in a `<details>` toggle. The heading's own siblings are empty,
-///   so a naïve walk misses every method's documentation.
+/// - Method/variant/assoc-type signatures live inside `<section id="...">` and
+///   the docs are in a sibling `<div class="docblock">`, optionally wrapped in
+///   a `<details>` toggle.
+///   The heading's own siblings are empty, so a naïve walk misses every
+///   method's documentation.
 /// - The page has a handful of structural IDs (`rustdoc_body_wrapper`,
-///   `rustdoc-toc`, `rustdoc-modnav`, `main-content`) that get picked up by
-///   the ancestor-id fallback and clutter the section listing.
+///   `rustdoc-toc`, `rustdoc-modnav`, `main-content`) that get picked up by the
+///   ancestor-id fallback and clutter the section listing.
 mod rustdoc_pages {
     use scraper::Html;
 
@@ -815,9 +817,10 @@ mod rustdoc_pages {
 }
 
 /// Tests covering AsciiDoctor-style horizontal definition lists, as used by
-/// git's manpages on git-scm.com. Fixture is reduced from the actual
-/// `gitglossary` page; each `<dt>` carries three IDs (its own auto-generated
-/// one plus two child `<a id="...">` anchors).
+/// git's manpages on git-scm.com.
+/// Fixture is reduced from the actual `gitglossary` page; each `<dt>` carries
+/// three IDs (its own auto-generated one plus two child `<a id="...">`
+/// anchors).
 mod definition_term_sections {
     use scraper::Html;
 
@@ -987,9 +990,9 @@ mod definition_term_sections {
         assert_eq!(headers[0].id, "intro");
     }
 
-    /// HTML allows several `<dt>`s to share one `<dd>` ("these terms have
-    /// the same definition"). Fetching any term in the group should return
-    /// the whole group.
+    /// HTML allows several `<dt>`s to share one `<dd>` ("these terms have the
+    /// same definition").
+    /// Fetching any term in the group should return the whole group.
     const SHARED_DEFINITION: &str = r#"
         <html>
         <head><title>shared</title></head>

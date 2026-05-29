@@ -7,10 +7,10 @@ pub fn hyperlink(uri: impl AsRef<str>, text: impl AsRef<str>) -> String {
 /// Terminals that don't support OSC 2 ignore the sequence.
 /// The title appears in the terminal's tab or title bar.
 ///
-/// Callers are responsible for checking whether they're connected to a
-/// terminal before invoking this function. Emitting OSC bytes into a
-/// non-TTY stderr (a captured pipe, a CI log, a subprocess wrapper)
-/// pollutes the captured output without any visible effect.
+/// Callers are responsible for checking whether they're connected to a terminal
+/// before invoking this function.
+/// Emitting OSC bytes into a non-TTY stderr (a captured pipe, a CI log, a
+/// subprocess wrapper) pollutes the captured output without any visible effect.
 pub fn set_title(title: impl AsRef<str>) {
     // OSC 2 ; <title> ST
     eprint!("\x1b]2;{}\x07", title.as_ref());

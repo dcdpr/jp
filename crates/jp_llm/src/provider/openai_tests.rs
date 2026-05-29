@@ -146,8 +146,8 @@ mod parameters_with_strict_mode {
     }
 
     /// Regression for the `crate_search_items.kinds` schema rejected by
-    /// OpenAI's strict validator with "array schema missing items" when
-    /// the parameter is encoded as `{type: ["array", "null"], items: ...}`.
+    /// OpenAI's strict validator with "array schema missing items" when the
+    /// parameter is encoded as `{type: ["array", "null"], items: ...}`.
     #[test]
     fn nullable_array_parameter_renders_as_anyof() {
         let mut params = IndexMap::new();
@@ -696,7 +696,8 @@ mod ensure_strict_schema {
         assert_eq!(items["type"], "string");
     }
 
-    /// Docs example: definitions with $ref. Verbatim from
+    /// Docs example: definitions with $ref.
+    /// Verbatim from
     /// <https://platform.openai.com/docs/guides/structured-outputs>.
     #[test]
     fn definitions_example_from_docs() {
@@ -1003,7 +1004,8 @@ mod classify_stream_error {
 
     /// The exact in-stream rate-limit payload reported in the field:
     /// `type=tokens, code=rate_limit_exceeded`, with a `try again in 2.398s.`
-    /// hint. This used to surface as a non-retryable `Other` error.
+    /// hint.
+    /// This used to surface as a non-retryable `Other` error.
     #[test]
     fn tpm_rate_limit_with_code_is_classified_as_rate_limit() {
         let e = err(
@@ -1041,9 +1043,9 @@ mod classify_stream_error {
     }
 
     /// The exact in-stream overload payload reported in the field:
-    /// `type=service_unavailable_error, code=server_is_overloaded`. This used
-    /// to surface as a non-retryable `Other` error because the message has no
-    /// parseable retry-after hint.
+    /// `type=service_unavailable_error, code=server_is_overloaded`.
+    /// This used to surface as a non-retryable `Other` error because the
+    /// message has no parseable retry-after hint.
     #[test]
     fn service_unavailable_overload_is_classified_as_transient() {
         let e = err(

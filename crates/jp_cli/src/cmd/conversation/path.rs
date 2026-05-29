@@ -52,8 +52,8 @@ impl Path {
 
 /// Resolve the requested paths for a conversation.
 ///
-/// When no file flags are set, returns the directory path. Otherwise returns
-/// the path to each requested file.
+/// When no file flags are set, returns the directory path.
+/// Otherwise returns the path to each requested file.
 pub(crate) fn resolve_paths(
     fs: &FsStorageBackend,
     id: &ConversationId,

@@ -1,7 +1,6 @@
 # Attachment: Bear Note
 
-An attachment handler for the [Bear Note](https://bear.app/) note-taking app
-(macOS only).
+An attachment handler for the [Bear Note] note-taking app (macOS only).
 
 It allows retrieving the full content of a single note, or a list of notes based
 on a search query, optionally filtered by tags.
@@ -48,3 +47,5 @@ Attachments:
   bear://search/my%20query
   bear://search/my%20query?tag=foo&tag=bar
 ```
+
+[Bear Note]: https://bear.app/

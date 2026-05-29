@@ -17,13 +17,13 @@ const DOCS_RS: &str = "https://docs.rs";
 
 /// Default root for cached crate documentation.
 ///
-/// Resolves to the OS-specific user cache directory
-/// (e.g. `~/Library/Caches/bookworm/crates` on macOS,
-/// `~/.cache/bookworm/crates` on Linux), so downloaded crate documentation
-/// survives reboots and is trivial to locate or wipe.
+/// Resolves to the OS-specific user cache directory (e.g.
+/// `~/Library/Caches/bookworm/crates` on macOS, `~/.cache/bookworm/crates` on
+/// Linux), so downloaded crate documentation survives reboots and is trivial to
+/// locate or wipe.
 ///
-/// Falls back to the system temp directory if `ProjectDirs` can't resolve
-/// a user cache directory (e.g. when `$HOME` is unset).
+/// Falls back to the system temp directory if `ProjectDirs` can't resolve a
+/// user cache directory (e.g. when `$HOME` is unset).
 #[must_use]
 pub fn default_crates_root() -> PathBuf {
     ProjectDirs::from("", "", "bookworm").map_or_else(
@@ -171,16 +171,17 @@ fn unzip(bytes: &[u8], destination: &Path) -> Result<(), Error> {
 /// docs.rs can ship multi-platform docsets, where each non-default platform
 /// lives in a target-triple-named directory (`x86_64-unknown-linux-gnu/`,
 /// `wasm32-unknown-unknown/`, …) that re-nests the full rustdoc layout.
-/// The downstream indexer can't tell those apart from the real docs, so
-/// would produce bogus module paths if they remained.
+/// The downstream indexer can't tell those apart from the real docs, so would
+/// produce bogus module paths if they remained.
 ///
-/// Detection is structural rather than name-based: rustdoc places each
-/// crate's HTML docs in a directory that has an `index.html` file directly
-/// inside it. Target-triple wrapper directories don't — they only contain
-/// nested crate directories. Keeping dirs that look like crate docs dirs
-/// handles hyphenated crate names (`ra-ap-rustc_lexer` -> `ra_ap_rustc_lexer/`),
-/// custom `[lib] name = "…"` declarations, and any other naming variation,
-/// without needing to know the crate's lib name in advance.
+/// Detection is structural rather than name-based: rustdoc places each crate's
+/// HTML docs in a directory that has an `index.html` file directly inside it.
+/// Target-triple wrapper directories don't — they only contain nested crate
+/// directories.
+/// Keeping dirs that look like crate docs dirs handles hyphenated crate names
+/// (`ra-ap-rustc_lexer` -\> `ra_ap_rustc_lexer/`), custom `[lib] name = "…"`
+/// declarations, and any other naming variation, without needing to know the
+/// crate's lib name in advance.
 ///
 /// `src/` and `implementors/` are kept by explicit allow-list — they're part
 /// of the rustdoc layout but don't have a top-level `index.html`.

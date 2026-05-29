@@ -190,24 +190,27 @@ impl Storage {
     /// Uses a staging directory and atomic directory swap for write safety:
     ///
     /// 1. Write all files into a `.staging-{name}` directory.
-    /// 2. Copy non-managed files from the existing conversation directory
-    ///    (e.g. `QUERY_MESSAGE.md`) into the staging directory.
+    /// 2. Copy non-managed files from the existing conversation directory (e.g.
+    ///    `QUERY_MESSAGE.md`) into the staging directory.
     /// 3. Rename the existing directory to `.old-{name}`.
     /// 4. Rename the staging directory to the final name.
     /// 5. Remove the `.old-{name}` backup.
     ///
-    /// If any write in step 1 fails, the staging directory is removed and
-    /// the existing conversation is untouched. The rename in step 4 is a
-    /// single syscall, so readers never see a partially-written directory.
+    /// If any write in step 1 fails, the staging directory is removed and the
+    /// existing conversation is untouched.
+    /// The rename in step 4 is a single syscall, so readers never see a
+    /// partially-written directory.
     ///
     /// Recovery: if the process crashes between steps 3 and 4, the next
-    /// startup's validation pass detects the `.old-*` / `.staging-*` pair
-    /// and completes or rolls back the swap.
+    /// startup's validation pass detects the `.old-*` / `.staging-*` pair and
+    /// completes or rolls back the swap.
     ///
     /// The conversation is stored as three managed files:
+    ///
     /// - `metadata.json` — lightweight conversation metadata.
     /// - `base_config.json` — the initial `PartialAppConfig` snapshot, written
-    ///   once at creation time. Subsequent persists preserve the existing file.
+    ///   once at creation time.
+    ///   Subsequent persists preserve the existing file.
     /// - `events.json` — the event stream (config deltas + conversation
     ///   events).
     pub fn persist_conversation(
@@ -294,8 +297,8 @@ impl Storage {
     /// Move a conversation directory into the `.archive/` subdirectory.
     ///
     /// Searches both workspace and user storage for the conversation, then
-    /// renames it into `conversations/.archive/{dirname}`. Creates the archive
-    /// directory if needed.
+    /// renames it into `conversations/.archive/{dirname}`.
+    /// Creates the archive directory if needed.
     pub fn archive_conversation(&self, id: &ConversationId) -> Result<()> {
         for root in [Some(&self.root), self.user.as_ref()] {
             let Some(root) = root else {
@@ -452,8 +455,9 @@ impl Storage {
 
     /// Load a session mapping from user storage.
     ///
-    /// Returns `Ok(None)` if user storage is not configured or the mapping
-    /// file does not exist. Returns `Err` on I/O or parse errors.
+    /// Returns `Ok(None)` if user storage is not configured or the mapping file
+    /// does not exist.
+    /// Returns `Err` on I/O or parse errors.
     pub fn load_session_data<T: serde::de::DeserializeOwned>(
         &self,
         session_key: &str,
@@ -494,8 +498,8 @@ impl Storage {
     /// List orphaned lock files in user storage.
     ///
     /// A lock file is orphaned if no process holds the `flock` on it.
-    /// This attempts a non-blocking lock; if it succeeds, the file is
-    /// orphaned and its path is returned.
+    /// This attempts a non-blocking lock; if it succeeds, the file is orphaned
+    /// and its path is returned.
     #[must_use]
     pub fn list_orphaned_lock_files(&self) -> Vec<Utf8PathBuf> {
         let Some(locks_dir) = self.user_storage_with_path(RelativePath::new(lock::LOCKS_DIR))
@@ -519,9 +523,9 @@ impl Storage {
     /// Build the expected conversation directory path.
     ///
     /// This constructs the path where a conversation *would* be stored,
-    /// regardless of whether the directory exists. Used when creating new
-    /// conversations or when the caller needs a stable path before
-    /// persistence.
+    /// regardless of whether the directory exists.
+    /// Used when creating new conversations or when the caller needs a stable
+    /// path before persistence.
     #[must_use]
     pub fn build_conversation_dir(
         &self,
@@ -541,8 +545,8 @@ impl Storage {
 
     /// Find the directory path for a conversation by ID.
     ///
-    /// Searches both workspace and user storage roots. Returns `None` if no
-    /// directory matching the conversation ID exists.
+    /// Searches both workspace and user storage roots.
+    /// Returns `None` if no directory matching the conversation ID exists.
     #[must_use]
     pub fn find_conversation_dir(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
         [Some(&self.root), self.user.as_ref()]
@@ -564,7 +568,8 @@ impl Storage {
             .map(|d| d.join(METADATA_FILE))
     }
 
-    /// Path to a conversation's `base_config.json` file, if the directory exists.
+    /// Path to a conversation's `base_config.json` file, if the directory
+    /// exists.
     #[must_use]
     pub fn conversation_base_config_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
         self.find_conversation_dir(id)
@@ -638,8 +643,8 @@ fn get_expiring_timestamp(root: &Utf8Path) -> Option<DateTime<Utc>> {
 pub(crate) const STAGING_PREFIX: &str = ".staging-";
 
 /// The dot-prefixed backup directory name used during the atomic swap in
-/// [`Storage::persist_conversation`]. Holds the old conversation directory
-/// between the two renames.
+/// [`Storage::persist_conversation`].
+/// Holds the old conversation directory between the two renames.
 pub(crate) const OLD_PREFIX: &str = ".old-";
 
 /// Build the staging directory name for a conversation dir name.
@@ -658,8 +663,9 @@ const MANAGED_FILES: &[&str] = &[METADATA_FILE, BASE_CONFIG_FILE, EVENTS_FILE];
 /// Copy non-managed files from `src` to `dst`.
 ///
 /// Files whose names match [`MANAGED_FILES`] are skipped — those are written
-/// fresh by the persistence logic. Everything else (e.g. `QUERY_MESSAGE.md`)
-/// is copied so it survives the directory swap.
+/// fresh by the persistence logic.
+/// Everything else (e.g.
+/// `QUERY_MESSAGE.md`) is copied so it survives the directory swap.
 fn copy_non_managed_files(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
     for entry in dir_entries(src) {
         let name = entry.file_name().to_owned();
@@ -801,9 +807,9 @@ pub(crate) fn load_conversation_id_from_entry(entry: &Utf8DirEntry) -> Option<Co
 
 /// Extract a conversation ID from an in-flight persist directory name.
 ///
-/// Recognizes `.old-*` and `.staging-*` directories created by the atomic
-/// swap in [`Storage::persist_conversation`]. Returns `None` for normal
-/// entries, `.trash/`, or anything else.
+/// Recognizes `.old-*` and `.staging-*` directories created by the atomic swap
+/// in [`Storage::persist_conversation`].
+/// Returns `None` for normal entries, `.trash/`, or anything else.
 fn load_inflight_conversation_id(entry: &Utf8DirEntry) -> Option<ConversationId> {
     if !entry.file_type().ok()?.is_dir() {
         return None;
@@ -823,8 +829,8 @@ impl Storage {
     /// Write a minimal valid conversation to the workspace storage root.
     ///
     /// Creates a conversation directory with valid `metadata.json`,
-    /// `base_config.json`, and `events.json` files. For test fixture setup
-    /// only.
+    /// `base_config.json`, and `events.json` files.
+    /// For test fixture setup only.
     #[doc(hidden)]
     pub fn write_test_conversation(&self, id: &ConversationId, conversation: &Conversation) {
         let dir = self
@@ -842,8 +848,8 @@ impl Storage {
 
     /// Read the raw persisted events file content for a conversation.
     ///
-    /// Searches both workspace and user storage roots. Returns `None` if
-    /// the conversation or its events file doesn't exist.
+    /// Searches both workspace and user storage roots.
+    /// Returns `None` if the conversation or its events file doesn't exist.
     /// For test assertions only.
     #[doc(hidden)]
     #[must_use]
@@ -860,7 +866,8 @@ impl Storage {
     /// Create an empty conversation directory that will fail validation.
     ///
     /// The directory contains no files, so it will fail the "missing
-    /// metadata.json" check during validation. For test fixture setup only.
+    /// metadata.json" check during validation.
+    /// For test fixture setup only.
     #[doc(hidden)]
     pub fn create_test_conversation_dir(&self, dirname: &str) {
         let dir = self.root.join(CONVERSATIONS_DIR).join(dirname);

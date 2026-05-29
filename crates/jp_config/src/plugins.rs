@@ -22,8 +22,8 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct PluginsConfig {
-    /// Whether to automatically install official plugins from the registry
-    /// when they are first invoked.
+    /// Whether to automatically install official plugins from the registry when
+    /// they are first invoked.
     #[setting(default = true)]
     pub auto_install: bool,
 
@@ -31,7 +31,8 @@ pub struct PluginsConfig {
     #[setting(default = 5)]
     pub shutdown_timeout_secs: u16,
 
-    /// Command plugin configurations, keyed by plugin name (e.g. `serve`).
+    /// Command plugin configurations, keyed by plugin name (e.g.
+    /// `serve`).
     #[setting(nested, merge = merge_nested_indexmap)]
     pub command: IndexMap<String, CommandPluginConfig>,
 }

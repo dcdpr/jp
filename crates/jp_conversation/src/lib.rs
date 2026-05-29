@@ -42,7 +42,8 @@ pub use storage::decode_event_value;
 pub use stream::{ConversationStream, IterTurns, StreamError, Turn, TurnMut};
 
 /// A wrapper around `DateTime<Utc>` that implements `Debug` to match `time`'s
-/// `OffsetDateTime` format (e.g. `2020-01-01 0:00:00.0 +00`).
+/// `OffsetDateTime` format (e.g.
+/// `2020-01-01 0:00:00.0 +00`).
 pub(crate) struct DebugDt<'a>(pub &'a chrono::DateTime<chrono::Utc>);
 
 impl std::fmt::Debug for DebugDt<'_> {
@@ -70,7 +71,8 @@ impl std::fmt::Debug for DebugDt<'_> {
     }
 }
 
-/// Format `DateTime<Utc>` like `time`'s human-readable serde: `"2023-01-01 00:00:00.0"`.
+/// Format `DateTime<Utc>` like `time`'s human-readable serde: `"2023-01-01
+/// 00:00:00.0"`.
 fn fmt_dt(dt: &chrono::DateTime<chrono::Utc>) -> String {
     if dt.timestamp_subsec_nanos() == 0 {
         return dt.format("%Y-%m-%d %H:%M:%S.0").to_string();

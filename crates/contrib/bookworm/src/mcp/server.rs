@@ -92,13 +92,14 @@ pub struct SearchCrateItemsRequest {
     /// The exact name of the crate.
     pub crate_name: String,
 
-    /// The version of the crate. Either a semantic version or `latest` for the
-    /// latest published crate version.
+    /// The version of the crate.
+    /// Either a semantic version or `latest` for the latest published crate
+    /// version.
     #[serde(default = "default_latest")]
     pub crate_version: String,
 
-    /// The `query` parameter does partial matching against the full path of
-    /// the type.
+    /// The `query` parameter does partial matching against the full path of the
+    /// type.
     ///
     /// In SQL terms, this will execute a similar query to the following:
     ///
@@ -136,8 +137,9 @@ pub struct CrateReadmeRequest {
     /// The exact name of the crate.
     pub crate_name: String,
 
-    /// The version of the crate. Either a semantic version or `latest` for the
-    /// latest published crate version.
+    /// The version of the crate.
+    /// Either a semantic version or `latest` for the latest published crate
+    /// version.
     #[serde(default = "default_latest")]
     pub crate_version: String,
 }

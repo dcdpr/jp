@@ -39,7 +39,8 @@ enum SpawnOutcome {
     /// Server started successfully.
     Started(RunningService<RoleClient, ()>),
 
-    /// Server is marked optional and failed to start. Already logged.
+    /// Server is marked optional and failed to start.
+    /// Already logged.
     OptionalFailed,
 }
 
@@ -79,10 +80,11 @@ impl Client {
 
     /// Look up a tool definition on a specific MCP server.
     ///
-    /// The server must be configured (i.e. present in the [`Client`]'s
-    /// server map). If the server isn't currently running, it is started
-    /// on demand and cached — same fail-soft policy as the rest of the
-    /// client for `optional` servers.
+    /// The server must be configured (i.e. present in the [`Client`]'s server
+    /// map).
+    /// If the server isn't currently running, it is started on demand and
+    /// cached — same fail-soft policy as the rest of the client for `optional`
+    /// servers.
     pub async fn get_tool(&self, id: &McpToolId, server_id: &McpServerId) -> Result<Tool> {
         let servers = self.servers.read().await;
         let server = servers
@@ -215,20 +217,21 @@ impl Client {
     /// Check whether a server has an active running service.
     ///
     /// Returns `false` for servers that aren't configured at all, that haven't
-    /// been started yet, or that failed to start while marked `optional`. The
-    /// tool-resolution pipeline uses this to filter out MCP tools whose
+    /// been started yet, or that failed to start while marked `optional`.
+    /// The tool-resolution pipeline uses this to filter out MCP tools whose
     /// backing server is unavailable before they reach the LLM.
     pub async fn is_running(&self, id: &McpServerId) -> bool {
         self.services.read().await.contains_key(id)
     }
 
-    /// Attempt to create an MCP client for a server configuration,
-    /// honoring the `optional` flag.
+    /// Attempt to create an MCP client for a server configuration, honoring the
+    /// `optional` flag.
     ///
-    /// For required servers (the default), any failure is returned as `Err`
-    /// and propagates up to abort the operation. For optional servers, the
-    /// failure is logged at `warn` and the helper returns
-    /// [`SpawnOutcome::OptionalFailed`] so the caller can skip the server.
+    /// For required servers (the default), any failure is returned as `Err` and
+    /// propagates up to abort the operation.
+    /// For optional servers, the failure is logged at `warn` and the helper
+    /// returns [`SpawnOutcome::OptionalFailed`] so the caller can skip the
+    /// server.
     async fn try_create_client(
         id: &McpServerId,
         config: &McpProviderConfig,
@@ -366,8 +369,8 @@ fn render_command(cmd: &Command) -> String {
 /// Render the captured stderr tail for inclusion in an `InitializeError`.
 ///
 /// Returns an empty string if the buffer is empty, otherwise a block prefixed
-/// with a leading newline and `stderr:` header, with each line indented by
-/// two spaces.
+/// with a leading newline and `stderr:` header, with each line indented by two
+/// spaces.
 fn render_stderr_tail(buffer: &Mutex<VecDeque<String>>) -> String {
     let snapshot: Vec<String> = match buffer.lock() {
         Ok(buf) => buf.iter().cloned().collect(),
@@ -387,17 +390,18 @@ fn render_stderr_tail(buffer: &Mutex<VecDeque<String>>) -> String {
     format!("\nstderr:\n{body}")
 }
 
-/// Spawn a background task that forwards an MCP server's stderr to tracing
-/// and a bounded ring buffer.
+/// Spawn a background task that forwards an MCP server's stderr to tracing and
+/// a bounded ring buffer.
 ///
 /// Each line is emitted under `target: "mcp::stderr"` tagged with the server
-/// id, so users can opt in via e.g. `RUST_LOG=mcp::stderr=trace`. Uses
-/// byte-level line reading so non-UTF-8 output doesn't terminate the
-/// forwarder. The task exits when the pipe closes (child exit).
+/// id, so users can opt in via e.g. `RUST_LOG=mcp::stderr=trace`.
+/// Uses byte-level line reading so non-UTF-8 output doesn't terminate the
+/// forwarder.
+/// The task exits when the pipe closes (child exit).
 ///
-/// The same lines are appended to `tail` (capped at [`STDERR_TAIL_LINES`])
-/// so initialization failures can attach the recent stderr output to the
-/// resulting error without requiring the user to enable trace logging.
+/// The same lines are appended to `tail` (capped at [`STDERR_TAIL_LINES`]) so
+/// initialization failures can attach the recent stderr output to the resulting
+/// error without requiring the user to enable trace logging.
 fn spawn_stderr_forwarder(
     stderr: ChildStderr,
     server: McpServerId,

@@ -35,8 +35,8 @@ pub struct TitleGeneratorTask {
     pub providers: LlmProviderConfig,
     pub events: ConversationStream,
     pub title: Option<String>,
-    /// Whether the invoking process is attached to a terminal. When
-    /// `false`, the OSC-2 title-update side effect on task sync is
+    /// Whether the invoking process is attached to a terminal.
+    /// When `false`, the OSC-2 title-update side effect on task sync is
     /// suppressed — the bytes would otherwise leak into a captured pipe.
     pub is_tty: bool,
 }

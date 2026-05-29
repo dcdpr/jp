@@ -1,7 +1,7 @@
 //! Render a parsed dhat profile as a Markdown report.
 //!
-//! Three sections: headline stats, hot leaves aggregated by leaf frame, and
-//! the top stacks by allocation count with their topmost frames.
+//! Three sections: headline stats, hot leaves aggregated by leaf frame, and the
+//! top stacks by allocation count with their topmost frames.
 
 use std::fmt::Write as _;
 
@@ -159,9 +159,9 @@ fn write_hot_stacks(out: &mut String, profile: &Profile) {
 
 /// Formats a count in a compact, human-readable way.
 ///
-/// The `as f64` casts on `u64` can lose precision above 2^53, but the
-/// formatted output is already approximate (one or two decimal digits),
-/// so the lossy cast doesn't affect what the user sees.
+/// The `as f64` casts on `u64` can lose precision above 2^53, but the formatted
+/// output is already approximate (one or two decimal digits), so the lossy cast
+/// doesn't affect what the user sees.
 #[allow(clippy::cast_precision_loss)]
 fn fmt_count(n: u64) -> String {
     if n < 10_000 {
@@ -175,8 +175,8 @@ fn fmt_count(n: u64) -> String {
     }
 }
 
-/// Formats a byte count in a compact, human-readable way. See [`fmt_count`]
-/// for the rationale on the lossy `u64 as f64` cast.
+/// Formats a byte count in a compact, human-readable way.
+/// See [`fmt_count`] for the rationale on the lossy `u64 as f64` cast.
 #[allow(clippy::cast_precision_loss)]
 fn fmt_bytes(n: u64) -> String {
     const KIB: f64 = 1024.0;

@@ -47,8 +47,8 @@ impl LoadError {
         &self.error
     }
 
-    /// Returns `true` if the error is caused by corrupt or invalid data
-    /// (as opposed to a system-level I/O failure or missing data).
+    /// Returns `true` if the error is caused by corrupt or invalid data (as
+    /// opposed to a system-level I/O failure or missing data).
     #[must_use]
     pub fn is_corrupt(&self) -> bool {
         matches!(
@@ -121,9 +121,10 @@ impl Storage {
 /// Scan a single conversations directory for IDs.
 ///
 /// If any in-flight persist directories (`.old-*`, `.staging-*`) are found
-/// without a corresponding normal directory, retries briefly to let the
-/// atomic rename complete. This ensures every returned ID has a normal
-/// directory behind it, even when another process is mid-persist.
+/// without a corresponding normal directory, retries briefly to let the atomic
+/// rename complete.
+/// This ensures every returned ID has a normal directory behind it, even when
+/// another process is mid-persist.
 fn scan_conversation_ids(path: &Utf8Path) -> Vec<ConversationId> {
     let entries: Vec<_> = dir_entries(path).collect();
 

@@ -213,7 +213,8 @@ pub(crate) fn open(path: Utf8PathBuf, options: Options) -> Result<(String, Rever
     Ok((content, guard))
 }
 
-/// Open an editor for the user to input or edit text using a file in the workspace
+/// Open an editor for the user to input or edit text using a file in the
+/// workspace
 pub(crate) fn edit_query(
     config: &AppConfig,
     conversation_root: &Utf8Path,

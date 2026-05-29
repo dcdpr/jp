@@ -50,8 +50,8 @@ fn empty_archive() -> Archive {
 }
 
 /// Bug fix: `jp c archive` without targets should resolve to the session's
-/// active conversation instead of opening the picker. Mirrors the behavior
-/// of `jp c show`.
+/// active conversation instead of opening the picker.
+/// Mirrors the behavior of `jp c show`.
 #[test]
 fn no_target_resolves_to_session_active_conversation() {
     let id = make_id(1000);
@@ -142,8 +142,8 @@ fn ts(secs: i64) -> DateTime<Utc> {
 }
 
 /// Pure range semantics (from-inclusive, until-exclusive) are covered by
-/// `CreationRange` tests in `time_tests.rs`. The tests below cover
-/// archive-specific composition with `--inactive-since`.
+/// `CreationRange` tests in `time_tests.rs`.
+/// The tests below cover archive-specific composition with `--inactive-since`.
 #[test]
 fn matches_inactive_since_uses_last_activated_at() {
     let cmd = Archive {

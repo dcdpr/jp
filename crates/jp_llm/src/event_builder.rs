@@ -1,8 +1,8 @@
 //! Event accumulation for the query stream pipeline.
 //!
-//! The [`EventBuilder`] accumulates streamed [`EventPart`] chunks from the
-//! LLM into complete [`ConversationEvent`]s. It uses index-based buffering
-//! where each index represents one logical event.
+//! The [`EventBuilder`] accumulates streamed [`EventPart`] chunks from the LLM
+//! into complete [`ConversationEvent`]s.
+//! It uses index-based buffering where each index represents one logical event.
 //!
 //! # Event Model
 //!
@@ -26,9 +26,10 @@
 //!   index are complete and should be merged into a single `ConversationEvent`
 //! - **Order preservation**: Flush events arrive in index order
 //! - **Tool calls may be multi-part**: Providers that stream tool calls
-//!   incrementally (e.g. Anthropic) emit `ToolCallPart::Start` when the tool
-//!   call begins, followed by `ToolCallPart::ArgumentChunk` events as JSON
-//!   arrives. The Flush after the last chunk marks the tool call as complete.
+//!   incrementally (e.g.
+//!   Anthropic) emit `ToolCallPart::Start` when the tool call begins, followed
+//!   by `ToolCallPart::ArgumentChunk` events as JSON arrives.
+//!   The Flush after the last chunk marks the tool call as complete.
 
 use std::collections::{HashMap, hash_map::Entry};
 
@@ -63,11 +64,13 @@ impl EventBuilder {
     /// Returns the partial content accumulated in unflushed buffers.
     ///
     /// This is used when the user interrupts streaming and chooses to continue
-    /// with assistant prefill. The partial content is injected into the next
-    /// request so the LLM can continue from where it left off.
+    /// with assistant prefill.
+    /// The partial content is injected into the next request so the LLM can
+    /// continue from where it left off.
     ///
-    /// Returns `None` if there's no meaningful partial content. Structured
-    /// buffers are excluded — partial JSON isn't useful for prefill.
+    /// Returns `None` if there's no meaningful partial content.
+    /// Structured buffers are excluded — partial JSON isn't useful for
+    /// prefill.
     #[must_use]
     pub fn peek_partial_content(&self) -> Option<String> {
         if self.buffers.is_empty() {
@@ -228,12 +231,14 @@ impl EventBuilder {
     /// ensure any partially accumulated events are not silently dropped.
     ///
     /// Tool-call buffers are an exception: a normally-completed tool call
-    /// always emits an explicit [`Event::Flush`] (e.g. Anthropic's
-    /// `ContentBlockStop`). A buffer that only reaches drain is structurally
-    /// incomplete — the stream ended before the block was closed. Persisting
-    /// it would create an orphaned `tool_use` in the conversation, which
-    /// providers reject on the next request because there's no matching
-    /// `tool_result`. Drop these with a warning.
+    /// always emits an explicit [`Event::Flush`] (e.g.
+    /// Anthropic's `ContentBlockStop`).
+    /// A buffer that only reaches drain is structurally incomplete — the
+    /// stream ended before the block was closed.
+    /// Persisting it would create an orphaned `tool_use` in the conversation,
+    /// which providers reject on the next request because there's no matching
+    /// `tool_result`.
+    /// Drop these with a warning.
     ///
     /// [`Event::Finished`]: crate::event::Event::Finished
     /// [`Event::Flush`]: crate::event::Event::Flush
@@ -281,9 +286,11 @@ enum IndexBuffer {
     },
     /// Accumulates a tool call request (identity + argument JSON chunks).
     ToolCall {
-        /// Tool call ID. First non-empty value wins.
+        /// Tool call ID.
+        /// First non-empty value wins.
         id: String,
-        /// Tool name. First non-empty value wins.
+        /// Tool name.
+        /// First non-empty value wins.
         name: String,
         /// Raw JSON arguments accumulated from chunks.
         arguments_json: String,
@@ -291,8 +298,8 @@ enum IndexBuffer {
     /// Accumulates streamed JSON chunks for a structured response.
     ///
     /// During streaming, providers emit `EventPart::Structured` chunks.
-    /// On flush, the concatenated string is parsed into a `Value`. If
-    /// parsing fails, the raw string is preserved.
+    /// On flush, the concatenated string is parsed into a `Value`.
+    /// If parsing fails, the raw string is preserved.
     Structured {
         /// The JSON string accumulated so far.
         content: String,

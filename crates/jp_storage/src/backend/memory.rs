@@ -1,8 +1,8 @@
 //! In-memory storage backend.
 //!
 //! [`InMemoryStorageBackend`] provides a filesystem-free implementation of all
-//! four backend traits. Intended for tests and future non-filesystem
-//! environments.
+//! four backend traits.
+//! Intended for tests and future non-filesystem environments.
 
 use std::{
     collections::{HashMap, HashSet},
@@ -22,7 +22,8 @@ use crate::{LoadError, error::Result, load::LoadErrorInner, lock::LockInfo};
 
 /// Purely in-memory storage backend.
 ///
-/// All data lives in process memory behind mutexes. No filesystem access.
+/// All data lives in process memory behind mutexes.
+/// No filesystem access.
 /// Locking uses in-process checks (not cross-process `flock`).
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorageBackend {
@@ -214,7 +215,8 @@ impl SessionBackend for InMemoryStorageBackend {
     }
 }
 
-/// A held in-process lock. Removes itself from the lock set on drop.
+/// A held in-process lock.
+/// Removes itself from the lock set on drop.
 struct InMemoryLockGuard {
     conversation_id: String,
     locks: Arc<Mutex<HashSet<String>>>,

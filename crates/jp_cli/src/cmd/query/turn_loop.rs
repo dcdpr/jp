@@ -60,21 +60,22 @@ use crate::{
 
 /// Events produced by the merged streaming loop sources.
 enum StreamingLoopEvent {
-    /// A signal from the signal handler (e.g. Ctrl+C).
+    /// A signal from the signal handler (e.g.
+    /// Ctrl+C).
     Signal(SignalTo),
     /// An event from the LLM provider stream.
     Llm(Box<Result<Event, StreamError>>),
-    /// A tick from the preparing indicator timer, carrying the elapsed
-    /// time since the timer started.
+    /// A tick from the preparing indicator timer, carrying the elapsed time
+    /// since the timer started.
     PreparingTick(Duration),
 }
 
-/// Wrapper enum that unifies heterogeneous stream sources for
-/// [`SelectAll`].
+/// Wrapper enum that unifies heterogeneous stream sources for [`SelectAll`].
 ///
-/// Each variant holds a different concrete stream type, but they all
-/// yield [`StreamingLoopEvent`]. This avoids boxing while allowing
-/// `select_all` to poll them as a single merged stream.
+/// Each variant holds a different concrete stream type, but they all yield
+/// [`StreamingLoopEvent`].
+/// This avoids boxing while allowing `select_all` to poll them as a single
+/// merged stream.
 enum StreamSource<S, L, T> {
     Signal(S),
     Llm(L),
@@ -121,9 +122,9 @@ fn spawn_waiting_indicator(
 
 /// Runs the turn loop: streaming from LLM, handling signals, executing tools.
 ///
-/// This is extracted from `handle_turn` to enable integration testing
-/// without requiring a real LLM provider. The function handles the complete
-/// turn lifecycle:
+/// This is extracted from `handle_turn` to enable integration testing without
+/// requiring a real LLM provider.
+/// The function handles the complete turn lifecycle:
 ///
 /// 1. Streaming LLM responses
 /// 2. Handling user interrupts (Ctrl+C)
@@ -133,6 +134,7 @@ fn spawn_waiting_indicator(
 /// # Errors
 ///
 /// Returns an error if:
+///
 /// - LLM streaming fails with a non-retryable error
 /// - Tool execution fails critically
 /// - Workspace persistence fails
@@ -771,8 +773,8 @@ async fn build_inquiry_overrides(
 }
 
 /// Assemble tool responses from the executor's results plus any pre-resolved
-/// responses (skipped tools, unavailable tools, orphan synthesizations),
-/// commit them to the conversation stream, and flush to disk.
+/// responses (skipped tools, unavailable tools, orphan synthesizations), commit
+/// them to the conversation stream, and flush to disk.
 ///
 /// Returns `true` if a follow-up LLM cycle is needed (i.e. tool responses were
 /// added and the coordinator wants to continue).

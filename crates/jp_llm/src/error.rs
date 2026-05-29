@@ -26,8 +26,8 @@ pub struct StreamError {
 
     /// The underlying source of the error.
     ///
-    /// This is kept for logging and display purposes, but callers should
-    /// make decisions based on `kind` and `retry_after`, not the source.
+    /// This is kept for logging and display purposes, but callers should make
+    /// decisions based on `kind` and `retry_after`, not the source.
     source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
@@ -163,10 +163,10 @@ impl StreamError {
     /// Classify a [`reqwest_eventsource::Error`] into a [`StreamError`].
     ///
     /// This is async because [`InvalidStatusCode`] carries a
-    /// [`reqwest::Response`] whose body must be read to extract the actual
-    /// API error message. Without reading the body, errors like HTTP 400
-    /// would just say "HTTP 400 Bad Request" with no indication of what
-    /// went wrong.
+    /// [`reqwest::Response`] whose body must be read to extract the actual API
+    /// error message.
+    /// Without reading the body, errors like HTTP 400 would just say "HTTP 400
+    /// Bad Request" with no indication of what went wrong.
     ///
     /// Provider-specific error handlers should call this rather than
     /// re-implementing the classification logic.
@@ -234,8 +234,8 @@ impl StreamError {
 /// Try to extract a human-readable error message from a JSON error response
 /// body.
 ///
-/// Supports the common `{"error": {"message": "..."}}` shape used by OpenAI
-/// and compatible APIs, as well as Google's `{"error": {"message": "..."}}`.
+/// Supports the common `{"error": {"message": "..."}}` shape used by OpenAI and
+/// compatible APIs, as well as Google's `{"error": {"message": "..."}}`.
 fn extract_api_error_body(body: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
     parsed
@@ -483,6 +483,7 @@ impl PartialEq for ToolError {
 /// Heuristic check for quota/billing exhaustion based on error text.
 ///
 /// This catches the common patterns across providers:
+///
 /// - OpenAI: `"insufficient_quota"`
 /// - Anthropic: `"billing_error"`, `"Your credit balance is too low"`
 /// - Google: `"RESOURCE_EXHAUSTED"`, `"Quota exceeded"`
@@ -565,20 +566,23 @@ pub(crate) fn extract_retry_from_text(text: &str) -> Option<Duration> {
     None
 }
 
-/// Extracts a retry-after duration from common rate-limit response
-/// headers.
+/// Extracts a retry-after duration from common rate-limit response headers.
 ///
 /// Headers are checked in decreasing order of authority:
 ///
-/// 1. `retry-after-ms` — Non-standard (OpenAI). Millisecond precision.
-/// 2. `Retry-After` — RFC 7231. Integer or float seconds (the spec
-///    mandates integers, but floats are accepted). HTTP-date values are
-///    not supported.
+/// 1. `retry-after-ms` — Non-standard (OpenAI).
+///    Millisecond precision.
+/// 2. `Retry-After` — RFC 7231.
+///    Integer or float seconds (the spec mandates integers, but floats are
+///    accepted).
+///    HTTP-date values are not supported.
 /// 3. `RateLimit` — IETF draft `t=` parameter (delta-seconds).
-///    See: <https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers>
-/// 4. `x-ratelimit-reset-requests` / `x-ratelimit-reset-tokens` —
-///    OpenAI-style Human-duration values (e.g. `6m0s`). Takes the longer
-///    of the two if both are present.
+///    See:
+///    <https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers>
+/// 4. `x-ratelimit-reset-requests` / `x-ratelimit-reset-tokens` — OpenAI-style
+///    Human-duration values (e.g.
+///    `6m0s`).
+///    Takes the longer of the two if both are present.
 /// 5. `x-ratelimit-reset` — Unix timestamp, converted relative to now.
 fn extract_retry_after(headers: &HeaderMap) -> Option<Duration> {
     if let Some(d) = header_positive_f64(headers, "retry-after-ms")
@@ -654,8 +658,7 @@ fn header_positive_f64(
 /// Supported units: `h` (hours), `m` (minutes), `s` (seconds), `ms`
 /// (milliseconds — rounded up to 1s if non-zero and total is 0).
 ///
-/// Examples: `"1s"` → 1, `"6m0s"` → 360, `"1h30m"` → 5400,
-/// `"200ms"` → 1.
+/// Examples: `"1s"` → 1, `"6m0s"` → 360, `"1h30m"` → 5400, `"200ms"` → 1.
 ///
 /// Returns `None` for empty, zero, or unparseable values.
 fn parse_human_duration(s: &str) -> Option<u64> {

@@ -38,8 +38,8 @@ fn ts(h: u32, m: u32, s: u32) -> DateTime<Utc> {
 
 /// Create a `Ctx` backed by an in-memory printer.
 ///
-/// Returns the ctx, conversation id, output buffer, and the runtime (kept
-/// alive so `Ctx::drop` can persist without panicking).
+/// Returns the ctx, conversation id, output buffer, and the runtime (kept alive
+/// so `Ctx::drop` can persist without panicking).
 fn setup_ctx_with_config(
     config: AppConfig,
     events: Vec<ConversationEvent>,
@@ -282,10 +282,12 @@ fn prints_structured_data() {
     assert!(output.contains("```json"), "got: {output}");
 }
 
-/// Regression: replay must close the structured `json` fence. Before this
-/// fix, `TurnRenderer::flush()` only flushed the chat sub-renderer, so a
-/// conversation ending on a `ChatResponse::Structured` printed an opening
+/// Regression: replay must close the structured `json` fence.
+/// Before this fix, `TurnRenderer::flush()` only flushed the chat sub-renderer,
+/// so a conversation ending on a `ChatResponse::Structured` printed an opening
+///
 /// ```json with no matching close.
+/// ```
 #[test]
 fn structured_fence_is_closed_at_end_of_replay() {
     let data = json!({"name": "Alice"});
@@ -317,8 +319,8 @@ fn structured_fence_is_closed_at_end_of_replay() {
 }
 
 /// Regression: a message following a structured response in the same
-/// conversation must render OUTSIDE the `json` fence — the fence is
-/// closed at the role/content boundary, not left open until end-of-stream.
+/// conversation must render OUTSIDE the `json` fence — the fence is closed at
+/// the role/content boundary, not left open until end-of-stream.
 #[test]
 fn structured_response_followed_by_message_closes_fence_first() {
     let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
@@ -364,11 +366,11 @@ fn structured_response_followed_by_message_closes_fence_first() {
     );
 }
 
-/// Regression: a message after a structured response *within the same
-/// turn* must close the `json` fence first. This pins the
-/// structured→message branch in `TurnView::render_chat_response`
-/// specifically — no per-turn `reconfigure` runs between the two events,
-/// so the close has to come from that branch.
+/// Regression: a message after a structured response *within the same turn*
+/// must close the `json` fence first.
+/// This pins the structured→message branch in `TurnView::render_chat_response`
+/// specifically — no per-turn `reconfigure` runs between the two events, so
+/// the close has to come from that branch.
 #[test]
 fn structured_to_message_in_same_turn_closes_fence_first() {
     let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![

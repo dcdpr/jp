@@ -1,43 +1,40 @@
 # Jean-Pierre, An LLM-powered Programming Assistant
 
 > A command-line toolkit to support you in your daily work as a software
-> programmer. Built to integrate into your existing workflows, providing a
-> secure, powerful and flexible pair-programming experience with LLMs.
+> programmer.
+> Built to integrate into your existing workflows, providing a secure, powerful
+> and flexible pair-programming experience with LLMs.
 
-Visit [jp.computer](https://jp.computer/) to learn more.
+Visit [jp.computer] to learn more.
 
 > [!NOTE]
-> This project is in active development. Expect breaking changes. What is
-> documented here is subject to change and may not be up-to-date. Please consult
-> the [installation instructions](#getting-started) to get started, and [reach
-> out to us](https://jp.computer/contact) if you need any assistance, or have
-> feedback.
+> This project is in active development.
+> Expect breaking changes.
+> What is documented here is subject to change and may not be up-to-date.
+> Please consult the [installation instructions](#getting-started) to get
+> started, and [reach out to us] if you need any assistance, or have feedback.
 
 ## Philosophy
 
-JP is built to be: **[provider-agnostic][1]**, because your workflow shouldn't be coupled
-to any single LLM backend; **[private and secure by default][2]**, with no
-implicit network access or silent tool execution; a **[proper Unix
+JP is built to be: **[provider-agnostic][1]**, because your workflow shouldn't
+be coupled to any single LLM backend; **[private and secure by default][2]**,
+with no implicit network access or silent tool execution; a **[proper Unix
 citizen][3]** as a single static binary that composes with pipes, respects your
 shell, and stays out of your way; **[extensible][4]** through sandboxed plugins;
 **[configurable][5]** where it matters; and finally, **[open-source and
-independent][6]**, holding no allegiance to any LLM provider, funded without 
-the enshittification of VC money, just striving to be great — thanks to and for its users.
+independent][6]**, holding no allegiance to any LLM provider, funded without the
+enshittification of VC money, just striving to be great — thanks to and for its
+users.
 
-When you adapt your programming tooling and workflow to JP, you are ensuring that
-you will have access to all of the frontier models, all of the local-first open source 
-inference runtimes, and all of the major inference aggregation services.  
-
-[1]: docs/README/providers.md
-[2]: docs/README/privacy-and-security.md
-[3]: docs/README/workflow-integration.md
-[4]: docs/README/extensibility.md
-[5]: docs/README/configuration.md
-[6]: docs/README/open-source.md
+When you adapt your programming tooling and workflow to JP, you are ensuring
+that you will have access to all of the frontier models, all of the local-first
+open source inference runtimes, and all of the major inference aggregation
+services.
 
 ## Getting Started
 
-JP is in active development. Install from source:
+JP is in active development.
+Install from source:
 
 ```sh
 % cargo install --locked --git https://github.com/dcdpr/jp.git
@@ -55,7 +52,8 @@ ollama/qwen3
 Initialized workspace at current directory
 ```
 
-Run your first queries, noting that you get back to the command line every time, but `jp q` is easy to type:
+Run your first queries, noting that you get back to the command line every time,
+but `jp q` is easy to type:
 
 ```sh
 % jp query --new "Is this thing on?"
@@ -82,3 +80,12 @@ See what else you can do:
 ```sh
 % jp help
 ```
+
+[1]: docs/README/providers.md
+[2]: docs/README/privacy-and-security.md
+[3]: docs/README/workflow-integration.md
+[4]: docs/README/extensibility.md
+[5]: docs/README/configuration.md
+[6]: docs/README/open-source.md
+[jp.computer]: https://jp.computer/
+[reach out to us]: https://jp.computer/contact

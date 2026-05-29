@@ -765,9 +765,9 @@ fn test_roundtrip_delta_with_tool_defaults() {
     assert_eq!(original_json, result_json);
 }
 
-/// Per-tool entries are serialized as flattened keys alongside "*" in the
-/// tools object. The schema only knows about "*", so a naive strip would
-/// remove all per-tool config.
+/// Per-tool entries are serialized as flattened keys alongside "*" in the tools
+/// object. The schema only knows about "*", so a naive strip would remove all
+/// per-tool config.
 #[test]
 fn test_roundtrip_delta_with_per_tool_overrides() {
     let mut partial = jp_config::PartialAppConfig::empty();

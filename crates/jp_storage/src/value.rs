@@ -57,8 +57,9 @@ pub fn read_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
 /// Write a JSON value to a file atomically.
 ///
 /// Writes to a temporary sibling file (`{path}.tmp`), flushes, then renames
-/// over the target. If anything fails before the rename, the original file is
-/// left untouched and the temp file is cleaned up on a best-effort basis.
+/// over the target.
+/// If anything fails before the rename, the original file is left untouched and
+/// the temp file is cleaned up on a best-effort basis.
 pub fn write_json<T: Serialize>(path: &Utf8Path, value: &T) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -101,8 +102,8 @@ fn tmp_path_for(path: &Utf8Path) -> Utf8PathBuf {
 /// Remove orphaned `.tmp` files from a directory.
 ///
 /// These can be left behind if the process crashes after writing the temp file
-/// but before the rename completes. Safe to call on any directory; non-`.tmp`
-/// entries are ignored.
+/// but before the rename completes.
+/// Safe to call on any directory; non-`.tmp` entries are ignored.
 pub fn cleanup_tmp_files(dir: &Utf8Path) {
     let Ok(entries) = dir.read_dir_utf8() else {
         return;

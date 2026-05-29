@@ -48,8 +48,8 @@ pub(crate) async fn github_code_search(
 
 /// Hard cap on lines returned without an explicit range.
 ///
-/// Files larger than this require `start_line` and `end_line`. Picked to
-/// match the kind of "big enough to bloat context" that motivated the
+/// Files larger than this require `start_line` and `end_line`.
+/// Picked to match the kind of "big enough to bloat context" that motivated the
 /// limit, while still leaving room for typical source files.
 const MAX_LINES_WITHOUT_RANGE: usize = 2000;
 

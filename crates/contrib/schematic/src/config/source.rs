@@ -34,7 +34,8 @@ impl Source {
         Ok(Source::File { path, required })
     }
 
-    /// Return a file extension (without period) for the source if one is available.
+    /// Return a file extension (without period) for the source if one is
+    /// available.
     #[must_use]
     pub fn get_file_ext(&self) -> Option<&str> {
         match self {

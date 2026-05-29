@@ -30,10 +30,10 @@ const REPO: &str = "jp";
 
 /// Tool-level state filter for `github_issues` and `github_pulls`.
 ///
-/// The underlying GitHub API supports `all` too, but exposing it
-/// explicitly is redundant — leaving the parameter unspecified at the
-/// tool boundary already means "both open and closed". Both tools map
-/// `None` to [`jp_github::params::State::All`] internally.
+/// The underlying GitHub API supports `all` too, but exposing it explicitly is
+/// redundant — leaving the parameter unspecified at the tool boundary already
+/// means "both open and closed".
+/// Both tools map `None` to [`jp_github::params::State::All`] internally.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
@@ -41,12 +41,12 @@ pub enum State {
     Closed,
 }
 
-/// Parse a `repository` argument of the form `owner/repo`, defaulting to
-/// the project's own repo when unset.
+/// Parse a `repository` argument of the form `owner/repo`, defaulting to the
+/// project's own repo when unset.
 ///
-/// Rejects malformed shapes (`owner/repo/extra`, `/repo`, `owner/`,
-/// `owner`) at the boundary rather than letting them interpolate into
-/// GitHub API paths and surface as opaque 404s.
+/// Rejects malformed shapes (`owner/repo/extra`, `/repo`, `owner/`, `owner`) at
+/// the boundary rather than letting them interpolate into GitHub API paths and
+/// surface as opaque 404s.
 pub(crate) fn parse_repo(repository: Option<String>) -> Result<(String, String)> {
     let repository = repository.unwrap_or_else(|| format!("{ORG}/{REPO}"));
     let parts: Vec<&str> = repository.split('/').collect();
@@ -176,9 +176,8 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
 /// Initialize the GitHub client with a token, verifying it works.
 ///
-/// Use this for tools that modify state (`create_issue_*`,
-/// `pr_review_*`) or that hit endpoints which always require auth
-/// (GraphQL, search).
+/// Use this for tools that modify state (`create_issue_*`, `pr_review_*`) or
+/// that hit endpoints which always require auth (GraphQL, search).
 async fn auth() -> Result<()> {
     let token = read_token().ok_or(
         "unable to get auth token. Set `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to a valid token.",
@@ -202,14 +201,15 @@ async fn auth() -> Result<()> {
     Ok(())
 }
 
-/// Initialize the GitHub client, falling back to anonymous access when no
-/// token is set.
+/// Initialize the GitHub client, falling back to anonymous access when no token
+/// is set.
 ///
-/// Use this for read-only tools that work against public repos without
-/// auth. Anonymous requests get GitHub's 60-req/hour rate limit; the
-/// authenticated limit is 5000/hour. We do not verify the token here —
-/// the real request will surface a 401 if the token is bad, which is a
-/// better signal than a generic "can't authenticate" message.
+/// Use this for read-only tools that work against public repos without auth.
+/// Anonymous requests get GitHub's 60-req/hour rate limit; the authenticated
+/// limit is 5000/hour.
+/// We do not verify the token here — the real request will surface a 401 if
+/// the token is bad, which is a better signal than a generic "can't
+/// authenticate" message.
 async fn auth_optional() -> Result<()> {
     let mut builder = jp_github::Octocrab::builder();
     if let Some(token) = read_token() {

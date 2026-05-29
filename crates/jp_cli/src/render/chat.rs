@@ -19,14 +19,14 @@
 //!
 //! Reasoning content can be displayed in different modes:
 //!
-//! | Mode | Behavior |
-//! |------|----------|
-//! | `Hidden` | Don't render reasoning (still persisted) |
-//! | `Full` | Render all reasoning tokens |
-//! | `Truncate(N)` | Render first N characters, then "..." |
-//! | `Progress` | Show "reasoning..." then dots |
-//! | `Static` | Show "reasoning..." once |
-//! | `Timer` | Show a running timer, erase when done |
+//! | Mode          | Behavior                                 |
+//! | ------------- | ---------------------------------------- |
+//! | `Hidden`      | Don't render reasoning (still persisted) |
+//! | `Full`        | Render all reasoning tokens              |
+//! | `Truncate(N)` | Render first N characters, then "..."    |
+//! | `Progress`    | Show "reasoning..." then dots            |
+//! | `Static`      | Show "reasoning..." once                 |
+//! | `Timer`       | Show a running timer, erase when done    |
 
 use std::{fmt::Write as _, sync::Arc, time::Duration};
 
@@ -50,8 +50,8 @@ use crate::timer::spawn_line_timer;
 
 /// The kind of content last pushed into the renderer.
 ///
-/// Used to detect content-type transitions so that the markdown buffer
-/// can be force-flushed before a different kind of content is rendered.
+/// Used to detect content-type transitions so that the markdown buffer can be
+/// force-flushed before a different kind of content is rendered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ContentKind {
     Reasoning,
@@ -62,9 +62,10 @@ enum ContentKind {
 /// Renders chat events to the terminal.
 ///
 /// Handles user messages, assistant reasoning, and assistant message content,
-/// applying the configured display mode for reasoning. Tracks content-kind
-/// transitions to insert appropriate spacing between different content types
-/// (e.g. blank lines between tool calls and message text).
+/// applying the configured display mode for reasoning.
+/// Tracks content-kind transitions to insert appropriate spacing between
+/// different content types (e.g. blank lines between tool calls and message
+/// text).
 pub struct ChatRenderer {
     buffer: Buffer,
     formatter: Formatter,
@@ -119,10 +120,10 @@ impl ChatRenderer {
 
     /// Render a user message (`ChatRequest` content).
     ///
-    /// Formats the content as a complete markdown block. Callers are
-    /// responsible for emitting any preceding role header via
-    /// [`Self::render_role_header`] — the renderer no longer emits a
-    /// trailing separator on its own.
+    /// Formats the content as a complete markdown block.
+    /// Callers are responsible for emitting any preceding role header via
+    /// [`Self::render_role_header`] — the renderer no longer emits a trailing
+    /// separator on its own.
     pub fn render_request(&mut self, content: &str) {
         self.flush_on_transition(ContentKind::Message);
         self.flush();
@@ -139,14 +140,14 @@ impl ChatRenderer {
     /// Render a labeled role-boundary header.
     ///
     /// Draws a single line with the label embedded near the left and an
-    /// optional dimmed suffix appended after it, with `─` characters
-    /// filling the remaining width. Used by [`TurnRenderer`] to mark which
-    /// participant is speaking next — e.g. `── alice ──…` before a user
-    /// turn, `── jp (anthropic/claude-opus-4-7) ──…` before an assistant
-    /// turn.
+    /// optional dimmed suffix appended after it, with `─` characters filling
+    /// the remaining width.
+    /// Used by [`TurnRenderer`] to mark which participant is speaking next —
+    /// e.g. `── alice ──…` before a user turn, `── jp
+    /// (anthropic/claude-opus-4-8) ──…` before an assistant turn.
     ///
-    /// Replaces the old plain `---` HR separator and disambiguates JP's
-    /// turn boundaries from any HR markdown the assistant itself emits.
+    /// Replaces the old plain `---` HR separator and disambiguates JP's turn
+    /// boundaries from any HR markdown the assistant itself emits.
     ///
     /// [`TurnRenderer`]: super::TurnRenderer
     pub fn render_role_header(&mut self, label: &str, suffix: Option<&str>) {
@@ -164,17 +165,17 @@ impl ChatRenderer {
 
     /// Flush the markdown buffer if the content kind is changing.
     ///
-    /// When the LLM switches from one content type to another (e.g.
-    /// reasoning → message, or message → tool call), any partial markdown
-    /// sitting in the buffer must be emitted immediately. Without this,
-    /// content before the transition would only appear after the next
-    /// block boundary — which may not arrive until much later (or never,
+    /// When the LLM switches from one content type to another (e.g. reasoning
+    /// → message, or message → tool call), any partial markdown sitting in
+    /// the buffer must be emitted immediately.
+    /// Without this, content before the transition would only appear after the
+    /// next block boundary — which may not arrive until much later (or never,
     /// if a tool call follows).
     ///
-    /// Always cancels any active ephemeral reasoning chrome (e.g. the
-    /// `Timer` display): persistent content arriving — even of the same
-    /// `ContentKind` as before — must stop the running timer, since the
-    /// timer line and the upcoming content share the terminal row.
+    /// Always cancels any active ephemeral reasoning chrome (e.g. the `Timer`
+    /// display): persistent content arriving — even of the same `ContentKind`
+    /// as before — must stop the running timer, since the timer line and the
+    /// upcoming content share the terminal row.
     fn flush_on_transition(&mut self, next: ContentKind) {
         self.cancel_reasoning_timer();
         if let Some(prev) = self.last_content_kind
@@ -336,10 +337,10 @@ impl ChatRenderer {
 
     /// Print a raw code string with the code typewriter delay.
     ///
-    /// The content is already highlighted and has background applied by
-    /// the formatter's streaming code block API. `indent` is the visual
-    /// column the renderer should put each line at (used when the code
-    /// block is inside a list item).
+    /// The content is already highlighted and has background applied by the
+    /// formatter's streaming code block API.
+    /// `indent` is the visual column the renderer should put each line at (used
+    /// when the code block is inside a list item).
     fn print_code(&self, content: &str, indent: usize) {
         let delay = self.config.typewriter.code_delay;
         let content = if indent == 0 {
@@ -368,8 +369,8 @@ impl ChatRenderer {
         self.printer.print(formatted.typewriter(delay.into()));
     }
 
-    /// Build per-block terminal options based on the current content kind
-    /// and visual indent.
+    /// Build per-block terminal options based on the current content kind and
+    /// visual indent.
     fn terminal_options(&self, indent: usize) -> TerminalOptions {
         TerminalOptions {
             default_background: if self.last_content_kind == Some(ContentKind::Reasoning) {
@@ -405,18 +406,18 @@ impl ChatRenderer {
 
     /// Signal that the current typewriter producer is done emitting.
     ///
-    /// Called by the coordinator on `Event::Finished` after the renderer
-    /// has flushed its remaining content. Switches the printer's
-    /// bounded-latency controller into drain mode so the per-character
-    /// delay can no longer grow as the queue empties.
+    /// Called by the coordinator on `Event::Finished` after the renderer has
+    /// flushed its remaining content.
+    /// Switches the printer's bounded-latency controller into drain mode so the
+    /// per-character delay can no longer grow as the queue empties.
     pub fn signal_typewriter_drain(&self) {
         self.printer.mark_typewriter_drained();
     }
 
     /// Cancel the reasoning timer if one is running.
     ///
-    /// Cancels the token (so the background task stops ticking) and
-    /// clears the timer line on stderr immediately.
+    /// Cancels the token (so the background task stops ticking) and clears the
+    /// timer line on stderr immediately.
     fn cancel_reasoning_timer(&mut self) {
         if let Some(token) = self.reasoning_timer.take() {
             token.cancel();
@@ -431,10 +432,10 @@ impl ChatRenderer {
 
     /// Reset the renderer state, discarding any buffered content.
     ///
-    /// Used when the current streaming cycle is being interrupted and a new
-    /// one will start (e.g., after a Reply or Continue action). The partial
-    /// content in the buffer has already been captured by the event builder,
-    /// so it's safe to discard.
+    /// Used when the current streaming cycle is being interrupted and a new one
+    /// will start (e.g., after a Reply or Continue action).
+    /// The partial content in the buffer has already been captured by the event
+    /// builder, so it's safe to discard.
     pub fn reset(&mut self) {
         self.cancel_reasoning_timer();
         self.buffer = Buffer::new();
@@ -449,7 +450,8 @@ impl ChatRenderer {
         ];
     }
 
-    /// Run the event through all fixups. Returns `None` if suppressed.
+    /// Run the event through all fixups.
+    /// Returns `None` if suppressed.
     fn apply_fixups(&mut self, event: Event) -> Option<Event> {
         self.fixups
             .iter_mut()
@@ -462,8 +464,9 @@ impl ChatRenderer {
 ///
 /// Layout: `── <label> [(<suffix>)] ──…` filling `width` columns.
 /// In `pretty` mode, the label is bold and the optional suffix is dimmed.
-/// Plain mode emits the same characters without ANSI styling so it
-/// survives ANSI-stripping pipes (e.g. `jp c print | grep`).
+/// Plain mode emits the same characters without ANSI styling so it survives
+/// ANSI-stripping pipes (e.g.
+/// `jp c print | grep`).
 fn build_role_header_line(label: &str, suffix: Option<&str>, width: usize, pretty: bool) -> String {
     let suffix_part = suffix.map(|s| format!(" ({s})")).unwrap_or_default();
 

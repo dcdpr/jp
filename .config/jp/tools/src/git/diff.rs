@@ -84,8 +84,9 @@ fn git_diff_impl<R: ProcessRunner>(
 
 /// Format a unified diff with per-file truncation.
 ///
-/// Each file's diff is capped at `max_lines_per_file`. Truncated files get a
-/// note directing the user to `git_diff_file` for the full per-file diff.
+/// Each file's diff is capped at `max_lines_per_file`.
+/// Truncated files get a note directing the user to `git_diff_file` for the
+/// full per-file diff.
 fn format_diff(diff: &str, max_lines_per_file: usize) -> String {
     let files = split_into_files(diff);
 

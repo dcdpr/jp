@@ -1,8 +1,8 @@
 //! Cancellable periodic timer utilities.
 //!
-//! Generic async helpers for spawning interval-based tasks. Used by the tool
-//! renderer (argument-receiving indicator), tool coordinator (execution
-//! progress), and turn loop (streaming progress).
+//! Generic async helpers for spawning interval-based tasks.
+//! Used by the tool renderer (argument-receiving indicator), tool coordinator
+//! (execution progress), and turn loop (streaming progress).
 
 use std::{fmt::Write as _, sync::Arc, time::Duration};
 
@@ -13,11 +13,11 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-/// Spawns a timer task that sends elapsed [`Duration`] through a channel
-/// at a fixed interval.
+/// Spawns a timer task that sends elapsed [`Duration`] through a channel at a
+/// fixed interval.
 ///
-/// After `delay`, the task sends its elapsed time every `interval`. On
-/// cancellation (or when the receiver is dropped), the task exits.
+/// After `delay`, the task sends its elapsed time every `interval`.
+/// On cancellation (or when the receiver is dropped), the task exits.
 ///
 /// Returns `None` if `show` is `false`, in which case nothing is spawned.
 pub fn spawn_tick_sender(
@@ -63,9 +63,9 @@ pub fn spawn_tick_sender(
 
 /// Spawns a `\r`-based timer task that periodically writes a status line.
 ///
-/// After `delay`, the task calls `format_line(elapsed_secs)` every
-/// `interval` and writes the result to the printer. On cancellation it
-/// clears the line with `\r\x1b[K`.
+/// After `delay`, the task calls `format_line(elapsed_secs)` every `interval`
+/// and writes the result to the printer.
+/// On cancellation it clears the line with `\r\x1b[K`.
 ///
 /// Returns `None` if `show` is `false`, in which case nothing is spawned.
 pub fn spawn_line_timer(

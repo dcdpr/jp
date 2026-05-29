@@ -38,18 +38,18 @@ pub struct ChatCompletion {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub stop: Vec<String>,
 
-    /// Whether to return log probabilities of the output tokens or not. If
-    /// true, returns the log probabilities of each output token returned in the
-    /// content of message.
+    /// Whether to return log probabilities of the output tokens or not.
+    /// If true, returns the log probabilities of each output token returned in
+    /// the content of message.
     #[serde(skip_serializing_if = "is_false")]
     pub logprobs: bool,
 
     /// Whether to include usage statistics in the response.
     ///
     /// Enabling usage accounting will add a few hundred milliseconds to the
-    /// last response as the API calculates token counts and costs. This only
-    /// affects the final message and does not impact overall streaming
-    /// performance.
+    /// last response as the API calculates token counts and costs.
+    /// This only affects the final message and does not impact overall
+    /// streaming performance.
     ///
     /// Default is `false`.
     #[serde(skip_serializing_if = "is_false")]

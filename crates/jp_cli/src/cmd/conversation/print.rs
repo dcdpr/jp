@@ -53,28 +53,31 @@ pub(crate) struct Print {
     #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Print only the last N turns. Without a value, prints the last turn.
+    /// Print only the last N turns.
+    /// Without a value, prints the last turn.
     #[arg(long, num_args = 0..=1, default_missing_value = "1", conflicts_with = "turn")]
     last: Option<usize>,
 
-    /// Print a specific turn by number (1-based). Stable across new turns.
+    /// Print a specific turn by number (1-based).
+    /// Stable across new turns.
     #[arg(long, conflicts_with = "last")]
     turn: Option<usize>,
 
     /// Use the current workspace config instead of the per-turn config.
     ///
     /// By default, each turn is rendered with the config that was active when
-    /// it was created. This flag overrides that and uses the current workspace
-    /// config for all turns.
+    /// it was created.
+    /// This flag overrides that and uses the current workspace config for all
+    /// turns.
     #[arg(long, default_value_t = false)]
     current_config: bool,
 
     /// Output style preset.
     ///
-    /// - `chat`: Show only user and assistant messages. Hides reasoning
-    ///   and tool calls entirely.
-    /// - `brief`: Hide reasoning, tool arguments, and tool results. Shows
-    ///   only user messages, assistant messages, and tool call headers.
+    /// - `chat`: Show only user and assistant messages.
+    ///   Hides reasoning and tool calls entirely.
+    /// - `brief`: Hide reasoning, tool arguments, and tool results.
+    ///   Shows only user messages, assistant messages, and tool call headers.
     /// - `full`: Show everything including reasoning, tool arguments, and
     ///   untruncated tool results.
     #[arg(long, short = 's', value_enum)]
@@ -84,13 +87,13 @@ pub(crate) struct Print {
 /// Output style presets for `jp conversation print`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum PrintStyle {
-    /// Show only user and assistant messages; hide reasoning and tool
-    /// calls entirely.
+    /// Show only user and assistant messages; hide reasoning and tool calls
+    /// entirely.
     Chat,
     /// Hide reasoning, tool arguments, and tool results.
     Brief,
-    /// Show everything: full reasoning, tool arguments, and untruncated
-    /// tool results.
+    /// Show everything: full reasoning, tool arguments, and untruncated tool
+    /// results.
     Full,
 }
 

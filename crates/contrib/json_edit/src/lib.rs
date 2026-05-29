@@ -2,8 +2,9 @@
 //!
 //! `json_edit` parses JSON or JSON5 text into a lossless syntax tree (powered
 //! by [`rowan`]) and exposes high-level editing operations that touch only the
-//! modified keys. Comments, whitespace, key order, and quote styles are
-//! preserved for everything that wasn't explicitly changed.
+//! modified keys.
+//! Comments, whitespace, key order, and quote styles are preserved for
+//! everything that wasn't explicitly changed.
 //!
 //! # Quick start
 //!

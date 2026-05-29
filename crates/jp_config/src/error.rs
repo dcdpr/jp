@@ -19,8 +19,8 @@ pub enum Error {
 
     /// An `extends` chain forms a cycle.
     ///
-    /// `chain` is the full sequence of files that produced the cycle. The
-    /// first and last entries refer to the same (canonicalized) file.
+    /// `chain` is the full sequence of files that produced the cycle.
+    /// The first and last entries refer to the same (canonicalized) file.
     #[error("configuration `extends` cycle detected: {}", format_chain(chain))]
     ExtendsCycle {
         /// The files that form the cycle, in traversal order.

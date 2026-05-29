@@ -32,7 +32,8 @@ pub struct ObjectType {
 }
 
 impl ObjectType {
-    /// Create an indexed/mapable object schema with the provided key and value types.
+    /// Create an indexed/mapable object schema with the provided key and value
+    /// types.
     pub fn new(key_type: impl Into<Schema>, value_type: impl Into<Schema>) -> Self {
         ObjectType {
             key_type: Box::new(key_type.into()),

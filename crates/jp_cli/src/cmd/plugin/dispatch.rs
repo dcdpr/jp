@@ -40,8 +40,8 @@ use crate::{Ctx, cmd, signals::SignalPair};
 
 /// Run a plugin binary, handling the full protocol lifecycle.
 ///
-/// `binary` is the path to the plugin executable. `args` are the remaining CLI
-/// arguments to forward.
+/// `binary` is the path to the plugin executable.
+/// `args` are the remaining CLI arguments to forward.
 pub(crate) fn run_plugin(
     name: &str,
     binary: &Utf8Path,
@@ -425,8 +425,8 @@ fn is_process_alive(pid: u32) -> bool {
 
 /// Send SIGKILL to a child process by PID.
 ///
-/// Used as a last resort when the plugin doesn't exit within the grace
-/// period after receiving `Shutdown`.
+/// Used as a last resort when the plugin doesn't exit within the grace period
+/// after receiving `Shutdown`.
 #[cfg(unix)]
 fn kill_child(pid: u32) {
     // SAFETY: We're sending a signal to a process we spawned.
@@ -456,8 +456,8 @@ fn kill_child(pid: u32) {
 
 /// Search `$PATH` for a plugin binary matching the given subcommand segments.
 ///
-/// For `["serve"]`, looks for `jp-serve`. For `["conversation", "export"]`,
-/// looks for `jp-conversation-export`.
+/// For `["serve"]`, looks for `jp-serve`.
+/// For `["conversation", "export"]`, looks for `jp-conversation-export`.
 pub(crate) fn find_plugin_binary(segments: &[&str]) -> Option<Utf8PathBuf> {
     let name = format!("jp-{}", segments.join("-"));
     which::which(&name)
@@ -467,8 +467,8 @@ pub(crate) fn find_plugin_binary(segments: &[&str]) -> Option<Utf8PathBuf> {
 
 /// Find any existing plugin binary without downloading or prompting.
 ///
-/// Checks the install directory first, then `$PATH`. Used for non-mutating
-/// operations like help requests.
+/// Checks the install directory first, then `$PATH`.
+/// Used for non-mutating operations like help requests.
 pub(crate) fn find_any_plugin_binary(name: &str) -> Option<Utf8PathBuf> {
     if let Some(path) = registry::find_installed(name) {
         return Some(path);
@@ -483,8 +483,9 @@ pub(crate) fn find_any_plugin_binary(name: &str) -> Option<Utf8PathBuf> {
 /// 2. Plugin registry (auto-install if official, prompt if third-party)
 /// 3. `$PATH` (with approval check for unapproved plugins)
 ///
-/// The `plugins_config` drives installation and execution policy. Per-plugin
-/// settings override the defaults from the registry (official vs third-party).
+/// The `plugins_config` drives installation and execution policy.
+/// Per-plugin settings override the defaults from the registry (official vs
+/// third-party).
 pub(crate) async fn resolve_plugin_binary(
     name: &str,
     plugins_config: &PluginsConfig,
@@ -709,9 +710,9 @@ fn check_run_policy(
 
 /// Send a `Describe` request to a plugin and return its metadata.
 ///
-/// Spawns the binary, sends `{"type":"describe"}`, reads one response line,
-/// and returns the parsed [`DescribeResponse`]. Returns `None` if the plugin
-/// doesn't support describe or fails to respond.
+/// Spawns the binary, sends `{"type":"describe"}`, reads one response line, and
+/// returns the parsed [`DescribeResponse`].
+/// Returns `None` if the plugin doesn't support describe or fails to respond.
 pub(crate) fn describe_plugin(binary: &Utf8Path) -> Option<DescribeResponse> {
     let mut child = Command::new(binary)
         .stdin(Stdio::piped())
@@ -829,9 +830,10 @@ pub(crate) fn show_plugin_help(binary: &Utf8Path) -> cmd::Output {
 /// Produce a clap-formatted error for an unknown subcommand.
 ///
 /// Uses `Command::error()` to get clap's standard error chrome (colored
-/// `error:` prefix, usage line, help hint). The message includes our
-/// plugin-specific context. Returns exit code 2 (clap's convention for usage
-/// errors) with no message, since the output was already written.
+/// `error:` prefix, usage line, help hint).
+/// The message includes our plugin-specific context.
+/// Returns exit code 2 (clap's convention for usage errors) with no message,
+/// since the output was already written.
 fn unknown_subcommand_error(name: &str) -> cmd::Error {
     use clap::CommandFactory as _;
 
@@ -849,8 +851,8 @@ fn unknown_subcommand_error(name: &str) -> cmd::Error {
 
 /// Dispatch an external plugin subcommand.
 ///
-/// Resolves the plugin binary, then runs the protocol loop. Called from
-/// `Commands::run()` after the normal startup flow.
+/// Resolves the plugin binary, then runs the protocol loop.
+/// Called from `Commands::run()` after the normal startup flow.
 pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
     let (subcommand, plugin_args) = args
         .split_first()

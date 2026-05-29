@@ -160,8 +160,8 @@ fn write_hot_stacks(out: &mut String, threads: &[Thread]) {
 ///
 /// `sample(1)` emits frames in depth-first preorder, so an anchor's ancestors
 /// are the closest preceding frames at each successively-shallower depth.
-/// Walks backward looking for the first frame at `anchor_depth - 1`, then
-/// `- 2`, and so on until the root is reached or `max_depth` is hit.
+/// Walks backward looking for the first frame at `anchor_depth - 1`, then `-
+/// 2`, and so on until the root is reached or `max_depth` is hit.
 fn build_ancestry(frames: &[Frame], anchor_idx: usize, max_depth: usize) -> Vec<&Frame> {
     let anchor = &frames[anchor_idx];
     let mut path = vec![anchor];

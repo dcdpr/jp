@@ -1,8 +1,9 @@
 //! Features for assigning key-value pairs to configurations.
 //!
 //! It uses the [`KvAssignment`] type to parse key-value pairs from CLI
-//! arguments or environment variables. The [`AssignKeyValue`] trait is
-//! implemented for types that can be assigned a key-value pair.
+//! arguments or environment variables.
+//! The [`AssignKeyValue`] trait is implemented for types that can be assigned a
+//! key-value pair.
 
 use std::{fmt, str::FromStr};
 
@@ -38,8 +39,8 @@ where
 
 /// A key-value pair to set in a configuration.
 ///
-/// The key is a path-like string, separated by a configurable delimiter. The
-/// value is a string, or a JSON object, and the strategy determines how the
+/// The key is a path-like string, separated by a configurable delimiter.
+/// The value is a string, or a JSON object, and the strategy determines how the
 /// value is set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KvAssignment {
@@ -48,8 +49,8 @@ pub struct KvAssignment {
 
     /// The value to set the key to.
     ///
-    /// If `raw` is true, the value is used as-is. Otherwise it is parsed as a
-    /// string.
+    /// If `raw` is true, the value is used as-is.
+    /// Otherwise it is parsed as a string.
     pub(crate) value: KvValue,
 
     /// Whether the value should be merged with the existing value, or replaced
@@ -196,9 +197,11 @@ impl KvAssignment {
     ///
     /// When assigned via [`AssignKeyValue::assign`], the object's top-level
     /// keys are iterated and each is assigned individually via
-    /// [`try_merge_object`](Self::try_merge_object). This allows
-    /// `--cfg '{"assistant": {"name": "dev"}}'` to work like
-    /// `--cfg assistant.name=dev`.
+    /// [`try_merge_object`].
+    /// This allows `--cfg '{"assistant": {"name": "dev"}}'` to work like `--cfg
+    /// assistant.name=dev`.
+    ///
+    /// [`try_merge_object`]: Self::try_merge_object
     #[must_use]
     pub const fn root_json(value: Value) -> Self {
         Self {
@@ -231,8 +234,9 @@ impl KvAssignment {
         self.trim_prefix(segment)
     }
 
-    /// Trim the first key segment and assign to the corresponding entry in
-    /// a map. Returns a missing-key error if no segment can be trimmed.
+    /// Trim the first key segment and assign to the corresponding entry in a
+    /// map.
+    /// Returns a missing-key error if no segment can be trimmed.
     pub(crate) fn assign_to_entry<V>(mut self, map: &mut IndexMap<String, V>) -> AssignResult
     where
         V: AssignKeyValue + Default,
@@ -401,15 +405,19 @@ impl KvAssignment {
     /// Merge a JSON object value into a target, assigning each top-level key
     /// individually.
     ///
-    /// Unlike [`try_object`](Self::try_object), which deserializes the JSON
-    /// into a fresh value (replacing whatever was there), this iterates the
-    /// object's keys and calls [`AssignKeyValue::assign`] for each one. Fields
-    /// already present in `target` that are *not* mentioned in the JSON object
-    /// are left untouched.
+    /// Unlike [`try_object`], which deserializes the JSON into a fresh value
+    /// (replacing whatever was there), this iterates the object's keys and
+    /// calls [`AssignKeyValue::assign`] for each one.
+    /// Fields already present in `target` that are *not* mentioned in the JSON
+    /// object are left untouched.
     ///
     /// This is the right semantic for partial-config overrides where the caller
-    /// only wants to change specific fields (e.g. `enable` and `run`) without
-    /// wiping out fields loaded from earlier config layers (e.g. `source`).
+    /// only wants to change specific fields (e.g.
+    /// `enable` and `run`) without wiping out fields loaded from earlier config
+    /// layers (e.g.
+    /// `source`).
+    ///
+    /// [`try_object`]: Self::try_object
     pub(crate) fn try_merge_object<T: AssignKeyValue>(self, target: &mut T) -> AssignResult {
         let Self {
             key,
@@ -462,8 +470,8 @@ impl KvAssignment {
         }
     }
 
-    /// Convenience method for [`Self::try_object_or_from_str`] that wraps the `Ok` value
-    /// into `Some`.
+    /// Convenience method for [`Self::try_object_or_from_str`] that wraps the
+    /// `Ok` value into `Some`.
     pub(crate) fn try_some_object_or_from_str<T, E>(self) -> Result<Option<T>, KvAssignmentError>
     where
         T: DeserializeOwned + FromStr<Err = E>,
@@ -504,11 +512,13 @@ impl KvAssignment {
         self.try_from_str().map(Some)
     }
 
-    /// Like [`Self::try_from_str`], but also accepts JSON numbers by
-    /// converting them to their string representation first.
+    /// Like [`Self::try_from_str`], but also accepts JSON numbers by converting
+    /// them to their string representation first.
     ///
-    /// Useful for types like [`Color`](crate::types::color::Color) that
-    /// accept both `236` (integer) and `"#504945"` (string).
+    /// Useful for types like [`Color`] that accept both `236` (integer) and
+    /// `"#504945"` (string).
+    ///
+    /// [`Color`]: crate::types::color::Color
     pub(crate) fn try_number_or_from_str<T, E>(self) -> Result<T, KvAssignmentError>
     where
         T: FromStr<Err = E>,
@@ -857,8 +867,8 @@ impl KvAssignment {
         })
     }
 
-    /// Convenience method for [`Self::try_vec_of_nested`] that wraps
-    /// the `Ok` value into `Some`.
+    /// Convenience method for [`Self::try_vec_of_nested`] that wraps the `Ok`
+    /// value into `Some`.
     #[allow(clippy::allow_attributes, dead_code)]
     pub(crate) fn try_some_vec_of_nested<T>(
         self,
@@ -873,10 +883,11 @@ impl KvAssignment {
 
 /// Flatten a JSON object into a list of dot-delimited key-value pairs.
 ///
-/// This *DOES NOT* flatten arrays, only objects. The reason for this is that if
-/// we want to assign a JSON array to an item, if we flattened the array, the
-/// assignment would try to fetch the individual elements from the array, which
-/// might not exist, and result in an out-of-bounds error.
+/// This *DOES NOT* flatten arrays, only objects.
+/// The reason for this is that if we want to assign a JSON array to an item, if
+/// we flattened the array, the assignment would try to fetch the individual
+/// elements from the array, which might not exist, and result in an
+/// out-of-bounds error.
 ///
 /// Instead, we want the array to be assigned as-is, overriding any existing
 /// array.
@@ -1004,9 +1015,10 @@ pub(crate) struct KvKey {
     /// The "path" of the key.
     ///
     /// We cannot split the path by its delimiter before hand, because we don't
-    /// know if the delimiter is part of the segment or not. For example, for
-    /// the path `foo_bar_baz`, it might be split as `["foo", "bar", "baz"]`, or
-    /// `["foo_bar", "baz"]`, or `["foo", "bar_baz"]` or `["foo_bar_baz"]`.
+    /// know if the delimiter is part of the segment or not.
+    /// For example, for the path `foo_bar_baz`, it might be split as `["foo",
+    /// "bar", "baz"]`, or `["foo_bar", "baz"]`, or `["foo", "bar_baz"]` or
+    /// `["foo_bar_baz"]`.
     ///
     /// Only once the key is used in [`AssignKeyValue::assign`], we know the
     /// shape of the next segment, and can split the path by the delimiter.
@@ -1058,7 +1070,7 @@ impl KvKey {
         true
     }
 
-    /// Similar to [`KvKey::trim_prefix`], but trims _any_ prefix, if one
+    /// Similar to [`KvKey::trim_prefix`], but trims *any* prefix, if one
     /// exists.
     pub(crate) fn trim_prefix_any(&mut self) -> Option<String> {
         let mut segments = self.path.split(self.delim.as_str());
@@ -1071,8 +1083,8 @@ impl KvKey {
     }
 
     /// Similar to [`KvKey::trim_prefix`], but only trims the first segment if
-    /// it is an integer, pointing into a list. Returns the index if it was
-    /// trimmed, or `None` if it was not.
+    /// it is an integer, pointing into a list.
+    /// Returns the index if it was trimmed, or `None` if it was not.
     pub(crate) fn trim_index(&mut self) -> Option<usize> {
         let mut segments = self.path.split(self.delim.as_str());
         if let Some(index) = segments.next().and_then(|v| v.parse().ok()) {

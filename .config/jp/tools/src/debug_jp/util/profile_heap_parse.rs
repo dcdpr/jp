@@ -1,9 +1,9 @@
 //! Parser for dhat heap-profile JSON.
 //!
-//! Each program point in the file carries the cumulative byte/block totals
-//! for one unique allocation stack. Frame strings in `ftbl` are
-//! pre-demangled by dhat-rs (via the `backtrace` crate's `{:#}` formatting),
-//! so we use them as-is.
+//! Each program point in the file carries the cumulative byte/block totals for
+//! one unique allocation stack.
+//! Frame strings in `ftbl` are pre-demangled by dhat-rs (via the `backtrace`
+//! crate's `{:#}` formatting), so we use them as-is.
 
 use std::collections::BTreeMap;
 
@@ -44,15 +44,16 @@ pub(crate) struct Profile {
 }
 
 impl ProgramPoint {
-    /// Return the first frame that looks like JP code, falling back to the
-    /// raw leaf if no jp-prefixed frame exists in the stack.
+    /// Return the first frame that looks like JP code, falling back to the raw
+    /// leaf if no jp-prefixed frame exists in the stack.
     ///
     /// Heap traces bottom out in allocator plumbing (`<Global as Allocator>::
     /// allocate`, `<RawVec>::with_capacity_in`, etc.) which carries no signal
-    /// about who called it. The `jp_` heuristic matches anything from our
-    /// own crates — directly (`jp_config::PartialAppConfig::clone`),
-    /// through trait impls (`<jp_conversation::Stream as Extend>::extend`),
-    /// and as generic parameters (`drop_in_place::<jp_config::...>`).
+    /// about who called it.
+    /// The `jp_` heuristic matches anything from our own crates — directly
+    /// (`jp_config::PartialAppConfig::clone`), through trait impls
+    /// (`<jp_conversation::Stream as Extend>::extend`), and as generic
+    /// parameters (`drop_in_place::<jp_config::...>`).
     pub(crate) fn interesting_leaf(&self) -> &str {
         for frame in &self.frames {
             if frame.contains("jp_") {
@@ -64,8 +65,8 @@ impl ProgramPoint {
 }
 
 impl Profile {
-    /// Aggregate program points by their interesting (jp-prefixed) leaf,
-    /// sorted by allocation count.
+    /// Aggregate program points by their interesting (jp-prefixed) leaf, sorted
+    /// by allocation count.
     pub(crate) fn aggregate_by_leaf(&self) -> Vec<LeafAgg> {
         let mut map: BTreeMap<&str, LeafAgg> = BTreeMap::new();
         for pp in &self.program_points {
@@ -147,13 +148,13 @@ pub(crate) fn parse(json: &str) -> Result<Profile, serde_json::Error> {
     })
 }
 
-/// Clean up a dhat frame string: strip the leading instruction-address
-/// prefix (`0xADDR: `), demangle the symbol if needed, and shorten common
-/// stdlib paths.
+/// Clean up a dhat frame string: strip the leading instruction-address prefix
+/// (` 0xADDR:  `), demangle the symbol if needed, and shorten common stdlib
+/// paths.
 ///
 /// dhat-rs writes frames already demangled — the `_` check is here for
-/// robustness if a profile from an older or differently-configured run
-/// emits raw mangled symbols.
+/// robustness if a profile from an older or differently-configured run emits
+/// raw mangled symbols.
 fn clean_frame(raw: &str) -> String {
     let symbol = strip_address_prefix(raw);
     let demangled = if symbol.starts_with('_') {
@@ -166,10 +167,10 @@ fn clean_frame(raw: &str) -> String {
 
 /// Shorten common stdlib module paths so frame strings fit on one line.
 ///
-/// The replacements are conservative: only well-known prefixes that every
-/// Rust developer would recognize without disambiguation. Crate-internal
-/// module paths (`jp_config::conversation::tool::...`) are preserved —
-/// they tell us *where* in our own code the work is happening.
+/// The replacements are conservative: only well-known prefixes that every Rust
+/// developer would recognize without disambiguation.
+/// Crate-internal module paths (`jp_config::conversation::tool::...`) are
+/// preserved — they tell us *where* in our own code the work is happening.
 fn polish_frame(s: &str) -> String {
     // Apply each replacement in turn. Order matters where one pattern is
     // a prefix of another (longer matches first).
@@ -182,8 +183,9 @@ fn polish_frame(s: &str) -> String {
     out
 }
 
-/// Verbose stdlib path → short form. Listed longest-first when one is a
-/// prefix of another, otherwise order doesn't matter.
+/// Verbose stdlib path → short form.
+/// Listed longest-first when one is a prefix of another, otherwise order
+/// doesn't matter.
 const REPLACEMENTS: &[(&str, &str)] = &[
     // Trait paths
     ("core::ops::function::FnOnce", "FnOnce"),
@@ -224,11 +226,11 @@ const REPLACEMENTS: &[(&str, &str)] = &[
 ];
 
 /// Frames that are pure dispatch/trampoline boilerplate — carrying no
-/// information about *who* or *what* is being called, only *how* the call
-/// gets there.
+/// information about *who* or *what* is being called, only *how* the call gets
+/// there.
 ///
-/// Run on POLISHED frame strings (i.e. after [`polish_frame`]), so the
-/// patterns match the short forms (`FnMut`, `Map`, `Cloned`, ...).
+/// Run on POLISHED frame strings (i.e. after [`polish_frame`]), so the patterns
+/// match the short forms (`FnMut`, `Map`, `Cloned`, ...).
 fn is_dispatch_noise(symbol: &str) -> bool {
     // Closure trampolines via the Fn family: `<X as FnMut<Args>>::call_mut`.
     // These show up as a layer between *whoever holds the closure* and the
@@ -287,8 +289,9 @@ fn is_dispatch_noise(symbol: &str) -> bool {
     false
 }
 
-/// Strip a leading `0xHEX: ` prefix from a frame string. The instruction
-/// address is useful to a debugger and noise to a reader, so we drop it.
+/// Strip a leading ` 0xHEX:  ` prefix from a frame string.
+/// The instruction address is useful to a debugger and noise to a reader, so we
+/// drop it.
 fn strip_address_prefix(raw: &str) -> &str {
     let Some(rest) = raw.strip_prefix("0x") else {
         return raw;

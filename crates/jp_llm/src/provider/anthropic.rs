@@ -50,11 +50,12 @@ static PROVIDER: ProviderId = ProviderId::Anthropic;
 /// returning an API error if the request exceeds this limit.
 ///
 /// We use automatic caching (top-level `cache_control` on the request) to
-/// handle the growing message history, which consumes 1 of the 4 slots. The
-/// remaining 3 are allocated to stable, explicitly-cached content: system
+/// handle the growing message history, which consumes 1 of the 4 slots.
+/// The remaining 3 are allocated to stable, explicitly-cached content: system
 /// prompt, attachments, and tools.
 ///
-/// See: <https://platform.claude.com/docs/en/build-with-claude/prompt-caching#combining-with-block-level-caching>
+/// See:
+/// <https://platform.claude.com/docs/en/build-with-claude/prompt-caching#combining-with-block-level-caching>
 const MAX_EXPLICIT_CACHE_CONTROL_COUNT: usize = 3;
 
 const THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
@@ -62,7 +63,8 @@ const REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
 
 /// Known Anthropic error types that are safe to retry.
 ///
-/// See: <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
+/// See:
+/// <https://docs.claude.com/en/docs/build-with-claude/streaming#error-events>
 /// See: <https://docs.claude.com/en/api/errors#http-errors>
 const RETRYABLE_ANTHROPIC_ERROR_TYPES: &[&str] =
     &["rate_limit_error", "overloaded_error", "api_error"];
@@ -184,7 +186,8 @@ impl Provider for Anthropic {
 /// request (reasoning enabled + `tool_choice: auto` with a system prompt nudge)
 /// completes without the model calling any tool.
 ///
-/// See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
+/// See:
+/// <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
 #[derive(Debug, Clone)]
 struct ForcedToolFallback {
     /// The Anthropic API `tool_choice` to use on the retry request (the
@@ -216,9 +219,10 @@ impl ForcedToolFallback {
 ///
 /// If `forced_tool_fallback` is `Some`, the model was asked to call a tool but
 /// the API restriction on reasoning + forced tool use required us to downgrade
-/// to `auto`. If the response completes without any tool call, a follow-up
-/// request is issued with thinking disabled and the original forced
-/// `tool_choice` restored.
+/// to `auto`.
+/// If the response completes without any tool call, a follow-up request is
+/// issued with thinking disabled and the original forced `tool_choice`
+/// restored.
 ///
 /// If the API rejects the request due to an invalid thinking-block signature,
 /// emits [`Event::Patch`] instructions to fix the conversation stream and
@@ -565,7 +569,8 @@ fn is_invalid_thinking_signature(error: &StreamError) -> bool {
 /// message like `"messages.1.content.0: Invalid 'signature' …"`.
 ///
 /// These are **logical turn** indices — not our `request.messages[]` array
-/// positions. Use [`resolve_turn_position`] to map them to actual message and
+/// positions.
+/// Use [`resolve_turn_position`] to map them to actual message and
 /// content-block indices in the request.
 fn parse_signature_error_position(msg: &str) -> Option<(usize, usize)> {
     let rest = msg.split("messages.").nth(1)?;
@@ -587,8 +592,8 @@ fn parse_signature_error_position(msg: &str) -> Option<(usize, usize)> {
 /// The Anthropic API groups messages into logical turns: a user turn is a
 /// single non-tool-result user message, and an assistant turn spans from the
 /// first assistant message through all subsequent tool-result / assistant pairs
-/// until the next real user message. Content blocks are flat-indexed across all
-/// messages within a turn.
+/// until the next real user message.
+/// Content blocks are flat-indexed across all messages within a turn.
 fn resolve_turn_position(
     messages: &[types::Message],
     turn_idx: usize,
@@ -646,10 +651,11 @@ fn is_tool_result_message(msg: &types::Message) -> bool {
 }
 
 /// Build [`EventPatch`] instructions for the thinking block identified by the
-/// API error. The caller yields these as [`Event::Patch`] so the CLI can remove
-/// the stale signature metadata from the persisted conversation stream. On the
-/// next request rebuild, [`convert_event`] will fall through to the `<think>`
-/// tag path for events that no longer carry a signature.
+/// API error.
+/// The caller yields these as [`Event::Patch`] so the CLI can remove the stale
+/// signature metadata from the persisted conversation stream.
+/// On the next request rebuild, [`convert_event`] will fall through to the
+/// `<think>` tag path for events that no longer carry a signature.
 ///
 /// Returns `None` if the offending block cannot be located.
 fn build_thinking_patches(
@@ -677,8 +683,9 @@ fn build_thinking_patches(
 }
 
 /// Find the first (oldest) `Thinking` or `RedactedThinking` content block in
-/// the request. Used as a fallback when [`parse_signature_error_position`]
-/// cannot parse the API error.
+/// the request.
+/// Used as a fallback when [`parse_signature_error_position`] cannot parse the
+/// API error.
 fn find_oldest_thinking_block(request: &types::CreateMessagesRequest) -> Option<(usize, usize)> {
     for (i, msg) in request.messages.iter().enumerate() {
         for (j, content) in msg.content.0.iter().enumerate() {
@@ -722,7 +729,8 @@ fn identify_thinking_block(
 struct BetaFeatures(Vec<String>);
 
 impl BetaFeatures {
-    /// See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking>
+    /// See:
+    /// <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#interleaved-thinking>
     fn interleaved_thinking(&self) -> bool {
         self.0
             .iter()
@@ -734,7 +742,8 @@ impl BetaFeatures {
         self.0.iter().any(|h| h == "context-editing-2025-06-27")
     }
 
-    /// See: <https://platform.claude.com/docs/en/build-with-claude/structured-outputs>
+    /// See:
+    /// <https://platform.claude.com/docs/en/build-with-claude/structured-outputs>
     fn structured_outputs(&self) -> bool {
         self.0.iter().any(|h| h == "structured-outputs-2025-10-27")
     }
@@ -1343,13 +1352,14 @@ impl TryFrom<&AnthropicConfig> for Anthropic {
 /// Transform a JSON schema to conform to Anthropic's structured output
 /// constraints.
 ///
-/// Anthropic's structured output supports a subset of JSON Schema. Unsupported
-/// properties are stripped and appended to the `description` field so the model
-/// can still see them as soft hints.
+/// Anthropic's structured output supports a subset of JSON Schema.
+/// Unsupported properties are stripped and appended to the `description` field
+/// so the model can still see them as soft hints.
 ///
 /// Mirrors the logic from Anthropic's Python SDK `transform_schema`.
 ///
-/// See: <https://docs.claude.com/en/docs/build-with-claude/structured-outputs#json-schema-limitations>
+/// See:
+/// <https://docs.claude.com/en/docs/build-with-claude/structured-outputs#json-schema-limitations>
 fn transform_schema(mut src: Map<String, Value>) -> Map<String, Value> {
     if let Some(r) = src.remove("$ref") {
         return Map::from_iter([("$ref".into(), r)]);

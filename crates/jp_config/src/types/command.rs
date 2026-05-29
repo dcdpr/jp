@@ -1,21 +1,21 @@
 //! Configuration shape for user-configured external commands.
 //!
-//! [`CommandConfig`] models an external command JP runs on behalf of the
-//! user: a program plus arguments, optionally wrapped in a shell.
-//! [`CommandConfigOrString`] adds a string-shorthand variant so users can
-//! write `command = "cargo check"` and have it parsed as
-//! `{ program = "cargo", args = ["check"] }` automatically.
+//! [`CommandConfig`] models an external command JP runs on behalf of the user:
+//! a program plus arguments, optionally wrapped in a shell.
+//! [`CommandConfigOrString`] adds a string-shorthand variant so users can write
+//! `command = "cargo check"` and have it parsed as `{ program = "cargo", args =
+//! ["check"] }` automatically.
 //!
-//! String-shorthand parsing uses shell-word semantics via [`shlex`], so
-//! quoting is respected:
+//! String-shorthand parsing uses shell-word semantics via [`shlex`], so quoting
+//! is respected:
 //!
 //! ```ignore
 //! "echo 'hello world'" => ["echo", "hello world"]
 //! ```
 //!
-//! Malformed shell quoting (unbalanced quotes, dangling escapes) is rejected
-//! at config-parse time via [`PartialCommandConfigOrString::from_str`] rather
-//! than producing garbage at spawn time.
+//! Malformed shell quoting (unbalanced quotes, dangling escapes) is rejected at
+//! config-parse time via [`PartialCommandConfigOrString::from_str`] rather than
+//! producing garbage at spawn time.
 
 use std::{fmt, str::FromStr};
 
@@ -35,7 +35,8 @@ use crate::{
 #[serde(untagged)]
 pub enum CommandConfigOrString {
     /// A single string, parsed as shell words: first token is the program,
-    /// remaining tokens are arguments. Quoting is respected.
+    /// remaining tokens are arguments.
+    /// Quoting is respected.
     String(String),
 
     /// A complete command configuration.
@@ -108,13 +109,14 @@ impl CommandConfigOrString {
     /// If the configuration is a string, it is parsed using shell-word
     /// semantics (`shlex::split`): the first token becomes
     /// [`CommandConfig::program`], remaining tokens become
-    /// [`CommandConfig::args`]. [`CommandConfig::shell`] is `false`.
+    /// [`CommandConfig::args`].
+    /// [`CommandConfig::shell`] is `false`.
     ///
     /// Malformed input is normally rejected at config-parse time by
-    /// [`PartialCommandConfigOrString::from_str`]. This method is defensive
-    /// against direct construction in Rust code: on `shlex::split` failure it
-    /// falls back to an empty token list, which surfaces as a spawn-time
-    /// error.
+    /// [`PartialCommandConfigOrString::from_str`].
+    /// This method is defensive against direct construction in Rust code: on
+    /// `shlex::split` failure it falls back to an empty token list, which
+    /// surfaces as a spawn-time error.
     #[must_use]
     pub fn command(self) -> CommandConfig {
         match self {
@@ -135,8 +137,8 @@ impl CommandConfigOrString {
 /// External command configuration.
 ///
 /// A user-facing description of a command JP should run: which program, with
-/// which arguments, and whether to wrap the whole thing in a shell. The
-/// configured policy around *when* JP is allowed to run the command (prompt
+/// which arguments, and whether to wrap the whole thing in a shell.
+/// The configured policy around *when* JP is allowed to run the command (prompt
 /// or not, confirm `shell = true` invocations, etc.) lives on each consumer
 /// (tools, labels, ...), not on this shape.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
@@ -151,8 +153,8 @@ pub struct CommandConfig {
 
     /// Whether to run the command in a shell.
     ///
-    /// If this is enabled, a shell will be invoked to run the command. This
-    /// allows for things like piping and subshells.
+    /// If this is enabled, a shell will be invoked to run the command.
+    /// This allows for things like piping and subshells.
     ///
     /// NOTE that setting this to `true` implies that JP will always ask for
     /// confirmation before running the tool, for security reasons.

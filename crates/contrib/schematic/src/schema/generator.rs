@@ -5,21 +5,23 @@ use schematic_types::{Schema, SchemaBuilder, SchemaType, Schematic};
 
 use super::{RenderError, SchemaRenderer};
 
-/// A generator collects [`Schema`]s and renders them to a specific file,
-/// using a renderer that implements [`SchemaRenderer`].
+/// A generator collects [`Schema`]s and renders them to a specific file, using
+/// a renderer that implements [`SchemaRenderer`].
 #[derive(Debug, Default)]
 pub struct SchemaGenerator {
     pub schemas: IndexMap<String, Schema>,
 }
 
 impl SchemaGenerator {
-    /// Add a [`Schema`] to be rendered, derived from the provided [`Schematic`].
+    /// Add a [`Schema`] to be rendered, derived from the provided
+    /// [`Schematic`].
     pub fn add<T: Schematic>(&mut self) {
         let schema = SchemaBuilder::build_root::<T>();
         self.add_schema(&schema);
     }
 
-    /// Add an explicit [`Schema`] to be rendered, and recursively add any nested schemas.
+    /// Add an explicit [`Schema`] to be rendered, and recursively add any
+    /// nested schemas.
     /// Schemas with a name will be considered a reference.
     pub fn add_schema(&mut self, schema: &Schema) {
         let mut schema = schema.to_owned();
@@ -60,8 +62,9 @@ impl SchemaGenerator {
         }
     }
 
-    /// Generate an output by rendering all collected [`Schema`]s using the provided
-    /// [`SchemaRenderer`], and finally write to the provided file path.
+    /// Generate an output by rendering all collected [`Schema`]s using the
+    /// provided [`SchemaRenderer`], and finally write to the provided file
+    /// path.
     pub fn generate<P: AsRef<Path>, O, R: SchemaRenderer<O>>(
         &self,
         output_file: P,

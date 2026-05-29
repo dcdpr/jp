@@ -89,8 +89,8 @@ impl IntegerType {
     ///
     /// # Panics
     ///
-    /// Panics if `kind` is an unsigned variant. Use [`Self::new_unsigned`] for
-    /// those.
+    /// Panics if `kind` is an unsigned variant.
+    /// Use [`Self::new_unsigned`] for those.
     #[must_use]
     pub fn new(kind: IntegerKind, value: isize) -> Self {
         assert!(!kind.is_unsigned(), "must be signed");
@@ -106,7 +106,8 @@ impl IntegerType {
     ///
     /// # Panics
     ///
-    /// Panics if `kind` is a signed variant. Use [`Self::new`] for those.
+    /// Panics if `kind` is a signed variant.
+    /// Use [`Self::new`] for those.
     #[must_use]
     pub fn new_unsigned(kind: IntegerKind, value: usize) -> Self {
         assert!(kind.is_unsigned(), "must be unsigned");

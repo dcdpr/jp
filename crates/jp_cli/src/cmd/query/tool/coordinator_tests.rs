@@ -437,8 +437,8 @@ async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
 
 /// Minimal `Executor` whose `set_arguments` actually mutates state.
 ///
-/// `MockExecutor::set_arguments` is a no-op, which is fine for tests that
-/// don't exercise the prompt-edit path but useless for verifying the
+/// `MockExecutor::set_arguments` is a no-op, which is fine for tests that don't
+/// exercise the prompt-edit path but useless for verifying the
 /// pre-render-invalidation logic in `resolve_tool_call_decision`.
 struct EditableExecutor {
     tool_id: String,

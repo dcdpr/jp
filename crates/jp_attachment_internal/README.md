@@ -1,9 +1,9 @@
-# jp_attachment_internal
+# jp\_attachment\_internal
 
 Attachment handler for JP-internal resources, accessed via the `jp://` scheme.
 
-The handler dispatches on the variant character in the JP ID. Each resource
-type owns its own set of query parameters.
+The handler dispatches on the variant character in the JP ID.
+Each resource type owns its own set of query parameters.
 
 ## URL scheme
 
@@ -19,10 +19,10 @@ Attach the contents of another conversation.
 
 #### Query parameters
 
-| Parameter | Values | Default | Effect |
-|---|---|---|---|
-| `select` | DSL `CONTENT[:RANGE]` | `a:-1` | Filters which events to include |
-| `raw` | (absent), `events`, `all` | absent | Toggles JSON output |
+| Parameter | Values                    | Default | Effect                          |
+| --------- | ------------------------- | ------- | ------------------------------- |
+| `select`  | DSL `CONTENT[:RANGE]`     | `a:-1`  | Filters which events to include |
+| `raw`     | (absent), `events`, `all` | absent  | Toggles JSON output             |
 
 #### Selector DSL
 
@@ -60,8 +60,8 @@ shape as persisted conversation events.
 - `?raw` — selected events only
 - `?raw=all` — selected events plus `base_config` and `metadata` fields
 
-The selector applies to `events`. It does not affect `base_config` or
-`metadata`.
+The selector applies to `events`.
+It does not affect `base_config` or `metadata`.
 
 #### Examples
 
@@ -89,18 +89,21 @@ jp-c17013123456?raw                             # → jp://jp-c17013123456?raw
 jp-c17013123456?raw=all                         # → jp://jp-c17013123456?raw=all
 ```
 
-A bare value after `?` (e.g. `a:-1`) becomes the value of an implicit
-`select=`. If the suffix already names a known parameter (`select` or `raw`),
-it's passed through verbatim.
+A bare value after `?` (e.g.
+`a:-1`) becomes the value of an implicit `select=`.
+If the suffix already names a known parameter (`select` or `raw`), it's passed
+through verbatim.
 
 ### Other variants
 
-Reserved for future use. Today, requesting any non-conversation variant
-(e.g. `jp-w…` for workspaces) returns a clear error. Adding new resources
-is a single dispatch arm in `lib.rs` plus a renderer.
+Reserved for future use.
+Today, requesting any non-conversation variant (e.g.
+`jp-w…` for workspaces) returns a clear error.
+Adding new resources is a single dispatch arm in `lib.rs` plus a renderer.
 
 ## Output
 
-Each entry resolves to one or more text attachments. The source field of each
-attachment encodes the canonical ID and what the attachment contains, so the
-assistant always knows which slice of which resource it received.
+Each entry resolves to one or more text attachments.
+The source field of each attachment encodes the canonical ID and what the
+attachment contains, so the assistant always knows which slice of which resource
+it received.

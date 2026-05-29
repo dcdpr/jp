@@ -26,8 +26,8 @@ impl RenderError {
 
 pub type RenderResult<T = String> = std::result::Result<T, RenderError>;
 
-/// Renders [`SchemaType`]s to a distinct format (derived from generic `O`)
-/// for use within a [`SchemaGenerator`].
+/// Renders [`SchemaType`]s to a distinct format (derived from generic `O`) for
+/// use within a [`SchemaGenerator`].
 ///
 /// [`SchemaGenerator`]: crate::schema::SchemaGenerator
 pub trait SchemaRenderer<O = String> {
@@ -111,7 +111,9 @@ pub trait SchemaRenderer<O = String> {
         }
     }
 
-    /// Render the list of [`Schema`]s to a string, in the order they are listed.
-    /// References between types can be resolved using the provided `schemas` map.
+    /// Render the list of [`Schema`]s to a string, in the order they are
+    /// listed.
+    /// References between types can be resolved using the provided `schemas`
+    /// map.
     fn render(&mut self, schemas: IndexMap<String, Schema>) -> RenderResult;
 }

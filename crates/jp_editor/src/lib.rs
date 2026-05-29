@@ -36,8 +36,8 @@ pub struct MockEditorBackend {
 impl MockEditorBackend {
     /// Creates a mock that returns the given responses in sequence.
     ///
-    /// Each call to `edit()` consumes one response. If all responses are
-    /// exhausted, subsequent calls return an empty string.
+    /// Each call to `edit()` consumes one response.
+    /// If all responses are exhausted, subsequent calls return an empty string.
     #[must_use]
     pub fn with_responses(responses: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {

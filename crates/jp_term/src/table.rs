@@ -5,8 +5,8 @@ pub const UTF8_FULL: &str = "││──├──┤     ──╭╮╰╯";
 
 /// Render a list table with unicode box-drawing characters.
 ///
-/// When `footer` is true, the header row is repeated at the bottom of the
-/// table so it stays visible when the top has scrolled off screen.
+/// When `footer` is true, the header row is repeated at the bottom of the table
+/// so it stays visible when the top has scrolled off screen.
 #[must_use]
 pub fn list(header: Row, rows: Vec<Row>, footer: bool) -> String {
     let mut table = Table::new();
@@ -56,6 +56,7 @@ pub fn list(header: Row, rows: Vec<Row>, footer: bool) -> String {
 /// Render a list table as a pipe-delimited markdown table.
 ///
 /// Produces output like:
+///
 /// ```text
 /// | ID   | #  | Activity |
 /// |------|---:|----------|

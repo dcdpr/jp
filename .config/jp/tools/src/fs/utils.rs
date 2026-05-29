@@ -36,18 +36,19 @@ pub(super) fn is_file_dirty_impl<R: ProcessRunner>(
 }
 
 /// Count the number of dirty entries reported by `git status --porcelain` for
-/// the given path. For a file, returns 0 or 1. For a directory, returns the
-/// number of changed entries underneath it. Returns 0 when outside a git
-/// repository.
+/// the given path.
+/// For a file, returns 0 or 1.
+/// For a directory, returns the number of changed entries underneath it.
+/// Returns 0 when outside a git repository.
 ///
 /// Unlike `is_file_dirty`, this counts any non-empty porcelain line — staged,
-/// unstaged, untracked, renamed, all of it. Directory moves have a wider
-/// blast radius than file moves, so the dirty check is correspondingly
-/// stricter.
+/// unstaged, untracked, renamed, all of it.
+/// Directory moves have a wider blast radius than file moves, so the dirty
+/// check is correspondingly stricter.
 ///
 /// Currently the only caller (`fs_move_file`) flows through a generic
-/// `ProcessRunner` for testability, so the production wrapper is omitted —
-/// add one if a non-generic caller appears.
+/// `ProcessRunner` for testability, so the production wrapper is omitted — add
+/// one if a non-generic caller appears.
 pub(super) fn count_dirty_paths_impl<R: ProcessRunner>(
     root: &Utf8Path,
     path: &Utf8Path,
@@ -72,35 +73,35 @@ pub(super) fn count_dirty_paths_impl<R: ProcessRunner>(
 
 /// Kind of filesystem entry, as observed via `symlink_metadata`.
 ///
-/// Distinguishes the four shapes the fs tools care about. The resolver
-/// layer already rejects dangling-symlink ancestors at canonicalization
-/// time, so anything that reaches this helper has already passed the
-/// workspace-escape check; the only remaining question is what kind of
-/// entry sits at the final position.
+/// Distinguishes the four shapes the fs tools care about.
+/// The resolver layer already rejects dangling-symlink ancestors at
+/// canonicalization time, so anything that reaches this helper has already
+/// passed the workspace-escape check; the only remaining question is what kind
+/// of entry sits at the final position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntryKind {
     File,
     Dir,
-    /// Live *or* dangling symlink at the final position. The link entry
-    /// exists; the resolver-level dangling check applies only to ancestors
-    /// and to the `path`-style resolver, not to entries reached via
+    /// Live *or* dangling symlink at the final position.
+    /// The link entry exists; the resolver-level dangling check applies only to
+    /// ancestors and to the `path`-style resolver, not to entries reached via
     /// [`resolve_workspace_entry`].
     Symlink,
-    /// Block device, fifo, socket, etc. The fs tools refuse to operate on
-    /// these because `fs::rename`/`fs::remove_file`/`File::open` behavior
-    /// is too platform-dependent to be worth getting right.
+    /// Block device, fifo, socket, etc. The fs tools refuse to operate on these
+    /// because `fs::rename`/`fs::remove_file`/`File::open` behavior is too
+    /// platform-dependent to be worth getting right.
     Other,
 }
 
 /// Stat an entry without following a final-position symlink.
 ///
 /// Returns `Ok(None)` when the entry does not exist and `Ok(Some(kind))`
-/// otherwise. Use this in place of `Utf8Path::is_dir`/`is_file`/`exists`
-/// whenever the caller has already routed through
-/// [`resolve_workspace_entry`] — those `Path` methods follow symlinks and
-/// will lie about a dangling final-position symlink (existence checks
-/// return `false` even though the entry is present and `fs::rename` will
-/// silently replace it).
+/// otherwise.
+/// Use this in place of `Utf8Path::is_dir`/`is_file`/`exists` whenever the
+/// caller has already routed through [`resolve_workspace_entry`] — those
+/// `Path` methods follow symlinks and will lie about a dangling final-position
+/// symlink (existence checks return `false` even though the entry is present
+/// and `fs::rename` will silently replace it).
 pub fn entry_kind(path: &Utf8Path) -> Result<Option<EntryKind>, io::Error> {
     match path.symlink_metadata() {
         Ok(m) => {
@@ -132,38 +133,38 @@ const MAX_COMPONENT_COUNT: usize = 20;
 pub struct ResolvedPath {
     /// Absolute path inside the workspace.
     ///
-    /// Always anchored in the canonicalized workspace root. The shape of
-    /// the final component depends on which resolver produced it: for
-    /// [`resolve_workspace_path`] it is the canonical target (symlinks
-    /// followed); for [`resolve_workspace_entry`] it is the directory
-    /// entry as named by the user (symlinks left intact).
+    /// Always anchored in the canonicalized workspace root.
+    /// The shape of the final component depends on which resolver produced it:
+    /// for [`resolve_workspace_path`] it is the canonical target (symlinks
+    /// followed); for [`resolve_workspace_entry`] it is the directory entry as
+    /// named by the user (symlinks left intact).
     pub absolute: Utf8PathBuf,
 
     /// Path relative to the canonical workspace root.
     pub relative: Utf8PathBuf,
 }
 
-/// Resolve a user-supplied path against the workspace root, following
-/// symlinks all the way to the final component.
+/// Resolve a user-supplied path against the workspace root, following symlinks
+/// all the way to the final component.
 ///
-/// Use this when the caller wants to operate on the *content* of the
-/// target — reading, modifying, or otherwise touching whatever the path
-/// ultimately points to. Read- and modify-style tools belong here
-/// (`fs_read_file`, `fs_modify_file`).
+/// Use this when the caller wants to operate on the *content* of the target —
+/// reading, modifying, or otherwise touching whatever the path ultimately
+/// points to.
+/// Read- and modify-style tools belong here (`fs_read_file`, `fs_modify_file`).
 ///
-/// For write tools that should operate on the directory entry itself
-/// (create, delete, rename), use [`resolve_workspace_entry`] instead — it
-/// does not follow a final symlink and so cannot be tricked into writing
-/// or unlinking through one.
+/// For write tools that should operate on the directory entry itself (create,
+/// delete, rename), use [`resolve_workspace_entry`] instead — it does not
+/// follow a final symlink and so cannot be tricked into writing or unlinking
+/// through one.
 ///
 /// For not-yet-existing targets, only the deepest existing ancestor is
-/// canonicalized; the lexical remainder is appended as-is. After cleaning,
-/// the remainder contains only `Normal` components and cannot traverse
-/// upwards out of the canonicalized ancestor.
+/// canonicalized; the lexical remainder is appended as-is.
+/// After cleaning, the remainder contains only `Normal` components and cannot
+/// traverse upwards out of the canonicalized ancestor.
 ///
-/// Dangling symlinks at any position in the path are rejected — there is
-/// no canonical target to bound, so the workspace check cannot prove the
-/// path stays inside.
+/// Dangling symlinks at any position in the path are rejected — there is no
+/// canonical target to bound, so the workspace check cannot prove the path
+/// stays inside.
 pub fn resolve_workspace_path(root: &Utf8Path, path: &str) -> Result<ResolvedPath, String> {
     let ValidatedInput {
         cleaned,
@@ -187,17 +188,17 @@ pub fn resolve_workspace_path(root: &Utf8Path, path: &str) -> Result<ResolvedPat
     Ok(ResolvedPath { absolute, relative })
 }
 
-/// Resolve a user-supplied path as a directory entry, canonicalizing only
-/// the *parent*.
+/// Resolve a user-supplied path as a directory entry, canonicalizing only the
+/// *parent*.
 ///
-/// The final component is preserved as-is: if it is an existing symlink,
-/// it is left intact rather than followed. This is the right primitive for
-/// tools that operate on the entry itself — create, delete, rename — where
-/// following the link would silently retarget the operation onto whatever
-/// the link points at.
+/// The final component is preserved as-is: if it is an existing symlink, it is
+/// left intact rather than followed.
+/// This is the right primitive for tools that operate on the entry itself —
+/// create, delete, rename — where following the link would silently retarget
+/// the operation onto whatever the link points at.
 ///
-/// All other validation rules from [`resolve_workspace_path`] still apply:
-/// the parent must canonicalize to somewhere inside `canonical_root`, no
+/// All other validation rules from [`resolve_workspace_path`] still apply: the
+/// parent must canonicalize to somewhere inside `canonical_root`, no
 /// dangling-symlink ancestors, length limits, and so on.
 pub fn resolve_workspace_entry(root: &Utf8Path, path: &str) -> Result<ResolvedPath, String> {
     let ValidatedInput {
@@ -246,8 +247,9 @@ pub fn resolve_workspace_entry(root: &Utf8Path, path: &str) -> Result<ResolvedPa
 /// escape but not *followed* in the returned path.
 ///
 /// Performs the same input validation as [`resolve_workspace_path`], but
-/// doesn't canonicalize the result. Use this when output paths should match
-/// what the user supplied (read/search tools).
+/// doesn't canonicalize the result.
+/// Use this when output paths should match what the user supplied (read/search
+/// tools).
 pub fn clean_workspace_path(root: &Utf8Path, path: &str) -> Result<Utf8PathBuf, String> {
     let ValidatedInput {
         cleaned,
@@ -261,8 +263,8 @@ pub fn clean_workspace_path(root: &Utf8Path, path: &str) -> Result<Utf8PathBuf, 
 }
 
 /// Output of [`validate_workspace_input`]: the cleaned form plus the
-/// canonicalized workspace root. Each public resolver decides how to
-/// canonicalize the rest.
+/// canonicalized workspace root.
+/// Each public resolver decides how to canonicalize the rest.
 struct ValidatedInput {
     /// Lexically-cleaned, non-canonical workspace-relative path.
     cleaned: Utf8PathBuf,
@@ -272,23 +274,23 @@ struct ValidatedInput {
 
 /// Run the input-level validation shared by every workspace path resolver.
 ///
-/// This only inspects the input and the workspace root — it does not touch
-/// the rest of the filesystem. Per-resolver canonicalization happens in
-/// [`check_ancestor_in_root`].
+/// This only inspects the input and the workspace root — it does not touch the
+/// rest of the filesystem.
+/// Per-resolver canonicalization happens in [`check_ancestor_in_root`].
 ///
-/// The input is lexically normalized first (via `clean-path`), so
-/// `foo/../bar` is accepted and reduces to `bar`. Paths whose normalized
-/// form still tries to climb above the workspace (`../etc/passwd`,
-/// `foo/../../etc/passwd`) are rejected.
+/// The input is lexically normalized first (via `clean-path`), so `foo/../bar`
+/// is accepted and reduces to `bar`.
+/// Paths whose normalized form still tries to climb above the workspace
+/// (`../etc/passwd`, `foo/../../etc/passwd`) are rejected.
 ///
 /// Rejects:
 ///
 /// - Absolute paths (`/etc/passwd`, `C:\foo`).
-/// - Rooted but not-fully-absolute paths (`\foo`, `\\server\share`). These
-///   are caught by `has_root()` even when `is_absolute()` would return
+/// - Rooted but not-fully-absolute paths (`\foo`, `\\server\share`).
+///   These are caught by `has_root()` even when `is_absolute()` would return
 ///   false (Windows drive-relative paths).
-/// - `Prefix(_)` components (Windows drive-relative inputs like `C:foo`)
-///   that survive both rooted checks.
+/// - `Prefix(_)` components (Windows drive-relative inputs like `C:foo`) that
+///   survive both rooted checks.
 /// - Normalized paths that still contain a leading `..` (escape attempts).
 /// - Components longer than 100 bytes, or paths with more than 20 components.
 /// - Empty paths.
@@ -366,8 +368,8 @@ fn validate_workspace_input(root: &Utf8Path, path: &str) -> Result<ValidatedInpu
 /// Canonicalize the deepest existing ancestor of `candidate` and verify it
 /// stays inside `canonical_root`.
 ///
-/// Returns `(canonical_ancestor, lexical_suffix)`. When the full candidate
-/// exists, `lexical_suffix` is empty.
+/// Returns `(canonical_ancestor, lexical_suffix)`.
+/// When the full candidate exists, `lexical_suffix` is empty.
 fn check_ancestor_in_root(
     candidate: &Utf8Path,
     canonical_root: &Utf8Path,
@@ -383,16 +385,17 @@ fn check_ancestor_in_root(
 
 /// Walk up `path` until an existing ancestor can be canonicalized.
 ///
-/// Returns `(canonical_ancestor, lexical_suffix)`. When the full path exists,
-/// `lexical_suffix` is empty.
+/// Returns `(canonical_ancestor, lexical_suffix)`.
+/// When the full path exists, `lexical_suffix` is empty.
 ///
 /// A `NotFound` from `canonicalize_utf8()` is normally treated as "this
-/// component doesn't exist yet, pop it and try the parent." The exception is
-/// when the component itself exists as a *dangling* symlink: `canonicalize`
-/// fails because the target is missing, but the entry is still there and
-/// `open(O_CREAT)` would follow it and create the target outside the
-/// workspace. We probe with `symlink_metadata` to tell the two cases apart
-/// and reject the symlink case.
+/// component doesn't exist yet, pop it and try the parent."
+/// The exception is when the component itself exists as a *dangling* symlink:
+/// `canonicalize` fails because the target is missing, but the entry is still
+/// there and `open(O_CREAT)` would follow it and create the target outside the
+/// workspace.
+/// We probe with `symlink_metadata` to tell the two cases apart and reject the
+/// symlink case.
 fn canonicalize_existing_ancestor(path: &Utf8Path) -> Result<(Utf8PathBuf, Utf8PathBuf), String> {
     let mut current = path.to_owned();
     let mut suffix: Vec<String> = Vec::new();

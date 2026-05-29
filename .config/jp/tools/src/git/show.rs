@@ -18,8 +18,8 @@ use crate::{
 const SHOW_FORMAT: &str = "%H%x00%h%x00%an%x00%aI%x00%B";
 
 /// Sentinel separating the formatted header from `--numstat` output.
-/// Must not contain NUL bytes (can't pass those in process args) and
-/// must be unlikely to appear in commit messages.
+/// Must not contain NUL bytes (can't pass those in process args) and must be
+/// unlikely to appear in commit messages.
 const STAT_SEPARATOR: &str = "<<--JP-NUMSTAT-->>";
 
 #[derive(Debug, PartialEq)]
@@ -161,8 +161,8 @@ fn parse_show_output(stdout: &str) -> Result<ShowOutput> {
 
 /// Parse `--numstat` output lines into structured file stats.
 ///
-/// Each line is tab-separated: `insertions\tdeletions\tpath`
-/// Binary files show as: `-\t-\tpath`
+/// Each line is tab-separated: `insertions\tdeletions\tpath` Binary files show
+/// as: `-\t-\tpath`
 fn parse_numstat_lines(stat_section: &str) -> Vec<FileStat> {
     stat_section
         .lines()

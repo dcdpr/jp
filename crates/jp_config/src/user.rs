@@ -23,7 +23,8 @@ pub struct UserConfig {
     /// different local configs continue the conversation.
     ///
     /// Typically set in user-local config (run `jp init` for an interactive
-    /// setup). When unset, transcripts fall back to a generic `"user"` label.
+    /// setup).
+    /// When unset, transcripts fall back to a generic `"user"` label.
     pub name: Option<String>,
 }
 

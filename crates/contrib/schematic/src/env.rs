@@ -2,7 +2,8 @@ use std::str::FromStr;
 
 use crate::{ParseEnvResult, internal};
 
-/// Ignore the environment variable if it's empty and fallback to the previous or default value.
+/// Ignore the environment variable if it's empty and fallback to the previous
+/// or default value.
 pub fn ignore_empty<T: FromStr>(var: &str) -> ParseEnvResult<T> {
     let var = var.trim();
 
@@ -13,8 +14,9 @@ pub fn ignore_empty<T: FromStr>(var: &str) -> ParseEnvResult<T> {
     internal::parse_value(var).map(|v| Some(v))
 }
 
-/// Parse a string into a boolean. Will parse `1`, `true`, `yes`, `on`,
-/// and `enabled` as true, and everything else as false.
+/// Parse a string into a boolean.
+/// Will parse `1`, `true`, `yes`, `on`, and `enabled` as true, and everything
+/// else as false.
 pub fn parse_bool(var: &str) -> ParseEnvResult<bool> {
     Ok(match var.to_lowercase().as_str() {
         "1" | "true" | "yes" | "on" | "enabled" | "enable" => Some(true),

@@ -1,11 +1,13 @@
 //! Structured inquiry support for tool execution.
 //!
-//! When a tool requires additional input with `QuestionTarget::Assistant`,
-//! the `ToolCoordinator` spawns an async inquiry task that makes a structured
+//! When a tool requires additional input with `QuestionTarget::Assistant`, the
+//! `ToolCoordinator` spawns an async inquiry task that makes a structured
 //! output request to the LLM, extracts the answer, and sends it back via the
-//! event channel. The tool is then re-executed with the answer.
+//! event channel.
+//! The tool is then re-executed with the answer.
 //!
 //! This module provides:
+//!
 //! - Schema generation and answer extraction
 //! - The [`InquiryBackend`] trait for testability
 //! - [`LlmInquiryBackend`] for real LLM calls
@@ -40,9 +42,10 @@ use tracing::info;
 
 /// Create an inquiry ID for a tool call question.
 ///
-/// Format: `<tool_call_id>.<question_id>` — unique per question within a
-/// tool call. The tool name is not included because it's already stored
-/// in the `InquirySource` of the `InquiryRequest` event.
+/// Format: `<tool_call_id>.<question_id>` — unique per question within a tool
+/// call.
+/// The tool name is not included because it's already stored in the
+/// `InquirySource` of the `InquiryRequest` event.
 pub fn tool_call_inquiry_id(tool_call_id: &str, question_id: &str) -> String {
     format!("{tool_call_id}.{question_id}")
 }
@@ -84,7 +87,8 @@ pub enum InquiryError {
     #[error("LLM provider error: {0}")]
     Provider(#[from] jp_llm::Error),
 
-    /// The inquiry was cancelled (e.g. Ctrl+C).
+    /// The inquiry was cancelled (e.g.
+    /// Ctrl+C).
     #[error("Inquiry cancelled")]
     Cancelled,
 
@@ -108,15 +112,17 @@ pub enum InquiryError {
 /// Abstraction over how inquiries are resolved.
 ///
 /// The real implementation ([`LlmInquiryBackend`]) makes a structured output
-/// call to an LLM provider. Tests use `MockInquiryBackend` to return
-/// pre-configured answers without network calls.
+/// call to an LLM provider.
+/// Tests use `MockInquiryBackend` to return pre-configured answers without
+/// network calls.
 #[async_trait]
 pub trait InquiryBackend: Send + Sync {
     /// Resolve an inquiry and return the answer.
     ///
     /// `events` is an owned conversation stream (cloned just-in-time by the
-    /// caller). The implementation appends temporary events, builds a thread,
-    /// makes the LLM call, and extracts the answer.
+    /// caller).
+    /// The implementation appends temporary events, builds a thread, makes the
+    /// LLM call, and extracts the answer.
     ///
     /// `inquiry_id` is an opaque correlation ID for logging.
     /// `tool_name` identifies the tool that needs input.
@@ -133,8 +139,8 @@ pub trait InquiryBackend: Send + Sync {
 
 /// Fully-resolved configuration for a single inquiry call.
 ///
-/// Built at turn start from the three-layer merge:
-/// per-question `PartialAssistantConfig` → global inquiry config → main assistant config.
+/// Built at turn start from the three-layer merge: per-question
+/// `PartialAssistantConfig` → global inquiry config → main assistant config.
 pub struct InquiryConfig {
     pub provider: Arc<dyn Provider>,
     pub model: ModelDetails,
@@ -152,8 +158,8 @@ pub struct LlmInquiryBackend {
     default_config: InquiryConfig,
 
     /// Per-question overrides keyed by `(tool_name, question_id)`.
-    /// Built at turn start from `QuestionTarget::Assistant(config)` entries
-    /// in the active tool configs.
+    /// Built at turn start from `QuestionTarget::Assistant(config)` entries in
+    /// the active tool configs.
     overrides: IndexMap<(String, String), InquiryConfig>,
 
     /// Attachments from the parent turn (shared across all inquiries).
@@ -388,8 +394,8 @@ const CHARS_PER_TOKEN: usize = 3;
 /// structured output injection, etc.).
 ///
 /// The system prompt, sections, attachments, and tool definitions are now
-/// measured explicitly via `estimate_fixed_overhead_chars`, so this factor
-/// only needs to cover the remaining approximation error.
+/// measured explicitly via `estimate_fixed_overhead_chars`, so this factor only
+/// needs to cover the remaining approximation error.
 const OVERHEAD_FACTOR: usize = 90; // percent
 
 /// When truncation is needed, target this fraction of the context window.
@@ -494,13 +500,13 @@ fn estimate_fixed_overhead_chars(
 /// to bring the total under the target.
 ///
 /// Dropping from the start (oldest events) produces a stable cutoff across
-/// multiple inquiry calls within the same turn. Since `ConversationStream`
-/// is append-only, the same K oldest events are dropped regardless of how
-/// many new events were appended at the end. This preserves the prompt
-/// cache prefix across inquiries.
+/// multiple inquiry calls within the same turn.
+/// Since `ConversationStream` is append-only, the same K oldest events are
+/// dropped regardless of how many new events were appended at the end.
+/// This preserves the prompt cache prefix across inquiries.
 ///
-/// After truncation, `sanitize()` restores structural invariants
-/// (orphaned tool calls, leading non-user events, etc.).
+/// After truncation, `sanitize()` restores structural invariants (orphaned tool
+/// calls, leading non-user events, etc.).
 fn truncate_to_fit(events: &mut ConversationStream, max_tokens: u32, overhead_chars: usize) {
     let budget = token_budget(max_tokens, overhead_chars);
     let total_chars = estimate_chars(events);

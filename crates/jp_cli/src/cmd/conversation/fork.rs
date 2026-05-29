@@ -15,10 +15,11 @@ pub(crate) struct Fork {
     #[arg(short, long, default_value = "false")]
     activate: bool,
 
-    /// Ignore all conversation events *before* the specified timestamp.
+    /// Ignore all conversation events before the specified timestamp.
     ///
-    /// Timestamp can be relative (5days, 2mins, etc) or absolute. Can be used
-    /// in combination with `--until`.
+    /// Inclusive: an event at exactly this timestamp is kept.
+    /// Timestamp can be relative (5days, 2mins, etc) or absolute.
+    /// Composes with `--until` to form a half-open `[from, until)` range.
     #[arg(long)]
     from: Option<TimeThreshold>,
 

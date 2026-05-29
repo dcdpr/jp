@@ -96,9 +96,9 @@ fn render_handles_empty_thread_list() {
     assert!(report.contains("No threads sampled"));
 }
 
-/// Regression: when the call tree branches, the ancestry rendered for an
-/// anchor must follow the depth chain (parent = first preceding frame at
-/// depth-1), not just take the previous N entries in document order.
+/// Regression: when the call tree branches, the ancestry rendered for an anchor
+/// must follow the depth chain (parent = first preceding frame at depth-1), not
+/// just take the previous N entries in document order.
 ///
 /// Tree:
 ///
@@ -110,8 +110,8 @@ fn render_handles_empty_thread_list() {
 ///    └─ E (depth 2, 30)
 /// ```
 ///
-/// Preorder: A, B, C, D, E. The ancestry for anchor E must be [A, D, E] —
-/// the previous design would have returned [B, C, D, E].
+/// Preorder: A, B, C, D, E. The ancestry for anchor E must be [A, D, E] — the
+/// previous design would have returned [B, C, D, E].
 #[test]
 fn render_ancestry_follows_depth_chain_across_branches() {
     let threads = vec![Thread {

@@ -47,8 +47,8 @@ pub enum Error {
         cmd: String,
         error: String,
         /// Pre-rendered tail of the server's stderr, including a leading
-        /// newline and `stderr:` header when non-empty. Empty when the
-        /// server produced no stderr output before failing.
+        /// newline and `stderr:` header when non-empty.
+        /// Empty when the server produced no stderr output before failing.
         stderr: String,
     },
 

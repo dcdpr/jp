@@ -124,9 +124,9 @@ struct Globals {
     ///
     /// Can be specified multiple times to increase verbosity.
     ///
-    /// Defaults to printing "error" messages. For each increase in verbosity,
-    /// the log level is set to "warn", "info", "debug", and "trace"
-    /// respectively.
+    /// Defaults to printing "error" messages.
+    /// For each increase in verbosity, the log level is set to "warn", "info",
+    /// "debug", and "trace" respectively.
     #[arg(short = 'v', long, global = true, action = ArgAction::Count)]
     verbose: u8,
 
@@ -147,8 +147,9 @@ struct Globals {
     /// Persist modified state to disk.
     ///
     /// This is enabled by default, but can be disabled to debug certain
-    /// actions. It is also useful to send a query to the assistant, without
-    /// adding that query to the conversation history.
+    /// actions.
+    /// It is also useful to send a query to the assistant, without adding that
+    /// query to the conversation history.
     #[arg(
         short = '!',
         long = "no-persist",
@@ -168,33 +169,34 @@ struct Globals {
 
     /// The format of the log output written to stderr.
     ///
-    /// Defaults to "text" when stderr is a terminal, and "json" when stderr
-    /// is redirected to a file or pipe. Only takes effect when tracing is
-    /// written to stderr (via `-v` or `--log-file=-`).
+    /// Defaults to "text" when stderr is a terminal, and "json" when stderr is
+    /// redirected to a file or pipe.
+    /// Only takes effect when tracing is written to stderr (via `-v` or
+    /// `--log-file=-`).
     #[arg(long, global = true, value_enum, default_value_t = LogFormat::Auto)]
     log_format: LogFormat,
 
     /// Write tracing logs to an additional destination.
     ///
-    /// Use `-` to write to stderr. Tracing is always written to a log
-    /// file regardless of this flag.
+    /// Use `-` to write to stderr.
+    /// Tracing is always written to a log file regardless of this flag.
     #[arg(long, global = true, value_name = "PATH")]
     log_file: Option<String>,
 
     /// Filter log output by target and level.
     ///
-    /// Accepts a comma-separated list of `target=level` pairs. Levels are
-    /// one of: off, error, warn, info, debug, trace. Targets match path
-    /// prefixes.
+    /// Accepts a comma-separated list of `target=level` pairs.
+    /// Levels are one of: off, error, warn, info, debug, trace.
+    /// Targets match path prefixes.
     ///
-    /// Examples:
-    ///   --log=tool::stderr=trace        Show stderr output from local tools.
-    ///   --log=mcp::stderr=debug         Show stderr from MCP servers.
-    ///   --log='jp_llm=trace,plugin=off' Trace jp_llm internals, silence plugins.
+    /// Examples: --log=tool::stderr=trace Show stderr output from local tools.
+    /// --log=mcp::stderr=debug Show stderr from MCP servers.
+    /// --log='jp\_llm=trace,plugin=off' Trace jp\_llm internals, silence
+    /// plugins.
     ///
-    /// Composes with `-v`: verbosity sets the baseline for jp's own
-    /// modules; `--log` adds or overrides specific targets. Passing
-    /// `--log` without `-v` still enables stderr log output.
+    /// Composes with `-v`: verbosity sets the baseline for jp's own modules;
+    /// `--log` adds or overrides specific targets.
+    /// Passing `--log` without `-v` still enables stderr log output.
     #[allow(clippy::doc_markdown)]
     #[arg(long, global = true, value_name = "DIRECTIVE")]
     log: Option<String>,
@@ -273,16 +275,16 @@ impl FromStr for WorkspaceIdOrPath {
 /// The format of the CLI output written to stdout.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum CliFormat {
-    /// Automatically detect: use "text-pretty" for terminals,
-    /// "text" otherwise.
+    /// Automatically detect: use "text-pretty" for terminals, "text" otherwise.
     #[default]
     Auto,
 
-    /// Plain text output. No ANSI colors or unicode decorations.
+    /// Plain text output.
+    /// No ANSI colors or unicode decorations.
     Text,
 
-    /// Pretty-printed text output. Includes ANSI colors, unicode
-    /// decorations, and hyperlinks.
+    /// Pretty-printed text output.
+    /// Includes ANSI colors, unicode decorations, and hyperlinks.
     TextPretty,
 
     /// Compact JSON output.
@@ -614,8 +616,8 @@ async fn stop_drain_timer(timer: Option<(CancellationToken, JoinHandle<()>)>) {
 
 /// Check if the current invocation is a root-level help request (`jp -h`).
 ///
-/// We only inject the "Plugins:" section for root help, not for subcommand
-/// help like `jp query -h`.
+/// We only inject the "Plugins:" section for root help, not for subcommand help
+/// like `jp query -h`.
 fn is_root_help_request() -> bool {
     let args: Vec<String> = env::args().collect();
     args.len() == 2 && (args[1] == "-h" || args[1] == "--help")
@@ -709,7 +711,8 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
 /// Load the base partial config from files and environment variables.
 ///
 /// This produces the `files + inheritance + env` layer that serves as input to
-/// [`ConfigPipeline`]. No `--cfg` args or per-conversation config.
+/// [`ConfigPipeline`].
+/// No `--cfg` args or per-conversation config.
 ///
 /// See: <https://jp.computer/configuration>
 fn load_base_partial(fs: Option<&FsStorageBackend>) -> Result<PartialAppConfig> {

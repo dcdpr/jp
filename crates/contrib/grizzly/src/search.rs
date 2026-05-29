@@ -40,16 +40,16 @@ pub struct SearchParams {
 
     /// Maximum characters in each result's snippet text (default: 200).
     ///
-    /// Longer matching lines are truncated with `…` and centered on the
-    /// match. Callers should use `note_get` with the returned line numbers
-    /// to fetch full content when the snippet is insufficient.
+    /// Longer matching lines are truncated with `…` and centered on the match.
+    /// Callers should use `note_get` with the returned line numbers to fetch
+    /// full content when the snippet is insufficient.
     pub snippet_chars: usize,
 
     /// Maximum number of line numbers reported in `SearchMatch::line_hits`
     /// (default: 20).
     ///
-    /// `SearchMatch::total_hits` always reports the true count, so callers
-    /// know when this cap kicked in.
+    /// `SearchMatch::total_hits` always reports the true count, so callers know
+    /// when this cap kicked in.
     pub max_line_hits: usize,
 }
 
@@ -71,9 +71,8 @@ impl SearchParams {
     /// Return a copy with glob-style wildcard queries (`"*"`) removed.
     ///
     /// Users pass `queries: ["*"]` to mean "match everything" (e.g. when
-    /// filtering by tags only), but `*` is not a wildcard in SQL LIKE or
-    /// FTS5. Stripping it makes the search fall through to the tag/ID-only
-    /// path.
+    /// filtering by tags only), but `*` is not a wildcard in SQL LIKE or FTS5.
+    /// Stripping it makes the search fall through to the tag/ID-only path.
     fn without_wildcards(&self) -> Self {
         Self {
             queries: self
@@ -94,8 +93,8 @@ impl SearchParams {
 
 /// A bounded summary of a matching note.
 ///
-/// Carries metadata plus a short snippet showing why the note matched. To
-/// read full content, the caller should follow up with `note_get`, passing
+/// Carries metadata plus a short snippet showing why the note matched.
+/// To read full content, the caller should follow up with `note_get`, passing
 /// the values from `line_hits` (or ranges around them) via its `lines`
 /// parameter.
 pub struct SearchMatch {
@@ -113,8 +112,9 @@ pub struct SearchMatch {
 
     /// 1-indexed line numbers in the note's content where the query matched.
     ///
-    /// Capped at `SearchParams::max_line_hits`; check `total_hits` for the
-    /// true count. Empty for title-only matches.
+    /// Capped at `SearchParams::max_line_hits`; check `total_hits` for the true
+    /// count.
+    /// Empty for title-only matches.
     pub line_hits: Vec<usize>,
 
     /// Total number of content lines that matched the query.
@@ -133,16 +133,17 @@ pub struct Snippet {
     /// 1-indexed source line.
     pub line: usize,
 
-    /// Excerpt text. Prefixed/suffixed with `…` when truncated.
+    /// Excerpt text.
+    /// Prefixed/suffixed with `…` when truncated.
     pub text: String,
 }
 
 impl SearchMatch {
     /// Format as pseudo-XML for LLM consumption.
     ///
-    /// The output is intentionally compact and size-bounded. To read full
-    /// content, the caller should follow up with `note_get`, passing
-    /// `line_hits` (or a range around them) via its `lines` parameter.
+    /// The output is intentionally compact and size-bounded.
+    /// To read full content, the caller should follow up with `note_get`,
+    /// passing `line_hits` (or a range around them) via its `lines` parameter.
     #[must_use]
     pub fn to_xml(&self) -> String {
         let mut out = format!(
@@ -188,8 +189,9 @@ struct ScoredNote {
 
 /// Execute a search against the Bear database.
 ///
-/// Dispatches to FTS5 or LIKE search based on [`SearchMode`]. In `Auto` mode,
-/// FTS5 is attempted first with a fallback to LIKE on error or empty results.
+/// Dispatches to FTS5 or LIKE search based on [`SearchMode`].
+/// In `Auto` mode, FTS5 is attempted first with a fallback to LIKE on error or
+/// empty results.
 pub fn execute(conn: &Connection, cte: &str, params: &SearchParams) -> Result<Vec<SearchMatch>> {
     // Treat "*" as a match-all wildcard (glob convention), not a literal.
     let params = params.without_wildcards();
@@ -330,8 +332,8 @@ fn get_filtered_note_ids(
 
 /// LIKE-based search (original implementation).
 ///
-/// Results are ranked by a hand-rolled scoring formula:
-/// exact title match = 1.0, title LIKE = 0.5, content LIKE = 0.1.
+/// Results are ranked by a hand-rolled scoring formula: exact title match =
+/// 1.0, title LIKE = 0.5, content LIKE = 0.1.
 #[allow(clippy::too_many_lines)]
 fn execute_like(conn: &Connection, cte: &str, params: &SearchParams) -> Result<Vec<SearchMatch>> {
     rusqlite::vtab::array::load_module(conn)?;
@@ -479,11 +481,12 @@ fn execute_like(conn: &Connection, cte: &str, params: &SearchParams) -> Result<V
 
 /// Find matching lines and produce a snippet showing the best match.
 ///
-/// Returns `(line_hits, total_hits, snippet)`. `line_hits` is truncated to
-/// `max_line_hits`; `total_hits` is always the full count. When no content
-/// line matches the query (title-only match), `line_hits` is empty and the
-/// snippet previews the first non-empty content line. `snippet` is `None`
-/// only when the note has no content at all.
+/// Returns `(line_hits, total_hits, snippet)`.
+/// `line_hits` is truncated to `max_line_hits`; `total_hits` is always the full
+/// count.
+/// When no content line matches the query (title-only match), `line_hits` is
+/// empty and the snippet previews the first non-empty content line.
+/// `snippet` is `None` only when the note has no content at all.
 fn extract_hits_and_snippet(
     content: &str,
     queries: &[String],
@@ -546,8 +549,9 @@ fn extract_hits_and_snippet(
 }
 
 /// Truncate `line` to roughly `max_chars` characters, centered on
-/// `match_byte_pos`. Prefixes and/or suffixes the result with `…` when
-/// truncation actually happened.
+/// `match_byte_pos`.
+/// Prefixes and/or suffixes the result with `…` when truncation actually
+/// happened.
 ///
 /// `match_byte_pos` is a hint and is clamped to the line's byte length, so
 /// callers can safely pass approximate positions derived from a lower-cased
