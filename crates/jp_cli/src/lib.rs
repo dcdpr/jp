@@ -522,6 +522,8 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
 /// The first SIGINT/SIGTERM switches the line to a 2s countdown and signals
 /// graceful cancellation; a second SIGINT (or any SIGQUIT) escalates to a force
 /// quit that aborts the `JoinSet` and drops pending workspace mutations.
+///
+/// [`TaskHandler::sync`]: jp_task::TaskHandler::sync
 async fn drain_background_tasks(
     ctx: &mut Ctx,
 ) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
