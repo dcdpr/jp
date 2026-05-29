@@ -332,6 +332,7 @@ fn test_default_background_column_fill_with_indent() {
             fill: BackgroundFill::Column(20),
         }),
         indent: 4,
+        ..Default::default()
     };
 
     let rendered = Formatter::with_width(0)
@@ -367,6 +368,7 @@ fn test_default_background_terminal_fill_with_indent() {
             fill: BackgroundFill::Terminal,
         }),
         indent: 4,
+        ..Default::default()
     };
 
     let rendered = Formatter::with_width(0)
@@ -553,6 +555,7 @@ fn test_default_background_column_fill_with_indent_wrapped() {
             fill: BackgroundFill::Column(30),
         }),
         indent: 4,
+        ..Default::default()
     };
 
     // Long enough to wrap at width=20.
