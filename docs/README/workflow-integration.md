@@ -1,8 +1,10 @@
 # Your Workflow, Your Way
 
-JP integrates seamlessly with your existing workflows. It is a single binary
-that you run from anywhere, either interactively or headlessly. It respects
-basic Unix convetions such as pipes, stdin, stdout/stderr, and exit codes:
+JP integrates seamlessly with your existing workflows.
+It is a single binary that you run from anywhere, either interactively or
+headlessly.
+It respects basic Unix convetions such as pipes, stdin, stdout/stderr, and exit
+codes:
 
 ```sh
 # Interactive usage, can prompt for input
@@ -55,9 +57,9 @@ jp -v 2> log.txt
 ```
 
 JP is a single binary you call from wherever you already work; shell scripts,
-editor terminals, `git` hooks, CI pipelines, Makefiles. It stores state in a
-`.jp/` directory alongside your code, so conversations, configuration, and tools
-travel with the project and can be committed to git.
+editor terminals, `git` hooks, CI pipelines, Makefiles.
+It stores state in a `.jp/` directory alongside your code, so conversations,
+configuration, and tools travel with the project and can be committed to git.
 
 Each conversation has a unique ID and contains the full message history:
 
@@ -80,7 +82,8 @@ jp query --new --tmp=1d "..."
 jp conversation edit --no-tmp
 ```
 
-Conversations are text files. Commit them alongside your code changes:
+Conversations are text files.
+Commit them alongside your code changes:
 
 ```sh
 git add .jp/conversations/2024-01-15-143022/
@@ -88,7 +91,10 @@ git commit -m "feat: add user authentication"
 ```
 
 Your teammates clone the repo and get the full context of how you arrived at the
-implementation. Switch conversations, fork from any point in history, or grep
-across all of them with standard Unix tools.
+implementation.
+Switch conversations, fork from any point in history, or grep across all of them
+with standard Unix tools.
 
-[back to README](../../README.md)
+[back to README]
+
+[back to README]: ../../README.md

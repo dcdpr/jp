@@ -4,36 +4,39 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-28
-- **Requires**: [RFD 015](015-simplified-attachment-handler-trait.md), [RFD 016](016-wasm-plugin-architecture.md)
+- **Requires**: [RFD 015], [RFD 016]
 
 ## Summary
 
-This RFD adds Wasm plugin support for attachment handlers. Third-party handlers
-are loaded as Wasm components at runtime, exposing the same
-`jp:plugin/attachment` interface. The host wraps them in a `WasmHandler` adapter
-that implements the native `Handler` trait from [RFD 015], making the
-plugin/native distinction transparent to the rest of the system.
+This RFD adds Wasm plugin support for attachment handlers.
+Third-party handlers are loaded as Wasm components at runtime, exposing the same
+`jp:plugin/attachment` interface.
+The host wraps them in a `WasmHandler` adapter that implements the native
+`Handler` trait from [RFD 015], making the plugin/native distinction transparent
+to the rest of the system.
 
 ## Motivation
 
 [RFD 015] simplified the `Handler` trait to three stateless methods, but all
-handlers are still hardcoded into the binary. Adding a new attachment type means
-writing a Rust crate, wiring it into the workspace, and recompiling. Users
-cannot add custom attachment types without forking the project.
+handlers are still hardcoded into the binary.
+Adding a new attachment type means writing a Rust crate, wiring it into the
+workspace, and recompiling.
+Users cannot add custom attachment types without forking the project.
 
 This RFD leverages the plugin infrastructure from [RFD 016] to support
-third-party attachment handlers. Handlers become just another capability
-interface that plugins can export.
+third-party attachment handlers.
+Handlers become just another capability interface that plugins can export.
 
 ## Design
 
 ### Built-in vs external handlers
 
 Built-in handlers implement the `Handler` trait directly in Rust (as defined in
-[RFD 015]). External handlers are Wasm plugins that export the
-`jp:plugin/attachment` capability interface. The host wraps external handlers in
-a `WasmHandler` adapter that implements the same `Handler` trait, so the rest of
-the system is unaware of the distinction.
+[RFD 015]).
+External handlers are Wasm plugins that export the `jp:plugin/attachment`
+capability interface.
+The host wraps external handlers in a `WasmHandler` adapter that implements the
+same `Handler` trait, so the rest of the system is unaware of the distinction.
 
 ### Attachment WIT interface
 
@@ -67,9 +70,9 @@ interface attachment {
 }
 ```
 
-The interface mirrors the simplified `Handler` trait from [RFD 015]. URLs are
-passed as strings; the guest parses them using whatever URL library its language
-provides.
+The interface mirrors the simplified `Handler` trait from [RFD 015].
+URLs are passed as strings; the guest parses them using whatever URL library its
+language provides.
 
 A convenience world for attachment-only plugins:
 
@@ -85,7 +88,8 @@ world attachment-plugin {
 ```
 
 Plugins that provide additional capabilities (e.g., tools) compose their own
-world. See [RFD 016].
+world.
+See [RFD 016].
 
 ### `WasmHandler` adapter
 
@@ -122,8 +126,8 @@ impl Handler for WasmHandler {
 }
 ```
 
-No state, no `typetag`. The `WasmHandler` is a stateless bridge between the host
-and the Wasm component.
+No state, no `typetag`.
+The `WasmHandler` is a stateless bridge between the host and the Wasm component.
 
 If a plugin exports the `attachment` interface but `schemes()` returns an empty
 list, the host emits a warning and skips registering it as an attachment
@@ -134,8 +138,8 @@ message identifying both plugins.
 
 ### Removing `bear` from the binary
 
-The `bear` handler is too niche for the core binary. It becomes an external Wasm
-plugin:
+The `bear` handler is too niche for the core binary.
+It becomes an external Wasm plugin:
 
 1. Create `crates/jp_attachment_handler_bear/` targeting `wasm32-wasip2`.
 2. Implement the `jp:plugin/plugin` and `jp:plugin/attachment` interfaces.
@@ -149,19 +153,22 @@ plugin:
 
 ## Drawbacks
 
-- **Two handler models.** Native Rust handlers and Wasm handlers coexist. This
-  is intentional (native for core handlers, Wasm for extensibility) but adds
-  maintenance surface.
+- **Two handler models.** Native Rust handlers and Wasm handlers coexist.
+  This is intentional (native for core handlers, Wasm for extensibility) but
+  adds maintenance surface.
 - **Wasm call overhead.** External handlers pay Wasm instantiation and call
-  overhead that native handlers avoid. For attachment resolution (which
-  typically involves I/O), this overhead is negligible.
+  overhead that native handlers avoid.
+  For attachment resolution (which typically involves I/O), this overhead is
+  negligible.
 
 ## Alternatives
 
 ### Port all handlers to Wasm (no native handlers)
 
-Simpler mental model: everything is Wasm. With host imports for process, HTTP,
-and filesystem, this is technically feasible. But it means:
+Simpler mental model: everything is Wasm.
+With host imports for process, HTTP, and filesystem, this is technically
+feasible.
+But it means:
 
 - The `file` handler loses parallel directory walking and `.ignore` integration.
 - The `mcp` handler loses access to the MCP client transport.
@@ -171,9 +178,9 @@ and filesystem, this is technically feasible. But it means:
 ### Use a different plugin architecture
 
 Instead of the capability-based model from [RFD 016], use a simpler approach
-(e.g., dynamic libraries, embedded scripting languages). This trades off
-sandboxing and cross-platform compatibility for reduced binary size and
-complexity.
+(e.g., dynamic libraries, embedded scripting languages).
+This trades off sandboxing and cross-platform compatibility for reduced binary
+size and complexity.
 
 ## Non-Goals
 
@@ -183,14 +190,16 @@ complexity.
 ## Risks and Open Questions
 
 1. **Bear handler SQLite in Wasm.** The Wasm guest needs to read a SQLite
-   database. Options: bundle a SQLite build compiled to Wasm, or read the raw
-   file through `jp:host/filesystem` and parse it in the guest. Needs
-   prototyping.
+   database.
+   Options: bundle a SQLite build compiled to Wasm, or read the raw file through
+   `jp:host/filesystem` and parse it in the guest.
+   Needs prototyping.
 
 2. **Host import surface.** Each additional capability granted to attachment
    handlers (e.g., `jp:host/mcp` for accessing MCP servers) expands the attack
-   surface. We should start minimal and add capabilities only when clear use
-   cases emerge.
+   surface.
+   We should start minimal and add capabilities only when clear use cases
+   emerge.
 
 ## Implementation Plan
 

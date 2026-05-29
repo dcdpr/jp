@@ -4,42 +4,47 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
-- **Extends**: [RFD D15](D15-structured-logging-infrastructure.md)
+- **Extends**: [RFD D15]
 
 ## Summary
 
 This RFD introduces a typed tracing system for JP, built on the `tracing`
-ecosystem. It replaces ad-hoc `tracing::info!(...)` calls with typed event
-structs, adds span-based execution context, and establishes a two-channel output
-model: structured tracing for developers (always written to the log file),
-chrome for users (controlled by `-v`). The work lives in a new `jp_trace` crate
-that owns subscriber configuration, the `emit!` macro, a test capture API, and
-content-addressed blob storage for large payloads.
+ecosystem.
+It replaces ad-hoc `tracing::info!(...)` calls with typed event structs, adds
+span-based execution context, and establishes a two-channel output model:
+structured tracing for developers (always written to the log file), chrome for
+users (controlled by `-v`).
+The work lives in a new `jp_trace` crate that owns subscriber configuration, the
+`emit!` macro, a test capture API, and content-addressed blob storage for large
+payloads.
 
 ## Motivation
 
-JP's tracing is ad-hoc. Every crate calls `tracing::info!("some message",
-field = value)` with free-form strings and inconsistent field names. There are
-no spans — not a single `#[instrument]` or `tracing::span!()` in the codebase.
+JP's tracing is ad-hoc.
+Every crate calls `tracing::info!("some message", field = value)` with free-form
+strings and inconsistent field names.
+There are no spans — not a single `#[instrument]` or `tracing::span!()` in the
+codebase.
 Errors propagate through `?` without recording which span they occurred in.
 Large payloads (LLM request bodies) are dumped to temp files via a one-off
-`trace_to_tmpfile()` helper. The subscriber is configured in a 150-line function
-in `jp_cli::lib` that mixes verbosity semantics, file writing, and stderr
-formatting.
+`trace_to_tmpfile()` helper.
+The subscriber is configured in a 150-line function in `jp_cli::lib` that mixes
+verbosity semantics, file writing, and stderr formatting.
 
 This creates concrete problems:
 
 1. **No structure.** Tracing output is only useful to someone who already knows
-   the codebase. A `warn!("retrying")` in one provider looks different from
-   `warn!("retry")` in another. There is no way to programmatically find "all
-   retry events" or "all events from the Anthropic provider" without grepping
-   source code.
+   the codebase.
+   A `warn!("retrying")` in one provider looks different from `warn!("retry")`
+   in another.
+   There is no way to programmatically find "all retry events" or "all events
+   from the Anthropic provider" without grepping source code.
 
 2. **No hierarchy.** Without spans, there is no way to see that an error
    occurred during the 3rd retry of the 2nd turn of a query against
-   `claude-sonnet-4`. Events are a flat stream with no parent-child
-   relationships. Post-mortem debugging requires reconstructing the call chain
-   manually.
+   `claude-sonnet-4`.
+   Events are a flat stream with no parent-child relationships.
+   Post-mortem debugging requires reconstructing the call chain manually.
 
 3. **No test observability.** Tests cannot assert "this code path emitted a
    retry event" without capturing stderr output and pattern-matching strings.
@@ -47,18 +52,21 @@ This creates concrete problems:
    behavior.
 
 4. **Mixed audiences.** The `-v` flag controls both user-facing status ("what is
-   JP doing?") and developer tracing (internal state, protocol details). These
-   serve different audiences with different needs. Users running `jp -vvv` are
-   flooded with implementation details they cannot act on. Developers who always
-   set `JP_DEBUG=1` get tracing noise mixed into their terminal.
+   JP doing?") and developer tracing (internal state, protocol details).
+   These serve different audiences with different needs.
+   Users running `jp -vvv` are flooded with implementation details they cannot
+   act on.
+   Developers who always set `JP_DEBUG=1` get tracing noise mixed into their
+   terminal.
 
-5. **Large payload handling is fragile.** `trace_to_tmpfile()` writes to
-   `/tmp` with no cleanup, no connection to the log directory, and no
-   deduplication. Each provider re-implements the same pattern.
+5. **Large payload handling is fragile.** `trace_to_tmpfile()` writes to `/tmp`
+   with no cleanup, no connection to the log directory, and no deduplication.
+   Each provider re-implements the same pattern.
 
-As JP grows — agentic workflows, server integrations, plugin ecosystems — these
-problems compound. A typed tracing system addresses them at the foundation
-level, before the codebase doubles in size.
+As JP grows — agentic workflows, server integrations, plugin ecosystems —
+these problems compound.
+A typed tracing system addresses them at the foundation level, before the
+codebase doubles in size.
 
 ## Design
 
@@ -67,18 +75,20 @@ level, before the codebase doubles in size.
 JP separates output into two channels with distinct audiences:
 
 | Channel | Audience   | Controls              | Content                              |
-|---------|------------|-----------------------|--------------------------------------|
+| ------- | ---------- | --------------------- | ------------------------------------ |
 | Chrome  | Users      | `-v` / `-q`           | Status lines, progress, tool headers |
 | Tracing | Developers | `JP_LOG` / `JP_DEBUG` | Typed events, spans, structured data |
 
-**Chrome** is user-facing status written to stderr via `Printer`. It is curated:
-each line is explicitly authored by CLI command code with control over wording
-and format. The `-v` / `-vv` / `-vvv` flags control chrome verbosity.
+**Chrome** is user-facing status written to stderr via `Printer`.
+It is curated: each line is explicitly authored by CLI command code with control
+over wording and format.
+The `-v` / `-vv` / `-vvv` flags control chrome verbosity.
 
-**Tracing** is structured diagnostic data written to a JSON log file. It is
-automatic and complete: every typed event and span is recorded at TRACE level
-regardless of flags. Tracing is never shown on stderr unless a developer
-explicitly opts in via `JP_LOG`.
+**Tracing** is structured diagnostic data written to a JSON log file.
+It is automatic and complete: every typed event and span is recorded at TRACE
+level regardless of flags.
+Tracing is never shown on stderr unless a developer explicitly opts in via
+`JP_LOG`.
 
 When an event matters to both audiences (e.g., a rate-limit retry), the CLI code
 does both at the same call site:
@@ -88,16 +98,18 @@ printer.chrome_v(format!("⟳ Retrying ({attempt}/{max})…"));
 emit!(events::Retrying { attempt, max, backoff, kind });
 ```
 
-Chrome gets a polished status line. Tracing gets a structured event with all
-fields. The two representations are authored independently.
+Chrome gets a polished status line.
+Tracing gets a structured event with all fields.
+The two representations are authored independently.
 
 ### Verbosity and environment variables
 
-All tracing controls are environment variables. No CLI flags. This keeps `jp
---help` clean of developer-only knobs.
+All tracing controls are environment variables.
+No CLI flags.
+This keeps `jp --help` clean of developer-only knobs.
 
 | Variable                  | Purpose                                  | Default                              |
-|---------------------------|------------------------------------------|--------------------------------------|
+| ------------------------- | ---------------------------------------- | ------------------------------------ |
 | `JP_DEBUG=1`              | Developer mode. Prints log file path at  | off                                  |
 |                           | end of run.                              |                                      |
 | `JP_LOG=<filter>`         | Mirrors tracing to stderr with the given | off                                  |
@@ -109,16 +121,16 @@ All tracing controls are environment variables. No CLI flags. This keeps `jp
 
 CLI flags for verbosity:
 
-| Flag                  | Effect                                   |
-|-----------------------|------------------------------------------|
-| `-v` / `-vv` / `-vvv` | Increases chrome verbosity. Does not     |
-|                       | affect tracing.                          |
-| `-q`                  | Suppresses chrome. Does not affect       |
-|                       | tracing.                                 |
+| Flag                  | Effect                               |
+| --------------------- | ------------------------------------ |
+| `-v` / `-vv` / `-vvv` | Increases chrome verbosity. Does not |
+|                       | affect tracing.                      |
+| `-q`                  | Suppresses chrome. Does not affect   |
+|                       | tracing.                             |
 
-The log file always captures full TRACE. No flag or variable reduces its
-verbosity. This ensures users can always attach a complete log when filing
-issues.
+The log file always captures full TRACE.
+No flag or variable reduces its verbosity.
+This ensures users can always attach a complete log when filing issues.
 
 Examples:
 
@@ -136,10 +148,11 @@ JP_LOG=info,jp_llm=trace jp query "fix the bug"
 JP_LOG=warn jp -vv query "fix the bug"
 ```
 
-This model supersedes the verbosity semantics in [RFD D15]. D15's `-v` through
-`-vvvvv` levels, which controlled tracing output, are replaced by the two-knob
-model above. D15's log file plumbing (persistent directory, deferred path
-resolution, in-memory buffering) remains unchanged.
+This model supersedes the verbosity semantics in [RFD D15].
+D15's `-v` through `-vvvvv` levels, which controlled tracing output, are
+replaced by the two-knob model above.
+D15's log file plumbing (persistent directory, deferred path resolution,
+in-memory buffering) remains unchanged.
 
 ### The `jp_trace` crate
 
@@ -156,15 +169,16 @@ crates/jp_trace/
 │       └── common.rs   // Cross-cutting event types (HTTP, process, I/O)
 ```
 
-`jp_trace` depends on `tracing` and `tracing-subscriber`. It does not depend on
-any `jp_*` domain crate. Domain crates depend on `jp_trace` for the `Emit` trait
-and `emit!` macro.
+`jp_trace` depends on `tracing` and `tracing-subscriber`.
+It does not depend on any `jp_*` domain crate.
+Domain crates depend on `jp_trace` for the `Emit` trait and `emit!` macro.
 
 ### Typed events
 
-Each event is a plain struct with typed fields. Events are defined in a
-`trace::events` module within the crate that emits them, and are `pub(crate)` to
-enforce that events are only emitted by the code that owns them.
+Each event is a plain struct with typed fields.
+Events are defined in a `trace::events` module within the crate that emits them,
+and are `pub(crate)` to enforce that events are only emitted by the code that
+owns them.
 
 ```rust
 // crates/jp_llm/src/trace.rs
@@ -236,8 +250,9 @@ They can carry any typed data their domain needs, including error types and
 other non-trivially-copyable values.
 
 A small set of cross-cutting events live in `jp_trace::events::common` as `pub`
-types. These cover genuinely shared primitives that no single domain crate owns:
-HTTP requests/responses, process lifecycle, file I/O operations.
+types.
+These cover genuinely shared primitives that no single domain crate owns: HTTP
+requests/responses, process lifecycle, file I/O operations.
 
 ### The `Emit` trait and `emit!` macro
 
@@ -252,8 +267,9 @@ pub trait Emit: Sized {
 }
 ```
 
-Call sites never invoke `Emit::emit` directly. The `emit!` macro captures the
-caller's source location and invokes the test recorder:
+Call sites never invoke `Emit::emit` directly.
+The `emit!` macro captures the caller's source location and invokes the test
+recorder:
 
 ```rust
 #[macro_export]
@@ -267,21 +283,25 @@ macro_rules! emit {
 }
 ```
 
-The macro is intentionally thin. It exists for two reasons: to capture
-`file!()`/`line!()` at the call site (not inside the `Emit` impl), and to
-interpose the test recorder (compiled out in non-test builds). `file!()` and
-`line!()` are compile-time constants with zero runtime cost.
+The macro is intentionally thin.
+It exists for two reasons: to capture `file!()`/`line!()` at the call site (not
+inside the `Emit` impl), and to interpose the test recorder (compiled out in
+non-test builds).
+`file!()` and `line!()` are compile-time constants with zero runtime cost.
 
 Caller location fields (`caller.file`, `caller.line`) are always recorded in the
-log file. They are part of the structured event data, not metadata about the
-`tracing` callsite. Output formatters can strip them if desired, but the default
-JSON log includes them unconditionally.
+log file.
+They are part of the structured event data, not metadata about the `tracing`
+callsite.
+Output formatters can strip them if desired, but the default JSON log includes
+them unconditionally.
 
 ### Typed spans
 
 Spans carry shared context that events within the span inherit automatically via
-the `tracing` subscriber. Each span is defined as a function returning a
-`tracing::Span`, grouped in the same `trace` module as the crate's events.
+the `tracing` subscriber.
+Each span is defined as a function returning a `tracing::Span`, grouped in the
+same `trace` module as the crate's events.
 
 ```rust
 // crates/jp_cli/src/trace.rs
@@ -329,7 +349,7 @@ let stream = provider.chat_completion_stream(model, query)
 The initial span set covers the critical path:
 
 | Span                   | Crate          | Fields                  | Scope                             |
-|------------------------|----------------|-------------------------|-----------------------------------|
+| ---------------------- | -------------- | ----------------------- | --------------------------------- |
 | `cmd`                  | `jp_cli`       | `name`, `invocation_id` | One per JP invocation. Root span. |
 | `query`                | `jp_cli`       | `conversation_id`       | Duration of the query command.    |
 | `turn`                 | `jp_cli`       | `number`                | One turn within a query.          |
@@ -338,21 +358,23 @@ The initial span set covers the critical path:
 | `conversation_persist` | `jp_workspace` | `conversation_id`       | Conversation save to disk.        |
 
 The `cmd` span carries a ULID correlation ID (`invocation_id`) that uniquely
-identifies a single `jp` invocation. This enables filtering a log file to a
-specific run: `jq 'select(.spans[] | .invocation_id == "01HXZ...")'`.
+identifies a single `jp` invocation.
+This enables filtering a log file to a specific run: `jq 'select(.spans[] |
+.invocation_id == "01HXZ...")'`.
 
-Spans are `pub(crate)` like events. The same rule applies: a span is defined and
-entered by the crate that owns the execution boundary it represents.
+Spans are `pub(crate)` like events.
+The same rule applies: a span is defined and entered by the crate that owns the
+execution boundary it represents.
 
 Because spans carry fields like `provider` and `model`, events emitted inside an
-`llm_stream` span do not need to repeat those fields. The subscriber attaches
-them automatically.
+`llm_stream` span do not need to repeat those fields.
+The subscriber attaches them automatically.
 
 ### Blob storage for large payloads
 
-The `Blob` type replaces `trace_to_tmpfile()`. It decides at construction time
-whether a value is small enough to inline or should be written to a sidecar
-file:
+The `Blob` type replaces `trace_to_tmpfile()`.
+It decides at construction time whether a value is small enough to inline or
+should be written to a sidecar file:
 
 ```rust
 // crates/jp_trace/src/blob.rs
@@ -405,17 +427,20 @@ impl fmt::Display for Blob {
 ```
 
 The sidecar directory is `~/.local/share/jp/logs/blobs/`, colocated with the log
-files from [RFD D15]. Content-addressed naming (SHA-256 of the payload) means
-identical request bodies (common during retries) produce a single file. The
-`INLINE_THRESHOLD` is 4 KB.
+files from [RFD D15].
+Content-addressed naming (SHA-256 of the payload) means identical request bodies
+(common during retries) produce a single file.
+The `INLINE_THRESHOLD` is 4 KB.
 
-Event structs use `Blob` as a field type. The `Emit` impl formats it via
-`Display`, which writes either the inline JSON or a `blob:<path>` reference.
+Event structs use `Blob` as a field type.
+The `Emit` impl formats it via `Display`, which writes either the inline JSON or
+a `blob:<path>` reference.
 
 ### Plugin tracing
 
 Plugin processes produce two kinds of trace data: raw stderr lines and
-structured log messages from the JSON-RPC protocol. Both are typed.
+structured log messages from the JSON-RPC protocol.
+Both are typed.
 
 ```rust
 // crates/jp_plugin/src/trace.rs
@@ -450,8 +475,9 @@ pub(crate) mod events {
 }
 ```
 
-The `plugin_span` carries the plugin ID. Events inside inherit it, so filtering
-a log file to a specific plugin is `jq 'select(.spans[] | .id == "jp-path")'`.
+The `plugin_span` carries the plugin ID.
+Events inside inherit it, so filtering a log file to a specific plugin is `jq
+'select(.spans[] | .id == "jp-path")'`.
 
 The `LogMessage` event dispatches to the appropriate `tracing` level in its
 `Emit` impl, translating the plugin's reported level to a `tracing` event.
@@ -459,7 +485,8 @@ The `LogMessage` event dispatches to the appropriate `tracing` level in its
 ### Test capture API
 
 The test capture API uses `tokio::task_local!` to scope a recorder to a test
-body. The recorder stores event type identity, not event values.
+body.
+The recorder stores event type identity, not event values.
 
 ```rust
 // crates/jp_trace/src/testing.rs
@@ -535,22 +562,26 @@ async fn retries_on_rate_limit() {
 }
 ```
 
-Tests assert on event types and counts, not field values. Field correctness is
-verified through function return values and observable side effects, not trace
-output. This follows Vector's approach: record event identity, not payloads.
+Tests assert on event types and counts, not field values.
+Field correctness is verified through function return values and observable side
+effects, not trace output.
+This follows Vector's approach: record event identity, not payloads.
 
-The task-local approach isolates parallel tests without a global mutex. Events
-emitted on spawned tasks within the same `tokio::task::LocalSet` share the
-recorder. Events on independently spawned tasks (via `tokio::spawn`) do not —
-this is a known limitation. Tests that need cross-task capture should use
-`LocalSet` or structure their assertions around the coordinating task.
+The task-local approach isolates parallel tests without a global mutex.
+Events emitted on spawned tasks within the same `tokio::task::LocalSet` share
+the recorder.
+Events on independently spawned tasks (via `tokio::spawn`) do not — this is a
+known limitation.
+Tests that need cross-task capture should use `LocalSet` or structure their
+assertions around the coordinating task.
 
 ### Subscriber construction
 
 The `configure_logging` function and `TracingGuard` type move from `jp_cli::lib`
-to `jp_trace::configure`. The function reads the environment variables described
-in [Verbosity and environment variables](#verbosity-and-environment-variables)
-and builds the subscriber stack:
+to `jp_trace::configure`.
+The function reads the environment variables described in [Verbosity and
+environment variables](#verbosity-and-environment-variables) and builds the
+subscriber stack:
 
 ```txt
 ┌────────────────────────────────────┐
@@ -571,58 +602,66 @@ and builds the subscriber stack:
 └────────────────────────────────────┘
 ```
 
-The file layer writes JSON to the log directory from [RFD D15]. The stderr layer
-is only installed when `JP_LOG` is set. The in-memory buffering layer from [RFD
-D15] (for deferred file path resolution) remains part of the file layer's setup
-— this RFD does not change that mechanism.
+The file layer writes JSON to the log directory from [RFD D15].
+The stderr layer is only installed when `JP_LOG` is set.
+The in-memory buffering layer from [RFD D15] (for deferred file path resolution)
+remains part of the file layer's setup — this RFD does not change that
+mechanism.
 
 `jp_cli::lib` calls `jp_trace::configure(...)` at startup and receives a
-`TracingGuard`. The guard's behavior on drop (flushing, persisting) is unchanged
-from [RFD D15].
+`TracingGuard`.
+The guard's behavior on drop (flushing, persisting) is unchanged from [RFD D15].
 
 ## Drawbacks
 
 **Boilerplate per event.** Every typed event requires a struct definition and an
-`Emit` impl with a hand-written `tracing::event!()` call. For a crate with 15
-events, this is ~200 lines of mechanical code. A derive macro would reduce this,
-but we deliberately avoid one to keep the system simple and debuggable. If the
-boilerplate becomes painful at 50+ events, a derive macro can be introduced
-later without changing the external API.
+`Emit` impl with a hand-written `tracing::event!()` call.
+For a crate with 15 events, this is ~200 lines of mechanical code.
+A derive macro would reduce this, but we deliberately avoid one to keep the
+system simple and debuggable.
+If the boilerplate becomes painful at 50+ events, a derive macro can be
+introduced later without changing the external API.
 
 **Two representations for dual-audience events.** When an event matters to both
 users and developers, the call site has two lines: a chrome call and an
-`emit!()`. This is deliberate (chrome is curated UX, tracing is structured
-data), but it means the two can drift out of sync. A retry event might update
-its chrome wording without updating the event struct's fields, or vice versa.
+`emit!()`.
+This is deliberate (chrome is curated UX, tracing is structured data), but it
+means the two can drift out of sync.
+A retry event might update its chrome wording without updating the event
+struct's fields, or vice versa.
 Code review is the mitigation.
 
 **Migration cost.** Converting existing `tracing::info!(...)` calls to typed
-events across ~30 crate-level call sites is not free. Each conversion requires
-defining a struct, writing an `Emit` impl, and updating the call site. The
-work is mechanical but touches many files.
+events across ~30 crate-level call sites is not free.
+Each conversion requires defining a struct, writing an `Emit` impl, and updating
+the call site.
+The work is mechanical but touches many files.
 
 **No field-level test assertions on events.** The test capture API records event
-type identity, not values. Tests cannot assert "the retry event's attempt field
-was 2" through the capture API. This is deliberate: field correctness is tested
-through return values and side effects, not trace output. If this proves too
-limiting for specific cases, a per-event opt-in recording mechanism can be added
-later.
+type identity, not values.
+Tests cannot assert "the retry event's attempt field was 2" through the capture
+API.
+This is deliberate: field correctness is tested through return values and side
+effects, not trace output.
+If this proves too limiting for specific cases, a per-event opt-in recording
+mechanism can be added later.
 
 **Breaking change: CLI flag removal.** Removing `--log-file`, `--log-filter`,
 and `--log-format` in favor of environment variables is a breaking change for
-users who have these in shell aliases or scripts. The flags were not widely
-advertised and targeted developers, but the change should be communicated in the
-changelog.
+users who have these in shell aliases or scripts.
+The flags were not widely advertised and targeted developers, but the change
+should be communicated in the changelog.
 
 ## Alternatives
 
 ### Keep ad-hoc tracing calls
 
-Do nothing. Continue using `tracing::info!("message", field = value)` across
-the codebase. This avoids the migration cost and boilerplate, but the problems
-in the Motivation section compound as the codebase grows. Rejected because the
-current approach does not support test observability, consistent field naming, or
-audience separation.
+Do nothing.
+Continue using `tracing::info!("message", field = value)` across the codebase.
+This avoids the migration cost and boilerplate, but the problems in the
+Motivation section compound as the codebase grows.
+Rejected because the current approach does not support test observability,
+consistent field naming, or audience separation.
 
 ### Derive macro for `Emit`
 
@@ -639,8 +678,10 @@ pub(crate) struct Retrying {
 
 This reduces boilerplate but adds a proc-macro dependency, increases compile
 times, and makes the tracing call opaque (harder to debug what fields are
-actually emitted). The manual approach is verbose but transparent. If event
-counts grow past ~50 per crate, the derive macro becomes worth the trade-off.
+actually emitted).
+The manual approach is verbose but transparent.
+If event counts grow past ~50 per crate, the derive macro becomes worth the
+trade-off.
 
 ### Enum-based event hierarchy
 
@@ -655,32 +696,41 @@ pub struct LlmEvent {
 ```
 
 This reduces the number of top-level types but duplicates fields already carried
-by spans (`provider`, `model`). Since spans automatically attach their fields to
-events emitted within them, the namespace struct adds redundancy without value.
-Flat events + spans is cleaner. Rejected.
+by spans (`provider`, `model`).
+Since spans automatically attach their fields to events emitted within them, the
+namespace struct adds redundancy without value.
+Flat events + spans is cleaner.
+Rejected.
 
 ### `#[instrument]` instead of typed spans
 
 `tracing`'s `#[instrument]` attribute auto-generates spans from function
-signatures. This is convenient but noisy (`skip(...)` annotations everywhere),
-leaks internal parameter names into trace output, and does not align spans with
-architectural boundaries. Manual span functions give precise control over what
-fields appear and where spans start/end. Rejected.
+signatures.
+This is convenient but noisy (`skip(...)` annotations everywhere), leaks
+internal parameter names into trace output, and does not align spans with
+architectural boundaries.
+Manual span functions give precise control over what fields appear and where
+spans start/end.
+Rejected.
 
 ### Centralized event definitions
 
 Define all events in `jp_trace::events::*` (like Vector's
-`src/internal_events/`). This gives one place to browse all events but creates a
-god-crate that depends on every domain type, or forces domain types into
-`jp_trace`. Per-crate `trace::events` modules avoid both problems. Rejected.
+`src/internal_events/`).
+This gives one place to browse all events but creates a god-crate that depends
+on every domain type, or forces domain types into `jp_trace`.
+Per-crate `trace::events` modules avoid both problems.
+Rejected.
 
 ### `RUST_LOG` instead of `JP_LOG`
 
-`RUST_LOG` is the ecosystem standard for `EnvFilter` expressions. However, JP
-already uses `JP_DEBUG` as a namespaced env var, and `RUST_LOG` would also
-affect third-party crate logging (reqwest, hyper, tokio) in unexpected ways.
+`RUST_LOG` is the ecosystem standard for `EnvFilter` expressions.
+However, JP already uses `JP_DEBUG` as a namespaced env var, and `RUST_LOG`
+would also affect third-party crate logging (reqwest, hyper, tokio) in
+unexpected ways.
 `JP_LOG` gives JP full control over the filter baseline while using the same
-`EnvFilter` syntax. Users familiar with `RUST_LOG` will recognize the format.
+`EnvFilter` syntax.
+Users familiar with `RUST_LOG` will recognize the format.
 
 ## Non-Goals
 
@@ -689,107 +739,124 @@ affect third-party crate logging (reqwest, hyper, tokio) in unexpected ways.
   `chrome_vv()`) and the curation of which lines appear at which level are a
   separate RFD.
 - **Error emission convention.** The pattern for emitting trace events when
-  errors are first materialized is a separate RFD. This RFD provides the
-  infrastructure (`emit!`, typed events); the convention for where and when to
-  emit is a distinct concern.
-- **Log rotation and cleanup.** [RFD D15] defers this. The log directory and
-  blob sidecar directory will accumulate files until rotation is implemented.
+  errors are first materialized is a separate RFD.
+  This RFD provides the infrastructure (`emit!`, typed events); the convention
+  for where and when to emit is a distinct concern.
+- **Log rotation and cleanup.** [RFD D15] defers this.
+  The log directory and blob sidecar directory will accumulate files until
+  rotation is implemented.
 - **Pretty-printing and `jp-log` command plugin.** A command plugin for
-  pretty-printing log files as hierarchical trees is a separate effort, built
-  on [RFD 072].
+  pretty-printing log files as hierarchical trees is a separate effort, built on
+  [RFD 072].
 - **OpenTelemetry export.** OTLP integration (for shipping traces to Jaeger,
-  Grafana, etc.) is out of scope. The JSON log files with span IDs are
-  sufficient for external tooling to reconstruct traces.
+  Grafana, etc.) is out of scope.
+  The JSON log files with span IDs are sufficient for external tooling to
+  reconstruct traces.
 - **Metrics.** Unlike Vector's `InternalEvent` system, this RFD does not add
-  metric counters (request counts, error rates, token usage). If metrics become
-  needed, the `Emit` trait can be extended to emit metrics alongside trace
-  events.
+  metric counters (request counts, error rates, token usage).
+  If metrics become needed, the `Emit` trait can be extended to emit metrics
+  alongside trace events.
 
 ## Risks and Open Questions
 
 ### Task-local recorder and `tokio::spawn`
 
 The test capture API uses `tokio::task_local!`, which does not propagate across
-`tokio::spawn` boundaries. Events emitted on independently spawned tasks are not
-captured. This affects tests for code that spawns background tasks (e.g., plugin
-process monitoring). Mitigation: use `LocalSet` in tests, or structure
-assertions around the coordinating task. If this proves too limiting, a global
-recorder with per-test keys (similar to `tracing-test`) is a fallback.
+`tokio::spawn` boundaries.
+Events emitted on independently spawned tasks are not captured.
+This affects tests for code that spawns background tasks (e.g., plugin process
+monitoring).
+Mitigation: use `LocalSet` in tests, or structure assertions around the
+coordinating task.
+If this proves too limiting, a global recorder with per-test keys (similar to
+`tracing-test`) is a fallback.
 
 ### `Blob` writes on the hot path
 
-`Blob::json()` performs file I/O (SHA-256, `fs::write`) synchronously. If
-called from an async context on the hot path, this could block the tokio
-runtime. In practice, blob creation happens at TRACE level for LLM request
-payloads — once per provider call, not per-event. The I/O is small (a single
-write of a few hundred KB). If this becomes measurable, blob writes can be
-deferred to a `spawn_blocking` call.
+`Blob::json()` performs file I/O (SHA-256, `fs::write`) synchronously.
+If called from an async context on the hot path, this could block the tokio
+runtime.
+In practice, blob creation happens at TRACE level for LLM request payloads —
+once per provider call, not per-event.
+The I/O is small (a single write of a few hundred KB).
+If this becomes measurable, blob writes can be deferred to a `spawn_blocking`
+call.
 
 ### Migration ordering
 
-Converting a crate's tracing calls to typed events requires the `jp_trace`
-crate to exist. But `jp_trace::configure` replaces `jp_cli`'s
-`configure_logging`, which must be done carefully to avoid breaking the
-subscriber setup. The implementation plan addresses this by phasing: crate
-extraction first, then event migration.
+Converting a crate's tracing calls to typed events requires the `jp_trace` crate
+to exist.
+But `jp_trace::configure` replaces `jp_cli`'s `configure_logging`, which must be
+done carefully to avoid breaking the subscriber setup.
+The implementation plan addresses this by phasing: crate extraction first, then
+event migration.
 
 ### Span overhead
 
 Each active span adds a small per-event cost (the subscriber records span
-context for every event). With 6 spans on the critical path, this is negligible.
+context for every event).
+With 6 spans on the critical path, this is negligible.
 If span count grows significantly, profiling should confirm the overhead remains
 acceptable.
 
 ### `caller.file` paths in release builds
 
-`file!()` expands to an absolute path on the build machine. In release builds
-distributed to users, this leaks the build environment's directory structure.
+`file!()` expands to an absolute path on the build machine.
+In release builds distributed to users, this leaks the build environment's
+directory structure.
 This is acceptable for a developer-focused tool where users are typically
-building from source, but worth noting. If binary distribution becomes common,
-the paths can be stripped via `--remap-path-prefix` in rustc flags.
+building from source, but worth noting.
+If binary distribution becomes common, the paths can be stripped via
+`--remap-path-prefix` in rustc flags.
 
 ## Implementation Plan
 
 ### Phase 1: `jp_trace` crate and subscriber extraction
 
 Create the `jp_trace` crate with:
+
 - `Emit` trait and `emit!` macro
 - `Blob` type (replacing `trace_to_tmpfile`)
 - `testing` module (task-local recorder, `Captured` type)
 - `configure` module (moved from `jp_cli::lib::configure_logging`)
 
 Update `jp_cli` to call `jp_trace::configure(...)` instead of its local
-function. Read `JP_LOG`, `JP_LOG_FILE`, `JP_LOG_FORMAT`, and `JP_DEBUG`
-environment variables. Remove `--log-file`, `--log-filter`, and `--log-format`
-CLI flags.
+function.
+Read `JP_LOG`, `JP_LOG_FILE`, `JP_LOG_FORMAT`, and `JP_DEBUG` environment
+variables.
+Remove `--log-file`, `--log-filter`, and `--log-format` CLI flags.
 
 No typed events yet — existing `tracing::info!(...)` calls continue to work.
 The subscriber stack is unchanged in behavior.
 
-Can be merged independently. Depends on [RFD D15] Phase 1 (persistent log
-directory).
+Can be merged independently.
+Depends on [RFD D15] Phase 1 (persistent log directory).
 
 ### Phase 2: Initial spans
 
-Add the 6 span functions (`cmd_span`, `query_span`, `turn_span`,
-`stream_span`, `tool_execution_span`, `conversation_persist_span`) and wire
-them into the call sites. Add ULID generation for the `cmd` span's
-`invocation_id`.
+Add the 6 span functions (`cmd_span`, `query_span`, `turn_span`, `stream_span`,
+`tool_execution_span`, `conversation_persist_span`) and wire them into the call
+sites.
+Add ULID generation for the `cmd` span's `invocation_id`.
 
-Can be merged independently. Depends on Phase 1.
+Can be merged independently.
+Depends on Phase 1.
 
 ### Phase 3: Typed events — `jp_llm`
 
 Create `crates/jp_llm/src/trace.rs` with event structs for the LLM provider
 layer: request sent, response complete, retry, stream error, cache hit, tool
-definition sent. Migrate existing `tracing::*!()` calls in `jp_llm` to use
-`emit!()`. Replace `trace_to_tmpfile` calls with `Blob::json`.
+definition sent.
+Migrate existing `tracing::*!()` calls in `jp_llm` to use `emit!()`.
+Replace `trace_to_tmpfile` calls with `Blob::json`.
 
-Can be merged independently. Depends on Phase 1.
+Can be merged independently.
+Depends on Phase 1.
 
 ### Phase 4: Typed events — remaining crates
 
 Migrate one crate at a time, in order of event density:
+
 1. `jp_workspace` (conversation locking, persistence, sanitization)
 2. `jp_plugin` (plugin lifecycle, stderr, protocol)
 3. `jp_storage` (backend operations, validation)
@@ -797,31 +864,35 @@ Migrate one crate at a time, in order of event density:
 5. `jp_cli` (command dispatch, query loop, tool coordination)
 6. Remaining crates as needed
 
-Each crate migration is a standalone PR. Depends on Phase 1.
+Each crate migration is a standalone PR.
+Depends on Phase 1.
 
 ### Phase 5: Verbosity model migration
 
 Change `-v` / `-vv` / `-vvv` from tracing level controls to chrome verbosity
-controls. This requires the chrome verbosity API on `Printer` (separate RFD)
-to be implemented, or at minimum stubbed. Remove the current `-v` → tracing
-level mapping from `jp_trace::configure`.
+controls.
+This requires the chrome verbosity API on `Printer` (separate RFD) to be
+implemented, or at minimum stubbed.
+Remove the current `-v` → tracing level mapping from `jp_trace::configure`.
 
 Depends on Phase 1 and the chrome verbosity RFD.
 
 ## References
 
-- [RFD D15: Structured Logging Infrastructure][RFD D15] — parent RFD. Owns log
-  file plumbing (persistent directory, deferred path resolution, in-memory
-  buffer). This RFD extends D15 with typed events, revised verbosity semantics,
-  and the `jp_trace` crate.
-- [RFD 048: Four-Channel Output Model][RFD 048] — establishes stdout/stderr/tty/
-  log-file channel separation. This RFD's two-channel model (chrome vs tracing)
-  refines the stderr and log-file channels.
+- [RFD D15: Structured Logging Infrastructure][RFD D15] — parent RFD.
+  Owns log file plumbing (persistent directory, deferred path resolution,
+  in-memory buffer).
+  This RFD extends D15 with typed events, revised verbosity semantics, and the
+  `jp_trace` crate.
+- [RFD 048: Four-Channel Output Model][RFD 048] — establishes
+  stdout/stderr/tty/ log-file channel separation.
+  This RFD's two-channel model (chrome vs tracing) refines the stderr and
+  log-file channels.
 - [RFD 072: Command Plugin System][RFD 072] — a `jp-log` command plugin can
   provide pretty-printing and log management tools for developers.
 - `crates/jp_cli/src/lib.rs` — current `configure_logging` and `TracingGuard`.
 - `crates/jp_llm/src/provider.rs` — current `trace_to_tmpfile`.
 
-[RFD D15]: D15-structured-logging-infrastructure.md
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 072]: 072-command-plugin-system.md
+[RFD D15]: D15-structured-logging-infrastructure.md

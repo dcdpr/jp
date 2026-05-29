@@ -11,30 +11,33 @@ Add a `jp completions <shell>` subcommand that prints shell completion scripts
 to stdout, and a `jp manpage` subcommand that prints man page content.
 Completions use `clap_complete`'s dynamic `CompleteEnv` system — the binary
 itself acts as the completer, enabling context-aware value completions in later
-phases. Man pages are generated at runtime using `clap_mangen`.
+phases.
+Man pages are generated at runtime using `clap_mangen`.
 
 ## Motivation
 
 JP has a large CLI surface — global flags, subcommands with their own flags,
 value parsers with unique formats (`KEY=VALUE`, `KEY:=JSON`, `provider/model`),
-and a layered configuration system. Users currently discover this surface
-through `--help`, the documentation site, or trial and error.
+and a layered configuration system.
+Users currently discover this surface through `--help`, the documentation site,
+or trial and error.
 
-Shell completions and man pages are table-stakes for any serious CLI tool. They
-meet users where they already are — in their shell, pressing Tab — without
-requiring them to context-switch to a browser or remember exact flag names.
+Shell completions and man pages are table-stakes for any serious CLI tool.
+They meet users where they already are — in their shell, pressing Tab —
+without requiring them to context-switch to a browser or remember exact flag
+names.
 Completions are particularly valuable for JP because:
 
-- Flag names are not always guessable (e.g. `-!` for `--no-persist` or `-%` for
-  `--template`).
+- Flag names are not always guessable (e.g.
+  `-!` for `--no-persist` or `-%` for `--template`).
 - Several flags accept structured values that benefit from completion hints
   (`--cfg KEY=VALUE`, `--model provider/name`).
 - Subcommands have short aliases (`q` for `query`, `c` for `conversation`) that
   are hard to discover without completions.
 
 Man pages provide offline, terminal-native documentation that integrates with
-the Unix help ecosystem (`man jp`, `man jp-query`). They are the expected
-documentation format for CLI tools on Unix systems.
+the Unix help ecosystem (`man jp`, `man jp-query`).
+They are the expected documentation format for CLI tools on Unix systems.
 
 ## Design
 
@@ -52,26 +55,27 @@ jp completions elvish
 jp completions nushell
 ```
 
-The user pipes the output to the appropriate location for their shell. This is
-the dominant pattern in the ecosystem — used by `starship`, `rustup`, `gh`,
-`uv`, `mise`, and many others. It is the simplest, most portable approach and
-avoids JP needing to know shell-specific installation paths.
+The user pipes the output to the appropriate location for their shell.
+This is the dominant pattern in the ecosystem — used by `starship`, `rustup`,
+`gh`, `uv`, `mise`, and many others.
+It is the simplest, most portable approach and avoids JP needing to know
+shell-specific installation paths.
 
 #### Supported shells
 
-| Shell      | Crate                    |
-|------------|--------------------------|
-| Bash       | `clap_complete`          |
-| Zsh        | `clap_complete`          |
-| Fish       | `clap_complete`          |
-| Elvish     | `clap_complete`          |
-| PowerShell | `clap_complete`          |
-| Nushell    | `clap_complete_nushell`  |
+| Shell      | Crate                   |
+| ---------- | ----------------------- |
+| Bash       | `clap_complete`         |
+| Zsh        | `clap_complete`         |
+| Fish       | `clap_complete`         |
+| Elvish     | `clap_complete`         |
+| PowerShell | `clap_complete`         |
+| Nushell    | `clap_complete_nushell` |
 
 #### Installation instructions
 
-`jp completions --help` prints brief per-shell installation instructions. This
-is static text, not generated — each shell has a different mechanism:
+`jp completions --help` prints brief per-shell installation instructions.
+This is static text, not generated — each shell has a different mechanism:
 
 ```sh
 $ jp completions --help
@@ -111,18 +115,20 @@ completions <shell>` generates a small shell script that registers `jp` as its
 own completer.
 
 When the shell requests completions, it invokes `jp` with special environment
-variables. JP inspects the partial command line and returns candidates. This
-happens via `CompleteEnv::with_factory(Cli::command).complete()`, called at the
-very start of `main()` before any other initialization.
+variables.
+JP inspects the partial command line and returns candidates.
+This happens via `CompleteEnv::with_factory(Cli::command).complete()`, called at
+the very start of `main()` before any other initialization.
 
 This architecture enables value-level completions — the binary can load config
-files, read the workspace index, and return context-aware candidates. The same
-shell integration script works for all implementation phases; only the completer
-logic inside the binary changes.
+files, read the workspace index, and return context-aware candidates.
+The same shell integration script works for all implementation phases; only the
+completer logic inside the binary changes.
 
 `CompleteEnv` and `ArgValueCandidates` are behind the `unstable-dynamic` feature
-flag in `clap_complete`. Despite the name, the API has been stable since v4.4
-and is the recommended approach for new projects.
+flag in `clap_complete`.
+Despite the name, the API has been stable since v4.4 and is the recommended
+approach for new projects.
 
 Benefits over static script generation:
 
@@ -136,19 +142,20 @@ Benefits over static script generation:
 #### Why a subcommand, not a flag
 
 Some tools use `--completions <shell>` as a flag on the root command (e.g., `bat
---completion bash`). We use a subcommand because:
+--completion bash`).
+We use a subcommand because:
 
 - It groups naturally with `--help` output — users looking for help see
   `completions` in the subcommand list.
 - It avoids polluting the global flag namespace.
-- It allows `--help` on the subcommand itself to show installation
-  instructions.
+- It allows `--help` on the subcommand itself to show installation instructions.
 - It is the more common pattern among modern CLI tools.
 
 #### Visibility
 
 The `completions` subcommand is visible in `--help` output but placed after the
-primary commands (query, config, etc.). It does not have a short alias.
+primary commands (query, config, etc.).
+It does not have a short alias.
 
 ### `jp manpage`
 
@@ -163,7 +170,8 @@ jp manpage query
 jp manpage conversation ls
 ```
 
-Output is roff-formatted text printed to stdout. Users can view it directly:
+Output is roff-formatted text printed to stdout.
+Users can view it directly:
 
 ```sh
 jp manpage query | man -l -
@@ -177,10 +185,11 @@ jp manpage query > /usr/local/share/man/man1/jp-query.1
 
 #### Man page structure
 
-`clap_mangen` generates one man page per subcommand. The root `jp manpage` (no
-arguments) generates the top-level `jp.1` page. `jp manpage <subcommand>`
-generates `jp-<subcommand>.1`. Nested subcommands use hyphenated names: `jp
-manpage conversation ls` generates `jp-conversation-ls.1`.
+`clap_mangen` generates one man page per subcommand.
+The root `jp manpage` (no arguments) generates the top-level `jp.1` page.
+`jp manpage <subcommand>` generates `jp-<subcommand>.1`.
+Nested subcommands use hyphenated names: `jp manpage conversation ls` generates
+`jp-conversation-ls.1`.
 
 #### Bulk generation
 
@@ -190,8 +199,8 @@ For package maintainers who want to install all man pages at once:
 jp manpage --all --output-dir /usr/local/share/man/man1/
 ```
 
-This writes one `.1` file per subcommand into the specified directory. The
-`--output-dir` flag is only valid with `--all`.
+This writes one `.1` file per subcommand into the specified directory.
+The `--output-dir` flag is only valid with `--all`.
 
 ### CLI changes
 
@@ -214,7 +223,8 @@ runtime, similar to `Init`.
 
 ### Completion performance
 
-Every Tab press invokes the `jp` binary. The completion codepath must be fast.
+Every Tab press invokes the `jp` binary.
+The completion codepath must be fast.
 `CompleteEnv::complete()` runs before `Cli::parse()`, before workspace loading,
 before config resolution — it only needs the `clap::Command` structure.
 
@@ -222,31 +232,34 @@ For Phase 1 (structural completions), performance is a non-issue — building th
 `Command` and returning candidates is sub-millisecond.
 
 For Phases 3-4 (value-level completions), the `ValueCandidates` closures need to
-load data. The approach is to keep these lightweight:
+load data.
+The approach is to keep these lightweight:
 
 - `AppConfig::fields()` — static, zero-cost.
 - Schema enum variants — static, zero-cost.
 - Model aliases — requires loading config files only.
 - Conversation IDs — requires reading the workspace directory index.
 
-All of these complete in under 50ms. No network calls, no MCP server
-initialization.
+All of these complete in under 50ms.
+No network calls, no MCP server initialization.
 
 ## Drawbacks
 
 - **`unstable-dynamic` feature flag**: `CompleteEnv` and `ArgValueCandidates`
-  are behind `clap_complete`'s `unstable-dynamic` feature. The API has been
-  stable in practice since v4.4, but the flag name is a risk signal. If the API
-  changes, our completion logic needs updating. This is mitigated by the clap
-  team's commitment to the dynamic completion approach as the future direction.
+  are behind `clap_complete`'s `unstable-dynamic` feature.
+  The API has been stable in practice since v4.4, but the flag name is a risk
+  signal.
+  If the API changes, our completion logic needs updating.
+  This is mitigated by the clap team's commitment to the dynamic completion
+  approach as the future direction.
 
 ## Alternatives
 
 ### Build-time generation
 
 Generate completion scripts and man pages in `build.rs` and embed them in the
-binary (or write them to `OUT_DIR` for packaging). This is what `clap_mangen`'s
-README suggests.
+binary (or write them to `OUT_DIR` for packaging).
+This is what `clap_mangen`'s README suggests.
 
 Rejected because: it adds build-time dependencies, and it doesn't support
 dynamic content (future command aliases, plugins).
@@ -254,11 +267,12 @@ dynamic content (future command aliases, plugins).
 ### Separate generation binary
 
 A separate `jp-generate` binary (or `xtask`) that produces completions and man
-pages. Used for release packaging only, not shipped to end users.
+pages.
+Used for release packaging only, not shipped to end users.
 
 Rejected because: end users can't regenerate completions after updates, and it
-adds packaging complexity. The subcommand approach serves both end users and
-package maintainers.
+adds packaging complexity.
+The subcommand approach serves both end users and package maintainers.
 
 ### No man pages
 
@@ -272,14 +286,15 @@ help gesture.
 ## Non-Goals
 
 - **Installation automation**: JP does not write to shell config files or manage
-  completion installation. It prints to stdout; the user decides where it goes.
+  completion installation.
+  It prints to stdout; the user decides where it goes.
 
 ## Risks and Open Questions
 
 - **Man page quality**: `clap_mangen` generates man pages from clap's help text.
   If our `--help` descriptions are terse or poorly formatted, the man pages will
-  be too. This is an incentive to keep help text high-quality, which is good
-  pressure.
+  be too.
+  This is an incentive to keep help text high-quality, which is good pressure.
 
 ## Implementation Plan
 
@@ -330,21 +345,26 @@ help gesture.
 4. Add completions for `--cfg @<TAB>` that returns files in `config_load_paths`
    directories.
 
-Phases 1-2 can be merged independently. Phases 3-4 add incremental value without
-changing the shell integration mechanism.
+Phases 1-2 can be merged independently.
+Phases 3-4 add incremental value without changing the shell integration
+mechanism.
 
 ## References
 
-- [`clap_complete` docs](https://docs.rs/clap_complete)
-- [`clap_complete::env::CompleteEnv`](https://docs.rs/clap_complete/latest/clap_complete/env/struct.CompleteEnv.html)
-  — dynamic completion system
-- [`clap_complete::engine::ValueCandidates`](https://docs.rs/clap_complete/latest/clap_complete/engine/trait.ValueCandidates.html)
-  — custom value completion trait
-- [`clap_complete::ArgValueCandidates`](https://docs.rs/clap_complete/latest/clap_complete/struct.ArgValueCandidates.html)
-  — attaching custom completers to args
-- [`clap_complete_nushell` docs](https://docs.rs/clap_complete_nushell)
-- [`clap_mangen` docs](https://docs.rs/clap_mangen)
+- [`clap_complete` docs]
+- [`clap_complete::env::CompleteEnv`] — dynamic completion system
+- [`clap_complete::engine::ValueCandidates`] — custom value completion trait
+- [`clap_complete::ArgValueCandidates`] — attaching custom completers to args
+- [`clap_complete_nushell` docs]
+- [`clap_mangen` docs]
 - `AppConfig::fields()` in `jp_config/src/lib.rs` — static field list for
   `--cfg` completions
 - `SchemaType::Enum` in `schematic` — enum variant extraction for value
   completions
+
+[`clap_complete::ArgValueCandidates`]: https://docs.rs/clap_complete/latest/clap_complete/struct.ArgValueCandidates.html
+[`clap_complete::engine::ValueCandidates`]: https://docs.rs/clap_complete/latest/clap_complete/engine/trait.ValueCandidates.html
+[`clap_complete::env::CompleteEnv`]: https://docs.rs/clap_complete/latest/clap_complete/env/struct.CompleteEnv.html
+[`clap_complete_nushell` docs]: https://docs.rs/clap_complete_nushell
+[`clap_complete` docs]: https://docs.rs/clap_complete
+[`clap_mangen` docs]: https://docs.rs/clap_mangen

@@ -4,16 +4,17 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-15
-- **Required by**: [RFD 043](043-incremental-tool-call-argument-streaming.md)
+- **Required by**: [RFD 043]
 
 ## Summary
 
 This RFD replaces `ConversationEvent` inside `jp_llm::Event::Part` with a
 purpose-built `EventPart` enum that models what LLM providers actually stream:
 message chunks, reasoning chunks, structured data chunks, and tool call
-lifecycle events. This decouples the streaming transport layer from the
-persistence layer, eliminates invalid states, and prepares the infrastructure
-for incremental tool call argument streaming.
+lifecycle events.
+This decouples the streaming transport layer from the persistence layer,
+eliminates invalid states, and prepares the infrastructure for incremental tool
+call argument streaming.
 
 ## Motivation
 
@@ -27,40 +28,41 @@ pub enum Event {
 }
 ```
 
-`ConversationEvent` is a persistence type. It carries a timestamp, a metadata
-map, and an `EventKind` that can be any of seven variants: `TurnStart`,
-`ChatRequest`, `ChatResponse`, `ToolCallRequest`, `ToolCallResponse`,
-`InquiryRequest`, `InquiryResponse`.
+`ConversationEvent` is a persistence type.
+It carries a timestamp, a metadata map, and an `EventKind` that can be any of
+seven variants: `TurnStart`, `ChatRequest`, `ChatResponse`, `ToolCallRequest`,
+`ToolCallResponse`, `InquiryRequest`, `InquiryResponse`.
 
 In the streaming context, only a subset is valid:
 
-| EventKind variant    | Used in `Event::Part`? |
-|----------------------|------------------------|
-| `ChatResponse::Message`    | Yes — message content chunks |
-| `ChatResponse::Reasoning`  | Yes — reasoning content chunks |
-| `ChatResponse::Structured` | Yes — but hacked as `Value::String(chunk)` |
+| EventKind variant          | Used in `Event::Part`?                                |
+| -------------------------- | ----------------------------------------------------- |
+| `ChatResponse::Message`    | Yes — message content chunks                          |
+| `ChatResponse::Reasoning`  | Yes — reasoning content chunks                        |
+| `ChatResponse::Structured` | Yes — but hacked as `Value::String(chunk)`            |
 | `ToolCallRequest`          | Yes — but only as a start signal with empty arguments |
-| `TurnStart`                | No |
-| `ChatRequest`              | No |
-| `ToolCallResponse`         | No |
-| `InquiryRequest`           | No |
-| `InquiryResponse`          | No |
+| `TurnStart`                | No                                                    |
+| `ChatRequest`              | No                                                    |
+| `ToolCallResponse`         | No                                                    |
+| `InquiryRequest`           | No                                                    |
+| `InquiryResponse`          | No                                                    |
 
 This creates several problems:
 
 1. **Invalid states are representable.** The `EventBuilder` must silently ignore
    `ChatRequest`, `ToolCallResponse`, `InquiryRequest`, `InquiryResponse`, and
-   `TurnStart` in its `handle_part` method. These should be unrepresentable at
-   the type level.
+   `TurnStart` in its `handle_part` method.
+   These should be unrepresentable at the type level.
 
 2. **Structured data is a hack.** Structured response chunks piggy-back on
    `ChatResponse::Structured { data: Value::String(chunk) }` — a persistence
-   type abused as transport. This has caused bugs where consumers process
-   structured data chunks as regular message content.
+   type abused as transport.
+   This has caused bugs where consumers process structured data chunks as
+   regular message content.
 
 3. **Tool call starts are overloaded.** When a tool call begins, the provider
-   emits a `ToolCallRequest` with empty arguments. This is a persistence type
-   pretending to be a "streaming has started" signal.
+   emits a `ToolCallRequest` with empty arguments.
+   This is a persistence type pretending to be a "streaming has started" signal.
 
 4. **Wasted allocations.** Every streaming chunk allocates a `ConversationEvent`
    with a timestamp and metadata map that nobody reads during streaming.
@@ -140,23 +142,25 @@ pub enum ToolCallPart {
 The `EventBuilder` becomes an explicit translator between the streaming domain
 (`EventPart`) and the persistence domain (`ConversationEvent`):
 
-| EventPart received | Buffer action | ConversationEvent on Flush |
-|---------------------|---------------|----------------------------|
-| `Message(s)` | Append to string buffer | `ChatResponse::Message { message }` |
-| `Reasoning(s)` | Append to string buffer | `ChatResponse::Reasoning { reasoning }` |
-| `Structured(s)` | Append to JSON string buffer | Parse JSON → `ChatResponse::Structured { data }` |
-| `ToolCall(Start { id, name })` | Initialize tool call buffer | — |
-| `ToolCall(ArgumentChunk(s))` | Feed `ToolCallRequestAggregator` | `ToolCallRequest { id, name, arguments }` |
+| EventPart received             | Buffer action                    | ConversationEvent on Flush                       |
+| ------------------------------ | -------------------------------- | ------------------------------------------------ |
+| `Message(s)`                   | Append to string buffer          | `ChatResponse::Message { message }`              |
+| `Reasoning(s)`                 | Append to string buffer          | `ChatResponse::Reasoning { reasoning }`          |
+| `Structured(s)`                | Append to JSON string buffer     | Parse JSON → `ChatResponse::Structured { data }` |
+| `ToolCall(Start { id, name })` | Initialize tool call buffer      | —                                                |
+| `ToolCall(ArgumentChunk(s))`   | Feed `ToolCallRequestAggregator` | `ToolCallRequest { id, name, arguments }`        |
 
-The `ToolCallRequestAggregator` remains unchanged — it buffers raw JSON argument
-chunks and parses them on finalize, as today. This RFD only changes the
-transport; it does not change how arguments are parsed.
+The `ToolCallRequestAggregator` remains unchanged — it buffers raw JSON
+argument chunks and parses them on finalize, as today.
+This RFD only changes the transport; it does not change how arguments are
+parsed.
 
 ### Metadata handling
 
-Streaming metadata (e.g. Anthropic's thinking signatures via `SignatureDelta`)
-currently piggy-backs on `ConversationEvent`'s metadata map. With `EventPart`,
-metadata moves to a field on `Event::Part`:
+Streaming metadata (e.g.
+Anthropic's thinking signatures via `SignatureDelta`) currently piggy-backs on
+`ConversationEvent`'s metadata map.
+With `EventPart`, metadata moves to a field on `Event::Part`:
 
 ```rust
 Event::Part {
@@ -172,7 +176,8 @@ merging it into the final `ConversationEvent`'s metadata on Flush.
 ### Provider changes
 
 Each provider's stream mapper changes from constructing `ConversationEvent`s to
-constructing `EventPart`s. This is a mechanical transformation:
+constructing `EventPart`s.
+This is a mechanical transformation:
 
 **Before (Anthropic example):**
 
@@ -235,8 +240,8 @@ Event::Part {
 ### TurnCoordinator changes
 
 The `TurnCoordinator` currently inspects `ConversationEvent` variants inside
-`Event::Part` to decide what to render. With `EventPart`, it matches directly on
-the streaming types:
+`Event::Part` to decide what to render.
+With `EventPart`, it matches directly on the streaming types:
 
 ```rust
 Event::Part { index, part, metadata } => {
@@ -268,9 +273,10 @@ Event::Part { index, part, metadata } => {
   `ConversationStream`.
 - The `ConversationStream` is not affected.
 - `Event::Flush` and `Event::Finished` are unchanged.
-- The `Event::Part` variant changes its inner type. All consumers of
-  `Event::Part` must be updated (providers, EventBuilder, TurnCoordinator). This
-  is a breaking change within `jp_llm`.
+- The `Event::Part` variant changes its inner type.
+  All consumers of `Event::Part` must be updated (providers, EventBuilder,
+  TurnCoordinator).
+  This is a breaking change within `jp_llm`.
 
 ### What does NOT change
 
@@ -278,27 +284,27 @@ Event::Part { index, part, metadata } => {
 - `ConversationStream` (persistence layer)
 - `ToolCallRequestAggregator` (argument parsing — see [RFD 048] for its
   replacement)
-- The query stream pipeline's Part > Flush > Finished lifecycle
+- The query stream pipeline's Part \> Flush \> Finished lifecycle
 
 ## Drawbacks
 
 - **Breaking change to `Event`.** Every provider and every consumer of
-  `Event::Part` must be updated. This is a mechanical transformation but touches
-  many files.
+  `Event::Part` must be updated.
+  This is a mechanical transformation but touches many files.
 
 - **Two type hierarchies for the same concepts.** `EventPart::Message` and
   `ChatResponse::Message` represent the same concept (assistant message content)
-  at different layers. This is intentional — streaming and persistence have
-  different concerns — but it means the EventBuilder translates between parallel
-  hierarchies.
+  at different layers.
+  This is intentional — streaming and persistence have different concerns —
+  but it means the EventBuilder translates between parallel hierarchies.
 
 ## Alternatives
 
 ### Keep ConversationEvent in Event::Part, add ValueChunk variant
 
 Add `Event::ValueChunk { index, chunk }` alongside the existing `Event::Part`
-for raw JSON chunks (tool call arguments, structured responses). This is the
-minimal change needed for incremental argument streaming.
+for raw JSON chunks (tool call arguments, structured responses).
+This is the minimal change needed for incremental argument streaming.
 
 Rejected because:
 
@@ -317,8 +323,8 @@ argument chunks, routing by index buffer type in EventBuilder.
 Rejected because:
 
 - The EventBuilder already routes by type (message vs reasoning vs structured vs
-  tool call). Having typed variants at the EventPart level is consistent with
-  this routing.
+  tool call).
+  Having typed variants at the EventPart level is consistent with this routing.
 - `Json(String)` loses the tool call identity information that `ToolCall(Start {
   id, name })` provides.
 - Two different streaming use cases (structured data, tool call arguments) have
@@ -327,12 +333,12 @@ Rejected because:
 ## Non-Goals
 
 - **Incremental tool call argument streaming.** This RFD keeps the
-  `ToolCallRequestAggregator` in the EventBuilder for argument parsing. The
-  `ArgumentChunk` variant forwards raw JSON to the aggregator, same as today's
-  behavior but with cleaner transport.
+  `ToolCallRequestAggregator` in the EventBuilder for argument parsing.
+  The `ArgumentChunk` variant forwards raw JSON to the aggregator, same as
+  today's behavior but with cleaner transport.
 
-- **Changing ConversationEvent.** The persistence type is unchanged. This RFD
-  only affects the streaming transport layer.
+- **Changing ConversationEvent.** The persistence type is unchanged.
+  This RFD only affects the streaming transport layer.
 
 ## Risks and Open Questions
 
@@ -350,20 +356,21 @@ Rejected because:
 
 ### Phase 1: Define EventPart types
 
-Add `EventPart`, `ToolCallPart` to `jp_llm`. These are pure types with no
-behavioral changes.
+Add `EventPart`, `ToolCallPart` to `jp_llm`.
+These are pure types with no behavioral changes.
 
 ### Phase 2: Update EventBuilder
 
 Change `EventBuilder::handle_part` to accept `EventPart` instead of
-`ConversationEvent`. Update the `IndexBuffer` creation and accumulation logic.
+`ConversationEvent`.
+Update the `IndexBuffer` creation and accumulation logic.
 The output (flushed `ConversationEvent`s) is identical.
 
 ### Phase 3: Update providers
 
 Update Anthropic, OpenRouter, Llamacpp, Ollama, and Google providers to emit
-`EventPart` variants instead of constructing `ConversationEvent`s. Remove
-`ConversationEvent` construction from the provider layer entirely.
+`EventPart` variants instead of constructing `ConversationEvent`s.
+Remove `ConversationEvent` construction from the provider layer entirely.
 
 Move the `ToolCallRequestAggregator` from the provider layer into the
 EventBuilder — providers now emit `ToolCall(ArgumentChunk(chunk))` instead of
@@ -372,14 +379,15 @@ buffering chunks themselves.
 ### Phase 4: Update TurnCoordinator
 
 Update `TurnCoordinator::handle_streaming_event` to match on `EventPart` instead
-of `ConversationEvent`. Update the chat renderer, structured renderer, and tool
-renderer integration points.
+of `ConversationEvent`.
+Update the chat renderer, structured renderer, and tool renderer integration
+points.
 
 ### Phase 5: Clean up
 
 Remove `Event`'s `as_conversation_event()`, `into_conversation_event()`, and
-related helper methods that assume `Part` carries a `ConversationEvent`. Add
-equivalent helpers for `EventPart` if needed.
+related helper methods that assume `Part` carries a `ConversationEvent`.
+Add equivalent helpers for `EventPart` if needed.
 
 ## References
 
@@ -390,4 +398,5 @@ equivalent helpers for `EventPart` if needed.
 - `crates/jp_llm/src/stream/aggregator/tool_call_request.rs` —
   `ToolCallRequestAggregator`
 
+[RFD 043]: 043-incremental-tool-call-argument-streaming.md
 [RFD 048]: 048-four-channel-output-model.md

@@ -1,9 +1,9 @@
 # JP Query Architecture
 
 This document describes the technical architecture of the `jp query` command,
-the core component responsible for LLM interactions. The goal is to provide a
-foundation for refactoring toward better maintainability, decoupling, and
-testability.
+the core component responsible for LLM interactions.
+The goal is to provide a foundation for refactoring toward better
+maintainability, decoupling, and testability.
 
 ## Table of Contents
 
@@ -21,7 +21,8 @@ testability.
 ## Overview
 
 The `jp query` command orchestrates interactions between the user, LLM
-providers, and tools via the Model Context Protocol (MCP). It handles:
+providers, and tools via the Model Context Protocol (MCP).
+It handles:
 
 - User input collection (CLI args, editor, templates)
 - Conversation state management (workspace persistence)
@@ -31,8 +32,8 @@ providers, and tools via the Model Context Protocol (MCP). It handles:
 - Tool execution (local commands, MCP servers)
 - Response rendering (Markdown, code blocks, streaming)
 
-The command operates as a single-threaded async state machine with side
-effects on disk (workspace persistence) and network (LLM/MCP calls).
+The command operates as a single-threaded async state machine with side effects
+on disk (workspace persistence) and network (LLM/MCP calls).
 
 ## System Architecture
 
@@ -252,9 +253,10 @@ ResponseHandler.handle()              ToolDefinition.call()
 
 ## Core Components
 
-### 1. Query Command (`jp_cli::cmd::query`)
+### 1\. Query Command (`jp_cli::cmd::query`)
 
 **Responsibilities:**
+
 - CLI argument parsing and validation
 - Message input collection (args, editor, templates)
 - Configuration merging via `IntoPartialAppConfig` trait
@@ -262,10 +264,12 @@ ResponseHandler.handle()              ToolDefinition.call()
 - Error handling and cleanup
 
 **State:**
+
 - `Query` struct (CLI args only)
 - `TurnState` (ephemeral per-turn state: retry count, tool answers)
 
 **Key Methods:**
+
 ```rust
 async fn run(self, ctx: &mut Ctx) -> Output
 async fn build_message(&self, ctx: &mut Ctx, conversation_id: &ConversationId)
@@ -276,20 +280,23 @@ async fn handle_stream(&self, ctx: &mut Ctx, turn_state: &mut TurnState,
 ```
 
 **Problems:**
+
 - 1,246 lines of code in a single file
 - Deep nesting (6+ levels of indentation in `handle_stream`)
 - Recursive async functions (Box::pin workaround)
 - Mixes concerns (input, execution, output, persistence)
 - Hard to test (requires full `Ctx` with real I/O)
 
-### 2. Context (`jp_cli::ctx::Ctx`)
+### 2\. Context (`jp_cli::ctx::Ctx`)
 
 **Responsibilities:**
+
 - Shared state container for the entire CLI session
 - Owns workspace, config, MCP client, task handler, signals
 - Provides immutable config access after initialization
 
 **State:**
+
 ```rust
 pub struct Ctx {
     pub workspace: Workspace,
@@ -303,19 +310,22 @@ pub struct Ctx {
 ```
 
 **Problems:**
+
 - God object (all commands depend on it)
 - No clear lifecycle (created once, mutated throughout)
 - Mixes concerns (config, I/O, async runtime)
 - Makes unit testing impossible (needs real workspace)
 
-### 3. LLM Provider (`jp_llm::provider`)
+### 3\. LLM Provider (`jp_llm::provider`)
 
 **Responsibilities:**
+
 - Abstract LLM provider API differences
 - Stream response events (content, reasoning, tool calls, metadata)
 - Handle provider-specific features (reasoning, structured output)
 
 **Interface:**
+
 ```rust
 #[async_trait]
 pub trait Provider: Debug + Send + Sync {
@@ -329,20 +339,23 @@ pub trait Provider: Debug + Send + Sync {
 ```
 
 **Problems:**
-- Trait cannot be mocked easily (async_trait)
+
+- Trait cannot be mocked easily (async\_trait)
 - Provider selection is global (`get_provider(id, config)`)
 - Error types are provider-specific but wrapped generically
 - Reasoning extraction is post-hoc (parsed from stream)
 
-### 4. Stream Event Handler (`jp_cli::cmd::query::event`)
+### 4\. Stream Event Handler (`jp_cli::cmd::query::event`)
 
 **Responsibilities:**
+
 - Accumulate streamed tokens into complete messages
 - Distinguish reasoning from content tokens
 - Execute tool calls (blocking async calls mid-stream)
 - Prompt user for tool execution confirmation
 
 **State:**
+
 ```rust
 pub struct StreamEventHandler {
     pub reasoning_tokens: String,
@@ -353,20 +366,23 @@ pub struct StreamEventHandler {
 ```
 
 **Problems:**
+
 - Mutable state accumulated during streaming
 - Blocks stream processing for tool execution
 - User prompts during streaming (synchronous I/O)
 - Turn-level state (persisted answers) lives elsewhere
 
-### 5. Response Handler (`jp_cli::cmd::query::response_handler`)
+### 5\. Response Handler (`jp_cli::cmd::query::response_handler`)
 
 **Responsibilities:**
+
 - Render Markdown with syntax highlighting
 - Apply typewriter effect for streaming
 - Handle code block extraction and file saving
 - Generate terminal hyperlinks (OSC 8)
 
 **State:**
+
 ```rust
 pub struct ResponseHandler {
     pub render_mode: RenderMode,
@@ -381,20 +397,23 @@ pub struct ResponseHandler {
 ```
 
 **Problems:**
+
 - Stateful line-by-line parsing (context-dependent)
 - Mixes rendering logic with file I/O (saving code blocks)
 - Handles both streaming and buffered modes differently
 - Markdown parser state is implicit (`jp_md` integration)
 
-### 6. Tool System (`jp_llm::tool`, `jp_tool`)
+### 6\. Tool System (`jp_llm::tool`, `jp_tool`)
 
 **Responsibilities:**
+
 - Define tool schemas (parameters, descriptions)
 - Execute tools (local commands, MCP calls)
 - Handle tool prompts (confirmation, questions, editing)
 - Return results to LLM
 
 **Flow:**
+
 ```
 ToolConfig → ToolDefinition → ToolDefinition.call() → ToolCallResult
                    ↓
@@ -408,19 +427,22 @@ ToolConfig → ToolDefinition → ToolDefinition.call() → ToolCallResult
 ```
 
 **Problems:**
+
 - Tool execution is synchronous and blocks event stream
 - Local tool commands use shell execution (security concern)
 - MCP tool parameters are dynamically merged (schema drift)
 - Tool prompts (confirmation, editing) use blocking I/O
 
-### 7. Workspace (`jp_workspace`)
+### 7\. Workspace (`jp_workspace`)
 
 **Responsibilities:**
+
 - Manage conversation lifecycle
 - Persist messages and metadata to disk
 - Track active conversation
 
 **Structure:**
+
 ```
 .jp/
   ├─ conversations/
@@ -432,6 +454,7 @@ ToolConfig → ToolDefinition → ToolDefinition.call() → ToolCallResult
 ```
 
 **Problems:**
+
 - File I/O happens in `Drop` (implicit, error-prone)
 - No transaction semantics (partial writes on crash)
 - Active conversation is special-cased (stored separately)
@@ -469,6 +492,7 @@ let config = partial.finalize()?;
 ```
 
 **Problems:**
+
 - Order-dependent merging (no declarative precedence)
 - Partial config is mutated in-place (hard to trace)
 - CLI args are applied twice (once for validation, once for merge)
@@ -492,11 +516,13 @@ State {
 ```
 
 **Lifecycle:**
+
 1. Load from disk on `Workspace::load()`
 2. Mutate in-memory during command execution
 3. Persist to disk on `Workspace::persist()` (explicit) or `Drop`
 
 **Problems:**
+
 - Active conversation is stored separately (prevents removal)
 - No event sourcing (can't replay conversation)
 - Metadata is split (Conversation vs Messages)
@@ -511,11 +537,14 @@ pub struct TurnState {
 }
 ```
 
-Ephemeral state for a single query turn. Tracks:
+Ephemeral state for a single query turn.
+Tracks:
+
 - Tool answers to reuse (e.g., "use this answer for all calls")
 - Retry count (for rate limit handling)
 
 **Problems:**
+
 - Lives outside `Query` struct (passed as `&mut`)
 - Cleared on recursion (nested tool calls lose state)
 - No persistence across queries (user must re-answer)
@@ -537,16 +566,18 @@ jp_cli::Error
 
 ### Error Propagation
 
-Errors bubble up with `?` operator, wrapped in crate-specific types. Most
-errors terminate the command and print to stderr.
+Errors bubble up with `?` operator, wrapped in crate-specific types.
+Most errors terminate the command and print to stderr.
 
 **Special Cases:**
+
 - Rate limits: Retry with exponential backoff (handled in `handle_event`)
 - Empty responses: Retry with modified prompt (handled in `handle_stream`)
 - Tool errors: Return as `ToolCallResult` with `error: true`
 - User cancellation: Signal handling via `SignalPair`
 
 **Problems:**
+
 - No error context (source location, trace)
 - Mixed error types (some retryable, some fatal)
 - Errors in `Drop` are printed to stderr (not propagated)
@@ -576,21 +607,25 @@ jp_cli
 ### Tight Coupling Points
 
 **1. Query → Ctx (God Object)**
+
 - Every operation requires `&mut Ctx`
 - No interfaces, direct field access
 - Cannot test without full workspace
 
 **2. Config → Everything**
+
 - Config is read by all components
 - Deeply nested structure (config.assistant.model.parameters)
 - No trait boundaries (concrete types everywhere)
 
 **3. Tool Execution → MCP Client**
+
 - Tool calls block event stream
 - No abstraction over local vs MCP
 - User prompts are synchronous
 
 **4. Persistence → Workspace**
+
 - Implicit on `Drop` (side effects)
 - No dependency injection
 - Cannot test without file I/O
@@ -664,7 +699,7 @@ self.handle_stream(ctx, turn_state, thread, tool_choice, tools, messages).await?
 
 ## Refactoring Opportunities
 
-### 1. Extract Command Phases
+### 1\. Extract Command Phases
 
 Split `Query::run()` into discrete phases with clear boundaries:
 
@@ -688,11 +723,12 @@ impl QueryCommand {
 ```
 
 **Benefits:**
+
 - Each phase is testable in isolation
 - Clear separation of concerns
 - Can replace phases for testing (stub output, mock LLM)
 
-### 2. Introduce Provider Abstraction
+### 2\. Introduce Provider Abstraction
 
 Replace direct provider calls with a trait object:
 
@@ -719,11 +755,12 @@ let client = Box::new(MockLlmClient::new(vec![
 ```
 
 **Benefits:**
+
 - Can inject test doubles
 - Provider selection is encapsulated
 - Easier to add new providers
 
-### 3. Decouple Tool Execution
+### 3\. Decouple Tool Execution
 
 Move tool execution out of event stream handling:
 
@@ -747,11 +784,12 @@ let result = executor.execute(call).await?;
 ```
 
 **Benefits:**
+
 - Tools can be async without blocking stream
 - Executor can be swapped (test, dry-run, parallel)
 - User prompts can be decoupled (pre-approved, config-driven)
 
-### 4. Make Context Injectable
+### 4\. Make Context Injectable
 
 Replace `Ctx` with focused traits:
 
@@ -788,11 +826,12 @@ impl Query {
 ```
 
 **Benefits:**
+
 - Clear dependencies (documented in trait bounds)
 - Easier to mock (implement trait for test struct)
 - Prevents leaking access to unrelated state
 
-### 5. Event-Driven Architecture
+### 5\. Event-Driven Architecture
 
 Replace recursive `handle_stream` with event loop:
 
@@ -828,11 +867,12 @@ impl QueryStateMachine {
 ```
 
 **Benefits:**
+
 - No recursion (easier to reason about)
 - State machine is explicit (can visualize)
 - Events can be recorded/replayed (debugging, testing)
 
-### 6. Separate Rendering from Processing
+### 6\. Separate Rendering from Processing
 
 Move `ResponseHandler` to a pure function:
 
@@ -853,11 +893,12 @@ pub struct RenderedOutput {
 ```
 
 **Benefits:**
+
 - Testable without terminal
 - Can render offline (e.g., in web UI)
 - Easier to add new output formats (JSON, HTML)
 
-### 7. Introduce Repository Pattern
+### 7\. Introduce Repository Pattern
 
 Wrap workspace operations:
 
@@ -879,11 +920,12 @@ pub struct InMemoryRepository {
 ```
 
 **Benefits:**
+
 - Persistence logic is isolated
 - Can swap storage (SQLite, cloud)
 - Easy to test without disk I/O
 
-### 8. Configuration Builder Pattern
+### 8\. Configuration Builder Pattern
 
 Replace partial config mutation:
 
@@ -920,6 +962,7 @@ let config = ConfigBuilder::new()
 ```
 
 **Benefits:**
+
 - Explicit layer ordering
 - Can inspect "where did this value come from?"
 - Easy to test specific merge scenarios
@@ -929,28 +972,33 @@ let config = ConfigBuilder::new()
 The `jp query` command is the heart of the application, but suffers from:
 
 **Architectural Issues:**
+
 - God object pattern (`Ctx`)
 - Deep nesting and tight coupling
 - Mixed concerns (I/O, logic, rendering)
 - Implicit dependencies (global state)
 
 **Testing Issues:**
+
 - Cannot unit test in isolation
 - Requires real I/O (file, network, terminal)
 - Non-deterministic (LLM, timestamps)
 - Async complexity
 
 **Maintainability Issues:**
+
 - 1,246 LOC in one file
 - Recursive async functions
 - Stateful rendering (context-dependent)
 - Implicit error handling
 
 Refactoring toward testability requires:
+
 1. Dependency injection (traits over concrete types)
 2. Pure functions (side effects at boundaries)
 3. Event-driven design (explicit state machine)
 4. Repository pattern (storage abstraction)
 
-This document serves as a map for incremental refactoring. Each opportunity
-can be addressed independently, with tests added to prevent regressions.
+This document serves as a map for incremental refactoring.
+Each opportunity can be addressed independently, with tests added to prevent
+regressions.

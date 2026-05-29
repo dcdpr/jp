@@ -5,9 +5,9 @@ The KB provides a structured way to expose domain-specific knowledge to the
 assistant via **topics** and **subjects**, with a built-in `learn` tool for
 on-demand retrieval.
 
-Related: [Wasm Tools Architecture](wasm-tools.md) — describes the target Wasm
-plugin infrastructure that the `learn` tool will migrate to in v2. In v1,
-`learn` runs as native Rust in the `jp_tool_learn` crate.
+Related: [Wasm Tools Architecture] — describes the target Wasm plugin
+infrastructure that the `learn` tool will migrate to in v2.
+In v1, `learn` runs as native Rust in the `jp_tool_learn` crate.
 
 ## Table of Contents
 
@@ -26,8 +26,10 @@ plugin infrastructure that the `learn` tool will migrate to in v2. In v1,
 ## Overview
 
 The knowledge base organizes reusable knowledge into **topics** and
-**subjects**. A topic is a named group (e.g., "project", "skills") that maps to
-a directory of text files. Each file is a subject.
+**subjects**.
+A topic is a named group (e.g., "project", "skills") that maps to a directory of
+text files.
+Each file is a subject.
 
 The assistant discovers available topics through the system prompt and retrieves
 specific subjects on demand via the `learn` tool — JP's first built-in tool.
@@ -36,13 +38,13 @@ configuration field, or on-the-fly via the `--knowledge` (`-k`) CLI flag.
 
 ## Design Goals
 
-| Goal | Description |
-|------|-------------|
+| Goal                     | Description                                  |
+| ------------------------ | -------------------------------------------- |
 | **Structured knowledge** | Organize knowledge into topics with subjects |
-| **On-demand retrieval** | Assistant fetches subjects via `learn` tool |
-| **Hidden subjects** | `.`-prefixed paths excluded from listings |
-| **Pre-loaded subjects** | Inject critical knowledge into system prompt |
-| **Glob support** | Load multiple subjects with patterns |
+| **On-demand retrieval**  | Assistant fetches subjects via `learn` tool  |
+| **Hidden subjects**      | `.`-prefixed paths excluded from listings    |
+| **Pre-loaded subjects**  | Inject critical knowledge into system prompt |
+| **Glob support**         | Load multiple subjects with patterns         |
 
 ## Configuration Schema
 
@@ -124,23 +126,23 @@ pub struct TopicConfig {
 
 ### Field Reference
 
-| Field | Required | Default | Description |
-|-------|----------|---------|-------------|
-| `enable` | No | `true` | Set `false` to deactivate the topic |
-| `title` | No | — | Display name shown to the assistant |
-| `introduction` | No | — | One-line summary in system prompt |
-| `description` | No | — | Extended description in `learn` output |
-| `subjects` | **Yes** | — | Path to subject directory |
-| `learned` | No | `[]` | Glob patterns for pre-loaded subjects |
-| `disabled` | No | `[]` | Excluded subject slugs |
+| Field          | Required | Default | Description                            |
+| -------------- | -------- | ------- | -------------------------------------- |
+| `enable`       | No       | `true`  | Set `false` to deactivate the topic    |
+| `title`        | No       | —       | Display name shown to the assistant    |
+| `introduction` | No       | —       | One-line summary in system prompt      |
+| `description`  | No       | —       | Extended description in `learn` output |
+| `subjects`     | **Yes**  | —       | Path to subject directory              |
+| `learned`      | No       | `[]`    | Glob patterns for pre-loaded subjects  |
+| `disabled`     | No       | `[]`    | Excluded subject slugs                 |
 
----
+-----
 
 ## Subject Resolution
 
-A **subject** is a text file inside a topic's `subjects` directory. The **slug**
-is the file path relative to the topic directory, with the file extension
-stripped.
+A **subject** is a text file inside a topic's `subjects` directory.
+The **slug** is the file path relative to the topic directory, with the file
+extension stripped.
 
 ### Example Directory Layout
 
@@ -162,19 +164,19 @@ stripped.
 
 A subject is **hidden** when any component of its path starts with `.`:
 
-| Path | Hidden? | Reason |
-|------|---------|--------|
-| `.internal-notes.md` | Yes | Filename starts with `.` |
-| `ast-grep/.rules.md` | Yes | Nested filename starts with `.` |
-| `.hidden-dir/visible.md` | Yes | Parent directory starts with `.` |
-| `maintainers/jean.md` | No | No `.`-prefixed components |
+| Path                     | Hidden? | Reason                           |
+| ------------------------ | ------- | -------------------------------- |
+| `.internal-notes.md`     | Yes     | Filename starts with `.`         |
+| `ast-grep/.rules.md`     | Yes     | Nested filename starts with `.`  |
+| `.hidden-dir/visible.md` | Yes     | Parent directory starts with `.` |
+| `maintainers/jean.md`    | No      | No `.`-prefixed components       |
 
 Hidden subjects:
 
 - **Not listed** by `learn` (even with `*` or `**` globs)
 - **Loadable** only by exact slug: `learn(topic, subjects: ["ast-grep/rules"])`
-- **Discoverable** only via external hints — e.g., a non-hidden subject mentions
-  "read `ast-grep/rules` for full rule documentation"
+- **Discoverable** only via external hints — e.g., a non-hidden subject
+  mentions "read `ast-grep/rules` for full rule documentation"
 
 ### Disabled Subjects
 
@@ -284,17 +286,18 @@ exposing too much irrelevant knowledge upfront)
 </knowledge>
 ```
 
-Pre-loaded subjects do NOT appear in `learn` tool listings. They are shown in a
-separate "already learned" section when `learn` is called without `subjects`, so
-the assistant knows they exist.
+Pre-loaded subjects do NOT appear in `learn` tool listings.
+They are shown in a separate "already learned" section when `learn` is called
+without `subjects`, so the assistant knows they exist.
 
 ### Why Not Configurable Sections
 
 The existing `SectionConfig` type (content, tag, position) is designed for
-user-controlled system prompt sections. The `<knowledge>` section is **not
-user-configurable** — its content is derived from KB config. It is built
-programmatically and injected directly into the system prompt string during
-thread construction.
+user-controlled system prompt sections.
+The `<knowledge>` section is **not user-configurable** — its content is derived
+from KB config.
+It is built programmatically and injected directly into the system prompt string
+during thread construction.
 
 Internally, the implementation MAY use `SectionConfig` as a container (with a
 fixed tag of `"knowledge"` and a low position value), but this is an
@@ -321,8 +324,9 @@ if let Some(section) = kb_section {
 
 ### Registration
 
-`learn` is registered as a built-in tool via `ToolSource::Builtin`. Its
-definition is generated dynamically based on the KB configuration at query time.
+`learn` is registered as a built-in tool via `ToolSource::Builtin`.
+Its definition is generated dynamically based on the KB configuration at query
+time.
 
 ```rust
 // Pseudo-code for registration
@@ -345,9 +349,10 @@ learn (not all pre-loaded or disabled).
 
 ### JSON Schema
 
-The `topic` parameter is a free-form string. The description lists available
-topics so the LLM knows what to pass. The schema itself is stable — it does not
-change when the KB configuration changes.
+The `topic` parameter is a free-form string.
+The description lists available topics so the LLM knows what to pass.
+The schema itself is stable — it does not change when the KB configuration
+changes.
 
 ```json
 {
@@ -377,8 +382,9 @@ change when the KB configuration changes.
 ```
 
 The description is dynamically generated from the KB configuration (listing
-available topic IDs and titles). The schema structure remains constant. This
-avoids issues with providers caching stale tool schemas between turns.
+available topic IDs and titles).
+The schema structure remains constant.
+This avoids issues with providers caching stale tool schemas between turns.
 
 ### Topic Resolution
 
@@ -452,16 +458,17 @@ Returns all matching non-hidden subjects, each wrapped in tags:
 
 ### Glob Behavior
 
-Standard glob semantics apply. `*` matches at one directory level. `**` matches
-recursively across directories.
+Standard glob semantics apply.
+`*` matches at one directory level.
+`**` matches recursively across directories.
 
-| Pattern | Matches |
-|---------|---------|
-| `*` | Non-hidden subjects at the top level only |
-| `**` | All non-hidden subjects, recursively |
-| `maintainers/*` | Non-hidden subjects directly under `maintainers/` |
-| `maintainers/**` | Non-hidden subjects under `maintainers/`, recursively |
-| `ast-grep/rules` | Exact match — loads hidden subject |
+| Pattern          | Matches                                                    |
+| ---------------- | ---------------------------------------------------------- |
+| `*`              | Non-hidden subjects at the top level only                  |
+| `**`             | All non-hidden subjects, recursively                       |
+| `maintainers/*`  | Non-hidden subjects directly under `maintainers/`          |
+| `maintainers/**` | Non-hidden subjects under `maintainers/`, recursively      |
+| `ast-grep/rules` | Exact match — loads hidden subject                         |
 | `maintainers/j*` | Non-hidden subjects starting with `j` under `maintainers/` |
 
 Key rules:
@@ -475,19 +482,20 @@ Key rules:
 ### No De-duplication Across Calls
 
 There is no mechanism to prevent the assistant from calling `learn` with the
-same subject twice. System prompt subjects (via `learned`) ARE excluded from the
-tool, because the system prompt is never compacted. But subjects learned via
-tool calls may have been compacted away from the context window, so re-learning
-them is valid.
+same subject twice.
+System prompt subjects (via `learned`) ARE excluded from the tool, because the
+system prompt is never compacted.
+But subjects learned via tool calls may have been compacted away from the
+context window, so re-learning them is valid.
 
----
+-----
 
 ## CLI Integration
 
 ### The `-k` / `--knowledge` Flag
 
-A convenience flag on the `query` command for pre-loading subjects
-into the system prompt:
+A convenience flag on the `query` command for pre-loading subjects into the
+system prompt:
 
 ```sh
 jp query -k "project/maintainers/*" "Review this PR"
@@ -539,34 +547,34 @@ a config merge on `kb.topic.<id>.learned`.
 
 ## File Format Handling
 
-Subject files are read as UTF-8 text. The file extension determines presentation
-format.
+Subject files are read as UTF-8 text.
+The file extension determines presentation format.
 
 ### Pass-through Formats
 
 Included as-is in tool output:
 
-| Extension | Format |
-|-----------|--------|
-| `.md` | Markdown |
-| `.txt` | Plain text |
-| `.text` | Plain text |
-| (none) | Plain text |
+| Extension | Format     |
+| --------- | ---------- |
+| `.md`     | Markdown   |
+| `.txt`    | Plain text |
+| `.text`   | Plain text |
+| (none)    | Plain text |
 
 ### Fenced Code Block Formats
 
 Wrapped in fenced code blocks with the extension as language:
 
-| Extension | Language tag |
-|-----------|-------------|
-| `.toml` | `toml` |
-| `.json` | `json` |
-| `.yaml` / `.yml` | `yaml` |
-| `.rs` | `rust` |
-| `.py` | `python` |
-| `.js` | `javascript` |
-| `.ts` | `typescript` |
-| (other) | extension name |
+| Extension        | Language tag   |
+| ---------------- | -------------- |
+| `.toml`          | `toml`         |
+| `.json`          | `json`         |
+| `.yaml` / `.yml` | `yaml`         |
+| `.rs`            | `rust`         |
+| `.py`            | `python`       |
+| `.js`            | `javascript`   |
+| `.ts`            | `typescript`   |
+| (other)          | extension name |
 
 Example: a `.toml` file is returned as:
 
@@ -580,10 +588,10 @@ name = "example"
 ### Binary File Detection
 
 If the first 8192 bytes of a file contain a null byte, the file is treated as
-binary and skipped. The `learn` tool returns a message indicating the file was
-skipped.
+binary and skipped.
+The `learn` tool returns a message indicating the file was skipped.
 
----
+-----
 
 ## Data Flow
 
@@ -648,11 +656,11 @@ jp_tool_learn (native Rust, v1)
 Host returns tool result to LLM
 ```
 
-**v2 (Wasm):** The same `jp_tool_learn` crate compiles to
-`wasm32-wasip2` and runs in a Wasm sandbox with a preopened
-subjects directory. See [wasm-tools.md](wasm-tools.md).
+**v2 (Wasm):** The same `jp_tool_learn` crate compiles to `wasm32-wasip2` and
+runs in a Wasm sandbox with a preopened subjects directory.
+See [wasm-tools.md][Wasm Tools Architecture].
 
----
+-----
 
 ## Crate Changes
 
@@ -661,8 +669,8 @@ subjects directory. See [wasm-tools.md](wasm-tools.md).
 New module `src/kb.rs`:
 
 - `KnowledgeBaseConfig`, `TopicConfig`
-- Partial variants with `AssignKeyValue`, `PartialConfigDelta`,
-  `ToPartial` implementations
+- Partial variants with `AssignKeyValue`, `PartialConfigDelta`, `ToPartial`
+  implementations
 - Config field names, environment variables, CLI assignment
 
 New field on `AppConfig`:
@@ -679,19 +687,19 @@ pub struct AppConfig {
 
 ### `jp_tool`
 
-No changes to existing types. `Context`, `Outcome`, and `Question`
-are sufficient for the `learn` tool.
+No changes to existing types.
+`Context`, `Outcome`, and `Question` are sufficient for the `learn` tool.
 
-The Wasm-specific contract (WIT interface) is defined in the
-`jp_tool` crate but is part of the Wasm tools architecture — see
-[wasm-tools.md](wasm-tools.md).
+The Wasm-specific contract (WIT interface) is defined in the `jp_tool` crate but
+is part of the Wasm tools architecture — see [wasm-tools.md][Wasm Tools
+Architecture].
 
 ### `jp_tool_learn`
 
-New crate at `crates/jp_tool_learn/`. In v1, this is a regular Rust
-library crate called from the host. In v2, it compiles to
-`wasm32-wasip2` and runs in a Wasm sandbox (see
-[wasm-tools.md](wasm-tools.md)).
+New crate at `crates/jp_tool_learn/`.
+In v1, this is a regular Rust library crate called from the host.
+In v2, it compiles to `wasm32-wasip2` and runs in a Wasm sandbox (see
+[wasm-tools.md][Wasm Tools Architecture]).
 
 Contains the `learn` tool logic:
 
@@ -699,8 +707,8 @@ Contains the `learn` tool logic:
 - Subject loading (glob matching, file reading, format handling)
 - Output formatting (markdown with `<subject>` tags)
 
-The crate's public API is designed to be portable across both
-native and Wasm targets:
+The crate's public API is designed to be portable across both native and Wasm
+targets:
 
 ```rust
 // crates/jp_tool_learn/src/lib.rs
@@ -724,8 +732,8 @@ pub fn execute(input: LearnInput) -> jp_tool::Outcome {
 }
 ```
 
-The host (`jp_llm`) constructs `LearnInput` from the resolved
-`TopicConfig` and the LLM's tool arguments, then calls `execute()`.
+The host (`jp_llm`) constructs `LearnInput` from the resolved `TopicConfig` and
+the LLM's tool arguments, then calls `execute()`.
 
 ### `jp_cli`
 
@@ -739,21 +747,21 @@ The host (`jp_llm`) constructs `LearnInput` from the resolved
 - Implement `ToolSource::Builtin` in `ToolDefinition::new()` and
   `ToolDefinition::execute()` (currently `todo!()`)
 - v1: Call `jp_tool_learn::execute()` directly (native Rust)
-- v2: Delegate to Wasm runtime (see [wasm-tools.md](wasm-tools.md))
+- v2: Delegate to Wasm runtime (see [wasm-tools.md][Wasm Tools Architecture])
 
 ### `jp_conversation`
 
-No changes. The `learn` tool produces standard `ToolCallRequest` /
-`ToolCallResponse` events in the conversation stream.
+No changes.
+The `learn` tool produces standard `ToolCallRequest` / `ToolCallResponse` events
+in the conversation stream.
 
----
+-----
 
 ## Migration Path
 
 ### Phase 1: Configuration
 
-1. Create `jp_config/src/kb.rs` with `KnowledgeBaseConfig` and
-   `TopicConfig`
+1. Create `jp_config/src/kb.rs` with `KnowledgeBaseConfig` and `TopicConfig`
 2. Add partial config types, merging, and CLI assignment
 3. Add `kb` field to `AppConfig`
 4. Add config snapshot tests
@@ -781,27 +789,27 @@ No changes. The `learn` tool produces standard `ToolCallRequest` /
 1. Create `jp_tool_learn` crate as a regular Rust library
 2. Implement `LearnInput` and `execute()` as a pure function
 3. Implement listing logic (directory scan, hidden/disabled filter)
-4. Implement loading logic (glob matching, file reading, format
-   handling)
-5. Implement `ToolSource::Builtin` in `jp_llm` — construct
-   `LearnInput` from `TopicConfig` + LLM arguments, call
-   `jp_tool_learn::execute()`
+4. Implement loading logic (glob matching, file reading, format handling)
+5. Implement `ToolSource::Builtin` in `jp_llm` — construct `LearnInput` from
+   `TopicConfig` + LLM arguments, call `jp_tool_learn::execute()`
 6. Add integration tests (tool call → file content)
 
 ### Phase 5: Testing
 
-1. Unit tests: config parsing, slug resolution, glob matching,
-   format handling, section generation, schema generation
+1. Unit tests: config parsing, slug resolution, glob matching, format handling,
+   section generation, schema generation
 2. Integration tests: full `learn` tool call (native execution)
-3. Edge cases: empty topics, all-learned topics, all-disabled
-   subjects, binary files, deeply nested directories
+3. Edge cases: empty topics, all-learned topics, all-disabled subjects, binary
+   files, deeply nested directories
 
 ### Phase 6: Wasm Migration (v2)
 
-See [wasm-tools.md](wasm-tools.md).
+See [wasm-tools.md][Wasm Tools Architecture].
 
 1. Add `wasm32-wasip2` target support to `jp_tool_learn`
 2. Implement WIT exports via `wit-bindgen`
 3. Embed compiled Wasm binary in `jp` via `include_bytes!`
 4. Update `ToolSource::Builtin` to use `jp_wasm::execute()`
 5. Verify identical behavior between native and Wasm execution
+
+[Wasm Tools Architecture]: wasm-tools.md

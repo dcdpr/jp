@@ -7,24 +7,27 @@
 
 ## Summary
 
-This RFD adds runtime output redirection to `jp_printer`. A `Printer` can switch
-its underlying writers at any point during execution via a new `SwapWriters`
-command, without replacing the `Printer` instance or disrupting renderer state.
+This RFD adds runtime output redirection to `jp_printer`.
+A `Printer` can switch its underlying writers at any point during execution via
+a new `SwapWriters` command, without replacing the `Printer` instance or
+disrupting renderer state.
 
 ## Motivation
 
 The `Printer` is constructed with fixed `out`/`err` writers that are moved into
-a background worker thread. Once created, there is no way to change where output
-goes. All renderers (`ChatResponseRenderer`, `ToolRenderer`,
-`StructuredRenderer`, `JsonEmitter`) share a single `Arc<Printer>`, so the
-output destination is locked in for the lifetime of the process.
+a background worker thread.
+Once created, there is no way to change where output goes.
+All renderers (`ChatResponseRenderer`, `ToolRenderer`, `StructuredRenderer`,
+`JsonEmitter`) share a single `Arc<Printer>`, so the output destination is
+locked in for the lifetime of the process.
 
 This blocks use cases that need to redirect output at runtime - detaching a
 conversation from the terminal, redirecting to a file mid-stream, or capturing
-output from a specific phase during testing. Without live redirection, the only
-options are replacing the `Printer` instance (which means either rebuilding all
-renderers or introducing `ArcSwap` indirection) or maintaining a parallel output
-path outside the printer (which duplicates rendering logic).
+output from a specific phase during testing.
+Without live redirection, the only options are replacing the `Printer` instance
+(which means either rebuilding all renderers or introducing `ArcSwap`
+indirection) or maintaining a parallel output path outside the printer (which
+duplicates rendering logic).
 
 Live redirection is also useful for testing: swap to a memory buffer mid-test to
 capture output from a specific phase without capturing setup noise.
@@ -54,10 +57,10 @@ enum Command {
 }
 ```
 
-The worker processes `SwapWriters` in FIFO order with other commands. All
-`Print` commands enqueued before `SwapWriters` write to the old destination. All
-`Print` commands enqueued after write to the new one. The swap is a
-deterministic point in the command stream.
+The worker processes `SwapWriters` in FIFO order with other commands.
+All `Print` commands enqueued before `SwapWriters` write to the old destination.
+All `Print` commands enqueued after write to the new one.
+The swap is a deterministic point in the command stream.
 
 Worker implementation:
 
@@ -97,8 +100,8 @@ impl Printer {
 }
 ```
 
-The method blocks until the worker has performed the swap. After it returns, the
-caller knows the new writers are active.
+The method blocks until the worker has performed the swap.
+After it returns, the caller knows the new writers are active.
 
 ### Worker Type Change
 
@@ -123,8 +126,9 @@ struct Worker {
 ```
 
 This loses monomorphization, but the writers are behind a thread boundary —
-there is no inlining benefit to preserve. The cost is one vtable dispatch per
-`write()` call, which is negligible compared to the I/O itself.
+there is no inlining benefit to preserve.
+The cost is one vtable dispatch per `write()` call, which is negligible compared
+to the I/O itself.
 
 `Printer::new()` boxes the writers at construction:
 
@@ -162,43 +166,49 @@ printer.swap_writers(new_out, new_err);
 ```
 
 `flush_instant()` cancels typewriter delays, drains pending commands
-immediately, and blocks until complete. This minimizes the time between the
-caller's intent to swap and the swap taking effect. Any `Print` commands
-enqueued between the two calls race with the worker - in practice this window is
-negligible since both calls happen on the same thread in sequence.
+immediately, and blocks until complete.
+This minimizes the time between the caller's intent to swap and the swap taking
+effect.
+Any `Print` commands enqueued between the two calls race with the worker - in
+practice this window is negligible since both calls happen on the same thread in
+sequence.
 
 ### Existing API Unchanged
 
 The public `Printer` API does not change beyond the addition of `swap_writers`.
 All existing methods (`print`, `println`, `eprint`, `flush`, `flush_instant`,
-`shutdown`) work exactly as before. The `Printer::memory()` constructor also
-remains unchanged — it serves a different purpose (capturing all output for
-testing from construction time).
+`shutdown`) work exactly as before.
+The `Printer::memory()` constructor also remains unchanged — it serves a
+different purpose (capturing all output for testing from construction time).
 
 ## Drawbacks
 
 **Type erasure for all printers.** Changing `Worker<O, E>` to `Worker { out:
 Box<dyn Write>, ... }` applies to all `Printer` instances, not just ones that
-use `swap_writers()`. Printers that never swap still pay for the vtable
-dispatch. The cost is negligible (one indirect call per write, dwarfed by actual
-I/O) but it is a universal change.
+use `swap_writers()`.
+Printers that never swap still pay for the vtable dispatch.
+The cost is negligible (one indirect call per write, dwarfed by actual I/O) but
+it is a universal change.
 
 **Blocking call.** `swap_writers()` blocks until the worker processes the
-command. If the worker is mid-typewriter on a long task, the caller waits.
+command.
+If the worker is mid-typewriter on a long task, the caller waits.
 Callers who need a faster swap should call `flush_instant()` first.
 
 ## Alternatives
 
 ### SwitchableWriter (writer-level swap)
 
-Wrap the inner writers in `Arc<Mutex<Box<dyn Write>>>`. The swap happens below
-the worker, at the writer level. The next `write()` call goes to the new
-destination regardless of the command queue.
+Wrap the inner writers in `Arc<Mutex<Box<dyn Write>>>`.
+The swap happens below the worker, at the writer level.
+The next `write()` call goes to the new destination regardless of the command
+queue.
 
 This has one advantage: the swap is immediate, even for commands already in the
-queue. But it introduces a mutex acquisition on every `write()` call (not just
-during swaps), and it creates ordering confusion — commands enqueued before the
-swap may write to the new destination if the worker hasn't processed them yet.
+queue.
+But it introduces a mutex acquisition on every `write()` call (not just during
+swaps), and it creates ordering confusion — commands enqueued before the swap
+may write to the new destination if the worker hasn't processed them yet.
 The caller must manually `flush()` before swapping to avoid this, which is a
 footgun.
 
@@ -212,37 +222,41 @@ immediate-swap alternative.
 
 ### Replace `Arc<Printer>` with `Arc<ArcSwap<Printer>>`
 
-Replace the entire `Printer` atomically. All holders see the new printer
-immediately.
+Replace the entire `Printer` atomically.
+All holders see the new printer immediately.
 
 Rejected because it replaces the entire printer (including the background worker
-thread), not just the output destination. This loses the worker's queue, pending
-typewriter state, and any in-flight writes. It also requires every call site to
-load from the `ArcSwap`, adding overhead to every print.
+thread), not just the output destination.
+This loses the worker's queue, pending typewriter state, and any in-flight
+writes.
+It also requires every call site to load from the `ArcSwap`, adding overhead to
+every print.
 
 ## Non-Goals
 
-- **Per-renderer redirection.** All renderers share a single `Printer`. This RFD
-  does not add the ability to redirect individual renderers to different
-  destinations.
+- **Per-renderer redirection.** All renderers share a single `Printer`.
+  This RFD does not add the ability to redirect individual renderers to
+  different destinations.
 
 - **Changing `OutputFormat` at runtime.** The format (text, pretty, JSON) is set
-  at construction and does not change. Switching from pretty to plain mid-stream
-  would require renderer resets.
+  at construction and does not change.
+  Switching from pretty to plain mid-stream would require renderer resets.
 
 ## Implementation Plan
 
 ### Phase 1: Worker Type Change
 
 Change `Worker<O, E>` to use `Box<dyn io::Write + Send>` for `out` and `err`.
-Update `Printer::new()` to box the writers. All existing constructors and tests
-continue to work.
+Update `Printer::new()` to box the writers.
+All existing constructors and tests continue to work.
 
-Can be merged independently. No behavioral change.
+Can be merged independently.
+No behavioral change.
 
 ### Phase 2: SwapWriters Command
 
-Add `Command::SwapWriters` and `Printer::swap_writers()`. Add tests:
+Add `Command::SwapWriters` and `Printer::swap_writers()`.
+Add tests:
 
 - Create a printer with memory writers, swap to different memory writers, verify
   each buffer received the correct output.

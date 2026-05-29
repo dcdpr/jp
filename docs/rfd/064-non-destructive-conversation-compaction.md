@@ -4,40 +4,43 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
-- **Supersedes**: [RFD 036](036-conversation-compaction.md)
+- **Supersedes**: [RFD 036]
 
 ## Summary
 
 This RFD introduces conversation compaction as a non-destructive, additive
-operation. Instead of mutating or deleting events in the stored conversation,
-compaction appends overlay events that instruct the projection layer to present
-a reduced view when building the LLM request. The original events are always
-preserved. Compaction policies are defined per content type (summary, reasoning,
-tool calls), composed across multiple compaction events, and configured at the
+operation.
+Instead of mutating or deleting events in the stored conversation, compaction
+appends overlay events that instruct the projection layer to present a reduced
+view when building the LLM request.
+The original events are always preserved.
+Compaction policies are defined per content type (summary, reasoning, tool
+calls), composed across multiple compaction events, and configured at the
 workspace and conversation level.
 
 ## Motivation
 
-Long-running conversations degrade LLM performance. Research confirms that when
-models take a wrong turn early in a conversation, they don't recover (see:
-[Issue #57]). Even when the conversation stays on track, growing context windows
-cause:
+Long-running conversations degrade LLM performance.
+Research confirms that when models take a wrong turn early in a conversation,
+they don't recover (see: [Issue #57]).
+Even when the conversation stays on track, growing context windows cause:
 
-1. **Higher cost.** Every cached and uncached input token is billed. Tool call
-   responses — file contents, grep results, test output — dominate the token
-   count in coding conversations.
+1. **Higher cost.** Every cached and uncached input token is billed.
+   Tool call responses — file contents, grep results, test output — dominate
+   the token count in coding conversations.
 2. **Slower responses.** More input tokens means higher time-to-first-token.
-3. **Lower quality.** Models lose focus in long contexts. Obsolete tool results
-   and abandoned tangents actively mislead the model.
+3. **Lower quality.** Models lose focus in long contexts.
+   Obsolete tool results and abandoned tangents actively mislead the model.
 4. **Context window overflow.** Eventually the conversation exceeds the model's
    window and fails outright.
 
 Today, users work around this by forking the last turn (`jp conversation fork
---last 1`) and losing all prior context. This is effective but blunt — it
-discards useful context along with the noise.
+--last 1`) and losing all prior context.
+This is effective but blunt — it discards useful context along with the noise.
 
 JP needs a way to *selectively* reduce conversation size while preserving the
-context that matters. Multiple existing RFDs defer to this one:
+context that matters.
+Multiple existing RFDs defer to this one:
 
 - [RFD 011] (System Notification Queue): "If JP ever implements conversation
   compaction..."
@@ -46,10 +49,10 @@ context that matters. Multiple existing RFDs defer to this one:
 
 [RFD 036] proposed compaction as a destructive transformation of the
 `ConversationStream` — strategies that mutate or replace events, with
-fork-by-default as a safety net. This RFD supersedes that design with a
-non-destructive approach: compaction events are appended to the stream and
-define a *projection* of the original events, preserving the full history while
-presenting a reduced view to the LLM.
+fork-by-default as a safety net.
+This RFD supersedes that design with a non-destructive approach: compaction
+events are appended to the stream and define a *projection* of the original
+events, preserving the full history while presenting a reduced view to the LLM.
 
 ## Design
 
@@ -57,7 +60,8 @@ presenting a reduced view to the LLM.
 
 A compaction event is an [`InternalEvent`][InternalEvent] variant — like
 `ConfigDelta` — that modifies how *preceding* events are interpreted when
-building the LLM request. It does not modify or delete any existing events.
+building the LLM request.
+It does not modify or delete any existing events.
 
 ```
 InternalEvent::ConfigDelta  → "from here on, use this config"
@@ -65,9 +69,9 @@ InternalEvent::Compaction   → "when building the LLM view, apply these
                                policies to events in this range"
 ```
 
-The original events remain in `events.json`. The projection layer in
-`Thread::into_parts()` reads all compaction events, builds a projection plan,
-and yields the appropriate view to the provider.
+The original events remain in `events.json`.
+The projection layer in `Thread::into_parts()` reads all compaction events,
+builds a projection plan, and yields the appropriate view to the provider.
 
 ### User-Facing Behavior
 
@@ -78,7 +82,8 @@ jp conversation compact [ID] [OPTIONS]
 ```
 
 Compacts the active conversation (or the specified one) by appending a
-compaction event. The original events are untouched.
+compaction event.
+The original events are untouched.
 
 ```sh
 # Compact with workspace defaults
@@ -99,28 +104,29 @@ jp conversation compact --dry-run
 
 **Flags:**
 
-| Flag               | Default               | Description                              |
-|--------------------|-----------------------|------------------------------------------|
-| `--profile <name>` | `default`             | Named compaction profile from config.    |
-| `--from <bound>`   | start of conversation | Start of the compacted range             |
-|                    |                       | (inclusive).                             |
-| `--to <bound>`     | end of conversation   | End of the compacted range (inclusive).  |
-| `--keep <N>`       | from config           | Shorthand for `--to` N turns ago.        |
-| `--dry-run`        | `false`               | Preview mechanical effects without       |
-|                    |                       | applying.                                |
+| Flag               | Default               | Description                             |
+| ------------------ | --------------------- | --------------------------------------- |
+| `--profile <name>` | `default`             | Named compaction profile from config.   |
+| `--from <bound>`   | start of conversation | Start of the compacted range            |
+|                    |                       | (inclusive).                            |
+| `--to <bound>`     | end of conversation   | End of the compacted range (inclusive). |
+| `--keep <N>`       | from config           | Shorthand for `--to` N turns ago.       |
+| `--dry-run`        | `false`               | Preview mechanical effects without      |
+|                    |                       | applying.                               |
 
 Range bounds accept several formats:
 
-| Value            | Example       | Meaning                                  |
-|------------------|---------------|------------------------------------------|
-| Positive integer | `--from 5`    | Absolute turn index (0-based).           |
-| Negative integer | `--to -3`     | 3 turns before the last turn.            |
-| Duration string  | `--from 5h`   | Time ago (resolved to a turn index).     |
-| `last`           | `--from last` | Turn of the most recent compaction       |
-|                  |               | event, or start if none.                 |
+| Value            | Example       | Meaning                              |
+| ---------------- | ------------- | ------------------------------------ |
+| Positive integer | `--from 5`    | Absolute turn index (0-based).       |
+| Negative integer | `--to -3`     | 3 turns before the last turn.        |
+| Duration string  | `--from 5h`   | Time ago (resolved to a turn index). |
+| `last`           | `--from last` | Turn of the most recent compaction   |
+|                  |               | event, or start if none.             |
 
-`--from` without a value defaults to `last`. All bounds are **resolved to
-absolute turn indices at creation time** and stored as integers.
+`--from` without a value defaults to `last`.
+All bounds are **resolved to absolute turn indices at creation time** and stored
+as integers.
 
 #### The `--compact` Flag on `query`
 
@@ -132,9 +138,9 @@ jp query --compact -- "Continue working on the feature"
 jp query --compact=heavy "Continue working on the feature"
 ```
 
-Equivalent to `jp conversation compact` followed by `jp query`. `--compact`
-alone uses the conversation's default profile; `--compact=<name>` uses the named
-profile.
+Equivalent to `jp conversation compact` followed by `jp query`.
+`--compact` alone uses the conversation's default profile; `--compact=<name>`
+uses the named profile.
 
 #### The `--compact` Flag on `fork`
 
@@ -146,8 +152,8 @@ jp conversation fork --compact
 jp conversation fork --compact=heavy
 ```
 
-Forks the conversation and appends a compaction event to the fork. Uses the
-forked conversation's resolved compaction config.
+Forks the conversation and appends a compaction event to the fork.
+Uses the forked conversation's resolved compaction config.
 
 #### Viewing Compacted Conversations
 
@@ -244,14 +250,14 @@ pub enum ToolCallPolicy {
 Transformations fall into two categories:
 
 - **Eager (store the result).** Expensive or non-deterministic operations —
-  LLM-generated summaries. The output is stored in the compaction event
-  (`SummaryPolicy { summary }`) because regenerating it would be costly and
-  potentially different each time.
+  LLM-generated summaries.
+  The output is stored in the compaction event (`SummaryPolicy { summary }`)
+  because regenerating it would be costly and potentially different each time.
 
 - **Lazy (store the policy).** Cheap, deterministic operations — stripping
-  reasoning, replacing tool responses with a status line, omitting events. The
-  policy is stored (`ToolCallPolicy::StripResponses`), and the projection layer
-  applies it at read time.
+  reasoning, replacing tool responses with a status line, omitting events.
+  The policy is stored (`ToolCallPolicy::StripResponses`), and the projection
+  layer applies it at read time.
 
 #### Integration with `InternalEvent`
 
@@ -266,29 +272,31 @@ pub enum InternalEvent {
 }
 ```
 
-Like `ConfigDelta`, compaction events are stream metadata — they are not visible
-to providers, not counted by `ConversationStream::len()`, and are preserved by
-`retain()`.
+Like `ConfigDelta`, compaction events are stream metadata — they are not
+visible to providers, not counted by `ConversationStream::len()`, and are
+preserved by `retain()`.
 
 ### Projection Layer
 
 The projection layer transforms the raw event stream into the view sent to the
-LLM. It is applied in `Thread::into_parts()`, which already filters events via
+LLM.
+It is applied in `Thread::into_parts()`, which already filters events via
 `is_provider_visible()`.
 
 #### Algorithm
 
 1. **Collect** all `Compaction` events from the stream.
-2. **For each** conversation event at turn T with content type C:
-   a. Find all compaction events where `from_turn <= T <= to_turn` and the
-      policy for C is `Some`.
-   b. Of those, the one with the **latest timestamp** wins.
-   c. Apply the winning policy: keep, omit, strip, or substitute.
+2. **For each** conversation event at turn T with content type C: a.
+   Find all compaction events where `from_turn <= T <= to_turn` and the policy
+   for C is `Some`. b.
+   Of those, the one with the **latest timestamp** wins. c.
+   Apply the winning policy: keep, omit, strip, or substitute.
 3. **When `summary` is set**: omit ALL provider-visible events in the range
-   (messages, reasoning, tool calls). Inject a synthetic `ChatRequest` /
-   `ChatResponse::Message` pair at the `from_turn` position containing the
-   pre-computed summary. When `summary` is set, the `reasoning` and `tool_calls`
-   policies are ignored for events in the range.
+   (messages, reasoning, tool calls).
+   Inject a synthetic `ChatRequest` / `ChatResponse::Message` pair at the
+   `from_turn` position containing the pre-computed summary.
+   When `summary` is set, the `reasoning` and `tool_calls` policies are ignored
+   for events in the range.
 
 This logic lives in a new `ConversationStream::projected_iter()` method (or
 similar), called by `Thread::into_parts()` instead of the raw iterator.
@@ -351,10 +359,11 @@ Projected view:
   ...turns 3+ uncompacted...
 ```
 
-Reasoning is stripped, tool arguments and responses are compacted. Note that
-`fs_read_file` at id="2" keeps its arguments (per-tool hint `request = "keep"`)
-while `fs_create_file` and `fs_modify_file` have their arguments stripped
-(per-tool hint `request = "strip"` because they carry large file content).
+Reasoning is stripped, tool arguments and responses are compacted.
+Note that `fs_read_file` at id="2" keeps its arguments (per-tool hint `request =
+"keep"`) while `fs_create_file` and `fs_modify_file` have their arguments
+stripped (per-tool hint `request = "strip"` because they carry large file
+content).
 Messages and conversation structure are preserved.
 
 With the `heavy` profile (`summary: Summarize`):
@@ -377,23 +386,25 @@ Projected view:
 
 The two profiles show the distinction:
 
-- **`default` (mechanical):** Conversation structure is preserved. Reasoning is
-  stripped, tool responses are replaced with status lines. Messages and tool
-  call requests remain — the model sees the full flow of what happened, minus
-  the bulk.
+- **`default` (mechanical):** Conversation structure is preserved.
+  Reasoning is stripped, tool responses are replaced with status lines.
+  Messages and tool call requests remain — the model sees the full flow of what
+  happened, minus the bulk.
 - **`heavy` (summarization):** Everything in the range is replaced by a single
-  summary. The summarizer reads ALL raw events (messages, reasoning, tool calls)
-  to produce the summary, so tool usage and decisions are captured in the text.
+  summary.
+  The summarizer reads ALL raw events (messages, reasoning, tool calls) to
+  produce the summary, so tool usage and decisions are captured in the text.
   No orphaned events remain.
 
 When `summary` is set, `reasoning` and `tool_calls` are ignored — the summary
-replaces everything. They only apply when compacting without summarization.
+replaces everything.
+They only apply when compacting without summarization.
 
 #### Stacking Semantics
 
-Multiple compaction events compose independently per content type. For each
-event, per content type, the latest compaction whose range covers that event
-wins.
+Multiple compaction events compose independently per content type.
+For each event, per content type, the latest compaction whose range covers that
+event wins.
 
 Example:
 
@@ -402,21 +413,22 @@ Compaction A (turn 20): from=0, to=20, summary=SummaryPolicy("...")
 Compaction B (turn 30): from=0, to=30, tool_calls=Strip { request: false, response: true }
 ```
 
-| Turn | Event type   | A            | B     | Winner        |
-|------|--------------|--------------|-------|---------------|
-| 5    | Any          | Summarize    | —     | A: Summarize  |
-| 5    | Tool calls   | Summarize    | Strip | A: Summarize* |
-| 25   | Tool calls   | out of range | Strip | B: Strip      |
-| 25   | Reasoning    | out of range | —     | Keep          |
+| Turn | Event type | A            | B     | Winner         |
+| ---- | ---------- | ------------ | ----- | -------------- |
+| 5    | Any        | Summarize    | —     | A: Summarize   |
+| 5    | Tool calls | Summarize    | Strip | A: Summarize\* |
+| 25   | Tool calls | out of range | Strip | B: Strip       |
+| 25   | Reasoning  | out of range | —     | Keep           |
 
 \* `summary` takes precedence over per-type policies when both cover an event.
 
 #### Summary Overlap Resolution
 
 Summaries are holistic representations of a range — they cannot be split or
-sliced. Partial overlaps between summary ranges would produce irreconcilable
-conflicts (two summaries covering partially the same turns, potentially
-contradicting each other).
+sliced.
+Partial overlaps between summary ranges would produce irreconcilable conflicts
+(two summaries covering partially the same turns, potentially contradicting each
+other).
 
 **Rule: when creating a new compaction with `summary: Some(SummaryPolicy)`, if
 any existing summary compaction partially overlaps with the new range, the new
@@ -424,31 +436,35 @@ range is auto-extended to fully subsume the existing one.**
 
 Formally: given new range `[X, Y]` and existing summary range `[A, B]`, if the
 ranges intersect but neither fully contains the other, extend to `[min(X, A),
-max(Y, B)]`. Repeat until no partial overlaps remain. The summarizer then reads
-raw events for the extended range.
+max(Y, B)]`.
+Repeat until no partial overlaps remain.
+The summarizer then reads raw events for the extended range.
 
-This constraint applies only when `summary` is set. All other policies operate
-per-event and compose naturally with partial overlaps.
+This constraint applies only when `summary` is set.
+All other policies operate per-event and compose naturally with partial
+overlaps.
 
 #### Raw-Stream Invariant
 
 **Summarization always reads the raw (non-compacted) event stream.** The
-summarizer sees the original messages, not prior summaries. This prevents
-compound information loss — summarizing a summary degrades quality at each step.
+summarizer sees the original messages, not prior summaries.
+This prevents compound information loss — summarizing a summary degrades
+quality at each step.
 
 When compaction B's range overlaps with compaction A's range, B's summarizer
-reads the original events for its full range, ignoring A's summary entirely. At
-projection time, B's summary wins for the overlapping region (it has a later
+reads the original events for its full range, ignoring A's summary entirely.
+At projection time, B's summary wins for the overlapping region (it has a later
 timestamp), and it is a faithful summary of the originals.
 
-This is already guaranteed by the additive design — the raw events are always in
-`events.json` — but it is worth stating as an invariant: **no code path should
-feed a projected view to a summarizer.**
+This is already guaranteed by the additive design — the raw events are always
+in `events.json` — but it is worth stating as an invariant: **no code path
+should feed a projected view to a summarizer.**
 
 ### Strategies
 
 A strategy is a function that analyzes a `ConversationStream` and produces a
-`Compaction` event. Strategies do not mutate the stream.
+`Compaction` event.
+Strategies do not mutate the stream.
 
 #### Mechanical Strategies
 
@@ -464,28 +480,32 @@ specified range.
 ##### `strip-tools`
 
 Produces a compaction with `tool_calls: Some(ToolCallPolicy::Strip { .. })` for
-the specified range. At projection time, tool response content is replaced with
-a status line (`[compacted] {tool_name}: {success|error}`) and/or request
-arguments are replaced with a compact summary. Which fields are stripped depends
-on the profile and per-tool hints.
+the specified range.
+At projection time, tool response content is replaced with a status line
+(`[compacted] {tool_name}: {success|error}`) and/or request arguments are
+replaced with a compact summary.
+Which fields are stripped depends on the profile and per-tool hints.
 
-**Impact:** High. Tool responses and arguments (especially for file-writing
-tools) dominate token count in coding conversations.
+**Impact:** High.
+Tool responses and arguments (especially for file-writing tools) dominate token
+count in coding conversations.
 
 #### LLM-Assisted Strategies
 
 ##### `summarize`
 
 Sends the raw events in the specified range to an LLM with instructions to
-produce a concise summary. Produces a compaction with `summary:
-Some(SummaryPolicy { summary })`. When set, this replaces all provider-visible
-events in the range.
+produce a concise summary.
+Produces a compaction with `summary: Some(SummaryPolicy { summary })`.
+When set, this replaces all provider-visible events in the range.
 
 The summarization prompt instructs the model to preserve key decisions, file
-paths, error resolutions, and the current state of the task. The model and
-prompt are configurable per-profile (see [Configuration](#configuration)).
+paths, error resolutions, and the current state of the task.
+The model and prompt are configurable per-profile (see
+[Configuration](#configuration)).
 
-**Impact:** High. Replaces an arbitrary number of turns with a short summary.
+**Impact:** High.
+Replaces an arbitrary number of turns with a short summary.
 
 ### Configuration
 
@@ -524,17 +544,18 @@ model = "anthropic/claude-haiku"
 reasoning = "strip"
 ```
 
-Profiles define which per-type policies to apply. The range (`from`, `to`,
-`keep_last`) comes from the CLI flags or the top-level `keep_last` default. A
-profile does not encode a range — ranges are an invocation-time concern.
+Profiles define which per-type policies to apply.
+The range (`from`, `to`, `keep_last`) comes from the CLI flags or the top-level
+`keep_last` default.
+A profile does not encode a range — ranges are an invocation-time concern.
 
 Conversation-level overrides (via `--cfg`) can change any of these for a
 specific conversation.
 
 ### Per-Tool Compaction Hints
 
-Tools can declare how their calls should be compacted. This is a new optional
-field in the tool configuration:
+Tools can declare how their calls should be compacted.
+This is a new optional field in the tool configuration:
 
 ```toml
 [conversation.tools.fs_read_file.compaction]
@@ -542,14 +563,14 @@ request = "keep" # "keep" | "strip"
 response = "strip" # "keep" | "strip"
 ```
 
-Per-tool hints override the profile's `Strip` policy for individual tools. A
-tool with `response = "keep"` is exempted from response stripping even under a
+Per-tool hints override the profile's `Strip` policy for individual tools.
+A tool with `response = "keep"` is exempted from response stripping even under a
 policy that sets `response: true`.
 
 Example defaults for the JP project:
 
 | Tool             | `request` | `response` |
-|------------------|-----------|------------|
+| ---------------- | --------- | ---------- |
 | `fs_read_file`   | `keep`    | `strip`    |
 | `fs_grep_files`  | `keep`    | `strip`    |
 | `cargo_check`    | `keep`    | `strip`    |
@@ -558,48 +579,53 @@ Example defaults for the JP project:
 | `fs_modify_file` | `strip`   | `strip`    |
 | `git_commit`     | `strip`   | `keep`     |
 
-These are workspace-level tool configurations, not built-in defaults. Each
-workspace defines its own tools and compaction hints.
+These are workspace-level tool configurations, not built-in defaults.
+Each workspace defines its own tools and compaction hints.
 
 ## Drawbacks
 
 - **Summaries are lossy.** Even though the original events are preserved, the
-  LLM only sees the compacted view. A poor summary can mislead the model worse
-  than a long conversation. Mitigation: summaries are generated from raw events
-  (never from prior summaries), and the summarization model and prompt are
-  configurable.
+  LLM only sees the compacted view.
+  A poor summary can mislead the model worse than a long conversation.
+  Mitigation: summaries are generated from raw events (never from prior
+  summaries), and the summarization model and prompt are configurable.
 
 - **Storage growth.** Compaction events add to the stream rather than reducing
-  stored size. Summary text in `SummaryPolicy` can be non-trivial. In practice
-  this is small compared to the tool responses they overlay, but it is additive
-  rather than reductive.
+  stored size.
+  Summary text in `SummaryPolicy` can be non-trivial.
+  In practice this is small compared to the tool responses they overlay, but it
+  is additive rather than reductive.
 
 - **Projection complexity.** The projection layer adds a code path between the
-  raw stream and the LLM. Bugs in projection logic could cause the LLM to see
-  inconsistent state. Mitigation: the projection is a pure function of the
-  stream, fully testable without LLM calls.
+  raw stream and the LLM.
+  Bugs in projection logic could cause the LLM to see inconsistent state.
+  Mitigation: the projection is a pure function of the stream, fully testable
+  without LLM calls.
 
 - **Prompt cache invalidation.** Adding a compaction event changes the projected
-  prefix, invalidating any cached conversation history. System prompt caching is
-  unaffected (it is a separate prefix). This is acceptable for manual compaction
-  but would be problematic for automatic compaction.
+  prefix, invalidating any cached conversation history.
+  System prompt caching is unaffected (it is a separate prefix).
+  This is acceptable for manual compaction but would be problematic for
+  automatic compaction.
 
 - **`--dry-run` cannot preview summaries.** For mechanical strategies, dry-run
-  accurately shows the projected view. For summarization, dry-run can only
-  report "will generate a summary for turns X-Y using model Z" — it cannot show
-  the actual summary without spending tokens on an LLM call, and re-running
-  without `--dry-run` would produce a different summary anyway.
+  accurately shows the projected view.
+  For summarization, dry-run can only report "will generate a summary for turns
+  X-Y using model Z" — it cannot show the actual summary without spending
+  tokens on an LLM call, and re-running without `--dry-run` would produce a
+  different summary anyway.
 
 ## Alternatives
 
 ### Destructive compaction ([RFD 036])
 
 The original design: strategies mutate the `ConversationStream` directly, with
-fork-by-default as a safety net. Rejected because:
+fork-by-default as a safety net.
+Rejected because:
 
-1. **Information loss.** Once events are deleted, they're gone. Fork mitigates
-   but doesn't solve — you end up with two conversations, one intact and one
-   damaged.
+1. **Information loss.** Once events are deleted, they're gone.
+   Fork mitigates but doesn't solve — you end up with two conversations, one
+   intact and one damaged.
 2. **No undo.** Reverting a compaction requires restoring from the fork.
 3. **Fork proliferation.** Each compaction creates a new conversation,
    cluttering the conversation list.
@@ -608,69 +634,75 @@ fork-by-default as a safety net. Rejected because:
 
 ### Automatic compaction on every turn
 
-Compact transparently when approaching the context window limit. Rejected for
-this RFD: compaction is lossy and should be an explicit user decision. Automatic
-compaction has additional design constraints (caching interaction, interval
-control, trigger conditions) that warrant a separate proposal.
+Compact transparently when approaching the context window limit.
+Rejected for this RFD: compaction is lossy and should be an explicit user
+decision.
+Automatic compaction has additional design constraints (caching interaction,
+interval control, trigger conditions) that warrant a separate proposal.
 
 ### Single monolithic compact operation
 
-One "compact" that does everything. Rejected: different conversations need
-different compaction. A coding conversation benefits from tool response
-stripping; a discussion benefits from summarization. Named profiles with
-per-type policies let users tailor the operation.
+One "compact" that does everything.
+Rejected: different conversations need different compaction.
+A coding conversation benefits from tool response stripping; a discussion
+benefits from summarization.
+Named profiles with per-type policies let users tailor the operation.
 
 ## Non-Goals
 
 - **Automatic compaction.** This RFD covers explicit, user-initiated compaction.
   Automatic compaction (triggered by context window proximity or turn count
   thresholds) has different design constraints — caching interaction, trigger
-  intervals, rolling window semantics — and is deferred to a follow-up RFD. The
-  config namespace (`conversation.compaction.auto`) is reserved.
+  intervals, rolling window semantics — and is deferred to a follow-up RFD.
+  The config namespace (`conversation.compaction.auto`) is reserved.
 
 - **Provider-delegated compaction.** Some providers offer server-side compaction
   ([Anthropic][anthropic-compaction] returns readable summaries,
-  [OpenAI][openai-compaction] returns opaque encrypted blobs). In practice,
-  readable provider summaries offer no advantage over JP's own `SummaryPolicy`
-  using the same model, and opaque formats cannot be integrated into JP's event
-  model. Provider delegation may become interesting if providers offer
-  compaction capabilities that can't be replicated client-side, but that's not
-  the case today.
+  [OpenAI][openai-compaction] returns opaque encrypted blobs).
+  In practice, readable provider summaries offer no advantage over JP's own
+  `SummaryPolicy` using the same model, and opaque formats cannot be integrated
+  into JP's event model.
+  Provider delegation may become interesting if providers offer compaction
+  capabilities that can't be replicated client-side, but that's not the case
+  today.
 
 - **Custom external strategies.** An extension point where an external binary
   receives the raw events and range, and returns replacement events that JP
-  stores in the compaction event. This is analogous to how tools work today
-  (external process, structured I/O) and would enable domain-specific compaction
-  logic. The compaction event model supports this (replacement events are just
-  the policy payloads), but the protocol and CLI integration are deferred.
+  stores in the compaction event.
+  This is analogous to how tools work today (external process, structured I/O)
+  and would enable domain-specific compaction logic.
+  The compaction event model supports this (replacement events are just the
+  policy payloads), but the protocol and CLI integration are deferred.
 
 - **Tool subsumption protocol.** [RFD 036] proposed an `Action::Subsumes` tool
   protocol extension where tools could declare that one call subsumes another
-  (e.g., `read_file(1,10)` subsumes `read_file(2,5)`). This is a refinement that
-  can be added later without changing the compaction event model.
+  (e.g., `read_file(1,10)` subsumes `read_file(2,5)`).
+  This is a refinement that can be added later without changing the compaction
+  event model.
 
 - **Interactive tangent classification.** [RFD 036] proposed a
   `classify-tangents` strategy that uses an LLM to identify off-topic turns.
   Interesting but orthogonal to the core compaction model.
 
 - **Tool call deduplication.** Identifying and removing duplicate tool calls
-  (same name, same arguments) across turns. While potentially useful, it adds
-  complexity to the compaction model (per-call selective policies) for marginal
-  benefit. Can be added as a `ToolCallPolicy::Selective` variant later if
-  needed.
+  (same name, same arguments) across turns.
+  While potentially useful, it adds complexity to the compaction model (per-call
+  selective policies) for marginal benefit.
+  Can be added as a `ToolCallPolicy::Selective` variant later if needed.
 
 - **Conversation merging.** Combining two conversations into one.
 
 - **Interactive stream editing.** A `$EDITOR`-based workflow for manually
   removing or reordering events in the raw stream (similar to `git rebase -i`).
-  This is a separate, destructive operation on the stored events — distinct from
-  compaction's non-destructive overlay model — and warrants its own RFD.
+  This is a separate, destructive operation on the stored events — distinct
+  from compaction's non-destructive overlay model — and warrants its own RFD.
 
 ## Risks and Open Questions
 
 - **Summarization prompt design.** The summary needs to preserve the right
-  context — key decisions, file paths, error resolutions, task state. What
-  should the prompt look like? This needs experimentation during implementation.
+  context — key decisions, file paths, error resolutions, task state.
+  What should the prompt look like?
+  This needs experimentation during implementation.
   We should take inspiration from Anthropic's default summarization prompt.
 
 - **Turn boundary correctness.** Range resolution must handle edge cases:
@@ -678,14 +710,14 @@ per-type policies let users tailor the operation.
   The existing `fork --last` implementation is a reference.
 
 - **Config delta preservation.** `ConversationStream` interleaves `ConfigDelta`
-  events with conversation events. The projection layer must preserve config
-  deltas correctly — compacting a range should not affect config state for
-  events outside that range.
+  events with conversation events.
+  The projection layer must preserve config deltas correctly — compacting a
+  range should not affect config state for events outside that range.
 
 - **Summary injection and provider expectations.** The synthetic
   `ChatRequest`/`ChatResponse` pair injected for summaries must maintain the
-  user/assistant alternation that providers expect. Needs testing across
-  Anthropic, OpenAI, Google, and local providers.
+  user/assistant alternation that providers expect.
+  Needs testing across Anthropic, OpenAI, Google, and local providers.
 
 ## Implementation Plan
 
@@ -698,7 +730,8 @@ per-type policies let users tailor the operation.
    (preserved, not counted).
 4. Add unit tests for serialization roundtrip and stream invariants.
 
-Can be merged independently. No behavioral changes.
+Can be merged independently.
+No behavioral changes.
 
 ### Phase 2: Projection Layer
 
@@ -710,13 +743,13 @@ Can be merged independently. No behavioral changes.
 5. Add unit tests for each policy type, stacking, and summary overlap
    auto-extension.
 
-Depends on Phase 1. After this phase, compaction events in the stream will
-affect what the LLM sees.
+Depends on Phase 1.
+After this phase, compaction events in the stream will affect what the LLM sees.
 
 ### Phase 3: Mechanical Strategies and CLI
 
-1. Implement strategy functions: `strip_reasoning`, `strip_tools`. Each produces
-   a `Compaction` event.
+1. Implement strategy functions: `strip_reasoning`, `strip_tools`.
+   Each produces a `Compaction` event.
 2. Implement range bound resolution (negative integers, duration strings, `last`
    → absolute turn index).
 3. Add the `jp conversation compact` CLI command with `--profile`, `--from`,
@@ -736,8 +769,9 @@ Depends on Phase 2.
 4. Wire profiles into the CLI (`--profile` flag, `--compact` defaults).
 5. Add config tests.
 
-Depends on Phase 3. Can be partially parallelized with Phase 3 (config types can
-be defined before the CLI is wired up).
+Depends on Phase 3.
+Can be partially parallelized with Phase 3 (config types can be defined before
+the CLI is wired up).
 
 ### Phase 5: LLM-Assisted Summarization
 
@@ -747,7 +781,8 @@ be defined before the CLI is wired up).
 3. Add `--compact[=profile]` to `jp query`.
 4. Add integration tests (with mock LLM).
 
-Depends on Phase 2. Can proceed in parallel with Phases 3 and 4.
+Depends on Phase 2.
+Can proceed in parallel with Phases 3 and 4.
 
 ## References
 
@@ -755,13 +790,13 @@ Depends on Phase 2. Can proceed in parallel with Phases 3 and 4.
 - [RFD 034] — Inquiry-Specific Assistant Configuration (defers compaction)
 - [RFD 036] — Conversation Compaction (superseded by this RFD)
 - [Issue #57] — Make conversation management more powerful
-- [Multi-turn degradation paper][paper] — cited in Issue #57
+- [Multi-turn degradation paper][paper] — cited in Issue \#57
 
+[InternalEvent]: https://github.com/dcdpr/jp/blob/main/crates/jp_conversation/src/stream.rs
+[Issue #57]: https://github.com/dcdpr/jp/issues/57
 [RFD 011]: 011-system-notification-queue.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md
 [RFD 036]: 036-conversation-compaction.md
-[InternalEvent]: https://github.com/dcdpr/jp/blob/main/crates/jp_conversation/src/stream.rs
-[Issue #57]: https://github.com/dcdpr/jp/issues/57
 [anthropic-compaction]: https://docs.anthropic.com/en/docs/build-with-claude/compaction.md
 [openai-compaction]: https://developers.openai.com/api/docs/guides/compaction.md
 [paper]: https://arxiv.org/abs/2505.06120

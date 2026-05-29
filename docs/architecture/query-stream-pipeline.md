@@ -1,9 +1,10 @@
 # Query Stream Pipeline Architecture
 
 This document describes the target architecture for the `jp query` command's
-stream handling pipeline. It addresses the architectural issues identified in
-[architecture.md](architecture.md) and provides a blueprint for refactoring
-toward better separation of concerns, testability, and maintainability.
+stream handling pipeline.
+It addresses the architectural issues identified in [architecture.md] and
+provides a blueprint for refactoring toward better separation of concerns,
+testability, and maintainability.
 
 ## Table of Contents
 
@@ -34,12 +35,13 @@ toward better separation of concerns, testability, and maintainability.
 - [Testing Strategy](#testing-strategy)
 - [Migration Path](#migration-path)
 
----
+-----
 
 ## Overview
 
 The query stream pipeline handles the core interaction loop between the user,
-LLM providers, and tools. It is responsible for:
+LLM providers, and tools.
+It is responsible for:
 
 1. Receiving streamed events from LLM providers
 2. Rendering content to the terminal with low latency
@@ -49,32 +51,33 @@ LLM providers, and tools. It is responsible for:
 6. Handling interrupts (Ctrl+C) gracefully
 
 The current implementation suffers from tight coupling, mixed concerns, and
-difficult testability. This architecture introduces clear component boundaries,
-a state machine for turn management, and separation between rendering and
-persistence.
+difficult testability.
+This architecture introduces clear component boundaries, a state machine for
+turn management, and separation between rendering and persistence.
 
----
+-----
 
 ## Design Goals
 
-| Goal | Description |
-|------|-------------|
-| **Low-latency rendering** | Display LLM output as soon as possible, using minimal buffering |
-| **Separation of concerns** | Each component has a single responsibility |
-| **Testability** | Components can be unit tested in isolation |
-| **Order preservation** | Events are rendered and persisted in correct order |
-| **Graceful interrupts** | Ctrl+C provides interactive options, not just abort |
-| **Resilient execution** | Transient errors are retried without losing progress |
-| **Parallel tool execution** | Multiple tools can execute concurrently |
+| Goal                        | Description                                                     |
+| --------------------------- | --------------------------------------------------------------- |
+| **Low-latency rendering**   | Display LLM output as soon as possible, using minimal buffering |
+| **Separation of concerns**  | Each component has a single responsibility                      |
+| **Testability**             | Components can be unit tested in isolation                      |
+| **Order preservation**      | Events are rendered and persisted in correct order              |
+| **Graceful interrupts**     | Ctrl+C provides interactive options, not just abort             |
+| **Resilient execution**     | Transient errors are retried without losing progress            |
+| **Parallel tool execution** | Multiple tools can execute concurrently                         |
 
----
+-----
 
 ## Core Concepts
 
 ### Turns and Cycles
 
 A **turn** is the complete interaction initiated by a user query until the
-assistant provides a final response. A turn consists of one or more **cycles**.
+assistant provides a final response.
+A turn consists of one or more **cycles**.
 
 A **cycle** is a single request-response exchange with the LLM:
 
@@ -148,14 +151,15 @@ pub enum Event {
 
 **Key properties:**
 
-1. **Index-based grouping**: Each `index` represents one logical event. Parts
-   with the same index are accumulated together.
+1. **Index-based grouping**: Each `index` represents one logical event.
+   Parts with the same index are accumulated together.
 
-2. **Flush boundary**: A `Flush { index }` signals that all parts for that
-   index are complete and should be merged into a single `ConversationEvent`.
+2. **Flush boundary**: A `Flush { index }` signals that all parts for that index
+   are complete and should be merged into a single `ConversationEvent`.
 
-3. **Ordering**: Indices are assigned in order. Flush events arrive in index
-   order. This preserves the sequence of events.
+3. **Ordering**: Indices are assigned in order.
+   Flush events arrive in index order.
+   This preserves the sequence of events.
 
 4. **Tool calls are single-part**: The `ToolCallRequestAggregator` ensures tool
    call requests are delivered as complete, single-part events (never chunked).
@@ -180,17 +184,18 @@ Flush { index: 3 }                                      → Tool call 2 complete
 Finished(Completed)                                     → CYCLE ENDS HERE
 ```
 
-**Important:** When tool calls are present, the cycle ends with `Finished`. The
-LLM cannot reason about tool results until we execute the tools and send back
-`ToolCallResponse`s in a NEW cycle. The example above shows a single cycle
-that ends with two pending tool calls.
+**Important:** When tool calls are present, the cycle ends with `Finished`.
+The LLM cannot reason about tool results until we execute the tools and send
+back `ToolCallResponse`s in a NEW cycle.
+The example above shows a single cycle that ends with two pending tool calls.
 
 **Interleaved content within a cycle:** While it is technically possible for an
 LLM to interleave reasoning, message, and tool call content within a single
 cycle (e.g., message chunks at index 0, reasoning at index 1, more message at
-index 2), this does NOT mean the LLM is reasoning about tool results. Any
-reasoning within a cycle happens BEFORE tool execution, not after. Reasoning
-about tool results requires a follow-up cycle after we return `ToolCallResponse`s.
+index 2), this does NOT mean the LLM is reasoning about tool results.
+Any reasoning within a cycle happens BEFORE tool execution, not after.
+Reasoning about tool results requires a follow-up cycle after we return
+`ToolCallResponse`s.
 
 **Example of interleaved content (still single cycle):**
 
@@ -210,7 +215,8 @@ Flush { index: 3 }                                      → Tool call
 Finished(Completed)                                     → CYCLE ENDS
 ```
 
-In this example, the output order is: message → reasoning → message → tool call.
+In this example, the output order is: message → reasoning → message → tool
+call.
 The index determines rendering and persistence order, not the event type.
 
 ### Existing Types
@@ -218,6 +224,7 @@ The index determines rendering and persistence order, not the event type.
 The architecture uses existing types from the codebase:
 
 **`ConversationEvent`** (`jp_conversation::event`):
+
 ```rust
 pub struct ConversationEvent {
     pub timestamp: UtcDateTime,
@@ -236,6 +243,7 @@ pub enum EventKind {
 ```
 
 **`ChatResponse`** variants:
+
 ```rust
 pub enum ChatResponse {
     Reasoning { reasoning: String },
@@ -244,6 +252,7 @@ pub enum ChatResponse {
 ```
 
 **`ConversationStream`** (`jp_conversation::stream`):
+
 ```rust
 pub struct ConversationStream {
     base_config: Arc<AppConfig>,
@@ -253,6 +262,7 @@ pub struct ConversationStream {
 ```
 
 **`Thread`** (`jp_conversation::thread`):
+
 ```rust
 pub struct Thread {
     pub system_prompt: Option<String>,
@@ -263,9 +273,10 @@ pub struct Thread {
 ```
 
 The pipeline builds `ConversationEvent` instances and pushes them to
-`ConversationStream`. Persistence serializes `ConversationStream` to disk.
+`ConversationStream`.
+Persistence serializes `ConversationStream` to disk.
 
----
+-----
 
 ## Architecture Overview
 
@@ -342,12 +353,14 @@ The pipeline builds `ConversationEvent` instances and pushes them to
 ```
 
 **Note on Resilient Request:** The Turn Coordinator uses a `ResilientRequest`
-wrapper internally when making LLM requests. Since a turn can span multiple
-cycles (when tool calls are involved), the resilient wrapper is applied
-per-cycle, not per-turn. If cycle N fails after cycles 1..(N-1) succeeded,
-only cycle N is retried — previous cycles are already persisted.
+wrapper internally when making LLM requests.
+Since a turn can span multiple cycles (when tool calls are involved), the
+resilient wrapper is applied per-cycle, not per-turn.
+If cycle N fails after cycles 1..(
+N-1) succeeded, only cycle N is retried — previous cycles are already
+persisted.
 
----
+-----
 
 ## Component Details
 
@@ -355,16 +368,18 @@ only cycle N is retried — previous cycles are already persisted.
 
 Wraps a single request-response cycle with retry logic for transient errors.
 
-**Scope:** Per-cycle, not per-turn. If cycle 100 fails, cycles 1-99 are already
-persisted and unaffected.
+**Scope:** Per-cycle, not per-turn.
+If cycle 100 fails, cycles 1-99 are already persisted and unaffected.
 
 **Handles:**
+
 - Rate limits (429) — retry with backoff
 - Timeouts — retry N times
 - Empty responses — retry with modified prompt
 - Transient network errors — retry
 
 **Propagates (does not retry):**
+
 - Authentication errors
 - Unknown model errors
 - Budget/quota exhausted
@@ -403,6 +418,7 @@ fn resilient_request(request, max_retries = 3):
 The central orchestrator implementing a state machine for turn management.
 
 **Responsibilities:**
+
 - Drive state transitions based on events and signals
 - Route chunks to appropriate handlers (renderer, builder)
 - Manage request-response cycles (loop on tool calls)
@@ -410,6 +426,7 @@ The central orchestrator implementing a state machine for turn management.
 - Trigger persistence at cycle boundaries
 
 **Does NOT:**
+
 - Execute tools (delegates to Tool Coordinator)
 - Format output (delegates to Renderers)
 - Build events (delegates to Event Builder)
@@ -443,7 +460,8 @@ enum Action:
 
 Accumulates streamed chunks into complete `ConversationEvent` instances.
 
-**Key insight:** Uses index-based buffering. Each index gets its own buffer.
+**Key insight:** Uses index-based buffering.
+Each index gets its own buffer.
 On `Flush { index }`, the buffer for that index is finalized and pushed to
 `ConversationStream`.
 
@@ -502,6 +520,7 @@ fn handle_tool_response(response):
 ```
 
 **Properties:**
+
 - One index = one event type (never mixes reasoning and message)
 - Flush order matches index order (preserves sequence)
 - Tool calls are single-part (guaranteed by `ToolCallRequestAggregator`)
@@ -513,15 +532,17 @@ with minimal latency.
 
 **Scope:** This renderer is specifically for `ChatResponse` events from the LLM.
 It does NOT handle `ChatRequest` (user messages), `ToolCallRequest`, or other
-event types. The name explicitly reflects this limitation.
+event types.
+The name explicitly reflects this limitation.
 
 **Components:**
 
-1. **Buffer** (`jp_md::buffer::Buffer`): Accumulates raw string chunks until
-   a valid markdown block is formed. Emits blocks as soon as possible.
+1. **Buffer** (`jp_md::buffer::Buffer`): Accumulates raw string chunks until a
+   valid markdown block is formed.
+   Emits blocks as soon as possible.
 
-2. **Formatter** (`jp_md::format::Formatter`): Applies terminal formatting
-   (ANSI codes for bold, italic, code, etc.) to markdown blocks.
+2. **Formatter** (`jp_md::format::Formatter`): Applies terminal formatting (ANSI
+   codes for bold, italic, code, etc.) to markdown blocks.
 
 3. **Display Mode Handler**: Applies display configuration (e.g., reasoning
    hidden, truncated, or full).
@@ -619,6 +640,7 @@ fn flush():
 **Why `ChatResponse` input instead of `&str`:**
 
 By accepting `ChatResponse` directly, the renderer:
+
 1. Has explicit type information (reasoning vs message) without extra flags
 2. Can apply variant-specific display logic internally
 3. Makes the API self-documenting — callers know exactly what this renders
@@ -626,18 +648,19 @@ By accepting `ChatResponse` directly, the renderer:
 
 ### Tool Coordinator
 
-Manages parallel execution of multiple tool calls while preserving order for
-LLM responses.
+Manages parallel execution of multiple tool calls while preserving order for LLM
+responses.
 
 **Responsibilities:**
+
 - Spawn Tool Executors for each tool call (can be parallel)
 - Collect responses and reorder to match request order
 - Surface input prompts immediately (don't wait for order)
 - Buffer render output for ordered emission (optional, see below)
 - Manage cancellation token for all executors
 
-**Key insight:** Input prompts and render output CAN be out of order. Only the
-responses sent to the LLM MUST be in order.
+**Key insight:** Input prompts and render output CAN be out of order.
+Only the responses sent to the LLM MUST be in order.
 
 **State:**
 
@@ -659,13 +682,16 @@ enum ExecutorState:
 ```
 
 **Note:** `AwaitingInput(RunMode)` replaces the simpler "permission prompt"
-concept. The `RunMode` determines not just whether to run, but HOW to run:
+concept.
+The `RunMode` determines not just whether to run, but HOW to run:
+
 - `Ask` — prompt user each time
 - `Unattended` — run without prompts
 - `Edit` — let user edit arguments before running
 - `Skip` — skip execution entirely
 
 Similarly, `AwaitingInput(ResultMode)` controls what happens after execution:
+
 - `Ask` — prompt user before delivering result to LLM
 - `Unattended` — deliver result as-is
 - `Edit` — let user edit the result
@@ -801,12 +827,14 @@ ToolExecutor:
 ```
 
 **RunMode options** (see `jp_llm::tool`):
+
 - `Ask` — prompt user before execution (default for interactive)
 - `Unattended` — execute without prompts
 - `Edit` — open editor to modify arguments before execution
 - `Skip` — skip execution, return "skipped" response
 
 **ResultMode options**:
+
 - `Ask` — prompt user before delivering result
 - `Unattended` — deliver result as-is (default)
 - `Edit` — open editor to modify result before delivery
@@ -814,8 +842,8 @@ ToolExecutor:
 
 ### Tool Renderer
 
-Formats tool-related output for the terminal. "Dumb" renderer — only formats
-what it's told, doesn't make decisions.
+Formats tool-related output for the terminal.
+"Dumb" renderer — only formats what it's told, doesn't make decisions.
 
 **Input types:**
 
@@ -941,6 +969,8 @@ Tools are cancelled using `tokio_util::sync::CancellationToken`:
 5. Local tools: abort the `wait_with_output` task (orphans the process)
 6. MCP tools: race `mcp_client.call_tool()` against `token.cancelled()`
 
+<!-- end list -->
+
 ```
 ToolCoordinator:
     cancellation_token: CancellationToken  // parent
@@ -967,7 +997,7 @@ ToolExecutor (MCP):
     }
 ```
 
----
+-----
 
 ## State Machine
 
@@ -1080,13 +1110,14 @@ The Turn Coordinator implements this state machine:
 **Key clarifications:**
 
 1. **Persistence at cycle boundaries:** Persistence occurs at the end of EACH
-   cycle, not just at turn end. After streaming completes and tools execute,
-   we persist before continuing to the next cycle.
+   cycle, not just at turn end.
+   After streaming completes and tools execute, we persist before continuing to
+   the next cycle.
 
 2. **Replying starts a NEW turn:** When user presses Ctrl+C and chooses "Reply",
-   their input becomes a new `ChatRequest` that starts a fresh turn. The current
-   partial turn is persisted first, then the CLI returns to Idle, then
-   immediately starts a new turn with the user's reply.
+   their input becomes a new `ChatRequest` that starts a fresh turn.
+   The current partial turn is persisted first, then the CLI returns to Idle,
+   then immediately starts a new turn with the user's reply.
 
 3. **Continuing loops back to Streaming:** After tool responses are collected
    and persisted, we send them to the LLM and enter `Streaming` again for the
@@ -1098,26 +1129,26 @@ The Turn Coordinator implements this state machine:
 
 **State transitions:**
 
-| From | Event | To | Action |
-|------|-------|-----|--------|
-| Idle | start_turn | Streaming | Send ChatRequest to LLM |
-| Streaming | Event::Part | Streaming | Forward to Renderer + Builder |
-| Streaming | Event::Flush | Streaming | Finalize event in Builder |
-| Streaming | Event::Finished | Evaluating | Check for tool calls |
-| Streaming | Ctrl+C | Interrupted(Streaming) | Pause, show menu |
-| Interrupted | "Stop" | Complete | Persist current cycle |
-| Interrupted | "Abort" | Aborted | Discard, no persist, → Idle |
-| Interrupted | "Reply" | Replying | Get user input |
-| Interrupted | "Continue" | Streaming | Resume or Prefill+Resume |
-| Replying | User input | Idle → Streaming | Persist partial, start NEW turn with reply |
-| Evaluating | Has tool calls | Executing | Start Tool Coordinator |
-| Evaluating | No tool calls | Complete | Persist final cycle, → Idle |
-| Executing | All tools done | Continuing | Persist cycle, prepare follow-up |
-| Executing | Ctrl+C | Interrupted(Tool) | Show tool menu |
-| Continuing | — | Streaming | Send tool responses to LLM (new cycle) |
-| Complete | — | Idle | Turn done |
+| From        | Event           | To                     | Action                                     |
+| ----------- | --------------- | ---------------------- | ------------------------------------------ |
+| Idle        | start\_turn     | Streaming              | Send ChatRequest to LLM                    |
+| Streaming   | Event::Part     | Streaming              | Forward to Renderer + Builder              |
+| Streaming   | Event::Flush    | Streaming              | Finalize event in Builder                  |
+| Streaming   | Event::Finished | Evaluating             | Check for tool calls                       |
+| Streaming   | Ctrl+C          | Interrupted(Streaming) | Pause, show menu                           |
+| Interrupted | "Stop"          | Complete               | Persist current cycle                      |
+| Interrupted | "Abort"         | Aborted                | Discard, no persist, → Idle                |
+| Interrupted | "Reply"         | Replying               | Get user input                             |
+| Interrupted | "Continue"      | Streaming              | Resume or Prefill+Resume                   |
+| Replying    | User input      | Idle → Streaming       | Persist partial, start NEW turn with reply |
+| Evaluating  | Has tool calls  | Executing              | Start Tool Coordinator                     |
+| Evaluating  | No tool calls   | Complete               | Persist final cycle, → Idle                |
+| Executing   | All tools done  | Continuing             | Persist cycle, prepare follow-up           |
+| Executing   | Ctrl+C          | Interrupted(Tool)      | Show tool menu                             |
+| Continuing  | —               | Streaming              | Send tool responses to LLM (new cycle)     |
+| Complete    | —               | Idle                   | Turn done                                  |
 
----
+-----
 
 ## Data Flow
 
@@ -1428,7 +1459,7 @@ Final ConversationStream (persisted):
   [ChatResponse::Message("The answer is 4. Because 2+2=4. ...")]
 ```
 
----
+-----
 
 ## Rendering Architecture
 
@@ -1438,6 +1469,8 @@ Every chunk flows through TWO parallel paths:
 
 1. **Render Path**: For immediate display (low latency)
 2. **Accumulation Path**: For persistence (complete events)
+
+<!-- end list -->
 
 ```
                     Turn Coordinator
@@ -1459,16 +1492,18 @@ Every chunk flows through TWO parallel paths:
          Terminal                     Disk
 ```
 
-**Key insight:** The Render Path uses `jp_md::buffer::Buffer` which buffers
-only enough to form valid markdown blocks. The Event Builder buffers until
-`Flush` arrives. These are independent — rendering doesn't wait for flush.
+**Key insight:** The Render Path uses `jp_md::buffer::Buffer` which buffers only
+enough to form valid markdown blocks.
+The Event Builder buffers until `Flush` arrives.
+These are independent — rendering doesn't wait for flush.
 
 ### Output Ordering
 
 Output ordering is determined by the **index** on each event, NOT by event type.
 
-**Important:** Reasoning is NOT always first. An LLM can send events in any
-order within a cycle. For example:
+**Important:** Reasoning is NOT always first.
+An LLM can send events in any order within a cycle.
+For example:
 
 ```
 index 0: Message("Here's what I found")
@@ -1480,11 +1515,13 @@ index 3: ToolCallRequest(search)
 In this case, the output order is: message → reasoning → message → tool call.
 
 **The Turn Coordinator's role:**
+
 - Forward events to renderers in the order they arrive (by index)
 - Does NOT reorder events based on type
 - Index order is preserved for both rendering and persistence
 
 **Tool call ordering:**
+
 - Tool-related output can be out of order between different tools (T2's result
   can display before T1's result)
 - However, tool call RESPONSES sent to the LLM MUST be in request order
@@ -1494,27 +1531,27 @@ In this case, the output order is: message → reasoning → message → tool ca
 
 Reasoning display modes (applied in Markdown Renderer):
 
-| Mode | Behavior |
-|------|----------|
-| `Hidden` | Don't render reasoning (still persisted) |
-| `Full` | Render all reasoning tokens |
-| `Truncate(N)` | Render first N characters, then "..." |
-| `Progress` | Show "reasoning..." then dots |
-| `Static` | Show "reasoning..." once |
-| `Summary` | (Future) Summarize reasoning via new (async) LLM request |
+| Mode          | Behavior                                                 |
+| ------------- | -------------------------------------------------------- |
+| `Hidden`      | Don't render reasoning (still persisted)                 |
+| `Full`        | Render all reasoning tokens                              |
+| `Truncate(N)` | Render first N characters, then "..."                    |
+| `Progress`    | Show "reasoning..." then dots                            |
+| `Static`      | Show "reasoning..." once                                 |
+| `Summary`     | (Future) Summarize reasoning via new (async) LLM request |
 
----
+-----
 
 ## Error Handling
 
 ### Error Categories
 
-| Category | Examples | Handling |
-|----------|----------|----------|
-| **Retryable** | Rate limit, timeout, empty response | Resilient Cycle retries |
-| **Fatal** | Auth error, unknown model, quota | Propagate to user |
-| **Tool error** | Tool execution failed | Return error in ToolCallResponse |
-| **User cancel** | Ctrl+C | Interrupt Handler |
+| Category        | Examples                            | Handling                         |
+| --------------- | ----------------------------------- | -------------------------------- |
+| **Retryable**   | Rate limit, timeout, empty response | Resilient Cycle retries          |
+| **Fatal**       | Auth error, unknown model, quota    | Propagate to user                |
+| **Tool error**  | Tool execution failed               | Return error in ToolCallResponse |
+| **User cancel** | Ctrl+C                              | Interrupt Handler                |
 
 ### Resilient Cycle Behavior
 
@@ -1532,7 +1569,8 @@ Quota exhausted          Propagate immediately
 
 ### Tool Error Handling
 
-Tool errors don't fail the turn. They're returned to the LLM:
+Tool errors don't fail the turn.
+They're returned to the LLM:
 
 ```
 Tool execution fails
@@ -1547,7 +1585,7 @@ ToolCallResponse {
 LLM receives error, can respond appropriately
 ```
 
----
+-----
 
 ## Testing Strategy
 
@@ -1556,6 +1594,7 @@ LLM receives error, can respond appropriately
 Each component can be tested in isolation:
 
 **Event Builder:**
+
 ```
 test "accumulates reasoning chunks":
     builder = EventBuilder::new(mock_stream)
@@ -1569,6 +1608,7 @@ test "accumulates reasoning chunks":
 ```
 
 **Markdown Renderer:**
+
 ```
 test "buffers until valid markdown":
     renderer = MarkdownRenderer::new(mock_printer)
@@ -1579,6 +1619,7 @@ test "buffers until valid markdown":
 ```
 
 **Turn Coordinator:**
+
 ```
 test "transitions to Executing on tool call":
     coordinator = TurnCoordinator::new()
@@ -1593,6 +1634,7 @@ test "transitions to Executing on tool call":
 ```
 
 **Tool Cancellation:**
+
 ```
 test "tools cancelled via token complete quickly":
     // Executors with 10 second delays
@@ -1657,7 +1699,7 @@ test "events are persisted in stream order":
         assert stream.events.indices() == sorted(flush_indices)
 ```
 
----
+-----
 
 ## Migration Path
 
@@ -1709,21 +1751,23 @@ test "events are persisted in stream order":
 3. Update documentation
 4. Performance testing
 
----
+-----
 
 ## Summary
 
 This architecture addresses the key issues in the current implementation:
 
-| Issue | Solution |
-|-------|----------|
+| Issue                             | Solution                                         |
+| --------------------------------- | ------------------------------------------------ |
 | Mixed concerns in `handle_stream` | Separate components with single responsibilities |
-| Hard to test | Each component testable in isolation |
-| Tight coupling | Clear interfaces between components |
-| Implicit state | Explicit state machine |
-| Recursive async | Event-driven loop |
-| Blocking tool execution | Parallel Tool Coordinator |
-| Abrupt Ctrl+C | Interactive Interrupt Handler |
+| Hard to test                      | Each component testable in isolation             |
+| Tight coupling                    | Clear interfaces between components              |
+| Implicit state                    | Explicit state machine                           |
+| Recursive async                   | Event-driven loop                                |
+| Blocking tool execution           | Parallel Tool Coordinator                        |
+| Abrupt Ctrl+C                     | Interactive Interrupt Handler                    |
 
 The migration can be done incrementally, with each phase adding tests and
 maintaining backward compatibility until the final cleanup.
+
+[architecture.md]: architecture.md

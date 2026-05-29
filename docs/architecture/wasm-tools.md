@@ -1,12 +1,12 @@
 # Wasm Tools Architecture
 
-This document describes the architecture for executing JP tools as
-WebAssembly (Wasm) components. It covers the runtime, the host-guest
-contract, builtin tools (embedded in the binary), and local Wasm
-tools (loaded from disk).
+This document describes the architecture for executing JP tools as WebAssembly
+(Wasm) components.
+It covers the runtime, the host-guest contract, builtin tools (embedded in the
+binary), and local Wasm tools (loaded from disk).
 
-Related: [Knowledge Base Architecture](knowledge-base.md) — the
-`learn` tool is the first builtin Wasm tool.
+Related: [Knowledge Base Architecture] — the `learn` tool is the first builtin
+Wasm tool.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ Related: [Knowledge Base Architecture](knowledge-base.md) — the
 - [Testing Strategy](#testing-strategy)
 - [Migration Path](#migration-path)
 
----
+-----
 
 ## Overview
 
@@ -35,74 +35,75 @@ JP currently supports two tool execution models:
 
 1. **Local tools** — shell commands spawned as subprocesses
    (`ToolSource::Local`)
-2. **MCP tools** — remote calls to MCP servers
-   (`ToolSource::Mcp`)
+2. **MCP tools** — remote calls to MCP servers (`ToolSource::Mcp`)
 
-This architecture adds a third model: **Wasm tools** — sandboxed
-WebAssembly components executed in-process via a Wasm runtime. Wasm
-tools serve two purposes:
+This architecture adds a third model: **Wasm tools** — sandboxed WebAssembly
+components executed in-process via a Wasm runtime.
+Wasm tools serve two purposes:
 
-- **Builtin tools** (`ToolSource::Builtin`): Wasm binaries compiled
-  into the `jp` binary, loaded via `include_bytes!`. The `learn` tool
-  is the first of these.
-- **Local Wasm tools** (`ToolSource::Local` with `wasm` option): Wasm
-  binaries loaded from disk at runtime. This lets users write custom
-  tools as Wasm components without shell command overhead.
+- **Builtin tools** (`ToolSource::Builtin`): Wasm binaries compiled into the
+  `jp` binary, loaded via `include_bytes!`.
+  The `learn` tool is the first of these.
+- **Local Wasm tools** (`ToolSource::Local` with `wasm` option): Wasm binaries
+  loaded from disk at runtime.
+  This lets users write custom tools as Wasm components without shell command
+  overhead.
 
 Both share the same WIT (Wasm Interface Types) contract, so a single
-implementation works in either mode. The only difference is where the
-bytes come from.
+implementation works in either mode.
+The only difference is where the bytes come from.
 
----
+-----
 
 ## Design Goals
 
-| Goal | Description |
-|------|-------------|
-| **Single contract** | One WIT interface for both builtin and local Wasm tools |
-| **Sandboxed execution** | Tools run in a Wasm sandbox with scoped filesystem access |
-| **Component model** | Target WASI Preview 2 for typed interfaces and future features |
-| **Minimal host coupling** | Guest tools depend only on `jp_tool` types and WIT bindings |
-| **Lazy loading** | Local Wasm tools are compiled on first use, not at startup |
-| **Familiar types** | WIT types mirror the existing `jp_tool::Outcome`, `Context`, etc. |
+| Goal                      | Description                                                       |
+| ------------------------- | ----------------------------------------------------------------- |
+| **Single contract**       | One WIT interface for both builtin and local Wasm tools           |
+| **Sandboxed execution**   | Tools run in a Wasm sandbox with scoped filesystem access         |
+| **Component model**       | Target WASI Preview 2 for typed interfaces and future features    |
+| **Minimal host coupling** | Guest tools depend only on `jp_tool` types and WIT bindings       |
+| **Lazy loading**          | Local Wasm tools are compiled on first use, not at startup        |
+| **Familiar types**        | WIT types mirror the existing `jp_tool::Outcome`, `Context`, etc. |
 
----
+-----
 
 ## Runtime Selection
 
 ### Decision: `wasmtime`
 
-The Wasm runtime is `wasmtime`. This is a hard requirement driven
-by the choice to target WASI Preview 2 (component model).
+The Wasm runtime is `wasmtime`.
+This is a hard requirement driven by the choice to target WASI Preview 2
+(component model).
 
-| Runtime | WASI P1 | WASI P2 / Component Model | Binary overhead |
-|---------|---------|---------------------------|-----------------|
-| `wasmtime` | Yes | **Yes** | ~15-20 MB |
-| `wasmi` | Yes | No | ~1 MB |
-| `wasm3` | Partial | No | ~0.5 MB |
+| Runtime    | WASI P1 | WASI P2 / Component Model | Binary overhead |
+| ---------- | ------- | ------------------------- | --------------- |
+| `wasmtime` | Yes     | **Yes**                   | ~15-20 MB       |
+| `wasmi`    | Yes     | No                        | ~1 MB           |
+| `wasm3`    | Partial | No                        | ~0.5 MB         |
 
-`wasmi` was considered for its smaller binary footprint, but it does
-not support the component model. Since the project intends to expand
-Wasm-based extensibility to other areas (e.g., LLM provider plugins),
-investing in `wasip2` from the start avoids a future migration.
+`wasmi` was considered for its smaller binary footprint, but it does not support
+the component model.
+Since the project intends to expand Wasm-based extensibility to other areas
+(e.g., LLM provider plugins), investing in `wasip2` from the start avoids a
+future migration.
 
 ### Binary Size Mitigation
 
-The `wasmtime` dependency adds significant binary size. Strategies to
-reduce it:
+The `wasmtime` dependency adds significant binary size.
+Strategies to reduce it:
 
-1. **Feature gating**: Put `wasmtime` behind a cargo feature
-   (`wasm-tools`), disabled by default for minimal builds.
-2. **Cranelift tuning**: `wasmtime` uses cranelift for JIT
-   compilation. The `cranelift` feature can be replaced with
-   interpreter-only mode (experimental) for smaller binaries at the
-   cost of execution speed.
-3. **LTO and stripping**: Standard release optimizations
-   (`lto = true`, `strip = true`) reduce the overhead.
+1. **Feature gating**: Put `wasmtime` behind a cargo feature (`wasm-tools`),
+   disabled by default for minimal builds.
+2. **Cranelift tuning**: `wasmtime` uses cranelift for JIT compilation.
+   The `cranelift` feature can be replaced with interpreter-only mode
+   (experimental) for smaller binaries at the cost of execution speed.
+3. **LTO and stripping**: Standard release optimizations (`lto = true`, `strip =
+   true`) reduce the overhead.
 
-For the initial implementation, accept the full `wasmtime` dependency
-with default features. Optimize later based on real-world binary size
-measurements.
+For the initial implementation, accept the full `wasmtime` dependency with
+default features.
+Optimize later based on real-world binary size measurements.
 
 ### Compilation Target
 
@@ -113,19 +114,18 @@ rustup target add wasm32-wasip2
 cargo build --target wasm32-wasip2 --release
 ```
 
-This produces a Wasm component (`.wasm` file) that exports the
-functions defined in the WIT interface and can use WASI Preview 2
-APIs (filesystem, clocks, random, etc.).
+This produces a Wasm component (`.wasm` file) that exports the functions defined
+in the WIT interface and can use WASI Preview 2 APIs (filesystem, clocks,
+random, etc.).
 
----
+-----
 
 ## Host-Guest Contract
 
 ### WIT Interface
 
 The tool contract is defined as a WIT (Wasm Interface Types) package.
-This file lives in the `jp_tool` crate and is shared between host and
-guest.
+This file lives in the `jp_tool` crate and is shared between host and guest.
 
 ```wit
 // wit/tool.wit
@@ -222,47 +222,47 @@ world tool {
 
 The WIT types mirror the existing Rust types in `jp_tool`:
 
-| WIT Type | Rust Type (`jp_tool`) |
-|----------|----------------------|
-| `context` | `Context` |
-| `action` | `Action` |
-| `outcome::success` | `Outcome::Success` |
-| `outcome::error` | `Outcome::Error` |
-| `outcome::needs-input` | `Outcome::NeedsInput` |
-| `question` | `Question` |
-| `error-info` | (fields of `Outcome::Error`) |
+| WIT Type               | Rust Type (`jp_tool`)        |
+| ---------------------- | ---------------------------- |
+| `context`              | `Context`                    |
+| `action`               | `Action`                     |
+| `outcome::success`     | `Outcome::Success`           |
+| `outcome::error`       | `Outcome::Error`             |
+| `outcome::needs-input` | `Outcome::NeedsInput`        |
+| `question`             | `Question`                   |
+| `error-info`           | (fields of `Outcome::Error`) |
 
-The `answer-type` field is serialized as a string rather than a WIT
-variant to keep the interface simple. The guest and host both parse
-it the same way:
+The `answer-type` field is serialized as a string rather than a WIT variant to
+keep the interface simple.
+The guest and host both parse it the same way:
 
 - `"boolean"` → `AnswerType::Boolean`
 - `"text"` → `AnswerType::Text`
 - `{"select": {"options": [...]}}` → `AnswerType::Select`
 
-The `arguments` and `answers` parameters are JSON strings because
-tool arguments are dynamic (schema varies per tool). Parsing happens
-inside the guest.
+The `arguments` and `answers` parameters are JSON strings because tool arguments
+are dynamic (schema varies per tool).
+Parsing happens inside the guest.
 
 ### WASI Capabilities
 
-Wasm tools run in a sandbox. The host grants specific capabilities
-via WASI preopens and configuration:
+Wasm tools run in a sandbox.
+The host grants specific capabilities via WASI preopens and configuration:
 
-| Capability | Builtin tools | Local Wasm tools |
-|------------|---------------|------------------|
-| Filesystem (read) | Scoped to topic directory | Scoped to workspace root |
-| Filesystem (write) | Denied | Scoped to workspace root |
-| Network | Denied | Denied (for now) |
-| Environment vars | Denied | Denied |
-| Clocks | Allowed | Allowed |
-| Random | Allowed | Allowed |
-| Stdout/Stderr | Captured by host | Captured by host |
+| Capability         | Builtin tools             | Local Wasm tools         |
+| ------------------ | ------------------------- | ------------------------ |
+| Filesystem (read)  | Scoped to topic directory | Scoped to workspace root |
+| Filesystem (write) | Denied                    | Scoped to workspace root |
+| Network            | Denied                    | Denied (for now)         |
+| Environment vars   | Denied                    | Denied                   |
+| Clocks             | Allowed                   | Allowed                  |
+| Random             | Allowed                   | Allowed                  |
+| Stdout/Stderr      | Captured by host          | Captured by host         |
 
-**Filesystem scoping** uses WASI preopened directories. The host
-opens a directory and maps it into the guest's filesystem namespace.
-The guest can only access files within preopened directories — there
-is no escape from the sandbox.
+**Filesystem scoping** uses WASI preopened directories.
+The host opens a directory and maps it into the guest's filesystem namespace.
+The guest can only access files within preopened directories — there is no
+escape from the sandbox.
 
 ```rust
 // Host-side setup (pseudo-code)
@@ -286,15 +286,16 @@ wasi.preopened_dir(
 ```
 
 The guest sees a virtual filesystem:
+
 - Builtin `learn` tool: `/subjects/ast-grep.md`, etc.
 - Local Wasm tool: `/workspace/src/main.rs`, etc.
 
----
+-----
 
 ## Builtin Wasm Tools
 
-Builtin tools are Wasm binaries compiled into the `jp` binary as
-static byte arrays.
+Builtin tools are Wasm binaries compiled into the `jp` binary as static byte
+arrays.
 
 ### Embedding
 
@@ -307,8 +308,8 @@ const LEARN_WASM: &[u8] = include_bytes!(
 );
 ```
 
-The Wasm binary is built during `cargo build` via a build script
-that compiles the guest crate:
+The Wasm binary is built during `cargo build` via a build script that compiles
+the guest crate:
 
 ```rust
 // build.rs
@@ -361,8 +362,8 @@ ToolSource::Builtin { tool } => {
 
 ### Caching
 
-`wasmtime` compiles Wasm bytes to native code on first load. This
-compilation is cached:
+`wasmtime` compiles Wasm bytes to native code on first load.
+This compilation is cached:
 
 ```rust
 use wasmtime::{Engine, component::Component};
@@ -381,17 +382,18 @@ static LEARN_COMPONENT: LazyLock<Component> = LazyLock::new(|| {
 });
 ```
 
-For local Wasm tools, the compiled component is cached in a
-`HashMap<PathBuf, Component>` keyed by the Wasm file path. This
-means the first invocation of a local Wasm tool pays the compilation
-cost, but subsequent calls reuse the cached component.
+For local Wasm tools, the compiled component is cached in a `HashMap<PathBuf,
+Component>` keyed by the Wasm file path.
+This means the first invocation of a local Wasm tool pays the compilation cost,
+but subsequent calls reuse the cached component.
 
----
+-----
 
 ## Local Wasm Tools
 
-Local Wasm tools are loaded from disk. They use the same WIT contract
-as builtin tools but are configured via `ToolConfig`.
+Local Wasm tools are loaded from disk.
+They use the same WIT contract as builtin tools but are configured via
+`ToolConfig`.
 
 ### Configuration
 
@@ -406,9 +408,9 @@ parameters.input.type = "string"
 parameters.input.required = true
 ```
 
-When `wasm` is present on a `local` tool, the Wasm binary is loaded
-and executed instead of spawning a shell command. The `command` field
-is ignored.
+When `wasm` is present on a `local` tool, the Wasm binary is loaded and executed
+instead of spawning a shell command.
+The `command` field is ignored.
 
 ### Rust Type Change
 
@@ -431,8 +433,7 @@ pub struct ToolConfig {
 
 ### Execution Path
 
-In `ToolDefinition::execute()`, the `Local` branch checks for a
-Wasm binary:
+In `ToolDefinition::execute()`, the `Local` branch checks for a Wasm binary:
 
 ```rust
 ToolSource::Local { tool } => {
@@ -456,9 +457,9 @@ ToolSource::Local { tool } => {
 
 ### Lazy Loading
 
-Local Wasm tools are compiled on first invocation. The compiled
-`Component` is cached for the duration of the process. This avoids
-paying compilation cost for tools that are never called.
+Local Wasm tools are compiled on first invocation.
+The compiled `Component` is cached for the duration of the process.
+This avoids paying compilation cost for tools that are never called.
 
 ```rust
 // Pseudo-code
@@ -474,16 +475,17 @@ fn execute_wasm_from_path(path, ...) {
 }
 ```
 
----
+-----
 
 ## The `learn` Tool
 
-The `learn` tool is the first builtin Wasm tool. It is the primary
-driver for the Wasm tools infrastructure.
+The `learn` tool is the first builtin Wasm tool.
+It is the primary driver for the Wasm tools infrastructure.
 
 ### Guest Crate: `jp_tool_learn`
 
-Located at `crates/jp_tool_learn/`. Targets `wasm32-wasip2`.
+Located at `crates/jp_tool_learn/`.
+Targets `wasm32-wasip2`.
 
 **Dependencies:**
 
@@ -584,6 +586,8 @@ Before calling the Wasm guest, the host:
 2. Preopens the topic's subjects directory with read-only access
 3. Injects topic metadata (`_topic`) into the arguments
 
+<!-- end list -->
+
 ```rust
 // Pseudo-code in ToolDefinition::execute() for builtin "learn"
 
@@ -608,13 +612,13 @@ let wasi = WasiCtxBuilder::new()
 execute_wasm(LEARN_WASM, "learn", &args, answers, context, wasi)
 ```
 
----
+-----
 
 ## Test Tool
 
-A simple Wasm tool for validating the infrastructure. This tool is
-NOT compiled into the `jp` binary. It is loaded from disk via the
-`wasm` config option.
+A simple Wasm tool for validating the infrastructure.
+This tool is NOT compiled into the `jp` binary.
+It is loaded from disk via the `wasm` config option.
 
 ### Purpose
 
@@ -627,8 +631,8 @@ Verify that:
 
 ### Implementation
 
-Located at `crates/jp_tool_test/`. A minimal tool that reads a file
-and returns its content:
+Located at `crates/jp_tool_test/`.
+A minimal tool that reads a file and returns its content:
 
 ```rust
 // crates/jp_tool_test/src/lib.rs
@@ -718,7 +722,7 @@ async fn test_builtin_and_local_same_contract() {
 }
 ```
 
----
+-----
 
 ## Crate Structure
 
@@ -755,8 +759,8 @@ crates/
 
 ### `jp_wasm` Crate
 
-A new crate that encapsulates all `wasmtime` interaction. No other
-crate depends on `wasmtime` directly.
+A new crate that encapsulates all `wasmtime` interaction.
+No other crate depends on `wasmtime` directly.
 
 ```rust
 // jp_wasm/src/lib.rs
@@ -829,10 +833,11 @@ jp_tool_test (wasm guest)
   └── serde, serde_json
 ```
 
-Key: `wasmtime` is isolated in `jp_wasm`. Guest crates do not depend
-on `wasmtime` — they use `wit-bindgen` to generate Wasm exports.
+Key: `wasmtime` is isolated in `jp_wasm`.
+Guest crates do not depend on `wasmtime` — they use `wit-bindgen` to generate
+Wasm exports.
 
----
+-----
 
 ## Data Flow
 
@@ -922,21 +927,21 @@ jp_wasm converts WIT outcome → jp_tool::Outcome
 ExecutionOutcome::Completed { result: Ok("fn main() { ... }") }
 ```
 
----
+-----
 
 ## Error Handling
 
 ### Guest Errors
 
-Tool-level errors are returned as `Outcome::Error` or
-`Outcome::NeedsInput`. These propagate through the normal tool
-result path — the LLM receives them and can respond appropriately.
+Tool-level errors are returned as `Outcome::Error` or `Outcome::NeedsInput`.
+These propagate through the normal tool result path — the LLM receives them and
+can respond appropriately.
 
 ### Runtime Errors
 
-Wasm runtime errors (compilation failure, instantiation failure,
-trap) are infrastructure errors. They are returned as
-`Err(ToolError)` from `ToolDefinition::execute()`:
+Wasm runtime errors (compilation failure, instantiation failure, trap) are
+infrastructure errors.
+They are returned as `Err(ToolError)` from `ToolDefinition::execute()`:
 
 ```rust
 pub enum ToolError {
@@ -962,20 +967,22 @@ pub enum ToolError {
 
 ### Filesystem Errors
 
-If the guest attempts to access a path outside its preopened
-directories, the WASI runtime returns a "permission denied" or
-"no such file" error. This is by design — the sandbox is enforced
-at the runtime level, not by the guest.
+If the guest attempts to access a path outside its preopened directories, the
+WASI runtime returns a "permission denied" or "no such file" error.
+This is by design — the sandbox is enforced at the runtime level, not by the
+guest.
 
 ### Cancellation
 
-Wasm execution does not natively support cancellation tokens. For
-short-running tools (like `learn`), this is acceptable. For
-potentially long-running Wasm tools, the host can:
+Wasm execution does not natively support cancellation tokens.
+For short-running tools (like `learn`), this is acceptable.
+For potentially long-running Wasm tools, the host can:
 
 1. Run the Wasm execution in a `tokio::spawn` task
 2. Race it against the cancellation token
 3. Drop the task on cancellation (aborts the Wasm instance)
+
+<!-- end list -->
 
 ```rust
 tokio::select! {
@@ -989,7 +996,7 @@ tokio::select! {
 }
 ```
 
----
+-----
 
 ## Testing Strategy
 
@@ -1084,15 +1091,14 @@ async fn test_builtin_and_local_produce_same_outcome_type() {
 }
 ```
 
----
+-----
 
 ## Migration Path
 
 ### Phase 1: WIT Definition and `jp_tool` Changes
 
 1. Create `crates/jp_tool/wit/tool.wit` with the interface definition
-2. Add `wit-bindgen` as an optional dependency of `jp_tool` (for
-   guest-side use)
+2. Add `wit-bindgen` as an optional dependency of `jp_tool` (for guest-side use)
 3. Verify the WIT types align with existing Rust types
 4. No runtime changes — just the contract definition
 
@@ -1117,15 +1123,14 @@ async fn test_builtin_and_local_produce_same_outcome_type() {
 
 ### Phase 4: Host Integration
 
-1. Add build script to compile `jp_tool_learn` and embed via
-   `include_bytes!`
-2. Implement `ToolSource::Builtin` in `ToolDefinition::new()` —
-   generate `ToolDefinition` from hardcoded metadata (the Wasm guest
-   doesn't self-describe its schema; the host provides it)
-3. Implement `ToolSource::Builtin` in `ToolDefinition::execute()` —
-   delegate to `jp_wasm::execute()`
-4. Add WASI filesystem scoping for the `learn` tool (preopen
-   subjects directory, read-only)
+1. Add build script to compile `jp_tool_learn` and embed via `include_bytes!`
+2. Implement `ToolSource::Builtin` in `ToolDefinition::new()` — generate
+   `ToolDefinition` from hardcoded metadata (the Wasm guest doesn't
+   self-describe its schema; the host provides it)
+3. Implement `ToolSource::Builtin` in `ToolDefinition::execute()` — delegate to
+   `jp_wasm::execute()`
+4. Add WASI filesystem scoping for the `learn` tool (preopen subjects directory,
+   read-only)
 5. Integration tests: tool call → Wasm execution → result
 
 ### Phase 5: `ToolConfig` Wasm Option
@@ -1153,3 +1158,5 @@ async fn test_builtin_and_local_produce_same_outcome_type() {
 2. Update `docs/architecture/index.md` with links to new docs
 3. Update `docs/features/tools.md` with Wasm tool documentation
 4. Audit `wasmtime` feature flags for binary size optimization
+
+[Knowledge Base Architecture]: knowledge-base.md

@@ -1648,6 +1648,11 @@ fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
 fmt-comments-ci: _install-comfort _install_ci_matchers
     comfort --check --workspace --language rust
 
+# Check standalone Markdown formatting on CI.
+[group('ci')]
+fmt-markdown-ci: _install-comfort _install_ci_matchers
+    comfort --check --workspace --language markdown
+
 # Test the code on CI.
 [group('ci')]
 test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers

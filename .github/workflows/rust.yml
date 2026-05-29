@@ -31,6 +31,7 @@ jobs:
       lint: ${{ steps.filter.outputs.lint }}
       fmt: ${{ steps.filter.outputs.fmt }}
       fmt-comments: ${{ steps.filter.outputs.fmt-comments }}
+      fmt-markdown: ${{ steps.filter.outputs.fmt-markdown }}
       test: ${{ steps.filter.outputs.test }}
       docs: ${{ steps.filter.outputs.docs }}
       coverage: ${{ steps.filter.outputs.coverage }}
@@ -74,12 +75,14 @@ jobs:
           justfile='^justfile$'
           cargo='(^|/)Cargo\.toml$|^Cargo\.lock$|^rust-toolchain\.toml$'
           rust='\.rs$'
+          markdown='\.md$|\.markdown$'
           snapshots='\.snap$|^\.config/insta\.yaml$'
           source="$rust|$cargo|$workflow|$justfile"
 
           set_task lint "$source|^\.clippy\.toml$"
           set_task fmt "$rust|^\.rustfmt\.toml$|$workflow|$justfile"
           set_task fmt-comments "$rust|$workflow|$justfile"
+          set_task fmt-markdown "$markdown|$workflow|$justfile"
           set_task test "$source|$snapshots"
           set_task docs "$source"
           set_task coverage "$source|$snapshots"
@@ -93,7 +96,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        task: [lint, fmt, fmt-comments, test, docs, coverage, deny, insta, shear, vet]
+        task: [lint, fmt, fmt-comments, fmt-markdown, test, docs, coverage, deny, insta, shear, vet]
         include:
           - task: test
             os: windows-latest
@@ -109,6 +112,7 @@ jobs:
           LINT: ${{ needs.changes.outputs.lint }}
           FMT: ${{ needs.changes.outputs.fmt }}
           FMT_COMMENTS: ${{ needs.changes.outputs.fmt-comments }}
+          FMT_MARKDOWN: ${{ needs.changes.outputs.fmt-markdown }}
           TEST: ${{ needs.changes.outputs.test }}
           DOCS: ${{ needs.changes.outputs.docs }}
           COVERAGE: ${{ needs.changes.outputs.coverage }}
@@ -123,6 +127,7 @@ jobs:
             lint) run="$LINT" ;;
             fmt) run="$FMT" ;;
             fmt-comments) run="$FMT_COMMENTS" ;;
+            fmt-markdown) run="$FMT_MARKDOWN" ;;
             test) run="$TEST" ;;
             docs) run="$DOCS" ;;
             coverage) run="$COVERAGE" ;;

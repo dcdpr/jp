@@ -4,16 +4,16 @@
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
-- **Required by**: [RFD 029](029-scriptable-structured-output.md)
+- **Required by**: [RFD 029]
 
 ## Summary
 
-JP accepts a concise DSL for defining JSON Schema objects via `--schema` /
-`-s`. This guide documents the syntax, rules, and examples for the DSL.
+JP accepts a concise DSL for defining JSON Schema objects via `--schema` / `-s`.
+This guide documents the syntax, rules, and examples for the DSL.
 
 The DSL is designed for the common case: flat or moderately nested objects with
-typed fields and descriptions. For complex schemas, full JSON Schema is
-accepted as a passthrough.
+typed fields and descriptions.
+For complex schemas, full JSON Schema is accepted as a passthrough.
 
 ## Quick Start
 
@@ -91,7 +91,8 @@ A field has four parts, all except the name are optional:
 
 ### Name
 
-Any sequence of non-reserved characters. Reserved characters are:
+Any sequence of non-reserved characters.
+Reserved characters are:
 
 ```
 space  tab  newline  ,  :  [  ]  {  }  |  ?  \  "
@@ -136,16 +137,16 @@ When no type is specified, fields default to `string`.
 
 ### Primitives
 
-| DSL | JSON Schema `type` |
-|-----|--------------------|
-| `str`, `string` | `"string"` |
-| `int`, `integer` | `"integer"` |
-| `float`, `number` | `"number"` |
-| `bool`, `boolean` | `"boolean"` |
-| `any` | `{}` (no type constraint) |
+| DSL               | JSON Schema `type`        |
+| ----------------- | ------------------------- |
+| `str`, `string`   | `"string"`                |
+| `int`, `integer`  | `"integer"`               |
+| `float`, `number` | `"number"`                |
+| `bool`, `boolean` | `"boolean"`               |
+| `any`             | `{}` (no type constraint) |
 
-A word following a field name is always interpreted as a type. If it is not a
-recognized keyword or literal, the parser produces an error:
+A word following a field name is always interpreted as a type.
+If it is not a recognized keyword or literal, the parser produces an error:
 
 ```
 age blorp
@@ -188,8 +189,8 @@ a { b { c } }
 
 ### Literal Values
 
-Quoted strings, numbers, `true`, `false`, and `null` in the type position
-define literal (constant) values:
+Quoted strings, numbers, `true`, `false`, and `null` in the type position define
+literal (constant) values:
 
 ```
 kind "fixed"                   → {"const": "fixed"}
@@ -200,13 +201,15 @@ cleared null                   → {"const": null}
 ```
 
 Strings must be quoted in the type position to distinguish them from type
-keywords. `string` is the type; `"string"` is the literal value `"string"`.
+keywords.
+`string` is the type; `"string"` is the literal value `"string"`.
 
 ### Unions
 
-The pipe `|` creates union types. When all variants are literals, the output
-uses `enum` (widely supported by LLM providers in strict mode). When the
-union mixes literals and types, the output uses `anyOf`.
+The pipe `|` creates union types.
+When all variants are literals, the output uses `enum` (widely supported by LLM
+providers in strict mode).
+When the union mixes literals and types, the output uses `anyOf`.
 
 **All literals — `enum`:**
 
@@ -270,13 +273,14 @@ value [string]|int
 
 ## Descriptions
 
-A colon after the type (or name, if no type) starts a description. Descriptions
-are passed as the `description` field in JSON Schema, which models use as a
-generation hint.
+A colon after the type (or name, if no type) starts a description.
+Descriptions are passed as the `description` field in JSON Schema, which models
+use as a generation hint.
 
 ### Inline
 
-The simplest form. Ends at the next comma, newline, or closing `}`:
+The simplest form.
+Ends at the next comma, newline, or closing `}`:
 
 ```
 summary: a brief two-sentence summary
@@ -301,8 +305,9 @@ multiple lines.
 """
 ```
 
-The opening `"""` may be followed by a newline (which is stripped). The closing
-`"""` must appear on its own. Internal newlines are preserved.
+The opening `"""` may be followed by a newline (which is stripped).
+The closing `"""` must appear on its own.
+Internal newlines are preserved.
 
 ### On nested types
 
@@ -316,7 +321,8 @@ people [{ name, age int }]: list of people mentioned
 ## Separators
 
 Fields are separated by commas or newlines (or both — a comma followed by a
-newline counts as one separator). Trailing separators are allowed.
+newline counts as one separator).
+Trailing separators are allowed.
 
 ```
 name, age int, active bool      ← commas
@@ -327,8 +333,8 @@ name,                           ← trailing comma
 age int,
 ```
 
-Commas and newlines are interchangeable. Inside `{ }` objects, the same rules
-apply.
+Commas and newlines are interchangeable.
+Inside `{ }` objects, the same rules apply.
 
 ## Line Continuation
 
@@ -353,8 +359,8 @@ whitespace on the next line are replaced by a single space.
 ## JSON Passthrough
 
 If the input starts with `{` and parses as valid JSON, it is returned as-is
-without DSL processing. This allows full JSON Schema to be used when the DSL
-is insufficient:
+without DSL processing.
+This allows full JSON Schema to be used when the DSL is insufficient:
 
 ```sh
 jp q -s '{"type":"object","properties":{"x":{"type":"string","minLength":1}}}' "..."
@@ -415,9 +421,12 @@ This produces:
 
 ## References
 
-- [RFD 029: Scriptable Structured Output](029-scriptable-structured-output.md)
-  — motivation and design context for the schema DSL
-- [JSON Schema specification](https://json-schema.org/)
-- [simonw/llm schema DSL](https://llm.datasette.io/en/stable/schemas.html#concise-llm-schema-syntax)
-  — prior art that inspired this syntax
+- [RFD 029: Scriptable Structured Output][RFD 029] — motivation and design
+  context for the schema DSL
+- [JSON Schema specification]
+- [simonw/llm schema DSL] — prior art that inspired this syntax
 - Implementation: `crates/jp_cli/src/schema.rs`
+
+[JSON Schema specification]: https://json-schema.org/
+[RFD 029]: 029-scriptable-structured-output.md
+[simonw/llm schema DSL]: https://llm.datasette.io/en/stable/schemas.html#concise-llm-schema-syntax
