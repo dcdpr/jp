@@ -4003,3 +4003,93 @@ async fn test_inquiry_failure_marks_tool_as_error() {
 
     assert!(test_result.is_ok(), "Test timed out");
 }
+
+/// Regression for A1 (live/replay parity on the role-header model id).
+///
+/// The live header must use `cfg.assistant.model.id.resolved()`, not the
+/// provider's `ModelDetails.id`.
+/// With the previous code, the two could drift when the provider rewrites the
+/// id (e.g.
+/// Anthropic resolving an unversioned name to a date-suffixed canonical form).
+/// On replay, `TurnRenderer` reads the stored per-turn config and shows the
+/// configured id — so live had to match that, or the same conversation would
+/// render with two different model strings between `jp q` and `jp c print`.
+#[tokio::test]
+async fn test_live_header_uses_configured_model_id_not_provider_returned() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        // `AppConfig::new_test()` sets `assistant.model.id = anthropic/test`.
+        // `MockProvider::model_details` echoes whatever name it's handed
+        // back under `ProviderId::Test` — we deliberately pass a *different*
+        // name (`api-rewritten`) so the resulting `ModelDetails.id`
+        // (`test/api-rewritten`) cannot collide with the configured id.
+        let config = AppConfig::new_test();
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Hello");
+
+        let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_message("Hi there"));
+        let model = provider
+            .model_details(&"api-rewritten".parse().unwrap())
+            .await
+            .unwrap();
+
+        // Sanity check: the provider's id really does differ from the
+        // configured id, so the assertions below have something to bite on.
+        assert_eq!(model.id.to_string(), "test/api-rewritten");
+        assert_eq!(
+            config.assistant.model.id.resolved().to_string(),
+            "anthropic/test"
+        );
+
+        let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &signal_rx,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            chat_request,
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+        let output = strip_ansi_escapes::strip(&*out.lock());
+        let output = String::from_utf8(output).unwrap();
+
+        assert!(
+            output.contains("anthropic/test"),
+            "live header must use configured model id; got: {output:?}"
+        );
+        assert!(
+            !output.contains("api-rewritten"),
+            "live header must not use provider-returned model id; got: {output:?}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}

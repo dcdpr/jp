@@ -156,12 +156,19 @@ pub(super) async fn run_turn_loop(
 ) -> Result<(), Error> {
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request, is_tty);
+    // The role-header model id derives from the *configured* model id, not
+    // `ModelDetails.id` returned by the provider. The two can disagree on
+    // version specificity (config: `anthropic/claude-opus-4-5`; API:
+    // `anthropic/claude-opus-4-5-20251101`). Pinning the displayed id to the
+    // config form keeps live and replay headers consistent and stable over
+    // API version drift — replay reads the same `assistant.model.id` from
+    // the per-turn `PartialAppConfig` snapshot.
     let mut turn_coordinator = TurnCoordinator::new(
         printer.clone(),
         cfg.style.clone(),
         cfg.user.name.clone(),
         cfg.assistant.name.clone(),
-        Some(model.id.to_string()),
+        Some(cfg.assistant.model.id.resolved().to_string()),
     );
     let mut tool_renderer = ToolRenderer::new(
         if cfg.style.tool_call.show && !printer.format().is_json() {
