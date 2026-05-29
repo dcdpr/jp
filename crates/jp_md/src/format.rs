@@ -82,6 +82,16 @@ pub struct TerminalOptions {
     /// chat-renderer level (see `indent_lines` in the chat renderer), so the
     /// public contract here only promises indentation for wrap-routed content.
     pub indent: usize,
+
+    /// When `true`, omit the trailing inter-block separator that this call
+    /// would otherwise append after the rendered content.
+    ///
+    /// The separator is the blank line that visually divides consecutive
+    /// blocks.
+    /// Suppressing it lets a streaming caller emit the separation itself once
+    /// it knows what follows — for instance, to decide whether the gap between
+    /// two blocks carries a background.
+    pub suppress_trailing_separator: bool,
 }
 
 /// A formatter for markdown text.
@@ -287,7 +297,7 @@ impl Formatter {
         // line in the source (the buffer ends terminal items with
         // "\n\n" but mid-list items with just "\n").
         let is_mid_list = ends_with_tight_list(ast) && !text.ends_with("\n\n");
-        if auto_separator && !is_mid_list {
+        if auto_separator && !is_mid_list && !options.suppress_trailing_separator {
             buf.push_str(&render_separator(options.default_background.as_ref()));
         }
 

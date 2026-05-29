@@ -42,6 +42,7 @@ fn test_renders_reasoning_full_mode() {
         reasoning: "Let me think\n\n".into(),
     });
 
+    renderer.flush();
     renderer.printer.flush();
     assert_eq!(*out.lock(), "Let me think\n\n");
 }
@@ -201,6 +202,7 @@ fn test_truncate_reasoning() {
         reasoning: "This is a very long reasoning that should be truncated\n\n".into(),
     });
 
+    renderer.flush();
     renderer.printer.flush();
     assert_eq!(*out.lock(), "This is a ...\n\n");
 }
@@ -346,6 +348,71 @@ fn test_reasoning_background_not_applied_to_messages() {
         !output.contains("\x1b[48;5;236m"),
         "Message should not have reasoning background, got: {output:?}"
     );
+}
+
+#[test]
+fn test_reasoning_background_separator_unshaded_before_message() {
+    // Regression: the blank line between reasoning and the following message
+    // must not carry the reasoning background. The shading ends at the last
+    // line with actual reasoning content.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert!(
+        output.contains("\x1b[48;5;236m"),
+        "reasoning content should still be shaded, got: {output:?}"
+    );
+    // A shaded blank separator is `<bg><erase-to-EOL><reset-bg>`. With a single
+    // reasoning paragraph the only gap is the one before the message, so none
+    // should appear.
+    assert!(
+        !output.contains("\x1b[48;5;236m\x1b[K\x1b[49m"),
+        "the separator before the message must be unshaded, got: {output:?}"
+    );
+}
+
+#[test]
+fn test_reasoning_background_shades_gap_between_paragraphs() {
+    // Multi-paragraph reasoning stays a contiguous shaded region: the blank
+    // line between two reasoning paragraphs keeps the background, while the gap
+    // to the following message does not.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First paragraph\n\nSecond paragraph\n\n".into(),
+    });
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    // Exactly one shaded separator: between the two reasoning paragraphs, not
+    // after the last one.
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        1,
+        "expected one shaded inter-paragraph separator, got: {output:?}"
+    );
+    assert!(output.contains("First paragraph"), "got: {output:?}");
+    assert!(output.contains("Second paragraph"), "got: {output:?}");
+    assert!(output.contains("Answer"), "got: {output:?}");
 }
 
 #[test]

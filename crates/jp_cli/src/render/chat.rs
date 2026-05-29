@@ -77,6 +77,14 @@ pub struct ChatRenderer {
     code_block: Option<CodeBlockState>,
     /// Active reasoning timer token, used by `Timer` display mode.
     reasoning_timer: Option<CancellationToken>,
+    /// Whether a rendered reasoning block still owes its trailing inter-block
+    /// separator.
+    ///
+    /// Reasoning blocks defer that separator so its background can be chosen
+    /// once the following content is known: shaded when more reasoning follows
+    /// (the gap stays inside the reasoning region), unstyled when reasoning
+    /// gives way to a message, tool call, or end of stream.
+    reasoning_separator_pending: bool,
     /// Post-processing fixups for LLM quirks in the event stream.
     fixups: Vec<Box<dyn EventFixup>>,
 }
@@ -99,6 +107,7 @@ impl ChatRenderer {
             reasoning_chars_count: 0,
             code_block: None,
             reasoning_timer: None,
+            reasoning_separator_pending: false,
             fixups: vec![
                 Box::new(OrphanedFenceFixup::new()),
                 Box::new(FenceEscalationFixup),
@@ -296,6 +305,11 @@ impl ChatRenderer {
                     indent,
                     ..
                 } => {
+                    // A code block inside reasoning consumes the deferred
+                    // separator the same way another reasoning block would.
+                    if self.last_content_kind == Some(ContentKind::Reasoning) {
+                        self.emit_pending_reasoning_separator(true);
+                    }
                     self.code_block = Some(self.formatter.begin_code_block(language));
                     let bg = self.terminal_options(0).default_background;
                     let rendered = self
@@ -351,7 +365,7 @@ impl ChatRenderer {
         self.printer.print(content.typewriter(delay.into()));
     }
 
-    fn print_block(&self, block: &str, indent: usize) {
+    fn print_block(&mut self, block: &str, indent: usize) {
         // Skip whitespace-only blocks. These can appear when the LLM emits
         // blank text content blocks (e.g. "\n\n" between interleaved thinking
         // blocks) that survive a buffer flush.
@@ -359,7 +373,21 @@ impl ChatRenderer {
             return;
         }
 
-        let opts = self.terminal_options(indent);
+        let is_reasoning = self.last_content_kind == Some(ContentKind::Reasoning);
+
+        // A reasoning block following another reasoning block: emit the
+        // deferred separator shaded so the gap stays inside the reasoning
+        // region.
+        if is_reasoning {
+            self.emit_pending_reasoning_separator(true);
+        }
+
+        let mut opts = self.terminal_options(indent);
+        // Defer a reasoning block's trailing separator. Whether the gap that
+        // follows is shaded depends on whether more reasoning or other content
+        // comes next, which isn't known until the next event arrives.
+        opts.suppress_trailing_separator = is_reasoning;
+
         let formatted = self
             .formatter
             .format_terminal_with(block, &opts)
@@ -367,6 +395,10 @@ impl ChatRenderer {
 
         let delay = self.config.typewriter.text_delay;
         self.printer.print(formatted.typewriter(delay.into()));
+
+        if is_reasoning {
+            self.reasoning_separator_pending = true;
+        }
     }
 
     /// Build per-block terminal options based on the current content kind and
@@ -374,18 +406,47 @@ impl ChatRenderer {
     fn terminal_options(&self, indent: usize) -> TerminalOptions {
         TerminalOptions {
             default_background: if self.last_content_kind == Some(ContentKind::Reasoning) {
-                self.config
-                    .reasoning
-                    .background
-                    .map(|color| DefaultBackground {
-                        param: crate::format::color_to_bg_param(color),
-                        fill: BackgroundFill::Terminal,
-                    })
+                self.reasoning_background()
             } else {
                 None
             },
             indent,
+            suppress_trailing_separator: false,
         }
+    }
+
+    /// The full-width background fill configured for reasoning content, if any.
+    fn reasoning_background(&self) -> Option<DefaultBackground> {
+        self.config
+            .reasoning
+            .background
+            .map(|color| DefaultBackground {
+                param: crate::format::color_to_bg_param(color),
+                fill: BackgroundFill::Terminal,
+            })
+    }
+
+    /// Emit the separator owed by the previously rendered reasoning block.
+    ///
+    /// Reasoning blocks render without their trailing inter-block separator so
+    /// its background can be decided once the following content is known.
+    /// When `shaded`, the separator carries the reasoning background (the gap
+    /// sits between two reasoning blocks); otherwise it is unstyled (reasoning
+    /// is giving way to other content).
+    fn emit_pending_reasoning_separator(&mut self, shaded: bool) {
+        if !self.reasoning_separator_pending {
+            return;
+        }
+        self.reasoning_separator_pending = false;
+
+        let background = if shaded {
+            self.reasoning_background()
+        } else {
+            None
+        };
+        let separator = render_separator(background.as_ref());
+        let delay = self.config.typewriter.text_delay;
+        self.printer.print(separator.typewriter(delay.into()));
     }
 
     pub fn flush(&mut self) {
@@ -402,6 +463,12 @@ impl ChatRenderer {
                 _ => {}
             }
         }
+
+        // Reaching a flush means we're leaving the current content region (a
+        // content-kind transition, a role header, or end of stream). Emit any
+        // deferred reasoning separator unstyled so the gap to whatever follows
+        // isn't shaded.
+        self.emit_pending_reasoning_separator(false);
     }
 
     /// Signal that the current typewriter producer is done emitting.
@@ -442,6 +509,7 @@ impl ChatRenderer {
         let pretty = self.printer.pretty_printing_enabled();
         self.formatter = formatter_from_config(&self.config, pretty);
         self.last_content_kind = None;
+        self.reasoning_separator_pending = false;
         self.reasoning_chars_count = 0;
         self.code_block = None;
         self.fixups = vec![
