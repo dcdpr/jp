@@ -6,6 +6,7 @@ use std::{
 
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
+use crossterm::terminal;
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::McpServerId;
 use jp_printer::Printer;
@@ -67,6 +68,12 @@ pub(crate) struct Term {
     /// pipe or a regular file, respectively.
     /// These are not managed by the TTY subsystem.
     pub(crate) is_tty: bool,
+
+    /// Width of the controlling terminal in columns, when stdout is a TTY.
+    ///
+    /// `None` when stdout is piped or redirected, so list output keeps its full
+    /// width for machine consumption rather than wrapping to a guessed size.
+    pub(crate) width: Option<u16>,
 }
 
 impl Ctx {
@@ -83,13 +90,21 @@ impl Ctx {
         let config = config.into();
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
+        let is_tty = io::stdout().is_terminal();
+        let width = if is_tty {
+            terminal::size().ok().map(|(cols, _)| cols)
+        } else {
+            None
+        };
+
         Self {
             workspace,
             fs_backend,
             config,
             term: Term {
                 args,
-                is_tty: io::stdout().is_terminal(),
+                is_tty,
+                width,
             },
             session,
             printer: Arc::new(printer),

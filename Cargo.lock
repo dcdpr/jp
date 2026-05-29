@@ -2190,6 +2190,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "unicode-width",
  "url",
  "which",
  "windows-sys 0.61.0",

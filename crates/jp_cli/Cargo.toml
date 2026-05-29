@@ -96,6 +96,7 @@ tracing-subscriber = { workspace = true, features = [
     "tracing-log",
     "valuable",
 ] }
+unicode-width = { workspace = true }
 url = { workspace = true }
 which = { workspace = true, features = ["real-sys"] }
 
