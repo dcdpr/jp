@@ -738,10 +738,14 @@ pub enum ToolSource {
     Mcp {
         /// The name of the MCP server that contains the tool.
         ///
-        /// If not specified, all servers are searched, and the first one that
-        /// contains the tool is used. If no server contains the tool, an error
-        /// is returned.
-        server: Option<String>,
+        /// The server name is required — the source string must be of the
+        /// form `mcp.<server>` or `mcp.<server>.<tool>`. The legacy
+        /// shapes `mcp` and `mcp..<tool>` are rejected because the
+        /// implicit cross-server lookup they enabled was both
+        /// order-dependent (whichever server happened to be iterated
+        /// first) and incompatible with optional MCP servers (a failed
+        /// candidate would abort the whole resolution).
+        server: String,
 
         /// The name of the tool to use.
         ///
@@ -775,14 +779,10 @@ impl Serialize for ToolSource {
                 .as_ref()
                 .map_or_else(|| "local".to_string(), |tool| format!("local.{tool}")),
             Self::Mcp { server, tool } => {
-                let mut s = "mcp".to_string();
-                if let Some(server) = server {
+                let mut s = format!("mcp.{server}");
+                if let Some(tool) = tool {
                     s.push('.');
-                    s.push_str(server);
-                    if let Some(tool) = tool {
-                        s.push('.');
-                        s.push_str(tool);
-                    }
+                    s.push_str(tool);
                 }
                 s
             }
@@ -803,11 +803,23 @@ impl FromStr for ToolSource {
             "builtin" => Ok(Self::Builtin { tool }),
             "local" => Ok(Self::Local { tool }),
             "mcp" => {
-                let (server, tool) = tool.map_or((None, None), |t| {
-                    t.split_once('.')
-                        .map(|(a, b)| (Some(a.to_owned()), Some(b.to_owned())))
-                        .unwrap_or((Some(t), None))
-                });
+                let Some(rest) = tool else {
+                    return Err("MCP tool source must name a server: use `mcp.<server>` or \
+                                `mcp.<server>.<tool>` (legacy `mcp` is no longer accepted)."
+                        .to_owned());
+                };
+
+                let (server, tool) = match rest.split_once('.') {
+                    Some((server, tool)) => (server.to_owned(), Some(tool.to_owned())),
+                    None => (rest, None),
+                };
+
+                if server.is_empty() {
+                    return Err("MCP tool source must name a server: use `mcp.<server>` or \
+                                `mcp.<server>.<tool>` (legacy `mcp..<tool>` is no longer \
+                                accepted)."
+                        .to_owned());
+                }
 
                 Ok(Self::Mcp { server, tool })
             }

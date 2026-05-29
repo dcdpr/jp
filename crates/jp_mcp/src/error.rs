@@ -42,8 +42,15 @@ pub enum Error {
         error: std::io::Error,
     },
 
-    #[error("Server initialization error: {cmd}, error: {error}")]
-    InitializeError { cmd: String, error: String },
+    #[error("Server initialization error: {cmd}, error: {error}{stderr}")]
+    InitializeError {
+        cmd: String,
+        error: String,
+        /// Pre-rendered tail of the server's stderr, including a leading
+        /// newline and `stderr:` header when non-empty. Empty when the
+        /// server produced no stderr output before failing.
+        stderr: String,
+    },
 
     #[error("Cannot read file: {path}, error: {error}")]
     CannotReadFile {

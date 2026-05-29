@@ -329,6 +329,62 @@ fn test_tool_source_schema() {
 }
 
 #[test]
+fn test_tool_source_mcp_parses_server_only() {
+    let parsed: ToolSource = "mcp.bookworm".parse().unwrap();
+    assert_eq!(parsed, ToolSource::Mcp {
+        server: "bookworm".to_owned(),
+        tool: None,
+    });
+}
+
+#[test]
+fn test_tool_source_mcp_parses_server_and_tool() {
+    let parsed: ToolSource = "mcp.bookworm.crate_readme".parse().unwrap();
+    assert_eq!(parsed, ToolSource::Mcp {
+        server: "bookworm".to_owned(),
+        tool: Some("crate_readme".to_owned()),
+    });
+}
+
+#[test]
+fn test_tool_source_mcp_rejects_legacy_no_server() {
+    let err = "mcp".parse::<ToolSource>().unwrap_err();
+    assert!(err.contains("must name a server"), "got: {err}");
+}
+
+#[test]
+fn test_tool_source_mcp_rejects_legacy_empty_server() {
+    let err = "mcp..read_file".parse::<ToolSource>().unwrap_err();
+    assert!(err.contains("must name a server"), "got: {err}");
+}
+
+#[test]
+fn test_tool_source_mcp_roundtrip_with_tool() {
+    let original = ToolSource::Mcp {
+        server: "bookworm".to_owned(),
+        tool: Some("crate_readme".to_owned()),
+    };
+    let serialized = serde_json::to_string(&original).unwrap();
+    assert_eq!(serialized, r#""mcp.bookworm.crate_readme""#);
+
+    let parsed: ToolSource = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(parsed, original);
+}
+
+#[test]
+fn test_tool_source_mcp_roundtrip_without_tool() {
+    let original = ToolSource::Mcp {
+        server: "bookworm".to_owned(),
+        tool: None,
+    };
+    let serialized = serde_json::to_string(&original).unwrap();
+    assert_eq!(serialized, r#""mcp.bookworm""#);
+
+    let parsed: ToolSource = serde_json::from_str(&serialized).unwrap();
+    assert_eq!(parsed, original);
+}
+
+#[test]
 fn test_tool_options_assign_flat() {
     let mut p = PartialToolConfig::default();
     let kv = KvAssignment::try_from_cli("options.verbose", "true").unwrap();

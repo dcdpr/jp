@@ -24,7 +24,7 @@ use tokio::{
     process::Command,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{info, trace};
+use tracing::{info, trace, warn};
 
 use crate::error::ToolError;
 
@@ -668,7 +668,7 @@ impl ToolDefinition {
                     id,
                     arguments,
                     mcp_client,
-                    server.as_deref(),
+                    server,
                     tool.as_deref(),
                     cancellation_token,
                 )
@@ -756,7 +756,7 @@ impl ToolDefinition {
         id: String,
         arguments: Value,
         mcp_client: &jp_mcp::Client,
-        server: Option<&str>,
+        server: &str,
         tool: Option<&str>,
         cancellation_token: CancellationToken,
     ) -> Result<ExecutionOutcome, ToolError> {
@@ -1045,6 +1045,21 @@ pub async fn tool_definitions(
             continue;
         }
 
+        // Drop MCP-backed tools whose server failed to start while marked
+        // optional. The server is absent from the running services map, and
+        // we don't want to hand the LLM a tool it cannot invoke.
+        if let ToolSource::Mcp { server, .. } = config.source() {
+            let server_id = McpServerId::new(server);
+            if !mcp_client.is_running(&server_id).await {
+                warn!(
+                    tool = name,
+                    server = %server,
+                    "Skipping MCP tool: backing server is not running."
+                );
+                continue;
+            }
+        }
+
         let definition = resolve_tool(name, &config, mcp_client).await?;
         definitions.push(definition);
     }
@@ -1068,30 +1083,26 @@ async fn resolve_tool(
             })
         }
         ToolSource::Mcp { server, tool } => {
-            resolve_mcp_tool(server.as_ref(), name, tool.as_deref(), config, mcp_client).await
+            resolve_mcp_tool(server, name, tool.as_deref(), config, mcp_client).await
         }
     }
 }
 
 /// Resolve an MCP tool: fetch from server, merge config overrides, auto-split
 /// descriptions into summary + detail.
-#[expect(clippy::too_many_lines)]
 async fn resolve_mcp_tool(
-    server: Option<&String>,
+    server: &str,
     name: &str,
     source_name: Option<&str>,
     config: &ToolConfigWithDefaults,
     mcp_client: &jp_mcp::Client,
 ) -> Result<ToolDefinition, ToolError> {
     let mcp_tool = {
-        trace!(?server, tool = %name, "Fetching tool from MCP server");
+        trace!(server = %server, tool = %name, "Fetching tool from MCP server");
 
-        let server_id = server.as_ref().map(|s| McpServerId::new(s.to_owned()));
+        let server_id = McpServerId::new(server);
         mcp_client
-            .get_tool(
-                &McpToolId::new(source_name.unwrap_or(name)),
-                server_id.as_ref(),
-            )
+            .get_tool(&McpToolId::new(source_name.unwrap_or(name)), &server_id)
             .await
             .map_err(ToolError::McpGetToolError)
     }?;
@@ -1122,110 +1133,9 @@ async fn resolve_mcp_tool(
         .flatten()
     {
         let override_cfg = user_overrides.get(param_name.as_str());
-
-        let kind = match override_cfg.map(|v| v.kind.clone()) {
-            Some(kind) => kind,
-            None => match opts.get("type").unwrap_or(&Value::Null) {
-                Value::String(v) => OneOrManyTypes::One(v.to_owned()),
-                Value::Array(v) => OneOrManyTypes::Many(
-                    v.iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_owned)
-                        .collect(),
-                ),
-                value => {
-                    if value.is_null()
-                        && let Some(any) = opts
-                            .get("anyOf")
-                            .and_then(Value::as_array)
-                            .map(|v| {
-                                v.iter()
-                                    .filter_map(|v| {
-                                        v.get("type").and_then(Value::as_str).map(str::to_owned)
-                                    })
-                                    .collect::<Vec<_>>()
-                            })
-                            .filter(|v| !v.is_empty())
-                    {
-                        OneOrManyTypes::Many(any)
-                    } else {
-                        return Err(ToolError::InvalidType {
-                            key: param_name.to_owned(),
-                            value: value.to_owned(),
-                            need: vec!["string", "array"],
-                        });
-                    }
-                }
-            },
-        };
-
-        let default = override_cfg
-            .and_then(|v| v.default.clone())
-            .or_else(|| opts.get("default").cloned());
-
-        let description = merge_description(
-            override_cfg.and_then(|v| v.description.clone()),
-            opts.get("description").and_then(Value::as_str),
-        );
-
-        let mut enumeration: Vec<Value> = override_cfg
-            .map(|v| v.enumeration.clone())
-            .into_iter()
-            .flatten()
-            .collect();
-
-        if enumeration.is_empty() {
-            enumeration = opts
-                .get("enum")
-                .and_then(|v| v.as_array())
-                .into_iter()
-                .flatten()
-                .cloned()
-                .collect();
-        }
-
-        // An MCP tool's parameter `requiredness` can be switched from `false`
-        // to `true`, but not the other way around. This is because allowing
-        // this could break the contract with the external tool's expectations.
-        let required = required_properties.iter().any(|p| *p == param_name);
-        let required = match (required, override_cfg.map(|v| v.required)) {
-            (v, None) => v,
-            (true, _) => true,
-            (false, Some(cfg)) => cfg,
-        };
-
-        params.insert(param_name.to_owned(), ToolParameterConfig {
-            kind,
-            default,
-            required,
-            summary: None,
-            description,
-            examples: None,
-            enumeration,
-            items: opts.get("items").and_then(|v| v.as_object()).and_then(|v| {
-                Some(Box::new(ToolParameterConfig {
-                    kind: match v.get("type")? {
-                        Value::String(v) => OneOrManyTypes::One(v.to_owned()),
-                        Value::Array(v) => OneOrManyTypes::Many(
-                            v.iter()
-                                .filter_map(Value::as_str)
-                                .map(str::to_owned)
-                                .collect(),
-                        ),
-                        _ => return None,
-                    },
-                    default: None,
-                    required: false,
-                    summary: None,
-                    description: None,
-                    examples: None,
-                    enumeration: vec![],
-                    items: None,
-                    properties: IndexMap::default(),
-                }))
-            }),
-            properties: IndexMap::default(),
-        });
+        let required_in_mcp = required_properties.iter().any(|p| *p == param_name);
+        let param = merge_mcp_param(param_name, opts, override_cfg, required_in_mcp)?;
+        params.insert(param_name.to_owned(), param);
     }
 
     // Build docs with auto-split heuristic.
@@ -1296,6 +1206,153 @@ async fn resolve_mcp_tool(
         name: name.to_owned(),
         docs,
         parameters: params,
+    })
+}
+
+/// Merge an MCP server's schema for a single parameter with the user's TOML
+/// override, producing the resolved [`ToolParameterConfig`] used by the rest of
+/// the pipeline.
+///
+/// User overrides win wholesale for fields that affect the parameter's shape
+/// (`kind`, `items`, `properties`, `enumeration`) and value constraints
+/// (`default`, `description`).
+/// The only field that's *not* freely replaceable is `required`: the MCP
+/// server's contract allows tightening (`false → true`) but not loosening,
+/// since loosening could produce LLM calls that drop arguments the server
+/// expects.
+///
+/// Item-level (`items`) and nested-object (`properties`) overrides are handled
+/// here even when the MCP schema doesn't declare them (e.g. the MCP server
+/// emits `items: {"$ref": ...}` which our parser can't inline today).
+/// This keeps the override surface symmetric with `kind`, `default`, and
+/// `enumeration`.
+fn merge_mcp_param(
+    name: &str,
+    opts: &Value,
+    override_cfg: Option<&ToolParameterConfig>,
+    required_in_mcp: bool,
+) -> Result<ToolParameterConfig, ToolError> {
+    let kind = match override_cfg.map(|v| v.kind.clone()) {
+        Some(kind) => kind,
+        None => match opts.get("type").unwrap_or(&Value::Null) {
+            Value::String(v) => OneOrManyTypes::One(v.to_owned()),
+            Value::Array(v) => OneOrManyTypes::Many(
+                v.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+            ),
+            value => {
+                if value.is_null()
+                    && let Some(any) = opts
+                        .get("anyOf")
+                        .and_then(Value::as_array)
+                        .map(|v| {
+                            v.iter()
+                                .filter_map(|v| {
+                                    v.get("type").and_then(Value::as_str).map(str::to_owned)
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .filter(|v| !v.is_empty())
+                {
+                    OneOrManyTypes::Many(any)
+                } else {
+                    return Err(ToolError::InvalidType {
+                        key: name.to_owned(),
+                        value: value.to_owned(),
+                        need: vec!["string", "array"],
+                    });
+                }
+            }
+        },
+    };
+
+    let default = override_cfg
+        .and_then(|v| v.default.clone())
+        .or_else(|| opts.get("default").cloned());
+
+    let description = merge_description(
+        override_cfg.and_then(|v| v.description.clone()),
+        opts.get("description").and_then(Value::as_str),
+    );
+
+    let mut enumeration: Vec<Value> = override_cfg
+        .map(|v| v.enumeration.clone())
+        .into_iter()
+        .flatten()
+        .collect();
+
+    if enumeration.is_empty() {
+        enumeration = opts
+            .get("enum")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect();
+    }
+
+    // An MCP tool's parameter `requiredness` can be switched from `false`
+    // to `true`, but not the other way around. This is because allowing
+    // this could break the contract with the external tool's expectations.
+    let required = match (required_in_mcp, override_cfg.map(|v| v.required)) {
+        (v, None) => v,
+        (true, _) => true,
+        (false, Some(cfg)) => cfg,
+    };
+
+    // Items: user override wins wholesale (same policy as `kind`).
+    // Otherwise fall back to the MCP schema, which we can only parse
+    // when its `items` declares a plain `type` — schemas that use
+    // `$ref` for items resolve to `None` here, in which case the
+    // user's TOML is the only path to a usable `items` config.
+    let items = override_cfg.and_then(|v| v.items.clone()).or_else(|| {
+        opts.get("items").and_then(|v| v.as_object()).and_then(|v| {
+            Some(Box::new(ToolParameterConfig {
+                kind: match v.get("type")? {
+                    Value::String(v) => OneOrManyTypes::One(v.to_owned()),
+                    Value::Array(v) => OneOrManyTypes::Many(
+                        v.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_owned)
+                            .collect(),
+                    ),
+                    _ => return None,
+                },
+                default: None,
+                required: false,
+                summary: None,
+                description: None,
+                examples: None,
+                enumeration: vec![],
+                items: None,
+                properties: IndexMap::default(),
+            }))
+        })
+    });
+
+    // Properties: user override wins when non-empty. We don't currently
+    // parse nested `properties` from the MCP schema into
+    // `ToolParameterConfig`, so without an override this stays empty
+    // — same situation as `items` with a `$ref`. A future change can
+    // add MCP-side nested-property resolution; that's symmetric with
+    // the `$ref`-resolution follow-up for `items`.
+    let properties = override_cfg
+        .map(|v| v.properties.clone())
+        .filter(|p| !p.is_empty())
+        .unwrap_or_default();
+
+    Ok(ToolParameterConfig {
+        kind,
+        default,
+        required,
+        summary: None,
+        description,
+        examples: None,
+        enumeration,
+        items,
+        properties,
     })
 }
 

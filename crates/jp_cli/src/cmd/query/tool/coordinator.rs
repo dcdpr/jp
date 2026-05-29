@@ -405,7 +405,6 @@ impl ToolCoordinator {
         &mut self,
         executor: Box<dyn Executor>,
         prompter: &ToolPrompter,
-        mcp_client: &Client,
         is_tty: bool,
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
@@ -450,7 +449,7 @@ impl ToolCoordinator {
                 // the post-edit args.
                 let pre_edit_args = executor.arguments().clone();
 
-                let result = prompter.prompt_permission(&info, mcp_client).await;
+                let result = prompter.prompt_permission(&info);
                 match self.apply_permission_result(result, &info, turn_state, executor) {
                     Ok(executor) => {
                         let pre = if executor.arguments() == &pre_edit_args {
@@ -748,7 +747,6 @@ impl ToolCoordinator {
     pub async fn run_permission_phase(
         &mut self,
         prompter: &ToolPrompter,
-        mcp_client: &Client,
         is_tty: bool,
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
@@ -765,14 +763,7 @@ impl ToolCoordinator {
             // decide → pre-render → prompt → render policy stays in one
             // place.
             let decision = self
-                .resolve_tool_call_decision(
-                    executor,
-                    prompter,
-                    mcp_client,
-                    is_tty,
-                    turn_state,
-                    tool_renderer,
-                )
+                .resolve_tool_call_decision(executor, prompter, is_tty, turn_state, tool_renderer)
                 .await;
 
             match decision {

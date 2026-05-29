@@ -7,7 +7,7 @@ use std::{
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
-use jp_mcp::id::{McpServerId, McpToolId};
+use jp_mcp::id::McpServerId;
 use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
 use jp_task::TaskHandler;
@@ -158,26 +158,16 @@ impl Ctx {
     ) -> Result<JoinSet<std::result::Result<(), jp_mcp::Error>>> {
         let mut server_ids = HashSet::new();
 
-        for (name, cfg) in self.config.conversation.tools.iter() {
+        for (_name, cfg) in self.config.conversation.tools.iter() {
             if !cfg.enable() {
                 continue;
             }
 
-            let ToolSource::Mcp { server, tool } = &cfg.source() else {
+            let ToolSource::Mcp { server, .. } = &cfg.source() else {
                 continue;
             };
 
-            let tool_name = tool.as_deref().unwrap_or(name);
-            let server_id = match server.as_deref() {
-                Some(server) => McpServerId::new(server),
-                None => {
-                    self.mcp_client
-                        .get_tool_server_id(&McpToolId::new(tool_name), None)
-                        .await?
-                }
-            };
-
-            server_ids.insert(server_id);
+            server_ids.insert(McpServerId::new(server));
         }
 
         self.mcp_client

@@ -17,10 +17,6 @@ use jp_conversation::event::{InquiryId, SelectOption};
 use jp_editor::{EditorBackend, TerminalEditorBackend};
 use jp_inquire::{InlineOption, prompt::PromptBackend};
 use jp_llm::tool::executor::PermissionInfo;
-use jp_mcp::{
-    Client,
-    id::{McpServerId, McpToolId},
-};
 use jp_printer::Printer;
 use jp_tool::AnswerType;
 use serde_json::Value;
@@ -158,11 +154,7 @@ impl ToolPrompter {
     ///
     /// - `PermissionResult::Run` if the user approved (with possibly modified args)
     /// - `PermissionResult::Skip` if the user declined
-    pub async fn prompt_permission(
-        &self,
-        info: &PermissionInfo,
-        mcp_client: &Client,
-    ) -> Result<PermissionResult, Error> {
+    pub fn prompt_permission(&self, info: &PermissionInfo) -> Result<PermissionResult, Error> {
         match info.run_mode {
             RunMode::Unattended => Ok(PermissionResult::Run {
                 arguments: info.arguments.clone(),
@@ -170,23 +162,11 @@ impl ToolPrompter {
             }),
 
             RunMode::Ask => {
-                self.prompt_ask(
-                    &info.tool_name,
-                    &info.tool_source,
-                    info.arguments.clone(),
-                    mcp_client,
-                )
-                .await
+                self.prompt_ask(&info.tool_name, &info.tool_source, info.arguments.clone())
             }
 
             RunMode::Edit => {
-                self.prompt_edit(
-                    &info.tool_name,
-                    &info.tool_source,
-                    info.arguments.clone(),
-                    mcp_client,
-                )
-                .await
+                self.prompt_edit(&info.tool_name, &info.tool_source, info.arguments.clone())
             }
 
             RunMode::Skip => Ok(PermissionResult::Skip {
@@ -218,19 +198,16 @@ impl ToolPrompter {
     }
 
     /// Shows the interactive permission prompt.
-    async fn prompt_ask(
+    fn prompt_ask(
         &self,
         tool_name: &str,
         tool_source: &ToolSource,
         arguments: Value,
-        mcp_client: &Client,
     ) -> Result<PermissionResult, Error> {
         let current_args = arguments;
 
         loop {
-            let question = self
-                .build_permission_question(tool_name, tool_source, mcp_client)
-                .await?;
+            let question = build_permission_question(tool_name, tool_source);
 
             let inline_options = select_options_to_inline(&self.permission_options());
 
@@ -318,17 +295,14 @@ impl ToolPrompter {
     /// If no editor is configured, falls back to Ask mode.
     /// If the user empties the content, falls back to Ask mode.
     /// If JSON parsing fails, prompts to retry or fail.
-    async fn prompt_edit(
+    fn prompt_edit(
         &self,
         tool_name: &str,
         tool_source: &ToolSource,
         arguments: Value,
-        mcp_client: &Client,
     ) -> Result<PermissionResult, Error> {
         let Some(_) = &self.editor else {
-            return self
-                .prompt_ask(tool_name, tool_source, arguments, mcp_client)
-                .await;
+            return self.prompt_ask(tool_name, tool_source, arguments);
         };
 
         match self.try_edit_arguments(&arguments)? {
@@ -336,10 +310,7 @@ impl ToolPrompter {
                 arguments: edited,
                 persist: false,
             }),
-            EditResult::Emptied => {
-                self.prompt_ask(tool_name, tool_source, arguments, mcp_client)
-                    .await
-            }
+            EditResult::Emptied => self.prompt_ask(tool_name, tool_source, arguments),
             EditResult::Cancelled => Ok(PermissionResult::Skip {
                 reason: Some("Edit cancelled".to_string()),
                 persist: false,
@@ -483,42 +454,6 @@ impl ToolPrompter {
         self.editor.is_some()
     }
 
-    /// Builds the permission question string.
-    async fn build_permission_question(
-        &self,
-        tool_name: &str,
-        tool_source: &ToolSource,
-        mcp_client: &Client,
-    ) -> Result<String, Error> {
-        let source_type = match tool_source {
-            ToolSource::Builtin { .. } => "built-in",
-            ToolSource::Local { .. } => "local",
-            ToolSource::Mcp { .. } => "mcp",
-        };
-
-        let mut question = format!("Run {} {} tool", source_type, tool_name.yellow().bold());
-
-        if let ToolSource::Mcp { server, tool } = tool_source {
-            let tool_id = McpToolId::new(tool.as_ref().unwrap_or(&tool_name.to_string()));
-            let server_id = server.as_ref().map(|s| McpServerId::new(s.clone()));
-
-            if let Ok(resolved_server_id) = mcp_client
-                .get_tool_server_id(&tool_id, server_id.as_ref())
-                .await
-            {
-                question = format!(
-                    "{} from {} server?",
-                    question,
-                    resolved_server_id.as_str().blue().bold()
-                );
-            }
-        } else {
-            question.push('?');
-        }
-
-        Ok(question)
-    }
-
     /// Prompts the user for a tool-specific question.
     ///
     /// This handles different question types:
@@ -622,6 +557,29 @@ impl ToolPrompter {
             _ => unreachable!(),
         }
     }
+}
+
+/// Builds the permission question string.
+fn build_permission_question(tool_name: &str, tool_source: &ToolSource) -> String {
+    let source_type = match tool_source {
+        ToolSource::Builtin { .. } => "built-in",
+        ToolSource::Local { .. } => "local",
+        ToolSource::Mcp { .. } => "mcp",
+    };
+
+    let mut question = format!("Run {} {} tool", source_type, tool_name.yellow().bold());
+
+    if let ToolSource::Mcp { server, .. } = tool_source {
+        question = format!(
+            "{} from {} server?",
+            question,
+            server.as_str().blue().bold()
+        );
+    } else {
+        question.push('?');
+    }
+
+    question
 }
 
 /// Converts `SelectOption`s to `InlineOption`s for the prompt backend.

@@ -36,7 +36,23 @@ impl PartialConfigDelta for PartialMcpProviderConfig {
                 arguments: delta_opt_vec(prev.arguments.as_ref(), next.arguments),
                 variables: delta_opt_vec(prev.variables.as_ref(), next.variables),
                 checksum: delta_opt_partial(prev.checksum.as_ref(), next.checksum),
+                optional: delta_opt(prev.optional.as_ref(), next.optional),
             }),
+        }
+    }
+}
+
+impl McpProviderConfig {
+    /// Whether a failed start of this server should be tolerated.
+    ///
+    /// Optional servers are logged at `warn` and skipped; tools backed by
+    /// them are filtered out of the resolved tool list before the LLM ever
+    /// sees them. Required servers (the default) abort the command on any
+    /// startup failure.
+    #[must_use]
+    pub const fn optional(&self) -> bool {
+        match self {
+            Self::Stdio(config) => config.optional,
         }
     }
 }
@@ -71,6 +87,18 @@ pub struct StdioConfig {
     /// The binary checksum for the binary.
     #[setting(nested)]
     pub checksum: Option<ChecksumConfig>,
+
+    /// Whether this MCP server is optional.
+    ///
+    /// When `false` (the default), a startup failure aborts the command — the
+    /// same loud failure as before this field existed.
+    ///
+    /// When `true`, a startup failure is logged at `warn` and the server is
+    /// skipped. Tools that depend on this server are filtered out before they
+    /// are presented to the LLM, so the assistant never sees a tool whose
+    /// backing server failed to start.
+    #[setting(default)]
+    pub optional: bool,
 }
 
 impl AssignKeyValue for PartialStdioConfig {
@@ -81,6 +109,7 @@ impl AssignKeyValue for PartialStdioConfig {
             _ if kv.p("args") => kv.try_some_vec_of_strings(&mut self.arguments)?,
             _ if kv.p("env") => kv.try_some_vec_of_strings(&mut self.variables)?,
             _ if kv.p("binary_checksum") => self.checksum.assign(kv)?,
+            "optional" => self.optional = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -97,6 +126,7 @@ impl ToPartial for StdioConfig {
             arguments: partial_opt(&self.arguments, defaults.arguments),
             variables: partial_opt(&self.variables, defaults.variables),
             checksum: partial_opt_config(self.checksum.as_ref(), defaults.checksum),
+            optional: partial_opt(&self.optional, defaults.optional),
         }
     }
 }
@@ -158,3 +188,7 @@ pub enum AlgorithmConfig {
     #[serde(rename = "sha1")]
     Sha1,
 }
+
+#[cfg(test)]
+#[path = "mcp_tests.rs"]
+mod tests;
