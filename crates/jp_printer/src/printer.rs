@@ -1,7 +1,6 @@
 //! The printer module.
 
 use std::{
-    borrow::Cow,
     fmt::{self, Write},
     io,
     sync::{
@@ -16,7 +15,7 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 use tracing::error;
 
-use crate::typewriter::VisibleCharsIterator;
+use crate::{ansi::AnsiStripper, typewriter::VisibleCharsIterator};
 
 /// A shared buffer that can be written to.
 pub type SharedBuffer = Arc<Mutex<String>>;
@@ -83,12 +82,11 @@ impl Printer {
             let delay_control = delay_control.clone();
             thread::spawn(move || {
                 let mut worker = Worker {
-                    out,
-                    err,
+                    out: Sink::new(out, format),
+                    err: Sink::new(err, format),
                     tty,
                     rx,
                     delay_control,
-                    format,
                 };
                 worker.run();
             })
@@ -416,11 +414,11 @@ impl io::Write for PrinterWriter<'_> {
 
 /// The worker thread that processes print tasks.
 struct Worker<O, E> {
-    /// The `out` writer.
-    out: O,
+    /// The `out` writer; strips ANSI escapes for non-pretty formats.
+    out: Sink<O>,
 
-    /// The `err` writer.
-    err: E,
+    /// The `err` writer; strips ANSI escapes for non-pretty formats.
+    err: Sink<E>,
 
     /// The TTY writer for interactive prompts (`/dev/tty`).
     tty: Option<Box<dyn io::Write + Send>>,
@@ -430,9 +428,6 @@ struct Worker<O, E> {
 
     /// Shared with the [`Printer`] to interrupt typewriter sleeps.
     delay_control: Arc<DelayControl>,
-
-    /// The output format - controls ANSI stripping.
-    format: OutputFormat,
 }
 
 impl<O: io::Write, E: io::Write> Worker<O, E> {
@@ -481,13 +476,6 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
 
     /// Process a print task instantly, ignoring typewriter delays.
     fn process_task_instant(&mut self, task: &PrintTask) {
-        // TTY content is never stripped — it's always a real terminal.
-        let content = if task.target == PrintTarget::Tty {
-            Cow::Borrowed(task.content.as_str())
-        } else {
-            self.maybe_strip(&task.content)
-        };
-
         let writer: &mut dyn io::Write = match task.target {
             PrintTarget::Out => &mut self.out,
             PrintTarget::Err => &mut self.err,
@@ -497,7 +485,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             },
         };
 
-        let _err = write!(writer, "{content}");
+        let _err = writer.write_all(task.content.as_bytes());
         let _err = writer.flush();
 
         // A typewriter task drained instantly still contributed to the
@@ -517,13 +505,6 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             mode,
             target,
         } = task;
-
-        // TTY content is never stripped — it's always a real terminal.
-        let content = if *target == PrintTarget::Tty {
-            Cow::Borrowed(content.as_str())
-        } else {
-            self.maybe_strip(content)
-        };
 
         let writer: &mut dyn io::Write = match target {
             PrintTarget::Out => &mut self.out,
@@ -545,7 +526,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                     let _err = writer.flush();
                     // The whole content was emitted in one shot; release
                     // its visible-char share from the pending counter.
-                    let count = visible_char_count(&content);
+                    let count = visible_char_count(content);
                     release_pending(&self.delay_control, count);
                     return;
                 }
@@ -559,7 +540,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                 // instead of the 200ms the controller asked for —
                 // silently violating the configured `max_latency`.
                 let mut credit = Duration::ZERO;
-                for (c, visible) in VisibleCharsIterator::new(&content) {
+                for (c, visible) in VisibleCharsIterator::new(content) {
                     let _err = write!(writer, "{c}");
                     let _err = writer.flush();
 
@@ -586,14 +567,45 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             }
         }
     }
+}
 
-    /// Strip ANSI escape sequences if the flag is set, otherwise return
-    /// the input unchanged.
-    fn maybe_strip<'a>(&self, content: &'a str) -> Cow<'a, str> {
-        if self.format.is_pretty() {
-            Cow::Borrowed(content)
+/// A per-stream output sink.
+///
+/// Wraps the underlying writer, stripping ANSI escape sequences for non-pretty
+/// formats and passing bytes through untouched for pretty output.
+/// Each stream owns its own sink so escape-sequence state never bleeds between
+/// `out` and `err`.
+enum Sink<W> {
+    /// Pass bytes through unchanged; pretty formats keep their ANSI.
+    Raw(W),
+
+    /// Strip ANSI escape sequences before writing.
+    Strip(Box<AnsiStripper<W>>),
+}
+
+impl<W: io::Write> Sink<W> {
+    /// Build a sink for `inner`, stripping ANSI unless `format` is pretty.
+    fn new(inner: W, format: OutputFormat) -> Self {
+        if format.is_pretty() {
+            Self::Raw(inner)
         } else {
-            Cow::Owned(strip_ansi_escapes::strip_str(content))
+            Self::Strip(Box::new(AnsiStripper::new(inner)))
+        }
+    }
+}
+
+impl<W: io::Write> io::Write for Sink<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Raw(writer) => writer.write(buf),
+            Self::Strip(writer) => writer.write(buf),
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        match self {
+            Self::Raw(writer) => writer.flush(),
+            Self::Strip(writer) => writer.flush(),
         }
     }
 }
