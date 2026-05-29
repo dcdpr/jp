@@ -98,9 +98,9 @@ fn format_preview(
     ));
     out.push_str("```\n\n");
     out.push_str(
-        "The build artifact at `target/profiling/jp` may be rebuilt to reflect\n\
-         the sandbox's source tree (HEAD + uncommitted changes from this worktree).\n\
-         The installed `jp` binary (`~/.cargo/bin/jp` etc.) is **not** touched.\n\n",
+        "The build artifact at `target/profiling/jp` may be rebuilt to reflect\nthe sandbox's \
+         source tree (HEAD + uncommitted changes from this worktree).\nThe installed `jp` binary \
+         (`~/.cargo/bin/jp` etc.) is **not** touched.\n\n",
     );
 
     out.push_str("Filters:\n\n");
@@ -177,9 +177,9 @@ fn run(
         .find_map(|line| line.strip_prefix(TRACE_PATH_PREFIX))
         .ok_or_else(|| {
             format!(
-                "Did not find `{TRACE_PATH_PREFIX}<path>` in jp's stderr. \
-                 jp may have exited before the tracing layer flushed, or \
-                 stderr was redirected. Last 20 lines of stderr:\n{}",
+                "Did not find `{TRACE_PATH_PREFIX}<path>` in jp's stderr. jp may have exited \
+                 before the tracing layer flushed, or stderr was redirected. Last 20 lines of \
+                 stderr:\n{}",
                 tail_lines(&launch_result.stderr, 20)
             )
         })?;
@@ -228,17 +228,11 @@ fn run(
     let trace_dst_display = crate::debug_jp::util::relative_to(workspace_root, &trace_dst);
     let stdout_dst_display = crate::debug_jp::util::relative_to(workspace_root, &stdout_dst);
     let stderr_dst_display = crate::debug_jp::util::relative_to(workspace_root, &stderr_dst);
-    let report = trace_render::render(
-        &filtered,
-        total,
-        &launch_result,
-        args,
-        OutputPaths {
-            trace: &trace_dst_display,
-            stdout: &stdout_dst_display,
-            stderr: &stderr_dst_display,
-        },
-    );
+    let report = trace_render::render(&filtered, total, &launch_result, args, OutputPaths {
+        trace: &trace_dst_display,
+        stdout: &stdout_dst_display,
+        stderr: &stderr_dst_display,
+    });
     fs::write(&report_dst, &report)?;
     Ok(Outcome::Success { content: report })
 }

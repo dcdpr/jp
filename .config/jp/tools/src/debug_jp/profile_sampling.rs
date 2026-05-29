@@ -22,8 +22,7 @@ use crate::{
     debug_jp::util::{
         build::{self, BuildSpec},
         launch::{self, LaunchSpec},
-        profile_sampling_parse as sample_parse,
-        profile_sampling_render as sample_render,
+        profile_sampling_parse as sample_parse, profile_sampling_render as sample_render,
         sandbox::{Sandbox, SandboxOpts},
     },
     util::{ToolResult, error},
@@ -69,8 +68,8 @@ fn format_preview(args: &[String], duration_secs: u32, clone_user_data: bool) ->
     out.push_str("Will execute (under sandbox isolation):\n\n");
     out.push_str("```sh\n");
     out.push_str(
-        "CARGO_TARGET_DIR=tmp/sandbox-target \\\n  \
-         cargo build --profile profiling -p jp_cli --bin jp\n",
+        "CARGO_TARGET_DIR=tmp/sandbox-target \\\n  cargo build --profile profiling -p jp_cli \
+         --bin jp\n",
     );
     out.push_str(&format!(
         "tmp/sandbox-target/profiling/jp {}\n",
@@ -80,9 +79,9 @@ fn format_preview(args: &[String], duration_secs: u32, clone_user_data: bool) ->
     out.push_str("```\n\n");
 
     out.push_str(
-        "Build artifacts go to `tmp/sandbox-target/` so the main `target/` and any\n\
-         `jp` binary you're running from other tabs are not disturbed. Persistent\n\
-         across sandbox runs; recoverable with `rm -rf tmp/sandbox-target/`.\n\n",
+        "Build artifacts go to `tmp/sandbox-target/` so the main `target/` and any\n`jp` binary \
+         you're running from other tabs are not disturbed. Persistent\nacross sandbox runs; \
+         recoverable with `rm -rf tmp/sandbox-target/`.\n\n",
     );
 
     out.push_str("Isolation:\n\n");

@@ -118,10 +118,8 @@ pub(crate) fn parse(json: &str) -> Result<Profile, serde_json::Error> {
                 .fs
                 .into_iter()
                 .map(|idx| {
-                    ftbl.get(idx).map_or_else(
-                        || "[unknown]".to_owned(),
-                        |raw| clean_frame(raw),
-                    )
+                    ftbl.get(idx)
+                        .map_or_else(|| "[unknown]".to_owned(), |raw| clean_frame(raw))
                 })
                 .filter(|frame| !is_dispatch_noise(frame))
                 .collect(),

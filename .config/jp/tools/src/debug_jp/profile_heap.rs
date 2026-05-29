@@ -17,8 +17,7 @@ use crate::{
     debug_jp::util::{
         build::{self, BuildSpec},
         launch::{self, LaunchSpec},
-        profile_heap_parse as heap_parse,
-        profile_heap_render as heap_render,
+        profile_heap_parse as heap_parse, profile_heap_render as heap_render,
         sandbox::{Sandbox, SandboxOpts},
     },
     util::{ToolResult, error},
@@ -55,14 +54,14 @@ fn format_preview(args: &[String], clone_user_data: bool) -> String {
     ));
     out.push_str("```\n\n");
     out.push_str(
-        "Heap profiling adds **significant overhead** — expect runs to be much slower\n\
-         than uninstrumented or wall-clock-sampled runs. Allocator-heavy commands can take\n\
-         minutes; the dhat profiler must be allowed to finish for the report to be useful.\n\n",
+        "Heap profiling adds **significant overhead** — expect runs to be much slower\nthan \
+         uninstrumented or wall-clock-sampled runs. Allocator-heavy commands can take\nminutes; \
+         the dhat profiler must be allowed to finish for the report to be useful.\n\n",
     );
     out.push_str(
-        "The build artifact at `target/profiling/jp` may be rebuilt to reflect\n\
-         the sandbox's source tree (HEAD + uncommitted changes from this worktree).\n\
-         The installed `jp` binary (`~/.cargo/bin/jp` etc.) is **not** touched.\n\n",
+        "The build artifact at `target/profiling/jp` may be rebuilt to reflect\nthe sandbox's \
+         source tree (HEAD + uncommitted changes from this worktree).\nThe installed `jp` binary \
+         (`~/.cargo/bin/jp` etc.) is **not** touched.\n\n",
     );
 
     out.push_str("Isolation:\n\n");
@@ -143,8 +142,8 @@ fn run(workspace_root: &Utf8Path, args: &[String], clone_user_data: bool) -> Too
 fn find_latest_heap_json(dir: &Utf8Path) -> Result<Utf8PathBuf, Error> {
     if !dir.exists() {
         return Err(format!(
-            "Expected dhat to write a heap profile to {dir}, but the directory doesn't exist. \
-             Was jp built with the `dhat` feature?"
+            "Expected dhat to write a heap profile to {dir}, but the directory doesn't exist. Was \
+             jp built with the `dhat` feature?"
         )
         .into());
     }
@@ -160,15 +159,18 @@ fn find_latest_heap_json(dir: &Utf8Path) -> Result<Utf8PathBuf, Error> {
         let mtime = entry.metadata()?.modified()?;
         let path = Utf8PathBuf::from_path_buf(entry.path())
             .map_err(|p| format!("non-UTF-8 dhat output path: {}", p.display()))?;
-        if latest.as_ref().is_none_or(|(prev_mtime, _)| *prev_mtime < mtime) {
+        if latest
+            .as_ref()
+            .is_none_or(|(prev_mtime, _)| *prev_mtime < mtime)
+        {
             latest = Some((mtime, path));
         }
     }
 
     latest.map(|(_, p)| p).ok_or_else(|| {
         format!(
-            "No heap-*.json file found under {dir}. The `dhat` feature may not have been \
-             active, or the program exited before the profiler could write its output."
+            "No heap-*.json file found under {dir}. The `dhat` feature may not have been active, \
+             or the program exited before the profiler could write its output."
         )
         .into()
     })

@@ -117,11 +117,31 @@ fn render_ancestry_follows_depth_chain_across_branches() {
     let threads = vec![Thread {
         header: "Thread_test".into(),
         frames: vec![
-            Frame { depth: 0, samples: 100, symbol: "A".into() },
-            Frame { depth: 1, samples: 60, symbol: "B".into() },
-            Frame { depth: 2, samples: 40, symbol: "C".into() },
-            Frame { depth: 1, samples: 30, symbol: "D".into() },
-            Frame { depth: 2, samples: 30, symbol: "E".into() },
+            Frame {
+                depth: 0,
+                samples: 100,
+                symbol: "A".into(),
+            },
+            Frame {
+                depth: 1,
+                samples: 60,
+                symbol: "B".into(),
+            },
+            Frame {
+                depth: 2,
+                samples: 40,
+                symbol: "C".into(),
+            },
+            Frame {
+                depth: 1,
+                samples: 30,
+                symbol: "D".into(),
+            },
+            Frame {
+                depth: 2,
+                samples: 30,
+                symbol: "E".into(),
+            },
         ],
     }];
     let report = render(&threads, &fixture_launch(), &["x".into()], "x.txt");
@@ -136,8 +156,14 @@ fn render_ancestry_follows_depth_chain_across_branches() {
         .map_or(report.len(), |off| section_start + off);
     let section = &report[section_start..section_end];
 
-    assert!(section.contains('A'), "E's ancestry should include A; section was:\n{section}");
-    assert!(section.contains('D'), "E's ancestry should include D; section was:\n{section}");
+    assert!(
+        section.contains('A'),
+        "E's ancestry should include A; section was:\n{section}"
+    );
+    assert!(
+        section.contains('D'),
+        "E's ancestry should include D; section was:\n{section}"
+    );
     // B is at the same depth as D but is D's sibling, not an ancestor of E.
     // C is E's sibling under B, not an ancestor of E.
     assert!(
