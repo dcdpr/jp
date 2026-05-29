@@ -44,8 +44,9 @@ pub enum Error {
     },
 
     /// A custom configuration error.
-    // TODO: Remove this once we can enable the `validation` feature for
-    // `schematic` (currently broken in our own fork).
+    ///
+    /// Used to wrap arbitrary error types from external sources (URL parsing,
+    /// model ID resolution, etc.) into the [`Error`] enum.
     #[error(transparent)]
     Custom(Box<dyn std::error::Error + Send + Sync>),
 }
