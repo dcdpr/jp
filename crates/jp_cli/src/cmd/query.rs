@@ -372,7 +372,7 @@ impl Query {
             .as_mut()
             .update_events(|stream| self.build_conversation(stream, &cfg, &conversation_path))?;
 
-        let Some(chat_request) = chat_request else {
+        let Some(mut chat_request) = chat_request else {
             // Empty query, early exit. Auto-persist happens on lock drop.
             if let Some(path) = query_file.as_deref() {
                 fs::remove_file(path)?;
@@ -380,6 +380,36 @@ impl Query {
             ctx.printer.println("Query is empty, ignoring.");
             return Ok(());
         };
+
+        // Stamp the request with the configured user name so transcripts
+        // attribute each turn correctly even when teammates with different
+        // local configs continue the conversation. `None` falls back to a
+        // generic label at render time.
+        chat_request.author = cfg.user.name.clone();
+
+        // If a schema is provided, set it on the ChatRequest so the
+        // provider uses its native structured output API.
+        if let Some(schema) = &self.schema {
+            chat_request.schema = schema.as_object().cloned();
+        }
+
+        // If the query was composed in an editor, the user has lost sight
+        // of what they wrote by the time the editor closes. Echo it back
+        // through the same role-aware rendering machinery used by replay
+        // and live streaming — a labeled user header followed by the
+        // request body — so the boundary between user input and the
+        // forthcoming assistant response is visually clear. Render this
+        // before any post-edit work (MCP init, attachments, tools) so that
+        // failures in those stages don't swallow the user's message.
+        if query_file.is_some() {
+            let mut echo = TurnView::new(
+                ctx.printer.clone(),
+                cfg.style.clone(),
+                cfg.assistant.name.clone(),
+                Some(cfg.assistant.model.id.resolved().to_string()),
+            );
+            echo.render_user_request(&chat_request);
+        }
 
         if !editor_provided_config.is_empty() {
             // Resolve any model aliases before storing in the stream so
@@ -433,35 +463,6 @@ impl Query {
         // Sanitize any structural issues (orphaned tool calls, missing
         // user messages, etc.) before sending the stream to the provider.
         lock.as_mut().update_events(ConversationStream::sanitize);
-
-        // If a schema is provided, set it on the ChatRequest so the
-        // provider uses its native structured output API.
-        let mut chat_request = chat_request;
-        if let Some(schema) = &self.schema {
-            chat_request.schema = schema.as_object().cloned();
-        }
-
-        // Stamp the request with the configured user name so transcripts
-        // attribute each turn correctly even when teammates with different
-        // local configs continue the conversation. `None` falls back to a
-        // generic label at render time.
-        chat_request.author = cfg.user.name.clone();
-
-        // If the query was composed in an editor, the user has lost sight
-        // of what they wrote by the time the editor closes. Echo it back
-        // through the same role-aware rendering machinery used by replay
-        // and live streaming — a labeled user header followed by the
-        // request body — so the boundary between user input and the
-        // forthcoming assistant response is visually clear.
-        if query_file.is_some() {
-            let mut echo = TurnView::new(
-                ctx.printer.clone(),
-                cfg.style.clone(),
-                cfg.assistant.name.clone(),
-                Some(cfg.assistant.model.id.resolved().to_string()),
-            );
-            echo.render_user_request(&chat_request);
-        }
 
         let turn_result = self
             .handle_turn(
