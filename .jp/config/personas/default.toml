@@ -3,8 +3,10 @@ id = "sonnet"
 parameters.reasoning.effort = "auto"
 
 [conversation]
+# `+%Y-%m-%d` -> daily granularity; encoded as `%2B%25Y-%25m-%25d`.
+# Keeping seconds in the timestamp would bust the prompt cache on every query.
 attachments = [
-    "cmd:date?description=Current Date",
+    "cmd://date?arg=%2B%25Y-%25m-%25d&description=Current Date",
 ]
 
 [style]
