@@ -98,7 +98,7 @@ impl Client {
                 SpawnOutcome::Started(client) => client.list_all_tools().await?,
                 SpawnOutcome::OptionalFailed => return Err(Error::UnknownTool(id.to_string())),
             }
-        }
+        };
 
         tools
             .into_iter()
