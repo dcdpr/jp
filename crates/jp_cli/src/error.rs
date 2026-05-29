@@ -63,6 +63,16 @@ pub(crate) enum Error {
     #[error("Attachment error: {0}")]
     Attachment(String),
 
+    /// An attachment handler failed while processing `uri`.
+    ///
+    /// Keeps the boxed source so its full cause chain can be rendered, and the
+    /// URI so the user can see which attachment failed.
+    #[error("Attachment error for {uri}")]
+    AttachmentFailed {
+        uri: Url,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// The conversation referenced by a `jp://` attachment has been archived or
     /// deleted from the workspace.
     /// Surfaced as its own variant so query-time loaders can warn and skip dead

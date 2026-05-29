@@ -87,7 +87,10 @@ pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
     let scheme = attachment_scheme(uri);
 
     if scheme == "jp" {
-        validate_internal_attachment(uri).map_err(|e| Error::Attachment(e.to_string()))?;
+        validate_internal_attachment(uri).map_err(|source| Error::AttachmentFailed {
+            uri: uri.clone(),
+            source,
+        })?;
         return Ok(());
     }
 
@@ -112,7 +115,7 @@ pub(crate) async fn register_attachment(
             Err(ResolveError::ConversationMissing(id)) => {
                 Err(Error::AttachmentConversationMissing { id, uri })
             }
-            Err(ResolveError::Other(error)) => Err(Error::Attachment(error.to_string())),
+            Err(ResolveError::Other(source)) => Err(Error::AttachmentFailed { uri, source }),
         };
     }
 
@@ -123,12 +126,15 @@ pub(crate) async fn register_attachment(
     handler
         .add(&uri, ctx.workspace.root())
         .await
-        .map_err(|e| Error::Attachment(e.to_string()))?;
+        .map_err(|source| Error::AttachmentFailed {
+            uri: uri.clone(),
+            source,
+        })?;
 
     handler
         .get(ctx.workspace.root(), ctx.mcp_client.clone())
         .await
-        .map_err(|e| Error::Attachment(e.to_string()))
+        .map_err(|source| Error::AttachmentFailed { uri, source })
 }
 
 /// Resolve a list of attachment URLs for the current query.

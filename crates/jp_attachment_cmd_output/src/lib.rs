@@ -113,12 +113,21 @@ impl Handler for Commands {
     ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         let mut attachments = vec![];
         for command in &self.0 {
+            let cmd_line = std::iter::once(command.cmd.clone())
+                .chain(command.args.iter().cloned())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            // A failed spawn yields a bare `io::Error` ("No such file or
+            // directory") that doesn't name the binary, so attach the command
+            // line here while we still have it.
             let output = duct::cmd(command.cmd.as_str(), command.args.as_slice())
                 .dir(root)
                 .stdout_capture()
                 .stderr_capture()
                 .unchecked()
-                .run()?;
+                .run()
+                .map_err(|e| format!("failed to run command `{cmd_line}`: {e}"))?;
 
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -129,13 +138,7 @@ impl Handler for Commands {
                 code: output.status.code().unwrap_or(0),
             };
 
-            let mut attachment = Attachment::text(
-                std::iter::once(command.cmd.clone())
-                    .chain(command.args.iter().cloned())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                output.try_to_xml()?,
-            );
+            let mut attachment = Attachment::text(cmd_line, output.try_to_xml()?);
             attachment.description = command.description.clone();
             attachments.push(attachment);
         }

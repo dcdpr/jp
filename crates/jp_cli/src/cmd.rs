@@ -347,6 +347,11 @@ impl From<crate::error::Error> for Error {
                 ("error", error.clone()),
             ]
             .into(),
+            AttachmentFailed { uri, source } => {
+                let mut meta = with_cause(source.as_ref(), "Attachment error");
+                meta.insert(1, ("uri", uri.to_string()));
+                meta
+            }
             AttachmentConversationMissing { id, uri } => [
                 ("message", "Attachment conversation not found".into()),
                 ("id", id.to_string()),
