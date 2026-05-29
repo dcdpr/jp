@@ -66,7 +66,7 @@ expression: "AppConfig::fields()"
     "conversation.attachments",
     "conversation.default_id",
     "conversation.start_local",
-    "conversation.tools.tools",
+    "conversation.tools",
     "conversation.tools.*.enable",
     "conversation.tools.*.format",
     "conversation.tools.*.result",
