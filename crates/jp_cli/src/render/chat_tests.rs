@@ -149,15 +149,16 @@ async fn test_timer_reasoning_then_message() {
     );
 }
 
-/// Regression: tool call → Timer reasoning → tool call must not leave a
-/// stray blank line on stdout.
+/// Regression: tool call → Timer reasoning → tool call must not leave a stray
+/// blank line on stdout.
 ///
-/// Timer reasoning is ephemeral chrome on stderr; it produces no
-/// persistent stdout output. The previous implementation routed Timer
-/// through `flush_on_transition`, which eagerly committed a blank-line
-/// separator on stdout when leaving a `ToolCall` block. Subsequent tool
-/// calls (or other ephemeral content) never "earned" that separator
-/// back, leaving an orphan blank line between consecutive tool calls.
+/// Timer reasoning is ephemeral chrome on stderr; it produces no persistent
+/// stdout output.
+/// The previous implementation routed Timer through `flush_on_transition`,
+/// which eagerly committed a blank-line separator on stdout when leaving a
+/// `ToolCall` block.
+/// Subsequent tool calls (or other ephemeral content) never "earned" that
+/// separator back, leaving an orphan blank line between consecutive tool calls.
 #[tokio::test]
 async fn test_no_separator_for_tool_call_timer_reasoning_tool_call() {
     let mut config = AppConfig::new_test();
@@ -462,17 +463,17 @@ fn test_fence_inside_list_item_indents_correctly_and_no_trailing_blank() {
     // table content was at column 6 in the source; it must render at
     // column 6, not 9.
     assert!(
-        lines.iter().any(|l| *l == "      path = \".\""),
+        lines.contains(&"      path = \".\""),
         "`path = \".\"` should render at column 6. Got:\n{plain}"
     );
     assert!(
-        lines.iter().any(|l| *l == "      read = true"),
+        lines.contains(&"      read = true"),
         "`read = true` should render at column 6. Got:\n{plain}"
     );
 
     // Closing fence sits at the opening fence's column (3).
     assert!(
-        lines.iter().any(|l| *l == "   `````"),
+        lines.contains(&"   `````"),
         "closing fence should render at column 3. Got:\n{plain}"
     );
 
