@@ -4004,7 +4004,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// Regression for A1 (live/replay parity on the role-header model id).
+/// Regression for live/replay parity on the role-header model id.
 ///
 /// The live header must use `cfg.assistant.model.id.resolved()`, not the
 /// provider's `ModelDetails.id`.

@@ -155,12 +155,6 @@ impl TurnRenderer {
     }
 
     /// Rebuild sub-renderers from a per-turn config partial.
-    ///
-    /// Identity (assistant name + model id) is read from the partial directly
-    /// so the role header doesn't depend on a full `AppConfig` rebuild for
-    /// these two fields.
-    /// `style` and `conversation.tools` still need the rebuild to pick up
-    /// defaults for unset sub-fields.
     fn reconfigure(&mut self, partial: &PartialAppConfig) {
         let assistant_name = partial.assistant.name.clone();
         let model_id = render_model_id(&partial.assistant.model.id);
