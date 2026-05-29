@@ -89,11 +89,38 @@ fn load_conversation_attachments_propagates_other_errors() {
     let bad_uri = Url::parse(&format!("jp://{id}?select=zzz")).unwrap();
 
     let err = runtime
-        .block_on(load_conversation_attachments(&ctx, vec![bad_uri]))
+        .block_on(load_conversation_attachments(&ctx, vec![bad_uri.clone()]))
         .expect_err("structural attachment errors should not be silently skipped");
 
-    assert!(
-        matches!(err, Error::Attachment(_)),
-        "expected Error::Attachment, got {err:?}"
-    );
+    match err {
+        Error::AttachmentFailed { uri, .. } => assert_eq!(uri, bad_uri),
+        other => panic!("expected AttachmentFailed, got {other:?}"),
+    }
+}
+
+#[test]
+fn register_attachment_failure_carries_uri_and_source() {
+    let (ctx, runtime) = empty_ctx();
+    // The `cmd` handler accepts the URI at `add` time and only spawns the
+    // binary at `get` time, so a missing binary surfaces as a handler failure
+    // carrying both the URI and the underlying spawn error.
+    let uri = Url::parse("cmd://jp-definitely-missing-binary").unwrap();
+
+    let err = runtime
+        .block_on(register_attachment(&ctx, uri.clone()))
+        .expect_err("spawning a missing binary should fail");
+
+    match err {
+        Error::AttachmentFailed {
+            uri: failed_uri,
+            source,
+        } => {
+            assert_eq!(failed_uri, uri);
+            assert!(
+                source.to_string().contains("jp-definitely-missing-binary"),
+                "source should name the failing command, got: {source}"
+            );
+        }
+        other => panic!("expected AttachmentFailed, got {other:?}"),
+    }
 }

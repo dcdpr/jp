@@ -153,6 +153,31 @@ fn test_uri_to_command_opaque() {
 }
 
 #[tokio::test]
+async fn test_commands_get_missing_binary_names_command() {
+    let commands = Commands(
+        std::iter::once(Command {
+            cmd: "jp-definitely-missing-binary".to_owned(),
+            args: vec!["--check".to_owned()],
+            description: None,
+        })
+        .collect(),
+    );
+
+    let root = camino_tempfile::tempdir().unwrap();
+    let client = Client::new(IndexMap::default());
+    let err = commands
+        .get(root.path(), client)
+        .await
+        .expect_err("spawning a missing binary should error");
+
+    let msg = err.to_string();
+    assert!(
+        msg.contains("jp-definitely-missing-binary"),
+        "error should name the failing command, got: {msg}"
+    );
+}
+
+#[tokio::test]
 async fn test_commands_get() {
     let commands = Commands(
         vec![
