@@ -2,8 +2,10 @@ use chrono::{DateTime, FixedOffset, Local, Utc};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
-use jp_term::osc::hyperlink;
+use jp_term::{osc::hyperlink, table::list};
 use jp_workspace::ConversationHandle;
+use strip_ansi_escapes::strip_str;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
@@ -145,30 +147,40 @@ impl Ls {
         });
 
         let conversations: Vec<_> = conversations.into_iter().skip(skip).collect();
-        let (expires_at_column, local_column, title_column, header) =
-            build_header_row(&conversations);
+        let hidden = if count > limit { skip } else { 0 };
 
-        let mut rows = vec![];
-        if count > limit {
-            let mut row = Row::new();
-            row.add_cell(Cell::new(
-                format!("({skip} hidden)")
-                    .italic()
-                    .with(Color::AnsiValue(245)),
-            ));
-            rows.push(row);
+        let mut columns = Columns {
+            expires_at: conversations.iter().any(|d| d.expires_at.is_some()),
+            local: conversations.iter().any(|d| d.local),
+            title: conversations.iter().any(|d| d.title.is_some()),
+        };
+
+        // Shrink or drop the free-text title column so the pretty box table
+        // fits the terminal. Only the box table mangles its borders by
+        // overflowing; piped and JSON output keep full titles for machines.
+        let mut title_budget = None;
+        if columns.title
+            && ctx.printer.pretty_printing_enabled()
+            && let Some(max_width) = ctx.term.width.map(usize::from)
+        {
+            let probe = list(
+                build_header_row(columns),
+                self.build_body(ctx, &conversations, columns, None, hidden),
+                false,
+            );
+            match fit_title(
+                max_line_width(&probe),
+                max_width,
+                title_column_width(&conversations),
+            ) {
+                TitleFit::Full => {}
+                TitleFit::Truncate(width) => title_budget = Some(width),
+                TitleFit::Drop => columns.title = false,
+            }
         }
 
-        for details in conversations {
-            rows.push(self.build_conversation_row(
-                ctx,
-                local_column,
-                title_column,
-                expires_at_column,
-                details,
-            ));
-        }
-
+        let header = build_header_row(columns);
+        let rows = self.build_body(ctx, &conversations, columns, title_budget, hidden);
         let footer = rows.len() > 20;
         print_table(&ctx.printer, header, rows, footer);
         Ok(())
@@ -177,26 +189,14 @@ impl Ls {
     fn build_conversation_row(
         &self,
         ctx: &Ctx,
-        local_column: bool,
-        title_column: bool,
-        expires_at_column: bool,
-        details: Details,
+        columns: Columns,
+        title_budget: Option<usize>,
+        details: &Details,
     ) -> Row {
-        let Details {
-            id,
-            active,
-            pinned_at,
-            title,
-            messages,
-            last_event_at: last_message_at,
-            expires_at,
-            local,
-            archived_at: _,
-        } = details;
-
-        let mut id_fmt = if active {
+        let id = details.id;
+        let mut id_fmt = if details.active {
             id.to_string().bold().yellow().to_string()
-        } else if pinned_at.is_some() {
+        } else if details.pinned_at.is_some() {
             id.to_string().blue().to_string()
         } else {
             id.to_string()
@@ -207,13 +207,17 @@ impl Ls {
         }
 
         let messages_fmt = if ctx.printer.pretty_printing_enabled() {
-            hyperlink(format!("jp://show-events/{id}"), messages.to_string())
+            hyperlink(
+                format!("jp://show-events/{id}"),
+                details.messages.to_string(),
+            )
         } else {
-            messages.to_string()
+            details.messages.to_string()
         };
 
         let last_message_at_fmt = if self.full {
-            last_message_at
+            details
+                .last_event_at
                 .map(|t| {
                     let format = "%Y-%m-%d %H:%M:%S";
                     let local_offset: FixedOffset = *Local::now().offset();
@@ -222,7 +226,7 @@ impl Ls {
                 })
                 .unwrap_or_default()
         } else {
-            last_message_at.map_or_else(String::new, |t| {
+            details.last_event_at.map_or_else(String::new, |t| {
                 let ago = (Utc::now() - t).to_std().expect("valid duration");
                 timeago::Formatter::new().convert(ago)
             })
@@ -233,8 +237,8 @@ impl Ls {
         row.add_cell(Cell::new(messages_fmt).set_alignment(CellAlignment::Right));
         row.add_cell(Cell::new(last_message_at_fmt).set_alignment(CellAlignment::Right));
 
-        if expires_at_column {
-            let expires_at_fmt = expires_at.map_or_else(String::new, |t| {
+        if columns.expires_at {
+            let expires_at_fmt = details.expires_at.map_or_else(String::new, |t| {
                 if t < Utc::now() {
                     "Now".to_string()
                 } else {
@@ -246,8 +250,8 @@ impl Ls {
             row.add_cell(Cell::new(expires_at_fmt).set_alignment(CellAlignment::Right));
         }
 
-        if local_column {
-            let local = if local {
+        if columns.local {
+            let local = if details.local {
                 "Y".blue().to_string()
             } else {
                 "N".to_string()
@@ -255,39 +259,163 @@ impl Ls {
 
             row.add_cell(Cell::new(local).set_alignment(CellAlignment::Center));
         }
-        if title_column {
-            let title = title.unwrap_or_default();
+
+        if columns.title {
+            let title = details.title.clone().unwrap_or_default();
+            let title = match title_budget {
+                Some(max) => truncate_to_width(&title, max),
+                None => title,
+            };
             row.add_cell(Cell::new(title));
         }
 
         row
     }
+
+    /// Build the table body: the optional "(N hidden)" row followed by one row
+    /// per conversation.
+    fn build_body(
+        &self,
+        ctx: &Ctx,
+        conversations: &[Details],
+        columns: Columns,
+        title_budget: Option<usize>,
+        hidden: usize,
+    ) -> Vec<Row> {
+        let mut rows = vec![];
+
+        if hidden > 0 {
+            let mut row = Row::new();
+            row.add_cell(Cell::new(
+                format!("({hidden} hidden)")
+                    .italic()
+                    .with(Color::AnsiValue(245)),
+            ));
+            rows.push(row);
+        }
+
+        for details in conversations {
+            rows.push(self.build_conversation_row(ctx, columns, title_budget, details));
+        }
+
+        rows
+    }
 }
 
-fn build_header_row(conversations: &[Details]) -> (bool, bool, bool, Row) {
+fn build_header_row(columns: Columns) -> Row {
     let mut header = Row::new();
     header.add_cell(Cell::new("ID"));
     header.add_cell(Cell::new("#").set_alignment(CellAlignment::Right));
     header.add_cell(Cell::new("Activity").set_alignment(CellAlignment::Right));
 
-    let mut expires_at_column = false;
-    if conversations.iter().any(|d| d.expires_at.is_some()) {
-        expires_at_column = true;
+    if columns.expires_at {
         header.add_cell(Cell::new("Expires In").set_alignment(CellAlignment::Right));
     }
 
-    // Show "local" column if any conversations are stored locally.
-    let mut local_column = false;
-    if conversations.iter().any(|d| d.local) {
-        local_column = true;
+    if columns.local {
         header.add_cell(Cell::new("Local").set_alignment(CellAlignment::Right));
     }
 
-    let mut title_column = false;
-    if conversations.iter().any(|d| d.title.is_some()) {
-        title_column = true;
-        header.add_cell(Cell::new("Title").set_alignment(CellAlignment::Left));
+    if columns.title {
+        header.add_cell(Cell::new(TITLE_HEADER).set_alignment(CellAlignment::Left));
     }
 
-    (expires_at_column, local_column, title_column, header)
+    header
 }
+
+/// Header label for the free-text title column.
+const TITLE_HEADER: &str = "Title";
+
+/// Which optional columns the conversation table renders.
+///
+/// `ID`, `#`, and `Activity` are always present; these three appear only when
+/// at least one listed conversation carries the corresponding value.
+#[derive(Clone, Copy)]
+struct Columns {
+    expires_at: bool,
+    local: bool,
+    title: bool,
+}
+
+/// How the title column must shrink to keep the box table within the terminal.
+#[derive(Debug, PartialEq, Eq)]
+enum TitleFit {
+    /// Render titles in full.
+    Full,
+    /// Truncate every title to the given display width.
+    Truncate(usize),
+    /// Drop the title column; even a header-width column would still overflow.
+    Drop,
+}
+
+/// Decide how to fit the title column given the rendered and available widths.
+///
+/// The title is the only free-text column, so it is the one shaved when the
+/// table overflows; every other column holds a short, fixed-shape value.
+/// The column cannot shrink below its header width, so a deeper overflow drops
+/// it.
+fn fit_title(rendered_width: usize, max_width: usize, title_width: usize) -> TitleFit {
+    if rendered_width <= max_width {
+        return TitleFit::Full;
+    }
+
+    let budget = title_width.saturating_sub(rendered_width - max_width);
+    if budget < TITLE_HEADER.len() {
+        TitleFit::Drop
+    } else {
+        TitleFit::Truncate(budget)
+    }
+}
+
+/// Current display width of the title column: the widest title, floored at the
+/// header width.
+fn title_column_width(conversations: &[Details]) -> usize {
+    conversations
+        .iter()
+        .filter_map(|d| d.title.as_deref())
+        .map(display_width)
+        .max()
+        .unwrap_or(0)
+        .max(TITLE_HEADER.len())
+}
+
+/// Truncate `s` to at most `max_width` display columns, appending '…' when
+/// cut.
+fn truncate_to_width(s: &str, max_width: usize) -> String {
+    if display_width(s) <= max_width {
+        return s.to_string();
+    }
+    if max_width == 0 {
+        return String::new();
+    }
+
+    // Reserve one column for the ellipsis.
+    let budget = max_width - 1;
+    let mut width = 0;
+    let mut out = String::new();
+    for ch in s.chars() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if width + w > budget {
+            break;
+        }
+        width += w;
+        out.push(ch);
+    }
+    out.push('…');
+    out
+}
+
+/// Widest line in `rendered`, by display width (ANSI styling and OSC hyperlinks
+/// stripped first).
+fn max_line_width(rendered: &str) -> usize {
+    rendered.lines().map(display_width).max().unwrap_or(0)
+}
+
+/// Display width of `s` with ANSI styling and OSC hyperlinks removed.
+fn display_width(s: &str) -> usize {
+    UnicodeWidthStr::width(strip_str(s).as_str())
+}
+
+#[cfg(test)]
+#[path = "ls_tests.rs"]
+mod tests;
