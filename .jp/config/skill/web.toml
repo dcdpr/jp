@@ -15,5 +15,21 @@ The following tools help you with this:
 - fs_grep_user_docs: Search through the project's documentation.
 """
 
+[[assistant.system_prompt_sections]]
+tag = "web_skill"
+title = "Skill: Web Access — Link Handling"
+content = """\
+When the user shares a URL in their message, treat it as an implicit request to consult that \
+page before answering. Fetch it with `web_fetch` unless one of the following clearly applies:
+
+- The URL appears inside code or quoted text the user is asking *about* (it's data, not a \
+  pointer).
+- The same URL is already available via an attachment or earlier tool call in the conversation.
+- The scheme isn't HTTP(S) (e.g. `file://`, `ssh://`) — `web_fetch` won't handle it.
+
+If you're unsure whether the user wants the page read, fetch it. The cost of an extra fetch is \
+small; the cost of answering without context the user expected you to have is large.
+"""
+
 [conversation.tools]
 web_fetch = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
