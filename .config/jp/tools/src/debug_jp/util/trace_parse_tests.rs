@@ -31,14 +31,20 @@ fn parse_extracts_message_out_of_fields() {
     assert_eq!(event.message, "hello");
     // The `message` key is removed from fields; only `path` remains.
     assert_eq!(event.fields.len(), 1);
-    assert_eq!(event.fields.get("path").and_then(Value::as_str), Some("/tmp/x"));
+    assert_eq!(
+        event.fields.get("path").and_then(Value::as_str),
+        Some("/tmp/x")
+    );
 }
 
 #[test]
 fn parse_extracts_span_stack() {
     let line = r#"{"timestamp":"2026-05-25T21:44:04.572Z","level":"DEBUG","fields":{"message":"x"},"target":"jp_cli","spans":[{"name":"outer"},{"name":"inner"}]}"#;
     let events = parse_lines(line);
-    assert_eq!(events[0].spans, vec!["outer".to_owned(), "inner".to_owned()]);
+    assert_eq!(events[0].spans, vec![
+        "outer".to_owned(),
+        "inner".to_owned()
+    ]);
 }
 
 #[test]

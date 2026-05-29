@@ -40,7 +40,11 @@ fn write_run_stats(out: &mut String, launch: &LaunchResult) {
         Some(code) => format!("exit {code}"),
         None => "terminated by signal".to_owned(),
     };
-    let _ = writeln!(out, "- **Wall clock:** {}", format_duration(launch.wall_duration));
+    let _ = writeln!(
+        out,
+        "- **Wall clock:** {}",
+        format_duration(launch.wall_duration)
+    );
     let _ = writeln!(out, "- **Status:** {status}");
     if !launch.success() && !launch.stderr.is_empty() {
         let _ = writeln!(out, "- **stderr (last 20 lines):**");
@@ -92,10 +96,7 @@ fn write_headline(out: &mut String, profile: &Profile) {
 }
 
 fn write_hot_leaves(out: &mut String, profile: &Profile) {
-    let _ = writeln!(
-        out,
-        "## Hot leaves (top {TOP_LEAVES} by allocation count)"
-    );
+    let _ = writeln!(out, "## Hot leaves (top {TOP_LEAVES} by allocation count)");
     let _ = writeln!(out);
     let _ = writeln!(out, "| Blocks | Bytes | Sites | Symbol |");
     let _ = writeln!(out, "| -----: | ----: | ----: | :----- |");
@@ -135,11 +136,7 @@ fn write_hot_stacks(out: &mut String, profile: &Profile) {
         // Allocator>::allocate` or similar; the interesting work is the
         // jp_ frame and its callers.
         let interesting = pp.interesting_leaf();
-        let start = pp
-            .frames
-            .iter()
-            .position(|f| f == interesting)
-            .unwrap_or(0);
+        let start = pp.frames.iter().position(|f| f == interesting).unwrap_or(0);
         let shown: Vec<&String> = pp.frames.iter().skip(start).take(STACK_FRAMES).collect();
         for (i, frame) in shown.iter().enumerate() {
             let arrow = if i == 0 { ">" } else { " " };
@@ -150,7 +147,10 @@ fn write_hot_stacks(out: &mut String, profile: &Profile) {
             let _ = writeln!(out, "  ... ({total_remaining} more)");
         }
         if start > 0 {
-            let _ = writeln!(out, "  (skipped {start} allocator/stdlib frames above leaf)");
+            let _ = writeln!(
+                out,
+                "  (skipped {start} allocator/stdlib frames above leaf)"
+            );
         }
         let _ = writeln!(out, "```");
         let _ = writeln!(out);

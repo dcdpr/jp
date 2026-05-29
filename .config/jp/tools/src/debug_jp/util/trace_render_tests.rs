@@ -176,12 +176,21 @@ fn render_collapses_consecutive_identical_events() {
         make_event("2026-05-25T21:44:04.003Z"),
     ];
 
-    let report = render(&events, 3, &fixture_launch(), &["c".into()], fixture_paths());
+    let report = render(
+        &events,
+        3,
+        &fixture_launch(),
+        &["c".into()],
+        fixture_paths(),
+    );
     assert!(report.contains("× 3"), "expected `× 3` in:\n{report}");
     // Only one event line in the fenced block — count occurrences of the
     // message "tick".
     let occurrences = report.matches("tick").count();
-    assert_eq!(occurrences, 1, "expected exactly one tick line; got:\n{report}");
+    assert_eq!(
+        occurrences, 1,
+        "expected exactly one tick line; got:\n{report}"
+    );
 }
 
 #[test]
@@ -203,7 +212,10 @@ fn render_does_not_collapse_events_with_different_fields() {
         &["c".into()],
         fixture_paths(),
     );
-    assert!(!report.contains("× "), "should not collapse; got:\n{report}");
+    assert!(
+        !report.contains("× "),
+        "should not collapse; got:\n{report}"
+    );
     assert!(report.contains("path=/a.toml"));
     assert!(report.contains("path=/b.toml"));
     assert!(report.contains("path=/c.toml"));
@@ -237,7 +249,13 @@ fn render_truncates_at_soft_cap() {
         .map(|i| event(Level::Info, "x", &format!("event {i}")))
         .collect();
     let total = events.len();
-    let report = render(&events, total, &fixture_launch(), &["c".into()], fixture_paths());
+    let report = render(
+        &events,
+        total,
+        &fixture_launch(),
+        &["c".into()],
+        fixture_paths(),
+    );
     assert!(report.contains("event 0"));
     assert!(!report.contains("event 405"));
     assert!(report.contains("more events omitted"));

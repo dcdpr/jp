@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use super::*;
-use crate::debug_jp::util::profile_heap_parse::{ProgramPoint, Profile};
+use crate::debug_jp::util::profile_heap_parse::{Profile, ProgramPoint};
 
 fn fixture_profile() -> Profile {
     Profile {
@@ -51,7 +51,12 @@ fn fixture_launch() -> LaunchResult {
 
 #[test]
 fn render_includes_headline() {
-    let report = render(&fixture_profile(), &fixture_launch(), &["c".into(), "fork".into()], "tmp/heap.json");
+    let report = render(
+        &fixture_profile(),
+        &fixture_launch(),
+        &["c".into(), "fork".into()],
+        "tmp/heap.json",
+    );
     assert!(report.contains("# jp profile · heap (dhat)"));
     assert!(report.contains("`jp c fork`"));
     assert!(report.contains("**Total allocations:** 15 blocks"));
@@ -60,7 +65,12 @@ fn render_includes_headline() {
 
 #[test]
 fn render_includes_hot_leaves_table() {
-    let report = render(&fixture_profile(), &fixture_launch(), &["x".into()], "x.json");
+    let report = render(
+        &fixture_profile(),
+        &fixture_launch(),
+        &["x".into()],
+        "x.json",
+    );
     assert!(report.contains("## Hot leaves"));
     assert!(report.contains("`PartialAppConfig::clone`"));
     // 10 blocks for the bigger PP, 5 for the smaller.
@@ -70,7 +80,12 @@ fn render_includes_hot_leaves_table() {
 
 #[test]
 fn render_includes_top_stacks_with_leaf_marker() {
-    let report = render(&fixture_profile(), &fixture_launch(), &["x".into()], "x.json");
+    let report = render(
+        &fixture_profile(),
+        &fixture_launch(),
+        &["x".into()],
+        "x.json",
+    );
     assert!(report.contains("## Hot stacks"));
     assert!(report.contains("> PartialAppConfig::clone"));
     // Non-leaf frames are not marked.
