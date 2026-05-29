@@ -4,15 +4,15 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-21
-- **Required by**: [RFD 061](061-interactive-config.md), [RFD 063](063-usage-based-wizard-field-ordering.md)
+- **Required by**: [RFD 061], [RFD 063]
 
 ## Summary
 
 Add a global `--explain` flag that prints the config resolution chain for all or
-a specific field, then exits without running the command. This gives users
-visibility into JP's layered configuration system — which files, environment
-variables, CLI flags, and conversation deltas contribute to the final resolved
-value.
+a specific field, then exits without running the command.
+This gives users visibility into JP's layered configuration system — which
+files, environment variables, CLI flags, and conversation deltas contribute to
+the final resolved value.
 
 ## Motivation
 
@@ -29,19 +29,24 @@ JP's configuration is loaded from up to 9 sources, merged in a specific order:
 9. Defaults (applied last via `default_values`)
 
 When a config value isn't what the user expects, they have no way to determine
-which layer set it. The current debugging workflow is: check `config.toml`,
-check env vars, check conversation history, check CLI flags, give up and ask
-someone. This is particularly painful for:
+which layer set it.
+The current debugging workflow is: check `config.toml`, check env vars, check
+conversation history, check CLI flags, give up and ask someone.
+This is particularly painful for:
 
 - **Model ID resolution**: `--model=opus` resolves through the alias system to
-  `anthropic/claude-sonnet-4-5`. Users can't see this transformation.
+  `anthropic/claude-sonnet-4-5`.
+  Users can't see this transformation.
 - **Inheritance**: A workspace config sets `inherit = false`, silently ignoring
-  the global config. Users don't know why their global settings aren't applying.
+  the global config.
+  Users don't know why their global settings aren't applying.
 - **Conversation deltas**: A previous `jp config set` or editor-provided config
   change is persisted in the conversation stream and silently overrides file
-  config. Users don't know the conversation is carrying state.
+  config.
+  Users don't know the conversation is carrying state.
 - **Conflicting layers**: An env var sets one value, a `--cfg` flag sets
-  another. Which wins?
+  another.
+  Which wins?
 
 `--explain` makes the resolution chain visible, turning "why is my config wrong"
 from a debugging session into a single command.
@@ -95,7 +100,8 @@ Config resolution for `jp query --model=opus --no-reasoning`:
 ```
 
 The "Final resolved config" section shows the merged result — what the command
-would actually run with. Only non-default fields are shown.
+would actually run with.
+Only non-default fields are shown.
 
 #### Focused mode (specific field)
 
@@ -124,9 +130,9 @@ assistant.model.id = "anthropic/claude-opus-4-6"
 ```
 
 The focused mode shows every layer, including ones that didn't set the field
-("not set") and config files that don't exist ("not found"). This makes the full
-resolution chain visible — users can see exactly where their value came from and
-what it overrode.
+("not set") and config files that don't exist ("not found").
+This makes the full resolution chain visible — users can see exactly where
+their value came from and what it overrode.
 
 The "Documentation" section is pulled from the schema description (the `///` doc
 comment on the corresponding `AppConfig` field using `schematic`s schema
@@ -134,12 +140,14 @@ introspection).
 
 #### Dry-run semantics
 
-`--explain` suppresses command execution. The command is parsed, config is fully
-resolved, and the provenance report is printed to stdout. The command itself
-(query, conversation ls, etc.) does not run.
+`--explain` suppresses command execution.
+The command is parsed, config is fully resolved, and the provenance report is
+printed to stdout.
+The command itself (query, conversation ls, etc.) does not run.
 
 This follows the precedent set by `terraform plan`, `docker compose config`, and
-`systemd-analyze`. The user re-runs without `--explain` to execute.
+`systemd-analyze`.
+The user re-runs without `--explain` to execute.
 
 #### JSON output
 
@@ -179,9 +187,10 @@ This enables scripting: `jp query --explain --format=json | jq
 #### Snapshot-and-diff provenance
 
 Rather than threading provenance metadata through the config merge pipeline, we
-reconstruct it on demand. When `--explain` is active, `load_partial_config()`
-takes a JSON snapshot of the `PartialAppConfig` after each layer, alongside
-metadata about that layer (name, file path).
+reconstruct it on demand.
+When `--explain` is active, `load_partial_config()` takes a JSON snapshot of the
+`PartialAppConfig` after each layer, alongside metadata about that layer (name,
+file path).
 
 ```rust
 struct ConfigSnapshot {
@@ -209,16 +218,16 @@ fn layer_contributions(
 }
 ```
 
-A non-empty field in the delta means that layer changed the value. `delta()`
-already handles nested structs, `IndexMap`-based tool configs, and all the
-custom merge strategies in the config system.
+A non-empty field in the delta means that layer changed the value.
+`delta()` already handles nested structs, `IndexMap`-based tool configs, and all
+the custom merge strategies in the config system.
 
 #### Layer definitions
 
 The layers correspond to the steps in `load_partial_config()`:
 
 | Layer | Name             | Source                                   |
-|-------|------------------|------------------------------------------|
+| ----- | ---------------- | ---------------------------------------- |
 | 1     | `user_global`    | `$XDG_CONFIG_HOME/jp/config.toml` +      |
 |       |                  | extends                                  |
 | 2     | `workspace`      | `.jp/config.toml` + extends              |
@@ -233,16 +242,17 @@ The layers correspond to the steps in `load_partial_config()`:
 
 #### Extends sub-layers
 
-Config files can use `extends` to include other files. For example, a workspace
-config might have:
+Config files can use `extends` to include other files.
+For example, a workspace config might have:
 
 ```toml
 extends = ["config.d/**/*"]
 ```
 
 This causes `.jp/config.d/tools.toml`, `.jp/config.d/style.toml`, etc. to be
-merged into the workspace layer. `--explain` decomposes these into sub-layers so
-the user can see exactly which file set a value:
+merged into the workspace layer.
+`--explain` decomposes these into sub-layers so the user can see exactly which
+file set a value:
 
 ```txt
   Workspace config (.jp/config.toml):
@@ -256,9 +266,9 @@ the user can see exactly which file set a value:
 ```
 
 The implementation uses `load_config_file_with_extends()` which already
-processes extends files individually. Each call to `loader.file()` for an
-extended file gets its own snapshot. The snapshot metadata records both the
-parent file and the extends path:
+processes extends files individually.
+Each call to `loader.file()` for an extended file gets its own snapshot.
+The snapshot metadata records both the parent file and the extends path:
 
 ```rust
 struct ConfigSnapshot {
@@ -271,7 +281,8 @@ struct ConfigSnapshot {
 ```
 
 The output groups sub-layers under their parent, indented to show the
-relationship. In focused mode, the trace shows the specific extends file:
+relationship.
+In focused mode, the trace shows the specific extends file:
 
 ```txt
     2a. Workspace       (.jp/config.toml)              (not set)
@@ -284,30 +295,32 @@ The `before` and `after` ordering of extends paths (controlled by
 `before` extensions appear as sub-layers before the parent file, `after`
 extensions appear after it.
 
-Layers 1-4 are merged by `load_partials_with_inheritance()`. When `inherit =
-false` is set, earlier layers are skipped — the snapshot still records them, but
-marks them as `skipped: true` so the output can show the user that inheritance
-was disabled.
+Layers 1-4 are merged by `load_partials_with_inheritance()`.
+When `inherit = false` is set, earlier layers are skipped — the snapshot still
+records them, but marks them as `skipped: true` so the output can show the user
+that inheritance was disabled.
 
 Layer 5 (environment variables) has higher precedence than file layers (1-4),
 per the documented ordering in `configuration.md`.
 
 Layer 9 (defaults) is applied by `build()` via
-`default_values().merge(partial)`. This layer fills in any fields not set by the
-earlier layers.
+`default_values().merge(partial)`.
+This layer fills in any fields not set by the earlier layers.
 
 #### CLI flag reverse-mapping
 
-Layer 8 (CLI flags) needs special handling. The `apply_cli_config()` method on
-each command converts typed CLI flags (like `--model=opus`) into
-`PartialAppConfig` mutations. But the snapshot only sees the resulting partial —
-it doesn't know that `assistant.model.id = "anthropic/claude-sonnet-4-5"` came
-from `--model=opus` with alias resolution.
+Layer 8 (CLI flags) needs special handling.
+The `apply_cli_config()` method on each command converts typed CLI flags (like
+`--model=opus`) into `PartialAppConfig` mutations.
+But the snapshot only sees the resulting partial — it doesn't know that
+`assistant.model.id = "anthropic/claude-sonnet-4-5"` came from `--model=opus`
+with alias resolution.
 
 The approach is to record provenance at the point where the mapping happens —
-inside `apply_cli_config()` itself. The code there already knows both sides: it
-reads the CLI flag value and writes the config field. We add an optional
-recorder parameter that captures this relationship:
+inside `apply_cli_config()` itself.
+The code there already knows both sides: it reads the CLI flag value and writes
+the config field.
+We add an optional recorder parameter that captures this relationship:
 
 ```rust
 trait IntoPartialAppConfig {
@@ -334,8 +347,9 @@ struct CliRecorder(Vec<CliRecord>);
 ```
 
 `CliRecord` stores only the config field path, the clap argument ID, and an
-optional transformation note. It does **not** store the raw value or the display
-flag name (`--model`, `-m`). Both can be looked up at render time:
+optional transformation note.
+It does **not** store the raw value or the display flag name (`--model`, `-m`).
+Both can be looked up at render time:
 
 - **Raw value**: from `ArgMatches::get_raw(arg_id)`, which is available in
   `run_inner()` via Clap's `Cli::command().get_matches()`.
@@ -364,18 +378,20 @@ fn apply_model(
 ```
 
 The `&'static str` for `field` and `arg_id` means these are compile-time
-constants, not runtime strings constructed elsewhere. The mapping lives next to
-the code that performs the mapping — the only place that can keep it accurate.
+constants, not runtime strings constructed elsewhere.
+The mapping lives next to the code that performs the mapping — the only place
+that can keep it accurate.
 
 During normal execution (no `--explain`), the recorder is `None` and no
-allocation occurs. When `--explain` is active, `run_inner()` passes
-`Some(&mut recorder)` and the records are used to annotate the CLI flags layer
-in the output.
+allocation occurs.
+When `--explain` is active, `run_inner()` passes `Some(&mut recorder)` and the
+records are used to annotate the CLI flags layer in the output.
 
-The recorder does not replace the snapshot diff — it augments it. If a flag sets
-a field but forgets to record it, the diff still shows the field changed at the
-CLI layer. The output just lacks the friendly flag name. The failure mode is
-"degraded display" not "wrong data."
+The recorder does not replace the snapshot diff — it augments it.
+If a flag sets a field but forgets to record it, the diff still shows the field
+changed at the CLI layer.
+The output just lacks the friendly flag name.
+The failure mode is "degraded display" not "wrong data."
 
 ##### Drift prevention
 
@@ -404,9 +420,9 @@ time.
 
 #### Schema documentation
 
-Focused mode shows documentation for the explained field. This comes from the
-`schematic::Schema` description, which is populated from the `///` doc comments
-on `AppConfig` fields:
+Focused mode shows documentation for the explained field.
+This comes from the `schematic::Schema` description, which is populated from the
+`///` doc comments on `AppConfig` fields:
 
 ```rust
 fn field_description(field_path: &str) -> Option<String> {
@@ -441,6 +457,7 @@ struct Globals {
 ```
 
 `Option<Option<String>>`:
+
 - `None` — flag not provided, normal execution.
 - `Some(None)` — bare `--explain`, broad mode.
 - `Some(Some("assistant.model.id"))` — focused mode for a specific field.
@@ -457,14 +474,15 @@ if let Some(field) = &cli.globals.explain {
 ```
 
 This runs after config loading but before `Ctx::new()`, workspace stream
-initialization, and `Commands::run()`. The command is never executed.
+initialization, and `Commands::run()`.
+The command is never executed.
 
 ### Field validation
 
 In focused mode, the provided field path is validated against
-`AppConfig::fields()`. If the field doesn't exist, an error is printed with
-suggestions (using the same fuzzy matching that `missing_key()` in
-`assignment.rs` uses):
+`AppConfig::fields()`.
+If the field doesn't exist, an error is printed with suggestions (using the same
+fuzzy matching that `missing_key()` in `assignment.rs` uses):
 
 ```
 Error: Unknown config field 'assistant.model'
@@ -479,27 +497,28 @@ Did you mean one of:
 ## Drawbacks
 
 - **Snapshot cloning cost**: Cloning `PartialAppConfig` at each of the ~9 layers
-  adds a small overhead to every `--explain` invocation. In practice this is
-  sub-millisecond and only runs when `--explain` is present.
+  adds a small overhead to every `--explain` invocation.
+  In practice this is sub-millisecond and only runs when `--explain` is present.
 
 - **CLI recorder is opt-in per call site**: Each `apply_*` helper that bridges a
-  CLI flag to a config field needs a `recorder.record(...)` call. Forgetting to
-  add one when a new flag is introduced means the diff still shows the field
-  changed, but without the flag annotation. A test validates that recorded
-  `arg_id` values match real clap argument IDs and that field paths are valid,
-  but cannot detect missing recordings — that requires code review discipline.
+  CLI flag to a config field needs a `recorder.record(...)` call.
+  Forgetting to add one when a new flag is introduced means the diff still shows
+  the field changed, but without the flag annotation.
+  A test validates that recorded `arg_id` values match real clap argument IDs
+  and that field paths are valid, but cannot detect missing recordings — that
+  requires code review discipline.
 
 - **Inheritable config complexity**: When `inherit = false` is set, the explain
-  output needs to show which layers were skipped and why. This adds conditional
-  logic to the output formatting.
+  output needs to show which layers were skipped and why.
+  This adds conditional logic to the output formatting.
 
 ## Alternatives
 
 ### Eager provenance tracking
 
 Thread a `ProvenanceMap<String, (Value, LayerName)>` through the entire merge
-pipeline. Every `load_partial()` and `assign()` call records where each field
-was set.
+pipeline.
+Every `load_partial()` and `assign()` call records where each field was set.
 
 Rejected because: it adds complexity to every config load (even when `--explain`
 is not used), requires modifying the `PartialAppConfig` merge infrastructure,
@@ -509,50 +528,56 @@ and the snapshot approach achieves the same result with less invasive changes.
 
 A dedicated subcommand under `jp config` instead of a global flag.
 
-Rejected because: it can't show CLI flag resolution. `jp config explain
-assistant.model.id` doesn't know that `--model=opus` would resolve to
-`anthropic/claude-sonnet-4-5`, because no command context is provided. The
-global flag captures the full resolution chain including command-specific
+Rejected because: it can't show CLI flag resolution.
+`jp config explain assistant.model.id` doesn't know that `--model=opus` would
+resolve to `anthropic/claude-sonnet-4-5`, because no command context is
+provided.
+The global flag captures the full resolution chain including command-specific
 transformations.
 
 ### Verbose logging (`-vvv`)
 
 Users can already get config resolution details via `jp query -vvv`, which
-outputs trace logs that include the merged config JSON. This shows the final
-state but not the per-layer provenance.
+outputs trace logs that include the merged config JSON.
+This shows the final state but not the per-layer provenance.
 
 Not a replacement: trace logs are noisy, unstructured, and not designed for
-end-user consumption. `--explain` provides a curated, human-readable view of
-exactly what the user needs.
+end-user consumption.
+`--explain` provides a curated, human-readable view of exactly what the user
+needs.
 
 ## Non-Goals
 
-- **Config editing**: `--explain` is read-only. It doesn't modify config files
-  or suggest corrections. Config editing is the domain of `jp config set` and a
-  future interactive `--cfg` feature.
+- **Config editing**: `--explain` is read-only.
+  It doesn't modify config files or suggest corrections.
+  Config editing is the domain of `jp config set` and a future interactive
+  `--cfg` feature.
 
 - **Runtime config changes**: `--explain` shows the static config resolution at
-  startup. It doesn't show config changes that happen during a turn (e.g.,
+  startup.
+  It doesn't show config changes that happen during a turn (e.g.,
   editor-provided config in the query editor).
 
 - **Dependency tracking**: `--explain` doesn't show *why* a config value matters
-  (e.g., "reasoning is off because your model doesn't support it"). It shows
-  where the value came from, not what it does.
+  (e.g., "reasoning is off because your model doesn't support it").
+  It shows where the value came from, not what it does.
 
 ## Risks and Open Questions
 
 - **Tool config fields**: The `conversation.tools.*` fields use dynamic keys
-  (tool names). The snapshot diff will show these correctly, but the field
-  validation in focused mode needs to handle wildcard patterns
+  (tool names).
+  The snapshot diff will show these correctly, but the field validation in
+  focused mode needs to handle wildcard patterns
   (`conversation.tools.fs_read_file.run`) that aren't in the static
   `AppConfig::fields()` list.
 
 - **Conversation delta readability**: The conversation delta is a
-  `PartialAppConfig` stored in the event stream. For `--explain`, we show its
-  fields as flat key-value pairs. But the delta might contain complex nested
-  structures (tool configs, system prompt sections). The formatting needs to
-  handle these gracefully — likely by truncating long values and showing a
-  `use --explain=<field> for details` hint.
+  `PartialAppConfig` stored in the event stream.
+  For `--explain`, we show its fields as flat key-value pairs.
+  But the delta might contain complex nested structures (tool configs, system
+  prompt sections).
+  The formatting needs to handle these gracefully — likely by truncating long
+  values and showing a `use --explain=<field> for details` hint.
 
 ## Implementation Plan
 
@@ -561,8 +586,8 @@ exactly what the user needs.
 1. Define `ConfigSnapshot` and `ExplainReport` types in a new `jp_cli::explain`
    module.
 2. Add snapshot collection points to `load_partial_config()`, gated behind a
-   boolean flag (only collect when `--explain` is active). This includes
-   sub-layer snapshots for each extends file.
+   boolean flag (only collect when `--explain` is active).
+   This includes sub-layer snapshots for each extends file.
 3. Refactor `load_config_file_with_extends()` to accept an optional snapshot
    collector, taking a snapshot after each extends file is loaded.
 4. Implement the diff logic: given a sequence of snapshots (including
@@ -583,14 +608,14 @@ exactly what the user needs.
 1. Add `--explain` to `Globals`.
 2. Wire the explain check into `run_inner()`, after config loading.
 3. Add `recorder: Option<&mut CliRecorder>` parameter to
-   `IntoPartialAppConfig::apply_cli_config` and thread it through the
-   `apply_*` helper functions in `Query` and other command structs.
+   `IntoPartialAppConfig::apply_cli_config` and thread it through the `apply_*`
+   helper functions in `Query` and other command structs.
 4. Add `cli_recorder_field_paths_are_valid` test.
 5. Test with representative scenarios: alias resolution, inheritance cutoff,
    conversation deltas, env var overrides.
 
-Phases 1 and 2 can be developed and tested independently. Phase 3 integrates
-them into the CLI and can be merged as a single PR.
+Phases 1 and 2 can be developed and tested independently.
+Phase 3 integrates them into the CLI and can be merged as a single PR.
 
 ## References
 
@@ -606,3 +631,5 @@ them into the CLI and can be merged as a single PR.
 - `git config --show-origin --list` — precedent for config provenance display
 
 [RFD 059]: 059-shell-completions-and-man-pages.md
+[RFD 061]: 061-interactive-config.md
+[RFD 063]: 063-usage-based-wizard-field-ordering.md

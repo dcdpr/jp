@@ -37,7 +37,7 @@ JP is in active development.
 Install from source:
 
 ```sh
-% cargo install --locked --git https://github.com/dcdpr/jp.git
+% cargo install --locked --git https://github.com/dcdpr/jp.git jp_cli
 ```
 
 Initiate a new workspace in an existing directory:

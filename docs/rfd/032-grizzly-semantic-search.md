@@ -8,22 +8,25 @@
 ## Summary
 
 Add semantic vector search, FTS5 full-text search, and typo tolerance to
-grizzly's `note_search` tool. The goal is to find notes by *meaning*, not just
-literal text. Searching "productivity systems" should surface notes about GTD
-and Pomodoro even when those exact words don't appear.
+grizzly's `note_search` tool.
+The goal is to find notes by *meaning*, not just literal text.
+Searching "productivity systems" should surface notes about GTD and Pomodoro
+even when those exact words don't appear.
 
 ## Context
 
-Grizzly is a Bear.app MCP server that lives in `crates/contrib/grizzly/`. It
-exposes `note_get`, `note_search`, and `note_create` tools over the MCP
-protocol. The current search implementation uses SQL `LIKE '%query%'` with
-hand-rolled relevance scoring. It works but has three weaknesses:
+Grizzly is a Bear.app MCP server that lives in `crates/contrib/grizzly/`.
+It exposes `note_get`, `note_search`, and `note_create` tools over the MCP
+protocol.
+The current search implementation uses SQL `LIKE '%query%'` with hand-rolled
+relevance scoring.
+It works but has three weaknesses:
 
 1. **Substring matching** — "prod" matches "reproduce", no word boundary
    awareness.
 2. **No typo handling** — "productivty" finds nothing.
-3. **No semantic understanding** — searching "task management" won't find a note
-   titled "GTD methodology" unless those words appear literally.
+3. **No semantic understanding** — searching "task management" won't find a
+   note titled "GTD methodology" unless those words appear literally.
 
 This RFD covers three layers of improvement, each independent and additive.
 
@@ -55,7 +58,7 @@ available, then merges results using Reciprocal Rank Fusion.
 ## Existing Code You Need to Know
 
 | File            | What it does                             |
-|-----------------|------------------------------------------|
+| --------------- | ---------------------------------------- |
 | `src/db.rs`     | `BearDb` — opens Bear's read-only SQLite |
 |                 | database, discovers schema at init,      |
 |                 | hands out short-lived connections. All   |
@@ -81,8 +84,8 @@ available, then merges results using Reciprocal Rank Fusion.
 |                 | workspace. New deps go here with feature |
 |                 | flags.                                   |
 
-Bear's database is read-only to us (we never write to it). The sidecar database
-for embeddings is ours and we can write to it freely.
+Bear's database is read-only to us (we never write to it).
+The sidecar database for embeddings is ours and we can write to it freely.
 
 ## Layer 1: FTS5 Full-Text Search
 
@@ -100,11 +103,12 @@ and boolean operators (`productivity OR gtd`).
 ### How
 
 Our `rusqlite` dependency already compiles SQLite with FTS5 enabled (the
-`bundled` feature includes it). No new dependencies needed.
+`bundled` feature includes it).
+No new dependencies needed.
 
 **On each search call**, create a temporary in-memory FTS5 table, populate it
-from the notes CTE, query it, then let it drop when the connection closes. Since
-we use short-lived connections, this happens every search.
+from the notes CTE, query it, then let it drop when the connection closes.
+Since we use short-lived connections, this happens every search.
 
 ```sql
 CREATE VIRTUAL TABLE temp.fts_notes USING fts5(
@@ -129,9 +133,11 @@ LIMIT ?;
 
 - New file `src/fts.rs` — functions to create the temp FTS table, run FTS5
   queries, and map results back to `ScoredNote`.
-- Modify `src/search.rs` — `execute()` tries FTS5 first. If the FTS5 query fails
-  (malformed syntax, etc.), fall back to LIKE search. Add a `mode` field to
-  `SearchParams`:
+- Modify `src/search.rs` — `execute()` tries FTS5 first.
+  If the FTS5 query fails (malformed syntax, etc.), fall back to LIKE search.
+  Add a `mode` field to `SearchParams`:
+
+<!-- end list -->
 
 ```rust
 pub enum SearchMode {
@@ -147,18 +153,22 @@ pub enum SearchMode {
 - Modify `src/error.rs` — add `FtsError` variant.
 
 **Performance concern:** For a few hundred notes, building the FTS table
-per-search is <50ms. For thousands, it could be slow. Measure this. If it's a
-problem, consider caching the FTS table in a persistent temp file that gets
-rebuilt when Bear's database modification time changes.
+per-search is \<50ms.
+For thousands, it could be slow.
+Measure this.
+If it's a problem, consider caching the FTS table in a persistent temp file that
+gets rebuilt when Bear's database modification time changes.
 
 **Testing:** Add tests that exercise FTS5 query syntax (prefix, phrase,
-boolean). Test the LIKE fallback by passing malformed FTS5 queries.
+boolean).
+Test the LIKE fallback by passing malformed FTS5 queries.
 
 ### Typo Tolerance via Trigram Tokenizer
 
 FTS5 supports a `trigram` tokenizer that indexes character trigrams instead of
-words. This naturally handles typos because "productivty" and "productivity"
-share most trigrams.
+words.
+This naturally handles typos because "productivty" and "productivity" share most
+trigrams.
 
 Add a second FTS5 table using the trigram tokenizer:
 
@@ -172,11 +182,12 @@ CREATE VIRTUAL TABLE temp.fts_trigram USING fts5(
 ```
 
 When the `unicode61` FTS5 search returns few or no results, retry against the
-trigram table. The trigram table has worse ranking quality (many false
-positives) so it's a fallback, not the primary.
+trigram table.
+The trigram table has worse ranking quality (many false positives) so it's a
+fallback, not the primary.
 
-This is a one-line tokenizer change with no new dependencies. The tradeoff is a
-larger in-memory index and noisier results.
+This is a one-line tokenizer change with no new dependencies.
+The tradeoff is a larger in-memory index and noisier results.
 
 ## Layer 2: Semantic Vector Search
 
@@ -190,19 +201,23 @@ semantically similar notes by cosine distance.
 Two new dependencies, both behind a `semantic` cargo feature flag:
 
 1. **`fastembed`** (Apache 2.0) — Rust library for generating text embeddings
-   locally using ONNX Runtime. Handles model download, tokenization, and
-   inference. We use it to convert text into dense float vectors. Crate:
-   https://crates.io/crates/fastembed
+   locally using ONNX Runtime.
+   Handles model download, tokenization, and inference.
+   We use it to convert text into dense float vectors.
+   Crate: https://crates.io/crates/fastembed
 
 2. **`sqlite-vector`** (Elastic License 2.0 with OSI open-source exception) —
-   C-based SQLite extension for vector similarity search. SIMD-accelerated
-   distance functions, quantization for memory efficiency, no preindexing
-   required. We compile it from source via `build.rs`. Source:
-   https://github.com/sqliteai/sqlite-vector
+   C-based SQLite extension for vector similarity search.
+   SIMD-accelerated distance functions, quantization for memory efficiency, no
+   preindexing required.
+   We compile it from source via `build.rs`.
+   Source: https://github.com/sqliteai/sqlite-vector
 
 The license situation: `sqlite-vector` is free for OSI-licensed open-source
-projects (grizzly is MIT). If grizzly is ever used in a closed-source product, a
-commercial license would be needed. `fastembed` is Apache 2.0, no restrictions.
+projects (grizzly is MIT).
+If grizzly is ever used in a closed-source product, a commercial license would
+be needed.
+`fastembed` is Apache 2.0, no restrictions.
 
 ```toml
 # In Cargo.toml
@@ -222,20 +237,22 @@ cc = "1" # for compiling sqlite-vector C source
 
 For `sqlite-vector`, vendor the C source files into
 `crates/contrib/grizzly/vendor/sqlite-vector/` and compile them in `build.rs`
-using the `cc` crate. Then register the extension at runtime via `rusqlite`'s
+using the `cc` crate.
+Then register the extension at runtime via `rusqlite`'s
 `load_extension_enable()` + `load_extension()`, or (better) use
-`Connection::load_extension()` with the compiled static library. The exact
-integration path needs prototyping — rusqlite's `load_extension` wants a
-`.dylib`/`.so` path, so the static compilation approach may require using
-rusqlite's `create_module()` API or calling `sqlite3_vector_init` directly via
-FFI.
+`Connection::load_extension()` with the compiled static library.
+The exact integration path needs prototyping — rusqlite's `load_extension`
+wants a `.dylib`/`.so` path, so the static compilation approach may require
+using rusqlite's `create_module()` API or calling `sqlite3_vector_init` directly
+via FFI.
 
 ### Sidecar Database
 
-Embeddings are stored in a separate SQLite `embeddings.db` database. This
-database is owned by grizzly and is read-write. The path is set using a CLI flag
-or environment variable. Ideally the caller uses something like
-`directories::ProjectDirs::cache_dir()` to get the cache directory.
+Embeddings are stored in a separate SQLite `embeddings.db` database.
+This database is owned by grizzly and is read-write.
+The path is set using a CLI flag or environment variable.
+Ideally the caller uses something like `directories::ProjectDirs::cache_dir()`
+to get the cache directory.
 
 Schema:
 
@@ -265,6 +282,7 @@ grizzly index [--model MODEL_NAME]
 ```
 
 This:
+
 1. Opens Bear's database (read-only) and the sidecar (read-write).
 2. Loads the embedding model (`BAAI/bge-small-en-v1.5` by default, 512
    dimensions, ~127MB download on first run).
@@ -274,8 +292,8 @@ This:
 5. Writes embeddings to the sidecar in batches.
 6. Calls `vector_init` and `vector_quantize` on the sidecar for fast search.
 
-Incremental: only re-embeds notes whose modification timestamp changed. Full
-rebuild via `grizzly index --rebuild`.
+Incremental: only re-embeds notes whose modification timestamp changed.
+Full rebuild via `grizzly index --rebuild`.
 
 **File changes:**
 
@@ -299,7 +317,8 @@ When semantic search is enabled (embeddings exist in the sidecar):
 
 RRF formula: for each note appearing in any result list, `score = sum(1 / (k +
 rank_i))` where `k = 60` (standard constant) and `rank_i` is the note's position
-in result list `i`. Notes are then sorted by fused score descending.
+in result list `i`.
+Notes are then sorted by fused score descending.
 
 ```rust
 fn reciprocal_rank_fusion(
@@ -329,14 +348,14 @@ fn reciprocal_rank_fusion(
 The search pipeline degrades gracefully:
 
 | Condition                  | Behavior                         |
-|----------------------------|----------------------------------|
+| -------------------------- | -------------------------------- |
 | Sidecar exists, FTS5 works | Semantic + FTS5, merged with RRF |
 | Sidecar exists, FTS5 fails | Semantic + LIKE, merged with RRF |
 | No sidecar, FTS5 works     | FTS5 only                        |
 | No sidecar, FTS5 fails     | LIKE only (current behavior)     |
 
-The user never sees an error from missing embeddings. They just get less
-relevant results.
+The user never sees an error from missing embeddings.
+They just get less relevant results.
 
 ### CLI Flags
 
@@ -345,8 +364,8 @@ grizzly [--jp] [--note-create] [--no-semantic]
 grizzly index [--model MODEL] [--rebuild]
 ```
 
-- `--no-semantic` — disable semantic search even if embeddings exist (useful for
-  debugging).
+- `--no-semantic` — disable semantic search even if embeddings exist (useful
+  for debugging).
 - `index` subcommand — build or update the embedding index.
 - `--model` — override the embedding model (default: `BAAI/bge-small-en-v1.5`).
 - `--rebuild` — force full re-embedding of all notes.
@@ -358,13 +377,13 @@ Default: `BAAI/bge-small-en-v1.5` (fastembed's own default)
 - 512 dimensions, 33M parameters, ~127MB download
 - Cached in `~/.cache/huggingface/` after first download
 - Fast inference (~1ms per short text on M-series Mac)
-- Ranks significantly higher than `all-MiniLM-L6-v2` on MTEB benchmarks
-  (rank 94 vs 123, mean score 43.76 vs 41.39) at the same memory tier
+- Ranks significantly higher than `all-MiniLM-L6-v2` on MTEB benchmarks (rank 94
+  vs 123, mean score 43.76 vs 41.39) at the same memory tier
 
 Other reasonable choices if users want to trade speed/size for quality:
 
 | Model                                | Memory | Dims | MTEB Rank |
-|--------------------------------------|--------|------|-----------|
+| ------------------------------------ | ------ | ---- | --------- |
 | `BAAI/bge-base-en-v1.5`              | 390MB  | 768  | 82        |
 | `nomic-ai/nomic-embed-text-v1.5`     | 522MB  | 768  | 87        |
 | `mixedbread-ai/mxbai-embed-large-v1` | 639MB  | 1024 | 61        |
@@ -372,48 +391,55 @@ Other reasonable choices if users want to trade speed/size for quality:
 Users can switch via `--model`, but changing models requires a full rebuild
 since embeddings from different models aren't compatible.
 
-Store the model name in the sidecar's `meta` table. On search, verify the model
-matches. If it doesn't, log a warning and skip semantic search (don't crash).
+Store the model name in the sidecar's `meta` table.
+On search, verify the model matches.
+If it doesn't, log a warning and skip semantic search (don't crash).
 
 ## Implementation Order
 
-1. **FTS5** — no new dependencies, moderate complexity. Validate that the
-   temp-table-per-search approach is fast enough.
+1. **FTS5** — no new dependencies, moderate complexity.
+   Validate that the temp-table-per-search approach is fast enough.
 2. **Trigram typo tolerance** — trivial addition on top of FTS5.
-3. **sqlite-vector integration** — figure out the build.rs / FFI story. This is
-   the riskiest part. Prototype it in isolation before integrating.
+3. **sqlite-vector integration** — figure out the build.rs / FFI story.
+   This is the riskiest part.
+   Prototype it in isolation before integrating.
 4. **fastembed integration** — straightforward API, but the ONNX Runtime binary
-   is large. Verify it works behind a feature flag without bloating the default
-   build.
+   is large.
+   Verify it works behind a feature flag without bloating the default build.
 5. **Sidecar database** — schema, migration, incremental indexing.
 6. **Search fusion** — wire it all together with RRF.
 
-Steps 1-2 can ship independently. Steps 3-6 ship together as the `semantic`
-feature.
+Steps 1-2 can ship independently.
+Steps 3-6 ship together as the `semantic` feature.
 
 ## Risks
 
 - **sqlite-vector build integration**: Compiling C source via `build.rs` and
-  loading it into rusqlite's bundled SQLite may be tricky. The extension expects
-  to be loaded via `sqlite3_vector_init`, which is normally called by
-  `load_extension()`. With bundled SQLite, we may need to call the init function
-  directly via FFI after getting the `sqlite3*` handle from rusqlite. This needs
-  a prototype.
+  loading it into rusqlite's bundled SQLite may be tricky.
+  The extension expects to be loaded via `sqlite3_vector_init`, which is
+  normally called by `load_extension()`.
+  With bundled SQLite, we may need to call the init function directly via FFI
+  after getting the `sqlite3*` handle from rusqlite.
+  This needs a prototype.
 
 - **ONNX Runtime binary size**: The `ort` crate (used by `fastembed`) downloads
-  prebuilt ONNX Runtime binaries (~50MB). This only affects builds with the
-  `semantic` feature, but it's a large addition. The download happens at build
-  time, not runtime.
+  prebuilt ONNX Runtime binaries (~50MB).
+  This only affects builds with the `semantic` feature, but it's a large
+  addition.
+  The download happens at build time, not runtime.
 
 - **First-run model download latency**: The first `grizzly index` call downloads
   the embedding model from Hugging Face (~127MB for the default
-  `bge-small-en-v1.5`). Subsequent runs use the cache. This should be clearly
-  communicated to the user (fastembed supports a download progress callback).
+  `bge-small-en-v1.5`).
+  Subsequent runs use the cache.
+  This should be clearly communicated to the user (fastembed supports a download
+  progress callback).
 
 - **FTS5 temp table rebuild cost**: If Bear has 5,000+ notes, rebuilding the
-  FTS5 index on every search could be slow. Measure this early. Mitigation:
-  cache the FTS table in a persistent temp file, keyed by the Bear database's
-  file modification time.
+  FTS5 index on every search could be slow.
+  Measure this early.
+  Mitigation: cache the FTS table in a persistent temp file, keyed by the Bear
+  database's file modification time.
 
 - **License**: `sqlite-vector`'s Elastic License 2.0 with open-source exception
   is fine for grizzly (MIT), but worth tracking if the project's license

@@ -4,8 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-01
-- **Requires**: [RFD 028](028-structured-inquiry-system-for-tool-questions.md)
-- **Required by**: [RFD 049](049-non-interactive-mode-and-detached-prompt-policy.md)
+- **Requires**: [RFD 028]
+- **Required by**: [RFD 049]
 
 ## Summary
 
@@ -17,16 +17,17 @@ between permission prompts, result delivery prompts, and tool questions.
 
 JP has three kinds of prompts during tool execution:
 
-1. **Permission prompts** — "Should I run this tool?" Constructed in
-   `ToolPrompter::prompt_permission` using `PermissionInfo`.
-2. **Result delivery prompts** — "Should I deliver this result?" Constructed in
-   `ToolPrompter::prompt_result_confirmation` as an inline format string.
-3. **Tool questions** — "Create backup?" Received as `Question` from
-   `Outcome::NeedsInput`.
+1. **Permission prompts** — "Should I run this tool?"
+   Constructed in `ToolPrompter::prompt_permission` using `PermissionInfo`.
+2. **Result delivery prompts** — "Should I deliver this result?"
+   Constructed in `ToolPrompter::prompt_result_confirmation` as an inline format
+   string.
+3. **Tool questions** — "Create backup?"
+   Received as `Question` from `Outcome::NeedsInput`.
 
 These are handled by three separate code paths in the coordinator, with no
-shared type representing "a prompt that needs an answer." This makes it
-difficult to:
+shared type representing "a prompt that needs an answer."
+This makes it difficult to:
 
 - Apply consistent routing logic (e.g., a detached fallback policy) across all
   prompt types.
@@ -39,9 +40,10 @@ difficult to:
 
 ### The `Prompt` Enum
 
-All prompts are modeled as variants of a `Prompt` enum. JP-level variants are
-fully self-describing (their answer type, exclusivity, and config key are
-derived from the variant). Tool questions are the open-ended catch-all.
+All prompts are modeled as variants of a `Prompt` enum.
+JP-level variants are fully self-describing (their answer type, exclusivity, and
+config key are derived from the variant).
+Tool questions are the open-ended catch-all.
 
 ```rust
 enum Prompt {
@@ -67,10 +69,12 @@ enum Prompt {
 }
 ```
 
-The enum carries **data, not presentation**. It does not define question text or
-ANSI formatting. The prompter (CLI layer) pattern-matches on the variant and
-renders the appropriate styled output. This keeps the enum usable by different
-frontends (terminal, JSON-over-IPC, etc.).
+The enum carries **data, not presentation**.
+It does not define question text or ANSI formatting.
+The prompter (CLI layer) pattern-matches on the variant and renders the
+appropriate styled output.
+This keeps the enum usable by different frontends (terminal, JSON-over-IPC,
+etc.).
 
 ### Derived Properties
 
@@ -125,14 +129,16 @@ impl Prompt {
 
 ### Why Each Prompt Has Its Own Type
 
-JP-level prompts (`RunTool`, `DeliverToolResult`) are defined at the type
-level, not at the call site. This provides:
+JP-level prompts (`RunTool`, `DeliverToolResult`) are defined at the type level,
+not at the call site.
+This provides:
 
-1. **Discoverability** — one enum, one file. Every prompt type JP can produce is
-   visible in one place.
+1. **Discoverability** — one enum, one file.
+   Every prompt type JP can produce is visible in one place.
 2. **No duplicates** — today the permission question text is constructed in
    `build_permission_question`, the result text in `prompt_result_confirmation`,
-   and tool questions come from `Question`. Three patterns for the same concept.
+   and tool questions come from `Question`.
+   Three patterns for the same concept.
 3. **Mechanical config mapping** — `config_key()` maps directly to config keys
    in the detached policy (see [RFD 049]).
 4. **Type-level exclusivity** — `RunTool` and `DeliverToolResult` are always
@@ -141,23 +147,24 @@ level, not at the call site. This provides:
 
 Future JP-level prompts (e.g., `ConfirmEndConversation`,
 `ApproveExpensiveModel`) add a variant with its own `config_key()`,
-`exclusive()`, and `answer_type()`. The routing logic, config cascade, and
-rendering extend mechanically.
+`exclusive()`, and `answer_type()`.
+The routing logic, config cascade, and rendering extend mechanically.
 
 ### Tool Boundary
 
-Tools can only produce `Outcome::NeedsInput { question }`. The coordinator wraps
-that into `Prompt::ToolQuestion { tool_name, question }`. A tool cannot
-construct `RunTool` or `DeliverToolResult` because those variants require data
-(`ToolSource`) that only the coordinator has, and the tool's output type
-(`Outcome`) does not include them. The type boundary is structural.
+Tools can only produce `Outcome::NeedsInput { question }`.
+The coordinator wraps that into `Prompt::ToolQuestion { tool_name, question }`.
+A tool cannot construct `RunTool` or `DeliverToolResult` because those variants
+require data (`ToolSource`) that only the coordinator has, and the tool's output
+type (`Outcome`) does not include them.
+The type boundary is structural.
 
 ### Rendering
 
-The enum does not define question text. Question text today includes ANSI
-escapes (`tool_name.yellow().bold()`), async MCP server resolution, and
-editor-availability-dependent option lists. This is rendering logic that belongs
-in the prompter (CLI layer).
+The enum does not define question text.
+Question text today includes ANSI escapes (`tool_name.yellow().bold()`), async
+MCP server resolution, and editor-availability-dependent option lists.
+This is rendering logic that belongs in the prompter (CLI layer).
 
 The prompter pattern-matches on the variant and builds styled text:
 
@@ -184,8 +191,9 @@ the same `Prompt` differently without touching the enum.
 ### Prompt Routing
 
 The coordinator constructs a `Prompt` and passes it to a central routing
-function. In this RFD, routing preserves existing behavior — TTY detection still
-drives the decision:
+function.
+In this RFD, routing preserves existing behavior — TTY detection still drives
+the decision:
 
 ```rust
 fn route_prompt(prompt: &Prompt, has_client: bool) -> PromptAction {
@@ -207,8 +215,8 @@ fn route_prompt(prompt: &Prompt, has_client: bool) -> PromptAction {
 ## Drawbacks
 
 **Indirection.** Adding an enum layer between the coordinator and the prompter
-is more abstraction for what currently works as direct function calls. The
-payoff is in extensibility and config integration, not in immediate
+is more abstraction for what currently works as direct function calls.
+The payoff is in extensibility and config integration, not in immediate
 simplification.
 
 **Migration surface.** Refactoring three code paths (`prompt_permission`,
@@ -220,22 +228,24 @@ variants touches multiple files in the coordinator and prompter.
 ### Keep prompt types implicit
 
 Continue with the current approach where prompt type is determined by which code
-path you're in. Rejected because it makes future improvements significantly
-harder — every new routing policy would need to be implemented in three separate
-places.
+path you're in.
+Rejected because it makes future improvements significantly harder — every new
+routing policy would need to be implemented in three separate places.
 
 ### `text()` method on the Prompt enum
 
-Have the enum define the question text directly. Rejected because question text
-includes ANSI escapes, async MCP server resolution, and
-editor-availability-dependent options. This is presentation, not data.
+Have the enum define the question text directly.
+Rejected because question text includes ANSI escapes, async MCP server
+resolution, and editor-availability-dependent options.
+This is presentation, not data.
 
 ### `exclusive` as a boolean field instead of a method
 
-Store `exclusive` as a field on every variant. Rejected because `RunTool` and
-`DeliverToolResult` are inherently exclusive — making it a field would allow
-constructing an impossible state (`RunTool { exclusive: false }`). The method
-encodes the invariant in the type.
+Store `exclusive` as a field on every variant.
+Rejected because `RunTool` and `DeliverToolResult` are inherently exclusive —
+making it a field would allow constructing an impossible state (`RunTool {
+exclusive: false }`).
+The method encodes the invariant in the type.
 
 ## Non-Goals
 
@@ -249,27 +259,30 @@ encodes the invariant in the type.
 
 ### Phase 1: Add the `Prompt` enum
 
-Define the `Prompt` enum and its methods. Likely in a new module (e.g.,
-`jp_cli::cmd::query::tool::prompt` or a shared crate if needed by config).
+Define the `Prompt` enum and its methods.
+Likely in a new module (e.g., `jp_cli::cmd::query::tool::prompt` or a shared
+crate if needed by config).
 
-Can be merged independently. No behavioral changes.
+Can be merged independently.
+No behavioral changes.
 
 ### Phase 2: Refactor the coordinator
 
 Replace direct `PermissionInfo` / `ResultMode` / `Question` handling in the
-coordinator with `Prompt` construction and `route_prompt()` calls. The prompter
-receives `Prompt` variants instead of raw data.
+coordinator with `Prompt` construction and `route_prompt()` calls.
+The prompter receives `Prompt` variants instead of raw data.
 
-Behavior is unchanged — TTY detection still drives routing. The refactor is
-purely structural.
+Behavior is unchanged — TTY detection still drives routing.
+The refactor is purely structural.
 
 Depends on Phase 1.
 
 ### Phase 3: Refactor the prompter
 
-Update `ToolPrompter` to accept `Prompt` variants. Consolidate
-`prompt_permission`, `prompt_result_confirmation`, and `prompt_question` into a
-pattern-match on the enum. The rendering logic stays in the prompter.
+Update `ToolPrompter` to accept `Prompt` variants.
+Consolidate `prompt_permission`, `prompt_result_confirmation`, and
+`prompt_question` into a pattern-match on the enum.
+The rendering logic stays in the prompter.
 
 Depends on Phase 2.
 

@@ -20,7 +20,8 @@
 
 ## Summary
 
-One to three sentences describing what this guide covers. A reader should know
-whether this document is relevant to them without reading further.
+One to three sentences describing what this guide covers.
+A reader should know whether this document is relevant to them without reading
+further.
 
 <!-- Write the guide below. Use whatever structure fits the topic. -->

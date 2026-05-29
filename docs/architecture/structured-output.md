@@ -2,8 +2,8 @@
 
 This document describes the target architecture for structured output in JP.
 It replaces the current `Provider::structured_completion` approach with a
-unified flow through `chat_completion_stream`, using native provider APIs
-and existing conversation event types.
+unified flow through `chat_completion_stream`, using native provider APIs and
+existing conversation event types.
 
 ## Table of Contents
 
@@ -21,7 +21,8 @@ and existing conversation event types.
   - [Native Structured Output Mapping](#native-structured-output-mapping)
   - [Event Conversion](#event-conversion)
   - [Streaming Structured Parts](#streaming-structured-parts)
-  - [Removing `structured_completion` and `chat_completion`](#removing-structured_completion-and-chat_completion)
+  - [Removing `structured_completion` and
+    `chat_completion`](#removing-structured_completion-and-chat_completion)
 - [Event Builder Changes](#event-builder-changes)
   - [New `IndexBuffer` Variant](#new-indexbuffer-variant)
   - [Flush Behavior](#flush-behavior)
@@ -41,24 +42,26 @@ and existing conversation event types.
 - [Testing Strategy](#testing-strategy)
 - [Migration Path](#migration-path)
 
----
+-----
 
 ## Overview
 
 Structured output allows the user to request a JSON response conforming to a
-schema. The current implementation uses a separate code path
-(`Provider::structured_completion`) that fakes a tool call to coerce JSON
-from the model. This path bypasses the streaming pipeline, retry logic,
-persistence, and signal handling.
+schema.
+The current implementation uses a separate code path
+(`Provider::structured_completion`) that fakes a tool call to coerce JSON from
+the model.
+This path bypasses the streaming pipeline, retry logic, persistence, and signal
+handling.
 
-The new architecture eliminates this separate path. Instead of introducing
-new event types, it extends the existing `ChatRequest` and `ChatResponse`
-types: the schema becomes an optional field on `ChatRequest`, and the
-structured JSON data becomes a new `ChatResponse` variant. Providers use
-their native structured output APIs, and everything flows through the same
-`chat_completion_stream` → `run_turn_loop` pipeline as normal queries.
+The new architecture eliminates this separate path.
+Instead of introducing new event types, it extends the existing `ChatRequest`
+and `ChatResponse` types: the schema becomes an optional field on `ChatRequest`,
+and the structured JSON data becomes a new `ChatResponse` variant.
+Providers use their native structured output APIs, and everything flows through
+the same `chat_completion_stream` → `run_turn_loop` pipeline as normal queries.
 
----
+-----
 
 ## Motivation
 
@@ -67,50 +70,51 @@ The current `handle_structured_output` function:
 1. **Duplicates provider/model resolution** with `handle_turn`
 2. **Has no transport-level retries** — rate limits and timeouts fail
    immediately
-3. **Does not persist** — the response is added to a local `Thread` clone
-   but never synced to the workspace
+3. **Does not persist** — the response is added to a local `Thread` clone but
+   never synced to the workspace
 4. **Has no signal handling** — Ctrl+C during the call is unhandled
-5. **Uses a tool-call workaround** instead of native structured output APIs
-   that all major providers now support
+5. **Uses a tool-call workaround** instead of native structured output APIs that
+   all major providers now support
 
 Every major provider supports native structured output:
 
-| Provider    | Mechanism                                                |
-|-------------|----------------------------------------------------------|
-| Anthropic   | `output_config.format = { type: "json_schema", schema }` |
-| OpenAI      | `response_format = { type: "json_schema", ... }`         |
-| Google      | `response_schema` + `response_mime_type`                 |
-| Ollama      | `format: <schema>`                                       |
-| OpenRouter  | Passes through to underlying provider                    |
-| Llamacpp    | `response_format` (OpenAI-compatible)                    |
+| Provider   | Mechanism                                                |
+| ---------- | -------------------------------------------------------- |
+| Anthropic  | `output_config.format = { type: "json_schema", schema }` |
+| OpenAI     | `response_format = { type: "json_schema", ... }`         |
+| Google     | `response_schema` + `response_mime_type`                 |
+| Ollama     | `format: <schema>`                                       |
+| OpenRouter | Passes through to underlying provider                    |
+| Llamacpp   | `response_format` (OpenAI-compatible)                    |
 
-With native support, the provider **guarantees** schema compliance. The
-tool-call workaround's validation-retry loop becomes unnecessary.
+With native support, the provider **guarantees** schema compliance.
+The tool-call workaround's validation-retry loop becomes unnecessary.
 
----
+-----
 
 ## Design Goals
 
-| Goal                     | Description                                        |
-|--------------------------|----------------------------------------------------|
-| **Single code path**     | Structured and normal queries flow through the     |
-|                          | same streaming pipeline                            |
-| **Native provider APIs** | Use each provider's structured output mechanism    |
-| **No new event types**   | Extend `ChatRequest` and `ChatResponse` instead    |
-|                          | of adding new `EventKind` variants                 |
-| **Eliminate dead code**  | Remove `structured_completion`, `chat_completion`, |
-|                          | `StructuredQuery`, `SCHEMA_TOOL_NAME`              |
-| **Incremental rendering**| Stream JSON tokens to terminal in a fenced code    |
-|                          | block                                              |
+| Goal                      | Description                                        |
+| ------------------------- | -------------------------------------------------- |
+| **Single code path**      | Structured and normal queries flow through the     |
+|                           | same streaming pipeline                            |
+| **Native provider APIs**  | Use each provider's structured output mechanism    |
+| **No new event types**    | Extend `ChatRequest` and `ChatResponse` instead    |
+|                           | of adding new `EventKind` variants                 |
+| **Eliminate dead code**   | Remove `structured_completion`, `chat_completion`, |
+|                           | `StructuredQuery`, `SCHEMA_TOOL_NAME`              |
+| **Incremental rendering** | Stream JSON tokens to terminal in a fenced code    |
+|                           | block                                              |
 
----
+-----
 
 ## Core Concepts
 
 ### Schema on `ChatRequest`
 
 A structured request is fundamentally a chat request with an output format
-constraint. The schema is an optional field on `ChatRequest`:
+constraint.
+The schema is an optional field on `ChatRequest`:
 
 ```rust
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,16 +134,17 @@ pub struct ChatRequest {
 ```
 
 This models the domain accurately: a structured request is a user message
-("extract contacts from this text") combined with a format constraint
-("respond as JSON matching this schema"). The Anthropic API enforces this
-relationship — `output_config.format` requires at least one user message.
+("extract contacts from this text") combined with a format constraint ("respond
+as JSON matching this schema").
+The Anthropic API enforces this relationship — `output_config.format` requires
+at least one user message.
 By placing the schema on `ChatRequest`, this pairing is structural.
 
-**Backward compatibility:** Existing serialized events have no `schema`
-field. With `#[serde(default, skip_serializing_if = "Option::is_none")]`,
-deserialization of old events produces `schema: None`, and serialization
-of non-structured requests omits the field entirely. The wire format is
-unchanged for normal requests.
+**Backward compatibility:** Existing serialized events have no `schema` field.
+With `#[serde(default, skip_serializing_if = "Option::is_none")]`,
+deserialization of old events produces `schema: None`, and serialization of
+non-structured requests omits the field entirely.
+The wire format is unchanged for normal requests.
 
 ### Structured Variant on `ChatResponse`
 
@@ -172,10 +177,10 @@ pub enum ChatResponse {
 }
 ```
 
-`ChatResponse` already uses `#[serde(untagged)]` — variants are
-distinguished by their field name (`message`, `reasoning`, `data`). Adding
-`Structured` is a third variant with a unique field name. Existing events
-deserialize exactly as before.
+`ChatResponse` already uses `#[serde(untagged)]` — variants are distinguished
+by their field name (`message`, `reasoning`, `data`).
+Adding `Structured` is a third variant with a unique field name.
+Existing events deserialize exactly as before.
 
 ### Serialization
 
@@ -206,9 +211,12 @@ New structured events:
 
 Serde's `untagged` deserialization tries variants in order:
 
-1. `Message` — does the JSON have a `message` field? → match
-2. `Reasoning` — does the JSON have a `reasoning` field? → match
-3. `Structured` — does the JSON have a `data` field? → match
+1. `Message` — does the JSON have a `message` field?
+   → match
+2. `Reasoning` — does the JSON have a `reasoning` field?
+   → match
+3. `Structured` — does the JSON have a `data` field?
+   → match
 
 The field names are distinct, so there is no ambiguity.
 
@@ -237,7 +245,7 @@ User runs: jp query --schema '{"type":"object",...}' "Extract contacts"
 5. Turn completes. Caller extracts structured data from stream.
 ```
 
----
+-----
 
 ## Architecture Overview
 
@@ -294,7 +302,7 @@ After (unified):
                     └─────────────────────┘
 ```
 
----
+-----
 
 ## Provider Changes
 
@@ -325,8 +333,8 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<Request> {
 
 **Important:** Only the LAST `ChatRequest` determines the output format.
 Historical `ChatRequest`s may have schemas from previous structured turns —
-these are ignored during request building. The schema on historical requests
-is preserved for replay and auditing only.
+these are ignored during request building.
+The schema on historical requests is preserved for replay and auditing only.
 
 ### Native Structured Output Mapping
 
@@ -358,9 +366,9 @@ pub enum JsonOutputFormat {
 ```
 
 When both `effort` (from reasoning config) and `format` (from structured
-request) are needed, they coexist on the same `OutputConfig`. The current
-code that sets `effort` must be updated to merge with `format` rather than
-replacing the entire `OutputConfig`.
+request) are needed, they coexist on the same `OutputConfig`.
+The current code that sets `effort` must be updated to merge with `format`
+rather than replacing the entire `OutputConfig`.
 
 **OpenAI:**
 
@@ -397,8 +405,8 @@ if let Some(schema) = structured_schema {
 
 **OpenRouter:**
 
-OpenRouter passes through to the underlying provider. Set the OpenAI-style
-`response_format` field, which OpenRouter forwards.
+OpenRouter passes through to the underlying provider.
+Set the OpenAI-style `response_format` field, which OpenRouter forwards.
 
 **Llamacpp:**
 
@@ -406,15 +414,15 @@ Uses the OpenAI-compatible `response_format` field.
 
 ### Event Conversion
 
-When converting `ConversationStream` events to provider-specific messages
-(e.g. `convert_events` in the Anthropic provider), the existing match arms
-handle the new cases naturally:
+When converting `ConversationStream` events to provider-specific messages (e.g.
+`convert_events` in the Anthropic provider), the existing match arms handle the
+new cases naturally:
 
 **`ChatRequest` with schema:**
 
-The `content` field is converted to a user message, as before. The `schema`
-field is NOT included in the message text — it's read separately by
-`create_request` to set the output format config.
+The `content` field is converted to a user message, as before.
+The `schema` field is NOT included in the message text — it's read separately
+by `create_request` to set the output format config.
 
 ```rust
 EventKind::ChatRequest(request) if !request.content.is_empty() => Some((
@@ -429,7 +437,8 @@ EventKind::ChatRequest(request) if !request.content.is_empty() => Some((
 
 On subsequent turns, the LLM should see the JSON it previously produced.
 This provides useful context (e.g. "change the email field in the previous
-response"). The structured data is converted to an assistant text message:
+response").
+The structured data is converted to an assistant text message:
 
 ```rust
 EventKind::ChatResponse(resp) => {
@@ -473,9 +482,9 @@ if is_structured_request {
 }
 ```
 
-The provider carries an `is_structured` flag set during `create_request`
-and threaded through to the event mapping logic. This flag is derived from
-whether the last `ChatRequest` had a schema.
+The provider carries an `is_structured` flag set during `create_request` and
+threaded through to the event mapping logic.
+This flag is derived from whether the last `ChatRequest` had a schema.
 
 ### Removing `structured_completion` and `chat_completion`
 
@@ -498,8 +507,8 @@ pub trait Provider: Debug + Send + Sync {
 }
 ```
 
-`chat_completion` was a convenience that collected the stream. Callers that
-need collected results use the stream directly:
+`chat_completion` was a convenience that collected the stream.
+Callers that need collected results use the stream directly:
 
 ```rust
 let stream = provider.chat_completion_stream(&model, query).await?;
@@ -508,15 +517,15 @@ let events: Vec<Event> = stream.try_collect().await?;
 
 The following modules and types are also removed:
 
-| Item                           | Location                         |
-|--------------------------------|----------------------------------|
-| `StructuredQuery`              | `jp_llm/src/query/structured.rs` |
-| `structured::completion()`     | `jp_llm/src/structured.rs`       |
-| `structured::titles::titles()` | `jp_llm/src/structured/titles.rs`|
-| `SCHEMA_TOOL_NAME`             | `jp_llm/src/structured.rs`       |
-| `handle_structured_output()`   | `jp_cli/src/cmd/query.rs`        |
+| Item                           | Location                          |
+| ------------------------------ | --------------------------------- |
+| `StructuredQuery`              | `jp_llm/src/query/structured.rs`  |
+| `structured::completion()`     | `jp_llm/src/structured.rs`        |
+| `structured::titles::titles()` | `jp_llm/src/structured/titles.rs` |
+| `SCHEMA_TOOL_NAME`             | `jp_llm/src/structured.rs`        |
+| `handle_structured_output()`   | `jp_cli/src/cmd/query.rs`         |
 
----
+-----
 
 ## Event Builder Changes
 
@@ -533,8 +542,8 @@ enum IndexBuffer {
 }
 ```
 
-When `handle_part` receives a `ChatResponse::Structured` event, it extracts
-the `Value::String` content and appends to the buffer:
+When `handle_part` receives a `ChatResponse::Structured` event, it extracts the
+`Value::String` content and appends to the buffer:
 
 ```rust
 fn handle_part(&mut self, index: usize, event: &ConversationEvent) {
@@ -591,21 +600,22 @@ fn handle_flush(&mut self, index: usize, metadata: IndexMap<String, Value>,
 }
 ```
 
-If JSON parsing fails, the raw string is preserved as `Value::String`. This
-ensures no data loss even if the provider returns malformed JSON.
+If JSON parsing fails, the raw string is preserved as `Value::String`.
+This ensures no data loss even if the provider returns malformed JSON.
 
----
+-----
 
 ## Turn Loop Integration
 
 ### Streaming Phase
 
 The `TurnCoordinator` receives `ChatResponse::Structured` parts during
-streaming. It must NOT route them through `ChatResponseRenderer` (which
-applies markdown formatting to `Message` and `Reasoning` variants).
+streaming.
+It must NOT route them through `ChatResponseRenderer` (which applies markdown
+formatting to `Message` and `Reasoning` variants).
 
-Instead, `TurnCoordinator::handle_streaming_event` matches on the
-`ChatResponse` variant and delegates to the appropriate renderer:
+Instead, `TurnCoordinator::handle_streaming_event` matches on the `ChatResponse`
+variant and delegates to the appropriate renderer:
 
 ```rust
 fn handle_streaming_event(
@@ -643,10 +653,10 @@ fn handle_streaming_event(
 
 ### Rendering
 
-Structured output is rendered as a fenced JSON code block. A minimal
-`StructuredRenderer` handles this:
+Structured output is rendered as a fenced JSON code block.
+A minimal `StructuredRenderer` handles this:
 
-```rust
+````rust
 struct StructuredRenderer {
     printer: Arc<Printer>,
     started: bool,
@@ -674,7 +684,7 @@ impl StructuredRenderer {
         }
     }
 }
-```
+````
 
 The renderer:
 
@@ -682,12 +692,14 @@ The renderer:
 2. On each chunk: prints the raw JSON text
 3. On flush/finish: prints ` \n``` `
 
-No markdown parsing. No typewriter effect. Just raw JSON in a code fence.
+No markdown parsing.
+No typewriter effect.
+Just raw JSON in a code fence.
 
 ### Post-Turn Extraction
 
-After `run_turn_loop` completes, the caller extracts the structured result
-from the persisted conversation events:
+After `run_turn_loop` completes, the caller extracts the structured result from
+the persisted conversation events:
 
 ```rust
 // In Query::run, after handle_turn returns:
@@ -709,10 +721,10 @@ if self.schema.is_some() {
 }
 ```
 
-For non-TTY output (piped), `Success::Json(data)` is formatted by the CLI
-output layer — either pretty-printed (text format) or compact (JSON format).
+For non-TTY output (piped), `Success::Json(data)` is formatted by the CLI output
+layer — either pretty-printed (text format) or compact (JSON format).
 
----
+-----
 
 ## Helper Methods on `ChatResponse`
 
@@ -750,18 +762,16 @@ impl ChatResponse {
 }
 ```
 
----
+-----
 
 ## Background Callers
 
-Background tasks that need structured output do not go through
-`run_turn_loop`. They use `ResilientRequest` + `chat_completion_stream`
-directly.
+Background tasks that need structured output do not go through `run_turn_loop`.
+They use `ResilientRequest` + `chat_completion_stream` directly.
 
 ### Title Generator
 
-Currently uses `structured::completion()` →
-`provider.structured_completion()`.
+Currently uses `structured::completion()` → `provider.structured_completion()`.
 
 **New approach:**
 
@@ -813,17 +823,18 @@ let data = events
 let titles: Vec<String> = serde_json::from_value(data)?;
 ```
 
-The `titles()` helper function is replaced with simpler functions that
-return the schema `Map<String, Value>` and instructions separately, instead
-of building a `StructuredQuery`.
+The `titles()` helper function is replaced with simpler functions that return
+the schema `Map<String, Value>` and instructions separately, instead of building
+a `StructuredQuery`.
 
 ### Conversation Edit
 
-Same pattern as title generator. The `generate_titles` function in
-`conversation/edit.rs` builds a thread, adds a `ChatRequest` with schema,
-uses `ResilientRequest` + `chat_completion_stream`, and extracts the result.
+Same pattern as title generator.
+The `generate_titles` function in `conversation/edit.rs` builds a thread, adds a
+`ChatRequest` with schema, uses `ResilientRequest` + `chat_completion_stream`,
+and extracts the result.
 
----
+-----
 
 ## Data Flow
 
@@ -991,12 +1002,12 @@ When a structured turn is followed by a normal turn:
 
 When building the LLM request for the last turn, the provider:
 
-1. Converts all `ChatRequest`s to user messages (content only, schema
-   ignored for message text)
-2. Converts `ChatResponse::Structured` to an assistant text message
-   containing the JSON string — the LLM sees what it previously produced
-3. Reads the schema from ONLY the last `ChatRequest` — since it has no
-   schema, this is a normal (non-structured) request
+1. Converts all `ChatRequest`s to user messages (content only, schema ignored
+   for message text)
+2. Converts `ChatResponse::Structured` to an assistant text message containing
+   the JSON string — the LLM sees what it previously produced
+3. Reads the schema from ONLY the last `ChatRequest` — since it has no schema,
+   this is a normal (non-structured) request
 4. Converts `ChatResponse::Message` to an assistant text message as usual
 
 The LLM's message history for this request:
@@ -1007,24 +1018,24 @@ Assistant: "{\"name\": \"Alice\"}"
 User: "Now explain what you found"
 ```
 
----
+-----
 
 ## Error Handling
 
 ### Transport Errors
 
-Handled by `ResilientRequest`, same as normal queries. Rate limits, timeouts,
-and transient errors are retried automatically.
+Handled by `ResilientRequest`, same as normal queries.
+Rate limits, timeouts, and transient errors are retried automatically.
 
 ### Schema Compliance
 
 With native structured output APIs, the provider **guarantees** the response
-conforms to the schema. No client-side validation or retry is needed for
-providers with native support.
+conforms to the schema.
+No client-side validation or retry is needed for providers with native support.
 
-If a provider does not support native structured output (detected by absence
-of the feature in `ModelDetails`), the request should fail with a clear
-error rather than silently falling back to the tool-call workaround:
+If a provider does not support native structured output (detected by absence of
+the feature in `ModelDetails`), the request should fail with a clear error
+rather than silently falling back to the tool-call workaround:
 
 ```rust
 if structured_schema.is_some()
@@ -1036,25 +1047,26 @@ if structured_schema.is_some()
 }
 ```
 
-This is a deliberate design choice. The tool-call fallback is removed
-entirely. Providers that lack native support can add it over time.
+This is a deliberate design choice.
+The tool-call fallback is removed entirely.
+Providers that lack native support can add it over time.
 
 ### JSON Parse Failure
 
-If the `EventBuilder` fails to parse the accumulated JSON on flush (e.g.
-due to a truncated response from `FinishReason::MaxTokens`), it falls back
-to storing the raw string as `Value::String`:
+If the `EventBuilder` fails to parse the accumulated JSON on flush (e.g. due to
+a truncated response from `FinishReason::MaxTokens`), it falls back to storing
+the raw string as `Value::String`:
 
 ```rust
 let data = serde_json::from_str::<Value>(&content)
     .unwrap_or_else(|_| Value::String(content));
 ```
 
-The caller can detect this by checking if the resulting `Value` is a
-`String` when it expected an `Object`. This preserves the raw response for
-debugging.
+The caller can detect this by checking if the resulting `Value` is a `String`
+when it expected an `Object`.
+This preserves the raw response for debugging.
 
----
+-----
 
 ## Testing Strategy
 
@@ -1253,7 +1265,7 @@ async fn test_structured_output_through_turn_loop() {
 }
 ```
 
----
+-----
 
 ## Migration Path
 
@@ -1262,10 +1274,10 @@ async fn test_structured_output_through_turn_loop() {
 1. Add `schema: Option<Map<String, Value>>` to `ChatRequest` with
    `#[serde(default, skip_serializing_if = "Option::is_none")]`
 2. Add `Structured { data: Value }` variant to `ChatResponse`
-3. Add helper methods: `ChatResponse::is_structured()`,
-   `as_structured_data()`, `into_structured_data()`, `structured()`
-4. Update `content()` / `content_mut()` / `into_content()` to handle
-   the `Structured` variant (return empty string)
+3. Add helper methods: `ChatResponse::is_structured()`, `as_structured_data()`,
+   `into_structured_data()`, `structured()`
+4. Update `content()` / `content_mut()` / `into_content()` to handle the
+   `Structured` variant (return empty string)
 5. Add serialization round-trip tests
 6. Update snapshot tests
 
@@ -1278,17 +1290,18 @@ async fn test_structured_output_through_turn_loop() {
 
 ### Phase 3: Provider — Schema Detection and Event Conversion
 
-1. Add schema detection in each provider's `create_request` (read from
-   last `ChatRequest.schema`)
+1. Add schema detection in each provider's `create_request` (read from last
+   `ChatRequest.schema`)
 2. Set native structured output config for each provider
 3. Add `is_structured` flag to provider streaming logic
-4. Emit `ChatResponse::Structured` parts instead of
-   `ChatResponse::Message` when structured
-5. Update `convert_events` to handle `ChatResponse::Structured` as an
-   assistant text message
+4. Emit `ChatResponse::Structured` parts instead of `ChatResponse::Message` when
+   structured
+5. Update `convert_events` to handle `ChatResponse::Structured` as an assistant
+   text message
 6. Add unit tests for each provider
 
 Provider order (by usage priority):
+
 1. Anthropic
 2. Google
 3. OpenAI
@@ -1314,16 +1327,16 @@ Provider order (by usage priority):
 5. Remove `structured::completion()` (`jp_llm/src/structured.rs`)
 6. Remove `structured::titles::titles()` and the `titles` module
 7. Remove `SCHEMA_TOOL_NAME`
-8. Update `Query::run` to set `schema` on `ChatRequest` and call
-   `handle_turn` for both paths
+8. Update `Query::run` to set `schema` on `ChatRequest` and call `handle_turn`
+   for both paths
 
 ### Phase 6: Background Callers
 
 1. Update `TitleGeneratorTask` to use `ResilientRequest` +
    `chat_completion_stream` + `ChatRequest` with schema
 2. Update `conversation/edit.rs` `generate_titles` similarly
-3. Extract shared title schema + instructions into a helper (replacing
-   the `titles()` function)
+3. Extract shared title schema + instructions into a helper (replacing the
+   `titles()` function)
 4. Add unit tests
 
 ### Phase 7: Cleanup

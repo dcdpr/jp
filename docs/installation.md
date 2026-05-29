@@ -1,8 +1,10 @@
 # Installation
 
-::: warning
-JP is still in development. While in development, no binaries are provided. You
-can install JP from source, using the [Cargo] package manager.
+:::warning
+JP is still in development.
+While in development, no binaries are provided.
+You can install JP from source, using the [Cargo] package manager.
+
 :::
 
 ## Install From Source
@@ -10,7 +12,7 @@ can install JP from source, using the [Cargo] package manager.
 To install JP from source, you can use the following command:
 
 ```sh
-cargo install --locked --git https://github.com/dcdpr/jp.git
+cargo install --locked --git https://github.com/dcdpr/jp.git jp_cli
 ```
 
 This will install the latest version of JP from the `main` branch.
