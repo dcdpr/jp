@@ -307,9 +307,10 @@ response style. Simply answer the query appropriately.
 position = -90
 tag = "forbidden_words"
 content = """
-You MUST NOT use these words or phrases in your responses, unless there is a
-very good reason to do so:
+You MUST NOT use these words or phrases in your responses:
 
 - comprehensive
-- "key insight"
+- key insight
+- load-bearing
+- *em dashes*
 """

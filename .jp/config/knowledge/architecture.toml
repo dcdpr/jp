@@ -86,7 +86,7 @@ about programming like it is about writing code, but the code ends up being less
 important than the architecture, and the architecture ends up being less important than \
 social issues."
 
-For JP specifically, the "social structure" is one human author working with a small \
+For JP specifically, the "social structure" is three human authors working with a small \
 set of AI agents (`dev`, `architect`, `rfd-reviewer`, `committer`, …), each constrained \
 by a persona. The architecture reflects this:
 

@@ -91,6 +91,14 @@ been produced in this project and corrected.
   own terms; if the contrast actually matters for using the item, restate \
   the relevant fact directly.
 
+- **Caller-context leak.** A doc comment describes what the function \
+  promises to *any* caller. Don't justify the promise in terms of one \
+  particular caller's situation — "so that `--check` mode exits non-zero", \
+  "because the CLI prints this", "to keep the wizard's flow correct". The \
+  reader of the doc comment doesn't know about the wizard or `--check`. \
+  State the contract on its own terms; the caller-specific reasoning \
+  belongs in a `//` comment at the call site.
+
 - **Restating the signature.** `/// Returns the user's name.` on \
   `fn name() -> String` adds nothing. Either say what isn't visible \
   (where the value comes from, what happens on the unset path, ownership, \
@@ -123,6 +131,11 @@ items = [
     """\
     **Don't lean on a comparative sibling to define a function or type.** \
     State what it does on its own terms.\
+    """,
+    """\
+    **Don't justify a function's behavior with caller context.** State the \
+    contract on its own terms; caller-specific reasoning belongs at the \
+    call site.\
     """,
     """\
     **Don't ship stale inline comments.** Update the invariant or delete \
@@ -196,6 +209,30 @@ reason = """\
 The bad version forces the reader to consult `read` to understand this \
 function. The good version describes the contract directly; the contrast \
 with `read` is implicit and stays out of the way.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// Walk the tree under `root` and return every `.rs` file.
+///
+/// Walker errors (unreadable directories, symlink loops, etc.) are
+/// propagated rather than silently skipped.
+fn walk_rust_files(root: &Path) -> Result<Vec<PathBuf>, Error> { ... }\
+"""
+bad = """\
+/// Walker errors (unreadable directories, symlink loops, etc.) are
+/// propagated rather than silently skipped: in `--check` mode a swallowed
+/// error would let the job exit 0 without having checked the file the
+/// user asked about.
+fn walk_rust_files(root: &Path) -> Result<Vec<PathBuf>, Error> { ... }\
+"""
+reason = """\
+The bad version makes the function's contract depend on the reader \
+knowing about `--check` mode — but `walk_rust_files` doesn't know about \
+`--check` mode; only one of its callers does. The good version states \
+the contract on its own terms (errors propagate, period). The \
+`--check`-mode reasoning belongs in a `//` comment at the call site, \
+where the reader is already in that world.\
 """
 
 [[assistant.instructions.examples]]
