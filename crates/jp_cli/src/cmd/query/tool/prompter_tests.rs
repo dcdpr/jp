@@ -255,14 +255,10 @@ fn make_permission_info(run_mode: RunMode, arguments: Value) -> PermissionInfo {
 #[tokio::test]
 async fn test_prompt_permission_unattended_returns_original_args() {
     let prompter = prompter_without_editor();
-    let mcp_client = jp_mcp::Client::default();
     let original = serde_json::json!({"key": "original"});
 
     let info = make_permission_info(RunMode::Unattended, original.clone());
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => assert_eq!(arguments, original),
@@ -273,13 +269,9 @@ async fn test_prompt_permission_unattended_returns_original_args() {
 #[tokio::test]
 async fn test_prompt_permission_skip_returns_skip() {
     let prompter = prompter_without_editor();
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Skip, serde_json::json!({}));
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     assert!(matches!(result, PermissionResult::Skip {
         reason: None,
@@ -294,13 +286,9 @@ async fn test_prompt_permission_edit_returns_modified_args() {
 
     let mock = MockEditorBackend::json(&modified);
     let prompter = prompter_with_mock_editor(mock);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Edit, original);
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => assert_eq!(arguments, modified),
@@ -321,13 +309,9 @@ async fn test_prompt_permission_edit_can_add_new_fields() {
 
     let mock = MockEditorBackend::json(&modified);
     let prompter = prompter_with_mock_editor(mock);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Edit, original);
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => {
@@ -346,13 +330,9 @@ async fn test_prompt_permission_edit_can_remove_fields() {
 
     let mock = MockEditorBackend::json(&modified);
     let prompter = prompter_with_mock_editor(mock);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Edit, original);
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => {
@@ -370,13 +350,9 @@ async fn test_prompt_permission_edit_can_change_types() {
 
     let mock = MockEditorBackend::json(&modified);
     let prompter = prompter_with_mock_editor(mock);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Edit, original);
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => {
@@ -463,13 +439,9 @@ async fn test_run_mode_edit_empty_falls_back_to_ask_then_approves() {
     let editor = MockEditorBackend::empty();
     let prompt = MockPromptBackend::new().with_inline_responses(['y']);
     let prompter = prompter_with_mocks(editor, prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Edit, original.clone());
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => assert_eq!(arguments, original),
@@ -485,13 +457,9 @@ async fn test_run_mode_edit_empty_falls_back_to_ask_then_skips() {
     let editor = MockEditorBackend::empty();
     let prompt = MockPromptBackend::new().with_inline_responses(['n']);
     let prompter = prompter_with_mocks(editor, prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Edit, original);
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     assert!(matches!(result, PermissionResult::Skip {
         reason: None,
@@ -506,13 +474,9 @@ async fn test_run_mode_ask_approves() {
 
     let prompt = MockPromptBackend::new().with_inline_responses(['y']);
     let prompter = prompter_with_mock_prompt(prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Ask, original.clone());
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => assert_eq!(arguments, original),
@@ -525,13 +489,9 @@ async fn test_run_mode_ask_skips() {
     // Flow: Ask → 'n' → Skip
     let prompt = MockPromptBackend::new().with_inline_responses(['n']);
     let prompter = prompter_with_mock_prompt(prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Ask, serde_json::json!({}));
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     assert!(matches!(result, PermissionResult::Skip {
         reason: None,
@@ -548,13 +508,9 @@ async fn test_run_mode_ask_edit_option_modifies_args() {
     let editor = MockEditorBackend::json(&modified);
     let prompt = MockPromptBackend::new().with_inline_responses(['e']);
     let prompter = prompter_with_mocks(editor, prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Ask, original);
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => assert_eq!(arguments, modified),
@@ -571,13 +527,9 @@ async fn test_run_mode_ask_edit_empty_loops_back_then_approves() {
     // First 'e' to edit, then 'y' to approve after empty
     let prompt = MockPromptBackend::new().with_inline_responses(['e', 'y']);
     let prompter = prompter_with_mocks(editor, prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Ask, original.clone());
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => assert_eq!(arguments, original),
@@ -598,13 +550,9 @@ async fn test_run_mode_ask_edit_invalid_json_retry_then_valid() {
     // 'e' to edit, 'y' to retry after invalid JSON
     let prompt = MockPromptBackend::new().with_inline_responses(['e', 'y']);
     let prompter = prompter_with_mocks(editor, prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Ask, serde_json::json!({}));
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Run { arguments, .. } => assert_eq!(arguments, modified),
@@ -619,13 +567,9 @@ async fn test_run_mode_ask_edit_invalid_json_cancel() {
     // 'e' to edit, 'n' to cancel after invalid JSON
     let prompt = MockPromptBackend::new().with_inline_responses(['e', 'n']);
     let prompter = prompter_with_mocks(editor, prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Ask, serde_json::json!({}));
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Skip { reason, .. } => {
@@ -785,13 +729,9 @@ async fn test_run_mode_ask_skip_with_reasoning() {
     let editor = MockEditorBackend::always("Not applicable for this commit.");
     let prompt = MockPromptBackend::new().with_inline_responses(['r']);
     let prompter = prompter_with_mocks(editor, prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Ask, serde_json::json!({}));
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Skip { reason, .. } => {
@@ -808,13 +748,9 @@ async fn test_run_mode_ask_skip_with_reasoning_empty_editor() {
     let editor = MockEditorBackend::empty();
     let prompt = MockPromptBackend::new().with_inline_responses(['r']);
     let prompter = prompter_with_mocks(editor, prompt);
-    let mcp_client = jp_mcp::Client::default();
 
     let info = make_permission_info(RunMode::Ask, serde_json::json!({}));
-    let result = prompter
-        .prompt_permission(&info, &mcp_client)
-        .await
-        .unwrap();
+    let result = prompter.prompt_permission(&info).unwrap();
 
     match result {
         PermissionResult::Skip { reason, .. } => {

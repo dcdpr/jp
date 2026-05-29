@@ -428,7 +428,6 @@ pub(super) async fn run_turn_loop(
                                             .resolve_tool_call_decision(
                                                 executor,
                                                 &prompter,
-                                                mcp_client,
                                                 is_tty,
                                                 &mut turn_state,
                                                 &tool_renderer,
@@ -520,7 +519,6 @@ pub(super) async fn run_turn_loop(
                     let (executors, skipped) = tool_coordinator
                         .run_permission_phase(
                             &restart_prompter,
-                            mcp_client,
                             is_tty,
                             &mut turn_state,
                             &tool_renderer,

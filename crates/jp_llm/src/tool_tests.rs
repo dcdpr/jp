@@ -739,3 +739,196 @@ async fn test_run_tool_command_tojson_filter_on_scalar_still_works() {
 
     assert_eq!(stdout.trim_end(), "\"Hello\"");
 }
+
+mod merge_mcp_param {
+    use indexmap::IndexMap;
+    use jp_config::conversation::tool::{OneOrManyTypes, ToolParameterConfig};
+    use serde_json::{Value, json};
+
+    use super::super::merge_mcp_param;
+
+    fn cfg(kind: &str) -> ToolParameterConfig {
+        ToolParameterConfig {
+            kind: OneOrManyTypes::One(kind.to_owned()),
+            default: None,
+            required: false,
+            summary: None,
+            description: None,
+            examples: None,
+            enumeration: vec![],
+            items: None,
+            properties: IndexMap::default(),
+        }
+    }
+
+    /// Regression for the `crate_search_items.kinds` case.
+    /// The MCP schema declares `items: {"$ref": ...}` (no plain `type`), which
+    /// our parser can't inline.
+    /// The user's TOML override provides a usable `items` config and must win.
+    #[test]
+    fn user_items_override_used_when_mcp_items_lacks_type() {
+        let opts = json!({
+            "type": "array",
+            "items": { "$ref": "#/$defs/EntryType" }
+        });
+        let override_cfg = ToolParameterConfig {
+            items: Some(Box::new(cfg("string"))),
+            ..cfg("array")
+        };
+
+        let merged = merge_mcp_param("kinds", &opts, Some(&override_cfg), false).unwrap();
+
+        let items = merged.items.expect("items should be set from override");
+        assert!(matches!(
+            items.kind,
+            OneOrManyTypes::One(ref s) if s == "string"
+        ));
+    }
+
+    /// When the user override declares `items`, it wins even if the MCP schema
+    /// also has a usable `items`.
+    /// Mirrors the existing `kind` / `default` / `enumeration` override
+    /// semantics.
+    #[test]
+    fn user_items_override_replaces_mcp_items() {
+        let opts = json!({
+            "type": "array",
+            "items": { "type": "integer" }
+        });
+        let override_cfg = ToolParameterConfig {
+            items: Some(Box::new(cfg("string"))),
+            ..cfg("array")
+        };
+
+        let merged = merge_mcp_param("xs", &opts, Some(&override_cfg), false).unwrap();
+
+        let items = merged.items.expect("items present");
+        assert!(matches!(
+            items.kind,
+            OneOrManyTypes::One(ref s) if s == "string"
+        ));
+    }
+
+    /// When the user provides no override, fall back to the MCP schema's
+    /// `items` (existing behavior, preserved by the refactor).
+    #[test]
+    fn mcp_items_used_when_no_user_override() {
+        let opts = json!({
+            "type": "array",
+            "items": { "type": "integer" }
+        });
+
+        let merged = merge_mcp_param("xs", &opts, None, false).unwrap();
+
+        let items = merged.items.expect("items from MCP");
+        assert!(matches!(
+            items.kind,
+            OneOrManyTypes::One(ref s) if s == "integer"
+        ));
+    }
+
+    /// MCP `items` without a parsable `type` (e.g.
+    /// `$ref`) and no user override results in `items: None`.
+    /// This is the exact pre-fix state that produced the `array schema missing
+    /// items` error from OpenAI — documented here so a future change that adds
+    /// `$ref` resolution will surface as a test update.
+    #[test]
+    fn no_items_when_mcp_uses_ref_and_no_user_override() {
+        let opts = json!({
+            "type": "array",
+            "items": { "$ref": "#/$defs/EntryType" }
+        });
+
+        let merged = merge_mcp_param("kinds", &opts, None, false).unwrap();
+
+        assert!(merged.items.is_none());
+    }
+
+    /// User `properties` override is honored, mirroring `items`.
+    #[test]
+    fn user_properties_override_is_used() {
+        let opts = json!({ "type": "object" });
+        let mut props = IndexMap::new();
+        props.insert("name".to_owned(), cfg("string"));
+        let override_cfg = ToolParameterConfig {
+            properties: props,
+            ..cfg("object")
+        };
+
+        let merged = merge_mcp_param("target", &opts, Some(&override_cfg), false).unwrap();
+
+        assert_eq!(merged.properties.len(), 1);
+        assert!(merged.properties.contains_key("name"));
+    }
+
+    /// Empty user properties don't override — falls back to default (currently
+    /// empty, since MCP-side nested property resolution isn't implemented).
+    #[test]
+    fn empty_user_properties_falls_back_to_default() {
+        let opts = json!({ "type": "object" });
+
+        let merged = merge_mcp_param("target", &opts, None, false).unwrap();
+
+        assert!(merged.properties.is_empty());
+    }
+
+    /// `required: false → true` allowed by override (tightening).
+    #[test]
+    fn override_can_tighten_required() {
+        let opts = json!({ "type": "string" });
+        let override_cfg = ToolParameterConfig {
+            required: true,
+            ..cfg("string")
+        };
+
+        let merged = merge_mcp_param("x", &opts, Some(&override_cfg), false).unwrap();
+
+        assert!(merged.required);
+    }
+
+    /// `required: true → false` ignored — the server's contract wins.
+    #[test]
+    fn override_cannot_loosen_required() {
+        let opts = json!({ "type": "string" });
+        let override_cfg = ToolParameterConfig {
+            required: false,
+            ..cfg("string")
+        };
+
+        let merged = merge_mcp_param("x", &opts, Some(&override_cfg), true).unwrap();
+
+        assert!(merged.required, "MCP-required field cannot be loosened");
+    }
+
+    /// `kind` override wins (existing behavior, exercised here for completeness
+    /// alongside the new `items` / `properties` tests).
+    #[test]
+    fn user_kind_override_replaces_mcp_kind() {
+        let opts = json!({ "type": "integer" });
+        let override_cfg = cfg("string");
+
+        let merged = merge_mcp_param("x", &opts, Some(&override_cfg), false).unwrap();
+
+        assert!(matches!(
+            merged.kind,
+            OneOrManyTypes::One(ref s) if s == "string"
+        ));
+    }
+
+    /// `enum` from MCP carries through when no user override.
+    #[test]
+    fn mcp_enum_used_when_no_user_enumeration() {
+        let opts = json!({
+            "type": "string",
+            "enum": ["a", "b", "c"]
+        });
+
+        let merged = merge_mcp_param("x", &opts, None, false).unwrap();
+
+        assert_eq!(merged.enumeration, vec![
+            Value::from("a"),
+            Value::from("b"),
+            Value::from("c")
+        ]);
+    }
+}
