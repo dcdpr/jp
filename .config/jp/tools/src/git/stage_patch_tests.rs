@@ -5,8 +5,8 @@ use serde_json::json;
 use super::*;
 use crate::util::runner::MockProcessRunner;
 
-/// Compute what the listing-side ID for a hunk would be, so tests can use
-/// the same content-addressed ID the agent would receive.
+/// Compute what the listing-side ID for a hunk would be, so tests can use the
+/// same content-addressed ID the agent would receive.
 fn id_for(hunk: &str) -> String {
     super::super::hunk::hunk_id(hunk)
 }

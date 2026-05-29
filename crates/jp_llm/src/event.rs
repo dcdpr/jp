@@ -7,15 +7,17 @@ use serde_json::{Map, Value};
 /// provider.
 ///
 /// These parts will have their `index` field set to the index of the final
-/// messages array streamed by the provider. For example, if the LLM produces
-/// reasoning tokens, response tokens and tool call tokens, then all of these
-/// will have different `index` values corresponding to their relative order.
+/// messages array streamed by the provider.
+/// For example, if the LLM produces reasoning tokens, response tokens and tool
+/// call tokens, then all of these will have different `index` values
+/// corresponding to their relative order.
 ///
 /// Only after [`Event::Flush`] is produced with the given `index` value, should
 /// all previous parts be merged into a single [`ConversationEvent`] (e.g. via
-/// [`EventBuilder`](crate::event_builder::EventBuilder)).
+/// [`EventBuilder`]).
 ///
 /// [`ConversationEvent`]: jp_conversation::ConversationEvent
+/// [`EventBuilder`]: crate::event_builder::EventBuilder
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     /// A streaming chunk from the LLM provider.
@@ -52,15 +54,15 @@ pub enum Event {
     ///
     /// This allows LLM providers to inform the caller about an invalid event
     /// stream that the provider can fix, but which should ideally also be
-    /// applied to the conversation stream itself so that the error doesn't
-    /// show up again in the future.
+    /// applied to the conversation stream itself so that the error doesn't show
+    /// up again in the future.
     ///
     /// Currently, the caller applies these patches by mutating the stream
-    /// in-place (see `apply_history_patches` in `signals.rs`). This is a
-    /// known deviation from the append-only stream principle (RFD 064).
-    /// When RFD 064's overlay/projection infrastructure lands, patches
-    /// should be stored as stream events and applied at projection time
-    /// instead.
+    /// in-place (see `apply_history_patches` in `signals.rs`).
+    /// This is a known deviation from the append-only stream principle (RFD
+    /// 064).
+    /// When RFD 064's overlay/projection infrastructure lands, patches should
+    /// be stored as stream events and applied at projection time instead.
     Patch(Vec<EventPatch>),
 
     /// The response was finished.
@@ -70,11 +72,12 @@ pub enum Event {
 /// A chunk of streaming data from an LLM provider.
 ///
 /// Each variant maps to a distinct content type that providers differentiate
-/// between. The [`EventBuilder`] accumulates these into [`ConversationEvent`]s
-/// on [`Event::Flush`].
+/// between.
+/// The [`EventBuilder`] accumulates these into [`ConversationEvent`]s on
+/// [`Event::Flush`].
 ///
-/// [`EventBuilder`]: crate::event_builder::EventBuilder
 /// [`ConversationEvent`]: jp_conversation::ConversationEvent
+/// [`EventBuilder`]: crate::event_builder::EventBuilder
 #[derive(Debug, Clone, PartialEq)]
 pub enum EventPart {
     /// A chunk of assistant message content.
@@ -93,8 +96,9 @@ pub enum EventPart {
 /// Streaming events for a single tool call.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ToolCallPart {
-    /// Tool call identity. First non-empty value wins per field when multiple
-    /// Start events arrive for the same index.
+    /// Tool call identity.
+    /// First non-empty value wins per field when multiple Start events arrive
+    /// for the same index.
     Start {
         /// Unique identifier for this tool call.
         id: String,
@@ -265,16 +269,16 @@ impl Event {
         }
     }
 
-    /// Attaches a metadata field to a `Part` or `Flush` event. No-op for
-    /// other variants.
+    /// Attaches a metadata field to a `Part` or `Flush` event.
+    /// No-op for other variants.
     #[must_use]
     pub fn with_metadata_field(mut self, key: impl Into<String>, value: impl Into<Value>) -> Self {
         self.add_metadata_field(key, value);
         self
     }
 
-    /// Attaches a metadata field to a `Part` or `Flush` event. No-op for
-    /// other variants.
+    /// Attaches a metadata field to a `Part` or `Flush` event.
+    /// No-op for other variants.
     pub fn add_metadata_field(&mut self, key: impl Into<String>, value: impl Into<Value>) {
         match self {
             Self::Part { metadata, .. } | Self::Flush { metadata, .. } => {
@@ -295,8 +299,8 @@ pub enum FinishReason {
     MaxTokens,
 
     /// The provider requests that the caller rebuild the request from the
-    /// current conversation state and retry. The stream is finished and no
-    /// further events will be produced.
+    /// current conversation state and retry.
+    /// The stream is finished and no further events will be produced.
     Retry,
 
     /// The assistant has stopped generating tokens for some reason.

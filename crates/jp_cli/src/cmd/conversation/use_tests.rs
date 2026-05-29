@@ -38,7 +38,8 @@ fn test_session() -> Session {
 }
 
 /// Build a `Ctx` with an in-memory workspace, a session, and a single
-/// conversation whose `last_activated_at` is pinned to `ORIGINAL_LAST_ACTIVATED`.
+/// conversation whose `last_activated_at` is pinned to
+/// `ORIGINAL_LAST_ACTIVATED`.
 fn setup(id: ConversationId) -> Ctx {
     let mut workspace = Workspace::new("/tmp/jp-cli-use-test");
     workspace.create_conversation_with_id(
@@ -66,7 +67,8 @@ fn setup(id: ConversationId) -> Ctx {
 }
 
 /// Without contention, `Use::run` bumps the conversation's `last_activated_at`
-/// AND records the session mapping. This is the bug fix in its happy path.
+/// AND records the session mapping.
+/// This is the bug fix in its happy path.
 #[test]
 fn run_without_contention_bumps_last_activated_at() {
     let id = make_id(1000);

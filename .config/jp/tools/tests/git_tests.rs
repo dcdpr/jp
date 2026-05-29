@@ -69,9 +69,10 @@ fn ctx(root: &Utf8Path) -> Context {
 
 /// Build the shared tool options that isolate git from host config.
 ///
-/// Without this, tools that spawn git via `DuctProcessRunner` would inherit
-/// the developer's (or CI runner's) global git configuration, which can cause
-/// flaky failures (e.g. `commit.gpgsign = true`, global hooks, etc.).
+/// Without this, tools that spawn git via `DuctProcessRunner` would inherit the
+/// developer's (or CI runner's) global git configuration, which can cause flaky
+/// failures (e.g.
+/// `commit.gpgsign = true`, global hooks, etc.).
 fn git_options() -> Map<String, Value> {
     json!({
         "env": {

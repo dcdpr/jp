@@ -67,15 +67,16 @@ pub(crate) async fn fs_delete_file(
     Ok(msg.into())
 }
 
-/// Return the entry's intermediate parent directory if it is now empty and
-/// safe to remove.
+/// Return the entry's intermediate parent directory if it is now empty and safe
+/// to remove.
 ///
-/// "Intermediate" means: not the workspace root itself. The check is gated
-/// on the *relative* parent being non-empty, which is true exactly when the
-/// deleted entry lived in a subdirectory. This protects against deleting
-/// the workspace itself when the entry was at the top level — in that case
-/// `resolved.absolute.parent()` is the canonical workspace root, and
-/// removing it would either error (CWD/EBUSY) or, worse, succeed.
+/// "Intermediate" means: not the workspace root itself.
+/// The check is gated on the *relative* parent being non-empty, which is true
+/// exactly when the deleted entry lived in a subdirectory.
+/// This protects against deleting the workspace itself when the entry was at
+/// the top level — in that case `resolved.absolute.parent()` is the canonical
+/// workspace root, and removing it would either error (CWD/EBUSY) or, worse,
+/// succeed.
 fn empty_parent_to_remove(resolved: &ResolvedPath) -> Result<Option<&Utf8Path>, std::io::Error> {
     let Some(rel_parent) = resolved.relative.parent() else {
         return Ok(None);

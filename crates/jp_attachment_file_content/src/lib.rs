@@ -218,9 +218,9 @@ fn sanitize_pattern<'a>(mut pattern: &'a str, cwd: &Utf8Path) -> Cow<'a, str> {
     }
 }
 
-/// 10 MiB. Fits comfortably under every provider's inline limit (Anthropic
-/// 32 MB, OpenAI 20 MB, Gemini 20 MB) even after base64 expansion (~33%
-/// overhead).
+/// 10 MiB.
+/// Fits comfortably under every provider's inline limit (Anthropic 32 MB,
+/// OpenAI 20 MB, Gemini 20 MB) even after base64 expansion (~33% overhead).
 const MAX_BINARY_SIZE: u64 = 10 * 1024 * 1024;
 
 fn build_attachment(path: &Utf8Path, cwd: &Utf8Path) -> Option<Attachment> {
@@ -289,22 +289,23 @@ fn build_attachment(path: &Utf8Path, cwd: &Utf8Path) -> Option<Attachment> {
     Some(Attachment::text(rel.to_string(), content))
 }
 
-/// We need to do some extra work to get the path relative to the
-/// workspace.
+/// We need to do some extra work to get the path relative to the workspace.
 ///
-/// - For `file:**/*.md`, the `**` part is marked as the domain, so we
-///   need to merge it back.
-/// - A file URI is *almost always absolute, but there's also a way to make it
+/// - For `file:**/*.md`, the `**` part is marked as the domain, so we need to
+///   merge it back.
+///
+/// - A file URI is \*almost always absolute, but there's also a way to make it
 ///   relative:
+///   
+///   - <file:path/to/file.txt> -\> absolute
+///   - <file:/path/to/file.txt> -\> absolute
+///   - <file://path/to/file.txt> -\> relative (host is `path`)
+///   - <file:///path/to/file.txt> -\> absolute
 ///
-///   - <file:path/to/file.txt> -> absolute
-///   - <file:/path/to/file.txt> -> absolute
-///   - <file://path/to/file.txt> -> relative (host is `path`)
-///   - <file:///path/to/file.txt> -> absolute
-///
-/// To manage this, we make *all* paths absolute. This is okay, because paths
-/// are always relative to the workspace root, so `path/to/file.txt` and
-/// `/path/to/file.txt` both point to `{workspace}/path/to/file.txt`.
+/// To manage this, we make *all* paths absolute.
+/// This is okay, because paths are always relative to the workspace root, so
+/// `path/to/file.txt` and `/path/to/file.txt` both point to
+/// `{workspace}/path/to/file.txt`.
 fn uri_to_pattern(uri: &Url) -> Result<Pattern, Box<dyn Error + Send + Sync>> {
     let domain = uri.host_str().unwrap_or("");
     let mut path = format!("{domain}{}", uri.path());

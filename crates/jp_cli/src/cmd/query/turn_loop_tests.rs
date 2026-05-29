@@ -58,8 +58,8 @@ fn empty_executor_source() -> Box<dyn ExecutorSource> {
 
 /// A mock provider that returns different responses on each call.
 ///
-/// This enables testing multi-cycle conversations where the LLM returns
-/// tool calls on the first request, then a final message on the follow-up.
+/// This enables testing multi-cycle conversations where the LLM returns tool
+/// calls on the first request, then a final message on the follow-up.
 #[derive(Debug)]
 struct SequentialMockProvider {
     /// Sequence of event lists to return on each call.
@@ -281,13 +281,14 @@ async fn test_normal_completion_persists_content() {
 }
 
 /// Regression: any `ToolCallRequest` already in the stream when a new
-/// `Streaming` cycle starts MUST be sanitized into a stream that's safe to
-/// send to the provider. Otherwise providers like Anthropic reject the request
-/// with `tool_use ids were found without tool_result blocks`.
+/// `Streaming` cycle starts MUST be sanitized into a stream that's safe to send
+/// to the provider.
+/// Otherwise providers like Anthropic reject the request with `tool_use ids
+/// were found without tool_result blocks`.
 ///
 /// Reproduces the failure mode from the bug report by injecting an orphaned
-/// `ToolCallRequest` in a prior turn and then running a fresh turn. After the
-/// turn loop completes, the persisted stream must contain a synthetic
+/// `ToolCallRequest` in a prior turn and then running a fresh turn.
+/// After the turn loop completes, the persisted stream must contain a synthetic
 /// "Tool call was interrupted." response for the orphan.
 #[tokio::test]
 async fn orphan_tool_call_is_sanitized_before_provider_request() {
@@ -1111,8 +1112,8 @@ async fn test_tool_call_with_run_mode_ask_approves() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// Tests: LLM returns tool call → Ask prompt → user presses 'n' → tool skipped
-/// Uses `MockExecutor` to avoid shell commands.
+/// Tests: LLM returns tool call → Ask prompt → user presses 'n' → tool
+/// skipped Uses `MockExecutor` to avoid shell commands.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn test_tool_call_with_run_mode_ask_skips() {
@@ -1879,8 +1880,8 @@ async fn test_tool_call_returns_error() {
 
 /// A mock provider that delays before returning the stream.
 ///
-/// This simulates a slow API response, allowing us to test the
-/// waiting indicator during the HTTP round-trip.
+/// This simulates a slow API response, allowing us to test the waiting
+/// indicator during the HTTP round-trip.
 #[derive(Debug)]
 struct DelayedMockProvider {
     delay: Duration,
@@ -2510,8 +2511,8 @@ async fn test_turn_start_index_increments_across_turns() {
     assert_eq!(turn_starts.len(), 2, "Expected two TurnStart events");
 }
 
-/// Verifies that buffered markdown text is flushed before the "Calling
-/// tool" header appears in the output (Issue 1 fix).
+/// Verifies that buffered markdown text is flushed before the "Calling tool"
+/// header appears in the output (Issue 1 fix).
 #[tokio::test]
 async fn test_markdown_flushed_before_tool_header() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
@@ -2613,11 +2614,11 @@ async fn test_markdown_flushed_before_tool_header() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// Verifies that multiple parallel tool calls produce one permanent
-/// "Calling tool X(args)" line each, not garbled across lines.
+/// Verifies that multiple parallel tool calls produce one permanent "Calling
+/// tool X(args)" line each, not garbled across lines.
 ///
-/// Uses `FunctionCall` parameter style so header+args appear on one
-/// line, making assertions straightforward.
+/// Uses `FunctionCall` parameter style so header+args appear on one line,
+/// making assertions straightforward.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn test_parallel_tool_calls_rendered_atomically() {
@@ -2815,8 +2816,8 @@ async fn test_parallel_tool_calls_rendered_atomically() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// Verifies that a single tool call uses "Calling tool" (singular),
-/// and that its header+arguments are rendered atomically.
+/// Verifies that a single tool call uses "Calling tool" (singular), and that
+/// its header+arguments are rendered atomically.
 #[tokio::test]
 #[expect(clippy::too_many_lines)]
 async fn test_single_tool_call_rendered_with_args() {
@@ -2949,10 +2950,11 @@ async fn test_single_tool_call_rendered_with_args() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// Mock executor that checks accumulated answers and returns `NeedsInput`
-/// for the first unanswered question. When all questions are answered,
-/// returns `Completed`. This simulates a tool that requires one or more
-/// rounds of inquiry before it can finish.
+/// Mock executor that checks accumulated answers and returns `NeedsInput` for
+/// the first unanswered question.
+/// When all questions are answered, returns `Completed`.
+/// This simulates a tool that requires one or more rounds of inquiry before it
+/// can finish.
 struct InquiryMockExecutor {
     tool_id: String,
     tool_name: String,
@@ -3015,8 +3017,8 @@ impl Executor for InquiryMockExecutor {
 
 /// Build provider events for a structured inquiry response.
 ///
-/// Emits as `Value::String` to match real provider streaming behavior
-/// (the `EventBuilder` parses the JSON string on flush).
+/// Emits as `Value::String` to match real provider streaming behavior (the
+/// `EventBuilder` parses the JSON string on flush).
 fn structured_inquiry_events(inquiry_id: &str, answer: &Value) -> Vec<Event> {
     let data = json!({
         "inquiry_id": inquiry_id,
@@ -3226,8 +3228,8 @@ async fn test_tool_with_single_inquiry() {
 }
 
 /// Tool has two questions, each triggering a separate inquiry round.
-/// Flow: tool call → `NeedsInput(q1)` → inquiry → answer →
-///       `NeedsInput(q2)` → inquiry → answer → completed.
+/// Flow: tool call → `NeedsInput(q1)` → inquiry → answer → `NeedsInput(q2)`
+/// → inquiry → answer → completed.
 #[tokio::test]
 async fn test_tool_with_multiple_inquiries() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
@@ -3490,8 +3492,9 @@ async fn test_parallel_tools_one_with_inquiry() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// Two parallel tools both requiring inquiries. Uses responses without
-/// `inquiry_id` since the concurrent inquiry call order is non-deterministic.
+/// Two parallel tools both requiring inquiries.
+/// Uses responses without `inquiry_id` since the concurrent inquiry call order
+/// is non-deterministic.
 #[tokio::test]
 #[expect(clippy::too_many_lines)]
 async fn test_parallel_tools_both_with_inquiries() {
@@ -3627,10 +3630,11 @@ async fn test_parallel_tools_both_with_inquiries() {
 /// new streaming cycle.
 ///
 /// Scenario with `max_retries=1`:
-///   1. Stream produces content, then rate-limits mid-stream (no Finished)
-///   2. Retry: stream produces content (counter resets here), then rate-limits
-///      again mid-stream
-///   3. Retry: stream completes successfully
+///
+/// 1. Stream produces content, then rate-limits mid-stream (no Finished)
+/// 2. Retry: stream produces content (counter resets here), then rate-limits
+///    again mid-stream
+/// 3. Retry: stream completes successfully
 ///
 /// Without the fix, the counter would reach 2 after step 2, exceeding the
 /// budget of 1 and causing a hard failure.
@@ -3758,19 +3762,21 @@ async fn test_retry_counter_resets_on_successful_event() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// Regression: when the LLM emits a tool call for an unconfigured tool
-/// (which becomes a `Resolved` pending entry) followed by a configured one
-/// (which becomes `Approved`), `build_execution_plan` assigns plan indices
-/// 0 and 1 in stream order. The approved entry then has plan index 1, but
-/// `execute_with_prompting` was sizing its internal `results` vector to
-/// `executors.len()` (= 1) and indexing into it with the plan index — which
-/// panicked with `index out of bounds: the len is 1 but the index is 1`.
+/// Regression: when the LLM emits a tool call for an unconfigured tool (which
+/// becomes a `Resolved` pending entry) followed by a configured one (which
+/// becomes `Approved`), `build_execution_plan` assigns plan indices 0 and 1 in
+/// stream order.
+/// The approved entry then has plan index 1, but `execute_with_prompting` was
+/// sizing its internal `results` vector to `executors.len()` (= 1) and indexing
+/// into it with the plan index — which panicked with `index out of bounds: the
+/// len is 1 but the index is 1`.
 ///
 /// The fix re-bases plan indices to contiguous local positions inside
 /// `execute_with_prompting`, then pairs each response back with its
-/// caller-provided plan index on output. The downstream `commit_tool_responses`
-/// uses those plan indices when merging approved + pre-resolved responses,
-/// so they appear in the original stream order.
+/// caller-provided plan index on output.
+/// The downstream `commit_tool_responses` uses those plan indices when merging
+/// approved + pre-resolved responses, so they appear in the original stream
+/// order.
 #[tokio::test]
 async fn test_unavailable_tool_before_approved_does_not_panic() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {

@@ -248,7 +248,8 @@ impl EventChain {
         }
     }
 
-    /// Remove `chars_to_skip` characters from the start of the `pending` buffer.
+    /// Remove `chars_to_skip` characters from the start of the `pending`
+    /// buffer.
     fn trim_pending_overlap(&mut self, mut chars_to_skip: usize, indices: &[(usize, usize)]) {
         let mut last_consumed_deque_index = None;
         let mut partial_trim_info = None; // (deque_index, chars_to_trim)
@@ -334,7 +335,8 @@ fn trim_event_start(event: &mut Event, count: usize) {
     }
 }
 
-/// Finds the merge point between two text chunks by detecting overlapping content.
+/// Finds the merge point between two text chunks by detecting overlapping
+/// content.
 ///
 /// Returns the number of bytes to skip from the start of `right` to merge it
 /// seamlessly with `left`.

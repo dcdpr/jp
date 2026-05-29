@@ -20,8 +20,9 @@ pub(crate) const LOCKS_DIR: &str = "locks";
 /// Diagnostic metadata written to the lock file.
 ///
 /// This is informational only — the actual locking is done by the OS via
-/// `flock`/`LockFileEx`. If the process is killed with SIGKILL, the metadata
-/// may be stale but the OS releases the lock automatically.
+/// `flock`/`LockFileEx`.
+/// If the process is killed with SIGKILL, the metadata may be stale but the OS
+/// releases the lock automatically.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LockInfo {
     /// PID of the process that holds the lock.
@@ -37,8 +38,9 @@ pub struct LockInfo {
 
 /// An acquired exclusive advisory lock on a conversation.
 ///
-/// The OS lock is held as long as the `File` is open. On drop, the lock file is
-/// deleted and the file handle is closed (releasing the flock).
+/// The OS lock is held as long as the `File` is open.
+/// On drop, the lock file is deleted and the file handle is closed (releasing
+/// the flock).
 #[derive(Debug)]
 pub struct ConversationFileLock {
     file: Option<File>,
@@ -166,9 +168,9 @@ impl super::Storage {
 
     /// Resolve the lock file path for a conversation.
     ///
-    /// Returns `Ok(path)` if a lock file already exists (checking user
-    /// storage first, then workspace storage), or `Err(path)` with the
-    /// preferred write location if no lock file exists.
+    /// Returns `Ok(path)` if a lock file already exists (checking user storage
+    /// first, then workspace storage), or `Err(path)` with the preferred write
+    /// location if no lock file exists.
     fn lock_file_path(
         &self,
         conversation_id: &str,
@@ -195,8 +197,9 @@ impl super::Storage {
 
 /// Check whether a lock file is orphaned (no process holds the lock).
 ///
-/// Opens the file, attempts a non-blocking exclusive lock. If it succeeds, the
-/// file is orphaned. The lock is immediately released.
+/// Opens the file, attempts a non-blocking exclusive lock.
+/// If it succeeds, the file is orphaned.
+/// The lock is immediately released.
 pub(crate) fn is_orphaned_lock(path: &camino::Utf8Path) -> bool {
     let Ok(file) = std::fs::File::open(path) else {
         return false;

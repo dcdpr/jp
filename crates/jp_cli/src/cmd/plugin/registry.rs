@@ -1,7 +1,7 @@
 //! Plugin registry operations.
 //!
-//! Handles fetching, caching, and querying the plugin registry,
-//! as well as downloading and installing plugin binaries.
+//! Handles fetching, caching, and querying the plugin registry, as well as
+//! downloading and installing plugin binaries.
 
 use camino::{Utf8Path, Utf8PathBuf};
 use jp_plugin::registry::{ApprovedPlugin, PluginApprovals, Registry, RegistryBinary};
@@ -207,7 +207,8 @@ pub(crate) fn sha256_file(path: &Utf8Path) -> Result<String, cmd::Error> {
 /// Construct the target triple for the current platform.
 ///
 /// Maps Rust's `std::env::consts` to the target triples used in the registry
-/// (e.g. `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`).
+/// (e.g.
+/// `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`).
 pub(crate) fn current_target() -> String {
     let arch = std::env::consts::ARCH;
     let os_part = match std::env::consts::OS {

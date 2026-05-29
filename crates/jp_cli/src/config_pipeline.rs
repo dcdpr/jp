@@ -1,8 +1,8 @@
 //! Two-phase config loading pipeline.
 //!
-//! Config sources are loaded from disk once and cached. The pipeline can then
-//! produce partial configs with or without the per-conversation layer, ensuring
-//! correct precedence in both cases:
+//! Config sources are loaded from disk once and cached.
+//! The pipeline can then produce partial configs with or without the
+//! per-conversation layer, ensuring correct precedence in both cases:
 //!
 //! - **Pre-resolution** (for `conversation.default_id`): `files + env + --cfg`
 //! - **Final**: `files + env + conversation + --cfg`
@@ -41,9 +41,9 @@ enum ResolvedCfgArg {
 
 /// Config sources loaded once from disk, reusable for multiple builds.
 ///
-/// Owns the static config layers (files, env vars, `--cfg` args). The
-/// per-conversation layer and command-specific CLI overrides are provided at
-/// build time by the caller.
+/// Owns the static config layers (files, env vars, `--cfg` args).
+/// The per-conversation layer and command-specific CLI overrides are provided
+/// at build time by the caller.
 pub(crate) struct ConfigPipeline {
     /// Files + inheritance + env vars, merged into a single partial.
     base: PartialAppConfig,
@@ -69,15 +69,15 @@ impl ConfigPipeline {
 
     /// Build a partial with `--cfg` applied on top of the base.
     ///
-    /// No per-conversation layer. Used for pre-resolution reads like
-    /// `conversation.default_id`.
+    /// No per-conversation layer.
+    /// Used for pre-resolution reads like `conversation.default_id`.
     pub fn partial_without_conversation(&self) -> Result<PartialAppConfig> {
         apply_cfg_args(self.base.clone(), &self.cfg_args)
     }
 
-    /// Build a partial with the per-conversation layer sandwiched between
-    /// the base and `--cfg`, maintaining correct precedence:
-    /// `files + env < conversation < --cfg`.
+    /// Build a partial with the per-conversation layer sandwiched between the
+    /// base and `--cfg`, maintaining correct precedence: `files + env <
+    /// conversation < --cfg`.
     pub fn partial_with_conversation(
         &self,
         conversation: PartialAppConfig,
@@ -90,8 +90,8 @@ impl ConfigPipeline {
 
 /// Resolve `--cfg` arguments into their in-memory representations.
 ///
-/// File paths are searched and loaded from disk here, exactly once. Key-value
-/// assignments are stored as-is.
+/// File paths are searched and loaded from disk here, exactly once.
+/// Key-value assignments are stored as-is.
 fn resolve_cfg_args(
     overrides: &[KeyValueOrPath],
     base: &PartialAppConfig,
@@ -194,7 +194,8 @@ fn resolve_cfg_args(
     Ok(resolved)
 }
 
-/// Apply pre-resolved `--cfg` args onto a partial config. Pure in-memory merge.
+/// Apply pre-resolved `--cfg` args onto a partial config.
+/// Pure in-memory merge.
 fn apply_cfg_args(
     mut partial: PartialAppConfig,
     args: &[ResolvedCfgArg],

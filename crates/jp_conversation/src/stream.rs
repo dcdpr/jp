@@ -23,8 +23,9 @@ use crate::{
 ///
 /// This type handles base64-encoding of content fields (tool arguments, tool
 /// response content, metadata) during serialization, and decoding during
-/// deserialization. This keeps the encoding concern isolated to the storage
-/// layer — the inner [`ConversationEvent`] types serialize as plain text.
+/// deserialization.
+/// This keeps the encoding concern isolated to the storage layer — the inner
+/// [`ConversationEvent`] types serialize as plain text.
 #[derive(Debug, Clone, PartialEq)]
 enum InternalEvent {
     /// The configuration state of the conversation is updated.
@@ -32,8 +33,8 @@ enum InternalEvent {
     /// When this event is emitted, all subsequent events in the stream are
     /// bound to the new configuration.
     ///
-    /// This is a *delta* event, meaning that it is merged on top of all
-    /// other `ConfigDelta` events in the stream.
+    /// This is a *delta* event, meaning that it is merged on top of all other
+    /// `ConfigDelta` events in the stream.
     ///
     /// Any non-config events before the first `ConfigDelta` event are
     /// considered to have the default configuration.
@@ -73,8 +74,8 @@ impl Serialize for InternalEvent {
 }
 
 impl InternalEvent {
-    /// Convert an internal event into an [`ConversationEvent`]. Returns `None`
-    /// if the event is a config delta.
+    /// Convert an internal event into an [`ConversationEvent`].
+    /// Returns `None` if the event is a config delta.
     #[must_use]
     fn into_event(self) -> Option<ConversationEvent> {
         match self {
@@ -218,8 +219,8 @@ impl ConversationStream {
         self
     }
 
-    /// Returns `true` if the stream is empty. This only considers
-    /// [`ConversationEvent`]s.
+    /// Returns `true` if the stream is empty.
+    /// This only considers [`ConversationEvent`]s.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         !self
@@ -236,8 +237,8 @@ impl ConversationStream {
             .any(|e| matches!(e, InternalEvent::Event(event) if event.is_chat_request()))
     }
 
-    /// Returns the number of events in the stream. This only considers
-    /// [`ConversationEvent`]s.
+    /// Returns the number of events in the stream.
+    /// This only considers [`ConversationEvent`]s.
     #[must_use]
     pub fn len(&self) -> usize {
         self.events
@@ -337,7 +338,9 @@ impl ConversationStream {
 
     /// Start a new turn, returning `self` for builder chaining.
     ///
-    /// See [`start_turn`](Self::start_turn).
+    /// See [`start_turn`].
+    ///
+    /// [`start_turn`]: Self::start_turn
     #[must_use]
     pub fn with_turn(mut self, request: impl Into<ChatRequest>) -> Self {
         self.start_turn(request);
@@ -347,8 +350,10 @@ impl ConversationStream {
     /// Get a mutable handle to the current (last) turn.
     ///
     /// If the stream has no turns yet, a [`TurnStart`] is injected
-    /// automatically. Returns a [`TurnMut`] that buffers events until
-    /// [`build()`](TurnMut::build) is called.
+    /// automatically.
+    /// Returns a [`TurnMut`] that buffers events until [`build()`] is called.
+    ///
+    /// [`build()`]: TurnMut::build
     pub fn current_turn_mut(&mut self) -> TurnMut<'_> {
         let has_turn = self
             .events
@@ -371,11 +376,12 @@ impl ConversationStream {
     /// Returns the structured output schema for the current turn.
     ///
     /// The schema lives on the first [`ChatRequest`] after the last
-    /// [`TurnStart`]. It is set once at the start of a turn and must
-    /// persist across tool-use round-trips within that turn. Interrupt
-    /// replies (`InterruptAction::Reply`) inject additional
-    /// `ChatRequest`s with `schema: None`, so we specifically want the
-    /// *first* request in the turn, not the last.
+    /// [`TurnStart`].
+    /// It is set once at the start of a turn and must persist across tool-use
+    /// round-trips within that turn.
+    /// Interrupt replies (`InterruptAction::Reply`) inject additional
+    /// `ChatRequest`s with `schema: None`, so we specifically want the *first*
+    /// request in the turn, not the last.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     #[must_use]
@@ -430,8 +436,8 @@ impl ConversationStream {
         self.iter().next()
     }
 
-    /// Pops the last [`ConversationEvent`] from the stream, returning it wrapped
-    /// in a [`ConversationEventWithConfig`], containing the
+    /// Pops the last [`ConversationEvent`] from the stream, returning it
+    /// wrapped in a [`ConversationEventWithConfig`], containing the
     /// [`PartialAppConfig`] at the time the event was added.
     #[must_use]
     pub fn pop(&mut self) -> Option<ConversationEventWithConfig> {
@@ -499,6 +505,7 @@ impl ConversationStream {
     /// filtering.
     ///
     /// Specifically:
+    ///
     /// 1. Drops conversation events before the first [`ChatRequest`],
     ///    preserving [`ConfigDelta`]s and [`TurnStart`]s.
     /// 2. Removes orphaned [`ToolCallResponse`]s whose matching
@@ -509,16 +516,16 @@ impl ConversationStream {
     ///    [`InquiryRequest`] is missing.
     /// 5. Removes orphaned [`InquiryRequest`]s whose matching
     ///    [`InquiryResponse`] is missing.
-    /// 6. Removes a trailing [`TurnStart`] with no following events
-    ///    (artifact of an interrupted turn).
+    /// 6. Removes a trailing [`TurnStart`] with no following events (artifact
+    ///    of an interrupted turn).
     /// 7. Normalizes [`TurnStart`] events: ensures the stream begins with
     ///    exactly one `TurnStart` and re-indexes all turn starts to a
     ///    zero-based sequence.
     ///
-    /// [`ToolCallRequest`]: crate::event::ToolCallRequest
-    /// [`ToolCallResponse`]: crate::event::ToolCallResponse
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     /// [`InquiryResponse`]: crate::event::InquiryResponse
+    /// [`ToolCallRequest`]: crate::event::ToolCallRequest
+    /// [`ToolCallResponse`]: crate::event::ToolCallResponse
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn sanitize(&mut self) {
         self.drop_leading_non_user_events();
@@ -532,8 +539,9 @@ impl ConversationStream {
 
     /// Drops conversation events before the first [`ChatRequest`] that would be
     /// invalid as leading content (e.g. assistant responses, tool call
-    /// results). [`ConfigDelta`]s and [`TurnStart`]s are preserved — config
-    /// deltas maintain configuration state, and turn markers are invisible to
+    /// results).
+    /// [`ConfigDelta`]s and [`TurnStart`]s are preserved — config deltas
+    /// maintain configuration state, and turn markers are invisible to
     /// providers but useful for `--last`.
     fn drop_leading_non_user_events(&mut self) {
         let Some(pos) = self
@@ -584,8 +592,8 @@ impl ConversationStream {
     /// Removes [`InquiryResponse`]s whose ID doesn't match any
     /// [`InquiryRequest`] in the stream.
     ///
-    /// [`InquiryResponse`]: crate::event::InquiryResponse
     /// [`InquiryRequest`]: crate::event::InquiryRequest
+    /// [`InquiryResponse`]: crate::event::InquiryResponse
     fn remove_orphaned_inquiry_responses(&mut self) {
         let request_ids: Vec<InquiryId> = self
             .events
@@ -633,8 +641,9 @@ impl ConversationStream {
     /// `TurnStart` indices form a zero-based sequence.
     ///
     /// After filtering, the stream may have multiple stale `TurnStart`s from
-    /// earlier turns piled up at the front, or gaps in the index sequence. This
-    /// step:
+    /// earlier turns piled up at the front, or gaps in the index sequence.
+    /// This step:
+    ///
     /// - Inserts a `TurnStart(0)` if the stream has events but no leading
     ///   `TurnStart`.
     /// - Removes duplicate `TurnStart`s that precede the first `ChatRequest`
@@ -716,10 +725,11 @@ impl ConversationStream {
     /// Injects synthetic [`ToolCallResponse`]s for any [`ToolCallRequest`]s
     /// that lack a matching response.
     ///
-    /// This can happen when the user interrupts tool execution (e.g. Ctrl+C →
-    /// "save & exit") after the request has been streamed but before responses
-    /// are recorded. Providers such as Anthropic reject streams where a
-    /// `tool_use` block has no corresponding `tool_result`.
+    /// This can happen when the user interrupts tool execution (e.g.
+    /// Ctrl+C → "save & exit") after the request has been streamed but before
+    /// responses are recorded.
+    /// Providers such as Anthropic reject streams where a `tool_use` block has
+    /// no corresponding `tool_result`.
     ///
     /// The synthetic responses carry an error message explaining the
     /// interruption, preserving the context that a tool call was attempted.
@@ -770,8 +780,9 @@ impl ConversationStream {
     /// Returns a turn-level iterator over the stream.
     ///
     /// Each [`Turn`] groups the events between consecutive [`TurnStart`]
-    /// markers. Events before the first `TurnStart` (if any) form an implicit
-    /// leading turn.
+    /// markers.
+    /// Events before the first `TurnStart` (if any) form an implicit leading
+    /// turn.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     #[must_use]
@@ -781,8 +792,8 @@ impl ConversationStream {
 
     /// Retain only the last `n` turns, dropping earlier ones.
     ///
-    /// A turn is delimited by a [`TurnStart`] event. If there are `n` or
-    /// fewer turns, the stream is left unchanged.
+    /// A turn is delimited by a [`TurnStart`] event.
+    /// If there are `n` or fewer turns, the stream is left unchanged.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn retain_last_turns(&mut self, n: usize) {
@@ -819,8 +830,8 @@ impl ConversationStream {
     /// Retain only the first `n` turns, dropping later ones.
     ///
     /// Mirrors [`Self::retain_last_turns`] for the leading end of the stream.
-    /// A turn is delimited by a [`TurnStart`] event. If there are `n` or
-    /// fewer turns, the stream is left unchanged.
+    /// A turn is delimited by a [`TurnStart`] event.
+    /// If there are `n` or fewer turns, the stream is left unchanged.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn retain_first_turns(&mut self, n: usize) {
@@ -851,12 +862,12 @@ impl ConversationStream {
         });
     }
 
-    /// Retain only the first `first` turns and the last `last` turns,
-    /// dropping the turns in between.
+    /// Retain only the first `first` turns and the last `last` turns, dropping
+    /// the turns in between.
     ///
-    /// A turn is delimited by a [`TurnStart`] event. If `first + last` is
-    /// greater than or equal to the total number of turns, the stream is
-    /// left unchanged.
+    /// A turn is delimited by a [`TurnStart`] event.
+    /// If `first + last` is greater than or equal to the total number of turns,
+    /// the stream is left unchanged.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn retain_first_and_last_turns(&mut self, first: usize, last: usize) {
@@ -1186,15 +1197,16 @@ pub struct ConversationEventWithConfig {
 
     /// The configuration at the time the event was added.
     ///
-    /// It should be noted that this is not necessarily the same as the
-    /// current active configuration of the application, even if this is the
-    /// latest event in the stream. For one, the event may have been added a
-    /// while ago, but more importantly, not all configuration changes are
-    /// automatically applied to a [`ConversationStream`]. For example, if a new
-    /// tool is added in the configuration, it will not become available in the
-    /// conversation stream until explicitly added using the CLI flag `--tool`
-    /// or `--cfg`, while *NEW* conversations *WILL* get the new tool by
-    /// default.
+    /// It should be noted that this is not necessarily the same as the current
+    /// active configuration of the application, even if this is the latest
+    /// event in the stream.
+    /// For one, the event may have been added a while ago, but more
+    /// importantly, not all configuration changes are automatically applied to
+    /// a [`ConversationStream`].
+    /// For example, if a new tool is added in the configuration, it will not
+    /// become available in the conversation stream until explicitly added using
+    /// the CLI flag `--tool` or `--cfg`, while *NEW* conversations *WILL* get
+    /// the new tool by default.
     pub config: PartialAppConfig,
 }
 
@@ -1287,19 +1299,19 @@ impl ConversationStream {
     /// Construct a stream from a base config and serialized events.
     ///
     /// The storage layer reads `base_config.json` as a raw JSON [`Value`] and
-    /// `events.json` as raw JSON values. All deserialization, including
-    /// schema-aware stripping of unknown fields from the base config, stays
-    /// inside `jp_conversation`.
+    /// `events.json` as raw JSON values.
+    /// All deserialization, including schema-aware stripping of unknown fields
+    /// from the base config, stays inside `jp_conversation`.
     ///
-    /// The returned stream has `created_at` set to [`Utc::now()`]. The caller
-    /// should chain [`.with_created_at()`] to set the correct creation time
-    /// from the conversation ID.
-    ///
-    /// [`.with_created_at()`]: Self::with_created_at
+    /// The returned stream has `created_at` set to [`Utc::now()`].
+    /// The caller should chain [`.with_created_at()`] to set the correct
+    /// creation time from the conversation ID.
     ///
     /// # Errors
     ///
     /// Returns an error if event deserialization or config conversion fails.
+    ///
+    /// [`.with_created_at()`]: Self::with_created_at
     pub fn from_parts(base_config: Value, events: Vec<Value>) -> Result<Self, StreamError> {
         let base_config = crate::compat::deserialize_partial_config(base_config);
 
@@ -1317,8 +1329,8 @@ impl ConversationStream {
 
     /// Decompose the stream into its storable parts.
     ///
-    /// Returns the base config and the serialized events array as raw JSON. The
-    /// storage layer writes these to `base_config.json` and `events.json`
+    /// Returns the base config and the serialized events array as raw JSON.
+    /// The storage layer writes these to `base_config.json` and `events.json`
     /// respectively.
     ///
     /// # Errors
@@ -1340,8 +1352,8 @@ impl ConversationStream {
     /// Construct a stream from the legacy on-disk format where the base config
     /// was packed as the first element in the events array.
     ///
-    /// Used by the storage layer's backward-compatibility migration path. If
-    /// the first element is not a `ConfigDelta`, returns `None`.
+    /// Used by the storage layer's backward-compatibility migration path.
+    /// If the first element is not a `ConfigDelta`, returns `None`.
     ///
     /// # Errors
     ///
@@ -1421,8 +1433,8 @@ pub enum StreamError {
     /// An [`InquiryResponse`] was pushed without a matching [`InquiryRequest`]
     /// in the stream.
     ///
-    /// [`InquiryResponse`]: crate::event::InquiryResponse
     /// [`InquiryRequest`]: crate::event::InquiryRequest
+    /// [`InquiryResponse`]: crate::event::InquiryResponse
     #[error("InquiryResponse references unknown request ID `{id}`")]
     OrphanedInquiryResponse {
         /// The unmatched response ID.

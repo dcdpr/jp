@@ -126,18 +126,18 @@ impl Provider for Llamacpp {
 /// Mutable state carried across SSE events in a single stream.
 struct StreamState {
     extractor: ReasoningExtractor,
-    /// Tracks which tool call indices have been seen, so we can flush them
-    /// on finish.
+    /// Tracks which tool call indices have been seen, so we can flush them on
+    /// finish.
     tool_call_indices: Vec<usize>,
     reasoning_flushed: bool,
     /// Tracks whether `Event::flush(1)` (the message/structured index) has
-    /// already been emitted in this stream. Without this gate, the
-    /// `finish_reason` chunk and the `[DONE]` sentinel both emit it,
-    /// producing a spurious second flush that downstream consumers can
-    /// misinterpret as a re-dispatch signal.
+    /// already been emitted in this stream.
+    /// Without this gate, the `finish_reason` chunk and the `[DONE]` sentinel
+    /// both emit it, producing a spurious second flush that downstream
+    /// consumers can misinterpret as a re-dispatch signal.
     message_flushed: bool,
-    /// Captured from `finish_reason` in the last choice delta. Emitted as
-    /// `Event::Finished` when the `[DONE]` sentinel arrives.
+    /// Captured from `finish_reason` in the last choice delta.
+    /// Emitted as `Event::Finished` when the `[DONE]` sentinel arrives.
     finish_reason: Option<FinishReason>,
     is_structured: bool,
 }

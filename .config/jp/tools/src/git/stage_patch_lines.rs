@@ -160,12 +160,14 @@ fn parse_hunk(hunk: &str) -> Result<(HunkHeader, Vec<DiffLine>), String> {
 
 /// Build a sub-hunk from a parsed hunk, keeping only the selected line indices.
 ///
-/// Selected `-` lines become removals. Selected `+` lines become additions.
+/// Selected `-` lines become removals.
+/// Selected `+` lines become additions.
 /// Unselected lines are dropped — those changes remain in the working tree.
 ///
 /// All selected lines go into a single sub-hunk because a `--unified=0` hunk
-/// covers one contiguous region of the old file. Removals are emitted first
-/// (preserving order), then additions — matching git's unified diff format.
+/// covers one contiguous region of the old file.
+/// Removals are emitted first (preserving order), then additions — matching
+/// git's unified diff format.
 fn build_sub_hunk(hunk: &str, selected: &[usize]) -> Result<String, String> {
     let (header, diff_lines) = parse_hunk(hunk)?;
 
@@ -262,8 +264,10 @@ fn build_sub_hunk(hunk: &str, selected: &[usize]) -> Result<String, String> {
 /// Expands a mixed array of line selectors into a flat list of indices.
 ///
 /// Each element is either:
+///
 /// - An integer (single line index, e.g. `42`)
-/// - A string range with inclusive bounds (e.g. `"1:50"`)
+/// - A string range with inclusive bounds (e.g.
+///   `"1:50"`)
 fn parse_line_selectors(values: Vec<Value>) -> Result<Vec<usize>, String> {
     let mut indices = vec![];
     for value in values {

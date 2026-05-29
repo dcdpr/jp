@@ -1,11 +1,11 @@
 //! `debug_jp_trace` — capture and render `JP_DEBUG=1` trace logs.
 //!
-//! Launches `jp` inside the sandbox with `JP_DEBUG=1` set. `jp_cli` persists
-//! its tracing-subscriber output to a system temp file and prints
-//! `Full trace log written to: <path>` on stderr at exit. We parse that
-//! line, copy the file out to the real workspace so it survives sandbox
-//! cleanup, filter the events by level/target/grep, and render the result
-//! in a compact logfmt-like format.
+//! Launches `jp` inside the sandbox with `JP_DEBUG=1` set.
+//! `jp_cli` persists its tracing-subscriber output to a system temp file and
+//! prints `Full trace log written to: <path>` on stderr at exit.
+//! We parse that line, copy the file out to the real workspace so it survives
+//! sandbox cleanup, filter the events by level/target/grep, and render the
+//! result in a compact logfmt-like format.
 
 use std::{
     fs,
@@ -28,9 +28,8 @@ use crate::{
     util::{ToolResult, error},
 };
 
-/// Marker line `jp_cli::run` writes to stderr when `JP_DEBUG=1` and the
-/// output format is text (we never pass `--format=json`, so this is what
-/// we get).
+/// Marker line `jp_cli::run` writes to stderr when `JP_DEBUG=1` and the output
+/// format is text (we never pass `--format=json`, so this is what we get).
 const TRACE_PATH_PREFIX: &str = "Full trace log written to: ";
 
 /// Tool entrypoint.
@@ -138,8 +137,9 @@ fn format_preview(
     out
 }
 
-/// Live execution path. Builds jp, launches with `JP_DEBUG=1`, retrieves the
-/// trace log, parses + filters + renders.
+/// Live execution path.
+/// Builds jp, launches with `JP_DEBUG=1`, retrieves the trace log, parses +
+/// filters + renders.
 fn run(
     workspace_root: &Utf8Path,
     args: &[String],
@@ -243,8 +243,8 @@ fn run(
     Ok(Outcome::Success { content: report })
 }
 
-/// Build a single haystack for the `grep` filter from everything a user
-/// might want to search: target, message, field keys/values, span names.
+/// Build a single haystack for the `grep` filter from everything a user might
+/// want to search: target, message, field keys/values, span names.
 fn event_searchable_text(e: &TraceEvent) -> String {
     let mut s = String::new();
     s.push_str(&e.target);

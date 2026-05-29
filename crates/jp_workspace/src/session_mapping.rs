@@ -1,8 +1,8 @@
 //! Session-to-conversation mapping.
 //!
-//! Each terminal session tracks its own conversation history. The storage
-//! format and file layout are managed by the [`SessionBackend`] trait; this
-//! module defines the domain types and the `Workspace`-level API.
+//! Each terminal session tracks its own conversation history.
+//! The storage format and file layout are managed by the [`SessionBackend`]
+//! trait; this module defines the domain types and the `Workspace`-level API.
 //!
 //! See: `docs/rfd/020-parallel-conversations.md`
 //!
@@ -25,7 +25,8 @@ use crate::{
 /// A session's conversation history, persisted to disk.
 ///
 /// The `history` array tracks conversations activated in this session, ordered
-/// most recent first. The active conversation is always `history[0]`.
+/// most recent first.
+/// The active conversation is always `history[0]`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SessionMapping {
     /// Conversation activation history, most recent first.
@@ -67,7 +68,8 @@ impl SessionMapping {
     /// Record that a conversation was activated in this session.
     ///
     /// If the conversation was already in the history, it is moved to the front
-    /// (deduplication). Otherwise it is inserted at the front.
+    /// (deduplication).
+    /// Otherwise it is inserted at the front.
     pub fn activate(&mut self, id: ConversationId, now: DateTime<Utc>) {
         self.history.retain(|e| e.id != id);
         self.history.insert(0, SessionHistoryEntry {
@@ -92,8 +94,9 @@ impl Workspace {
     /// Get the previous conversation ID for the given session.
     ///
     /// This is the conversation that was active before the current one, similar
-    /// to `cd -` in a shell. Returns `None` if the referenced conversation no
-    /// longer exists in the workspace index.
+    /// to `cd -` in a shell.
+    /// Returns `None` if the referenced conversation no longer exists in the
+    /// workspace index.
     #[must_use]
     pub fn session_previous_conversation(&self, session: &Session) -> Option<ConversationId> {
         self.load_session_mapping(session)
@@ -103,8 +106,8 @@ impl Workspace {
 
     /// Get all conversation IDs from the session's history.
     ///
-    /// Returns IDs ordered most-recently-activated first. Only includes
-    /// conversations that still exist in the workspace index.
+    /// Returns IDs ordered most-recently-activated first.
+    /// Only includes conversations that still exist in the workspace index.
     #[must_use]
     pub fn session_conversation_ids(&self, session: &Session) -> Vec<ConversationId> {
         let Some(mapping) = self.load_session_mapping(session) else {
@@ -135,11 +138,11 @@ impl Workspace {
 
     /// Record that the given session activated a conversation.
     ///
-    /// Writes only the session mapping. Use [`activate_session_conversation`]
-    /// when you hold a [`ConversationLock`] — that variant also bumps the
-    /// conversation's `last_activated_at`, which is the canonical "this
-    /// conversation was last worked on" timestamp consumed by sorting,
-    /// archiving, and `--id=last`.
+    /// Writes only the session mapping.
+    /// Use [`activate_session_conversation`] when you hold a
+    /// [`ConversationLock`] — that variant also bumps the conversation's
+    /// `last_activated_at`, which is the canonical "this conversation was last
+    /// worked on" timestamp consumed by sorting, archiving, and `--id=last`.
     ///
     /// This bare form is for the lock-contention fallback in `jp c use` (where
     /// another process holds the lock, so we can't write the metadata, and
@@ -172,15 +175,16 @@ impl Workspace {
     /// 1. The session-to-conversation mapping (most recent first), via
     ///    [`record_session_activation`].
     /// 2. The conversation's `last_activated_at` timestamp on its metadata, via
-    ///    the held lock. The metadata write is staged in-memory and flushes
-    ///    when the resulting [`ConversationMut`] drops at the end of this call.
+    ///    the held lock.
+    ///    The metadata write is staged in-memory and flushes when the resulting
+    ///    [`ConversationMut`] drops at the end of this call.
     ///
     /// Requiring `&ConversationLock` makes it a type-level invariant that the
-    /// caller holds the conversation's exclusive lock — so the metadata bump is
-    /// safe to perform.
+    /// caller holds the conversation's exclusive lock — so the metadata bump
+    /// is safe to perform.
     ///
-    /// [`record_session_activation`]: Self::record_session_activation
     /// [`ConversationMut`]: crate::ConversationMut
+    /// [`record_session_activation`]: Self::record_session_activation
     pub fn activate_session_conversation(
         &self,
         conv: &ConversationLock,
@@ -196,10 +200,10 @@ impl Workspace {
     /// - Lock files are orphaned if no process holds the flock.
     /// - Session mappings are stale based on the session source:
     ///   - **Getsid/Hwnd** (process liveness is checkable): the session is
-    ///     deleted only when the originating process is confirmed dead. A
-    ///     live process keeps its session unconditionally — we don't check
-    ///     conversation existence because another process may be mid-persist
-    ///     or the conversation may have been created after our index loaded.
+    ///     deleted only when the originating process is confirmed dead.
+    ///     A live process keeps its session unconditionally — we don't check
+    ///     conversation existence because another process may be mid-persist or
+    ///     the conversation may have been created after our index loaded.
     ///   - **Env** (liveness unknown): falls back to conversation existence.
     ///     If none of the conversations in the history exist on disk, the
     ///     mapping is removed.
@@ -370,8 +374,8 @@ enum Liveness {
     /// The process is confirmed dead — safe to delete.
     Dead,
 
-    /// Liveness cannot be determined (Env sources, parse failures). Fall back
-    /// to heuristics.
+    /// Liveness cannot be determined (Env sources, parse failures).
+    /// Fall back to heuristics.
     Unknown,
 }
 
@@ -386,7 +390,8 @@ fn is_session_process_liveness(source: &SessionSource, session_key: &str) -> Liv
 
 /// Check whether a session leader PID is alive or dead.
 ///
-/// See: <https://man7.org/linux/man-pages/man2/kill.2.html#:~:text=sig%20is%200>
+/// See:
+/// <https://man7.org/linux/man-pages/man2/kill.2.html#:~:text=sig%20is%200>
 #[cfg(unix)]
 fn pid_liveness(session_key: &str) -> Liveness {
     let Ok(pid) = session_key.parse::<i32>() else {
@@ -421,7 +426,8 @@ fn pid_liveness(_session_key: &str) -> Liveness {
 
 /// Check whether a console window handle is alive or dead.
 ///
-/// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindow>
+/// See:
+/// <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindow>
 #[cfg(windows)]
 fn hwnd_liveness(session_key: &str) -> Liveness {
     use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;

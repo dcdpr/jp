@@ -129,8 +129,8 @@ impl Schema {
         Self::new(SchemaType::Unknown)
     }
 
-    /// Convert the current schema to a nullable type. If already nullable,
-    /// do nothing, otherwise convert to a union.
+    /// Convert the current schema to a nullable type.
+    /// If already nullable, do nothing, otherwise convert to a union.
     pub fn nullify(&mut self) {
         if self.nullable {
             // May already be a null union through inference
@@ -160,8 +160,9 @@ impl Schema {
         self.ty = SchemaType::Union(Box::new(UnionType::new_any([new_schema, Schema::null()])));
     }
 
-    /// Mark the inner schema type as partial. Only structs and unions can be marked partial,
-    /// but arrays and objects will also be recursively set to update the inner type.
+    /// Mark the inner schema type as partial.
+    /// Only structs and unions can be marked partial, but arrays and objects
+    /// will also be recursively set to update the inner type.
     pub fn partialize(&mut self) {
         match &mut self.ty {
             SchemaType::Array(inner) => inner.items_type.partialize(),
@@ -210,9 +211,10 @@ impl Schema {
         self.ty = value;
     }
 
-    /// Return a non-null schema if available. If a null type,
-    /// returns `None`. If a union type, returns the first non-null
-    /// type or `None`. Otherwise, returns the current type.
+    /// Return a non-null schema if available.
+    /// If a null type, returns `None`.
+    /// If a union type, returns the first non-null type or `None`.
+    /// Otherwise, returns the current type.
     #[must_use]
     pub fn get_nonnull_schema(&self) -> Option<&Schema> {
         match &self.ty {

@@ -10,10 +10,10 @@ pub type ToolResult = std::result::Result<Outcome, Box<dyn std::error::Error + S
 
 /// Map a file path to a syntax-highlight language tag.
 ///
-/// Looks at the path's extension and returns a known language identifier
-/// (the kind a markdown code fence accepts). If the extension isn't
-/// recognized, returns the extension itself — better than nothing for
-/// languages we haven't enumerated.
+/// Looks at the path's extension and returns a known language identifier (the
+/// kind a markdown code fence accepts).
+/// If the extension isn't recognized, returns the extension itself — better
+/// than nothing for languages we haven't enumerated.
 #[must_use]
 pub fn lang_from_path(path: &str) -> &str {
     match path.rsplit('.').next().unwrap_or_default() {

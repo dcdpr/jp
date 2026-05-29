@@ -639,7 +639,8 @@ pub enum Input {
 
 /// Request schema for Responses endpoint.
 ///
-/// This is the main request type for making requests to Openrouter's Responses API.
+/// This is the main request type for making requests to Openrouter's Responses
+/// API.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct OpenResponsesRequest {
     /// The model to use.
@@ -1035,7 +1036,8 @@ pub enum ResponseStatus {
 
 /// Complete non-streaming response from the Responses API.
 ///
-/// This is embedded in lifecycle events like `response.created`, `response.completed`, etc.
+/// This is embedded in lifecycle events like `response.created`,
+/// `response.completed`, etc.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Response {
     /// Unique identifier for the response.
@@ -1095,8 +1097,8 @@ pub struct Response {
 
 /// Union of all possible event types emitted during response streaming.
 ///
-/// This enum represents all Server-Sent Events that can be received when streaming
-/// a response from the Openrouter Responses API.
+/// This enum represents all Server-Sent Events that can be received when
+/// streaming a response from the Openrouter Responses API.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum StreamEvent {
@@ -1323,7 +1325,8 @@ pub enum StreamEvent {
         sequence_number: u32,
     },
 
-    /// Emitted periodically to keep the connection alive during long processing.
+    /// Emitted periodically to keep the connection alive during long
+    /// processing.
     #[serde(rename = "keepalive")]
     Keepalive {
         #[serde(default)]
@@ -1493,7 +1496,8 @@ impl StreamEvent {
         }
     }
 
-    /// Returns `true` if this is a terminal event (response completed, failed, or incomplete).
+    /// Returns `true` if this is a terminal event (response completed, failed,
+    /// or incomplete).
     #[must_use]
     pub fn is_terminal(&self) -> bool {
         matches!(
@@ -1513,7 +1517,9 @@ impl StreamEvent {
         )
     }
 
-    /// Extracts the text delta if this is an [`OutputTextDelta`](StreamEvent::OutputTextDelta) event.
+    /// Extracts the text delta if this is an [`OutputTextDelta`] event.
+    ///
+    /// [`OutputTextDelta`]: StreamEvent::OutputTextDelta
     #[must_use]
     pub fn as_text_delta(&self) -> Option<&str> {
         match self {

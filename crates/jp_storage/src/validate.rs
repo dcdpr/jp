@@ -93,24 +93,25 @@ impl fmt::Display for InvalidConversation {
 impl Storage {
     /// Scan all conversation directories and check structural integrity.
     ///
-    /// This is a lightweight check that runs on every startup. For each
-    /// directory entry it verifies:
+    /// This is a lightweight check that runs on every startup.
+    /// For each directory entry it verifies:
     ///
     /// 1. The directory name parses as a [`ConversationId`].
     /// 2. A `metadata.json` file exists and is a valid JSON object.
-    /// 3. An `events.json` file exists and is a JSON array where each
-    ///    element contains `timestamp` and `kind` fields.
+    /// 3. An `events.json` file exists and is a JSON array where each element
+    ///    contains `timestamp` and `kind` fields.
     ///
-    /// No field values are materialized — the check uses [`IgnoredAny`] to skip
-    /// values without allocating. Content-level issues (bad field values,
-    /// missing optional fields, schema mismatches) are handled at load time by
+    /// No field values are materialized — the check uses [`IgnoredAny`] to
+    /// skip values without allocating.
+    /// Content-level issues (bad field values, missing optional fields, schema
+    /// mismatches) are handled at load time by
     /// [`ConversationStream::sanitize`].
     ///
     /// Files and dot-prefixed directories (e.g., `.trash/`) are silently
     /// skipped.
     ///
-    /// [`IgnoredAny`]: serde::de::IgnoredAny
     /// [`ConversationStream::sanitize`]: jp_conversation::ConversationStream::sanitize
+    /// [`IgnoredAny`]: serde::de::IgnoredAny
     #[must_use]
     pub fn validate_conversations(&self) -> ValidationResult {
         trace!("Validating conversations.");
@@ -241,7 +242,8 @@ fn validate_entry(
 /// Confirm `metadata.json` is a valid JSON object.
 ///
 /// Uses [`IgnoredAny`] to skip all field values — no allocations, no schema
-/// checks. Content validation happens at load time.
+/// checks.
+/// Content validation happens at load time.
 ///
 /// [`IgnoredAny`]: serde::de::IgnoredAny
 fn validate_metadata(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -261,13 +263,13 @@ fn validate_json_file(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error +
 /// fields.
 ///
 /// All elements in the array — both `ConfigDelta` and `ConversationEvent` —
-/// serialize with `timestamp` and `type` as top-level fields. `type` is the tag
-/// for the flattened `EventKind` enum on events, and an explicit
-/// `"config_delta"` tag on config deltas.
+/// serialize with `timestamp` and `type` as top-level fields.
+/// `type` is the tag for the flattened `EventKind` enum on events, and an
+/// explicit `"config_delta"` tag on config deltas.
 ///
 /// Uses [`IgnoredAny`] for field values — the parser skips over them without
-/// allocating. This confirms the structural shape without materializing any
-/// event data.
+/// allocating.
+/// This confirms the structural shape without materializing any event data.
 ///
 /// [`IgnoredAny`]: serde::de::IgnoredAny
 fn validate_events(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -292,12 +294,14 @@ fn validate_events(path: &Utf8Path) -> Result<(), Box<dyn std::error::Error + Se
 /// Handles three crash scenarios:
 ///
 /// 1. **`.staging-X` exists, `X` exists**: crash during staging writes or
-///    before the swap started. Remove the staging dir.
+///    before the swap started.
+///    Remove the staging dir.
 /// 2. **`.old-X` exists, `.staging-X` exists, `X` missing**: crash between
-///    rename-old and rename-staging (steps 3–4 in `persist_conversation`). Roll
-///    back: rename `.old-X` → `X`, remove `.staging-X`.
+///    rename-old and rename-staging (steps 3–4 in `persist_conversation`).
+///    Roll back: rename `.old-X` → `X`, remove `.staging-X`.
 /// 3. **`.old-X` exists, `X` exists**: crash after the swap completed but
-///    before the backup was removed (step 5). Remove the `.old-X` dir.
+///    before the backup was removed (step 5).
+///    Remove the `.old-X` dir.
 fn cleanup_staging_dirs(conversations_dir: &Utf8Path) {
     let entries: Vec<_> = dir_entries(conversations_dir).collect();
 

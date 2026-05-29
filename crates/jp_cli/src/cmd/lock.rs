@@ -2,17 +2,17 @@
 //! prompts.
 //!
 //! [`acquire_lock`] polls `Workspace::lock_conversation` at 500ms intervals
-//! until the lock is acquired or a timeout is reached. On timeout (or ctrl-c),
-//! interactive terminals get a prompt; non-interactive environments get
-//! `LockTimeout`.
+//! until the lock is acquired or a timeout is reached.
+//! On timeout (or ctrl-c), interactive terminals get a prompt; non-interactive
+//! environments get `LockTimeout`.
 //!
 //! While polling, a timer indicator is shown (controlled by [`LockWaitConfig`])
-//! so the user sees immediate feedback. The timer is cleared before the
-//! interactive prompt appears.
+//! so the user sees immediate feedback.
+//! The timer is cleared before the interactive prompt appears.
 //!
 //! The prompt options are controlled by [`LockRequest::allow_new`] and
-//! [`LockRequest::allow_fork`]. When both are false, only "Continue waiting"
-//! and "Cancel" are shown.
+//! [`LockRequest::allow_fork`].
+//! When both are false, only "Continue waiting" and "Cancel" are shown.
 
 use std::{
     sync::Arc,
@@ -97,8 +97,8 @@ impl<'a> LockRequest<'a> {
 /// Acquire an exclusive conversation lock with polling and timeout.
 ///
 /// On timeout (or ctrl-c) in interactive terminals, shows a selection prompt.
-/// The available options depend on `allow_new` and `allow_fork`. In
-/// non-interactive environments, fails with `LockTimeout`.
+/// The available options depend on `allow_new` and `allow_fork`.
+/// In non-interactive environments, fails with `LockTimeout`.
 ///
 /// While polling, a `\r`-based timer line shows how long the CLI has been
 /// waiting, giving the user immediate visual feedback.

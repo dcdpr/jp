@@ -119,8 +119,9 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 /// Extract environment variables from the `env` tool option.
 ///
 /// Returns a list of (key, value) pairs that should be passed to git
-/// subprocesses. This allows callers (e.g. integration tests) to inject
-/// env vars like `GIT_CONFIG_GLOBAL` to isolate git from host config.
+/// subprocesses.
+/// This allows callers (e.g. integration tests) to inject env vars like
+/// `GIT_CONFIG_GLOBAL` to isolate git from host config.
 fn env_from_options(options: &Map<String, Value>) -> Vec<(&str, &str)> {
     options
         .get("env")

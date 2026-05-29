@@ -4,8 +4,8 @@
 //! mode (`--no-persist`) and error-path persistence suppression.
 //!
 //! [`NullLockBackend`] is a lock backend where every lock attempt succeeds
-//! immediately — used alongside `NullPersistBackend` for `--no-persist` so that
-//! ephemeral queries never block on lock contention.
+//! immediately — used alongside `NullPersistBackend` for `--no-persist` so
+//! that ephemeral queries never block on lock contention.
 //!
 //! [`NoopLockGuard`] is a lock guard that does nothing on drop — used by
 //! `NullLockBackend` and the `test_lock` helper.
@@ -44,9 +44,9 @@ impl PersistBackend for NullPersistBackend {
 
 /// A [`LockBackend`] where every lock attempt succeeds immediately.
 ///
-/// No cross-process or in-process exclusion is enforced. Used for
-/// `--no-persist` mode where no data is written to disk, so lock contention is
-/// irrelevant.
+/// No cross-process or in-process exclusion is enforced.
+/// Used for `--no-persist` mode where no data is written to disk, so lock
+/// contention is irrelevant.
 #[derive(Debug)]
 pub struct NullLockBackend;
 

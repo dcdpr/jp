@@ -3,7 +3,8 @@
 
 #[derive(Default, Debug)]
 /// A parser that segments a stream of text into 'reasoning' and 'other'
-/// buckets. It handles streams with or without a `<think>` block.
+/// buckets.
+/// It handles streams with or without a `<think>` block.
 pub struct ReasoningExtractor {
     pub other: String,
     pub reasoning: String,
@@ -14,13 +15,14 @@ pub struct ReasoningExtractor {
 #[derive(Default, PartialEq, Debug)]
 enum ReasoningState {
     #[default]
-    /// The default state. Processing 'other' text while looking for
-    /// `<think>\n`.
+    /// The default state.
+    /// Processing 'other' text while looking for `<think>\n`.
     Idle,
-    /// Found `<think>\n`. Processing 'reasoning' text while looking for
-    /// `</think>\n`.
+    /// Found `<think>\n`.
+    /// Processing 'reasoning' text while looking for `</think>\n`.
     Accumulating,
-    /// Found `</think>\n`. All subsequent text is 'other'.
+    /// Found `</think>\n`.
+    /// All subsequent text is 'other'.
     Finished,
 }
 

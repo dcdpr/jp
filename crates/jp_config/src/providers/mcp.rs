@@ -45,10 +45,10 @@ impl PartialConfigDelta for PartialMcpProviderConfig {
 impl McpProviderConfig {
     /// Whether a failed start of this server should be tolerated.
     ///
-    /// Optional servers are logged at `warn` and skipped; tools backed by
-    /// them are filtered out of the resolved tool list before the LLM ever
-    /// sees them. Required servers (the default) abort the command on any
-    /// startup failure.
+    /// Optional servers are logged at `warn` and skipped; tools backed by them
+    /// are filtered out of the resolved tool list before the LLM ever sees
+    /// them.
+    /// Required servers (the default) abort the command on any startup failure.
     #[must_use]
     pub const fn optional(&self) -> bool {
         match self {
@@ -94,9 +94,10 @@ pub struct StdioConfig {
     /// same loud failure as before this field existed.
     ///
     /// When `true`, a startup failure is logged at `warn` and the server is
-    /// skipped. Tools that depend on this server are filtered out before they
-    /// are presented to the LLM, so the assistant never sees a tool whose
-    /// backing server failed to start.
+    /// skipped.
+    /// Tools that depend on this server are filtered out before they are
+    /// presented to the LLM, so the assistant never sees a tool whose backing
+    /// server failed to start.
     #[setting(default)]
     pub optional: bool,
 }

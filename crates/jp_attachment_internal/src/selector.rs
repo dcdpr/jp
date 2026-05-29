@@ -2,9 +2,9 @@
 //!
 //! See the crate README for the full grammar.
 //!
-//! The DSL uses `,` as the content separator (e.g. `u,a:-1`) so it survives
-//! URL query-string parsing intact — form-urlencoded decoding turns `+`
-//! into a space, but leaves `,` alone.
+//! The DSL uses `,` as the content separator (e.g.
+//! `u,a:-1`) so it survives URL query-string parsing intact — form-urlencoded
+//! decoding turns `+` into a space, but leaves `,` alone.
 
 use std::{fmt, str::FromStr};
 
@@ -67,14 +67,17 @@ impl fmt::Display for Content {
     }
 }
 
-/// Which turns to include. Both bounds are inclusive.
+/// Which turns to include.
+/// Both bounds are inclusive.
 ///
 /// Negative values count from the end (`-1` = last turn).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct Range {
-    /// Left bound, 1-based. `None` means "from the start".
+    /// Left bound, 1-based.
+    /// `None` means "from the start".
     pub start: Option<i64>,
-    /// Right bound, 1-based. `None` means "to the end".
+    /// Right bound, 1-based.
+    /// `None` means "to the end".
     pub end: Option<i64>,
 }
 
@@ -97,7 +100,8 @@ impl Range {
     }
 
     /// Resolve the 0-based half-open `[start, end)` interval over a stream of
-    /// `total` turns. Returns `None` if the selection is empty.
+    /// `total` turns.
+    /// Returns `None` if the selection is empty.
     pub fn resolve(self, total: usize) -> Option<(usize, usize)> {
         if total == 0 {
             return None;
@@ -121,7 +125,9 @@ impl Range {
 
 /// Map a 1-based signed index to a 0-based unsigned index.
 ///
-/// Positive `N` → `N - 1`. Negative `-N` → `total - N`. `0` is clamped to `0`.
+/// Positive `N` → `N - 1`.
+/// Negative `-N` → `total - N`.
+/// `0` is clamped to `0`.
 fn normalize(idx: i64, total: i64) -> i64 {
     use std::cmp::Ordering;
     match idx.cmp(&0) {
@@ -197,8 +203,9 @@ impl FromStr for Selector {
 }
 
 /// Returns `true` if `s` is shaped like a range bound — only ASCII digits,
-/// dashes, and dots. Used to disambiguate single-component selector input
-/// without a colon: `-1` is a range, while `a` is content.
+/// dashes, and dots.
+/// Used to disambiguate single-component selector input without a colon: `-1`
+/// is a range, while `a` is content.
 fn looks_like_range(s: &str) -> bool {
     !s.is_empty()
         && s.chars()

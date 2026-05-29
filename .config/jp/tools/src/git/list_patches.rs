@@ -135,10 +135,11 @@ fn git_list_patches_impl<R: ProcessRunner>(
 
 /// Pretty print a git diff hunk with numbered change lines.
 ///
-/// Context lines (from the source file) get padding to align with the `[N] `
-/// prefix on diff lines. Actual diff lines (`-`/`+`) are prefixed with `[N]`
-/// where N is a sequential index used by `git_stage_patch_lines` to select
-/// individual lines for staging.
+/// Context lines (from the source file) get padding to align with the ` [N]  `
+/// prefix on diff lines.
+/// Actual diff lines (`-`/`+`) are prefixed with `[N]` where N is a sequential
+/// index used by `git_stage_patch_lines` to select individual lines for
+/// staging.
 fn pretty_print_diff(hunk_with_header: &str, source_lines: &[&str]) -> String {
     // Parse the header to find coordinates.
     let parts: Vec<_> = hunk_with_header.split_whitespace().collect();

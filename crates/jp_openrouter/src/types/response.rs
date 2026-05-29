@@ -300,9 +300,9 @@ pub enum ErrorMetadata {
         /// Why the input was flagged.
         reasons: Vec<String>,
 
-        /// The text segment that was flagged, limited to 100 characters. If the
-        /// flagged input is longer than 100 characters, it will be truncated in
-        /// the middle and replaced with ...
+        /// The text segment that was flagged, limited to 100 characters.
+        /// If the flagged input is longer than 100 characters, it will be
+        /// truncated in the middle and replaced with ...
         flagged_input: String,
 
         /// The name of the provider that requested moderation.

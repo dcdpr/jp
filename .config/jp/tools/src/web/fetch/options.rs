@@ -17,7 +17,8 @@ pub(super) enum Strategy {
     /// Try the `.md` variant first; fall back to HTML on failure.
     #[default]
     Auto,
-    /// Only fetch the `.md` variant. Error if unavailable.
+    /// Only fetch the `.md` variant.
+    /// Error if unavailable.
     Markdown,
     /// Fetch HTML directly (legacy behavior; skips the `.md` probe).
     Html,
@@ -29,8 +30,8 @@ pub(super) struct WebFetchOptions {
     #[serde(default)]
     strategy: Strategy,
 
-    /// Per-host strategy overrides. Keys are hostnames (exact match) or
-    /// `*.suffix` wildcards.
+    /// Per-host strategy overrides.
+    /// Keys are hostnames (exact match) or `*.suffix` wildcards.
     #[serde(default)]
     domains: HashMap<String, Strategy>,
 }
@@ -44,6 +45,7 @@ impl WebFetchOptions {
     /// Pick the strategy to use for the given URL.
     ///
     /// Resolution order:
+    ///
     /// 1. Exact hostname match.
     /// 2. Longest matching `*.suffix` wildcard.
     /// 3. Default strategy.

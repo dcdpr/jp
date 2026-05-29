@@ -23,7 +23,8 @@ pub struct TypewriterConfig {
     /// Delay between printing characters.
     ///
     /// Accepts any [`humantime`]-compatible duration string, e.g. `"3ms"`,
-    /// `"500us"`, `"1s"`. Use `"0s"` to disable.
+    /// `"500us"`, `"1s"`.
+    /// Use `"0s"` to disable.
     ///
     /// The default is `3ms`.
     #[setting(default = "3ms")]
@@ -31,24 +32,26 @@ pub struct TypewriterConfig {
 
     /// Delay between printing code-block characters.
     ///
-    /// Accepts the same formats as `text_delay`. The default is `500us`.
+    /// Accepts the same formats as `text_delay`.
+    /// The default is `500us`.
     #[setting(default = "500us")]
     pub code_delay: DelayDuration,
 
     /// Maximum latency the typewriter is allowed to fall behind the source.
     ///
-    /// When set to a non-zero value, the typewriter acts as a bounded-
-    /// latency controller: the effective per-character delay shrinks below
+    /// When set to a non-zero value, the typewriter acts as a bounded- latency
+    /// controller: the effective per-character delay shrinks below
     /// `text_delay`/`code_delay` as the queue of pending characters grows,
     /// keeping printed output within `max_latency` of what the source has
-    /// already emitted. With a fast provider (e.g. Cerebras) this prevents
-    /// the typewriter from falling many seconds behind. When the source
-    /// stops emitting, the controller switches to drain mode and stops
-    /// slowing back down as the queue empties.
+    /// already emitted.
+    /// With a fast provider (e.g.
+    /// Cerebras) this prevents the typewriter from falling many seconds behind.
+    /// When the source stops emitting, the controller switches to drain mode
+    /// and stops slowing back down as the queue empties.
     ///
-    /// Accepts the same formats as `text_delay`. The default is `0s`, which
-    /// disables the controller and keeps the static `text_delay`/
-    /// `code_delay` behavior.
+    /// Accepts the same formats as `text_delay`.
+    /// The default is `0s`, which disables the controller and keeps the static
+    /// `text_delay`/ `code_delay` behavior.
     #[setting(default = "0s")]
     pub max_latency: DelayDuration,
 }

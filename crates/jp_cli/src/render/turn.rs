@@ -1,9 +1,10 @@
 //! Turn-level rendering for conversation replay.
 //!
-//! The [`TurnRenderer`] coordinates the [`TurnView`] (which owns the chat
-//! and structured sub-renderers) and the [`ToolRenderer`] to render a
-//! complete conversation event stream. It handles turn boundaries,
-//! per-turn config rebuilds, and tool config lookups.
+//! The [`TurnRenderer`] coordinates the [`TurnView`] (which owns the chat and
+//! structured sub-renderers) and the [`ToolRenderer`] to render a complete
+//! conversation event stream.
+//! It handles turn boundaries, per-turn config rebuilds, and tool config
+//! lookups.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -25,19 +26,20 @@ use super::{ToolRenderer, TurnView, metadata::get_rendered_arguments};
 pub enum ConfigSource {
     /// Use the config as it was when each turn was created.
     ///
-    /// The renderer rebuilds its sub-renderers at each turn boundary using
-    /// the accumulated `PartialAppConfig` from the event stream.
+    /// The renderer rebuilds its sub-renderers at each turn boundary using the
+    /// accumulated `PartialAppConfig` from the event stream.
     PerTurn,
 
     /// Use a fixed config for all turns (the current workspace config).
     Fixed,
 }
 
-/// Renders conversation events for replay (e.g. `jp conversation print`).
+/// Renders conversation events for replay (e.g.
+/// `jp conversation print`).
 ///
-/// Owns a [`TurnView`] for chat/structured rendering and a [`ToolRenderer`]
-/// for tool UI; dispatches each event to the right one and rebuilds the
-/// view at turn boundaries when in [`ConfigSource::PerTurn`] mode.
+/// Owns a [`TurnView`] for chat/structured rendering and a [`ToolRenderer`] for
+/// tool UI; dispatches each event to the right one and rebuilds the view at
+/// turn boundaries when in [`ConfigSource::PerTurn`] mode.
 pub struct TurnRenderer {
     // Stable params for rebuilding sub-renderers.
     printer: Arc<Printer>,
@@ -49,9 +51,9 @@ pub struct TurnRenderer {
     tool: ToolRenderer,
     tools_config: ToolsConfig,
 
-    /// Maps tool call IDs to tool names, populated as `ToolCallRequest`
-    /// events are encountered so that `ToolCallResponse` can look up the
-    /// name without needing access to the full conversation stream.
+    /// Maps tool call IDs to tool names, populated as `ToolCallRequest` events
+    /// are encountered so that `ToolCallResponse` can look up the name without
+    /// needing access to the full conversation stream.
     tool_names: HashMap<String, String>,
 }
 
@@ -149,7 +151,8 @@ impl TurnRenderer {
         }
     }
 
-    /// Flush all sub-renderers. Call after the last turn has been rendered.
+    /// Flush all sub-renderers.
+    /// Call after the last turn has been rendered.
     pub fn flush(&mut self) {
         self.view.flush();
     }

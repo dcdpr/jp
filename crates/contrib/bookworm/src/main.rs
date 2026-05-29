@@ -33,8 +33,8 @@ enum Command {
         #[arg(short, long)]
         version: Option<String>,
 
-        /// Root directory to save the documentation to (defaults to the
-        /// user cache directory, e.g. `~/Library/Caches/bookworm/crates`).
+        /// Root directory to save the documentation to (defaults to the user
+        /// cache directory, e.g. `~/Library/Caches/bookworm/crates`).
         #[arg(short, long)]
         root: Option<PathBuf>,
     },
@@ -120,9 +120,10 @@ fn run_index(source: PathBuf, output: Option<PathBuf>) -> Result<(), Box<dyn std
     Ok(())
 }
 
-/// Configure tracing. Logs go to stderr (so the MCP protocol on stdout stays
-/// clean), or to `WRM_LOG_FILE` if set and its parent dir exists. Filter is
-/// read from `WRM_LOG`, defaulting to `info`.
+/// Configure tracing.
+/// Logs go to stderr (so the MCP protocol on stdout stays clean), or to
+/// `WRM_LOG_FILE` if set and its parent dir exists.
+/// Filter is read from `WRM_LOG`, defaulting to `info`.
 fn init_tracing() -> Result<(), Box<dyn std::error::Error>> {
     let filter = EnvFilter::try_from_env("WRM_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
 

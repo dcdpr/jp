@@ -12,10 +12,10 @@
 //!
 //! Combined with [`build_execution_plan`] — the **single** constructor for
 //! [`ExecutionPlan`] — this makes "the conversation stream is the source of
-//! truth for tool execution" hold at the API level, not by convention. A
-//! future contributor who wants a bag-of-pending-work has to either walk
-//! the stream first or add a new public API method, which is the visible
-//! smell that earlier conventions lacked.
+//! truth for tool execution" hold at the API level, not by convention.
+//! A future contributor who wants a bag-of-pending-work has to either walk the
+//! stream first or add a new public API method, which is the visible smell that
+//! earlier conventions lacked.
 //!
 //! [`ToolCallResponse`]: jp_conversation::event::ToolCallResponse
 use std::collections::HashMap;
@@ -32,17 +32,17 @@ pub(crate) enum PendingEntry {
     /// Permission was approved and the executor is ready to run.
     Approved(Box<dyn Executor>),
     /// Permission was denied (`Skip`) or the tool couldn't be resolved
-    /// (`Unavailable`); the response is already determined and just needs
-    /// to be committed in the right order.
+    /// (`Unavailable`); the response is already determined and just needs to be
+    /// committed in the right order.
     Resolved(ToolCallResponse),
 }
 
 /// Id-keyed scratchpad for the streaming phase's tool-prep output.
 ///
 /// Insert during streaming (`insert_approved` / `insert_resolved`), retrieve
-/// per-id during the executing phase via [`PendingTools::take`]. There is no
-/// way to enumerate the contents — callers must derive ids from the
-/// conversation stream.
+/// per-id during the executing phase via [`PendingTools::take`].
+/// There is no way to enumerate the contents — callers must derive ids from
+/// the conversation stream.
 #[derive(Default)]
 pub(crate) struct PendingTools {
     entries: HashMap<String, PendingEntry>,
@@ -63,16 +63,17 @@ impl PendingTools {
         self.entries.insert(id, PendingEntry::Resolved(response));
     }
 
-    /// Take the entry for `id`, if any. There is no way to retrieve entries
-    /// other than by id — and the only place ids come from is the
-    /// conversation stream.
+    /// Take the entry for `id`, if any.
+    /// There is no way to retrieve entries other than by id — and the only
+    /// place ids come from is the conversation stream.
     pub(crate) fn take(&mut self, id: &str) -> Option<PendingEntry> {
         self.entries.remove(id)
     }
 
-    /// Number of entries currently held. Provided for diagnostics and
-    /// tests only; production code SHOULD NOT use this to infer execution
-    /// work — that's what [`build_execution_plan`] is for.
+    /// Number of entries currently held.
+    /// Provided for diagnostics and tests only; production code SHOULD NOT use
+    /// this to infer execution work — that's what [`build_execution_plan`] is
+    /// for.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
@@ -82,45 +83,45 @@ impl PendingTools {
 /// One ordered work item in an [`ExecutionPlan`].
 ///
 /// `index` is the tool's position among unresponded tool-call requests in the
-/// current turn, in document order. It matches the `perm_tool_index` numbering
-/// of the previous design and is used downstream to merge response Vecs in
-/// the right order.
+/// current turn, in document order.
+/// It matches the `perm_tool_index` numbering of the previous design and is
+/// used downstream to merge response Vecs in the right order.
 pub(crate) struct PlanItem {
     pub(crate) index: usize,
-    /// The original request, kept for debugging and tests. Production code
-    /// drives execution off `index` + `work`; the request id is already
-    /// inside `work` for both `Approved` (`executor.tool_id()`) and
+    /// The original request, kept for debugging and tests.
+    /// Production code drives execution off `index` + `work`; the request id is
+    /// already inside `work` for both `Approved` (`executor.tool_id()`) and
     /// `Resolved` (`response.id`).
     #[allow(dead_code)]
     pub(crate) request: ToolCallRequest,
     pub(crate) work: PendingEntry,
 }
 
-/// Ordered tool work for the current cycle's executing phase, derived from
-/// the conversation stream.
+/// Ordered tool work for the current cycle's executing phase, derived from the
+/// conversation stream.
 ///
-/// The only public constructor is [`build_execution_plan`]. A future
-/// contributor who wants to skip the stream walk can't fabricate one of
-/// these without also adding a new constructor — which is the visible
+/// The only public constructor is [`build_execution_plan`].
+/// A future contributor who wants to skip the stream walk can't fabricate one
+/// of these without also adding a new constructor — which is the visible
 /// smell.
 pub(crate) struct ExecutionPlan {
     items: Vec<PlanItem>,
 
     /// Tool-call requests that appear in the stream's current turn without a
-    /// matching response AND without a matching entry in `PendingTools`,
-    /// paired with the plan index they would have occupied in document
-    /// order. Should be empty in correct operation; a non-empty vec signals
-    /// a contract violation (some path added a `ToolCallRequest` to the
-    /// stream without going through the streaming-phase preparation flow).
-    /// The caller decides what to do — synthesize an error response, log,
-    /// etc. — but MUST preserve the carried index when committing a
-    /// response so stream order is retained.
+    /// matching response AND without a matching entry in `PendingTools`, paired
+    /// with the plan index they would have occupied in document order.
+    /// Should be empty in correct operation; a non-empty vec signals a contract
+    /// violation (some path added a `ToolCallRequest` to the stream without
+    /// going through the streaming-phase preparation flow).
+    /// The caller decides what to do — synthesize an error response, log, etc.
+    /// — but MUST preserve the carried index when committing a response so
+    /// stream order is retained.
     orphaned: Vec<(usize, ToolCallRequest)>,
 }
 
 impl ExecutionPlan {
-    /// Decompose the plan into its parts. Consumes the plan; there's no
-    /// way to read it twice.
+    /// Decompose the plan into its parts.
+    /// Consumes the plan; there's no way to read it twice.
     pub(crate) fn into_parts(self) -> (Vec<PlanItem>, Vec<(usize, ToolCallRequest)>) {
         (self.items, self.orphaned)
     }
@@ -134,9 +135,9 @@ impl ExecutionPlan {
 /// Build an [`ExecutionPlan`] by walking the current turn for unresponded
 /// `ToolCallRequest`s and matching them against `pending`.
 ///
-/// This is the single entry point for "what work do we need to do this
-/// cycle?" Other code MUST NOT bypass this function — there's no other way
-/// to construct an `ExecutionPlan`.
+/// This is the single entry point for "what work do we need to do this cycle?"
+/// Other code MUST NOT bypass this function — there's no other way to
+/// construct an `ExecutionPlan`.
 pub(crate) fn build_execution_plan(
     stream: &ConversationStream,
     pending: &mut PendingTools,

@@ -1,8 +1,9 @@
 //! `jp-path`: print JP directory paths.
 //!
-//! A command plugin that prints well-known JP directory paths for use in
-//! shell scripts and automation. All paths come from the host's `init`
-//! message, so this plugin has no platform-specific logic.
+//! A command plugin that prints well-known JP directory paths for use in shell
+//! scripts and automation.
+//! All paths come from the host's `init` message, so this plugin has no
+//! platform-specific logic.
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`
 

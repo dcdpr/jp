@@ -24,15 +24,15 @@ use crate::{
 pub struct ProviderConfig {
     /// LLM provider configurations.
     ///
-    /// Configuration for different LLM providers (e.g. Anthropic, OpenAI,
-    /// Ollama).
+    /// Configuration for different LLM providers (e.g.
+    /// Anthropic, OpenAI, Ollama).
     #[setting(nested)]
     pub llm: LlmProviderConfig,
 
     /// MCP provider configurations.
     ///
-    /// Configuration for Model Context Protocol (MCP) servers. The key is the
-    /// server ID.
+    /// Configuration for Model Context Protocol (MCP) servers.
+    /// The key is the server ID.
     #[setting(nested, merge = merge_nested_indexmap)]
     pub mcp: IndexMap<String, McpProviderConfig>,
 }

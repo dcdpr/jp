@@ -48,21 +48,23 @@ pub enum RenderOutcome {
 /// The renderer owns the full tool display lifecycle:
 ///
 /// 1. **Streaming phase** — a rewritable "temp line" shows tool names while
-///    arguments are streamed. Once arguments are complete, a permanent line is
-///    printed via [`complete`]. Methods: [`register`], [`complete`], [`tick`].
+///    arguments are streamed.
+///    Once arguments are complete, a permanent line is printed via
+///    [`complete`].
+///    Methods: [`register`], [`complete`], [`tick`].
 ///
 /// 2. **Permission/execution phase** — arguments (if not already rendered),
-///    Custom formatter output, progress, and results. Methods:
-///    [`render_tool_call`], [`render_approved`], [`render_progress`],
+///    Custom formatter output, progress, and results.
+///    Methods: [`render_tool_call`], [`render_approved`], [`render_progress`],
 ///    [`render_result`].
 ///
 /// [`complete`]: Self::complete
 /// [`register`]: Self::register
-/// [`tick`]: Self::tick
-/// [`render_tool_call`]: Self::render_tool_call
 /// [`render_approved`]: Self::render_approved
 /// [`render_progress`]: Self::render_progress
 /// [`render_result`]: Self::render_result
+/// [`render_tool_call`]: Self::render_tool_call
+/// [`tick`]: Self::tick
 pub struct ToolRenderer {
     printer: Arc<Printer>,
     config: StyleConfig,
@@ -136,11 +138,13 @@ impl ToolRenderer {
     /// in a single write.
     ///
     /// For Custom style: runs the custom formatter command first, then prints
-    /// the header followed by the formatted output. If the custom formatter
-    /// fails, nothing is printed and [`RenderOutcome::Suppressed`] is returned.
+    /// the header followed by the formatted output.
+    /// If the custom formatter fails, nothing is printed and
+    /// [`RenderOutcome::Suppressed`] is returned.
     ///
     /// On success, returns `Rendered { content }` where `content` is the
-    /// custom-formatted output (if any) so the caller can persist it for replay.
+    /// custom-formatted output (if any) so the caller can persist it for
+    /// replay.
     pub async fn render_approved(
         &self,
         name: &str,
@@ -158,9 +162,11 @@ impl ToolRenderer {
 
     /// Renders a Custom-style tool call: header + custom formatted output.
     ///
-    /// Runs the custom formatter command first. If it succeeds, prints the
-    /// "Calling tool X" header followed by the formatted output. If it fails,
-    /// nothing is printed — the tool call is suppressed from the display.
+    /// Runs the custom formatter command first.
+    /// If it succeeds, prints the "Calling tool X" header followed by the
+    /// formatted output.
+    /// If it fails, nothing is printed — the tool call is suppressed from the
+    /// display.
     async fn render_custom_tool_call(
         &self,
         name: &str,
@@ -191,9 +197,10 @@ impl ToolRenderer {
 
     /// Render already-formatted custom argument content.
     ///
-    /// Used by [`render_approved`](Self::render_approved) internally and by
-    /// the replay path when the stored event has rendered arguments in its
-    /// metadata.
+    /// Used by [`render_approved`] internally and by the replay path when the
+    /// stored event has rendered arguments in its metadata.
+    ///
+    /// [`render_approved`]: Self::render_approved
     pub fn render_formatted_arguments(&self, content: &str) {
         let _ = writeln!(self.printer.err_writer(), "\n{content}");
         if !content.ends_with("\n\n") {
@@ -218,9 +225,11 @@ impl ToolRenderer {
         &self.config.tool_call.progress
     }
 
-    /// Renders a tool call result with language detection, truncation, and file links.
+    /// Renders a tool call result with language detection, truncation, and file
+    /// links.
     ///
     /// This method handles the full result rendering flow:
+    ///
     /// 1. Parses content to detect if it's JSON and pretty-prints it
     /// 2. Detects language from code fences or content inspection (XML/JSON)
     /// 3. Writes the full content to a temp file for linking
@@ -229,9 +238,9 @@ impl ToolRenderer {
     ///
     /// # Arguments
     ///
-    /// * `response` - The tool call response containing the result
-    /// * `inline_results` - How to display inline results (Off, Full, Truncate)
-    /// * `results_file_link` - How to display file links (Off, Full, Osc8)
+    /// - `response` - The tool call response containing the result
+    /// - `inline_results` - How to display inline results (Off, Full, Truncate)
+    /// - `results_file_link` - How to display file links (Off, Full, Osc8)
     #[allow(clippy::too_many_lines)]
     pub fn render_result(
         &self,
@@ -371,8 +380,8 @@ impl ToolRenderer {
 
     /// Registers a new tool call (name known, arguments pending).
     ///
-    /// Adds the tool to the rewritable temp line. Starts the tick timer on the
-    /// first registration.
+    /// Adds the tool to the rewritable temp line.
+    /// Starts the tick timer on the first registration.
     pub fn register(&mut self, id: &str, name: &str, tick_tx: &Sender<Duration>) {
         if self.pending.iter().any(|t| t.id == id) {
             return;
@@ -395,9 +404,9 @@ impl ToolRenderer {
 
     /// Completes a tool call and removes it from the temp line.
     ///
-    /// This only handles the rewritable temp-line display. The permanent
-    /// "Calling tool ..." header is printed later by [`render_approved`]
-    /// after the permission decision.
+    /// This only handles the rewritable temp-line display.
+    /// The permanent "Calling tool ..." header is printed later by
+    /// [`render_approved`] after the permission decision.
     ///
     /// [`render_approved`]: Self::render_approved
     pub fn complete(&mut self, id: &str) {
@@ -438,8 +447,8 @@ impl ToolRenderer {
 
     /// Clears the temp line visually without modifying state.
     ///
-    /// Used before showing interrupt menus. The next tick will
-    /// redisplay the temp line.
+    /// Used before showing interrupt menus.
+    /// The next tick will redisplay the temp line.
     pub fn clear_temp_line(&self) {
         if self.pending.is_empty() {
             return;
@@ -447,7 +456,8 @@ impl ToolRenderer {
         let _ = write!(self.printer.err_writer(), "\r\x1b[K");
     }
 
-    /// Clears the temp line and all pending state. Stops the timer.
+    /// Clears the temp line and all pending state.
+    /// Stops the timer.
     pub fn cancel_all(&mut self) {
         self.stop_timer();
 

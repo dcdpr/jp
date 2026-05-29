@@ -20,8 +20,9 @@ pub struct InlineCodeConfig {
     /// Background color for inline code spans.
     ///
     /// Overrides the background derived from the syntax highlighting theme.
-    /// Accepts either an ANSI 256-color index (e.g. `236`) or a hex RGB
-    /// string (e.g. `"#504945"`).
+    /// Accepts either an ANSI 256-color index (e.g.
+    /// `236`) or a hex RGB string (e.g.
+    /// `"#504945"`).
     ///
     /// When unset, the theme's background color is used (the default).
     pub background: Option<Color>,

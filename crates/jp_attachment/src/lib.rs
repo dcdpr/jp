@@ -110,16 +110,16 @@ pub enum AttachmentContent {
 /// Any type that implements this trait can be used to handle a set of
 /// attachment types.
 ///
-/// For example, a `file` handler could handle attachments that are files
-/// on the local file system, while a `web` handler could handle attachments
-/// that are URLs pointing to web pages.
+/// For example, a `file` handler could handle attachments that are files on the
+/// local file system, while a `web` handler could handle attachments that are
+/// URLs pointing to web pages.
 #[typetag::serde(tag = "type")]
 #[async_trait]
 pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     /// The URI scheme of the handler.
     ///
-    /// This is used to determine which handler to use for a given URI. The
-    /// scheme has to be unique across all handlers.
+    /// This is used to determine which handler to use for a given URI.
+    /// The scheme has to be unique across all handlers.
     fn scheme(&self) -> &'static str;
 
     /// Add a new attachment, using the given URL.

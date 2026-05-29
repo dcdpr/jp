@@ -12,7 +12,7 @@ file://host/path
 
 However, this attachment handler enforces the following restrictions:
 
-- `host` is always ignored<sup>*</sup> (and can be omitted)
+- `host` is always ignored<sup>\*</sup> (and can be omitted)
 - `path` is always relative to the workspace root
 
 This means that the following URIs are equivalent:
@@ -22,9 +22,10 @@ This means that the following URIs are equivalent:
 - `file://path/to/file.txt`
 - `file:///path/to/file.txt`
 
-<sup>*Technically, for `file://path/to/file.txt`, the host is `path`, but
-this handler considers this part of the final path, so it is not ignored, but
-prepended to the path.</sup>
+<sup>\*Technically, for `file://path/to/file.txt`, the host is `path`, but this
+handler considers this part of the final path, so it is not ignored, but
+prepended to the path.
+</sup>
 
 ## Usage
 

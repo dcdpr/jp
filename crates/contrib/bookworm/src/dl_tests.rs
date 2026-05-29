@@ -6,10 +6,10 @@ use super::*;
 
 /// Build a fake docs.rs extraction layout under `root`.
 ///
-/// Each `(dir, has_index)` tuple creates `root/<dir>/` and, when
-/// `has_index` is true, also creates `root/<dir>/index.html` with a
-/// placeholder body. Used by the sanitize tests to assert which kinds of
-/// directories survive based purely on the presence of `index.html`.
+/// Each `(dir, has_index)` tuple creates `root/<dir>/` and, when `has_index` is
+/// true, also creates `root/<dir>/index.html` with a placeholder body.
+/// Used by the sanitize tests to assert which kinds of directories survive
+/// based purely on the presence of `index.html`.
 fn populate(root: &Path, entries: &[(&str, bool)]) {
     for (dir, has_index) in entries {
         let path = root.join(dir);

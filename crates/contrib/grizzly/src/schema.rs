@@ -6,8 +6,11 @@ use crate::Error;
 /// Metadata discovered from Bear's Core Data SQLite schema.
 ///
 /// Bear uses Apple's Core Data framework which creates numbered junction tables
-/// (e.g. `Z_5TAGS`) with numbered columns (e.g. `Z_5NOTES`, `Z_13TAGS`). These
-/// numbers can change across Bear versions, so we discover them at runtime.
+/// (e.g.
+/// `Z_5TAGS`) with numbered columns (e.g.
+/// `Z_5NOTES`, `Z_13TAGS`).
+/// These numbers can change across Bear versions, so we discover them at
+/// runtime.
 #[derive(Debug, Clone)]
 pub struct SchemaMetadata {
     pub junction_table: String,
@@ -19,9 +22,10 @@ pub struct SchemaMetadata {
 ///
 /// Core Data junction tables follow the pattern `Z_<number><RELATIONSHIP>`.
 /// We look for tables whose columns reference both notes (column ending in
-/// `NOTES`) and tags (column ending in `TAGS`). Multiple candidates may exist
-/// (e.g. `Z_5TAGS`, `Z_5NOTETAGS`), so we validate each by checking it
-/// actually joins `ZSFNOTE` and `ZSFNOTETAG` rows.
+/// `NOTES`) and tags (column ending in `TAGS`).
+/// Multiple candidates may exist (e.g.
+/// `Z_5TAGS`, `Z_5NOTETAGS`), so we validate each by checking it actually joins
+/// `ZSFNOTE` and `ZSFNOTETAG` rows.
 pub fn discover(conn: &Connection) -> Result<SchemaMetadata, Error> {
     // Find ALL candidate junction tables containing "TAGS" in the name.
     let mut stmt = conn.prepare(

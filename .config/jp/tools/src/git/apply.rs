@@ -9,9 +9,10 @@ const BASE_DELAY_MS: u64 = 50;
 
 /// Apply a patch to the git index with retry logic for lock contention.
 ///
-/// Git's `index.lock` prevents concurrent index modifications. When multiple
-/// tool calls run in parallel, they race for this lock. This function retries
-/// with exponential backoff when it detects lock contention.
+/// Git's `index.lock` prevents concurrent index modifications.
+/// When multiple tool calls run in parallel, they race for this lock.
+/// This function retries with exponential backoff when it detects lock
+/// contention.
 pub fn apply_patch_to_index<R: ProcessRunner>(
     patch: &str,
     root: &Utf8Path,

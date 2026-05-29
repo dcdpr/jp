@@ -1,14 +1,15 @@
 //! Unified stream retry logic.
 //!
-//! This module is the **single source of truth** for handling retryable
-//! stream errors during LLM streaming. It consolidates retry decisions,
-//! backoff, user notification, and state flushing into one place.
+//! This module is the **single source of truth** for handling retryable stream
+//! errors during LLM streaming.
+//! It consolidates retry decisions, backoff, user notification, and state
+//! flushing into one place.
 //!
 //! # Error Classification
 //!
-//! Error classification is owned by [`StreamError::is_retryable`] in
-//! `jp_llm`. This module only makes the retry *decision* based on that
-//! classification and the current retry budget.
+//! Error classification is owned by [`StreamError::is_retryable`] in `jp_llm`.
+//! This module only makes the retry *decision* based on that classification and
+//! the current retry budget.
 //!
 //! # Retry Flow
 //!
@@ -41,8 +42,9 @@ use crate::{
 /// Tracks retry state for stream errors within a single turn.
 ///
 /// Counts consecutive stream failures and enforces retry limits from
-/// [`RequestConfig`]. The counter resets when a new streaming cycle produces
-/// its first successful event.
+/// [`RequestConfig`].
+/// The counter resets when a new streaming cycle produces its first successful
+/// event.
 pub struct StreamRetryState {
     /// Retry configuration (max retries, backoff parameters).
     config: RequestConfig,
@@ -74,7 +76,8 @@ impl StreamRetryState {
     /// Reset the failure counter.
     ///
     /// Call this when the first successful LLM event arrives in a new streaming
-    /// cycle. This ensures that partially successful streams (e.g. rate-limited
+    /// cycle.
+    /// This ensures that partially successful streams (e.g. rate-limited
     /// mid-response) don't permanently consume the retry budget.
     pub fn reset(&mut self) {
         self.consecutive_failures = 0;
@@ -101,7 +104,8 @@ impl StreamRetryState {
         error.is_retryable() && self.consecutive_failures < self.config.max_retries
     }
 
-    /// Record a retry attempt. Must be called before sleeping.
+    /// Record a retry attempt.
+    /// Must be called before sleeping.
     fn record_attempt(&mut self) {
         self.consecutive_failures += 1;
     }
@@ -142,17 +146,17 @@ impl StreamRetryState {
 
 /// Single source of truth for handling stream errors during LLM streaming.
 ///
-/// Decides whether to retry, flushes state, notifies the user, and sleeps
-/// for the backoff duration. Returns a [`LoopAction`] telling the caller
-/// what to do next.
+/// Decides whether to retry, flushes state, notifies the user, and sleeps for
+/// the backoff duration.
+/// Returns a [`LoopAction`] telling the caller what to do next.
 ///
 /// # Returns
 ///
-/// - [`LoopAction::Break`] — retryable error within budget. The caller
-///   should break the inner event loop; the outer turn loop will re-enter
-///   `TurnPhase::Streaming` with a fresh stream.
-/// - [`LoopAction::Return`] — non-retryable error or retry budget
-///   exhausted. The caller should propagate the error.
+/// - [`LoopAction::Break`] — retryable error within budget.
+///   The caller should break the inner event loop; the outer turn loop will
+///   re-enter `TurnPhase::Streaming` with a fresh stream.
+/// - [`LoopAction::Return`] — non-retryable error or retry budget exhausted.
+///   The caller should propagate the error.
 pub async fn handle_stream_error(
     error: StreamError,
     retry_state: &mut StreamRetryState,

@@ -27,7 +27,8 @@ pub struct AnthropicConfig {
     ///
     /// This is enabled by default, but even when enabled, if you explicitly set
     /// the model's `max_tokens` parameter, the request will not be chained when
-    /// that limit is reached. This allows for better cost control.
+    /// that limit is reached.
+    /// This allows for better cost control.
     #[setting(default = true)]
     pub chain_on_max_tokens: bool,
 

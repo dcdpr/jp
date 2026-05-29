@@ -5,7 +5,8 @@
 //! text on disk - keeping it out of `grep` and editor search results.
 //!
 //! The encoding is applied during `InternalEvent` serialization and reversed
-//! during deserialization. The inner event types serialize as plain text.
+//! during deserialization.
+//! The inner event types serialize as plain text.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Map, Value};
@@ -77,8 +78,8 @@ pub fn encode_event(value: &mut Value, kind: &EventKind) {
 /// Decode base64-encoded storage fields from a raw event JSON value.
 ///
 /// This uses the `type` tag to determine which fields to decode, mirroring the
-/// encoding in [`encode_event`]. Unknown event types (including `config_delta`)
-/// are silently ignored.
+/// encoding in [`encode_event`].
+/// Unknown event types (including `config_delta`) are silently ignored.
 pub fn decode_event_value(value: &mut Value) {
     let Some(obj) = value.as_object_mut() else {
         return;
@@ -115,8 +116,8 @@ fn encode_string(value: &mut Value) {
     }
 }
 
-/// Decode a base64-encoded JSON string value in place. Non-base64 strings are
-/// left untouched.
+/// Decode a base64-encoded JSON string value in place.
+/// Non-base64 strings are left untouched.
 fn decode_string(value: &mut Value) {
     if let Value::String(s) = value
         && let Ok(bytes) = STANDARD.decode(s.as_bytes())

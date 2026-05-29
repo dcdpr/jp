@@ -32,9 +32,9 @@ impl Default for RetryConfig {
 
 /// Execute `chat_completion_stream` with automatic retries on transient errors.
 ///
-/// Collects the full event stream into a `Vec<Event>`. On retryable stream
-/// errors, backs off and retries the entire request up to `config.max_retries`
-/// times.
+/// Collects the full event stream into a `Vec<Event>`.
+/// On retryable stream errors, backs off and retries the entire request up to
+/// `config.max_retries` times.
 ///
 /// Non-retryable errors and errors from `chat_completion_stream` itself (before
 /// streaming starts) are propagated immediately.
@@ -95,10 +95,10 @@ pub async fn collect_with_retry(
 ///
 /// # Arguments
 ///
-/// * `attempt` - Current attempt number (1-based). The delay doubles with
-///   each attempt.
-/// * `base_backoff_ms` - Base delay in milliseconds for the first attempt.
-/// * `max_backoff_secs` - Maximum delay cap in seconds.
+/// - `attempt` - Current attempt number (1-based).
+///   The delay doubles with each attempt.
+/// - `base_backoff_ms` - Base delay in milliseconds for the first attempt.
+/// - `max_backoff_secs` - Maximum delay cap in seconds.
 #[must_use]
 pub fn exponential_backoff(attempt: u32, base_backoff_ms: u64, max_backoff_secs: u64) -> Duration {
     let max_ms = max_backoff_secs * 1000;

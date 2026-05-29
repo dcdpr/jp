@@ -377,8 +377,8 @@ fn check_if_redirection(html_file: &mut fs::File) -> Result<bool, Error> {
 /// also aliased as `Error` in the root module.
 ///
 /// This is useful while developing, but is noise when indexing the
-/// documentation for a crate. We only care about the "source" of the type, not
-/// any internal aliases.
+/// documentation for a crate.
+/// We only care about the "source" of the type, not any internal aliases.
 #[expect(dead_code)]
 fn check_if_inner_type_alias(path: &Path) -> Result<bool, Error> {
     // Skip checking module index files.

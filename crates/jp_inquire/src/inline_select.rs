@@ -30,7 +30,8 @@ impl InlineOption {
 /// Git-style inline select prompt.
 ///
 /// This provides a compact, single-line prompt where users select an option by
-/// typing a single character. The '?' key always shows help text.
+/// typing a single character.
+/// The '?' key always shows help text.
 ///
 /// # Example
 ///
@@ -59,8 +60,8 @@ pub struct InlineSelect {
 impl InlineSelect {
     /// Creates a new inline select prompt with the given message and options.
     ///
-    /// The message will be displayed before the option list, like:
-    /// `{message} [y,n,q,?]?`
+    /// The message will be displayed before the option list, like: `{message}
+    /// [y,n,q,?]?`
     ///
     /// The '?' option is automatically added to show help.
     pub fn new(message: impl Into<String>, options: Vec<InlineOption>) -> Self {
@@ -158,11 +159,11 @@ impl InlineSelect {
 /// Splits a prompt message into an optional preamble body and the final
 /// single-line prompt that gets handed to inquire.
 ///
-/// `inquire`'s `CustomType` (the underlying primitive) tracks line counts
-/// for redraw using its formatted message, which assumes a single line.
-/// A multi-line message wedges its terminal-rewrite logic. We split at
-/// the last newline: everything before is treated as a body to print
-/// up-front, and the trailing fragment becomes the actual prompt.
+/// `inquire`'s `CustomType` (the underlying primitive) tracks line counts for
+/// redraw using its formatted message, which assumes a single line.
+/// A multi-line message wedges its terminal-rewrite logic.
+/// We split at the last newline: everything before is treated as a body to
+/// print up-front, and the trailing fragment becomes the actual prompt.
 fn split_message(message: &str) -> (Option<&str>, &str) {
     match message.rsplit_once('\n') {
         Some((before, last)) => (Some(before), last),

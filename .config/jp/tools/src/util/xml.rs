@@ -7,7 +7,8 @@ use crate::Result;
 
 const INDENT_WIDTH: usize = 4;
 
-/// Serializes any Serializable type into a pretty-printed, LLM-friendly XML format.
+/// Serializes any Serializable type into a pretty-printed, LLM-friendly XML
+/// format.
 pub fn to_simple_xml_with_root<T: Serialize>(data: &T, root: &str) -> Result<String> {
     let value = serde_json::to_value(data)?;
 

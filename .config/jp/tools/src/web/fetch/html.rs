@@ -1,9 +1,9 @@
 //! HTML fetch pipeline.
 //!
 //! Fetches the URL as HTML, converts to markdown, and optionally extracts
-//! anchor-scoped sections. Pages that exceed `SUMMARIZE_THRESHOLD` after
-//! conversion are optionally run through Haiku summarization if an API key
-//! is available.
+//! anchor-scoped sections.
+//! Pages that exceed `SUMMARIZE_THRESHOLD` after conversion are optionally run
+//! through Haiku summarization if an API key is available.
 
 use htmd::HtmlToMarkdown;
 use reqwest::header::CONTENT_TYPE;
@@ -20,10 +20,11 @@ use crate::{
 /// Max chars of preview text per section in the listing.
 const PREVIEW_MAX: usize = 120;
 
-/// Top-level wrapper IDs used by rustdoc-generated pages (docs.rs, local
-/// `cargo doc` output). These get matched as section anchors via the
-/// ancestor-id fallback in `resolve_heading_id`, but they're page chrome,
-/// not content. Filtering them out only at the listing layer keeps explicit
+/// Top-level wrapper IDs used by rustdoc-generated pages (docs.rs, local `cargo
+/// doc` output).
+/// These get matched as section anchors via the ancestor-id fallback in
+/// `resolve_heading_id`, but they're page chrome, not content.
+/// Filtering them out only at the listing layer keeps explicit
 /// `sections=["main-content"]` requests working for non-rustdoc pages.
 const RUSTDOC_SCAFFOLDING_IDS: &[&str] = &[
     "rustdoc_body_wrapper",
@@ -37,7 +38,8 @@ fn is_rustdoc_scaffolding_id(id: &str) -> bool {
 }
 
 /// True if `el` is a `<div class="docblock">` (rustdoc's documentation
-/// container). Multi-class attributes are handled.
+/// container).
+/// Multi-class attributes are handled.
 fn is_docblock(el: &ElementRef<'_>) -> bool {
     el.value().name() == "div"
         && el
@@ -233,14 +235,14 @@ fn extract_anchor_html(html: &str, anchor: &str) -> Option<String> {
     ))
 }
 
-/// Build the extraction for a rustdoc `<section>` item: the section itself
-/// plus the immediately following sibling `<div class="docblock">`.
+/// Build the extraction for a rustdoc `<section>` item: the section itself plus
+/// the immediately following sibling `<div class="docblock">`.
 ///
 /// When the section is wrapped in `<summary>` (rustdoc's `<details>` toggle
 /// layout), the docblock is a sibling of the summary, not of the section.
-/// We do **not** return the whole `<details>` because impl headers nest
-/// every method inside a `<div class="impl-items">` sibling — returning
-/// the details would pull in every method's signature and docs.
+/// We do **not** return the whole `<details>` because impl headers nest every
+/// method inside a `<div class="impl-items">` sibling — returning the details
+/// would pull in every method's signature and docs.
 fn extract_rustdoc_section(section: &ElementRef<'_>) -> String {
     let mut parts = vec![section.html()];
 
@@ -303,17 +305,18 @@ fn heading_level(tag: &str) -> Option<u8> {
 }
 
 /// A section root is the element that anchors a stand-alone region of the
-/// document. Headings are the obvious case; AsciiDoctor-style horizontal
-/// definition lists (`<dl><dt>term</dt><dd>...</dd></dl>`, used by git's
-/// manpages and many AsciiDoc-generated sites) are the other common one.
+/// document.
+/// Headings are the obvious case; AsciiDoctor-style horizontal definition lists
+/// (`<dl><dt>term</dt><dd>...</dd></dl>`, used by git's manpages and many
+/// AsciiDoc-generated sites) are the other common one.
 enum SectionRoot<'a> {
     Heading(ElementRef<'a>),
     DefinitionTerm(ElementRef<'a>),
 }
 
-/// Walk up the ancestor chain looking for the closest section root. A `<dt>`
-/// nested inside a heading section returns the `<dt>` (it's deeper, so it's
-/// the more specific section).
+/// Walk up the ancestor chain looking for the closest section root.
+/// A `<dt>` nested inside a heading section returns the `<dt>` (it's deeper, so
+/// it's the more specific section).
 fn find_section_root_ancestor<'a>(el: &ElementRef<'a>) -> Option<SectionRoot<'a>> {
     let mut node = el.parent()?;
     loop {
@@ -335,8 +338,8 @@ fn find_section_root_ancestor<'a>(el: &ElementRef<'a>) -> Option<SectionRoot<'a>
 /// `AsciiDoctor` sometimes emits multiple `<dd>`s per term (multi-paragraph
 /// definitions), so we collect every `<dd>` until the next group starts.
 /// HTML also allows the `<dt><dt><dd>` shape where several terms share one
-/// definition; we accumulate consecutive sibling `<dt>`s up to the first
-/// `<dd>` so fetching any term in the group returns the whole group.
+/// definition; we accumulate consecutive sibling `<dt>`s up to the first `<dd>`
+/// so fetching any term in the group returns the whole group.
 /// Whitespace text nodes between siblings are preserved.
 fn extract_definition_section(dt: &ElementRef<'_>) -> String {
     let mut parts = vec![dt.html()];
@@ -364,11 +367,12 @@ fn extract_definition_section(dt: &ElementRef<'_>) -> String {
     format!("<dl>{}</dl>", parts.join(""))
 }
 
-/// Resolve the anchor ID for a `<dt>` element. Order differs from headings:
-/// `AsciiDoctor` wraps the canonical anchor in a child `<a id="...">`, while
-/// the `<dt>`'s own `id` is auto-generated from the term and tends to be
-/// ugly (e.g. `Documentation/gitglossary.txt-aiddefcleanaclean`). Prefer the
-/// child anchor when present.
+/// Resolve the anchor ID for a `<dt>` element.
+/// Order differs from headings: `AsciiDoctor` wraps the canonical anchor in a
+/// child `<a id="...">`, while the `<dt>`'s own `id` is auto-generated from the
+/// term and tends to be ugly (e.g.
+/// `Documentation/gitglossary.txt-aiddefcleanaclean`).
+/// Prefer the child anchor when present.
 fn resolve_dt_id(dt: &ElementRef<'_>) -> Option<String> {
     // Pattern 1: child <a id="...">.
     if let Ok(sel) = Selector::parse("a[id]")
@@ -401,8 +405,8 @@ fn resolve_dt_id(dt: &ElementRef<'_>) -> Option<String> {
 /// Collect a short plain-text preview from the `<dd>`s following a `<dt>`.
 /// Mirrors the boundary rule in `extract_definition_section`: leading sibling
 /// `<dt>`s in a shared-definition group are skipped (their preview comes from
-/// the shared `<dd>`), `<dd>`s contribute, and anything else (or a `<dt>`
-/// after we've started collecting) ends the preview.
+/// the shared `<dd>`), `<dd>`s contribute, and anything else (or a `<dt>` after
+/// we've started collecting) ends the preview.
 fn extract_preview_after_dt(dt: &ElementRef<'_>) -> String {
     let mut text = String::new();
     let mut seen_dd = false;
@@ -470,10 +474,10 @@ fn format_section_listing(html: &str) -> String {
     out
 }
 
-/// Discover all anchored sections in the document. Walks `h1..h6` and `<dt>`
-/// elements in document order; each `<dt>` is reported at one level below the
-/// most recent enclosing heading so glossary-style pages produce a sensible
-/// outline.
+/// Discover all anchored sections in the document.
+/// Walks `h1..h6` and `<dt>` elements in document order; each `<dt>` is
+/// reported at one level below the most recent enclosing heading so
+/// glossary-style pages produce a sensible outline.
 fn list_section_headers(html: &str) -> Vec<SectionHeader> {
     let doc = Html::parse_document(html);
     let sel = Selector::parse("h1, h2, h3, h4, h5, h6, dt").unwrap();
@@ -534,9 +538,11 @@ fn list_section_headers(html: &str) -> Vec<SectionHeader> {
 /// Resolve the anchor ID for a heading, trying multiple patterns:
 ///
 /// 1. `id` attribute on the heading itself
-/// 2. `id` attribute on a parent element (e.g. `<section id="..."><h3>`)
+/// 2. `id` attribute on a parent element (e.g.
+///    `<section id="..."><h3>`)
 /// 3. `href="#id"` on a child anchor (permalink pattern)
-/// 4. `id` attribute on a child element (e.g. `<h3><div id="...">`)
+/// 4. `id` attribute on a child element (e.g.
+///    `<h3><div id="...">`)
 /// 5. `id` or `name` on the immediately preceding sibling element
 fn resolve_heading_id(heading: &ElementRef<'_>) -> Option<String> {
     // Pattern 1: id on heading.

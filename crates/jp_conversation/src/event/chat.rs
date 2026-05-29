@@ -15,18 +15,17 @@ pub struct ChatRequest {
 
     /// Optional JSON schema constraining the assistant's response format.
     ///
-    /// When present, providers set their native structured output
-    /// configuration and the assistant's response is emitted as
-    /// `ChatResponse::Structured` instead of `ChatResponse::Message`.
+    /// When present, providers set their native structured output configuration
+    /// and the assistant's response is emitted as `ChatResponse::Structured`
+    /// instead of `ChatResponse::Message`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<Map<String, Value>>,
 
     /// Display name of whoever authored this request.
     ///
-    /// Captured at event-creation time from `user.name` so that
-    /// conversations resumed by different teammates retain accurate
-    /// per-turn attribution. This is purely cosmetic — providers do not see
-    /// this field.
+    /// Captured at event-creation time from `user.name` so that conversations
+    /// resumed by different teammates retain accurate per-turn attribution.
+    /// This is purely cosmetic — providers do not see this field.
     ///
     /// `None` for events created before this field was introduced and for
     /// requests authored without a configured user name.
@@ -95,14 +94,14 @@ pub enum ChatResponse {
         reasoning: String,
     },
 
-    /// Structured JSON response conforming to the schema from the
-    /// preceding `ChatRequest`.
+    /// Structured JSON response conforming to the schema from the preceding
+    /// `ChatRequest`.
     Structured {
         /// The structured JSON value.
         ///
         /// After flush, this is the parsed JSON (object, array, etc.).
-        /// During streaming, individual parts carry `Value::String`
-        /// chunks that are concatenated by the `EventBuilder`.
+        /// During streaming, individual parts carry `Value::String` chunks that
+        /// are concatenated by the `EventBuilder`.
         data: Value,
     },
 }

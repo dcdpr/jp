@@ -8,8 +8,8 @@ use jp_conversation::event::{ConversationEvent, RENDERED_ARGUMENTS_KEY};
 
 /// Store rendered custom-formatter output on a `ToolCallRequest` event.
 ///
-/// The content is base64-encoded to avoid JSON-escaping issues with
-/// arbitrary terminal output.
+/// The content is base64-encoded to avoid JSON-escaping issues with arbitrary
+/// terminal output.
 pub fn set_rendered_arguments(event: &mut ConversationEvent, content: &str) {
     let encoded = STANDARD.encode(content.as_bytes());
     event.add_metadata_field(RENDERED_ARGUMENTS_KEY, encoded);

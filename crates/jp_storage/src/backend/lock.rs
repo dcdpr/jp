@@ -8,8 +8,8 @@ use crate::lock::LockInfo;
 
 /// Conversation-level locking.
 ///
-/// Abstracts over the locking mechanism. Filesystem backends use `flock`;
-/// in-memory backends use in-process mutexes.
+/// Abstracts over the locking mechanism.
+/// Filesystem backends use `flock`; in-memory backends use in-process mutexes.
 pub trait LockBackend: Send + Sync + Debug {
     /// Attempt to acquire an exclusive lock on a conversation.
     ///
@@ -28,8 +28,9 @@ pub trait LockBackend: Send + Sync + Debug {
     fn list_orphaned_locks(&self) -> Vec<ConversationId>;
 }
 
-/// A held conversation lock. Released on drop.
+/// A held conversation lock.
+/// Released on drop.
 ///
-/// The filesystem implementation wraps `ConversationFileLock`. In-memory
-/// backends use a mutex-based guard.
+/// The filesystem implementation wraps `ConversationFileLock`.
+/// In-memory backends use a mutex-based guard.
 pub trait ConversationLockGuard: Send + Sync + Debug {}

@@ -329,17 +329,20 @@ fn build_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool)
 /// Transform a JSON schema for Cerebras's strict structured output mode.
 ///
 /// Cerebras requires `additionalProperties: false` on all objects and all
-/// properties listed in `required`. It does not support `minItems`,
-/// `maxItems`, string `pattern`, or string `format`.
+/// properties listed in `required`.
+/// It does not support `minItems`, `maxItems`, string `pattern`, or string
+/// `format`.
 ///
-/// See: <https://inference-docs.cerebras.ai/capabilities/structured-outputs#supported-schemas>
+/// See:
+/// <https://inference-docs.cerebras.ai/capabilities/structured-outputs#supported-schemas>
 fn transform_schema(src: Map<String, Value>) -> Value {
     Value::Object(process_schema(src))
 }
 
 /// Build a clean output map from `src`, moving only supported fields and
-/// recursing into nested schemas. Anything left in `src` after extraction
-/// is unsupported and gets appended to the `description` as a soft hint.
+/// recursing into nested schemas.
+/// Anything left in `src` after extraction is unsupported and gets appended to
+/// the `description` as a soft hint.
 fn process_schema(mut src: Map<String, Value>) -> Map<String, Value> {
     let mut out = Map::new();
 
@@ -526,10 +529,10 @@ struct StreamState {
     tool_call_indices: Vec<usize>,
     reasoning_flushed: bool,
     /// Tracks whether `Event::flush(1)` (the message/structured index) has
-    /// already been emitted in this stream. Without this gate, the
-    /// `finish_reason` chunk and the `[DONE]` sentinel both emit it,
-    /// producing a spurious second flush that downstream consumers can
-    /// misinterpret as a re-dispatch signal.
+    /// already been emitted in this stream.
+    /// Without this gate, the `finish_reason` chunk and the `[DONE]` sentinel
+    /// both emit it, producing a spurious second flush that downstream
+    /// consumers can misinterpret as a re-dispatch signal.
     message_flushed: bool,
     finish_reason: Option<FinishReason>,
     is_structured: bool,

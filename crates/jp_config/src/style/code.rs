@@ -28,7 +28,8 @@ pub struct CodeConfig {
     /// - `full`: Show the full file path.
     /// - `osc8`: Show a clickable link (OSC8 escape sequence).
     ///
-    /// See: <https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda>
+    /// See:
+    /// <https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda>
     #[setting(default = "osc8")]
     pub file_link: LinkStyle,
 
@@ -39,8 +40,7 @@ pub struct CodeConfig {
     ///
     /// Defaults to `off`, because no terminal supports it out of the box.
     ///
-    /// Here is an example of how to make this work using
-    /// [WezTerm](https://wezfurlong.org/wezterm/) on macOS:
+    /// Here is an example of how to make this work using [WezTerm] on macOS:
     ///
     /// ```lua
     /// local wezterm = require("wezterm")
@@ -52,6 +52,8 @@ pub struct CodeConfig {
     ///   end
     /// end)
     /// ```
+    ///
+    /// [WezTerm]: https://wezfurlong.org/wezterm/
     #[setting(default = "off")]
     pub copy_link: LinkStyle,
 }

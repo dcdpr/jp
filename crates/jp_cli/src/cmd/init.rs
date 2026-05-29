@@ -20,7 +20,8 @@ use crate::{DEFAULT_STORAGE_DIR, cmd::Output, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Init {
-    /// Path to initialize the workspace at. Defaults to the current directory.
+    /// Path to initialize the workspace at.
+    /// Defaults to the current directory.
     path: Option<Utf8PathBuf>,
 }
 
@@ -90,9 +91,11 @@ impl Init {
     /// Ask for and persist `user.name` to user-global config, unless it is
     /// already set there.
     ///
-    /// Skipped silently when no user-global config directory can be
-    /// determined (e.g. `$HOME` is unset). Empty input also skips,
-    /// leaving transcripts to fall back to the generic `user` label.
+    /// Skipped silently when no user-global config directory can be determined
+    /// (e.g.
+    /// `$HOME` is unset).
+    /// Empty input also skips, leaving transcripts to fall back to the generic
+    /// `user` label.
     fn maybe_ask_and_persist_user_name(
         writer: &mut dyn io::Write,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -133,12 +136,12 @@ impl Init {
     }
 
     /// Prompt the user for their display name, pre-filled with the best
-    /// available default (see [`detect_default_user_name`]). Returns `None`
-    /// when the user submits an empty value.
+    /// available default (see [`detect_default_user_name`]).
+    /// Returns `None` when the user submits an empty value.
     ///
-    /// The default is set as an *initial value* (editable), not as an
-    /// `inquire` default (substituted on empty submission), so the user can
-    /// clear the field and submit empty to skip attribution.
+    /// The default is set as an *initial value* (editable), not as an `inquire`
+    /// default (substituted on empty submission), so the user can clear the
+    /// field and submit empty to skip attribution.
     fn ask_user_name(
         writer: &mut dyn io::Write,
     ) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
@@ -324,17 +327,17 @@ impl Init {
 /// Cascades through:
 ///
 /// 1. `git config --global --get user.name` — the user's stable global
-///    identity. The picked-up value is persisted to user-global JP
-///    config and inherited by every future workspace, so we deliberately
-///    avoid the unscoped `git config --get user.name`: it would resolve
-///    against whichever repo happens to be in cwd (or in the init root),
-///    leaking a repo-local identity the user explicitly chose not to
-///    make global into every future JP workspace.
+///    identity.
+///    The picked-up value is persisted to user-global JP config and inherited
+///    by every future workspace, so we deliberately avoid the unscoped `git
+///    config --get user.name`: it would resolve against whichever repo happens
+///    to be in cwd (or in the init root), leaking a repo-local identity the
+///    user explicitly chose not to make global into every future JP workspace.
 /// 2. `$USER` (Unix) or `$USERNAME` (Windows) — the system login name,
 ///    last-resort fallback.
 ///
-/// Returns `None` when nothing is available so the prompt renders without
-/// a pre-filled value.
+/// Returns `None` when nothing is available so the prompt renders without a
+/// pre-filled value.
 fn detect_default_user_name() -> Option<String> {
     if let Ok(out) = cmd!("git", "config", "--global", "--get", "user.name")
         .stderr_null()

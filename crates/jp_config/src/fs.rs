@@ -54,9 +54,10 @@ pub enum ConfigLoaderError {
 pub struct ConfigLoader {
     /// file stem to search for.
     ///
-    /// This is the file name without the extension (e.g. `config` or `.jp`),
-    /// the extension is fixed to a list of valid extensions. See
-    /// [`CONFIG_FILE_EXTENSIONS`].
+    /// This is the file name without the extension (e.g.
+    /// `config` or `.jp`), the extension is fixed to a list of valid
+    /// extensions.
+    /// See [`CONFIG_FILE_EXTENSIONS`].
     pub file_stem: Cow<'static, str>,
 
     /// Whether to recurse upwards from the provided path to find a
@@ -191,9 +192,9 @@ impl ConfigFile {
 
 /// Recursively merge `source` table entries into `target`.
 ///
-/// Only keys present in `source` are touched. When both sides have a
-/// sub-table for the same key the merge recurses; otherwise the source
-/// value overwrites the target.
+/// Only keys present in `source` are touched.
+/// When both sides have a sub-table for the same key the merge recurses;
+/// otherwise the source value overwrites the target.
 fn deep_merge_toml(target: &mut toml_edit::Table, source: &toml_edit::Table) {
     for (key, source_item) in source {
         if let Some(target_table) = target.get_mut(key).and_then(|t| t.as_table_mut())
@@ -335,9 +336,8 @@ impl ConfigLoader {
 
 /// Get the path to the user-global config directory.
 ///
-/// If `JP_GLOBAL_CONFIG_DIR` is set, returns that path (after tilde
-/// expansion). Otherwise returns the platform's default user config
-/// directory for JP.
+/// If `JP_GLOBAL_CONFIG_DIR` is set, returns that path (after tilde expansion).
+/// Otherwise returns the platform's default user config directory for JP.
 ///
 /// Callers use this to locate both the user-global config file
 /// (`<dir>/config.{ext}`) and the deferred-loading search root
@@ -363,8 +363,8 @@ pub fn user_global_config_dir(home: Option<&Utf8Path>) -> Option<Utf8PathBuf> {
 
 /// Expand tilde in path to home directory
 ///
-/// If no tilde is found, returns `Some` with the original path. If a tilde is
-/// found, but no home directory is set, returns `None`.
+/// If no tilde is found, returns `Some` with the original path.
+/// If a tilde is found, but no home directory is set, returns `None`.
 pub fn expand_tilde<T: AsRef<str>>(path: impl AsRef<str>, home: Option<T>) -> Option<Utf8PathBuf> {
     if path.as_ref().starts_with('~') {
         return home.map(|home| Utf8PathBuf::from(path.as_ref().replacen('~', home.as_ref(), 1)));

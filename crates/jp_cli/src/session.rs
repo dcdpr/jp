@@ -17,10 +17,10 @@ use tracing::debug;
 /// Terminal-specific environment variables that provide per-tab/per-pane
 /// session granularity.
 ///
-/// Only variables with per-tab or per-pane granularity are included. Per-window
-/// variables (e.g. `$WT_SESSION`, `$KITTY_WINDOW_ID`, `$ALACRITTY_WINDOW_ID`)
-/// are deliberately excluded because multiple tabs in the same window share the
-/// value.
+/// Only variables with per-tab or per-pane granularity are included.
+/// Per-window variables (e.g.
+/// `$WT_SESSION`, `$KITTY_WINDOW_ID`, `$ALACRITTY_WINDOW_ID`) are deliberately
+/// excluded because multiple tabs in the same window share the value.
 const TERMINAL_SESSION_VARS: &[(&str, &str)] = &[
     ("TMUX_PANE", "tmux"),
     ("WEZTERM_PANE", "WezTerm"),
@@ -72,8 +72,9 @@ fn from_env(key: &str) -> Option<Session> {
 /// Platform-specific automatic session detection.
 ///
 /// `getsid(0)` returns the session leader PID — typically the login shell
-/// spawned by the terminal. Unique per tab/window/tmux-pane, stable across
-/// subshells, stable across tmux detach/reattach.
+/// spawned by the terminal.
+/// Unique per tab/window/tmux-pane, stable across subshells, stable across tmux
+/// detach/reattach.
 #[cfg(unix)]
 fn from_platform() -> Option<Session> {
     // Safety: getsid is a standard POSIX function. Passing 0 queries the
@@ -89,8 +90,8 @@ fn from_platform() -> Option<Session> {
 
 /// Platform-specific automatic session detection.
 ///
-/// `GetConsoleWindow` returns a window handle or null. No preconditions beyond
-/// being a console application.
+/// `GetConsoleWindow` returns a window handle or null.
+/// No preconditions beyond being a console application.
 #[cfg(windows)]
 fn from_platform() -> Option<Session> {
     // Safety: GetConsoleWindow returns a window handle or null. No

@@ -105,8 +105,9 @@ impl Object {
         })
     }
 
-    /// Set `key` to `raw_value`. If the key already exists, its value is
-    /// replaced in-place. Otherwise a new member is appended.
+    /// Set `key` to `raw_value`.
+    /// If the key already exists, its value is replaced in-place.
+    /// Otherwise a new member is appended.
     pub fn set(&self, key: &str, raw_value: &str) {
         if let Some(member) = self.find_member(key) {
             self.replace_member_value(&member, raw_value);
@@ -115,12 +116,13 @@ impl Object {
         }
     }
 
-    /// Remove the member with `key`. Returns `true` if it was found.
+    /// Remove the member with `key`.
+    /// Returns `true` if it was found.
     ///
     /// # Panics
     ///
-    /// Panics if internal tree indices become inconsistent (should never
-    /// happen for well-formed trees).
+    /// Panics if internal tree indices become inconsistent (should never happen
+    /// for well-formed trees).
     #[must_use]
     pub fn remove(&self, key: &str) -> bool {
         let Some(member_node) = self.find_member(key).map(|m| m.node) else {

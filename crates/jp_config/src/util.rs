@@ -31,8 +31,9 @@ const MAX_EXTENDS_DEPTH: u8 = u8::MAX;
 /// DFS ancestor stack used to detect `extends` cycles and enforce a depth cap.
 ///
 /// Each nested file load pushes its canonicalized path before recursing into
-/// the file's `extends`, and pops on return. Re-entry into a file already on
-/// the stack is a cycle; hitting `max_depth` is a (defensive) overflow.
+/// the file's `extends`, and pops on return.
+/// Re-entry into a file already on the stack is a cycle; hitting `max_depth` is
+/// a (defensive) overflow.
 struct ExtendsStack {
     /// Canonicalized paths currently being loaded, outermost first.
     ancestors: Vec<PathBuf>,
@@ -79,8 +80,8 @@ impl ExtendsStack {
     }
 }
 
-/// Load multiple partial configurations, starting with the first. Later
-/// partials override earlier ones, until one of the partials disables
+/// Load multiple partial configurations, starting with the first.
+/// Later partials override earlier ones, until one of the partials disables
 /// inheritance.
 ///
 /// # Errors
@@ -205,8 +206,10 @@ fn load_partial_at_path_with_max_depth<P: Into<PathBuf>>(
 /// either the filesystem root or `root` is reached.
 ///
 /// At each directory level, it attempts to load a config file with the same
-/// file name (e.g. `config.toml`). All found configs are merged together, with
-/// deeper (more specific) paths taking precedence over shallower ones.
+/// file name (e.g.
+/// `config.toml`).
+/// All found configs are merged together, with deeper (more specific) paths
+/// taking precedence over shallower ones.
 ///
 /// # Errors
 ///
@@ -502,8 +505,9 @@ macro_rules! named_unit_variant {
 /// Serialize a value to a temporary JSON file and return its path as a string.
 ///
 /// Used by `trace!` fields to avoid dumping massive payloads into the log
-/// stream. The file is written to `std::env::temp_dir()` with the given
-/// `prefix`. Returns `"<write failed>"` on I/O errors.
+/// stream.
+/// The file is written to `std::env::temp_dir()` with the given `prefix`.
+/// Returns `"<write failed>"` on I/O errors.
 fn trace_to_tmpfile(prefix: &str, value: &impl serde::Serialize) -> String {
     let path = std::env::temp_dir().join(format!("{prefix}-{}.json", std::process::id()));
     match std::fs::write(

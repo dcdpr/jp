@@ -18,10 +18,10 @@ use crate::{
 
 /// Kind of source entry being moved.
 ///
-/// Symlinks are treated as `File`: `resolve_workspace_entry` leaves the
-/// final component alone, so `fs::rename` renames the link entry itself
-/// rather than its target. The target is untouched and any other links to
-/// it stay intact.
+/// Symlinks are treated as `File`: `resolve_workspace_entry` leaves the final
+/// component alone, so `fs::rename` renames the link entry itself rather than
+/// its target.
+/// The target is untouched and any other links to it stay intact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SourceKind {
     File,
@@ -146,12 +146,12 @@ fn fs_move_file_impl<R: ProcessRunner>(
     Ok(msg.into())
 }
 
-/// Return the source's intermediate parent directory if it is now empty
-/// and safe to remove.
+/// Return the source's intermediate parent directory if it is now empty and
+/// safe to remove.
 ///
-/// Mirrors `delete_file::empty_parent_to_remove`: gated on the relative
-/// parent being non-empty, so removing a top-level entry never tries to
-/// remove the workspace root.
+/// Mirrors `delete_file::empty_parent_to_remove`: gated on the relative parent
+/// being non-empty, so removing a top-level entry never tries to remove the
+/// workspace root.
 fn empty_parent_to_remove(resolved: &ResolvedPath) -> Result<Option<&Utf8Path>, std::io::Error> {
     let Some(rel_parent) = resolved.relative.parent() else {
         return Ok(None);
@@ -176,10 +176,10 @@ fn empty_parent_to_remove(resolved: &ResolvedPath) -> Result<Option<&Utf8Path>, 
 
 /// Classify the source entry by inspecting its file type.
 ///
-/// Returns `Ok(None)` when the source does not exist, `Ok(Some(Ok(kind)))`
-/// when it can be moved, and `Ok(Some(Err(message)))` for unsupported entry
-/// types (block device, fifo, socket, ...). The outer `Result` propagates I/O
-/// errors that aren't `NotFound`.
+/// Returns `Ok(None)` when the source does not exist, `Ok(Some(Ok(kind)))` when
+/// it can be moved, and `Ok(Some(Err(message)))` for unsupported entry types
+/// (block device, fifo, socket, ...).
+/// The outer `Result` propagates I/O errors that aren't `NotFound`.
 fn classify_source(
     absolute: &Utf8Path,
     source: &str,
@@ -218,9 +218,9 @@ fn confirm_overwrite_file(answers: &Map<String, Value>, target: &str) -> Option<
     }
 }
 
-/// Build a transient error outcome from a plain message. Mirrors
-/// `crate::util::error` but returns the bare `Outcome` so callers that need to
-/// embed it in another `Result` shape don't have to unwrap.
+/// Build a transient error outcome from a plain message.
+/// Mirrors `crate::util::error` but returns the bare `Outcome` so callers that
+/// need to embed it in another `Result` shape don't have to unwrap.
 fn error_outcome(message: impl Into<String>) -> Outcome {
     Outcome::Error {
         message: message.into(),

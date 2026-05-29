@@ -23,8 +23,9 @@ pub struct GenerateConfig {
 
     /// Model configuration specific to title generation.
     ///
-    /// By default, the main assistant model is used. You can override this to
-    /// use a faster or cheaper model specifically for title generation.
+    /// By default, the main assistant model is used.
+    /// You can override this to use a faster or cheaper model specifically for
+    /// title generation.
     #[setting(nested)]
     pub model: Option<ModelConfig>,
 }

@@ -1,7 +1,7 @@
 //! Instruction-specific configuration for Jean-Pierre.
 //!
-//! Instructions are used to guide the assistant in generating a response. They
-//! are defined as a list of items, with a title and a list of examples.
+//! Instructions are used to guide the assistant in generating a response.
+//! They are defined as a list of items, with a title and a list of examples.
 
 use std::str::FromStr;
 
@@ -33,9 +33,9 @@ pub struct InstructionsConfig {
 
     /// The position of these instructions.
     ///
-    /// A lower position will be shown first. This is useful when merging
-    /// multiple instructions, and you want to make sure the most important
-    /// instructions are shown first.
+    /// A lower position will be shown first.
+    /// This is useful when merging multiple instructions, and you want to make
+    /// sure the most important instructions are shown first.
     ///
     /// Defaults to `0`.
     #[setting(default = 0)]
@@ -106,9 +106,9 @@ impl InstructionsConfig {
 
     /// Convert this instruction into a [`SectionConfig`].
     ///
-    /// The instruction's structured data (description, items, examples)
-    /// is flattened into markdown content, and the result is wrapped in
-    /// an `<instruction>` tag via the section's `tag` field.
+    /// The instruction's structured data (description, items, examples) is
+    /// flattened into markdown content, and the result is wrapped in an
+    /// `<instruction>` tag via the section's `tag` field.
     #[must_use]
     #[expect(clippy::cast_possible_truncation)]
     pub fn to_section(&self) -> SectionConfig {

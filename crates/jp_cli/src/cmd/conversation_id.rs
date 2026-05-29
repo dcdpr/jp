@@ -12,8 +12,8 @@
 //!
 //! Because clap's derive macro doesn't evaluate const generics in `#[arg]`
 //! attributes, both types implement [`clap::Args`] and [`clap::FromArgMatches`]
-//! manually. The const generics control parser selection, help text, and
-//! validation.
+//! manually.
+//! The const generics control parser selection, help text, and validation.
 
 use std::{borrow::Cow, ffi::OsStr};
 
@@ -43,8 +43,8 @@ impl<const SESSION: bool, const MULTI: bool> PositionalIds<SESSION, MULTI> {
 
 /// Flag-based conversation ID arguments: `-i/--id/--ids`
 ///
-/// Always supports bare `--id` (no value) for the interactive picker. When
-/// `MULTI` is true, supports comma-separated values and repeated flags.
+/// Always supports bare `--id` (no value) for the interactive picker.
+/// When `MULTI` is true, supports comma-separated values and repeated flags.
 ///
 /// # Type parameters
 ///
@@ -183,8 +183,8 @@ fn read_ids(matches: &ArgMatches) -> Vec<ConversationTarget> {
         .unwrap_or_default()
 }
 
-/// When multiple values are provided, only literal conversation IDs are
-/// allowed — keywords like `last`, `session`, etc. are rejected.
+/// When multiple values are provided, only literal conversation IDs are allowed
+/// — keywords like `last`, `session`, etc. are rejected.
 fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), clap::Error> {
     if !MULTI && ids.len() > 1 {
         return Err(clap::Error::raw(

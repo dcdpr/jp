@@ -16,9 +16,9 @@ fn make_id(secs: u64) -> ConversationId {
     .unwrap()
 }
 
-/// Build a `Ctx` whose workspace has no conversations indexed. All `jp://`
-/// resolutions against this Ctx therefore exercise the missing-conversation
-/// path.
+/// Build a `Ctx` whose workspace has no conversations indexed.
+/// All `jp://` resolutions against this Ctx therefore exercise the
+/// missing-conversation path.
 fn empty_ctx() -> (Ctx, Runtime) {
     let tmp = tempdir().unwrap();
     let workspace = Workspace::new(tmp.path().to_path_buf());

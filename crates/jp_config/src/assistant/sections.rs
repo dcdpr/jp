@@ -1,10 +1,11 @@
 //! System prompt sections.
 //!
-//! Sections are the building blocks of the system prompt. Each section has
-//! content and optional `tag` / `title` fields that control how it is rendered:
+//! Sections are the building blocks of the system prompt.
+//! Each section has content and optional `tag` / `title` fields that control
+//! how it is rendered:
 //!
 //! | `tag` | `title` | Output                           |
-//! |-------|---------|----------------------------------|
+//! | ----- | ------- | -------------------------------- |
 //! | Some  | Some    | `<tag title="...">content</tag>` |
 //! | Some  | None    | `<tag>content</tag>`             |
 //! | None  | Some    | `# title\n\ncontent`             |
@@ -79,7 +80,9 @@ impl FromStr for PartialSectionConfigOrString {
 /// A section of the system prompt.
 ///
 /// Sections are rendered according to their `tag` and `title` fields.
-/// See the [module-level documentation](self) for details.
+/// See the [module-level documentation] for details.
+///
+/// [module-level documentation]: self
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[config(default, rename_all = "snake_case")]
 pub struct SectionConfig {
@@ -92,16 +95,16 @@ pub struct SectionConfig {
 
     /// Optional title for the section.
     ///
-    /// When a `tag` is set, the title is rendered as an XML attribute. When
-    /// only a title is set (no tag), it is rendered as a markdown heading.
+    /// When a `tag` is set, the title is rendered as an XML attribute.
+    /// When only a title is set (no tag), it is rendered as a markdown heading.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 
     /// The position of the section.
     ///
-    /// A lower position will be shown first. This is useful when merging
-    /// multiple sections, and you want to make sure the most important sections
-    /// are shown first.
+    /// A lower position will be shown first.
+    /// This is useful when merging multiple sections, and you want to make sure
+    /// the most important sections are shown first.
     ///
     /// Defaults to `0`.
     #[setting(default = 0)]
@@ -132,8 +135,10 @@ impl SectionConfig {
 
     /// Render the section to its final string representation.
     ///
-    /// The output format depends on the combination of `tag` and `title`. See
-    /// the [module-level documentation](self) for the rendering rules.
+    /// The output format depends on the combination of `tag` and `title`.
+    /// See the [module-level documentation] for the rendering rules.
+    ///
+    /// [module-level documentation]: self
     #[must_use]
     pub fn render(&self) -> String {
         match (&self.tag, &self.title) {
@@ -210,11 +215,11 @@ fn escape_attr(s: &str) -> Cow<'_, str> {
     }
 }
 
-/// Wraps content in `<![CDATA[...]]>` if it contains characters that
-/// would break the surrounding XML structure.
+/// Wraps content in `<![CDATA[...]]>` if it contains characters that would
+/// break the surrounding XML structure.
 ///
-/// If the content itself contains the CDATA end marker `]]>`, it is
-/// split into multiple CDATA sections.
+/// If the content itself contains the CDATA end marker `]]>`, it is split into
+/// multiple CDATA sections.
 fn wrap_cdata_if_needed(content: &str) -> Cow<'_, str> {
     if !content.contains(['<', '>', '&']) {
         return Cow::Borrowed(content);

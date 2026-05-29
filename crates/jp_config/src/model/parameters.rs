@@ -22,19 +22,21 @@ pub struct ParametersConfig {
     /// Maximum number of tokens to generate.
     ///
     /// This can usually be left unset, in which case the model will be allowed
-    /// to generate as many tokens as it supports. However, some providers,
-    /// especially local ones such as `Ollama`, may set a very low token limit
-    /// based on the local machine's resources, in such cases, it might be
-    /// necessary to set a higher limit if your conversation is long or has more
-    /// context attached.
+    /// to generate as many tokens as it supports.
+    /// However, some providers, especially local ones such as `Ollama`, may set
+    /// a very low token limit based on the local machine's resources, in such
+    /// cases, it might be necessary to set a higher limit if your conversation
+    /// is long or has more context attached.
     ///
     /// If unset, some providers may use "request chaining" to allow the model
     /// to generate more tokens than the maximum token limit of the model, if
     /// the model had not finished its complete response after the first
-    /// request. You can either set `chain_on_max_tokens` to `false` for a given
+    /// request.
+    /// You can either set `chain_on_max_tokens` to `false` for a given
     /// provider, or explicitly set this `max_tokens` parameter to a specific
-    /// value to avoid request chaining. While request chaining is generally
-    /// useful, sometimes you might want to have more tighter cost controls.
+    /// value to avoid request chaining.
+    /// While request chaining is generally useful, sometimes you might want to
+    /// have more tighter cost controls.
     pub max_tokens: Option<u32>,
 
     /// Reasoning configuration.
@@ -47,26 +49,27 @@ pub struct ParametersConfig {
 
     /// Temperature of the model.
     ///
-    /// Controls the randomness of the output. Higher values (e.g. 0.8) make
-    /// the output more random, while lower values (e.g. 0.2) make it more
-    /// deterministic.
+    /// Controls the randomness of the output.
+    /// Higher values (e.g.
+    /// 0.8) make the output more random, while lower values (e.g.
+    /// 0.2) make it more deterministic.
     pub temperature: Option<f32>,
 
-    /// Control the randomness and diversity of the generated text. Also
-    /// known as *nucleus sampling*.
+    /// Control the randomness and diversity of the generated text.
+    /// Also known as *nucleus sampling*.
     ///
     /// For example, if `top_p` is set to 0.8, the model will consider the top
-    /// tokens whose cumulative probability just exceeds 0.8. This means the
-    /// model will focus on the most probable options, making the output more
-    /// controlled and less random.
+    /// tokens whose cumulative probability just exceeds 0.8.
+    /// This means the model will focus on the most probable options, making the
+    /// output more controlled and less random.
     ///
     /// As opposed to `top_k`, this is a dynamic approach that considers tokens
     /// until their cumulative probability reaches a threshold P.
     pub top_p: Option<f32>,
 
-    /// Control the diversity and focus of the model's output. It determines how
-    /// many of the most likely tokens (words or subwords) the model should
-    /// consider when generating a response.
+    /// Control the diversity and focus of the model's output.
+    /// It determines how many of the most likely tokens (words or subwords) the
+    /// model should consider when generating a response.
     ///
     /// As opposed to `top_p`, it is a fixed-size approach that considers the
     /// top K most probable tokens, discarding the rest.
@@ -241,9 +244,9 @@ pub struct CustomReasoningConfig {
     #[setting(default)]
     pub effort: ReasoningEffort,
 
-    /// Whether to exclude reasoning tokens from the response. The model will
-    /// still generate reasoning tokens, but they will not be included in the
-    /// response.
+    /// Whether to exclude reasoning tokens from the response.
+    /// The model will still generate reasoning tokens, but they will not be
+    /// included in the response.
     #[setting(default)]
     pub exclude: bool,
 }
@@ -317,19 +320,20 @@ impl From<PartialCustomReasoningConfig> for PartialReasoningConfig {
 pub enum ReasoningEffort {
     /// Disable reasoning entirely.
     ///
-    /// Providers map this to their native "off" mechanism (e.g. OpenAI
-    /// `none`/`minimal`, Anthropic budget 0). If a provider doesn't support
-    /// fully disabling reasoning, it uses the lowest available effort level.
+    /// Providers map this to their native "off" mechanism (e.g.
+    /// OpenAI `none`/`minimal`, Anthropic budget 0).
+    /// If a provider doesn't support fully disabling reasoning, it uses the
+    /// lowest available effort level.
     None,
 
-    /// Allows the model to decide the effort to use. If the model does not
-    /// support auto-mode, it will fall back to `Medium`.
+    /// Allows the model to decide the effort to use.
+    /// If the model does not support auto-mode, it will fall back to `Medium`.
     Auto,
 
     /// Maximum effort with no constraints on token spending.
     ///
-    /// Only supported by certain models (e.g., Claude Opus 4.6). For models
-    /// that don't support this level, it falls back to `XHigh`.
+    /// Only supported by certain models (e.g., Claude Opus 4.6).
+    /// For models that don't support this level, it falls back to `XHigh`.
     Max,
 
     /// Allocates an extremely large portion of tokens for reasoning

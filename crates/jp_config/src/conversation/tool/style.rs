@@ -13,11 +13,11 @@
 //! inline_results = "full"  # overrides on top of `style` for failed results
 //! ```
 //!
-//! [`ErrorStyleConfig`] (`error`) is a per-field overlay applied when the
-//! tool result is `Err`. Unset overlay fields take their value from the
-//! matching top-level field. The overlay is typed separately so the
-//! error path can grow its own fields (severity styling, alternate
-//! sinks, etc.) independently of the success path.
+//! [`ErrorStyleConfig`] (`error`) is a per-field overlay applied when the tool
+//! result is `Err`.
+//! Unset overlay fields take their value from the matching top-level field.
+//! The overlay is typed separately so the error path can grow its own fields
+//! (severity styling, alternate sinks, etc.) independently of the success path.
 
 use std::{fmt, num::ParseIntError, str::FromStr};
 
@@ -35,7 +35,9 @@ use crate::{
 
 /// Display style configuration.
 ///
-/// See the [module-level docs](self) for the user-facing TOML shape.
+/// See the [module-level docs] for the user-facing TOML shape.
+///
+/// [module-level docs]: self
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct DisplayStyleConfig {
@@ -65,14 +67,15 @@ pub struct DisplayStyleConfig {
     /// How to display the tool call parameters.
     ///
     /// - `json`: Show as JSON.
-    /// - `function_call`: Show as a function call (e.g. `tool_name(arg=val)`).
+    /// - `function_call`: Show as a function call (e.g.
+    ///   `tool_name(arg=val)`).
     /// - `off`: Do not show parameters.
     /// - `<command>`: Use a custom command to format the parameters.
     #[setting(default)]
     pub parameters: ParametersStyle,
 
-    /// Per-field overrides applied when the tool result is `Err`. Unset
-    /// overlay fields take their value from the matching top-level field.
+    /// Per-field overrides applied when the tool result is `Err`.
+    /// Unset overlay fields take their value from the matching top-level field.
     ///
     /// Sub-fields appear under `[style.error]` in TOML.
     #[setting(nested)]
@@ -82,9 +85,9 @@ pub struct DisplayStyleConfig {
 impl DisplayStyleConfig {
     /// Return the effective [`InlineResults`] for a tool response.
     ///
-    /// For error responses, the `style.error.inline_results` overlay is
-    /// applied on top of `style.inline_results`. Successful responses
-    /// read `style.inline_results` directly.
+    /// For error responses, the `style.error.inline_results` overlay is applied
+    /// on top of `style.inline_results`.
+    /// Successful responses read `style.inline_results` directly.
     #[must_use]
     pub fn inline_results(&self, is_error: bool) -> &InlineResults {
         if is_error {
@@ -97,12 +100,12 @@ impl DisplayStyleConfig {
         }
     }
 
-    /// Return the effective [`LinkStyle`] for the results-file link of a
-    /// tool response.
+    /// Return the effective [`LinkStyle`] for the results-file link of a tool
+    /// response.
     ///
-    /// For error responses, the `style.error.results_file_link` overlay
-    /// is applied on top of `style.results_file_link`. Successful
-    /// responses read `style.results_file_link` directly.
+    /// For error responses, the `style.error.results_file_link` overlay is
+    /// applied on top of `style.results_file_link`.
+    /// Successful responses read `style.results_file_link` directly.
     #[must_use]
     pub fn results_file_link(&self, is_error: bool) -> &LinkStyle {
         if is_error {
@@ -172,8 +175,9 @@ impl ToPartial for DisplayStyleConfig {
 
 /// Per-field overrides for rendering failed tool call responses.
 ///
-/// Each field is optional. Callers resolve an unset field by reading the
-/// matching field from the parent [`DisplayStyleConfig`].
+/// Each field is optional.
+/// Callers resolve an unset field by reading the matching field from the parent
+/// [`DisplayStyleConfig`].
 #[derive(Debug, Clone, PartialEq, Default, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ErrorStyleConfig {
@@ -232,8 +236,9 @@ impl ToPartial for ErrorStyleConfig {
 /// Whether and how to show the tool call results inline in the terminal.
 ///
 /// Even if disabled or truncated, a link will be added to a file containing the
-/// full tool call results. Additionally, the full tool call results will be
-/// sent back to the assistant, regardless of this setting.
+/// full tool call results.
+/// Additionally, the full tool call results will be sent back to the assistant,
+/// regardless of this setting.
 #[derive(Debug, Clone, PartialEq, Serialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum InlineResults {

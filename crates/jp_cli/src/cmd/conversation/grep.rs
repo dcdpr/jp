@@ -48,7 +48,8 @@ pub(crate) struct Grep {
 
     /// Restrict the search to specific parts of the conversation.
     ///
-    /// Repeatable or comma-separated. If omitted, every part is searched.
+    /// Repeatable or comma-separated.
+    /// If omitted, every part is searched.
     /// Meta-scopes `chat` and `tool` expand to their concrete members.
     #[arg(long = "scope", short = 's', value_enum, value_delimiter = ',', num_args = 1..)]
     scopes: Vec<Scope>,
@@ -112,8 +113,9 @@ impl Grep {
         per_id.into_iter().flatten().collect()
     }
 
-    /// Per-conversation hit collection. Pure function over `&Ctx`, so it is
-    /// safe to invoke concurrently from a rayon worker.
+    /// Per-conversation hit collection.
+    /// Pure function over `&Ctx`, so it is safe to invoke concurrently from a
+    /// rayon worker.
     fn collect_hits_for_id(
         &self,
         id: ConversationId,

@@ -45,14 +45,15 @@ impl From<&str> for InquiryId {
 /// An inquiry request event - requesting additional input or clarification.
 ///
 /// This event can be triggered by tools, the assistant, or even the user, when
-/// additional information is needed before proceeding. The system should pause
-/// execution and wait for a corresponding `InquiryResponse` event.
+/// additional information is needed before proceeding.
+/// The system should pause execution and wait for a corresponding
+/// `InquiryResponse` event.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InquiryRequest {
     /// Identifier for this inquiry.
     ///
-    /// This must match the `id` in the corresponding `InquiryResponse`. The
-    /// caller determines the ID convention.
+    /// This must match the `id` in the corresponding `InquiryResponse`.
+    /// The caller determines the ID convention.
     pub id: InquiryId,
 
     /// The source of the inquiry (who is asking).
@@ -122,8 +123,8 @@ pub struct InquiryQuestion {
 
     /// Optional default answer.
     ///
-    /// This can be used as a fallback in non-interactive environments
-    /// or as a suggested default in interactive prompts.
+    /// This can be used as a fallback in non-interactive environments or as a
+    /// suggested default in interactive prompts.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
 }
@@ -158,7 +159,8 @@ impl InquiryQuestion {
         Self::new(text, InquiryAnswerType::Select { options })
     }
 
-    /// Creates a new select inquiry question from plain values (no descriptions).
+    /// Creates a new select inquiry question from plain values (no
+    /// descriptions).
     #[must_use]
     pub fn select_values(text: String, values: impl IntoIterator<Item = Value>) -> Self {
         let options = values.into_iter().map(SelectOption::from).collect();
@@ -243,6 +245,7 @@ pub struct InquiryResponse {
     ///
     /// The shape of this value depends on the `answer_type` of the
     /// corresponding inquiry:
+    ///
     /// - `Boolean`: `Value::Bool`
     /// - `Select`: one of the option values
     /// - `Text`: `Value::String`

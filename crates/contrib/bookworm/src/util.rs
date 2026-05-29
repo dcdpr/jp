@@ -4,8 +4,8 @@ use crate::error::Error;
 
 /// Convert an HTML fragment to Markdown.
 ///
-/// `script`, `style`, `noscript`, `svg`, and `iframe` are dropped (they're
-/// page chrome, never useful content for an LLM).
+/// `script`, `style`, `noscript`, `svg`, and `iframe` are dropped (they're page
+/// chrome, never useful content for an LLM).
 pub(crate) fn html_to_markdown(html: &str) -> Result<String, Error> {
     let converter = HtmlToMarkdown::builder()
         .skip_tags(vec!["script", "style", "noscript", "svg", "iframe"])
@@ -19,7 +19,8 @@ pub(crate) fn html_to_markdown(html: &str) -> Result<String, Error> {
 
 /// Cap runs of blank lines at two newlines, so the LLM sees `paragraph\n\nnext`
 /// rather than the long runs `htmd` sometimes produces from rustdoc's
-/// indentation-heavy HTML. Trailing whitespace is dropped.
+/// indentation-heavy HTML.
+/// Trailing whitespace is dropped.
 fn collapse_blank_lines(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut consecutive_newlines = 0u8;

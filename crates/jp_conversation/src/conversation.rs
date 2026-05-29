@@ -44,7 +44,8 @@ pub struct Conversation {
     /// When the conversation was archived, or `None` if not archived.
     ///
     /// Set when the conversation is moved to the archive partition, cleared
-    /// when unarchived. Used for sorting archived conversation listings.
+    /// when unarchived.
+    /// Used for sorting archived conversation listings.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -59,10 +60,11 @@ pub struct Conversation {
     /// the system.
     ///
     /// The expiration timestamp is the *earliest* time at which the
-    /// conversation will be garbage collected. In other words, if the timestamp
-    /// is in the future, garbage collection will not occur, if the timestamp is
-    /// *exactly* now, the conversation *might* be garbage collected, but it
-    /// might also happen at a later time, when the timestamp is in the past.
+    /// conversation will be garbage collected.
+    /// In other words, if the timestamp is in the future, garbage collection
+    /// will not occur, if the timestamp is *exactly* now, the conversation
+    /// *might* be garbage collected, but it might also happen at a later time,
+    /// when the timestamp is in the past.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",

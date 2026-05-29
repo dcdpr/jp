@@ -1,7 +1,9 @@
 //! Signal and event handlers for the query stream pipeline.
 //!
-//! These functions extract the logic from the `jp_macro::select!` closures
-//! to improve readability and testability. Each handler:
+//! These functions extract the logic from the `jp_macro::select!` closures to
+//! improve readability and testability.
+//! Each handler:
+//!
 //! 1. Shows appropriate UI (interrupt menus) when needed
 //! 2. Delegates state transitions to the `TurnCoordinator` state machine
 //! 3. Returns a `LoopAction` for the caller to handle control flow
@@ -37,8 +39,8 @@ pub enum LoopAction<T> {
 
 /// Handle a signal received during LLM streaming.
 ///
-/// Shows the interrupt menu when Ctrl+C is received, then delegates to the
-/// turn coordinator's state machine for state transitions and content injection.
+/// Shows the interrupt menu when Ctrl+C is received, then delegates to the turn
+/// coordinator's state machine for state transitions and content injection.
 pub fn handle_streaming_signal(
     signal: SignalTo,
     turn_coordinator: &mut TurnCoordinator,
@@ -95,17 +97,18 @@ pub fn handle_streaming_signal(
 
 /// Handle a successful event from the LLM stream.
 ///
-/// Stream errors are handled separately by
-/// [`handle_stream_error`](crate::cmd::query::stream::handle_stream_error), which
-/// is the single source of truth for all retry logic.
+/// Stream errors are handled separately by [`handle_stream_error`], which is
+/// the single source of truth for all retry logic.
 ///
 /// Returns the loop-control signal alongside any committed event the shell
-/// should react to immediately. The committed event is surfaced directly from
-/// [`EventBuilder::handle_flush`] (via the coordinator) so the shell never has
-/// to infer it from the conversation stream's tail — a duplicate flush from a
-/// misbehaving provider commits nothing and so cannot cause a double dispatch.
+/// should react to immediately.
+/// The committed event is surfaced directly from [`EventBuilder::handle_flush`]
+/// (via the coordinator) so the shell never has to infer it from the
+/// conversation stream's tail — a duplicate flush from a misbehaving provider
+/// commits nothing and so cannot cause a double dispatch.
 ///
 /// [`EventBuilder::handle_flush`]: jp_llm::event_builder::EventBuilder::handle_flush
+/// [`handle_stream_error`]: crate::cmd::query::stream::handle_stream_error
 pub fn handle_llm_event(
     event: Event,
     turn_coordinator: &mut TurnCoordinator,
@@ -138,12 +141,12 @@ pub fn handle_llm_event(
 /// Apply provider-issued metadata patches to historical conversation events.
 ///
 /// NOTE: This mutates the stream in-place, which deviates from the append-only
-/// principle established in RFD 064 (non-destructive compaction). This is
-/// acceptable for now because the targets are opaque provider metadata
+/// principle established in RFD 064 (non-destructive compaction).
+/// This is acceptable for now because the targets are opaque provider metadata
 /// (cryptographic signatures), not user-visible content, and the overlay/
-/// projection infrastructure from RFD 064 does not exist yet. Once RFD 064
-/// lands, this should migrate to an append-only patch event that the
-/// projection layer applies at request-build time.
+/// projection infrastructure from RFD 064 does not exist yet.
+/// Once RFD 064 lands, this should migrate to an append-only patch event that
+/// the projection layer applies at request-build time.
 fn apply_history_patches(stream: &mut ConversationStream, patches: &[EventPatch]) {
     let mut count = 0;
 
@@ -187,25 +190,26 @@ pub enum ToolSignalResult {
     /// The caller should wait for cancellation to complete, then re-execute.
     Restart,
 
-    /// Cancel current execution and override cancelled tool responses with
-    /// the user-supplied message.
+    /// Cancel current execution and override cancelled tool responses with the
+    /// user-supplied message.
     Cancelled { response: String },
 }
 
 /// Handle a signal received during tool execution.
 ///
-/// Shows the tool interrupt menu when Ctrl+C is received, then delegates to
-/// the turn coordinator for state machine updates.
+/// Shows the tool interrupt menu when Ctrl+C is received, then delegates to the
+/// turn coordinator for state machine updates.
 ///
-/// If any tool is currently showing an interactive prompt (permission, question,
-/// result edit), the interrupt menu is suppressed and we let the active prompt
-/// handle Ctrl+C instead. This prevents UI conflicts between the interrupt menu
-/// and the active prompt.
+/// If any tool is currently showing an interactive prompt (permission,
+/// question, result edit), the interrupt menu is suppressed and we let the
+/// active prompt handle Ctrl+C instead.
+/// This prevents UI conflicts between the interrupt menu and the active prompt.
 ///
 /// # Arguments
 ///
-/// * `is_prompting` - Whether any tool is currently showing an interactive prompt.
-/// * `backend` - Allows injecting a mock prompt backend for testing.
+/// - `is_prompting` - Whether any tool is currently showing an interactive
+///   prompt.
+/// - `backend` - Allows injecting a mock prompt backend for testing.
 pub fn handle_tool_signal(
     signal: SignalTo,
     cancellation_token: &CancellationToken,

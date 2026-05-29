@@ -12,9 +12,9 @@ use crate::{
 /// Progress indicator shown while waiting for a conversation lock held by
 /// another session.
 ///
-/// When a conversation is locked by another process, the CLI polls for the
-/// lock to be released. This configuration controls the timer indicator
-/// displayed during that wait.
+/// When a conversation is locked by another process, the CLI polls for the lock
+/// to be released.
+/// This configuration controls the timer indicator displayed during that wait.
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct LockWaitConfig {

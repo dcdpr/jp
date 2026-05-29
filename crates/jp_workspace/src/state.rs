@@ -9,12 +9,14 @@ use parking_lot::RwLock;
 /// The entire in-memory workspace state.
 ///
 /// Each conversation's metadata and events are wrapped in `Arc<RwLock<...>>`
-/// for shared ownership between the workspace and any active
-/// `ConversationLock` / `ConversationMut` scopes.
+/// for shared ownership between the workspace and any active `ConversationLock`
+/// / `ConversationMut` scopes.
 ///
 /// The `OnceLock` provides lazy initialization — data is loaded from disk on
-/// first access. The `Arc` enables shared ownership. The `RwLock` allows
-/// concurrent reads and exclusive writes within the process.
+/// first access.
+/// The `Arc` enables shared ownership.
+/// The `RwLock` allows concurrent reads and exclusive writes within the
+/// process.
 #[derive(Debug, Default)]
 pub(super) struct State {
     /// Conversation metadata for all conversations.

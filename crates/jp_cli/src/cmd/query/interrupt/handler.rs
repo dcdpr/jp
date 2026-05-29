@@ -10,12 +10,12 @@
 //! ## Testing
 //!
 //! The handler uses dependency injection via [`PromptBackend`] to enable
-//! testing without a real TTY. In production, [`TerminalPromptBackend`] uses
-//! [`jp_inquire`]. In tests, [`MockPromptBackend`] provides pre-programmed
-//! responses.
+//! testing without a real TTY.
+//! In production, [`TerminalPromptBackend`] uses [`jp_inquire`].
+//! In tests, [`MockPromptBackend`] provides pre-programmed responses.
 //!
-//! [`TerminalPromptBackend`]: jp_inquire::prompt::TerminalPromptBackend
 //! [`MockPromptBackend`]: jp_inquire::prompt::MockPromptBackend
+//! [`TerminalPromptBackend`]: jp_inquire::prompt::TerminalPromptBackend
 
 use std::io::Write;
 
@@ -68,7 +68,8 @@ pub enum InterruptAction {
 /// Handles user interrupts (Ctrl+C) during query execution.
 ///
 /// This handler presents interactive menus and returns the user's chosen
-/// action. The actual handling of the action is done by the caller.
+/// action.
+/// The actual handling of the action is done by the caller.
 ///
 /// Uses [`PromptBackend`] for dependency injection, enabling testing without a
 /// TTY.
@@ -132,8 +133,9 @@ impl<P: PromptBackend> InterruptHandler<P> {
     /// Handle an interrupt during tool execution.
     ///
     /// Presents a menu with options to stop & reply, restart, or continue
-    /// waiting. When the user chooses "Stop & Reply", they can supply a custom
-    /// message. An empty input produces a canned default.
+    /// waiting.
+    /// When the user chooses "Stop & Reply", they can supply a custom message.
+    /// An empty input produces a canned default.
     pub fn handle_tool_interrupt(&self, writer: &mut dyn Write) -> InterruptAction {
         let options = vec![
             InlineOption::new('c', "Continue"),

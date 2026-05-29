@@ -22,7 +22,8 @@ use crate::{
 pub struct ModelConfig {
     /// The model ID.
     ///
-    /// This identifies the LLM model to use. It can be a full ID (e.g.
+    /// This identifies the LLM model to use.
+    /// It can be a full ID (e.g.
     /// `anthropic/claude-3-opus-20240229`) or an alias.
     #[setting(nested)]
     pub id: ModelIdOrAliasConfig,

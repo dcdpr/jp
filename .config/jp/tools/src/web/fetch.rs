@@ -81,11 +81,12 @@ pub(super) fn is_binary(content_type: &str) -> bool {
 }
 
 /// If the URL points at a GitHub issue or PR, build a redirect message
-/// suggesting the dedicated tool. Returns `None` for any other URL.
+/// suggesting the dedicated tool.
+/// Returns `None` for any other URL.
 ///
-/// We intentionally don't try to be smart about every kind of github.com
-/// URL — blobs, releases, the repo root, etc. continue through the HTML
-/// pipeline because for those the rendered HTML is enough.
+/// We intentionally don't try to be smart about every kind of github.com URL —
+/// blobs, releases, the repo root, etc. continue through the HTML pipeline
+/// because for those the rendered HTML is enough.
 fn github_issue_or_pr_redirect(url: &Url) -> Option<String> {
     if !matches!(url.host_str(), Some(host) if host.eq_ignore_ascii_case("github.com")) {
         return None;

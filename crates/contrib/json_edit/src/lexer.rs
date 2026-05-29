@@ -9,8 +9,8 @@ pub enum Dialect {
 
 /// Tokenize `input` into a sequence of `(SyntaxKind, slice)` pairs.
 ///
-/// Every byte of the input is covered by exactly one token, so
-/// concatenating all slices reproduces the original input.
+/// Every byte of the input is covered by exactly one token, so concatenating
+/// all slices reproduces the original input.
 #[must_use]
 pub fn lex(input: &str, dialect: Dialect) -> Vec<(SyntaxKind, &str)> {
     let mut tokens = Vec::new();
@@ -96,8 +96,8 @@ fn is_whitespace(b: u8) -> bool {
     matches!(b, b' ' | b'\t' | b'\n' | b'\r' | 0x0C | 0x0B)
 }
 
-/// Lex a double- or single-quoted string. The opening quote has not been
-/// consumed yet.
+/// Lex a double- or single-quoted string.
+/// The opening quote has not been consumed yet.
 fn lex_string(bytes: &[u8], pos: &mut usize, quote: u8) -> SyntaxKind {
     *pos += 1; // opening quote
     loop {

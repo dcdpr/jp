@@ -98,6 +98,8 @@ fn with_package_argument_is_passed_through_to_both_tools() {
             "--list-changed",
             "--format-markdown",
             "--reference-links",
+            "--language",
+            "rust",
             "--package",
             "my_pkg",
         ])
@@ -119,6 +121,8 @@ fn without_package_uses_workspace_scope_on_both_tools() {
             "--list-changed",
             "--format-markdown",
             "--reference-links",
+            "--language",
+            "rust",
             "--workspace",
         ])
         .returns_success("");

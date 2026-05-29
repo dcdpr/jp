@@ -1,8 +1,7 @@
 //! Plugin registry types.
 //!
-//! The registry is a JSON file served from the JP registry server that
-//! lists available plugins with their platform-specific download URLs
-//! and checksums.
+//! The registry is a JSON file served from the JP registry server that lists
+//! available plugins with their platform-specific download URLs and checksums.
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`
 
@@ -14,13 +13,15 @@ use serde::{Deserialize, Serialize};
 /// The plugin registry, fetched from the JP registry server.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Registry {
-    /// Schema version. Currently `1`.
+    /// Schema version.
+    /// Currently `1`.
     pub version: u32,
 
     /// Map of command path to plugin metadata.
     ///
-    /// Keys are space-separated command paths (e.g. `"serve"`,
-    /// `"serve web"`). Each key corresponds to a `jp` subcommand.
+    /// Keys are space-separated command paths (e.g.
+    /// `"serve"`, `"serve web"`).
+    /// Each key corresponds to a `jp` subcommand.
     pub plugins: BTreeMap<String, RegistryPlugin>,
 }
 
@@ -28,8 +29,9 @@ pub struct Registry {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RegistryPlugin {
     /// Stable identifier used for binary naming, config keys, and install
-    /// paths. The binary is `jp-{id}`, config lives at `plugins.command.{id}`,
-    /// and the install path is `$XDG_DATA_HOME/jp/plugins/command/jp-{id}`.
+    /// paths.
+    /// The binary is `jp-{id}`, config lives at `plugins.command.{id}`, and the
+    /// install path is `$XDG_DATA_HOME/jp/plugins/command/jp-{id}`.
     pub id: String,
 
     /// One-line description shown in `jp -h` and `jp plugin list`.
@@ -66,14 +68,16 @@ pub enum PluginKind {
         suggests: Vec<String>,
 
         /// Platform-specific downloadable binaries, keyed by target triple
-        /// (e.g. `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`).
+        /// (e.g.
+        /// `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`).
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         binaries: BTreeMap<String, RegistryBinary>,
     },
 
-    /// A command namespace with no binary. Provides help text and lists
-    /// sub-plugins via `suggests`. `jp <group>` prints help and exits with code
-    /// 2. `jp <group> <sub>` dispatches to the sub-plugin.
+    /// A command namespace with no binary.
+    /// Provides help text and lists sub-plugins via `suggests`.
+    /// `jp <group>` prints help and exits with code 2.
+    /// `jp <group> <sub>` dispatches to the sub-plugin.
     CommandGroup {
         /// Command paths (registry keys) of plugins that extend this group with
         /// additional subcommands.

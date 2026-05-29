@@ -13,9 +13,9 @@ const INDENT_WIDTH: usize = 2;
 /// Maximum size of the search results response in bytes.
 ///
 /// If the response exceeds this size, it will be truncated to avoid overflowing
-/// the client with excessive data. The limit is arbitrary, as there is no limit
-/// defined by the protocol, but the `Claude.app` client has shown issues
-/// handling larger responses.
+/// the client with excessive data.
+/// The limit is arbitrary, as there is no limit defined by the protocol, but
+/// the `Claude.app` client has shown issues handling larger responses.
 pub(crate) const MAX_RESPONSE_SIZE_BYTES: usize = 256 * 1024; // 256KiB limit
 
 #[derive(Debug, Clone, PartialEq)]
@@ -182,8 +182,8 @@ impl FromStr for PathRoot {
 
 /// Serialize any `Serialize` value into pretty-printed, LLM-friendly XML.
 ///
-/// Strings containing `<` or `>` (Rust code, HTML) are wrapped in CDATA so
-/// the LLM sees them verbatim instead of XML-escaped (`&lt;Vec&lt;Foo&gt;&gt;`).
+/// Strings containing `<` or `>` (Rust code, HTML) are wrapped in CDATA so the
+/// LLM sees them verbatim instead of XML-escaped (`&lt;Vec&lt;Foo&gt;&gt;`).
 /// Multi-line strings are split onto separate indented lines for readability.
 /// `None`/missing fields are skipped.
 pub(crate) fn format_xml<T: Serialize>(value: &T, root: &str) -> Result<String, Error> {
@@ -260,8 +260,8 @@ fn write_indent(out: &mut String, depth: usize) {
     }
 }
 
-/// Write a primitive value's raw content, wrapping in CDATA if it contains
-/// XML metacharacters so the LLM sees Rust code and HTML verbatim.
+/// Write a primitive value's raw content, wrapping in CDATA if it contains XML
+/// metacharacters so the LLM sees Rust code and HTML verbatim.
 fn write_content(out: &mut String, value: &Value) {
     match value {
         Value::String(s) => {
@@ -281,8 +281,9 @@ fn write_content(out: &mut String, value: &Value) {
     }
 }
 
-/// Guess a child-element tag for a top-level array, based on the Rust type
-/// of the array element. `Vec<Url>` → `url`, `Vec<CrateInfo>` → `crate_info`.
+/// Guess a child-element tag for a top-level array, based on the Rust type of
+/// the array element.
+/// `Vec<Url>` → `url`, `Vec<CrateInfo>` → `crate_info`.
 fn infer_array_tag_name<T: ?Sized>() -> String {
     let type_name = std::any::type_name::<T>();
     let inner = type_name
@@ -337,8 +338,9 @@ fn resource_text_len(raw: &RawContent) -> usize {
     }
 }
 
-/// Validate a crate version string. Accepts `latest` or a semver-compatible
-/// version (including partial versions like `1` or `1.2`).
+/// Validate a crate version string.
+/// Accepts `latest` or a semver-compatible version (including partial versions
+/// like `1` or `1.2`).
 pub(crate) fn valid_crate_version(s: &str) -> bool {
     s == "latest" || semver::Version::parse(s).is_ok() || semver::VersionReq::parse(s).is_ok()
 }

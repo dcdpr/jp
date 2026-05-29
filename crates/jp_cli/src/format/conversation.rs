@@ -27,7 +27,8 @@ pub struct DetailsFmt {
     /// If `None`, the details are not shown.
     pub pinned: Option<bool>,
 
-    /// Whether the conversation is local. If `None`, the details are not shown.
+    /// Whether the conversation is local.
+    /// If `None`, the details are not shown.
     pub local: Option<bool>,
 
     /// Mark the active conversation.

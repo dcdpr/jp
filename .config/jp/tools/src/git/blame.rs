@@ -1,10 +1,10 @@
 //! `git_blame`: show which commits last touched each line in a range.
 //!
 //! Output groups contiguous lines that share a blamed commit so token cost
-//! scales with the number of distinct commits, not the number of lines. Each
-//! group also carries the porcelain `previous <sha> <path>` field as
-//! `previous`, giving the assistant a free drill-down to the prior owner of
-//! the line without a second subprocess.
+//! scales with the number of distinct commits, not the number of lines.
+//! Each group also carries the porcelain `previous <sha> <path>` field as
+//! `previous`, giving the assistant a free drill-down to the prior owner of the
+//! line without a second subprocess.
 
 use std::{collections::HashMap, fmt::Write};
 
@@ -21,13 +21,15 @@ use crate::{
     },
 };
 
-/// Upper bound on the requested line range. A blame request with a wider
-/// range is rejected. This mirrors the rationale behind `git_diff_commit`'s
-/// `paths` requirement: keep the worst-case output size bounded.
+/// Upper bound on the requested line range.
+/// A blame request with a wider range is rejected.
+/// This mirrors the rationale behind `git_diff_commit`'s `paths` requirement:
+/// keep the worst-case output size bounded.
 const MAX_RANGE: usize = 200;
 
-/// Length of a full git SHA-1. Used to distinguish porcelain header lines
-/// (which start with a 40-char hex sha) from metadata lines.
+/// Length of a full git SHA-1.
+/// Used to distinguish porcelain header lines (which start with a 40-char hex
+/// sha) from metadata lines.
 const SHA_LEN: usize = 40;
 
 #[derive(Debug, Default, PartialEq)]
@@ -42,12 +44,12 @@ struct BlameLine {
     sha: String,
     final_line: usize,
     content: String,
-    /// Commit that owned this line before the change attributed to `sha`,
-    /// taken from porcelain's `previous <sha> <path>` field. Kept per-line
-    /// (not per-commit) because that field is path-origin metadata: a
-    /// single commit can legitimately have *different* prior commits for
-    /// different line groups when copy/move detection is in play, and
-    /// porcelain re-emits `previous` for every group of such commits.
+    /// Commit that owned this line before the change attributed to `sha`, taken
+    /// from porcelain's `previous <sha> <path>` field.
+    /// Kept per-line (not per-commit) because that field is path-origin
+    /// metadata: a single commit can legitimately have *different* prior
+    /// commits for different line groups when copy/move detection is in play,
+    /// and porcelain re-emits `previous` for every group of such commits.
     previous: Option<String>,
 }
 
@@ -297,8 +299,8 @@ fn is_sha(s: &str) -> bool {
     s.len() == SHA_LEN && s.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// Convert porcelain's `author-time` (epoch seconds) + `author-tz` (`±HHMM`)
-/// to ISO 8601, matching the format used by `git_log` (`%aI`).
+/// Convert porcelain's `author-time` (epoch seconds) + `author-tz` (`±HHMM`) to
+/// ISO 8601, matching the format used by `git_log` (`%aI`).
 fn format_author_date(secs: i64, tz: &str) -> String {
     parse_tz(tz)
         .and_then(|offset| offset.timestamp_opt(secs, 0).single())
@@ -329,14 +331,14 @@ struct LineGroup<'a> {
     lines: Vec<&'a BlameLine>,
 }
 
-/// Group consecutive lines that share a sha AND the same `previous` AND
-/// are line-number contiguous. A gap in line numbers, a different sha, or
-/// a different prior origin all start a new group, so the rendered output
-/// doesn't imply a continuous block where there isn't one. With
-/// porcelain's `-L <start>,<end>` range lines are always line-number
-/// contiguous; the `previous` check is what actually splits multi-path
-/// commits where the same sha has different prior origins for different
-/// line groups.
+/// Group consecutive lines that share a sha AND the same `previous` AND are
+/// line-number contiguous.
+/// A gap in line numbers, a different sha, or a different prior origin all
+/// start a new group, so the rendered output doesn't imply a continuous block
+/// where there isn't one.
+/// With porcelain's `-L <start>,<end>` range lines are always line-number
+/// contiguous; the `previous` check is what actually splits multi-path commits
+/// where the same sha has different prior origins for different line groups.
 fn group_lines(lines: &[BlameLine]) -> Vec<LineGroup<'_>> {
     let mut groups: Vec<LineGroup<'_>> = Vec::new();
 

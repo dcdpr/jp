@@ -32,8 +32,9 @@ pub struct ModelDetails {
 
     /// Whether the model supports structured output (JSON schema responses).
     ///
-    /// `None` means unknown (e.g. custom deployments). Providers should set
-    /// this to `Some(true)` or `Some(false)` for known models.
+    /// `None` means unknown (e.g. custom deployments).
+    /// Providers should set this to `Some(true)` or `Some(false)` for known
+    /// models.
     pub structured_output: Option<bool>,
 
     /// Provider-specific features.
@@ -219,7 +220,8 @@ pub enum ReasoningDetails {
     /// that the model can use to "reason".
     Budgetted {
         /// The minimum number of reasoning tokens required to generate a
-        /// response. Usually zero, but can be non-zero for certain models.
+        /// response.
+        /// Usually zero, but can be non-zero for certain models.
         min_tokens: u32,
 
         /// The maximum number of reasoning tokens that can be generated.
@@ -253,9 +255,9 @@ pub enum ReasoningDetails {
 
     /// Adaptive reasoning support.
     ///
-    /// The model dynamically decides when and how much to think based on
-    /// task complexity. Uses effort levels (low/medium/high/xhigh/max)
-    /// instead of token budgets.
+    /// The model dynamically decides when and how much to think based on task
+    /// complexity.
+    /// Uses effort levels (low/medium/high/xhigh/max) instead of token budgets.
     ///
     /// Currently only supported by Claude Opus 4.6+.
     Adaptive {
@@ -325,10 +327,10 @@ impl ReasoningDetails {
     /// Returns the lowest reasoning effort level supported by this model, if
     /// known.
     ///
-    /// `Leveled` models return their lowest supported level. Other variants
-    /// return `Option::None` — callers should decide how to handle "disable
-    /// reasoning" for their provider (e.g. token budget 0, effort `minimal`,
-    /// `thinking: disabled`, etc.).
+    /// `Leveled` models return their lowest supported level.
+    /// Other variants return `Option::None` — callers should decide how to
+    /// handle "disable reasoning" for their provider (e.g. token budget 0,
+    /// effort `minimal`, `thinking: disabled`, etc.).
     #[must_use]
     pub fn lowest_effort(&self) -> Option<ReasoningEffort> {
         match self {

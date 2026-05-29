@@ -25,7 +25,8 @@ pub(crate) struct Ctx {
     pub(crate) workspace: Workspace,
 
     /// Filesystem-specific backend for path queries, config loading, and
-    /// file-level cleanup. `None` when running with an in-memory backend.
+    /// file-level cleanup.
+    /// `None` when running with an in-memory backend.
     pub(crate) fs_backend: Option<Arc<FsStorageBackend>>,
 
     /// Merged file/CLI configuration.
@@ -36,8 +37,8 @@ pub(crate) struct Ctx {
 
     /// The resolved terminal session identity, if any.
     ///
-    /// `None` when no session could be detected (e.g. no controlling
-    /// terminal, no `$JP_SESSION`, and no recognized terminal env vars).
+    /// `None` when no session could be detected (e.g. no controlling terminal,
+    /// no `$JP_SESSION`, and no recognized terminal env vars).
     pub(crate) session: Option<Session>,
 
     /// The printer for output.
@@ -62,9 +63,9 @@ pub(crate) struct Term {
 
     /// Whether or not stdout is connected to a TTY.
     ///
-    /// If you pipe (|) or redirect (>) the output, stdout is connected to a
-    /// pipe or a regular file, respectively. These are not managed by the TTY
-    /// subsystem.
+    /// If you pipe (|) or redirect (\>) the output, stdout is connected to a
+    /// pipe or a regular file, respectively.
+    /// These are not managed by the TTY subsystem.
     pub(crate) is_tty: bool,
 }
 
@@ -135,9 +136,9 @@ impl Ctx {
     /// Get immutable access to the configuration.
     ///
     /// NOTE: There is *NO* mutable access to the configuration *after*
-    /// configuration initialization. This is to simplify the cognetive
-    /// complexity of configuration lifecycle management throughout the lifetime
-    /// of the CLI application.
+    /// configuration initialization.
+    /// This is to simplify the cognetive complexity of configuration lifecycle
+    /// management throughout the lifetime of the CLI application.
     ///
     /// Any changes to the configuration should be done using the "partial
     /// configuration" API in [`jp_config`] *before* constructing the final

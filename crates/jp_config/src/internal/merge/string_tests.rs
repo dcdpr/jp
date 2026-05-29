@@ -483,14 +483,14 @@ fn test_default_string() {
 }
 
 /// Regression test: a finalized `MergeableString` round-tripped through
-/// `to_partial()` must not re-apply the append/prepend merge strategy
-/// when merged back into a partial that already has the same value.
+/// `to_partial()` must not re-apply the append/prepend merge strategy when
+/// merged back into a partial that already has the same value.
 ///
 /// This simulates the flow in `apply_conversation_config`:
 ///
 /// 1. Config files produce a partial with `strategy: Append`.
-/// 2. The conversation stream's finalized config is converted to a
-///    partial via `to_partial()`.
+/// 2. The conversation stream's finalized config is converted to a partial via
+///    `to_partial()`.
 /// 3. That partial is merged on top of the config file partial.
 /// 4. The value must NOT be doubled.
 #[test]

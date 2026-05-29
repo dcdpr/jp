@@ -549,10 +549,11 @@ fn test_split_trims_whitespace() {
     assert_eq!(d, None);
 }
 
-/// Regression: `{{tool}}` must render as valid JSON, including `null`
-/// for null fields (not Jinja2's `none`). Originally fixed with
-/// `AutoEscape::Json`, now handled by the custom formatter which
-/// JSON-serializes composite values while leaving scalars alone.
+/// Regression: `{{tool}}` must render as valid JSON, including `null` for null
+/// fields (not Jinja2's `none`).
+/// Originally fixed with `AutoEscape::Json`, now handled by the custom
+/// formatter which JSON-serializes composite values while leaving scalars
+/// alone.
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_renders_null_args_as_valid_json() {
@@ -601,10 +602,10 @@ async fn test_run_tool_command_renders_null_args_as_valid_json() {
 }
 
 /// Regression: scalar string interpolation must not be JSON-quoted.
-/// A prior fix for the null-rendering bug set `AutoEscape::Json`
-/// globally, which wrapped every string value in literal `"..."`,
-/// breaking templates like `just rfd-draft {{tool.arguments.title}}`
-/// where tool authors expect the bare value.
+/// A prior fix for the null-rendering bug set `AutoEscape::Json` globally,
+/// which wrapped every string value in literal `"..."`, breaking templates like
+/// `just rfd-draft {{tool.arguments.title}}` where tool authors expect the bare
+/// value.
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_renders_scalar_strings_raw() {
@@ -634,9 +635,10 @@ async fn test_run_tool_command_renders_scalar_strings_raw() {
     assert_eq!(stdout.trim_end(), "Hello World");
 }
 
-/// Null scalars render as literal `null` (not Jinja2's `none`, and not
-/// an empty string). This keeps the behavior consistent with how null
-/// appears inside JSON-serialized composites.
+/// Null scalars render as literal `null` (not Jinja2's `none`, and not an empty
+/// string).
+/// This keeps the behavior consistent with how null appears inside
+/// JSON-serialized composites.
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_renders_null_scalar_as_literal_null() {
@@ -667,8 +669,8 @@ async fn test_run_tool_command_renders_null_scalar_as_literal_null() {
 /// End-to-end sanity check for the rfd-draft regression: with the old
 /// `AutoEscape::Json` behavior, `{{tool.arguments.title}}` rendered as
 /// `"Assistant-Initiated ..."` (literal quotes), which then broke the
-/// downstream `sed` command inside the just recipe. Verify the title
-/// now reaches the subprocess as a clean argument.
+/// downstream `sed` command inside the just recipe.
+/// Verify the title now reaches the subprocess as a clean argument.
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_rfd_draft_title_rendering() {
@@ -711,8 +713,8 @@ async fn test_run_tool_command_rfd_draft_title_rendering() {
 
 /// The `tojson` filter still works for tool authors who want explicit
 /// JSON-quoted strings (e.g. when hand-crafting a JSON literal).
-/// Safe strings produced by `tojson` must pass through the custom
-/// formatter unchanged — no double-encoding.
+/// Safe strings produced by `tojson` must pass through the custom formatter
+/// unchanged — no double-encoding.
 #[tokio::test]
 #[cfg(unix)]
 async fn test_run_tool_command_tojson_filter_on_scalar_still_works() {

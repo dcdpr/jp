@@ -36,7 +36,8 @@ pub struct ToolsConfig {
 
     /// Tool config
     ///
-    /// This section configures individual tools. The key is the tool ID.
+    /// This section configures individual tools.
+    /// The key is the tool ID.
     #[setting(nested, flatten, merge = merge_nested_indexmap)]
     tools: IndexMap<String, ToolConfig>,
 }
@@ -161,22 +162,24 @@ pub struct ToolsDefaultsConfig {
     #[setting(required)]
     pub run: RunMode,
 
-    /// When to run a tool's custom argument formatter relative to the
-    /// approval prompt.
+    /// When to run a tool's custom argument formatter relative to the approval
+    /// prompt.
     ///
-    /// Only affects [`style::ParametersStyle::Custom`] (a user-configured
-    /// shell command). Built-in parameter styles (`json`, `function_call`,
-    /// `off`) are pure transformations and always render before the
-    /// prompt regardless of this field.
+    /// Only affects [`style::ParametersStyle::Custom`] (a user-configured shell
+    /// command).
+    /// Built-in parameter styles (`json`, `function_call`, `off`) are pure
+    /// transformations and always render before the prompt regardless of this
+    /// field.
     ///
-    /// - `ask`: Defer the custom formatter until after approval (safe
-    ///   default — keeps an untrusted shell command from running
-    ///   unprompted).
-    /// - `unattended`: Run the custom formatter ahead of the approval
-    ///   prompt so the user sees the rendered call before deciding.
+    /// - `ask`: Defer the custom formatter until after approval (safe default
+    ///   — keeps an untrusted shell command from running unprompted).
+    /// - `unattended`: Run the custom formatter ahead of the approval prompt so
+    ///   the user sees the rendered call before deciding.
     ///
-    /// If unset, derives from [`run`](Self::run): `Ask`/`Edit`/`Skip`
-    /// map to `Ask`; `Unattended` maps to `Unattended`.
+    /// If unset, derives from [`run`]: `Ask`/`Edit`/`Skip` map to `Ask`;
+    /// `Unattended` maps to `Unattended`.
+    ///
+    /// [`run`]: Self::run
     pub format: Option<FormatMode>,
 
     /// How to deliver the results of the tool to the assistant.
@@ -264,27 +267,32 @@ pub struct ToolConfig {
     /// See [`Enable`] for details.
     pub enable: Option<Enable>,
 
-    /// The command to run. Only used for local tools.
+    /// The command to run.
+    /// Only used for local tools.
     ///
-    /// Can be a simple string (e.g. `ls -la`) or a structured object with
-    /// `program`, `args`, and `shell` properties.
+    /// Can be a simple string (e.g.
+    /// `ls -la`) or a structured object with `program`, `args`, and `shell`
+    /// properties.
     #[setting(nested)]
     pub command: Option<CommandConfigOrString>,
 
     /// A short summary of what the tool does.
     ///
-    /// This is always included in the tool definition sent to the LLM. It
-    /// should be concise enough to give the LLM a general idea of the tool's
+    /// This is always included in the tool definition sent to the LLM.
+    /// It should be concise enough to give the LLM a general idea of the tool's
     /// purpose without consuming excessive context.
     ///
-    /// If not set, falls back to [`description`](Self::description).
+    /// If not set, falls back to [`description`].
+    ///
+    /// [`description`]: Self::description
     pub summary: Option<String>,
 
     /// The full description of the tool.
     ///
     /// This provides detailed information about the tool's behavior, arguments,
-    /// and edge cases. It is NOT sent to the LLM by default, instead, it is
-    /// made available on demand via the `describe_tools` built-in tool.
+    /// and edge cases.
+    /// It is NOT sent to the LLM by default, instead, it is made available on
+    /// demand via the `describe_tools` built-in tool.
     ///
     /// This will override any existing description, such as the one from an MCP
     /// server, or a built-in tool.
@@ -299,14 +307,15 @@ pub struct ToolConfig {
     /// The parameters expected by the tool.
     ///
     /// For `local` tools, omitting this will result in a tool that takes no
-    /// parameters. For `mcp` or `builtin` tools, omitting this keeps the
-    /// original parameters from the tool definition, but you can override
-    /// existing parameters by specifying them here.
+    /// parameters.
+    /// For `mcp` or `builtin` tools, omitting this keeps the original
+    /// parameters from the tool definition, but you can override existing
+    /// parameters by specifying them here.
     ///
     /// Overriding parameters is allowed in narrow cases, such as flipping an
     /// argument from optional to required, defining an enumeration of allowed
-    /// values, or forcing a specific value by setting a single enum value. You
-    /// CANNOT change the type of the argument, its name, or any other
+    /// values, or forcing a specific value by setting a single enum value.
+    /// You CANNOT change the type of the argument, its name, or any other
     /// properties that would break the tool's original argument expectations.
     #[setting(nested, merge = merge_nested_indexmap)]
     pub parameters: IndexMap<String, ToolParameterConfig>,
@@ -322,9 +331,11 @@ pub struct ToolConfig {
     /// Only affects [`style::ParametersStyle::Custom`]; see
     /// [`ToolsDefaultsConfig::format`] for details.
     ///
-    /// Overrides the global default. If unset, derives from
-    /// [`run`](Self::run): `Ask`/`Edit`/`Skip` map to `FormatMode::Ask`;
-    /// `Unattended` maps to `FormatMode::Unattended`.
+    /// Overrides the global default.
+    /// If unset, derives from [`run`]: `Ask`/`Edit`/`Skip` map to
+    /// `FormatMode::Ask`; `Unattended` maps to `FormatMode::Unattended`.
+    ///
+    /// [`run`]: Self::run
     pub format: Option<FormatMode>,
 
     /// How to deliver the results of the tool to the assistant.
@@ -334,24 +345,26 @@ pub struct ToolConfig {
 
     /// How to display the results of the tool in the terminal.
     ///
-    /// Overrides the global default. The error overlay lives at
-    /// `style.error.*` (see [`DisplayStyleConfig::error`]).
+    /// Overrides the global default.
+    /// The error overlay lives at `style.error.*` (see
+    /// [`DisplayStyleConfig::error`]).
     #[setting(nested)]
     pub style: Option<DisplayStyleConfig>,
 
     /// Configuration for questions that the tool may ask during execution.
     ///
     /// Question IDs are defined by the tool implementation and should be
-    /// documented by the tool. For example, `fs_create_file` uses
-    /// `overwrite_file` when a file already exists.
+    /// documented by the tool.
+    /// For example, `fs_create_file` uses `overwrite_file` when a file already
+    /// exists.
     #[setting(nested, merge = merge_nested_indexmap)]
     pub questions: IndexMap<String, QuestionConfig>,
 
     /// Per-tool options passed to the tool at runtime.
     ///
     /// A free-form map of key-value pairs that configure tool behavior.
-    /// Each tool defines its own supported options and defaults. Unknown
-    /// options are silently forwarded.
+    /// Each tool defines its own supported options and defaults.
+    /// Unknown options are silently forwarded.
     #[setting(nested, merge = merge_nested_indexmap)]
     pub options: IndexMap<String, JsonValue>,
 }
@@ -499,8 +512,10 @@ pub struct ToolParameterConfig {
 
     /// A short summary of the parameter.
     ///
-    /// This is included in the JSON schema sent to the LLM. If not set, falls
-    /// back to [`description`](Self::description).
+    /// This is included in the JSON schema sent to the LLM.
+    /// If not set, falls back to [`description`].
+    ///
+    /// [`description`]: Self::description
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
 
@@ -738,13 +753,13 @@ pub enum ToolSource {
     Mcp {
         /// The name of the MCP server that contains the tool.
         ///
-        /// The server name is required — the source string must be of the
-        /// form `mcp.<server>` or `mcp.<server>.<tool>`. The legacy
-        /// shapes `mcp` and `mcp..<tool>` are rejected because the
-        /// implicit cross-server lookup they enabled was both
-        /// order-dependent (whichever server happened to be iterated
-        /// first) and incompatible with optional MCP servers (a failed
-        /// candidate would abort the whole resolution).
+        /// The server name is required — the source string must be of the form
+        /// `mcp.<server>` or `mcp.<server>.<tool>`.
+        /// The legacy shapes `mcp` and `mcp..<tool>` are rejected because the
+        /// implicit cross-server lookup they enabled was both order-dependent
+        /// (whichever server happened to be iterated first) and incompatible
+        /// with optional MCP servers (a failed candidate would abort the whole
+        /// resolution).
         server: String,
 
         /// The name of the tool to use.
@@ -879,31 +894,33 @@ pub enum RunMode {
 /// When to run a tool's argument formatter (custom-style parameter render).
 ///
 /// This controls whether the formatter — which may make read-only network
-/// calls or other side-effect-free I/O to render the rendered tool call —
-/// runs *before* the user is asked for permission, or *after*.
+/// calls or other side-effect-free I/O to render the rendered tool call — runs
+/// *before* the user is asked for permission, or *after*.
 ///
-/// `Ask` defers rendering until after approval (safe default for
-/// untrusted tools). `Unattended` runs the formatter up front, so the
-/// rendered output appears in the approval prompt — the user makes their
-/// decision based on the rendered call, not raw arguments.
+/// `Ask` defers rendering until after approval (safe default for untrusted
+/// tools).
+/// `Unattended` runs the formatter up front, so the rendered output appears in
+/// the approval prompt — the user makes their decision based on the rendered
+/// call, not raw arguments.
 ///
-/// **Contract**: Tools that opt into `Unattended` MUST be side-effect-free
-/// in format mode. They MAY make read-only network calls. They MUST NOT
-/// mutate any state, write files, or send notifications.
+/// **Contract**: Tools that opt into `Unattended` MUST be side-effect-free in
+/// format mode.
+/// They MAY make read-only network calls.
+/// They MUST NOT mutate any state, write files, or send notifications.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum FormatMode {
     /// Defer formatter execution until after approval.
     ///
-    /// Safe default: an untrusted tool's formatter cannot run before the
-    /// user has explicitly approved running the tool.
+    /// Safe default: an untrusted tool's formatter cannot run before the user
+    /// has explicitly approved running the tool.
     #[default]
     Ask,
 
     /// Run the formatter ahead of the approval prompt.
     ///
-    /// Only set this for trusted, side-effect-free formatters. The user
-    /// sees the rendered tool call before deciding whether to approve.
+    /// Only set this for trusted, side-effect-free formatters.
+    /// The user sees the rendered tool call before deciding whether to approve.
     Unattended,
 }
 
@@ -938,9 +955,9 @@ pub struct ToolConfigWithDefaults {
 impl ToolConfigWithDefaults {
     /// Return whether the tool is enabled.
     ///
-    /// Returns `true` only for [`Enable::On`]. Both [`Enable::Off`] and
-    /// [`Enable::Explicit`] return `false`. If no value is set, defaults to
-    /// `true`.
+    /// Returns `true` only for [`Enable::On`].
+    /// Both [`Enable::Off`] and [`Enable::Explicit`] return `false`.
+    /// If no value is set, defaults to `true`.
     #[must_use]
     pub fn enable(&self) -> bool {
         // NOTE: We cannot define `#[setting(default = true)]` on the `enable`
@@ -981,7 +998,9 @@ impl ToolConfigWithDefaults {
 
     /// Return the summary of the tool.
     ///
-    /// Falls back to [`description`](Self::description) if no summary is set.
+    /// Falls back to [`description`] if no summary is set.
+    ///
+    /// [`description`]: Self::description
     #[must_use]
     pub fn summary(&self) -> Option<&str> {
         self.tool
@@ -1022,19 +1041,22 @@ impl ToolConfigWithDefaults {
 
     /// Return the format mode of the tool.
     ///
-    /// Only affects [`style::ParametersStyle::Custom`] (a user-configured
-    /// shell command). Built-in parameter styles (`json`, `function_call`,
-    /// `off`) are pure transformations and always render before the
-    /// approval prompt regardless of this value — see
-    /// [`ToolsDefaultsConfig::format`] for the full contract.
+    /// Only affects [`style::ParametersStyle::Custom`] (a user-configured shell
+    /// command).
+    /// Built-in parameter styles (`json`, `function_call`, `off`) are pure
+    /// transformations and always render before the approval prompt regardless
+    /// of this value — see [`ToolsDefaultsConfig::format`] for the full
+    /// contract.
     ///
-    /// If neither the tool nor the global defaults set a `format` value,
-    /// the mode is derived from [`run`](Self::run): `Ask`/`Edit`/`Skip`
-    /// map to `FormatMode::Ask` (custom formatter runs after approval,
-    /// safe default for an untrusted shell command; `Skip` is grouped
-    /// here so we don't run a formatter for a tool that's about to be
-    /// discarded); `Unattended` maps to `FormatMode::Unattended` (the
-    /// tool was already going to run without an approval prompt anyway).
+    /// If neither the tool nor the global defaults set a `format` value, the
+    /// mode is derived from [`run`]: `Ask`/`Edit`/`Skip` map to
+    /// `FormatMode::Ask` (custom formatter runs after approval, safe default
+    /// for an untrusted shell command; `Skip` is grouped here so we don't run a
+    /// formatter for a tool that's about to be discarded); `Unattended` maps to
+    /// `FormatMode::Unattended` (the tool was already going to run without an
+    /// approval prompt anyway).
+    ///
+    /// [`run`]: Self::run
     #[must_use]
     pub fn format(&self) -> FormatMode {
         self.tool
@@ -1143,8 +1165,8 @@ impl ToPartial for QuestionConfig {
 
 /// The target of a question.
 ///
-/// Accepts a string (`"user"` or `"assistant"`) or a map with assistant
-/// config overrides for the inquiry model.
+/// Accepts a string (`"user"` or `"assistant"`) or a map with assistant config
+/// overrides for the inquiry model.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum QuestionTarget {
     /// Ask the question to the user.
@@ -1154,8 +1176,8 @@ pub enum QuestionTarget {
     /// Ask the question to the assistant.
     ///
     /// The partial config overrides the global inquiry config, which in turn
-    /// overrides the parent assistant config. An empty partial (all `None`)
-    /// means "use global inquiry defaults."
+    /// overrides the parent assistant config.
+    /// An empty partial (all `None`) means "use global inquiry defaults."
     Assistant(Box<PartialAssistantConfig>),
 }
 
@@ -1251,10 +1273,12 @@ impl schematic::Schematic for QuestionTarget {
 /// and string values (`"on"`, `"off"`, `"explicit"`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Enable {
-    /// The tool is enabled. Equivalent to `true`.
+    /// The tool is enabled.
+    /// Equivalent to `true`.
     On,
 
-    /// The tool is disabled. Equivalent to `false`.
+    /// The tool is disabled.
+    /// Equivalent to `false`.
     Off,
 
     /// The tool requires explicit activation.
@@ -1270,7 +1294,8 @@ pub enum Enable {
 }
 
 impl Enable {
-    /// Returns `true` if the tool is enabled (i.e. [`Enable::On`]).
+    /// Returns `true` if the tool is enabled (i.e.
+    /// [`Enable::On`]).
     #[must_use]
     pub const fn is_on(self) -> bool {
         matches!(self, Self::On)

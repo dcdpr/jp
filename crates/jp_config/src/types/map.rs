@@ -1,8 +1,11 @@
 //! Map types with configurable merge strategies.
 //!
-//! Mirrors the [`MergeableVec`](super::vec::MergeableVec) pattern for
-//! `IndexMap<String, T>` values. Used by [`JsonValue`](super::json_value::JsonValue)
-//! for object-typed values, and can be used directly in typed config fields.
+//! Mirrors the [`MergeableVec`] pattern for `IndexMap<String, T>` values.
+//! Used by [`JsonValue`] for object-typed values, and can be used directly in
+//! typed config fields.
+//!
+//! [`JsonValue`]: super::json_value::JsonValue
+//! [`MergeableVec`]: super::vec::MergeableVec
 
 use std::ops::{Deref, DerefMut};
 
@@ -97,9 +100,9 @@ impl<T> MergeableMap<T> {
 
     /// Returns `true` if the map is empty.
     ///
-    /// A `Merged` variant with no items but with metadata (e.g. `strategy`) is
-    /// NOT considered empty, because the metadata must still participate in
-    /// merges.
+    /// A `Merged` variant with no items but with metadata (e.g.
+    /// `strategy`) is NOT considered empty, because the metadata must still
+    /// participate in merges.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         match self {
@@ -215,16 +218,18 @@ where
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum MergedMapStrategy {
-    /// Recursive per-key merge. Nested objects are merged recursively.
+    /// Recursive per-key merge.
+    /// Nested objects are merged recursively.
     #[default]
     DeepMerge,
 
-    /// Shallow merge. Top-level keys from next win, but nested objects are
-    /// replaced rather than recursed into.
+    /// Shallow merge.
+    /// Top-level keys from next win, but nested objects are replaced rather
+    /// than recursed into.
     Merge,
 
-    /// Only insert keys absent from the base. Existing keys are never
-    /// overwritten.
+    /// Only insert keys absent from the base.
+    /// Existing keys are never overwritten.
     Keep,
 
     /// Replace the entire map.

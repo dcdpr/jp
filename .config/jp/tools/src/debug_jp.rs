@@ -2,9 +2,10 @@
 //!
 //! Each tool in this family runs `jp` inside an isolated sandbox so a
 //! destructive command approved by mistake cannot reach the user's real
-//! workspace or conversation store. The sandbox combines a detached git
-//! worktree (for the source tree) with an alternate `JP_USER_DATA_DIR` (for
-//! the user-global data directory) — see [`util::sandbox`] for details.
+//! workspace or conversation store.
+//! The sandbox combines a detached git worktree (for the source tree) with an
+//! alternate `JP_USER_DATA_DIR` (for the user-global data directory) — see
+//! [`util::sandbox`] for details.
 //!
 //! Tools currently exposed:
 //!

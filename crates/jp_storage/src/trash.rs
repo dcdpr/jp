@@ -14,8 +14,9 @@ const TRASHED_FILE: &str = "TRASHED.md";
 /// Move a conversation directory to the trash, preserving its contents.
 ///
 /// The conversation directory at `{conversations_dir}/{dirname}` is moved to
-/// `{conversations_dir}/.trash/{dirname}/`. A `TRASHED.md` file is written into
-/// the trashed directory explaining why it was trashed.
+/// `{conversations_dir}/.trash/{dirname}/`.
+/// A `TRASHED.md` file is written into the trashed directory explaining why it
+/// was trashed.
 ///
 /// If a directory with the same name already exists in `.trash/`, an integer
 /// suffix is appended (e.g., `{dirname}-1`, `{dirname}-2`).

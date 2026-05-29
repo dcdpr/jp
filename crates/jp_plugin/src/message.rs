@@ -1,7 +1,7 @@
 //! Protocol message types for the JP plugin system.
 //!
-//! Messages are exchanged as JSON-lines (one JSON object per line) over
-//! stdin (host→plugin) and stdout (plugin→host).
+//! Messages are exchanged as JSON-lines (one JSON object per line) over stdin
+//! (host→plugin) and stdout (plugin→host).
 
 use camino::Utf8PathBuf;
 use chrono::{DateTime, Utc};
@@ -17,6 +17,7 @@ pub struct PathsInfo {
     /// User-local data directory.
     ///
     /// Platform-specific base directory for JP's persistent data:
+    ///
     /// - Linux: `$XDG_DATA_HOME/jp` (typically `~/.local/share/jp`)
     /// - macOS: `~/Library/Application Support/jp`
     /// - Windows: `{FOLDERID_LocalAppData}\jp\data`
@@ -25,9 +26,9 @@ pub struct PathsInfo {
 
     /// User-global config directory.
     ///
-    /// Where JP looks for global configuration files. May differ from
-    /// `user_data` on Linux (XDG config vs data) and Windows (Roaming
-    /// vs Local `AppData`).
+    /// Where JP looks for global configuration files.
+    /// May differ from `user_data` on Linux (XDG config vs data) and Windows
+    /// (Roaming vs Local `AppData`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user_config: Option<Utf8PathBuf>,
 
@@ -65,7 +66,8 @@ pub enum HostToPlugin {
     /// The plugin should respond with `PluginToHost::Describe` and exit.
     Describe,
 
-    /// Graceful shutdown request (e.g. SIGINT/SIGTERM received).
+    /// Graceful shutdown request (e.g.
+    /// SIGINT/SIGTERM received).
     Shutdown,
 }
 
@@ -103,7 +105,8 @@ pub enum PluginToHost {
 /// The `init` message sent to the plugin on startup.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InitMessage {
-    /// Protocol version. Plugins should check compatibility.
+    /// Protocol version.
+    /// Plugins should check compatibility.
     pub version: u32,
 
     /// Workspace information.
@@ -122,7 +125,8 @@ pub struct InitMessage {
     /// Plugin-specific options from the host configuration.
     ///
     /// Contains the `options` map from the plugin's `CommandPluginConfig`, if
-    /// any. Empty when no options are configured.
+    /// any.
+    /// Empty when no options are configured.
     #[serde(default, skip_serializing_if = "Map::is_empty")]
     pub options: Map<String, Value>,
 
@@ -302,10 +306,10 @@ pub struct DescribeResponse {
 
     /// The command path this plugin provides.
     ///
-    /// Each element is a subcommand segment. For example, `["serve", "web"]`
-    /// means the plugin handles `jp serve web`. When absent, the host derives
-    /// the path from the binary name by stripping the `jp-` prefix and
-    /// splitting on `-`.
+    /// Each element is a subcommand segment.
+    /// For example, `["serve", "web"]` means the plugin handles `jp serve web`.
+    /// When absent, the host derives the path from the binary name by stripping
+    /// the `jp-` prefix and splitting on `-`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub command: Vec<String>,
 
@@ -330,8 +334,8 @@ pub struct ExitMessage {
 
     /// Human-readable reason for a non-zero exit.
     ///
-    /// When present and the code is non-zero, the host prints this to the
-    /// user. Omit for successful exits.
+    /// When present and the code is non-zero, the host prints this to the user.
+    /// Omit for successful exits.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }

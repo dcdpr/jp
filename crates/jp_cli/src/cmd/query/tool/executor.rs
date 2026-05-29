@@ -1,6 +1,7 @@
 //! Single tool execution for the query stream pipeline.
 //!
 //! The `ToolExecutor` handles execution of a single tool call, including:
+//!
 //! - Permission prompts (run mode configuration)
 //! - Input prompts (tool-specific questions)
 //! - Result formatting
@@ -31,8 +32,8 @@
 //! # Thread Safety
 //!
 //! The executor works with `SharedTurnState` (`Arc<RwLock<TurnState>>`) to
-//! support parallel execution. Lock durations are minimized to avoid
-//! blocking other executors.
+//! support parallel execution.
+//! Lock durations are minimized to avoid blocking other executors.
 //!
 //! # Testing
 //!
@@ -108,8 +109,8 @@ impl ExecutorSource for TerminalExecutorSource {
 /// # Note
 ///
 /// Interactive prompts currently happen inside `ToolDefinition::call()`.
-/// In the future, prompts will be driven by the `ToolCoordinator`, and
-/// the executor will only handle pure execution.
+/// In the future, prompts will be driven by the `ToolCoordinator`, and the
+/// executor will only handle pure execution.
 pub struct ToolExecutor {
     request: ToolCallRequest,
     config: ToolConfigWithDefaults,

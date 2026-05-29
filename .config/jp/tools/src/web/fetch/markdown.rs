@@ -1,8 +1,9 @@
 //! Markdown fetch pipeline.
 //!
 //! Tries to retrieve the `.md` variant of a URL (the Mintlify/GitBook/Fumadocs
-//! convention of serving a markdown twin at `{path}.md`). Section listing and
-//! extraction operate directly on the markdown AST (ATX headings).
+//! convention of serving a markdown twin at `{path}.md`).
+//! Section listing and extraction operate directly on the markdown AST (ATX
+//! headings).
 
 use std::collections::HashMap;
 
@@ -15,7 +16,8 @@ use crate::{
     util::{ToolResult, error},
 };
 
-/// Strict fetch: errors propagate. Used by `Strategy::Markdown`.
+/// Strict fetch: errors propagate.
+/// Used by `Strategy::Markdown`.
 pub(super) async fn fetch(
     url: &Url,
     list_sections: bool,
@@ -32,8 +34,9 @@ pub(super) async fn fetch(
     Ok(process(&body, url, list_sections, sections.as_deref()).into())
 }
 
-/// Opportunistic fetch: swallows errors. Used by `Strategy::Auto` to probe the
-/// `.md` variant before falling back to HTML.
+/// Opportunistic fetch: swallows errors.
+/// Used by `Strategy::Auto` to probe the `.md` variant before falling back to
+/// HTML.
 pub(super) async fn try_fetch(
     url: &Url,
     list_sections: bool,
@@ -68,8 +71,8 @@ async fn fetch_markdown_body(url: &Url) -> Result<String, Error> {
     response.text().await.map_err(Into::into)
 }
 
-/// Accept text/* except `text/html` (the common soft-404 shape). Reject
-/// anything that's clearly not text.
+/// Accept text/\* except `text/html` (the common soft-404 shape).
+/// Reject anything that's clearly not text.
 fn is_acceptable_markdown_content_type(ct: &str) -> bool {
     let ct = ct.trim().to_ascii_lowercase();
 
@@ -166,7 +169,8 @@ struct Heading {
 }
 
 /// Parse ATX-style (`#` prefixed) headings from markdown, skipping content
-/// inside fenced code blocks. Setext (underlined) headings are not supported.
+/// inside fenced code blocks.
+/// Setext (underlined) headings are not supported.
 fn parse_headings(md: &str) -> Vec<Heading> {
     let mut out = Vec::new();
     let mut slugger = Slugger::default();
@@ -218,9 +222,9 @@ fn parse_headings(md: &str) -> Vec<Heading> {
     out
 }
 
-/// Return the ATX heading level of a line (1..=6), or `None` if it's not an
-/// ATX heading. The character after the `#`s must be whitespace (per
-/// CommonMark).
+/// Return the ATX heading level of a line (1..=6), or `None` if it's not an ATX
+/// heading.
+/// The character after the `#`s must be whitespace (per CommonMark).
 fn atx_level(line: &str) -> Option<u8> {
     let count = line.bytes().take_while(|b| *b == b'#').count();
     if !(1..=6).contains(&count) {
@@ -236,6 +240,7 @@ fn atx_level(line: &str) -> Option<u8> {
 }
 
 /// Convert heading text into a GitHub-style slug:
+///
 /// - lowercase
 /// - alphanumerics, `-`, `_` retained
 /// - whitespace runs collapsed to a single `-`
@@ -288,8 +293,8 @@ impl Slugger {
     }
 }
 
-/// Build an XML listing of all headings in the markdown document, mirroring
-/// the HTML pipeline's format exactly.
+/// Build an XML listing of all headings in the markdown document, mirroring the
+/// HTML pipeline's format exactly.
 fn format_section_listing(md: &str) -> String {
     let headings = parse_headings(md);
     if headings.is_empty() {
@@ -322,8 +327,8 @@ fn format_section_listing(md: &str) -> String {
 /// Maximum chars of preview text per section.
 const PREVIEW_MAX: usize = 120;
 
-/// Collect a short plain-text preview from content after the heading at
-/// `idx`, stopping at the next heading of same-or-higher level.
+/// Collect a short plain-text preview from content after the heading at `idx`,
+/// stopping at the next heading of same-or-higher level.
 fn preview_after(lines: &[&str], headings: &[Heading], idx: usize) -> String {
     let h = &headings[idx];
     let start = h.line + 1;
@@ -362,8 +367,8 @@ fn truncate_preview(s: &str, max: usize) -> String {
     format!("{}...", &s[..end])
 }
 
-/// Line index of the next heading at `<= headings[idx].level`, or
-/// `total_lines` if none.
+/// Line index of the next heading at `<= headings[idx].level`, or `total_lines`
+/// if none.
 fn next_section_boundary(headings: &[Heading], idx: usize, total_lines: usize) -> usize {
     let current_level = headings[idx].level;
     headings
@@ -373,8 +378,9 @@ fn next_section_boundary(headings: &[Heading], idx: usize, total_lines: usize) -
         .map_or(total_lines, |h| h.line)
 }
 
-/// Extract one or more sections by slug ID, concatenated into a single
-/// markdown string. Missing IDs are silently skipped.
+/// Extract one or more sections by slug ID, concatenated into a single markdown
+/// string.
+/// Missing IDs are silently skipped.
 ///
 /// If no IDs match, returns an empty string (caller decides what to do).
 fn extract_sections(md: &str, ids: &[String]) -> String {

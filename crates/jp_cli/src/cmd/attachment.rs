@@ -134,10 +134,10 @@ pub(crate) async fn register_attachment(
 /// Resolve a list of attachment URLs for the current query.
 ///
 /// Unlike [`register_attachment`], this loader is tolerant of `jp://`
-/// attachments whose target conversation has been archived or removed since
-/// the attachment was registered: those references are warned about and
-/// skipped rather than aborting the whole query. Every other failure
-/// (invalid URI, real I/O error, etc.) is propagated.
+/// attachments whose target conversation has been archived or removed since the
+/// attachment was registered: those references are warned about and skipped
+/// rather than aborting the whole query.
+/// Every other failure (invalid URI, real I/O error, etc.) is propagated.
 pub(crate) async fn load_conversation_attachments(
     ctx: &Ctx,
     urls: Vec<Url>,

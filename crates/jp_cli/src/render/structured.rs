@@ -1,9 +1,9 @@
 //! Structured output rendering for the query stream pipeline and conversation
 //! replay.
 //!
-//! Renders structured JSON as a fenced code block. In the live-stream path,
-//! chunks arrive as `Value::String` fragments. In the replay path, the
-//! complete parsed value is pretty-printed.
+//! Renders structured JSON as a fenced code block.
+//! In the live-stream path, chunks arrive as `Value::String` fragments.
+//! In the replay path, the complete parsed value is pretty-printed.
 
 use std::sync::Arc;
 
@@ -11,8 +11,8 @@ use jp_conversation::event::ChatResponse;
 use jp_printer::Printer;
 use serde_json::Value;
 
-/// Renders `ChatResponse::Structured` events to the terminal as a fenced
-/// JSON code block.
+/// Renders `ChatResponse::Structured` events to the terminal as a fenced JSON
+/// code block.
 ///
 /// ````text
 /// ```json
@@ -34,8 +34,8 @@ impl StructuredRenderer {
 
     /// Render a single structured chunk.
     ///
-    /// On the first chunk, emits the opening code fence. Subsequent chunks
-    /// are appended directly.
+    /// On the first chunk, emits the opening code fence.
+    /// Subsequent chunks are appended directly.
     ///
     /// - `Value::String` is printed as raw text (streaming fragments).
     /// - Any other variant is pretty-printed as complete JSON.
@@ -67,8 +67,8 @@ impl StructuredRenderer {
         }
     }
 
-    /// Reset the renderer state, discarding tracking of whether a code
-    /// fence is open.
+    /// Reset the renderer state, discarding tracking of whether a code fence is
+    /// open.
     pub fn reset(&mut self) {
         self.started = false;
     }

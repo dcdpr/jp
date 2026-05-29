@@ -8,8 +8,8 @@ const SHA_BOB: &str = "def5678901234567890abcdef1234567890abcde";
 const SHA_PREV_ALICE: &str = "0000aaaa0000aaaa0000aaaa0000aaaa0000aaaa";
 
 /// Sample porcelain output covering three lines: two from Alice (contiguous)
-/// followed by one from Bob. Bob's commit is the first to introduce its line
-/// (no `previous` field).
+/// followed by one from Bob.
+/// Bob's commit is the first to introduce its line (no `previous` field).
 fn sample_porcelain() -> String {
     format!(
         "\
@@ -82,11 +82,11 @@ fn parses_porcelain_into_commits_and_lines() {
     assert_eq!(bob.date, "2024-05-18T04:40:00+02:00");
 }
 
-/// Sample porcelain output for a single commit that touches lines that
-/// came from *different* prior commits (the `MORE_THAN_ONE_PATH` case
-/// from `builtin/blame.c`). Porcelain re-emits `previous`/`filename` on
-/// each subsequent appearance even though the rest of the metadata
-/// block is suppressed.
+/// Sample porcelain output for a single commit that touches lines that came
+/// from *different* prior commits (the `MORE_THAN_ONE_PATH` case from
+/// `builtin/blame.c`).
+/// Porcelain re-emits `previous`/`filename` on each subsequent appearance even
+/// though the rest of the metadata block is suppressed.
 fn sample_porcelain_multi_path() -> String {
     let other_prev = "1111bbbb1111bbbb1111bbbb1111bbbb1111bbbb";
     format!(
@@ -148,11 +148,11 @@ fn group_lines_splits_on_different_previous_same_sha() {
     );
 }
 
-/// Multi-path commit where the *second* origin has no prior commit:
-/// the first block emits `previous A`/`filename`, the second emits
-/// `filename` alone (because `MORE_THAN_ONE_PATH` re-emits path-origin
-/// metadata, but this origin's `suspect->previous` is null). The buggy
-/// behaviour would inherit `A` for the second line; the fix should
+/// Multi-path commit where the *second* origin has no prior commit: the first
+/// block emits `previous A`/`filename`, the second emits `filename` alone
+/// (because `MORE_THAN_ONE_PATH` re-emits path-origin metadata, but this
+/// origin's `suspect->previous` is null).
+/// The buggy behaviour would inherit `A` for the second line; the fix should
 /// record it as `None`.
 fn sample_porcelain_multi_path_one_origin_has_no_previous() -> String {
     format!(

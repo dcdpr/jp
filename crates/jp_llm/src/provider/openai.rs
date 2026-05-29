@@ -49,7 +49,8 @@ pub(crate) const ENCRYPTED_CONTENT_KEY: &str = "openai_encrypted_content";
 pub(crate) const PHASE_KEY: &str = "openai_phase";
 
 /// Feature flag: temperature and `top_p` are only supported when reasoning
-/// effort is `none`. GPT-5 family models have this constraint.
+/// effort is `none`.
+/// GPT-5 family models have this constraint.
 const TEMP_REQUIRES_NO_REASONING: &str = "temp_requires_no_reasoning";
 
 /// Feature flag: the model only supports non-streaming Responses API requests.
@@ -938,8 +939,9 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
 /// Filter out unknown event types from the OpenAI SSE stream.
 ///
 /// OpenAI may introduce new streaming event types (e.g., `keepalive`) that the
-/// `openai_responses` crate doesn't know about yet. These cause deserialization
-/// failures. Rather than killing the stream, we silently skip them.
+/// `openai_responses` crate doesn't know about yet.
+/// These cause deserialization failures.
+/// Rather than killing the stream, we silently skip them.
 async fn skip_unknown_events(
     result: std::result::Result<types::Event, OpenaiStreamError>,
 ) -> Option<std::result::Result<types::Event, OpenaiStreamError>> {
@@ -1081,12 +1083,13 @@ fn map_event(
 
 /// Classify an OpenAI streaming error event into a [`StreamError`].
 ///
-/// Maps well-known error types (quota, rate-limit, auth, server errors)
-/// to the appropriate [`StreamErrorKind`] so the retry and display layers
-/// can handle them correctly.
+/// Maps well-known error types (quota, rate-limit, auth, server errors) to the
+/// appropriate [`StreamErrorKind`] so the retry and display layers can handle
+/// them correctly.
 ///
-/// In-stream errors carry no HTTP headers, so `retry_after` timing comes
-/// solely from message-body parsing (e.g. `"Please try again in 2.398s."`).
+/// In-stream errors carry no HTTP headers, so `retry_after` timing comes solely
+/// from message-body parsing (e.g.
+/// `"Please try again in 2.398s."`).
 ///
 /// Classification checks both `type` and `code` because OpenAI's per-minute
 /// token/request rate-limits arrive as `type=tokens|requests` with
@@ -1184,35 +1187,35 @@ impl TryFrom<&OpenaiConfig> for Openai {
 ///
 /// At each node of the schema tree:
 ///
-/// - Objects get `additionalProperties: false` and every property
-///   listed in `required`.
-/// - Properties that were not originally in `required` are made nullable
-///   (via [`make_schema_nullable`]) so the model can emit `null` to omit
-///   them — preserving the schema author's intent that those fields are
-///   optional (per OpenAI's docs: "it is possible to emulate an optional
-///   parameter by using a union type with null").
-/// - Recursion descends into every property value, into `items`, into
-///   each `anyOf` variant, into `$defs`/`definitions`, and into the
-///   entries of an `allOf`.
-/// - `allOf` is flattened into the parent schema (OpenAI's strict mode
-///   doesn't accept composition keywords).
-/// - `null` defaults are stripped (no meaningful distinction in strict
-///   mode).
-/// - A `$ref` with sibling properties is unravelled by inlining the
-///   resolved definition and re-running on the merged result (OpenAI
-///   supports standalone `$ref` but not alongside other keys).
+/// - Objects get `additionalProperties: false` and every property listed in
+///   `required`.
+/// - Properties that were not originally in `required` are made nullable (via
+///   [`make_schema_nullable`]) so the model can emit `null` to omit them —
+///   preserving the schema author's intent that those fields are optional (per
+///   OpenAI's docs: "it is possible to emulate an optional parameter by using a
+///   union type with null").
+/// - Recursion descends into every property value, into `items`, into each
+///   `anyOf` variant, into `$defs`/`definitions`, and into the entries of an
+///   `allOf`.
+/// - `allOf` is flattened into the parent schema (OpenAI's strict mode doesn't
+///   accept composition keywords).
+/// - `null` defaults are stripped (no meaningful distinction in strict mode).
+/// - A `$ref` with sibling properties is unravelled by inlining the resolved
+///   definition and re-running on the merged result (OpenAI supports standalone
+///   `$ref` but not alongside other keys).
 ///
 /// Mirrors the recursion pattern of OpenAI's own SDK helper
-/// (`_ensure_strict_json_schema` in `openai-python`), with two
-/// intentional differences:
+/// (`_ensure_strict_json_schema` in `openai-python`), with two intentional
+/// differences:
 ///
-/// 1. The Python SDK only sets `additionalProperties: false` if it's
-///    missing; we overwrite even if it's `true`. Forgiving rather than
-///    rejecting an upstream mistake that OpenAI would otherwise refuse.
-/// 2. The Python SDK doesn't inject nullability — Pydantic emits the
-///    `anyOf: [..., null]` form upstream. Our function-calling
-///    pipeline goes through `ToolParameterConfig` which encodes
-///    optionality as `required: bool`, so we have to bridge that here.
+/// 1. The Python SDK only sets `additionalProperties: false` if it's missing;
+///    we overwrite even if it's `true`.
+///    Forgiving rather than rejecting an upstream mistake that OpenAI would
+///    otherwise refuse.
+/// 2. The Python SDK doesn't inject nullability — Pydantic emits the `anyOf:
+///    [..., null]` form upstream.
+///    Our function-calling pipeline goes through `ToolParameterConfig` which
+///    encodes optionality as `required: bool`, so we have to bridge that here.
 ///
 /// See: <https://platform.openai.com/docs/guides/structured-outputs>
 fn ensure_strict_schema(schema: &mut Value) {
@@ -1316,7 +1319,7 @@ fn process_strict(schema: &mut Value, root: &Value) {
         && let Some(Value::String(ref_path)) = map.remove("$ref")
     {
         if let Some(resolved) = resolve_ref(&ref_path, root) {
-            // Current schema properties take priority over the
+            // Current schema's keys take priority over the
             // resolved definition's.
             let mut merged = resolved;
             for (k, v) in std::mem::take(map) {
@@ -1403,8 +1406,8 @@ pub(crate) fn parameters_with_strict_mode(
 
 /// Check whether a JSON schema `type` value includes `"object"`.
 ///
-/// Handles both `"object"` (string) and `["object", "null"]` (array)
-/// forms that arise after nullable injection.
+/// Handles both `"object"` (string) and `["object", "null"]` (array) forms that
+/// arise after nullable injection.
 fn is_object_type(type_value: Option<&Value>) -> bool {
     match type_value {
         Some(Value::String(s)) => s == "object",
@@ -1413,31 +1416,31 @@ fn is_object_type(type_value: Option<&Value>) -> bool {
     }
 }
 
-/// Keys that stay at the outer level when wrapping a structured schema
-/// in `anyOf` for nullability. Everything else moves into the typed
-/// variant alongside `type`/`items`/`properties`.
+/// Keys that stay at the outer level when wrapping a structured schema in
+/// `anyOf` for nullability.
+/// Everything else moves into the typed variant alongside
+/// `type`/`items`/`properties`.
 const NULLABLE_OUTER_KEYS: &[&str] = &["description", "title", "default", "examples"];
 
 /// Injects nullability into a raw JSON schema value.
 ///
 /// The encoding depends on the underlying type:
 ///
-/// - **Primitives** (`string`, `integer`, `number`, `boolean`) extend
-///   their `type` field to include `"null"` — `{"type": "string"}`
-///   becomes `{"type": ["string", "null"]}`. This matches OpenAI's
-///   documented optional-field example for strict mode.
-/// - **Structured types** (`array`, `object`) wrap the typed schema in
-///   `anyOf`, lifting descriptive metadata out to the outer level —
-///   `{"type": "array", "items": ..., "description": "..."}` becomes
-///   `{"anyOf": [{"type": "array", "items": ...}, {"type": "null"}],
-///   "description": "..."}`. OpenAI's strict validator rejects the
-///   `type` array form for structured types because it treats the
-///   sibling constraints (`items`, `properties`) as orphaned from the
-///   typed variant; Pydantic (OpenAI's own SDK) emits the same `anyOf`
-///   shape for `Optional[List[T]]` and `Optional[BaseModel]`.
+/// - **Primitives** (`string`, `integer`, `number`, `boolean`) extend their
+///   `type` field to include `"null"` — `{"type": "string"}` becomes `{"type":
+///   ["string", "null"]}`.
+///   This matches OpenAI's documented optional-field example for strict mode.
+/// - **Structured types** (`array`, `object`) wrap the typed schema in `anyOf`,
+///   lifting descriptive metadata out to the outer level — `{"type": "array",
+///   "items": ..., "description": "..."}` becomes `{"anyOf": [{"type": "array",
+///   "items": ...}, {"type": "null"}], "description": "..."}`.
+///   OpenAI's strict validator rejects the `type` array form for structured
+///   types because it treats the sibling constraints (`items`, `properties`) as
+///   orphaned from the typed variant; Pydantic (OpenAI's own SDK) emits the
+///   same `anyOf` shape for `Optional[List[T]]` and `Optional[BaseModel]`.
 ///
-/// Idempotent: a schema that's already nullable (via either encoding)
-/// is returned unchanged.
+/// Idempotent: a schema that's already nullable (via either encoding) is
+/// returned unchanged.
 fn make_schema_nullable(schema: &mut Value) {
     let Value::Object(map) = schema else {
         return;

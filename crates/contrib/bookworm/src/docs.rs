@@ -33,8 +33,9 @@ pub struct Item {
     /// Item documentation in Markdown, converted from rustdoc's HTML.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub documentation: Option<String>,
-    /// Source file path relative to the docset root. Used internally to
-    /// compute `src_resource` URIs and to deduplicate re-exported items.
+    /// Source file path relative to the docset root.
+    /// Used internally to compute `src_resource` URIs and to deduplicate
+    /// re-exported items.
     /// Not serialised — callers expose the URI form instead.
     #[serde(skip)]
     pub src_path: Option<String>,
@@ -144,8 +145,8 @@ fn extract_primary_signature(main: ElementRef<'_>) -> Option<String> {
 
 /// Pull the top-doc out of `<main>`.
 ///
-/// Modern rustdoc wraps it in `<details class="toggle top-doc">`; older
-/// docsets emit a `<div class="docblock">` as a direct child of `<main>`.
+/// Modern rustdoc wraps it in `<details class="toggle top-doc">`; older docsets
+/// emit a `<div class="docblock">` as a direct child of `<main>`.
 /// Returns `None` if the type has no top-level prose (we do **not** fall
 /// through to nested item docblocks — those belong to variants/methods).
 fn extract_primary_documentation(main: ElementRef<'_>) -> Option<String> {
@@ -160,8 +161,9 @@ fn extract_primary_documentation(main: ElementRef<'_>) -> Option<String> {
 }
 
 /// Extract the signature for a rustdoc `<section id="...">` (or any element
-/// targeted by a fragment). Looks for the first heading inside the section
-/// and returns its plain-text content (anchors flattened).
+/// targeted by a fragment).
+/// Looks for the first heading inside the section and returns its plain-text
+/// content (anchors flattened).
 fn extract_fragment_signature(section: ElementRef<'_>) -> Option<String> {
     let heading = section.select(&SECTION_HEADING).next()?;
     let text = heading.text().collect::<String>();
@@ -178,9 +180,11 @@ fn extract_fragment_signature(section: ElementRef<'_>) -> Option<String> {
 /// The docblock is the immediately-following element sibling of the section.
 /// When the section is wrapped in `<summary>` (rustdoc's `<details>` toggle
 /// layout), the docblock is a sibling of the `<summary>`, not of the section
-/// itself. We stop at the first element sibling unconditionally — if it isn't
-/// a docblock, there are no docs. Walking further would risk picking up the
-/// `<div class="impl-items">` (which contains every nested method's docblock).
+/// itself.
+/// We stop at the first element sibling unconditionally — if it isn't a
+/// docblock, there are no docs.
+/// Walking further would risk picking up the `<div class="impl-items">` (which
+/// contains every nested method's docblock).
 fn extract_fragment_documentation(section: ElementRef<'_>) -> Option<String> {
     let anchor = section
         .parent()
@@ -219,9 +223,10 @@ fn extract_src_path(element: ElementRef<'_>, root: &Path, item_path: &str) -> Op
 }
 
 /// Remove rustdoc's `<a class="doc-anchor">§</a>` permalink anchors from a
-/// docblock HTML fragment. These render as ugly `[§](#anchor)` Markdown
-/// links inside section headings (`##### [§](#examples)Examples`) and carry
-/// no value once the docblock has been extracted from its surrounding page.
+/// docblock HTML fragment.
+/// These render as ugly `[§](#anchor)` Markdown links inside section headings
+/// (`##### [§](#examples)Examples`) and carry no value once the docblock has
+/// been extracted from its surrounding page.
 fn strip_doc_anchors(html: &str) -> String {
     let fragment = Html::parse_fragment(html);
     let mut out = html.to_owned();
@@ -232,8 +237,8 @@ fn strip_doc_anchors(html: &str) -> String {
     out
 }
 
-/// True if `el` is a `<div class="docblock">`. Class attribute may have
-/// multiple values; we check word-membership.
+/// True if `el` is a `<div class="docblock">`.
+/// Class attribute may have multiple values; we check word-membership.
 fn is_docblock(el: ElementRef<'_>) -> bool {
     el.value().name() == "div"
         && el
@@ -242,8 +247,9 @@ fn is_docblock(el: ElementRef<'_>) -> bool {
             .is_some_and(|c| c.split_ascii_whitespace().any(|cl| cl == "docblock"))
 }
 
-/// Escape characters with special meaning inside a CSS attribute value
-/// selector (`[id="..."]`). Only `"` and `\` need escaping for our use.
+/// Escape characters with special meaning inside a CSS attribute value selector
+/// (`[id="..."]`).
+/// Only `"` and `\` need escaping for our use.
 fn escape_css_value(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {

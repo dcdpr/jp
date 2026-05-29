@@ -7,8 +7,8 @@ use serde_json::Value;
 /// Session-to-conversation mapping storage.
 ///
 /// Methods use [`serde_json::Value`] instead of generic `T` to keep the trait
-/// dyn-compatible (object-safe). Callers serialize/deserialize at the call
-/// site.
+/// dyn-compatible (object-safe).
+/// Callers serialize/deserialize at the call site.
 pub trait SessionBackend: Send + Sync + Debug {
     /// Load a session mapping as a JSON value.
     ///

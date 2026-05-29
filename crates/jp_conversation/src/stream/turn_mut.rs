@@ -13,9 +13,10 @@ use crate::{
 
 /// A mutable handle to the current turn in a [`ConversationStream`].
 ///
-/// Events are buffered internally and flushed to the stream when [`build()`]
-/// is called. This keeps the stream in a consistent state — partial or invalid
-/// events never appear on the stream.
+/// Events are buffered internally and flushed to the stream when [`build()`] is
+/// called.
+/// This keeps the stream in a consistent state — partial or invalid events
+/// never appear on the stream.
 ///
 /// Two method styles for ergonomics:
 ///
@@ -42,10 +43,14 @@ use crate::{
 /// [`build()`]: TurnMut::build
 #[must_use = "a `TurnMut` does nothing until `.build()` is called"]
 pub struct TurnMut<'a> {
-    /// The stream this handle mutates on [`build()`](TurnMut::build).
+    /// The stream this handle mutates on [`build()`].
+    ///
+    /// [`build()`]: TurnMut::build
     stream: &'a mut ConversationStream,
 
-    /// Buffered events to flush on [`build()`](TurnMut::build).
+    /// Buffered events to flush on [`build()`].
+    ///
+    /// [`build()`]: TurnMut::build
     events: Vec<ConversationEvent>,
 }
 
@@ -168,19 +173,21 @@ impl<'a> TurnMut<'a> {
     /// (or earlier in the buffer), and that no duplicate responses exist.
     ///
     /// All checks are scoped to the **current turn** — events from earlier
-    /// turns are ignored. This is correct because request-response pairing
-    /// is inherently turn-local, and providers like Google may reuse
-    /// synthetic IDs across turns.
+    /// turns are ignored.
+    /// This is correct because request-response pairing is inherently
+    /// turn-local, and providers like Google may reuse synthetic IDs across
+    /// turns.
     ///
     /// Validation uses **count-based matching**: a response is valid when the
     /// number of responses with that ID is still below the number of requests
-    /// with the same ID. This handles providers like Google Gemini that reuse
-    /// the same tool call ID across multiple streaming cycles within a single
-    /// turn.
+    /// with the same ID.
+    /// This handles providers like Google Gemini that reuse the same tool call
+    /// ID across multiple streaming cycles within a single turn.
     ///
     /// # Errors
     ///
     /// Returns an error if:
+    ///
     /// - A [`ToolCallResponse`] has no matching [`ToolCallRequest`]
     /// - A [`ToolCallResponse`] would exceed the number of matching requests
     /// - An [`InquiryResponse`] has no matching [`InquiryRequest`]

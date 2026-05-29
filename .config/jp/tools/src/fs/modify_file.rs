@@ -201,7 +201,8 @@ pub(crate) struct Pattern {
     /// The replacement string.
     pub new: String,
 
-    /// Optional per-pattern file paths. Overrides the root-level `path`.
+    /// Optional per-pattern file paths.
+    /// Overrides the root-level `path`.
     #[serde(default)]
     pub paths: Option<OneOrMany<String>>,
 }
@@ -243,9 +244,9 @@ fn validate_patterns(patterns: &[Pattern]) -> Result<(), String> {
 
 /// Validates that every pattern has at least one target path.
 ///
-/// Per-path safety (relative, no `..`, within workspace root) is enforced
-/// when each target is resolved via `resolve_workspace_path` in the main
-/// loop. This function handles only structural concerns.
+/// Per-path safety (relative, no `..`, within workspace root) is enforced when
+/// each target is resolved via `resolve_workspace_path` in the main loop.
+/// This function handles only structural concerns.
 fn validate_paths(default_path: Option<&str>, patterns: &[Pattern]) -> Result<(), String> {
     if default_path.is_none() {
         let missing: Vec<_> = patterns
@@ -277,9 +278,9 @@ fn validate_paths(default_path: Option<&str>, patterns: &[Pattern]) -> Result<()
 
 /// Formats a report of pattern outcomes.
 ///
-/// Returns empty string when there is a single pattern that succeeded. Shows a
-/// summary when there are multiple patterns, and details which patterns were
-/// not found.
+/// Returns empty string when there is a single pattern that succeeded.
+/// Shows a summary when there are multiple patterns, and details which patterns
+/// were not found.
 fn format_pattern_report(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
     let total = outcomes.len();
     let applied = outcomes
@@ -326,7 +327,8 @@ fn pattern_preview(s: &str) -> String {
 
 /// Prepends a report to a successful outcome.
 ///
-/// Non-success outcomes (e.g. `NeedsInput`) are passed through unchanged.
+/// Non-success outcomes (e.g.
+/// `NeedsInput`) are passed through unchanged.
 fn append_report(outcome: Outcome, report: &str) -> Outcome {
     if report.is_empty() {
         return outcome;
@@ -347,7 +349,8 @@ fn append_report(outcome: Outcome, report: &str) -> Outcome {
 const BLOCKED_REGEX_PATTERNS: &[&str] = &[".*", ".+", "^.*$", "^.+$", r"[\s\S]*", r"[\s\S]+"];
 
 /// Minimum number of lines in the original file before the broad-change check
-/// activates. Small files are not worth flagging.
+/// activates.
+/// Small files are not worth flagging.
 const BROAD_CHANGE_MIN_LINES: usize = 10;
 
 /// Maximum percentage of changed (deleted) lines to total lines before asking
@@ -374,8 +377,8 @@ fn find_blocked_regex_patterns(patterns: &[Pattern]) -> Option<Vec<&str>> {
 /// Returns `true` if the change modifies a suspiciously large fraction of the
 /// file.
 ///
-/// Only activates for files with at least [`BROAD_CHANGE_MIN_LINES`] lines. The
-/// ratio is computed as deleted lines / total original lines.
+/// Only activates for files with at least [`BROAD_CHANGE_MIN_LINES`] lines.
+/// The ratio is computed as deleted lines / total original lines.
 fn is_broad_change(before: &str, after: &str) -> bool {
     let total_lines = before.lines().count();
     if total_lines < BROAD_CHANGE_MIN_LINES {
@@ -393,8 +396,8 @@ fn is_broad_change(before: &str, after: &str) -> bool {
 
 /// Checks the user's answer to the `broad_replacement` question.
 ///
-/// Returns `None` if the user approved (continue execution). Returns
-/// `Some(ToolResult)` if the user rejected or hasn't answered yet.
+/// Returns `None` if the user approved (continue execution).
+/// Returns `Some(ToolResult)` if the user rejected or hasn't answered yet.
 fn guard_broad_replacement(
     answers: &Map<String, Value>,
     reject_message: &str,
@@ -509,8 +512,9 @@ impl Content {
     /// Replace occurrences of a literal string.
     ///
     /// Uses [`Content::find_pattern_range`] to locate the first occurrence
-    /// (trying exact, trimmed, and fuzzy matching). When `replace_all` is true,
-    /// all subsequent exact matches of the resolved text are also replaced.
+    /// (trying exact, trimmed, and fuzzy matching).
+    /// When `replace_all` is true, all subsequent exact matches of the resolved
+    /// text are also replaced.
     fn replace_literal(
         &self,
         find: &str,
@@ -689,9 +693,10 @@ fn parse_auto_approve_config(options: &Map<String, Value>) -> AutoApproveConfig 
 /// inquiry.
 ///
 /// Criteria (all must hold):
-/// - Tlta. changed files <= threshold
-/// - Total changed lines (insertions + deletions) <= threshold
-/// - Deletion ratio per file < threshold percent
+///
+/// - Tlta. changed files \<= threshold
+/// - Total changed lines (insertions + deletions) \<= threshold
+/// - Deletion ratio per file \< threshold percent
 fn should_auto_approve(changes: &[(String, String, String)], config: &AutoApproveConfig) -> bool {
     if !config.enabled || changes.len() > config.max_changed_files {
         return false;
@@ -815,8 +820,8 @@ fn apply_changes<R: ProcessRunner>(
     .into())
 }
 
-/// Formats a line number as a right-aligned string of the given width,
-/// or blank spaces if the index is `None`.
+/// Formats a line number as a right-aligned string of the given width, or blank
+/// spaces if the index is `None`.
 fn fmt_line_num(index: Option<usize>, width: usize) -> String {
     match index {
         Some(idx) => format!("{:>width$}", idx + 1),

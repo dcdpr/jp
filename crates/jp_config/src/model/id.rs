@@ -34,9 +34,6 @@ pub enum ModelIdOrAliasConfig {
     ///
     /// The matching [`ModelIdConfig`] can be fetched using
     /// [`LlmProviderConfig::aliases`].
-    ///
-    /// [`LlmProviderConfig::aliases`]:
-    /// crate::providers::llm::LlmProviderConfig::aliases
     #[setting(with = "alias")]
     Alias(String),
 }
@@ -150,13 +147,15 @@ impl ModelIdOrAliasConfig {
 
     /// Resolve to a [`ModelIdConfig`] using the alias map.
     ///
-    /// Prefer [`resolved()`](Self::resolved) when working with an
-    /// already-resolved `AppConfig`. This method is for the resolution step
-    /// itself and for code paths that work with partial/unresolved configs.
+    /// Prefer [`resolved()`] when working with an already-resolved `AppConfig`.
+    /// This method is for the resolution step itself and for code paths that
+    /// work with partial/unresolved configs.
     ///
     /// # Errors
     ///
     /// Returns an error if the configuration cannot be resolved.
+    ///
+    /// [`resolved()`]: Self::resolved
     pub fn finalize(
         &self,
         aliases: &IndexMap<String, ModelIdConfig>,
@@ -209,16 +208,17 @@ impl PartialModelIdOrAliasConfig {
 
     /// Resolve to a concrete [`ModelIdConfig`] using the concrete alias map.
     ///
-    /// This bridges partial config types (from e.g. `QuestionTarget::Assistant`)
-    /// with the concrete alias map in [`LlmProviderConfig::aliases`].
-    ///
-    /// [`LlmProviderConfig::aliases`]: crate::providers::llm::LlmProviderConfig::aliases
+    /// This bridges partial config types (from e.g.
+    /// `QuestionTarget::Assistant`) with the concrete alias map in
+    /// [`LlmProviderConfig::aliases`].
     ///
     /// # Errors
     ///
     /// Returns an error if the alias is unknown and cannot be parsed as a
-    /// `provider/name` model ID, or if a direct ID is missing the provider
-    /// or name fields.
+    /// `provider/name` model ID, or if a direct ID is missing the provider or
+    /// name fields.
+    ///
+    /// [`LlmProviderConfig::aliases`]: crate::providers::llm::LlmProviderConfig::aliases
     pub fn resolve(
         &self,
         aliases: &IndexMap<String, ModelIdConfig>,
@@ -238,8 +238,8 @@ impl PartialModelIdOrAliasConfig {
 
     /// Resolve an `Alias` variant in place using the concrete alias map.
     ///
-    /// If this is already an `Id`, this is a no-op. If it's an `Alias`, it's
-    /// replaced with `Id(resolved.to_partial())`.
+    /// If this is already an `Id`, this is a no-op.
+    /// If it's an `Alias`, it's replaced with `Id(resolved.to_partial())`.
     ///
     /// Used to sanitize `PartialAppConfig` values before storing them as
     /// `ConfigDelta`s in the conversation stream.
@@ -485,32 +485,44 @@ impl FromStr for PartialModelIdConfig {
 #[serde(rename_all = "lowercase")]
 pub enum ProviderId {
     #[default]
-    /// Anthropic provider. See: <https://www.anthropic.com/api>.
+    /// Anthropic provider.
+    /// See: <https://www.anthropic.com/api>.
     Anthropic,
-    /// Cerebras provider. See: <https://cerebras.ai>.
+    /// Cerebras provider.
+    /// See: <https://cerebras.ai>.
     Cerebras,
-    /// Deepseek provider. See: <https://api-docs.deepseek.com>. UNIMPLEMENTED.
+    /// Deepseek provider.
+    /// See: <https://api-docs.deepseek.com>.
+    /// UNIMPLEMENTED.
     Deepseek,
-    /// Google Gemini provider. See: <https://ai.google.dev/gemini-api/docs>.
+    /// Google Gemini provider.
+    /// See: <https://ai.google.dev/gemini-api/docs>.
     Google,
-    /// Llama.cpp provider. See: <https://github.com/ggml-org/llama.cpp>.
+    /// Llama.cpp provider.
+    /// See: <https://github.com/ggml-org/llama.cpp>.
     Llamacpp,
-    /// Ollama provider. See: <https://ollama.com>.
+    /// Ollama provider.
+    /// See: <https://ollama.com>.
     Ollama,
-    /// Openai provider. See: <https://openai.com/api/>.
+    /// Openai provider.
+    /// See: <https://openai.com/api/>.
     Openai,
-    /// Openrouter provider. See: <https://openrouter.io>.
+    /// Openrouter provider.
+    /// See: <https://openrouter.io>.
     Openrouter,
-    /// xAI provider. See: <https://x.ai/api>. UNIMPLEMENTED.
+    /// xAI provider.
+    /// See: <https://x.ai/api>.
+    /// UNIMPLEMENTED.
     Xai,
 
-    /// Test provider for unit and integration tests. Not a real provider.
+    /// Test provider for unit and integration tests.
+    /// Not a real provider.
     #[serde(skip)]
     Test,
 }
 
 impl ProviderId {
-    /// Get the provider ID as a &str.
+    /// Get the provider ID as a \&str.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {

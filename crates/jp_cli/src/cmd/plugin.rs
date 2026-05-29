@@ -1,6 +1,7 @@
 //! Plugin management and dispatch.
 //!
 //! This module handles:
+//!
 //! - `jp plugin list|install|update` management subcommands
 //! - External plugin dispatch (spawning `jp-<name>` binaries)
 //!

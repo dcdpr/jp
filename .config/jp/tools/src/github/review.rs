@@ -93,8 +93,9 @@ pub(crate) async fn github_pr_review_add_comment(
     Ok(format!("Comment queued on PR #{pull_number} at {location}.").into())
 }
 
-/// Find the current user's pending review on the PR, or lazily create an
-/// empty one. Returns the review's GraphQL `node_id`.
+/// Find the current user's pending review on the PR, or lazily create an empty
+/// one.
+/// Returns the review's GraphQL `node_id`.
 async fn ensure_pending_review(pull_number: u64) -> Result<String> {
     let me = jp_github::instance().current().user().await?;
 
@@ -203,8 +204,9 @@ async fn format_for_approval(
 
 /// Fetch a few lines of context around the commented line(s).
 ///
-/// For `RIGHT` side, fetch the file at the PR's head SHA. For `LEFT` side,
-/// fetch the base. Falls back to an error message if any step fails.
+/// For `RIGHT` side, fetch the file at the PR's head SHA.
+/// For `LEFT` side, fetch the base.
+/// Falls back to an error message if any step fails.
 async fn fetch_snippet(
     pull_number: u64,
     path: &str,

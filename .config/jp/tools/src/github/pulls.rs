@@ -5,8 +5,9 @@ use url::Url;
 use super::{State, auth_optional, parse_repo};
 use crate::{Result, github::handle_404, to_xml};
 
-/// Comments-per-page when fetching a specific pull request. Matches the
-/// issues tool — long discussions are walked with the `page` parameter.
+/// Comments-per-page when fetching a specific pull request.
+/// Matches the issues tool — long discussions are walked with the `page`
+/// parameter.
 const COMMENTS_PER_PAGE: u8 = 10;
 
 pub(crate) async fn github_pulls(
@@ -104,8 +105,8 @@ async fn get(owner: &str, repo: &str, number: u64, page: u64) -> Result<String> 
     })
 }
 
-/// Items per page when listing pull requests. Fixed at 100 (the
-/// GitHub API max for this endpoint).
+/// Items per page when listing pull requests.
+/// Fixed at 100 (the GitHub API max for this endpoint).
 const LIST_PER_PAGE: u8 = 100;
 
 async fn list(owner: &str, repo: &str, state: Option<State>, page: u64) -> Result<String> {

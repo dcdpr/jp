@@ -222,10 +222,11 @@ fn convert_tool_choice_values() {
 }
 
 /// `finish_reason: "length"` followed by `[DONE]` must not flush any pending
-/// tool-call buffers. When the model hits the token limit mid-tool-call, the
-/// arguments are structurally incomplete; the safety-net drain on `[DONE]`
-/// would otherwise commit them with truncated JSON (degraded to `{}`), which
-/// could re-dispatch a partial call.
+/// tool-call buffers.
+/// When the model hits the token limit mid-tool-call, the arguments are
+/// structurally incomplete; the safety-net drain on `[DONE]` would otherwise
+/// commit them with truncated JSON (degraded to `{}`), which could re-dispatch
+/// a partial call.
 #[test]
 fn length_finish_reason_drops_pending_tool_calls() {
     let mut state = StreamState {

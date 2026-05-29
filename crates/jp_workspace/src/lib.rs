@@ -90,7 +90,8 @@ impl Workspace {
     /// Creates a new workspace with the given root directory.
     ///
     /// The workspace starts with in-memory backends (no filesystem
-    /// persistence). Call [`with_backend`] to wire in a storage backend.
+    /// persistence).
+    /// Call [`with_backend`] to wire in a storage backend.
     ///
     /// [`with_backend`]: Self::with_backend
     pub fn new(root: impl Into<Utf8PathBuf>) -> Self {
@@ -169,8 +170,9 @@ impl Workspace {
     /// Disable persistence for the workspace.
     ///
     /// Swaps the persist backend to [`NullPersistBackend`], which silently
-    /// discards all writes. Already-created `ConversationMut` instances hold
-    /// their own `Arc` clone of the original backend and continue to persist.
+    /// discards all writes.
+    /// Already-created `ConversationMut` instances hold their own `Arc` clone
+    /// of the original backend and continue to persist.
     pub fn disable_persistence(&mut self) {
         self.persist = Arc::new(NullPersistBackend);
     }
@@ -184,8 +186,8 @@ impl Workspace {
     /// Call [`sanitize`] before this method to ensure the backing store is in a
     /// consistent state.
     ///
-    /// [`metadata`]: Self::metadata
     /// [`events`]: Self::events
+    /// [`metadata`]: Self::metadata
     /// [`sanitize`]: Self::sanitize
     pub fn load_conversation_index(&mut self) {
         trace!("Loading conversation index.");
@@ -236,8 +238,9 @@ impl Workspace {
     /// Remove expired ephemeral conversations.
     ///
     /// Scans the backing store for conversations whose `expires_at` timestamp
-    /// is in the past, then removes them through the persist backend. If
-    /// persistence is disabled (`NullPersistBackend`), the removes are no-ops.
+    /// is in the past, then removes them through the persist backend.
+    /// If persistence is disabled (`NullPersistBackend`), the removes are
+    /// no-ops.
     pub fn remove_ephemeral_conversations(&mut self, skip: &[ConversationId]) {
         let expired = self
             .loader
@@ -256,10 +259,11 @@ impl Workspace {
     /// Returns an iterator over all conversations.
     ///
     /// Uninitialized metadata is loaded from the backing store in parallel (via
-    /// rayon) on first access. Already-loaded conversations are returned as-is.
+    /// rayon) on first access.
+    /// Already-loaded conversations are returned as-is.
     ///
-    /// Each item yields a read guard that auto-derefs to `&Conversation`. Do
-    /// **not** hold these guards across `.await` points.
+    /// Each item yields a read guard that auto-derefs to `&Conversation`.
+    /// Do **not** hold these guards across `.await` points.
     pub fn conversations(
         &self,
     ) -> impl Iterator<Item = (&ConversationId, ArcRwLockReadGuard<RawRwLock, Conversation>)> {
@@ -273,9 +277,11 @@ impl Workspace {
 
     /// Create a new conversation in memory.
     ///
-    /// Returns the conversation ID. No data is written to the backing store and
-    /// no cross-process lock is acquired. Persistence happens when a
-    /// [`ConversationMut`] holding this conversation is flushed or dropped.
+    /// Returns the conversation ID.
+    /// No data is written to the backing store and no cross-process lock is
+    /// acquired.
+    /// Persistence happens when a [`ConversationMut`] holding this conversation
+    /// is flushed or dropped.
     ///
     /// For code that needs cross-process exclusion from the start, use
     /// [`create_and_lock_conversation`] instead.
@@ -324,9 +330,9 @@ impl Workspace {
     /// Create a new conversation and acquire an exclusive lock on it.
     ///
     /// Inserts into in-memory state and acquires an exclusive lock atomically,
-    /// so no other process can claim the same conversation ID. For in-memory
-    /// backends the lock has no cross-process backing but still provides the
-    /// type-level mutation guarantee.
+    /// so no other process can claim the same conversation ID.
+    /// For in-memory backends the lock has no cross-process backing but still
+    /// provides the type-level mutation guarantee.
     pub fn create_and_lock_conversation(
         &mut self,
         conversation: Conversation,
@@ -356,9 +362,10 @@ impl Workspace {
 
     /// Lock a just-created conversation.
     ///
-    /// Returns an error if the lock cannot be acquired. A freshly created
-    /// conversation should always be lockable — failure here indicates an
-    /// infrastructure problem (e.g. a stale lock file from a crashed process).
+    /// Returns an error if the lock cannot be acquired.
+    /// A freshly created conversation should always be lockable — failure here
+    /// indicates an infrastructure problem (e.g. a stale lock file from a
+    /// crashed process).
     fn lock_new_conversation(
         &self,
         id: ConversationId,
@@ -504,8 +511,9 @@ impl Workspace {
 
     /// Archive a conversation, consuming its lock.
     ///
-    /// Moves the conversation to the archive partition. The conversation is
-    /// removed from the in-memory index and excluded from normal operations.
+    /// Moves the conversation to the archive partition.
+    /// The conversation is removed from the in-memory index and excluded from
+    /// normal operations.
     pub fn archive_conversation(&mut self, mut conv: ConversationMut) {
         let id = conv.id();
 
@@ -532,7 +540,8 @@ impl Workspace {
     /// Restore a conversation from the archive.
     ///
     /// Moves the conversation back to the active partition and inserts it into
-    /// the in-memory index. Returns a handle for the restored conversation.
+    /// the in-memory index.
+    /// Returns a handle for the restored conversation.
     pub fn unarchive_conversation(&mut self, id: &ConversationId) -> Result<ConversationHandle> {
         // Move out of .archive/ first, then clear archived_at through the
         // normal persist path. If the metadata write fails, the conversation
@@ -567,8 +576,9 @@ impl Workspace {
 
     /// Returns an iterator over archived conversations.
     ///
-    /// Loads metadata for each archived conversation on demand. This performs
-    /// I/O for every call — it is not cached in the workspace index.
+    /// Loads metadata for each archived conversation on demand.
+    /// This performs I/O for every call — it is not cached in the workspace
+    /// index.
     pub fn archived_conversations(
         &self,
     ) -> impl Iterator<Item = (ConversationId, Conversation)> + '_ {
@@ -722,8 +732,8 @@ fn maybe_init_events(
 /// Environment variable used to override the user data directory.
 ///
 /// When set, [`user_data_dir`] returns this path verbatim, taking precedence
-/// over `XDG_DATA_HOME` and the platform default. The path is JP-specific:
-/// no `jp` suffix is appended.
+/// over `XDG_DATA_HOME` and the platform default.
+/// The path is JP-specific: no `jp` suffix is appended.
 const USER_DATA_DIR_ENV_VAR: &str = "JP_USER_DATA_DIR";
 
 /// Returns the directory JP stores its per-user data in.
@@ -732,14 +742,15 @@ const USER_DATA_DIR_ENV_VAR: &str = "JP_USER_DATA_DIR";
 ///
 /// 1. `JP_USER_DATA_DIR` if set to a non-empty value (used verbatim).
 ///    Empty values are treated as unset to avoid silently redirecting
-///    persistent state into the current working directory when callers
-///    join relative paths onto the result.
+///    persistent state into the current working directory when callers join
+///    relative paths onto the result.
 /// 2. `$XDG_DATA_HOME/jp` if `XDG_DATA_HOME` is set to an absolute path.
 ///    Honored on all platforms, not just Linux — on macOS and Windows this
-///    lets users who run JP alongside other XDG-aware tools keep their data
-///    in one place rather than under `~/Library/Application Support` or
-///    `%LOCALAPPDATA%`. Per the XDG Base Directory Specification, empty or
-///    relative values are treated as unset.
+///    lets users who run JP alongside other XDG-aware tools keep their data in
+///    one place rather than under `~/Library/Application Support` or
+///    `%LOCALAPPDATA%`.
+///    Per the XDG Base Directory Specification, empty or relative values are
+///    treated as unset.
 /// 3. The platform default via `directories::ProjectDirs::data_local_dir`.
 pub fn user_data_dir() -> Result<Utf8PathBuf> {
     if let Ok(path) = env::var(USER_DATA_DIR_ENV_VAR)

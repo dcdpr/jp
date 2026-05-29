@@ -1,7 +1,7 @@
 # Bookworm
 
-An MCP server (and accompanying CLI utilities) for working with
-[docs.rs](https://docs.rs) Rust crate documentation.
+An MCP server (and accompanying CLI utilities) for working with [docs.rs] Rust
+crate documentation.
 
 The `bookworm` binary exposes three subcommands:
 
@@ -56,15 +56,18 @@ Search for item definitions within a crate.
 
 Each item contains:
 
-- Item Path (e.g. `serde_json::value::Value`)
-- Item Type (e.g. `enum`)
+- Item Path (e.g.
+  `serde_json::value::Value`)
+- Item Type (e.g.
+  `enum`)
 - Type Signature
 - Documentation
 - Related Resource URIs
 
 #### `crate_resource`
 
-Fetch a resource for a crate, by URI. Supported URIs:
+Fetch a resource for a crate, by URI.
+Supported URIs:
 
 - `crate://{crate_name}` — list crate versions
 - `crate://{crate_name}/{crate_version}` — get metadata
@@ -99,8 +102,8 @@ cargo run -p bookworm -- download regex
 
 ### `bookworm index`
 
-Index a previously-downloaded documentation tree into a SQLite database used
-by the MCP server's search:
+Index a previously-downloaded documentation tree into a SQLite database used by
+the MCP server's search:
 
 ```sh
 cargo run -p bookworm -- index /tmp/regex/...
@@ -108,4 +111,5 @@ cargo run -p bookworm -- index /tmp/regex/...
 
 The default output path is `./index.sqlite`.
 
+[docs.rs]: https://docs.rs
 [mcp]: https://modelcontextprotocol.io

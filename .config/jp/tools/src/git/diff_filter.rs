@@ -2,14 +2,15 @@
 //!
 //! - [`truncate_diff`] caps a diff's total line count.
 //! - [`grep_diff`] greps within a diff and returns matching lines with
-//!   surrounding context, synthesizing per-region hunk headers so the output
-//!   is still a valid-looking unified diff. Accepts an optional 1-based
-//!   inclusive `bounds` window: when set, only matches inside the window
-//!   are visible, but the structural-header walk still scans the whole diff
-//!   so synthesized `@@` headers carry correct original-file line numbers.
+//!   surrounding context, synthesizing per-region hunk headers so the output is
+//!   still a valid-looking unified diff.
+//!   Accepts an optional 1-based inclusive `bounds` window: when set, only
+//!   matches inside the window are visible, but the structural-header walk
+//!   still scans the whole diff so synthesized `@@` headers carry correct
+//!   original-file line numbers.
 //!
-//! Both functions return `(content, optional_note)` where the note is meant
-//! to be displayed outside the fenced code block.
+//! Both functions return `(content, optional_note)` where the note is meant to
+//! be displayed outside the fenced code block.
 
 use std::{borrow::Cow, fmt::Write};
 
@@ -19,13 +20,14 @@ use std::{borrow::Cow, fmt::Write};
 /// `[Showing X/Y lines...]` meant to be displayed outside the fenced code
 /// block.
 ///
-/// `bounds`, when set, is a 1-based inclusive `(start, end)` window of
-/// rendered diff lines. Only lines inside the window are eligible for
-/// matching, and context expansion is clamped to the window. The structural
-/// walk (`diff --git` / `@@` tracking and `old_line`/`new_line` counters)
-/// still scans the entire diff so synthesized `@@` headers in the output
-/// carry correct original-file line numbers — even when the window starts
-/// mid-hunk and the user therefore never sees the seeding `@@` line.
+/// `bounds`, when set, is a 1-based inclusive `(start, end)` window of rendered
+/// diff lines.
+/// Only lines inside the window are eligible for matching, and context
+/// expansion is clamped to the window.
+/// The structural walk (`diff --git` / `@@` tracking and `old_line`/`new_line`
+/// counters) still scans the entire diff so synthesized `@@` headers in the
+/// output carry correct original-file line numbers — even when the window
+/// starts mid-hunk and the user therefore never sees the seeding `@@` line.
 #[expect(clippy::too_many_lines)]
 pub(super) fn grep_diff<'a>(
     diff: &str,
@@ -215,10 +217,11 @@ pub(super) fn truncate_diff(diff: &str, max_lines: usize) -> (Cow<'_, str>, Opti
 
 /// Validate user-provided line range arguments.
 ///
-/// Checks the static cross-cuts: both bounds must be positive, and `start`
-/// must not exceed `end`. The bound-vs-content check (`start > total_lines`)
-/// happens in the caller, since it depends on the diff's actual size and the
-/// error message wants to include that count.
+/// Checks the static cross-cuts: both bounds must be positive, and `start` must
+/// not exceed `end`.
+/// The bound-vs-content check (`start > total_lines`) happens in the caller,
+/// since it depends on the diff's actual size and the error message wants to
+/// include that count.
 pub(super) fn validate_line_range(
     start: Option<usize>,
     end: Option<usize>,
@@ -237,16 +240,17 @@ pub(super) fn validate_line_range(
     Ok(())
 }
 
-/// Slice the diff to a 1-based output-line range, returning just the
-/// extracted body without markers.
+/// Slice the diff to a 1-based output-line range, returning just the extracted
+/// body without markers.
 ///
 /// `start_line` and `end_line` are inclusive 1-based offsets into the diff's
-/// rendered output. Markers are added separately by [`add_slice_markers`]
-/// after any other processing (grep, truncate) so the slice context is still
-/// visible even when the body has been further filtered.
+/// rendered output.
+/// Markers are added separately by [`add_slice_markers`] after any other
+/// processing (grep, truncate) so the slice context is still visible even when
+/// the body has been further filtered.
 ///
-/// Validation (positive bounds, ordering, `start <= total`) must happen in
-/// the caller before this is invoked.
+/// Validation (positive bounds, ordering, `start <= total`) must happen in the
+/// caller before this is invoked.
 pub(super) fn slice_diff(diff: &str, start_line: Option<usize>, end_line: Option<usize>) -> String {
     let lines: Vec<&str> = diff.lines().collect();
     let total = lines.len();
@@ -265,15 +269,16 @@ pub(super) fn slice_diff(diff: &str, start_line: Option<usize>, end_line: Option
 /// Wrap content with `fs_read_file`-style range markers.
 ///
 /// Mirrors `fs_read_file`'s output shape:
+///
 /// ```text
 /// ... (starting from line #N) ...
 /// <content>
 /// ... (truncated after line #M) ...
 /// ```
 ///
-/// Applied as the last step so that markers consistently bracket whatever
-/// the prior pipeline produced (slice, grep-with-bounds, or truncate) without
-/// each branch having to weave the markers through itself.
+/// Applied as the last step so that markers consistently bracket whatever the
+/// prior pipeline produced (slice, grep-with-bounds, or truncate) without each
+/// branch having to weave the markers through itself.
 pub(super) fn add_slice_markers(
     content: &mut String,
     start_line: Option<usize>,
@@ -289,8 +294,8 @@ pub(super) fn add_slice_markers(
 
 /// Parse old and new start lines from a `@@` hunk header.
 ///
-/// Format: `@@ -old_start,old_count +new_start,new_count @@`
-/// Returns `(old_start, new_start)`, defaulting to 0 on parse failure.
+/// Format: `@@ -old_start,old_count +new_start,new_count @@` Returns
+/// `(old_start, new_start)`, defaulting to 0 on parse failure.
 fn parse_hunk_start(hunk_header: &str) -> (usize, usize) {
     let old = parse_hunk_section(hunk_header, '-');
     let new = parse_hunk_section(hunk_header, '+');

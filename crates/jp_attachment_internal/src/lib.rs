@@ -2,12 +2,12 @@
 //!
 //! Scheme: `jp://<jp-id>[?<query>]`
 //!
-//! The variant character of the JP ID dispatches to a specific resource
-//! type. Today only conversations (`jp-c<digits>`) are supported. Each
-//! resource type owns its own set of query parameters.
+//! The variant character of the JP ID dispatches to a specific resource type.
+//! Today only conversations (`jp-c<digits>`) are supported.
+//! Each resource type owns its own set of query parameters.
 //!
-//! See the crate README for full documentation of supported resources and
-//! their parameters.
+//! See the crate README for full documentation of supported resources and their
+//! parameters.
 
 use std::{
     error::Error,
@@ -40,7 +40,8 @@ const PARAM_RAW: &str = "raw";
 
 /// What raw-mode output to include.
 ///
-/// Triggered by the `raw` query parameter. Absent = rendered markdown.
+/// Triggered by the `raw` query parameter.
+/// Absent = rendered markdown.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 enum RawMode {
     /// Selected conversation events as JSON.
@@ -73,13 +74,14 @@ struct Entry {
     /// The full JP ID, e.g. `jp-c17013123456`.
     id: String,
 
-    /// Selector DSL value. The grammar depends on the ID's variant. For
-    /// conversations this is the `CONTENT[:RANGE]` DSL. Empty = resource
-    /// default.
+    /// Selector DSL value.
+    /// The grammar depends on the ID's variant.
+    /// For conversations this is the `CONTENT[:RANGE]` DSL.
+    /// Empty = resource default.
     select: String,
 
-    /// Raw-mode output flag. `None` = rendered output (markdown for
-    /// conversations).
+    /// Raw-mode output flag.
+    /// `None` = rendered output (markdown for conversations).
     raw: Option<RawMode>,
 }
 
@@ -119,17 +121,20 @@ impl Entry {
 
 /// Errors produced when resolving a `jp://` URI.
 ///
-/// The [`ConversationMissing`](Self::ConversationMissing) variant is
-/// surfaced separately so callers that re-resolve persisted attachments —
-/// notably `jp query` — can warn and skip dead references instead of
-/// aborting the entire operation. Every other failure (invalid URI,
-/// malformed selector, I/O error, etc.) goes through
-/// [`Other`](Self::Other) and should be treated as a hard error.
+/// The [`ConversationMissing`] variant is surfaced separately so callers that
+/// re-resolve persisted attachments — notably `jp query` — can warn and skip
+/// dead references instead of aborting the entire operation.
+/// Every other failure (invalid URI, malformed selector, I/O error, etc.) goes
+/// through [`Other`] and should be treated as a hard error.
+///
+/// [`ConversationMissing`]: Self::ConversationMissing
+/// [`Other`]: Self::Other
 #[derive(Debug, ThisError)]
 pub enum ResolveError {
     /// The referenced conversation is not present in the workspace's active
-    /// index. This happens when the conversation has been archived or
-    /// removed since the attachment was registered.
+    /// index.
+    /// This happens when the conversation has been archived or removed since
+    /// the attachment was registered.
     #[error("conversation '{0}' not found")]
     ConversationMissing(ConversationId),
 
@@ -480,8 +485,9 @@ impl fmt::Display for Entry {
 
 /// Collect events that match the given selector, preserving conversation order.
 ///
-/// Used by raw output mode. `TurnStart` events that fall within the selected
-/// range are always included (they're cheap context for debugging).
+/// Used by raw output mode.
+/// `TurnStart` events that fall within the selected range are always included
+/// (they're cheap context for debugging).
 fn collect_selected_events(
     stream: &ConversationStream,
     selector: Selector,
@@ -502,8 +508,9 @@ fn collect_selected_events(
     out
 }
 
-/// Returns `true` if the event kind matches the content filter. `TurnStart`
-/// is always considered a match — it's a free, low-cost context marker.
+/// Returns `true` if the event kind matches the content filter.
+/// `TurnStart` is always considered a match — it's a free, low-cost context
+/// marker.
 fn content_matches(kind: &EventKind, content: Content) -> bool {
     match kind {
         EventKind::TurnStart(_) => true,

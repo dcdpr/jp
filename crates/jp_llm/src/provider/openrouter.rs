@@ -128,8 +128,8 @@ impl Provider for Openrouter {
 
 /// Aggregation state for a single stream of events.
 struct AggregationState {
-    /// Tracks which tool call indices have been seen, so we can flush them
-    /// on finish.
+    /// Tracks which tool call indices have been seen, so we can flush them on
+    /// finish.
     tool_call_indices: Vec<usize>,
 
     /// Did the stream of events have any reasoning content?
@@ -147,12 +147,14 @@ struct AggregationState {
 ///
 /// For example, if we use Openrouter to call an Openai model with reasoning
 /// support, Openrouter will send us the "encryted reasoning" content in the
-/// payload. We take that data, and morph it into a certain metadata shape that
-/// can be read by both the Openrouter and Openai provider implementations, such
-/// that the reasoning content can be used in future turns, regardless of
-/// whether the conversation keeps using the Openrouter provider, or switches to
-/// the Openai provider. The same applies to Anthropic, and other providers for
-/// which Openrouter has provider-specific metadata support.
+/// payload.
+/// We take that data, and morph it into a certain metadata shape that can be
+/// read by both the Openrouter and Openai provider implementations, such that
+/// the reasoning content can be used in future turns, regardless of whether the
+/// conversation keeps using the Openrouter provider, or switches to the Openai
+/// provider.
+/// The same applies to Anthropic, and other providers for which Openrouter has
+/// provider-specific metadata support.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 struct MultiProviderMetadata {
     // NOTE: This has to remain in sync with

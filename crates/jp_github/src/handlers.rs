@@ -64,12 +64,12 @@ impl IssuesHandler {
         }
     }
 
-    /// Begin building a single-page fetch of conversation comments for an
-    /// issue or pull request.
+    /// Begin building a single-page fetch of conversation comments for an issue
+    /// or pull request.
     ///
-    /// Returns a single page rather than auto-paginating; callers that
-    /// need to step through long threads pass an explicit `page`. This
-    /// keeps responses bounded for LLM consumption — long discussions
+    /// Returns a single page rather than auto-paginating; callers that need to
+    /// step through long threads pass an explicit `page`.
+    /// This keeps responses bounded for LLM consumption — long discussions
     /// would otherwise blow the context window.
     #[must_use]
     pub fn list_comments(&self, number: u64) -> IssueCommentListBuilder {
@@ -94,7 +94,8 @@ pub struct IssueCommentListBuilder {
 }
 
 impl IssueCommentListBuilder {
-    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    /// Set the 1-indexed page number to fetch.
+    /// Defaults to 1.
     #[must_use]
     pub const fn page(mut self, page: u64) -> Self {
         self.page = page;
@@ -137,15 +138,16 @@ pub struct IssueListBuilder {
 }
 
 impl IssueListBuilder {
-    /// Filter the list by state. Defaults to `Open`, matching GitHub's
-    /// own default for this endpoint.
+    /// Filter the list by state.
+    /// Defaults to `Open`, matching GitHub's own default for this endpoint.
     #[must_use]
     pub const fn state(mut self, state: params::State) -> Self {
         self.state = state;
         self
     }
 
-    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    /// Set the 1-indexed page number to fetch.
+    /// Defaults to 1.
     #[must_use]
     pub const fn page(mut self, page: u64) -> Self {
         self.page = page;
@@ -161,9 +163,9 @@ impl IssueListBuilder {
     /// Fetch a single page of issues.
     ///
     /// Deliberately does not auto-paginate: callers may be pointed at an
-    /// arbitrary repository, and walking every page of `rust-lang/rust`
-    /// (for example) would blow rate limits and any reasonable response
-    /// budget. Use [`Self::page`] to step through the list.
+    /// arbitrary repository, and walking every page of `rust-lang/rust` (for
+    /// example) would blow rate limits and any reasonable response budget.
+    /// Use [`Self::page`] to step through the list.
     pub async fn send(self) -> Result<Vec<models::issues::Issue>> {
         let query = vec![
             ("state".to_owned(), self.state.as_str().to_owned()),
@@ -278,10 +280,10 @@ impl PullsHandler {
     /// Begin building a single-page fetch of the files changed in a pull
     /// request.
     ///
-    /// Like the other list builders, this returns a single page rather
-    /// than auto-paginating — callers that need to walk every file step
-    /// through pages explicitly. Keeps responses bounded for arbitrary
-    /// repositories.
+    /// Like the other list builders, this returns a single page rather than
+    /// auto-paginating — callers that need to walk every file step through
+    /// pages explicitly.
+    /// Keeps responses bounded for arbitrary repositories.
     #[must_use]
     pub fn list_files(&self, number: u64) -> PullFilesListBuilder {
         PullFilesListBuilder {
@@ -307,26 +309,25 @@ impl PullsHandler {
             .await
     }
 
-    /// Fetch every inline review comment on a pull request, including
-    /// pending review comments authored by the current user.
+    /// Fetch every inline review comment on a pull request, including pending
+    /// review comments authored by the current user.
     ///
     /// Uses GraphQL `pullRequest.reviewThreads` so each returned
     /// [`ReviewComment`] carries:
     ///
     /// - The thread-level [`Side`] in `side` / `start_side`.
-    /// - GitHub's authoritative `outdated` flag
-    ///   ([`ReviewComment::outdated`]).
+    /// - GitHub's authoritative `outdated` flag ([`ReviewComment::outdated`]).
     /// - File-line anchors (`line`, `start_line`, `original_line`,
-    ///   `original_start_line`) directly from GraphQL, which are reliable
-    ///   even for pending comments where REST returns null.
+    ///   `original_start_line`) directly from GraphQL, which are reliable even
+    ///   for pending comments where REST returns null.
     ///
-    /// Caps at the first 100 threads, each with up to 100 comments. Larger
-    /// PRs are silently truncated for now; pagination can be added if it
+    /// Caps at the first 100 threads, each with up to 100 comments.
+    /// Larger PRs are silently truncated for now; pagination can be added if it
     /// becomes a real limit.
     ///
+    /// [`ReviewComment::outdated`]: models::pulls::ReviewComment::outdated
     /// [`ReviewComment`]: models::pulls::ReviewComment
     /// [`Side`]: models::pulls::Side
-    /// [`ReviewComment::outdated`]: models::pulls::ReviewComment::outdated
     #[allow(clippy::too_many_lines, reason = "linear walk over GraphQL JSON")]
     pub async fn fetch_review_comments(
         &self,
@@ -514,12 +515,14 @@ impl PullsHandler {
     /// Add an inline comment to an existing pending review.
     ///
     /// The GitHub REST API does not support appending comments to an existing
-    /// pending review (creating a review is all-or-nothing). This uses the
-    /// GraphQL `addPullRequestReviewThread` mutation, which does support it.
+    /// pending review (creating a review is all-or-nothing).
+    /// This uses the GraphQL `addPullRequestReviewThread` mutation, which does
+    /// support it.
     ///
     /// `review_node_id` is the review's GraphQL `node_id` (NOT its integer
-    /// `id`). When `start_line` is set, the comment is multi-line; the range
-    /// is `[start_line, line]` on the chosen `side`.
+    /// `id`).
+    /// When `start_line` is set, the comment is multi-line; the range is
+    /// `[start_line, line]` on the chosen `side`.
     pub async fn add_review_thread(
         &self,
         review_node_id: &str,
@@ -585,19 +588,18 @@ impl PullsHandler {
         Ok(())
     }
 
-    /// Find the GraphQL thread node ID of the thread containing the given
-    /// REST comment ID.
+    /// Find the GraphQL thread node ID of the thread containing the given REST
+    /// comment ID.
     ///
-    /// GitHub exposes review-thread anchors only via GraphQL; the REST
-    /// API knows about individual comments but not the threads they
-    /// belong to. The reply mutation
-    /// (`addPullRequestReviewThreadReply`) needs the thread's node ID,
-    /// not the comment's database ID, so we walk all threads and match
-    /// on `fullDatabaseId`.
+    /// GitHub exposes review-thread anchors only via GraphQL; the REST API
+    /// knows about individual comments but not the threads they belong to.
+    /// The reply mutation (`addPullRequestReviewThreadReply`) needs the
+    /// thread's node ID, not the comment's database ID, so we walk all threads
+    /// and match on `fullDatabaseId`.
     ///
-    /// Caps at the first 100 threads, each with up to 100 comments. The
-    /// same shape as `fetch_review_comments`; pagination can be added
-    /// later if PRs in the wild blow past those limits.
+    /// Caps at the first 100 threads, each with up to 100 comments.
+    /// The same shape as `fetch_review_comments`; pagination can be added later
+    /// if PRs in the wild blow past those limits.
     pub async fn fetch_thread_id_for_comment(
         &self,
         pull_number: u64,
@@ -659,14 +661,14 @@ impl PullsHandler {
         })
     }
 
-    /// Append a reply to an existing review thread, attached to the
-    /// caller's pending review so the reply stays in `PENDING` state
-    /// until the review is submitted from the GitHub UI.
+    /// Append a reply to an existing review thread, attached to the caller's
+    /// pending review so the reply stays in `PENDING` state until the review is
+    /// submitted from the GitHub UI.
     ///
     /// `thread_node_id` is the thread's GraphQL node ID (as returned by
-    /// [`Self::fetch_thread_id_for_comment`]). `review_node_id` is the
-    /// node ID of a pending review by the authenticated user; create one
-    /// via [`Self::create_review`] if none exists yet.
+    /// [`Self::fetch_thread_id_for_comment`]).
+    /// `review_node_id` is the node ID of a pending review by the authenticated
+    /// user; create one via [`Self::create_review`] if none exists yet.
     pub async fn add_review_thread_reply(
         &self,
         thread_node_id: &str,
@@ -729,8 +731,8 @@ const fn side_to_str(side: models::pulls::Side) -> &'static str {
 }
 
 /// Parse a GraphQL `DiffSide` enum value into [`models::pulls::Side`].
-/// Anything other than the two known values yields `None`, which the
-/// caller treats as "side unknown" and falls back to defaults at render.
+/// Anything other than the two known values yields `None`, which the caller
+/// treats as "side unknown" and falls back to defaults at render.
 fn parse_diff_side(v: Option<&Value>) -> Option<models::pulls::Side> {
     match v?.as_str()? {
         "RIGHT" => Some(models::pulls::Side::Right),
@@ -769,8 +771,9 @@ impl PullReviewCreateBuilder {
         self
     }
 
-    /// Set an explicit `event`. Omit this to leave the review as a draft
-    /// (GitHub treats a missing event as `PENDING`).
+    /// Set an explicit `event`.
+    /// Omit this to leave the review as a draft (GitHub treats a missing event
+    /// as `PENDING`).
     #[must_use]
     pub fn event(mut self, event: impl Into<String>) -> Self {
         self.event = Some(event.into());
@@ -824,7 +827,8 @@ pub struct PullFilesListBuilder {
 }
 
 impl PullFilesListBuilder {
-    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    /// Set the 1-indexed page number to fetch.
+    /// Defaults to 1.
     #[must_use]
     pub const fn page(mut self, page: u64) -> Self {
         self.page = page;
@@ -873,7 +877,8 @@ impl PullListBuilder {
         self
     }
 
-    /// Set the 1-indexed page number to fetch. Defaults to 1.
+    /// Set the 1-indexed page number to fetch.
+    /// Defaults to 1.
     #[must_use]
     pub const fn page(mut self, page: u64) -> Self {
         self.page = page;
@@ -886,8 +891,8 @@ impl PullListBuilder {
         self
     }
 
-    /// Fetch a single page of pull requests. See [`IssueListBuilder::send`]
-    /// for why this does not auto-paginate.
+    /// Fetch a single page of pull requests.
+    /// See [`IssueListBuilder::send`] for why this does not auto-paginate.
     pub async fn send(self) -> Result<Vec<models::pulls::PullRequest>> {
         let query = vec![
             ("state".to_owned(), self.state.as_str().to_owned()),

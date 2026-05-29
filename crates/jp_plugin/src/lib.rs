@@ -1,8 +1,8 @@
 //! Protocol types for JP's command plugin system.
 //!
 //! Command plugins are standalone binaries (`jp-<name>`) that communicate with
-//! JP over a JSON-lines protocol on stdin/stdout. This crate defines the
-//! message types used by both sides.
+//! JP over a JSON-lines protocol on stdin/stdout.
+//! This crate defines the message types used by both sides.
 //!
 //! See: `docs/rfd/072-command-plugin-system.md`
 

@@ -38,8 +38,8 @@ pub struct Printer {
 
     /// Shared with the background worker to interrupt typewriter sleeps.
     ///
-    /// Set by `flush_instant()` before sending the `FlushInstant` command,
-    /// so even a currently-running typewriter task wakes up immediately.
+    /// Set by `flush_instant()` before sending the `FlushInstant` command, so
+    /// even a currently-running typewriter task wakes up immediately.
     /// Cleared by the worker after processing `FlushInstant`.
     delay_control: Arc<DelayControl>,
 }
@@ -104,8 +104,9 @@ impl Printer {
     /// Create a new printer that writes to the terminal (stdout/stderr).
     ///
     /// If `/dev/tty` (Unix) or `CONOUT$` (Windows) is available, it is opened
-    /// for interactive prompt output. This allows prompts to render on the
-    /// terminal even when stdout and stderr are redirected.
+    /// for interactive prompt output.
+    /// This allows prompts to render on the terminal even when stdout and
+    /// stderr are redirected.
     #[must_use]
     pub fn terminal(format: OutputFormat) -> Self {
         let tty = open_tty().map(|f| Box::new(f) as Box<dyn io::Write + Send>);
@@ -114,9 +115,10 @@ impl Printer {
 
     /// Create a new printer that silently discards all output.
     ///
-    /// Useful when output should be suppressed entirely, e.g. when tool
-    /// call rendering is disabled. The printer still spawns a background
-    /// thread, but writes go to [`io::sink()`].
+    /// Useful when output should be suppressed entirely, e.g. when tool call
+    /// rendering is disabled.
+    /// The printer still spawns a background thread, but writes go to
+    /// [`io::sink()`].
     #[must_use]
     pub fn sink() -> Self {
         Self::new(io::sink(), io::sink(), None, OutputFormat::Text)
@@ -140,8 +142,8 @@ impl Printer {
         self.format
     }
 
-    /// Returns `true` if pretty printing is enabled (ANSI colors,
-    /// unicode decorations, syntax highlighting).
+    /// Returns `true` if pretty printing is enabled (ANSI colors, unicode
+    /// decorations, syntax highlighting).
     #[must_use]
     pub const fn pretty_printing_enabled(&self) -> bool {
         self.format.is_pretty()
@@ -199,10 +201,10 @@ impl Printer {
 
     /// Wrap a print task's content in an NDJSON envelope.
     ///
-    /// ANSI escapes are stripped before serialization. This must happen here
-    /// rather than in the worker because `serde_json` would encode ESC bytes as
-    /// `\u001b`, making them invisible to the worker's `strip_ansi_escapes`
-    /// pass.
+    /// ANSI escapes are stripped before serialization.
+    /// This must happen here rather than in the worker because `serde_json`
+    /// would encode ESC bytes as `\u001b`, making them invisible to the
+    /// worker's `strip_ansi_escapes` pass.
     fn wrap_json(&self, mut task: PrintTask) -> PrintTask {
         let stripped = strip_ansi_escapes::strip_str(&task.content);
         let msg = stripped.trim_end_matches('\n');
@@ -256,9 +258,9 @@ impl Printer {
     /// When `max_latency` is non-zero, the worker shrinks the per-character
     /// typewriter delay below the cap supplied by each `Print` task as the
     /// queue of pending characters grows, keeping printed output within
-    /// `max_latency` of what the source has already emitted. Passing
-    /// `Duration::ZERO` (the default) disables the controller and restores
-    /// the static per-character delay behavior.
+    /// `max_latency` of what the source has already emitted.
+    /// Passing `Duration::ZERO` (the default) disables the controller and
+    /// restores the static per-character delay behavior.
     pub fn set_max_latency(&self, max_latency: Duration) {
         let nanos = u64::try_from(max_latency.as_nanos()).unwrap_or(u64::MAX);
         self.delay_control
@@ -269,12 +271,13 @@ impl Printer {
     /// Signal that the current typewriter producer is done emitting.
     ///
     /// Captures the current pending-character count as a floor on the
-    /// controller's denominator so the per-character delay never grows
-    /// back up as the queue drains. Any subsequent typewriter `Print` task
-    /// clears the snapshot, returning the controller to live mode.
+    /// controller's denominator so the per-character delay never grows back up
+    /// as the queue drains.
+    /// Any subsequent typewriter `Print` task clears the snapshot, returning
+    /// the controller to live mode.
     ///
-    /// No-op when no typewriter content is pending or when the controller
-    /// is disabled.
+    /// No-op when no typewriter content is pending or when the controller is
+    /// disabled.
     pub fn mark_typewriter_drained(&self) {
         let pending = self.delay_control.pending_chars.load(Ordering::Relaxed);
         if pending > 0 {
@@ -286,9 +289,9 @@ impl Printer {
 
     /// Track typewriter-visible characters before enqueueing a task.
     ///
-    /// Increments the pending counter by the visible-character count of
-    /// the task's content, and clears any drain snapshot so the
-    /// bounded-latency controller treats the producer as active again.
+    /// Increments the pending counter by the visible-character count of the
+    /// task's content, and clears any drain snapshot so the bounded-latency
+    /// controller treats the producer as active again.
     /// No-op for non-typewriter tasks.
     fn track_pending(&self, task: &PrintTask) {
         if !matches!(task.mode, PrintMode::Typewriter(_)) {
@@ -321,9 +324,9 @@ impl Printer {
     /// Flush all pending print tasks instantly, ignoring typewriter delays.
     ///
     /// Drains queued `Print` commands and writes their content immediately,
-    /// then blocks until complete. Useful before showing interactive prompts
-    /// (e.g., interrupt menus) to ensure all buffered output is visible
-    /// without typewriter lag.
+    /// then blocks until complete.
+    /// Useful before showing interactive prompts (e.g., interrupt menus) to
+    /// ensure all buffered output is visible without typewriter lag.
     pub fn flush_instant(&self) {
         // Set the flag and wake the worker so a currently-running
         // typewriter sleep returns immediately. The worker clears
@@ -351,8 +354,8 @@ impl Printer {
     /// Send a command to the background thread, printing an error if it fails.
     ///
     /// `Print` commands carrying typewriter mode also update the pending-
-    /// character counter so the bounded-latency controller has the queue
-    /// depth it needs.
+    /// character counter so the bounded-latency controller has the queue depth
+    /// it needs.
     fn send(&self, command: Command) {
         if let Command::Print(task) = &command {
             self.track_pending(task);
@@ -456,8 +459,9 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
     /// Drain all pending commands, printing instantly.
     ///
     /// Processes queued `Print` tasks as `Instant` (ignoring typewriter
-    /// delays). Honors `Flush` (signals the sender) and `Shutdown` (stops
-    /// the worker) if encountered during the drain.
+    /// delays).
+    /// Honors `Flush` (signals the sender) and `Shutdown` (stops the worker) if
+    /// encountered during the drain.
     fn drain_instant(&mut self) {
         while let Ok(cmd) = self.rx.try_recv() {
             match cmd {
@@ -637,17 +641,21 @@ impl io::Write for SharedVec {
 /// The output format controls how content is rendered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OutputFormat {
-    /// Plain text. No ANSI colors, no unicode decorations.
+    /// Plain text.
+    /// No ANSI colors, no unicode decorations.
     #[default]
     Text,
 
-    /// Pretty text. ANSI colors, unicode decorations, syntax highlighting.
+    /// Pretty text.
+    /// ANSI colors, unicode decorations, syntax highlighting.
     TextPretty,
 
-    /// Compact JSON. Each print call becomes an NDJSON line.
+    /// Compact JSON.
+    /// Each print call becomes an NDJSON line.
     Json,
 
-    /// Pretty-printed JSON. Indented, but no ANSI colors.
+    /// Pretty-printed JSON.
+    /// Indented, but no ANSI colors.
     JsonPretty,
 }
 
@@ -692,9 +700,10 @@ pub enum PrintTarget {
 
     /// TTY stream (`/dev/tty`) — interactive prompts.
     ///
-    /// Bypasses stdout/stderr redirections so prompts always render on
-    /// the terminal. Content is always written with ANSI escapes intact
-    /// (never stripped) and is never JSON-wrapped.
+    /// Bypasses stdout/stderr redirections so prompts always render on the
+    /// terminal.
+    /// Content is always written with ANSI escapes intact (never stripped) and
+    /// is never JSON-wrapped.
     Tty,
 }
 
@@ -801,33 +810,31 @@ enum Command {
 
     /// Flush all pending print tasks instantly, ignoring typewriter delays.
     ///
-    /// Drains all queued `Print` commands and writes their content
-    /// immediately (as `PrintMode::Instant`), then signals completion.
-    /// Other commands (`Flush`, `Shutdown`) encountered during the drain
-    /// are still honored.
+    /// Drains all queued `Print` commands and writes their content immediately
+    /// (as `PrintMode::Instant`), then signals completion.
+    /// Other commands (`Flush`, `Shutdown`) encountered during the drain are
+    /// still honored.
     FlushInstant(mpsc::Sender<()>),
 
     /// Shutdown the printer.
     Shutdown,
 }
 
-/// Shared state for interruptible typewriter delays and bounded-latency
-/// pacing.
+/// Shared state for interruptible typewriter delays and bounded-latency pacing.
 ///
-/// Bundles three concerns shared between [`Printer`] and the background
-/// worker:
+/// Bundles three concerns shared between [`Printer`] and the background worker:
 ///
-/// 1. [`Printer::flush_instant`] interruption: `skip` + `wake` allow a
-///    sleeping per-character delay to be cancelled immediately.
-/// 2. Bounded-latency pacing: `pending_chars` (typewriter-visible
-///    characters still queued or being emitted) plus `max_latency_nanos`
-///    (the configured budget) let the worker adapt its per-character
-///    delay to queue depth.
+/// 1. [`Printer::flush_instant`] interruption: `skip` + `wake` allow a sleeping
+///    per-character delay to be cancelled immediately.
+/// 2. Bounded-latency pacing: `pending_chars` (typewriter-visible characters
+///    still queued or being emitted) plus `max_latency_nanos` (the configured
+///    budget) let the worker adapt its per-character delay to queue depth.
 /// 3. Drain mode: when the producer signals via
 ///    [`Printer::mark_typewriter_drained`], `drain_snapshot` captures the
-///    pending count at that moment so the controller never slows back up
-///    as the queue empties. Any subsequent typewriter enqueue resets the
-///    snapshot to `0` (i.e. live mode resumes).
+///    pending count at that moment so the controller never slows back up as the
+///    queue empties.
+///    Any subsequent typewriter enqueue resets the snapshot to `0` (i.e. live
+///    mode resumes).
 #[derive(Debug)]
 struct DelayControl {
     /// When `true`, the worker skips all typewriter delays.
@@ -842,24 +849,26 @@ struct DelayControl {
     /// after each visible character is written.
     pending_chars: AtomicUsize,
 
-    /// Bounded-latency budget in nanoseconds. `0` disables the controller.
+    /// Bounded-latency budget in nanoseconds.
+    /// `0` disables the controller.
     max_latency_nanos: AtomicU64,
 
     /// Captured `pending_chars` at the moment
-    /// [`Printer::mark_typewriter_drained`] was called. `0` means "not in
-    /// drain mode". When non-zero, the worker uses
-    /// `max(drain_snapshot, pending_chars)` as the divisor so the per-char
-    /// delay never grows as the queue shrinks.
+    /// [`Printer::mark_typewriter_drained`] was called.
+    /// `0` means "not in drain mode".
+    /// When non-zero, the worker uses `max(drain_snapshot, pending_chars)` as
+    /// the divisor so the per-char delay never grows as the queue shrinks.
     drain_snapshot: AtomicUsize,
 }
 
 impl DelayControl {
     /// Compute the effective per-character delay for the typewriter loop.
     ///
-    /// Returns `cap` directly when the controller is disabled or the
-    /// queue is empty. Otherwise returns `min(cap, max_latency / denom)`,
-    /// where `denom = max(drain_snapshot, pending_chars)` so that drain
-    /// mode prevents the delay from growing as the queue empties.
+    /// Returns `cap` directly when the controller is disabled or the queue is
+    /// empty.
+    /// Otherwise returns `min(cap, max_latency / denom)`, where `denom =
+    /// max(drain_snapshot, pending_chars)` so that drain mode prevents the
+    /// delay from growing as the queue empties.
     fn effective_delay(&self, cap: Duration) -> Duration {
         let max_latency_nanos = self.max_latency_nanos.load(Ordering::Relaxed);
         if max_latency_nanos == 0 {
@@ -880,49 +889,47 @@ impl DelayControl {
 
 /// Minimum batch size for typewriter per-character delays.
 ///
-/// `Condvar::wait_for` is bounded below by the OS scheduler's timer
-/// resolution. On Linux/macOS that's well under 1ms, so per-character
-/// sleeps are honored as requested and the typewriter looks smooth.
-/// On Windows the default tick is ~15.6ms, so any sub-tick request
-/// still parks the worker for a full tick — without batching, a 200-
-/// character burst at 1ms each takes ~3.1s instead of the 200ms the
-/// bounded-latency controller asked for, silently violating the
-/// configured `max_latency`.
+/// `Condvar::wait_for` is bounded below by the OS scheduler's timer resolution.
+/// On Linux/macOS that's well under 1ms, so per-character sleeps are honored as
+/// requested and the typewriter looks smooth.
+/// On Windows the default tick is ~15.6ms, so any sub-tick request still parks
+/// the worker for a full tick — without batching, a 200- character burst at
+/// 1ms each takes ~3.1s instead of the 200ms the bounded-latency controller
+/// asked for, silently violating the configured `max_latency`.
 ///
-/// The worker accumulates effective per-character delays and only
-/// parks once the accumulated credit reaches this threshold. Setting
-/// it just below the Windows tick lets a single batched sleep cover
-/// the same tick the OS was already going to schedule us on. On
-/// non-Windows platforms the threshold is small enough that any
-/// practical per-character delay hits it on the first character, so
-/// the loop behaves identically to the original per-character sleep.
+/// The worker accumulates effective per-character delays and only parks once
+/// the accumulated credit reaches this threshold.
+/// Setting it just below the Windows tick lets a single batched sleep cover the
+/// same tick the OS was already going to schedule us on.
+/// On non-Windows platforms the threshold is small enough that any practical
+/// per-character delay hits it on the first character, so the loop behaves
+/// identically to the original per-character sleep.
 ///
 /// A better-but-more-complex fix exists for Windows specifically:
 /// `std::thread::sleep` has used `CreateWaitableTimerExW` with
-/// `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` since Rust 1.75 (Win 10
-/// 1803+), so true sub-millisecond per-character pacing is possible.
-/// Reaching it from here means dropping the `Condvar`-based wake and
-/// polling the `skip` flag between short `thread::sleep` calls —
-/// trading immediate `flush_instant` wake-up for up-to-poll-interval
-/// wake-up latency, plus extra syscall overhead from re-creating the
-/// waitable timer on every sleep. We've taken the simpler batching
-/// fix here on the assumption that ~10ms bursts on Windows are
-/// acceptable for a typewriter effect. Revisit if real-world output
-/// on Windows looks visibly chunkier than the Linux/macOS baseline.
+/// `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` since Rust 1.75 (Win 10 1803+), so
+/// true sub-millisecond per-character pacing is possible.
+/// Reaching it from here means dropping the `Condvar`-based wake and polling
+/// the `skip` flag between short `thread::sleep` calls — trading immediate
+/// `flush_instant` wake-up for up-to-poll-interval wake-up latency, plus extra
+/// syscall overhead from re-creating the waitable timer on every sleep.
+/// We've taken the simpler batching fix here on the assumption that ~10ms
+/// bursts on Windows are acceptable for a typewriter effect.
+/// Revisit if real-world output on Windows looks visibly chunkier than the
+/// Linux/macOS baseline.
 #[cfg(windows)]
 const SLEEP_GRANULARITY: Duration = Duration::from_millis(10);
 
-/// See the `cfg(windows)` variant for the rationale. On non-Windows
-/// platforms the scheduler's timer resolution is already sub-ms, so
-/// the threshold is effectively just "any non-zero delay".
+/// See the `cfg(windows)` variant for the rationale.
+/// On non-Windows platforms the scheduler's timer resolution is already sub-ms,
+/// so the threshold is effectively just "any non-zero delay".
 #[cfg(not(windows))]
 const SLEEP_GRANULARITY: Duration = Duration::from_nanos(1);
 
 /// Count the visible (non-control, non-ANSI-escape) characters in a string.
 ///
-/// Mirrors what the typewriter loop actually delays on, so the bounded-
-/// latency controller's pending counter tracks the same units the worker
-/// emits.
+/// Mirrors what the typewriter loop actually delays on, so the bounded- latency
+/// controller's pending counter tracks the same units the worker emits.
 fn visible_char_count(s: &str) -> usize {
     VisibleCharsIterator::new(s)
         .filter(|&(_, visible)| visible)
@@ -931,10 +938,10 @@ fn visible_char_count(s: &str) -> usize {
 
 /// Release `count` characters' worth of pending budget on the controller.
 ///
-/// Saturating subtract so a torn read or an off-by-one between
-/// `track_pending` and the worker can never wrap the counter around to
-/// `usize::MAX`. Once the queue actually drains, the next typewriter
-/// enqueue resets the counter via `track_pending` anyway.
+/// Saturating subtract so a torn read or an off-by-one between `track_pending`
+/// and the worker can never wrap the counter around to `usize::MAX`.
+/// Once the queue actually drains, the next typewriter enqueue resets the
+/// counter via `track_pending` anyway.
 fn release_pending(delay_control: &DelayControl, count: usize) {
     if count == 0 {
         return;
@@ -949,8 +956,8 @@ fn release_pending(delay_control: &DelayControl, count: usize) {
 
 /// Opens the controlling terminal for writing.
 ///
-/// Returns `None` if no controlling terminal is available (e.g., CI,
-/// Docker without `-t`, or detached processes).
+/// Returns `None` if no controlling terminal is available (e.g., CI, Docker
+/// without `-t`, or detached processes).
 #[cfg(unix)]
 fn open_tty() -> Option<std::fs::File> {
     std::fs::OpenOptions::new()
