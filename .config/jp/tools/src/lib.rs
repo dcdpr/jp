@@ -1,6 +1,7 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
 mod cargo;
+mod debug_jp;
 mod fs;
 mod git;
 mod github;
@@ -20,6 +21,7 @@ pub async fn run(ctx: Context, t: Tool) -> util::ToolResult {
         s if s.starts_with("cargo_") => cargo::run(ctx, t).await,
         s if s.starts_with("github_") => github::run(ctx, t).await,
         s if s.starts_with("fs_") => fs::run(ctx, t).await,
+        s if s.starts_with("debug_jp_") => debug_jp::run(ctx, t).await,
         s if s.starts_with("web_") => web::run(ctx, t).await,
         s if s.starts_with("git_") => git::run(ctx, t).await,
         s if s.starts_with("unix_") => unix::run(ctx, t),
