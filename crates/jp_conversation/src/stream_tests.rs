@@ -945,19 +945,12 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
 
     // Build a fresh destination with the same base config and created_at,
     // then extend it from the source.
-    let mut dest =
-        ConversationStream::new(source.base_config()).with_created_at(source.created_at);
+    let mut dest = ConversationStream::new(source.base_config()).with_created_at(source.created_at);
     dest.extend(source.clone());
 
     // 1. The iter sequence must match between source and dest.
-    let source_view: Vec<_> = source
-        .iter()
-        .map(|e| (e.event.clone(), e.config))
-        .collect();
-    let dest_view: Vec<_> = dest
-        .iter()
-        .map(|e| (e.event.clone(), e.config))
-        .collect();
+    let source_view: Vec<_> = source.iter().map(|e| (e.event.clone(), e.config)).collect();
+    let dest_view: Vec<_> = dest.iter().map(|e| (e.event.clone(), e.config)).collect();
     assert_eq!(source_view, dest_view);
 
     // 2. The serialized storage shape must match. Extending an empty stream
