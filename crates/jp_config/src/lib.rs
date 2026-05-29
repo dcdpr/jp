@@ -367,10 +367,17 @@ impl AppConfig {
             };
 
             for (name, field) in fields {
-                let mut path = name;
-                if !prefix.is_empty() {
-                    path = format!("{prefix}.{path}");
-                }
+                // Flattened nested structs contribute their sub-fields at
+                // the parent path (matches `#[setting(flatten)]` semantics
+                // on the wire). Without this, the field list would diverge
+                // from the TOML/JSON shape users actually write.
+                let path = if field.flatten {
+                    prefix.clone()
+                } else if prefix.is_empty() {
+                    name
+                } else {
+                    format!("{prefix}.{name}")
+                };
 
                 match field.schema.ty {
                     SchemaType::Struct(_) => stack.push((field.schema, path)),
