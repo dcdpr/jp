@@ -1,3 +1,5 @@
+use assert_matches::assert_matches;
+use camino_tempfile::tempdir;
 use indoc::indoc;
 use pretty_assertions::assert_eq;
 use test_log::test;
@@ -270,4 +272,51 @@ fn merge_delta_rejects_non_toml() {
     let delta = PartialAppConfig::default();
     let result = config.merge_delta(&delta);
     assert!(result.is_err());
+}
+
+#[test]
+fn load_creates_missing_directory_when_create_if_missing() {
+    let tmp = tempdir().unwrap();
+    // A directory that does not exist yet, mirroring a fresh machine's
+    // user-global config dir (e.g. ~/.config/jp on Linux) on first `jp init`.
+    let dir = tmp.path().join("config");
+
+    let loader = ConfigLoader {
+        file_stem: "config".into(),
+        create_if_missing: Some(Format::Toml),
+        ..Default::default()
+    };
+
+    let file = loader.load(&dir).unwrap();
+
+    assert_eq!(file.format, Format::Toml);
+    assert_eq!(file.path, dir.join("config.toml"));
+    assert!(file.path.is_file(), "config file was created on disk");
+    assert!(dir.is_dir(), "missing directory was created");
+}
+
+#[test]
+fn load_rejects_path_that_exists_but_is_not_a_directory() {
+    let tmp = tempdir().unwrap();
+    let file_path = tmp.path().join("not-a-dir");
+    std::fs::write(&file_path, "").unwrap();
+
+    let loader = ConfigLoader {
+        create_if_missing: Some(Format::Toml),
+        ..Default::default()
+    };
+
+    let err = loader.load(&file_path).unwrap_err();
+    assert_matches!(err, ConfigLoaderError::PathIsNotADirectory { .. });
+}
+
+#[test]
+fn load_rejects_missing_directory_without_create_if_missing() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("missing");
+
+    let loader = ConfigLoader::default();
+
+    let err = loader.load(&dir).unwrap_err();
+    assert_matches!(err, ConfigLoaderError::PathIsNotADirectory { .. });
 }

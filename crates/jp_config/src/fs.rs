@@ -258,8 +258,11 @@ impl ConfigLoader {
     pub fn load<P: AsRef<Utf8Path>>(&self, directory: P) -> Result<ConfigFile, ConfigLoaderError> {
         let directory = directory.as_ref();
 
-        // Directory must exist.
-        if !directory.is_dir() {
+        // The directory must exist, unless `create_if_missing` is set — in that
+        // case it (and the file) are created below. A path that exists but is
+        // not a directory is always rejected.
+        let missing_ok = !directory.exists() && self.create_if_missing.is_some();
+        if !directory.is_dir() && !missing_ok {
             return Err(ConfigLoaderError::PathIsNotADirectory {
                 got: directory.to_path_buf(),
             });
