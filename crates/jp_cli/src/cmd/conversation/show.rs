@@ -28,6 +28,7 @@ impl Show {
             let details = DetailsFmt::new(id)
                 .with_last_message_at(events.last().map(|v| v.event.timestamp))
                 .with_event_count(events.len())
+                .with_turn_count(events.iter_turns().len())
                 .with_title(conversation.title.as_ref())
                 .with_last_activated_at(Some(conversation.last_activated_at))
                 .with_pinned_flag(conversation.is_pinned())
