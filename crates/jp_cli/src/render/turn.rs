@@ -11,6 +11,7 @@ use camino::Utf8PathBuf;
 use jp_config::{
     AppConfig, PartialAppConfig,
     conversation::tool::{ToolConfigWithDefaults, ToolsConfig, style::ParametersStyle},
+    model::id::PartialModelIdOrAliasConfig,
     style::{StyleConfig, typewriter::DelayDuration},
 };
 use jp_conversation::{EventKind, stream::turn_iter::Turn};
@@ -155,6 +156,9 @@ impl TurnRenderer {
 
     /// Rebuild sub-renderers from a per-turn config partial.
     fn reconfigure(&mut self, partial: &PartialAppConfig) {
+        let assistant_name = partial.assistant.name.clone();
+        let model_id = render_model_id(&partial.assistant.model.id);
+
         let config = match AppConfig::from_partial_with_defaults(partial.clone()) {
             Ok(config) => config,
             Err(err) => {
@@ -167,14 +171,25 @@ impl TurnRenderer {
         style.typewriter.text_delay = DelayDuration::instant();
         style.typewriter.code_delay = DelayDuration::instant();
 
-        let model_id = Some(config.assistant.model.id.resolved().to_string());
         self.view.reconfigure(
             self.printer.clone(),
             style.clone(),
-            config.assistant.name,
+            assistant_name,
             model_id,
         );
         self.tool = ToolRenderer::new(self.printer.clone(), style, self.root.clone(), self.is_tty);
         self.tools_config = config.conversation.tools;
     }
+}
+
+/// Render a partial model id as a display string, treating a fully-empty id as
+/// "no model" rather than the empty string.
+///
+/// The partial's `Display` impl already handles both `Id` and `Alias` variants
+/// and degrades gracefully when fields are missing — we just need to flip the
+/// empty case from `Some("")` to `None` so callers can drop the `(model)`
+/// suffix from the role header entirely.
+fn render_model_id(id: &PartialModelIdOrAliasConfig) -> Option<String> {
+    let s = id.to_string();
+    if s.is_empty() { None } else { Some(s) }
 }

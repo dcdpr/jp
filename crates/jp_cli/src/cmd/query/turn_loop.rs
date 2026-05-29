@@ -161,7 +161,7 @@ pub(super) async fn run_turn_loop(
         cfg.style.clone(),
         cfg.user.name.clone(),
         cfg.assistant.name.clone(),
-        Some(model.id.to_string()),
+        Some(cfg.assistant.model.id.resolved().to_string()),
     );
     let mut tool_renderer = ToolRenderer::new(
         if cfg.style.tool_call.show && !printer.format().is_json() {
