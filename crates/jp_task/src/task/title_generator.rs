@@ -35,6 +35,10 @@ pub struct TitleGeneratorTask {
     pub providers: LlmProviderConfig,
     pub events: ConversationStream,
     pub title: Option<String>,
+    /// Whether the invoking process is attached to a terminal. When
+    /// `false`, the OSC-2 title-update side effect on task sync is
+    /// suppressed — the bytes would otherwise leak into a captured pipe.
+    pub is_tty: bool,
 }
 
 impl TitleGeneratorTask {
@@ -42,6 +46,7 @@ impl TitleGeneratorTask {
         conversation_id: ConversationId,
         events: ConversationStream,
         config: &AppConfig,
+        is_tty: bool,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         // Prefer the title generation model id, otherwise use the assistant
         // model id.
@@ -76,6 +81,7 @@ impl TitleGeneratorTask {
             providers: config.providers.llm.clone(),
             events,
             title: None,
+            is_tty,
         })
     }
 
@@ -205,8 +211,13 @@ impl Task for TitleGeneratorTask {
             }
         }
 
-        // Update terminal title now that we have a generated name.
-        if let Some(title) = &self.title {
+        // Update terminal title now that we have a generated name. Only
+        // emit the OSC-2 sequence when the original invocation was on a
+        // terminal — writing it into a captured pipe pollutes the output
+        // without any visible effect.
+        if self.is_tty
+            && let Some(title) = &self.title
+        {
             let display = format!("{}: {title}", self.conversation_id);
             jp_term::osc::set_title(display);
         }

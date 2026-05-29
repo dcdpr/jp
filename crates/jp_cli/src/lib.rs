@@ -53,7 +53,12 @@ use jp_term::table::{details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
 use relative_path::RelativePath;
 use serde_json::Value;
-use tokio::runtime::{self, Runtime};
+use tokio::{
+    runtime::{self, Runtime},
+    sync::broadcast,
+    task::JoinHandle,
+};
+use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
@@ -62,6 +67,8 @@ use crate::{
         target::resolve_request,
     },
     config_pipeline::ConfigPipeline,
+    signals::SignalTo,
+    timer::spawn_line_timer,
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
@@ -489,13 +496,13 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // before background tasks log any errors.
     ctx.printer.flush();
 
-    // Wait for background tasks to complete and sync their results to the
-    // workspace.
-    rt.block_on(
-        ctx.task_handler
-            .sync(&mut ctx.workspace, Duration::from_secs(10)),
-    )
-    .map_err(Error::Task)?;
+    // Drain background tasks. Shows a timer line while waiting and lets the
+    // user interrupt: first Ctrl+C signals graceful cancellation with a 2s
+    // countdown; a second Ctrl+C — or SIGQUIT — escalates to a force quit
+    // that aborts tasks immediately and drops their pending workspace
+    // mutations.
+    rt.block_on(drain_background_tasks(&mut ctx))
+        .map_err(Error::Task)?;
 
     // Remove ephemeral conversations that are no longer needed, but protect
     // any conversation that is active in a terminal session.
@@ -506,6 +513,103 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     ctx.workspace.cleanup_stale_files(ctx.fs_backend.as_deref());
 
     output.map_err(Into::into)
+}
+
+/// Drain background tasks at end of run, with interactive cancellation.
+///
+/// While [`TaskHandler::sync`] runs, prints a `⏱ Finishing background tasks…
+/// Ns` line on stderr after a 1s delay.
+/// The first SIGINT/SIGTERM switches the line to a 2s countdown and signals
+/// graceful cancellation; a second SIGINT (or any SIGQUIT) escalates to a force
+/// quit that aborts the `JoinSet` and drops pending workspace mutations.
+///
+/// [`TaskHandler::sync`]: jp_task::TaskHandler::sync
+async fn drain_background_tasks(
+    ctx: &mut Ctx,
+) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if ctx.task_handler.is_empty() {
+        return Ok(());
+    }
+
+    let cancel = ctx.task_handler.cancel_token();
+    let force = ctx.task_handler.force_token();
+    let printer = ctx.printer.clone();
+    let mut signals = ctx.signals.receiver.resubscribe();
+    let show_chrome = ctx.term.is_tty;
+    let mut signals_open = true;
+
+    let mut timer = if show_chrome {
+        spawn_line_timer(
+            printer.clone(),
+            true,
+            Duration::from_secs(1),
+            Duration::from_millis(100),
+            |secs| format!("\r\x1b[K⏱ Finishing background tasks… {secs:.1}s"),
+        )
+    } else {
+        None
+    };
+
+    let sync_fut = ctx
+        .task_handler
+        .sync(&mut ctx.workspace, Duration::from_secs(10));
+    tokio::pin!(sync_fut);
+
+    let result = loop {
+        tokio::select! {
+            biased;
+            sig = signals.recv(), if signals_open => {
+                let escalate = match sig {
+                    Ok(SignalTo::Shutdown) => cancel.is_cancelled(),
+                    Ok(SignalTo::Quit) => true,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => {
+                        signals_open = false;
+                        continue;
+                    }
+                };
+
+                stop_drain_timer(timer.take()).await;
+
+                if escalate {
+                    force.cancel();
+                    if show_chrome {
+                        drop(writeln!(
+                            printer.err_writer(),
+                            "\r\x1b[K⏱ Aborting background tasks…",
+                        ));
+                    }
+                    // No further escalation possible; stop watching signals.
+                    signals_open = false;
+                } else {
+                    cancel.cancel();
+                    if show_chrome {
+                        timer = spawn_line_timer(
+                            printer.clone(),
+                            true,
+                            Duration::ZERO,
+                            Duration::from_millis(100),
+                            |secs| format!(
+                                "\r\x1b[K⏱ Cancelling background tasks… {:.1}s",
+                                (2.0 - secs).max(0.0),
+                            ),
+                        );
+                    }
+                }
+            }
+            result = &mut sync_fut => break result,
+        }
+    };
+
+    stop_drain_timer(timer).await;
+    result
+}
+
+async fn stop_drain_timer(timer: Option<(CancellationToken, JoinHandle<()>)>) {
+    if let Some((token, handle)) = timer {
+        token.cancel();
+        drop(handle.await);
+    }
 }
 
 /// Check if the current invocation is a root-level help request (`jp -h`).

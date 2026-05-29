@@ -405,7 +405,7 @@ impl Query {
             let mut stream = stream.clone();
             stream.start_turn(chat_request.clone());
             ctx.task_handler
-                .spawn(TitleGeneratorTask::new(cid, stream, &cfg)?);
+                .spawn(TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty)?);
         }
 
         // Wait for all MCP servers to finish loading.
