@@ -17,10 +17,14 @@ pub struct DetailsFmt {
     /// The conversation title.
     pub title: Option<String>,
 
-    /// The number of messages in the conversation.
+    /// The number of events in the conversation.
     pub message_count: usize,
 
-    /// Whether the conversation is pinned. If `None`, the details are not shown.
+    /// The number of turns in the conversation.
+    pub turn_count: usize,
+
+    /// Whether the conversation is pinned.
+    /// If `None`, the details are not shown.
     pub pinned: Option<bool>,
 
     /// Whether the conversation is local. If `None`, the details are not shown.
@@ -50,6 +54,7 @@ impl DetailsFmt {
             assistant_name: None,
             title: None,
             message_count: 0,
+            turn_count: 0,
             pinned: None,
             local: None,
             active_conversation: None,
@@ -63,6 +68,12 @@ impl DetailsFmt {
     #[must_use]
     pub fn with_event_count(mut self, message_count: usize) -> Self {
         self.message_count = message_count;
+        self
+    }
+
+    #[must_use]
+    pub fn with_turn_count(mut self, turn_count: usize) -> Self {
+        self.turn_count = turn_count;
         self
     }
 
@@ -135,6 +146,14 @@ impl DetailsFmt {
         map.push(("ID".to_owned(), self.id.to_string()));
         if let Some(name) = self.assistant_name.clone() {
             map.push(("Assistant".to_owned(), name));
+        }
+
+        if self.message_count > 0 {
+            map.push(("Events".to_owned(), self.message_count.to_string()));
+        }
+
+        if self.turn_count > 0 {
+            map.push(("Turns".to_owned(), self.turn_count.to_string()));
         }
 
         if let Some(last_message_at) = self.last_message_at {
