@@ -278,6 +278,15 @@ pub fn build(partial: PartialAppConfig) -> Result<AppConfig, Error> {
         "Configuration details."
     );
 
+    for (name, tool) in &partial.conversation.tools.tools {
+        if tool.source.is_none() {
+            tracing::error!(
+                tool = %name,
+                "Tool config is missing required `source` field."
+            );
+        }
+    }
+
     let mut config = AppConfig::from_partial_with_defaults(partial)?;
 
     // Resolve model aliases so downstream code can assume all model IDs are
