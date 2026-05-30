@@ -234,13 +234,60 @@ impl KvAssignment {
         self.trim_prefix(segment)
     }
 
-    /// Trim the first key segment and assign to the corresponding entry in a
-    /// map.
-    /// Returns a missing-key error if no segment can be trimmed.
+    /// Assign a key-value pair to an entry (or entries) of a map.
+    ///
+    /// With a key segment present (`foo.KEY=…`), the value is assigned to that
+    /// single entry.
+    /// With no segment left (`foo:={…}`), the object is distributed across
+    /// entries, mirroring [`try_vec`]: `:=` (Set) replaces the whole map, `:+=`
+    /// (Merge) merges the entries into it.
+    /// A scalar value with no key segment, or any non-object whole-collection
+    /// value, is a type error.
+    ///
+    /// [`try_vec`]: Self::try_vec
     pub(crate) fn assign_to_entry<V>(mut self, map: &mut IndexMap<String, V>) -> AssignResult
     where
         V: AssignKeyValue + Default,
     {
+        // Whole-collection form, e.g. `aliases:={ ... }`: no map key remains to
+        // consume, so distribute the object's top-level keys across entries.
+        if self.key.is_empty() {
+            let Self {
+                key,
+                value,
+                strategy,
+            } = self;
+
+            let KvValue::Json(Value::Object(obj)) = value else {
+                return type_error(&key, &value, &["object"]).map_err(Into::into);
+            };
+
+            if !matches!(strategy, Strategy::Merge) {
+                map.clear();
+            }
+
+            for (k, v) in obj {
+                let full_path = if key.full_path.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{}{}{k}", key.full_path, key.delim.as_str())
+                };
+
+                let entry = Self {
+                    key: KvKey {
+                        path: String::new(),
+                        delim: key.delim,
+                        full_path,
+                    },
+                    value: KvValue::Json(v),
+                    strategy,
+                };
+                map.entry(k).or_default().assign(entry)?;
+            }
+
+            return Ok(());
+        }
+
         let Some(key) = self.trim_prefix_any() else {
             return missing_key(&self);
         };

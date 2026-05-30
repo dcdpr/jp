@@ -72,6 +72,36 @@ fn assign_alias_nested_provider_and_name() {
 }
 
 #[test]
+fn assign_aliases_whole_object_replaces_map() {
+    let mut p = PartialLlmProviderConfig::default();
+    p.aliases.insert(
+        "stale".to_owned(),
+        PartialModelIdOrAliasConfig::Alias("x".into()),
+    );
+
+    // `providers.llm.aliases:={...}` reaches this assign with key "aliases".
+    let kv = KvAssignment::try_from_cli(
+        "aliases:",
+        r#"{"opus": "anthropic/claude-opus-4", "coder": "opus"}"#,
+    )
+    .unwrap();
+    p.assign(kv).unwrap();
+
+    assert!(!p.aliases.contains_key("stale"), "Set replaces the map");
+    assert_eq!(
+        p.aliases.get("opus"),
+        Some(&PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+            provider: Some(ProviderId::Anthropic),
+            name: "claude-opus-4".parse().ok(),
+        }))
+    );
+    assert_eq!(
+        p.aliases.get("coder"),
+        Some(&PartialModelIdOrAliasConfig::Alias("opus".to_owned()))
+    );
+}
+
+#[test]
 fn test_provider_config_openrouter_referrer() {
     let mut p = PartialLlmProviderConfig::default();
 
