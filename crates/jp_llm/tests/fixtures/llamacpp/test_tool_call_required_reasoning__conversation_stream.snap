@@ -28,10 +28,7 @@ expression: v
           "name": "test"
         },
         "parameters": {
-          "reasoning": {
-            "effort": "low",
-            "exclude": false
-          },
+          "reasoning": "off",
           "stop_words": [],
           "other": {}
         }
@@ -173,9 +170,65 @@ expression: v
   },
   "events": [
     {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "The user is asking me to run a tool with arguments I choose. Looking at the available function, I have `run_me` which requires two parameters:\n- `foo`: a string or null (default is \"foo\")\n- `bar`: a string or array, with enum values [\"foo\", \"bar\"]\n\nSince the user said I can provide whatever arguments I want, I can choose any valid values. Let me pick some reasonable values:\n- foo: I'll use \"test\" (a string value)\n- bar: I'll use [\"foo\", \"bar\"] (an array with both enum values)\n\nBoth are valid according to the schema."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "bJSJqbnctkwroZWyYjEQrObRWJdWOWSV",
+      "name": "run_me",
+      "arguments": {
+        "foo": "dGVzdA==",
+        "bar": "WyJmb28iLCAiYmFyIl0="
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "bJSJqbnctkwroZWyYjEQrObRWJdWOWSV",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The tool ran successfully with the arguments `foo: \"test\"` and `bar: [\"foo\", \"bar\"]`. The output was:\n\n```\nworking!\n```"
     }
   ]
 }

@@ -3,5 +3,122 @@ source: crates/jp_test/src/mock.rs
 expression: v
 ---
 [
-    [],
+    [
+        Part {
+            index: 1,
+            part: Structured(
+                "{\n ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "\"t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "les\": ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "[\n    \"Conve",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "rsation ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "S",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "tarter",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                ": Topic Gen",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "eration ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "R",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "eque",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "st",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "\"\n  ]\n}",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Flush {
+            index: 1,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
 ]

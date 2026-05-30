@@ -28,10 +28,7 @@ expression: v
           "name": "test"
         },
         "parameters": {
-          "reasoning": {
-            "effort": "low",
-            "exclude": false
-          },
+          "reasoning": "off",
           "stop_words": [],
           "other": {}
         }
@@ -173,9 +170,65 @@ expression: v
   },
   "events": [
     {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "The user is asking me to run a tool with whatever arguments I want. Looking at the available tool, I have \"run_me\" which requires two parameters:\n1. \"foo\" - which is a string or null with a default of \"foo\"\n2. \"bar\" - which is a string or array with enum values [\"foo\", \"bar\"] and is required\n\nSince the user said I can provide whatever arguments I want, I'll choose some valid values. For \"foo\" I'll use the default \"foo\" (or I could use null), and for \"bar\" I need to choose from the enum values, so I'll use \"foo\".\n\nLet me make the function call with these arguments."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "YzdzqoDnBzzQllU2DH2jGDnyXj5HvjDB",
+      "name": "run_me",
+      "arguments": {
+        "foo": "Zm9v",
+        "bar": "WyJmb28iLCAiYmFyIl0="
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "YzdzqoDnBzzQllU2DH2jGDnyXj5HvjDB",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The tool executed successfully and returned: **working!**\n\nIf you'd like to try different arguments or run the tool again with other values, just let me know!"
     }
   ]
 }

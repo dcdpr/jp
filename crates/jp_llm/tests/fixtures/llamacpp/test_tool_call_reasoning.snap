@@ -3,6 +3,52 @@ source: crates/jp_test/src/mock.rs
 expression: v
 ---
 [
-    [],
-    [],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking me to run a tool with whatever arguments I want. Looking at the available tool, I have \"run_me\" which requires two parameters:\n1. \"foo\" - which is a string or null with a default of \"foo\"\n2. \"bar\" - which is a string or array with enum values [\"foo\", \"bar\"] and is required\n\nSince the user said I can provide whatever arguments I want, I'll choose some valid values. For \"foo\" I'll use the default \"foo\" (or I could use null), and for \"bar\" I need to choose from the enum values, so I'll use \"foo\".\n\nLet me make the function call with these arguments.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "YzdzqoDnBzzQllU2DH2jGDnyXj5HvjDB",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("foo"),
+                            "bar": String("[\"foo\", \"bar\"]"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool executed successfully and returned: **working!**\n\nIf you'd like to try different arguments or run the tool again with other values, just let me know!",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
 ]

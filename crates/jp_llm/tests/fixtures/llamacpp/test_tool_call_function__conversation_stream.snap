@@ -177,24 +177,24 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "PdYNgxq0YnipLBOxUQ1RCIqRdbwquKDs",
+      "id": "8DFIx92obUFlZuPR29lLFa1zIFmOZeGh",
       "name": "run_me",
       "arguments": {
-        "foo": "Zm9v",
+        "foo": "aGVsbG8=",
         "bar": "WyJmb28iLCAiYmFyIl0="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "PdYNgxq0YnipLBOxUQ1RCIqRdbwquKDs",
+      "id": "8DFIx92obUFlZuPR29lLFa1zIFmOZeGh",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Great! The tool executed successfully and returned \"working!\". \n\nSince you asked me to provide \"whatever arguments I want,\" I used some placeholder values (`foo` and `[\"foo\", \"bar\"]`) to demonstrate the process. \n\nIs there a specific tool you'd like me to run, or would you like to try with different arguments? Just let me know what you need!"
+      "message": "The tool ran successfully with the arguments `foo=\"hello\"` and `bar=[\"foo\", \"bar\"]`. The output confirms the execution: `working!`. Let me know if you'd like to try it with different arguments or need help with anything else!"
     }
   ]
 }

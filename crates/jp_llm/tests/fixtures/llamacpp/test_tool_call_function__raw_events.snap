@@ -12,7 +12,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "PdYNgxq0YnipLBOxUQ1RCIqRdbwquKDs",
+                    id: "8DFIx92obUFlZuPR29lLFa1zIFmOZeGh",
                     name: "run_me",
                 },
             ),
@@ -40,7 +40,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "foo",
+                    "hello",
                 ),
             ),
             metadata: {},
@@ -151,126 +151,42 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "Gre",
+                "T",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "at! T",
+                "he t",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "he tool e",
+                "ool ran succe",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "xecuted succe",
+                "ssful",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ssfu",
+                "ly w",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "lly and r",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "et",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "urned \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "wor",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "king!\". ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\n\nSi",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "nce yo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "u a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ske",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "d me to ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "pr",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ovide \"w",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "hatever ar",
+                "ith the ar",
             ),
             metadata: {},
         },
@@ -284,105 +200,70 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "ments",
+                "men",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " I",
+                "ts",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " w",
+                " `foo",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ant,\"",
+                "=\"",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " I us",
+                "hell",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ed some plac",
+                "o\"",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "eholder",
+                "` a",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " va",
+                "nd ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "lue",
+                "`ba",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " (`f",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "oo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "` ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " `",
+                "r=",
             ),
             metadata: {},
         },
@@ -417,91 +298,119 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "bar",
+                "bar\"",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "\"]`) to demo",
+                "]`. The",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "nstr",
+                " output c",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ate the ",
+                "onfi",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "p",
+                "rms the ex",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "roces",
+                "e",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s. \n\nI",
+                "cu",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s ",
+                "tion: `",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "there a s",
+                "w",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "pecif",
+                "or",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ic t",
+                "king",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "oo",
+                "!`.",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "l you",
+                " Let ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "me ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "know",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " i",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "f you",
             ),
             metadata: {},
         },
@@ -515,62 +424,6 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "lik",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "e me",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "to ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "run, o",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "r wo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "uld y",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ou ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
                 "like",
             ),
             metadata: {},
@@ -578,14 +431,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " to t",
+                " to",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ry with di",
+                " try ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "it with di",
             ),
             metadata: {},
         },
@@ -599,70 +459,56 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "g",
+                "gum",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ument",
+                "ents ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s? J",
+                "or ne",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ust",
+                "ed he",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " let ",
+                "lp with a",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "me kn",
+                "nythi",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ow w",
+                "n",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "hat y",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "o",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "u need!",
+                "g else!",
             ),
             metadata: {},
         },

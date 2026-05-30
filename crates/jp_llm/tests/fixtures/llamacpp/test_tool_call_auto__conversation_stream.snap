@@ -173,6 +173,28 @@ expression: v
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "ugYzpYrAdrXYCq64CUePmIvTG8oJwCZZ",
+      "name": "run_me",
+      "arguments": {
+        "foo": "aGVsbG8=",
+        "bar": "WyJmb28iLCAiYmFyIl0="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "ugYzpYrAdrXYCq64CUePmIvTG8oJwCZZ",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Great! The tool ran successfully. Is there anything specific you'd like to test or explore further?"
     }
   ]
 }

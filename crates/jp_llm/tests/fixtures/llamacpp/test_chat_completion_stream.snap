@@ -3,5 +3,31 @@ source: crates/jp_test/src/mock.rs
 expression: v
 ---
 [
-    [],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "Okay, the user sent a test message. Let me check the conversation history. Oh, there's nothing before this. So they're just testing if the system is working. I should respond in a friendly way, maybe acknowledge it's a test and offer help. Keep it simple and inviting.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Hello! This is a test message received successfully. 😊 How can I assist you today?",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
 ]

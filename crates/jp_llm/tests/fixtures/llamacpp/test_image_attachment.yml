@@ -33,11 +33,11 @@ then:
     - name: content-type
       value: text/event-stream
   body: |+
-    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1772808707,"id":"chatcmpl-OjRIkfsIri8GFdsg4PGOTz9LkQdYuXHO","model":"unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL","system_fingerprint":"b8210-2cd20b72e","object":"chat.completion.chunk"}
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}],"created":1780171784,"id":"chatcmpl-XPmojiGZd3GnS7MOfxiXSDCAlekq9JAU","model":"unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL","system_fingerprint":"b8210-2cd20b72e","object":"chat.completion.chunk"}
     
-    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"content":"apple"}}],"created":1772808707,"id":"chatcmpl-OjRIkfsIri8GFdsg4PGOTz9LkQdYuXHO","model":"unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL","system_fingerprint":"b8210-2cd20b72e","object":"chat.completion.chunk"}
+    data: {"choices":[{"finish_reason":null,"index":0,"delta":{"content":"apple"}}],"created":1780171784,"id":"chatcmpl-XPmojiGZd3GnS7MOfxiXSDCAlekq9JAU","model":"unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL","system_fingerprint":"b8210-2cd20b72e","object":"chat.completion.chunk"}
     
-    data: {"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"created":1772808707,"id":"chatcmpl-OjRIkfsIri8GFdsg4PGOTz9LkQdYuXHO","model":"unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL","system_fingerprint":"b8210-2cd20b72e","object":"chat.completion.chunk","timings":{"cache_n":0,"prompt_n":61,"prompt_ms":2632.415,"prompt_per_token_ms":43.15434426229508,"prompt_per_second":23.172638052890598,"predicted_n":2,"predicted_ms":81.379,"predicted_per_token_ms":40.6895,"predicted_per_second":24.57636490986618}}
+    data: {"choices":[{"finish_reason":"stop","index":0,"delta":{}}],"created":1780171784,"id":"chatcmpl-XPmojiGZd3GnS7MOfxiXSDCAlekq9JAU","model":"unsloth/Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL","system_fingerprint":"b8210-2cd20b72e","object":"chat.completion.chunk","timings":{"cache_n":0,"prompt_n":61,"prompt_ms":1550.386,"prompt_per_token_ms":25.41616393442623,"prompt_per_second":39.34504052539174,"predicted_n":2,"predicted_ms":80.61,"predicted_per_token_ms":40.305,"predicted_per_second":24.810817516437165}}
     
     data: [DONE]
     

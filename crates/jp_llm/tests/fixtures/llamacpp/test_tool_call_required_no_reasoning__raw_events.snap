@@ -12,7 +12,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "OCvUPbTN99xMM1B3k8jWrJkACUwJUPAe",
+                    id: "WBlihr8npOhr1BXe5g1yBz055NtEd7B1",
                     name: "run_me",
                 },
             ),
@@ -41,15 +41,6 @@ expression: v
             part: ToolCall(
                 ArgumentChunk(
                     "hello",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    " world",
                 ),
             ),
             metadata: {},
@@ -160,7 +151,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "T",
+                "Gre",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "at! T",
             ),
             metadata: {},
         },
@@ -181,252 +179,91 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "s",
+                "ssfu",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "sfu",
+                "lly and r",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "lly! I",
+                "et",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "t s",
+                "urned `",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "eems ",
+                "w",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "to have pr",
+                "or",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "oces",
+                "king",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "sed the ar",
+                "!`.",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "gu",
+                " Let ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "men",
+                "me ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "t",
+                "know",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s `f",
+                " i",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "oo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "` a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "d `bar` ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "withou",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "t",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " is",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "sue. I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "s there a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "nything s",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "peci",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "fi",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "c you",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "'d ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "lik",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "e m",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "e to ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "do ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "next",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " or an",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "y othe",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "r to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ol",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "s you",
+                "f you",
             ),
             metadata: {},
         },
@@ -447,14 +284,84 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " ",
+                " to",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "to try?",
+                " try i",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "t aga",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "in with di",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "fferent ar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "gum",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ents or ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "expl",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ore an",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "y other functi",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "o",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "nality.",
             ),
             metadata: {},
         },

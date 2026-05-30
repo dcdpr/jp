@@ -177,24 +177,24 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "OCvUPbTN99xMM1B3k8jWrJkACUwJUPAe",
+      "id": "WBlihr8npOhr1BXe5g1yBz055NtEd7B1",
       "name": "run_me",
       "arguments": {
-        "foo": "aGVsbG8gd29ybGQ=",
+        "foo": "aGVsbG8=",
         "bar": "WyJmb28iLCAiYmFyIl0="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "OCvUPbTN99xMM1B3k8jWrJkACUwJUPAe",
+      "id": "WBlihr8npOhr1BXe5g1yBz055NtEd7B1",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully! It seems to have processed the arguments `foo` and `bar` without issue. Is there anything specific you'd like me to do next or any other tools you'd like to try?"
+      "message": "Great! The tool ran successfully and returned `working!`. Let me know if you'd like to try it again with different arguments or explore any other functionality."
     }
   ]
 }

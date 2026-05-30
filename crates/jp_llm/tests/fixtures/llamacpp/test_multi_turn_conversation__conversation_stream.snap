@@ -193,7 +193,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Hello! Your test message has been received successfully. How can I assist you today?"
+      "message": "Test message received! How can I help you today?"
     },
     {
       "type": "config_delta",
@@ -219,7 +219,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to repeat their previous message.\n2.  **Identify the Previous Message:** Looking back at the conversation history, the user's first message was \"Test message\".\n3.  **Formulate the Response:** I need to output exactly what the user said previously.\n4.  **Draft the Response:** \"Test message\"\n5.  **Review Constraints:** Keep it direct and accurate.\n6.  **Final Output:** Test message"
+      "reasoning": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   User says: \"Repeat my previous message\"\n    *   Context: The conversation history shows:\n        *   User: \"Test message\"\n        *   Assistant: \"Test message received! How can I help you today?\"\n        *   User: \"Repeat my previous message\"\n    *   Goal: Identify the user's *immediately preceding* message and repeat it verbatim.\n\n2.  **Identify the Previous Message:**\n    *   Looking at the chat history, the user's last message before \"Repeat my previous message\" was \"Test message\".\n\n3.  **Formulate the Output:**\n    *   The user wants me to repeat *their* previous message.\n    *   That message was \"Test message\".\n    *   I should output exactly that.\n\n4.  **Final Check:**\n    *   Does this violate any safety policies? No.\n    *   Is it accurate? Yes.\n    *   Is it concise? Yes.\n\n5.  **Draft Response:** \"Test message\"\n\n6.  **Refinement:** Just output the text as requested. \"Test message\" is the content.\n\n    *Wait, one nuance:* In some contexts, \"previous message\" could be interpreted as the assistant's last message or the user's last message. Usually, when a user says \"Repeat my previous message\", they mean the message *they* just sent before this one.\n    *   User Message 1: \"Test message\"\n    *   User Message 2: \"Repeat my previous message\"\n    *   So, repeating \"Test message\" is the correct interpretation.\n\n7.  **Final Output Generation:** \"Test message\""
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
@@ -247,24 +247,24 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "Wy35ya7W8XdqEpvaSwODozPxg4oNFaU5",
+      "id": "qkCJzYjHEtfBrrkQDqGOZvqKmXEouoxP",
       "name": "run_me",
       "arguments": {
-        "foo": "YmFy",
+        "foo": "dGVzdA==",
         "bar": "WyJmb28iXQ=="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "Wy35ya7W8XdqEpvaSwODozPxg4oNFaU5",
+      "id": "qkCJzYjHEtfBrrkQDqGOZvqKmXEouoxP",
       "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The secret code is: **42**\n\n(Just a friendly reminder: I don't actually have the ability to run external tools or execute code with arbitrary arguments in this environment. The previous output was a simulated response for demonstration purposes. How can I help you with something real?)"
+      "message": "The tool has run successfully! Here is the output:\n\n```\nThe secret code is: 42\n```\n\nThe tool was called with the arguments `foo=\"test\"` and `bar=[\"foo\"]`."
     },
     {
       "type": "config_delta",
@@ -290,12 +290,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user is asking about the result of the previous tool call. Looking back at the conversation, I can see there was a simulated tool call using `run_me` that returned \"The secret code is: 42\".\n\nHowever, I need to be honest here - I don't actually have the ability to run real tools in this chat environment. That was a simulated/fictional response from the earlier turn. Let me clarify this for the user."
+      "reasoning": "The user is asking about the result of the previous tool call I made. Looking back at the conversation, I called a tool called `run_me` with arguments `foo=\"test\"` and `bar=[\"foo\"]`, and the result was \"The secret code is: 42\".\n\nI should report this back to the user accurately."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Looking back at the previous tool call, the simulated result was:\n\n**\"The secret code is: 42\"**\n\nHowever, I want to be completely transparent with you: I don't actually have the ability to run external tools or execute code with arguments in this chat environment. That previous output was a simulated response for demonstration purposes.\n\nI'm a text-based AI assistant that can help with questions, analysis, writing, coding help, and more - but I can't actually execute tools or run programs. Is there something specific I can help you with today?"
+      "message": "The result of the previous tool call was:\n\n```\nThe secret code is: 42\n```\n\nThe tool `run_me` was executed with the arguments `foo=\"test\"` and `bar=[\"foo\"]`, and it returned this output."
     }
   ]
 }
