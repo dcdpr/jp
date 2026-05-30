@@ -521,7 +521,7 @@ fn to_system_messages(parts: Vec<String>) -> impl Iterator<Item = Value> {
 
 /// Convert a conversation event stream into a list of JSON message values.
 fn convert_events(events: ConversationStream) -> Vec<Value> {
-    events
+    let messages = events
         .into_iter()
         .filter_map(|event| match event.into_kind() {
             EventKind::ChatRequest(request) => {
@@ -564,40 +564,50 @@ fn convert_events(events: ConversationStream) -> Vec<Value> {
             })),
             _ => None,
         })
-        .fold(vec![], |mut messages: Vec<Value>, message| {
-            if let Some(last) = messages.last_mut()
+        .collect();
+
+    merge_consecutive_assistant_messages(messages)
+}
+
+/// Merge consecutive assistant messages in an OpenAI-compatible
+/// chat-completions message list into single messages.
+///
+/// A single model turn can surface reasoning, content, and several parallel
+/// tool calls as separate events.
+/// The chat-completions contract expects them as one assistant message:
+/// reasoning and content folded in, every parallel `tool_calls` entry in one
+/// array, immediately followed by the tool results.
+///
+/// Both the `reasoning` (Cerebras) and `reasoning_content` (llama.cpp) field
+/// names are handled, so this is shared by both OpenAI-compatible providers.
+pub(crate) fn merge_consecutive_assistant_messages(messages: Vec<Value>) -> Vec<Value> {
+    messages
+        .into_iter()
+        .fold(vec![], |mut acc: Vec<Value>, message| {
+            if let Some(last) = acc.last_mut()
                 && last.get("role").and_then(Value::as_str) == Some("assistant")
                 && message.get("role").and_then(Value::as_str) == Some("assistant")
             {
-                // Merge consecutive assistant messages: fold
-                // `reasoning_content`, `content`, and `tool_calls` into a
-                // single message.
-                if let Some(tool_calls) = message.get("tool_calls")
-                    && let Some(new) = tool_calls.as_array()
-                {
+                if let Some(new) = message.get("tool_calls").and_then(Value::as_array) {
                     last["tool_calls"]
                         .as_array_mut()
                         .map(|existing| existing.extend(new.iter().cloned()))
                         .unwrap_or_else(|| last["tool_calls"] = json!(new));
                 }
 
-                if let Some(rc) = message.get("reasoning_content")
-                    && rc.is_string()
-                {
-                    last["reasoning_content"] = rc.clone();
+                for key in ["reasoning", "reasoning_content", "content"] {
+                    if let Some(value) = message.get(key)
+                        && value.is_string()
+                    {
+                        last[key] = value.clone();
+                    }
                 }
 
-                if let Some(c) = message.get("content")
-                    && c.is_string()
-                {
-                    last["content"] = c.clone();
-                }
-
-                return messages;
+                return acc;
             }
 
-            messages.push(message);
-            messages
+            acc.push(message);
+            acc
         })
 }
 

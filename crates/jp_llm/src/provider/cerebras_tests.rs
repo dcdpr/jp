@@ -1,5 +1,6 @@
 use eventsource_stream::Event as MessageEvent;
 use futures::StreamExt as _;
+use jp_conversation::{ConversationEvent, event::ToolCallRequest};
 use reqwest_eventsource::Error as SseError;
 
 use super::*;
@@ -385,4 +386,51 @@ fn length_finish_reason_drops_pending_tool_calls() {
         matches!(last, Event::Finished(FinishReason::MaxTokens)),
         "expected Finished(MaxTokens), got {last:?}"
     );
+}
+
+#[test]
+fn convert_events_coalesces_parallel_tool_calls() {
+    let mut stream = ConversationStream::new_test();
+    stream.extend([
+        ConversationEvent::from(ChatResponse::reasoning("Both files look relevant.")),
+        ConversationEvent::from(ChatResponse::message("Let me read both files.")),
+        ConversationEvent::from(ToolCallRequest {
+            id: "call_a".into(),
+            name: "fs_read_file".into(),
+            arguments: Map::new(),
+        }),
+        ConversationEvent::from(ToolCallRequest {
+            id: "call_b".into(),
+            name: "fs_read_file".into(),
+            arguments: Map::new(),
+        }),
+        ConversationEvent::from(ToolCallResponse {
+            id: "call_a".into(),
+            result: Ok("lib.rs".into()),
+        }),
+        ConversationEvent::from(ToolCallResponse {
+            id: "call_b".into(),
+            result: Ok("Cargo.toml".into()),
+        }),
+    ]);
+
+    let messages = convert_events(stream);
+
+    // One model turn -- reasoning, content, and both parallel tool calls --
+    // collapses into a single assistant message, followed by one `tool`
+    // message per result.
+    assert_eq!(messages.len(), 3, "{messages:#?}");
+
+    assert_eq!(messages[0]["role"], "assistant");
+    assert_eq!(messages[0]["reasoning"], "Both files look relevant.");
+    assert_eq!(messages[0]["content"], "Let me read both files.");
+    let tool_calls = messages[0]["tool_calls"].as_array().unwrap();
+    assert_eq!(tool_calls.len(), 2);
+    assert_eq!(tool_calls[0]["id"], "call_a");
+    assert_eq!(tool_calls[1]["id"], "call_b");
+
+    assert_eq!(messages[1]["role"], "tool");
+    assert_eq!(messages[1]["tool_call_id"], "call_a");
+    assert_eq!(messages[2]["role"], "tool");
+    assert_eq!(messages[2]["tool_call_id"], "call_b");
 }

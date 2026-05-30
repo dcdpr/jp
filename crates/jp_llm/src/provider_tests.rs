@@ -221,6 +221,21 @@ async fn multi_turn_conversation(provider: ProviderId, test_name: &str) -> Resul
     run_test(provider, test_name, requests).await
 }
 
+#[test]
+fn trace_to_tmpfile_writes_distinct_files() {
+    // Successive calls within a process must not clobber each other, so an
+    // intermittent failure keeps the payload of every request it made.
+    let first = trace_to_tmpfile("jp-test-trace", &1);
+    let second = trace_to_tmpfile("jp-test-trace", &2);
+
+    assert_ne!(first, second);
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "1");
+    assert_eq!(std::fs::read_to_string(&second).unwrap(), "2");
+
+    std::fs::remove_file(&first).ok();
+    std::fs::remove_file(&second).ok();
+}
+
 test_all_providers![
     chat_completion_stream,
     image_attachment,

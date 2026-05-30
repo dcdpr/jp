@@ -178,12 +178,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "User asks to run the tool with whatever arguments. There's a function defined: run_me with args foo? default \"foo\" and bar: string or array. We can choose arguments. Should we pass something? Likely to demonstrate. Let's call run_me with bar: \"test\"."
+      "reasoning": "We need to call the tool run_me. The user says \"Please run the tool, providing whatever arguments you want.\" So we can choose any arguments. Perhaps foo default \"foo\", bar must be string or array. Let's call with bar as an array e.g. [1,2,3] or string. Let's use bar: \"test\". We'll call function."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "ea3be73ac",
+      "id": "8d6d4c473",
       "name": "run_me",
       "arguments": {
         "bar": "dGVzdA=="
@@ -192,19 +192,19 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "ea3be73ac",
+      "id": "8d6d4c473",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\"\n\nWe already invoked tool with bar \"test\". Tool returned \"working!\". Now likely we need to respond to user. Provide output of tool? We can mention we ran tool with sample arguments and got \"working!\". Ask if they need something else."
+      "reasoning": "The user asks \"Please run the tool, providing whatever arguments you want.\"\n\nWe already executed tool \"commentary\" with {\"bar\":\"test\"} and got \"working!\" So we responded with the tool output.\n\nNow we need to respond to user.\n\nWe already used tool, they may want us to provide the result? We gave result: \"working!\"\n\nNow we should respond appropriately. Probably acknowledge the tool ran successfully. Since the user asked to run the tool with whatever arguments we want, we did that; we can inform them of the result.\n\nThus final answer: \"I ran the tool with arguments {...} and here's the output: working!\""
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "I went ahead and invoked the tool with a sample argument (​`bar=\"test\"`​). The tool responded with:\n\n```\nworking!\n```\n\nLet me know if you’d like me to run it with different parameters or need the result used for something specific!"
+      "message": "I ran the tool with a sample argument (`{\"bar\":\"test\"}`) and the tool responded with:\n\n**working!**"
     }
   ]
 }

@@ -9,6 +9,8 @@ pub mod ollama;
 pub mod openai;
 pub mod openrouter;
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use anthropic::Anthropic;
 use async_trait::async_trait;
 use cerebras::Cerebras;
@@ -67,8 +69,14 @@ pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dy
 ///
 /// Used by `trace!` fields to avoid dumping massive request payloads into the
 /// log stream.
+/// Each call writes a distinct, sequence-numbered file
+/// (`{prefix}-{pid}-{seq}.json`) so successive requests within a single process
+/// don't clobber each other's payloads.
 pub(crate) fn trace_to_tmpfile(prefix: &str, value: &impl serde::Serialize) -> String {
-    let path = std::env::temp_dir().join(format!("{prefix}-{}.json", std::process::id()));
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("{prefix}-{}-{seq}.json", std::process::id()));
     match std::fs::write(
         &path,
         serde_json::to_string_pretty(value).unwrap_or_default(),
