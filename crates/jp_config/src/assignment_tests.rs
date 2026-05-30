@@ -628,3 +628,51 @@ fn test_assign_to_entry_merges_into_existing() {
         JsonValue(json!({"host": "localhost", "port": "3000"}))
     );
 }
+
+#[test]
+fn test_assign_to_entry_object_replaces_map() {
+    let mut map = IndexMap::<String, JsonValue>::new();
+    map.insert("stale".to_owned(), JsonValue(json!("gone")));
+
+    // `foo:={...}` (Set) replaces the whole map.
+    let kv = KvAssignment::try_from_cli(":", r#"{"a": "1", "b": "2"}"#).unwrap();
+    kv.assign_to_entry(&mut map).unwrap();
+
+    assert_eq!(map.len(), 2);
+    assert_eq!(map["a"], JsonValue(json!("1")));
+    assert_eq!(map["b"], JsonValue(json!("2")));
+    assert!(!map.contains_key("stale"));
+}
+
+#[test]
+fn test_assign_to_entry_object_merges_with_plus() {
+    let mut map = IndexMap::<String, JsonValue>::new();
+    map.insert("kept".to_owned(), JsonValue(json!("value")));
+
+    // `foo:+={...}` (Merge) keeps existing entries.
+    let kv = KvAssignment::try_from_cli(":+", r#"{"a": "1"}"#).unwrap();
+    kv.assign_to_entry(&mut map).unwrap();
+
+    assert_eq!(map["kept"], JsonValue(json!("value")));
+    assert_eq!(map["a"], JsonValue(json!("1")));
+}
+
+#[test]
+fn test_assign_to_entry_object_with_nested_values() {
+    let mut map = IndexMap::<String, JsonValue>::new();
+
+    let kv = KvAssignment::try_from_cli(":", r#"{"web": {"port": "3000"}}"#).unwrap();
+    kv.assign_to_entry(&mut map).unwrap();
+
+    assert_eq!(map["web"], JsonValue(json!({"port": "3000"})));
+}
+
+#[test]
+fn test_assign_to_entry_scalar_with_empty_key_errors() {
+    let mut map = IndexMap::<String, JsonValue>::new();
+
+    // A bare value with no map key and no object is a type error.
+    let kv = KvAssignment::try_from_cli(":", r#""scalar""#).unwrap();
+    let err = kv.assign_to_entry(&mut map).unwrap_err();
+    assert!(err.to_string().contains("type error"), "got: {err}");
+}
