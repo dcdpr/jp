@@ -37,10 +37,13 @@ fn test_model_id_config_deserialize() {
 
 #[test]
 fn resolve_partial_alias_from_map() {
-    let aliases = IndexMap::from([("haiku".to_owned(), ModelIdConfig {
-        provider: ProviderId::Anthropic,
-        name: "claude-haiku-4-5".parse().unwrap(),
-    })]);
+    let aliases = IndexMap::from([(
+        "haiku".to_owned(),
+        ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Anthropic,
+            name: "claude-haiku-4-5".parse().unwrap(),
+        }),
+    )]);
 
     let partial = PartialModelIdOrAliasConfig::Alias("haiku".into());
     let resolved = partial.resolve(&aliases).unwrap();
@@ -113,10 +116,13 @@ fn resolved_panics_on_alias() {
 
 #[test]
 fn resolve_in_place_converts_alias() {
-    let aliases = IndexMap::from([("haiku".to_owned(), ModelIdConfig {
-        provider: ProviderId::Anthropic,
-        name: "claude-haiku-4-5".parse().unwrap(),
-    })]);
+    let aliases = IndexMap::from([(
+        "haiku".to_owned(),
+        ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Anthropic,
+            name: "claude-haiku-4-5".parse().unwrap(),
+        }),
+    )]);
 
     let mut config = ModelIdOrAliasConfig::Alias("haiku".into());
     config.resolve_in_place(&aliases).unwrap();
@@ -148,10 +154,13 @@ fn resolve_in_place_error_on_unknown_alias() {
 
 #[test]
 fn partial_resolve_in_place_converts_alias() {
-    let aliases = IndexMap::from([("haiku".to_owned(), ModelIdConfig {
-        provider: ProviderId::Anthropic,
-        name: "claude-haiku-4-5".parse().unwrap(),
-    })]);
+    let aliases = IndexMap::from([(
+        "haiku".to_owned(),
+        ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Anthropic,
+            name: "claude-haiku-4-5".parse().unwrap(),
+        }),
+    )]);
 
     let mut partial = PartialModelIdOrAliasConfig::Alias("haiku".into());
     partial.resolve_in_place(&aliases);
@@ -191,4 +200,57 @@ fn partial_resolve_in_place_unknown_alias_left_as_is() {
 
     // Unresolvable alias is left unchanged.
     assert!(matches!(partial, PartialModelIdOrAliasConfig::Alias(a) if a == "nonexistent"));
+}
+
+#[test]
+fn resolve_alias_chain_follows_multiple_hops() {
+    let aliases = IndexMap::from([
+        (
+            "opus".to_owned(),
+            ModelIdOrAliasConfig::Id(ModelIdConfig {
+                provider: ProviderId::Anthropic,
+                name: "claude-opus-4".parse().unwrap(),
+            }),
+        ),
+        (
+            "coder".to_owned(),
+            ModelIdOrAliasConfig::Alias("opus".into()),
+        ),
+        (
+            "default".to_owned(),
+            ModelIdOrAliasConfig::Alias("coder".into()),
+        ),
+    ]);
+
+    let resolved = resolve_alias_chain("default", &aliases).unwrap();
+    assert_eq!(resolved.provider, ProviderId::Anthropic);
+    assert_eq!(resolved.name.as_ref(), "claude-opus-4");
+}
+
+#[test]
+fn resolve_alias_chain_detects_cycle() {
+    let aliases = IndexMap::from([
+        ("a".to_owned(), ModelIdOrAliasConfig::Alias("b".into())),
+        ("b".to_owned(), ModelIdOrAliasConfig::Alias("a".into())),
+    ]);
+
+    let err = resolve_alias_chain("a", &aliases).unwrap_err();
+    assert!(
+        matches!(err, ModelIdConfigError::AliasCycle { .. }),
+        "expected cycle error, got: {err}"
+    );
+}
+
+#[test]
+fn resolve_alias_chain_unknown_name_parses_as_literal_id() {
+    let aliases = IndexMap::new();
+    let resolved = resolve_alias_chain("anthropic/claude-opus-4", &aliases).unwrap();
+    assert_eq!(resolved.provider, ProviderId::Anthropic);
+    assert_eq!(resolved.name.as_ref(), "claude-opus-4");
+}
+
+#[test]
+fn resolve_alias_chain_unknown_non_id_errors() {
+    let aliases = IndexMap::new();
+    assert!(resolve_alias_chain("nonexistent", &aliases).is_err());
 }

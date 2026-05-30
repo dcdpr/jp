@@ -158,14 +158,11 @@ impl ModelIdOrAliasConfig {
     /// [`resolved()`]: Self::resolved
     pub fn finalize(
         &self,
-        aliases: &IndexMap<String, ModelIdConfig>,
+        aliases: &IndexMap<String, Self>,
     ) -> Result<ModelIdConfig, ModelIdConfigError> {
-        match &self {
+        match self {
             Self::Id(id) => Ok(id.clone()),
-            Self::Alias(alias) => aliases
-                .get(alias)
-                .cloned()
-                .map_or_else(|| ModelIdConfig::from_str(alias), Ok),
+            Self::Alias(alias) => resolve_alias_chain(alias, aliases),
         }
     }
 
@@ -178,7 +175,7 @@ impl ModelIdOrAliasConfig {
     /// Returns an error if the alias cannot be resolved.
     pub fn resolve_in_place(
         &mut self,
-        aliases: &IndexMap<String, ModelIdConfig>,
+        aliases: &IndexMap<String, Self>,
     ) -> Result<(), ModelIdConfigError> {
         if let Self::Alias(_) = self {
             *self = Self::Id(self.finalize(aliases)?);
@@ -188,46 +185,48 @@ impl ModelIdOrAliasConfig {
 }
 
 impl PartialModelIdOrAliasConfig {
-    /// See [`ModelIdOrAliasConfig::finalize`].
+    /// Resolve to a [`PartialModelIdConfig`] using a partial alias map.
+    ///
+    /// Operates entirely on partial values, following alias-to-alias chains.
+    /// Used where only a partial config (and its partial alias map) is
+    /// available, such as reconstructing a model's provider from a
+    /// conversation-stream event.
     ///
     /// # Errors
     ///
-    /// Returns an error if the configuration cannot be resolved.
+    /// Returns an error if the alias chain contains a cycle, or ends in a name
+    /// that is neither a known alias nor a valid `provider/name` model ID.
     pub fn finalize(
         &self,
-        aliases: &IndexMap<String, PartialModelIdConfig>,
+        aliases: &IndexMap<String, Self>,
     ) -> Result<PartialModelIdConfig, ModelIdConfigError> {
-        match &self {
+        match self {
             Self::Id(id) => Ok(id.clone()),
-            Self::Alias(alias) => aliases
-                .get(alias)
-                .cloned()
-                .map_or_else(|| PartialModelIdConfig::from_str(alias), Ok),
+            Self::Alias(alias) => resolve_partial_alias_chain(alias, aliases),
         }
     }
 
-    /// Resolve to a concrete [`ModelIdConfig`] using the concrete alias map.
+    /// Resolve to a concrete [`ModelIdConfig`] using the alias map.
     ///
     /// This bridges partial config types (from e.g.
-    /// `QuestionTarget::Assistant`) with the concrete alias map in
+    /// `QuestionTarget::Assistant`) with the alias map in
     /// [`LlmProviderConfig::aliases`].
+    /// Alias values may point at other aliases; the chain is followed to a
+    /// concrete model ID.
     ///
     /// # Errors
     ///
-    /// Returns an error if the alias is unknown and cannot be parsed as a
-    /// `provider/name` model ID, or if a direct ID is missing the provider or
-    /// name fields.
+    /// Returns an error if the alias chain contains a cycle, if it ends in a
+    /// name that is neither a known alias nor a valid `provider/name` model ID,
+    /// or if a direct ID is missing the provider or name fields.
     ///
     /// [`LlmProviderConfig::aliases`]: crate::providers::llm::LlmProviderConfig::aliases
     pub fn resolve(
         &self,
-        aliases: &IndexMap<String, ModelIdConfig>,
+        aliases: &IndexMap<String, ModelIdOrAliasConfig>,
     ) -> Result<ModelIdConfig, ModelIdConfigError> {
         match self {
-            Self::Alias(alias) => aliases
-                .get(alias)
-                .cloned()
-                .map_or_else(|| ModelIdConfig::from_str(alias), Ok),
+            Self::Alias(alias) => resolve_alias_chain(alias, aliases),
             Self::Id(partial) => {
                 let provider = partial.provider.ok_or(ModelIdConfigError::StrParse)?;
                 let name = partial.name.clone().ok_or(ModelIdConfigError::StrParse)?;
@@ -236,18 +235,74 @@ impl PartialModelIdOrAliasConfig {
         }
     }
 
-    /// Resolve an `Alias` variant in place using the concrete alias map.
+    /// Resolve an `Alias` variant in place using the alias map.
     ///
     /// If this is already an `Id`, this is a no-op.
     /// If it's an `Alias`, it's replaced with `Id(resolved.to_partial())`.
     ///
     /// Used to sanitize `PartialAppConfig` values before storing them as
     /// `ConfigDelta`s in the conversation stream.
-    pub fn resolve_in_place(&mut self, aliases: &IndexMap<String, ModelIdConfig>) {
+    pub fn resolve_in_place(&mut self, aliases: &IndexMap<String, ModelIdOrAliasConfig>) {
         if let Self::Alias(_) = self
             && let Ok(resolved) = self.resolve(aliases)
         {
             *self = Self::Id(resolved.to_partial());
+        }
+    }
+}
+
+/// Resolve an alias name to a concrete [`ModelIdConfig`] by following the alias
+/// chain.
+///
+/// Each hop looks the current name up in `aliases`: an `Id` ends the walk, an
+/// `Alias` continues it, and a name absent from the map is parsed as a literal
+/// `provider/name` model ID.
+/// A name visited twice closes a cycle and errors.
+pub(crate) fn resolve_alias_chain(
+    name: &str,
+    aliases: &IndexMap<String, ModelIdOrAliasConfig>,
+) -> Result<ModelIdConfig, ModelIdConfigError> {
+    let mut chain: Vec<String> = Vec::new();
+    let mut current = name.to_owned();
+
+    loop {
+        if chain.contains(&current) {
+            chain.push(current);
+            return Err(ModelIdConfigError::AliasCycle { chain });
+        }
+        chain.push(current.clone());
+
+        match aliases.get(&current) {
+            Some(ModelIdOrAliasConfig::Id(id)) => return Ok(id.clone()),
+            Some(ModelIdOrAliasConfig::Alias(next)) => current.clone_from(next),
+            None => return ModelIdConfig::from_str(&current),
+        }
+    }
+}
+
+/// Partial-config counterpart of [`resolve_alias_chain`].
+///
+/// Walks a partial alias map, returning the [`PartialModelIdConfig`] the chain
+/// resolves to.
+/// A name visited twice closes a cycle and errors.
+pub(crate) fn resolve_partial_alias_chain(
+    name: &str,
+    aliases: &IndexMap<String, PartialModelIdOrAliasConfig>,
+) -> Result<PartialModelIdConfig, ModelIdConfigError> {
+    let mut chain: Vec<String> = Vec::new();
+    let mut current = name.to_owned();
+
+    loop {
+        if chain.contains(&current) {
+            chain.push(current);
+            return Err(ModelIdConfigError::AliasCycle { chain });
+        }
+        chain.push(current.clone());
+
+        match aliases.get(&current) {
+            Some(PartialModelIdOrAliasConfig::Id(id)) => return Ok(id.clone()),
+            Some(PartialModelIdOrAliasConfig::Alias(next)) => current.clone_from(next),
+            None => return PartialModelIdConfig::from_str(&current),
         }
     }
 }
@@ -433,6 +488,13 @@ pub enum ModelIdConfigError {
     /// Error when parsing `ModelId`.
     #[error(transparent)]
     ModelId(#[from] ModelIdError),
+
+    /// An alias chain refers back to itself.
+    #[error("model alias cycle detected: {}", .chain.join(" -> "))]
+    AliasCycle {
+        /// The alias names visited, ending with the name that closed the loop.
+        chain: Vec<String>,
+    },
 }
 
 impl FromStr for ModelIdConfig {

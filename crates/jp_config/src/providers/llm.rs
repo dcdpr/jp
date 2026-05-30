@@ -16,7 +16,7 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
     fill::FillDefaults,
-    model::id::ModelIdConfig,
+    model::id::{ModelIdConfig, ModelIdConfigError, ModelIdOrAliasConfig, resolve_alias_chain},
     partial::ToPartial,
     providers::llm::{
         anthropic::{AnthropicConfig, PartialAnthropicConfig},
@@ -35,18 +35,21 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(default, rename_all = "snake_case")]
 pub struct LlmProviderConfig {
-    /// Aliases for specific provider/model combinations.
+    /// Short names for models.
     ///
-    /// This allows you to define short names for models.
-    ///
-    /// For example:
+    /// Each value is a full model ID (`provider/name`), a `{ provider, name }`
+    /// table, or the name of another alias.
+    /// Aliases may point at other aliases; the chain is resolved to a concrete
+    /// model.
     ///
     /// ```toml
     /// [providers.llm.aliases]
-    /// haiku = { provider = "anthropic", name = "claude-3-haiku-20240307" }
+    /// opus = "anthropic/claude-opus-4"
+    /// haiku = { provider = "anthropic", name = "claude-haiku-4-5" }
+    /// coder = "opus"
     /// ```
     #[setting(nested, merge = merge_nested_indexmap)]
-    pub aliases: IndexMap<String, ModelIdConfig>,
+    pub aliases: IndexMap<String, ModelIdOrAliasConfig>,
 
     /// Anthropic API configuration.
     #[setting(nested)]
@@ -85,7 +88,7 @@ impl AssignKeyValue for PartialLlmProviderConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            _ if kv.p("aliases") => kv.try_object()?,
+            _ if kv.p("aliases") => kv.assign_to_entry(&mut self.aliases)?,
             _ if kv.p("anthropic") => self.anthropic.assign(kv)?,
             _ if kv.p("cerebras") => self.cerebras.assign(kv)?,
             _ if kv.p("deepseek") => self.deepseek.assign(kv)?,
@@ -166,6 +169,22 @@ impl ToPartial for LlmProviderConfig {
             openai: self.openai.to_partial(),
             openrouter: self.openrouter.to_partial(),
         }
+    }
+}
+
+impl LlmProviderConfig {
+    /// Resolve every alias to a concrete [`ModelIdConfig`], following
+    /// alias-to-alias chains.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any alias chain contains a cycle, or ends in a name
+    /// that is neither another alias nor a valid `provider/name` model ID.
+    pub fn resolved_aliases(&self) -> Result<IndexMap<String, ModelIdConfig>, ModelIdConfigError> {
+        self.aliases
+            .keys()
+            .map(|name| Ok((name.clone(), resolve_alias_chain(name, &self.aliases)?)))
+            .collect()
     }
 }
 
