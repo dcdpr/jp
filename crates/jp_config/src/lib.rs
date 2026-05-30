@@ -444,6 +444,20 @@ impl AppConfig {
     ///
     /// Returns an error if an alias cannot be resolved.
     pub fn resolve_aliases(&mut self) -> Result<(), Error> {
+        // Flatten the alias map to concrete model IDs, following alias-to-alias
+        // chains. This validates the whole map up front, so cycles and unknown
+        // targets surface during config load even for aliases that no field
+        // references, and leaves every entry as a concrete `Id`.
+        let resolved = self
+            .providers
+            .llm
+            .resolved_aliases()
+            .map_err(|e| Error::Custom(format!("providers.llm.aliases: {e}").into()))?;
+        self.providers.llm.aliases = resolved
+            .into_iter()
+            .map(|(name, id)| (name, model::id::ModelIdOrAliasConfig::Id(id)))
+            .collect();
+
         let aliases = &self.providers.llm.aliases;
 
         self.assistant
@@ -516,7 +530,7 @@ impl PartialAppConfig {
     /// contain only resolved model IDs.
     pub fn resolve_model_aliases(
         &mut self,
-        aliases: &indexmap::IndexMap<String, model::id::ModelIdConfig>,
+        aliases: &indexmap::IndexMap<String, model::id::ModelIdOrAliasConfig>,
     ) {
         self.assistant.model.id.resolve_in_place(aliases);
 

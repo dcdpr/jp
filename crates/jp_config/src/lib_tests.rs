@@ -98,12 +98,17 @@ fn test_partial_app_config_assign() {
 
 #[test]
 fn resolve_model_aliases_resolves_assistant_model() {
-    use crate::model::id::{ModelIdConfig, PartialModelIdOrAliasConfig, ProviderId};
+    use crate::model::id::{
+        ModelIdConfig, ModelIdOrAliasConfig, PartialModelIdOrAliasConfig, ProviderId,
+    };
 
-    let aliases = IndexMap::from([("haiku".to_owned(), ModelIdConfig {
-        provider: ProviderId::Anthropic,
-        name: "claude-haiku-4-5".parse().unwrap(),
-    })]);
+    let aliases = IndexMap::from([(
+        "haiku".to_owned(),
+        ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Anthropic,
+            name: "claude-haiku-4-5".parse().unwrap(),
+        }),
+    )]);
 
     let mut partial = PartialAppConfig::empty();
     partial.assistant.model.id = PartialModelIdOrAliasConfig::Alias("haiku".into());
@@ -156,7 +161,8 @@ fn build_resolves_aliases() {
             provider: ProviderId::Anthropic,
             name: "claude-haiku-4-5".parse().unwrap(),
         }
-        .to_partial(),
+        .to_partial()
+        .into(),
     );
     partial.assistant.model.id = PartialModelIdOrAliasConfig::Alias("mymodel".into());
 
@@ -171,4 +177,65 @@ fn build_resolves_aliases() {
     let resolved = config.assistant.model.id.resolved();
     assert_eq!(resolved.provider, ProviderId::Anthropic);
     assert_eq!(resolved.name.to_string(), "claude-haiku-4-5");
+}
+
+#[test]
+fn build_resolves_chained_aliases() {
+    use crate::{
+        conversation::tool::RunMode,
+        model::id::{ModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+    partial.providers.llm.aliases.insert(
+        "opus".to_owned(),
+        ModelIdConfig {
+            provider: ProviderId::Anthropic,
+            name: "claude-opus-4".parse().unwrap(),
+        }
+        .to_partial()
+        .into(),
+    );
+    partial.providers.llm.aliases.insert(
+        "coder".to_owned(),
+        PartialModelIdOrAliasConfig::Alias("opus".into()),
+    );
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Alias("coder".into());
+
+    let config = build(partial).expect("valid config");
+
+    let resolved = config.assistant.model.id.resolved();
+    assert_eq!(resolved.provider, ProviderId::Anthropic);
+    assert_eq!(resolved.name.to_string(), "claude-opus-4");
+}
+
+#[test]
+fn build_rejects_alias_cycle() {
+    use crate::{
+        conversation::tool::RunMode,
+        model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+    // A valid assistant model so `from_partial` succeeds; the cycle lives in
+    // aliases that no field references, exercising the up-front validation.
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+        provider: Some(ProviderId::Anthropic),
+        name: "claude-opus-4".parse().ok(),
+    });
+    partial.providers.llm.aliases.insert(
+        "a".to_owned(),
+        PartialModelIdOrAliasConfig::Alias("b".into()),
+    );
+    partial.providers.llm.aliases.insert(
+        "b".to_owned(),
+        PartialModelIdOrAliasConfig::Alias("a".into()),
+    );
+
+    let err = build(partial).unwrap_err();
+    assert!(err.to_string().contains("cycle"), "got: {err}");
 }

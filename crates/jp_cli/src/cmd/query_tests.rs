@@ -640,7 +640,8 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
             provider: ProviderId::Openai,
             name: "gpt-model".parse().unwrap(),
         }
-        .to_partial(),
+        .to_partial()
+        .into(),
     );
 
     let mut workspace = Workspace::new(root);
