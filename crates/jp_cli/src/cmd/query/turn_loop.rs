@@ -11,7 +11,10 @@ use std::{
 };
 
 use camino::Utf8Path;
-use futures::{Stream, StreamExt as _, future, stream::SelectAll};
+use futures::{
+    Stream, StreamExt as _, future,
+    stream::{self, SelectAll},
+};
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
@@ -286,7 +289,21 @@ pub(super) async fn run_turn_loop(
                 let llm_stream = StreamSource::Llm(
                     raw_stream
                         .fuse()
-                        .map(|result| StreamingLoopEvent::Llm(Box::new(result))),
+                        .map(|result| StreamingLoopEvent::Llm(Box::new(result)))
+                        // Backstop: if the provider stream ends without a
+                        // terminal `Finished` event (a dropped or stalled
+                        // connection), the loop would otherwise pend forever —
+                        // `SelectAll` only completes once the signal and tick
+                        // sources are also exhausted, and those never end.
+                        // Append a synthetic transient error so a premature end
+                        // routes through the same retry path as any other
+                        // stream failure. A normal `Finished` breaks the loop
+                        // before this sentinel is ever polled.
+                        .chain(stream::once(future::ready(StreamingLoopEvent::Llm(
+                            Box::new(Err(StreamError::transient(
+                                "provider stream ended without a terminal event",
+                            ))),
+                        )))),
                 );
                 turn_state.request_count += 1;
 

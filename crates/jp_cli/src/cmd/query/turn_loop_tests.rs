@@ -27,6 +27,7 @@ use jp_conversation::{
 use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{
     Error as LlmError, EventStream, Provider,
+    error::StreamError,
     event::{Event, FinishReason},
     model::ModelDetails,
     provider::mock::MockProvider,
@@ -98,6 +99,20 @@ impl SequentialMockProvider {
             }),
         }
     }
+
+    /// Create a provider whose single response stream ends WITHOUT a terminal
+    /// `Finished` event, simulating a provider that drops or stalls the
+    /// connection mid-stream.
+    fn with_premature_end(events: Vec<Event>) -> Self {
+        Self {
+            responses: vec![events],
+            call_index: AtomicUsize::new(0),
+            model: ModelDetails::empty(id::ModelIdConfig {
+                provider: ProviderId::Test,
+                name: "premature-mock".parse().expect("valid name"),
+            }),
+        }
+    }
 }
 
 #[async_trait]
@@ -125,6 +140,39 @@ impl Provider for SequentialMockProvider {
             .unwrap_or_else(|| vec![Event::Finished(FinishReason::Completed)]);
 
         Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
+    }
+}
+
+/// A provider whose stream always ends immediately with no events and no
+/// terminal `Finished`, counting calls so a test can assert the retry budget
+/// was consumed.
+#[derive(Debug, Default)]
+struct AlwaysPrematureProvider {
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl Provider for AlwaysPrematureProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: name.clone(),
+        }))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::pin(stream::iter(
+            Vec::<Result<Event, StreamError>>::new(),
+        )))
     }
 }
 
@@ -277,6 +325,140 @@ async fn test_normal_completion_persists_content() {
     assert!(
         content.contains(response_content),
         "Should contain assistant response.\nFile contents:\n{content}"
+    );
+}
+
+/// Regression: a provider stream that ends without a terminal `Finished` event
+/// (a dropped or stalled connection) must surface as an error rather than
+/// hanging the loop forever on the signal/tick sources.
+#[tokio::test]
+async fn premature_stream_end_without_finished_returns_error() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    // Disable retries so the premature end fails fast instead of cycling
+    // through the backoff schedule.
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_retries = 0;
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    // Emits a partial message, then ends with no `Finished` event.
+    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_premature_end(vec![
+        Event::message(0, "partial answer"),
+        Event::flush(0),
+    ]));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+    // Without the backstop the loop pends forever, so cap the whole run.
+    let result = timeout(
+        Duration::from_secs(5),
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &signal_rx,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("hi"),
+        ),
+    )
+    .await
+    .expect("turn loop hung on a stream that never sent a Finished event");
+
+    assert!(
+        result.is_err(),
+        "a premature stream end should surface as an error, got: {result:?}"
+    );
+}
+
+/// A premature stream end is retryable: the loop retries until the budget is
+/// exhausted, then returns an error rather than retrying forever.
+#[tokio::test]
+async fn premature_stream_end_exhausts_retry_budget() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    // Two retries, zero backoff so the retries are instant.
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_retries = 2;
+    config.assistant.request.base_backoff_ms = 0;
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let provider = Arc::new(AlwaysPrematureProvider::default());
+    let dyn_provider: Arc<dyn Provider> = provider.clone();
+    let model = dyn_provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+    let result = timeout(
+        Duration::from_secs(5),
+        run_turn_loop(
+            dyn_provider,
+            &model,
+            &config,
+            &signal_rx,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("hi"),
+        ),
+    )
+    .await
+    .expect("turn loop should exhaust retries quickly, not hang");
+
+    assert!(
+        result.is_err(),
+        "exhausted retries should return an error, got: {result:?}"
+    );
+
+    // 1 initial attempt + 2 retries.
+    assert_eq!(
+        provider.calls.load(Ordering::SeqCst),
+        3,
+        "provider should be called once per attempt across the retry budget"
     );
 }
 
