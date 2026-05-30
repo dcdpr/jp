@@ -5,11 +5,9 @@
 //! `target/`, so incremental builds across the user's worktree and the sandbox
 //! share artifacts.
 
-use std::process::Command;
-
 use camino::{Utf8Path, Utf8PathBuf};
 
-use crate::Error;
+use crate::{Error, util::runner::ProcessRunner};
 
 /// What to build and how.
 #[derive(Debug, Clone)]
@@ -31,7 +29,10 @@ pub(crate) struct BuildSpec<'a> {
 }
 
 /// Build `jp` and return the path to the resulting binary.
-pub(crate) fn build(spec: &BuildSpec<'_>) -> Result<Utf8PathBuf, Error> {
+pub(crate) fn build(
+    runner: &dyn ProcessRunner,
+    spec: &BuildSpec<'_>,
+) -> Result<Utf8PathBuf, Error> {
     let mut args = vec![
         "build".to_owned(),
         format!("--package={}", spec.package),
@@ -42,35 +43,32 @@ pub(crate) fn build(spec: &BuildSpec<'_>) -> Result<Utf8PathBuf, Error> {
     if !spec.features.is_empty() {
         args.push(format!("--features={}", spec.features.join(",")));
     }
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
 
-    let output = Command::new("cargo")
-        .current_dir(spec.working_dir)
-        .args(&args)
-        .output()
+    let output = runner
+        .run("cargo", &arg_refs, spec.working_dir)
         .map_err(|e| format!("Failed to spawn `cargo build`: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("`cargo build` failed: {stderr}").into());
+    if !output.success() {
+        return Err(format!("`cargo build` failed: {}", output.stderr).into());
     }
 
     // Resolve the binary path via `cargo metadata` so we honor the
     // workspace's `target/` layout from `.cargo/config.toml`. Both
     // worktrees share the same target dir, so the artifact ends up where
     // any other cargo build in this workspace would put it.
-    let metadata = Command::new("cargo")
-        .current_dir(spec.working_dir)
-        .args(["metadata", "--no-deps", "--format-version=1"])
-        .output()
+    let metadata = runner
+        .run(
+            "cargo",
+            &["metadata", "--no-deps", "--format-version=1"],
+            spec.working_dir,
+        )
         .map_err(|e| format!("Failed to spawn `cargo metadata`: {e}"))?;
-
-    if !metadata.status.success() {
-        let stderr = String::from_utf8_lossy(&metadata.stderr);
-        return Err(format!("`cargo metadata` failed: {stderr}").into());
+    if !metadata.success() {
+        return Err(format!("`cargo metadata` failed: {}", metadata.stderr).into());
     }
 
-    let stdout = String::from_utf8_lossy(&metadata.stdout);
-    let target_dir = stdout
+    let target_dir = metadata
+        .stdout
         .split_once("\"target_directory\":\"")
         .and_then(|(_, rest)| rest.split_once('"'))
         .map(|(path, _)| Utf8PathBuf::from(path))
@@ -82,3 +80,7 @@ pub(crate) fn build(spec: &BuildSpec<'_>) -> Result<Utf8PathBuf, Error> {
     }
     Ok(binary)
 }
+
+#[cfg(test)]
+#[path = "build_tests.rs"]
+mod tests;

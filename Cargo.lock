@@ -4595,6 +4595,7 @@ dependencies = [
  "jp_md",
  "jp_tool",
  "jp_workspace",
+ "libc",
  "pretty_assertions",
  "quick-xml",
  "reflink-copy",
@@ -4610,6 +4611,7 @@ dependencies = [
  "tokio",
  "url",
  "which",
+ "windows-sys 0.61.0",
 ]
 
 [[package]]

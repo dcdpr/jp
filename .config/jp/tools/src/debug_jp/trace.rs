@@ -20,12 +20,13 @@ use crate::{
     Context, Error, Tool,
     debug_jp::util::{
         build::{self, BuildSpec},
-        launch::{self, LaunchSpec},
+        launch::{LaunchSpec, Launcher, RealLauncher, Timeouts},
         sandbox::{Sandbox, SandboxOpts},
         trace_parse::{self, Level, TraceEvent},
         trace_render::{self, OutputPaths},
+        with_termination_note,
     },
-    util::{ToolResult, error},
+    util::{ToolResult, error, runner::DuctProcessRunner},
 };
 
 /// Marker line `jp_cli::run` writes to stderr when `JP_DEBUG=1` and the output
@@ -137,9 +138,7 @@ fn format_preview(
     out
 }
 
-/// Live execution path.
-/// Builds jp, launches with `JP_DEBUG=1`, retrieves the trace log, parses +
-/// filters + renders.
+/// Live execution path: set up the sandbox, build jp, then [`execute`].
 fn run(
     workspace_root: &Utf8Path,
     args: &[String],
@@ -148,9 +147,13 @@ fn run(
     grep: Option<&str>,
     clone_user_data: bool,
 ) -> ToolResult {
-    let sandbox = Sandbox::create(workspace_root, SandboxOpts { clone_user_data })?;
+    let sandbox = Sandbox::create(
+        workspace_root,
+        SandboxOpts { clone_user_data },
+        &DuctProcessRunner,
+    )?;
 
-    let binary = build::build(&BuildSpec {
+    let binary = build::build(&DuctProcessRunner, &BuildSpec {
         working_dir: sandbox.working_dir(),
         package: "jp_cli",
         bin: "jp",
@@ -160,30 +163,61 @@ fn run(
 
     let mut env = sandbox.env();
     env.push(("JP_DEBUG".to_owned(), "1".to_owned()));
-    let handle = launch::spawn(&LaunchSpec {
+    let spec = LaunchSpec {
         binary,
         args: args.to_vec(),
         working_dir: sandbox.working_dir().to_owned(),
         env,
-    })?;
-    let launch_result = handle.wait()?;
+    };
+
+    execute(
+        workspace_root,
+        &spec,
+        level,
+        target_filter,
+        grep,
+        &RealLauncher,
+        Timeouts::DEFAULT,
+    )
+}
+
+/// Launch jp via `launcher`, retrieve the trace log, filter, and render.
+///
+/// Split from [`run`] so it can be driven with a fake [`Launcher`] in tests,
+/// independent of the sandbox and build steps.
+fn execute(
+    workspace_root: &Utf8Path,
+    spec: &LaunchSpec,
+    level: Level,
+    target_filter: Option<&str>,
+    grep: Option<&str>,
+    launcher: &dyn Launcher,
+    timeouts: Timeouts,
+) -> ToolResult {
+    let launch_result = launcher.run(spec, timeouts, &mut |_| {})?;
 
     // jp prints `Full trace log written to: <path>` on stderr right before
     // exit. The path is in the system temp dir (e.g. `/var/folders/...`),
-    // outside the sandbox.
-    let trace_src = launch_result
+    // outside the sandbox. A force-killed jp never flushes, so fold the
+    // termination note into the error when the marker is absent.
+    let Some(trace_line) = launch_result
         .stderr
         .lines()
         .find_map(|line| line.strip_prefix(TRACE_PATH_PREFIX))
-        .ok_or_else(|| {
-            format!(
-                "Did not find `{TRACE_PATH_PREFIX}<path>` in jp's stderr. jp may have exited \
-                 before the tracing layer flushed, or stderr was redirected. Last 20 lines of \
-                 stderr:\n{}",
-                tail_lines(&launch_result.stderr, 20)
-            )
-        })?;
-    let trace_src = Utf8PathBuf::from(trace_src.trim());
+    else {
+        let note = launch_result
+            .note()
+            .map(|n| format!("{n}\n\n"))
+            .unwrap_or_default();
+        return Err(format!(
+            "{note}Did not find `{TRACE_PATH_PREFIX}<path>` in jp's stderr. jp may have exited \
+             before the tracing layer flushed, or stderr was redirected. Last 20 lines of \
+             stderr:\n{}",
+            tail_lines(&launch_result.stderr, 20)
+        )
+        .into());
+    };
+    let trace_src = Utf8PathBuf::from(trace_line.trim());
 
     // Copy the trace log into the real workspace so it survives the system
     // temp dir's eventual cleanup and stays alongside other profile output.
@@ -228,11 +262,12 @@ fn run(
     let trace_dst_display = crate::debug_jp::util::relative_to(workspace_root, &trace_dst);
     let stdout_dst_display = crate::debug_jp::util::relative_to(workspace_root, &stdout_dst);
     let stderr_dst_display = crate::debug_jp::util::relative_to(workspace_root, &stderr_dst);
-    let report = trace_render::render(&filtered, total, &launch_result, args, OutputPaths {
+    let report = trace_render::render(&filtered, total, &launch_result, &spec.args, OutputPaths {
         trace: &trace_dst_display,
         stdout: &stdout_dst_display,
         stderr: &stderr_dst_display,
     });
+    let report = with_termination_note(report, &launch_result);
     fs::write(&report_dst, &report)?;
     Ok(Outcome::Success { content: report })
 }
@@ -277,3 +312,7 @@ fn unix_seconds() -> u64 {
 fn _propagate_error(e: Error) -> Error {
     e
 }
+
+#[cfg(test)]
+#[path = "trace_tests.rs"]
+mod tests;
