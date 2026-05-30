@@ -20,6 +20,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         max_retries,
         base_backoff_ms: 1, // 1ms for fast tests
         max_backoff_secs: 1,
+        stream_idle_timeout_secs: 120,
         cache: CachePolicy::default(),
     };
     StreamRetryState::new(config, false)
@@ -83,6 +84,7 @@ fn backoff_uses_retry_after_when_present() {
         max_retries: 3,
         base_backoff_ms: 1,
         max_backoff_secs: 120,
+        stream_idle_timeout_secs: 120,
         cache: CachePolicy::default(),
     };
     let state = StreamRetryState::new(config, false);

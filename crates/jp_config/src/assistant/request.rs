@@ -50,6 +50,22 @@ pub struct RequestConfig {
     #[setting(default = 60)]
     pub max_backoff_secs: u32,
 
+    /// Abort a streaming response after this many seconds of inactivity.
+    ///
+    /// Defaults to `60`.
+    /// Set to `0` to disable the idle timeout.
+    ///
+    /// The timer resets every time the provider sends data, so it only fires
+    /// when a connection goes silent for the full duration without delivering
+    /// any tokens or events.
+    /// A timed-out stream is treated as a transient error and retried according
+    /// to `max_retries` and the backoff settings.
+    ///
+    /// Raise this for models with a very long time-to-first-token (such as
+    /// deep-research models) if you observe spurious retries.
+    #[setting(default = 60)]
+    pub stream_idle_timeout_secs: u32,
+
     /// Prompt caching policy.
     ///
     /// Controls whether the provider should apply prompt caching optimizations
@@ -68,6 +84,9 @@ impl AssignKeyValue for PartialRequestConfig {
             "max_retries" => self.max_retries = kv.try_some_u32()?,
             "base_backoff_ms" => self.base_backoff_ms = kv.try_some_u32()?,
             "max_backoff_secs" => self.max_backoff_secs = kv.try_some_u32()?,
+            "stream_idle_timeout_secs" => {
+                self.stream_idle_timeout_secs = kv.try_some_u32()?;
+            }
             "cache" => self.cache = kv.try_some_bool_or_from_str()?,
             _ => return missing_key(&kv),
         }
@@ -82,6 +101,10 @@ impl PartialConfigDelta for PartialRequestConfig {
             max_retries: delta_opt(self.max_retries.as_ref(), next.max_retries),
             base_backoff_ms: delta_opt(self.base_backoff_ms.as_ref(), next.base_backoff_ms),
             max_backoff_secs: delta_opt(self.max_backoff_secs.as_ref(), next.max_backoff_secs),
+            stream_idle_timeout_secs: delta_opt(
+                self.stream_idle_timeout_secs.as_ref(),
+                next.stream_idle_timeout_secs,
+            ),
             cache: delta_opt(self.cache.as_ref(), next.cache),
         }
     }
@@ -93,6 +116,9 @@ impl FillDefaults for PartialRequestConfig {
             max_retries: self.max_retries.or(defaults.max_retries),
             base_backoff_ms: self.base_backoff_ms.or(defaults.base_backoff_ms),
             max_backoff_secs: self.max_backoff_secs.or(defaults.max_backoff_secs),
+            stream_idle_timeout_secs: self
+                .stream_idle_timeout_secs
+                .or(defaults.stream_idle_timeout_secs),
             cache: self.cache.or(defaults.cache),
         }
     }
@@ -106,6 +132,10 @@ impl ToPartial for RequestConfig {
             max_retries: partial_opt(&self.max_retries, defaults.max_retries),
             base_backoff_ms: partial_opt(&self.base_backoff_ms, defaults.base_backoff_ms),
             max_backoff_secs: partial_opt(&self.max_backoff_secs, defaults.max_backoff_secs),
+            stream_idle_timeout_secs: partial_opt(
+                &self.stream_idle_timeout_secs,
+                defaults.stream_idle_timeout_secs,
+            ),
             cache: partial_opt(&self.cache, defaults.cache),
         }
     }

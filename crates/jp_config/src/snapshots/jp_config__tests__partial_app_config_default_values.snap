@@ -87,6 +87,9 @@ Ok(
                     max_backoff_secs: Some(
                         60,
                     ),
+                    stream_idle_timeout_secs: Some(
+                        60,
+                    ),
                     cache: None,
                 },
             },

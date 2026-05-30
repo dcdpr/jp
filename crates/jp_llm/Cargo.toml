@@ -52,6 +52,7 @@ url = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 eventsource-stream = { workspace = true }
 infer = { workspace = true, features = ["std"] }
 jp_test = { workspace = true }
