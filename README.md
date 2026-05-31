@@ -41,7 +41,7 @@ code, modifying files, interacting with version control, generating RFDs
 covering new features, filing Github issues, and making selected shell
 operations.
 JP does not need any tools to operate, but you will want at least a subset of
-the `jp-tools` colletion for your valid developer configuration.
+the `jp-tools` collection for your valid developer configuration.
 
 ## Getting Started
 
