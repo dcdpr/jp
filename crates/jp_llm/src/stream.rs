@@ -1,4 +1,7 @@
-use std::{pin::Pin, time::Duration};
+use std::{
+    pin::Pin,
+    time::{Duration, SystemTime},
+};
 
 use async_stream::stream;
 use futures::{Stream, StreamExt as _};
@@ -24,21 +27,66 @@ pub type EventStream = Pin<Box<dyn Stream<Item = Result<Event, StreamError>> + S
 /// The timer resets on every item, so long but active streams are left
 /// untouched.
 ///
+/// Idle is measured against the wall clock rather than the monotonic timer, so
+/// time the machine spends asleep counts toward the timeout.
+/// The monotonic clock pauses during system sleep on macOS and Linux, so a
+/// purely monotonic timeout would only resume counting after wake — a stream
+/// interrupted by closing the laptop lid would then hang for a further `idle`
+/// of awake time before retrying.
+/// Measuring against the wall clock and polling on a short cadence detects the
+/// resume within ~1s of reopening the lid instead.
+///
 /// [`StreamErrorKind::Timeout`]: crate::StreamErrorKind::Timeout
 #[must_use]
 pub fn with_idle_timeout(stream: EventStream, idle: Duration) -> EventStream {
+    with_idle_timeout_at(stream, idle, SystemTime::now)
+}
+
+/// How often to re-check the wall clock while waiting for the next item.
+///
+/// This doubles as the post-wake grace window: after the machine resumes from
+/// sleep, a still-alive stream has this long to produce data before the idle
+/// check fires and reconnects.
+/// Kept at a few seconds so the first reconnect isn't attempted before Wi-Fi
+/// has had a chance to reassociate, while still detecting a dead connection far
+/// faster than the full `idle` window.
+const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(3);
+
+/// [`with_idle_timeout`] with an injectable wall clock, for tests.
+fn with_idle_timeout_at(
+    stream: EventStream,
+    idle: Duration,
+    now: impl Fn() -> SystemTime + Send + 'static,
+) -> EventStream {
+    // Poll cadence: wake often enough to notice a resume from system sleep
+    // quickly, but never more often than `idle` itself.
+    let tick = idle.min(IDLE_POLL_INTERVAL);
+
     stream! {
         let mut stream = stream;
+        let mut last_activity = now();
         loop {
-            match timeout(idle, stream.next()).await {
-                Ok(Some(item)) => yield item,
+            match timeout(tick, stream.next()).await {
+                Ok(Some(item)) => {
+                    last_activity = now();
+                    yield item;
+                }
                 Ok(None) => break,
                 Err(_elapsed) => {
-                    yield Err(StreamError::timeout(format!(
-                        "no activity from provider for {}s",
-                        idle.as_secs()
-                    )));
-                    break;
+                    // The monotonic `tick` elapsed without an item. Decide using
+                    // the wall clock, which counts time spent asleep: a lid
+                    // reopened after sleep is caught on the first tick after
+                    // wake rather than after another full `idle` of awake time.
+                    let idle_for = now()
+                        .duration_since(last_activity)
+                        .unwrap_or(Duration::ZERO);
+                    if idle_for >= idle {
+                        yield Err(StreamError::timeout(format!(
+                            "no activity from provider for {}s",
+                            idle_for.as_secs()
+                        )));
+                        break;
+                    }
                 }
             }
         }

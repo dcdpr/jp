@@ -88,7 +88,7 @@ Ok(
                         60,
                     ),
                     stream_idle_timeout_secs: Some(
-                        60,
+                        30,
                     ),
                     cache: None,
                 },

@@ -164,25 +164,12 @@ pub async fn handle_stream_error(
     conv: &ConversationMut,
     printer: &Arc<Printer>,
 ) -> LoopAction<Result<(), Error>> {
-    if !retry_state.can_retry(&error) {
-        // Clear the temp line before printing the final error so it doesn't
-        // linger on screen.
-        retry_state.clear_line(printer);
-
-        error!("Stream error (not retryable or max retries exceeded): {error}");
-        return LoopAction::Return(Err(jp_llm::Error::Stream(error).into()));
-    }
-
-    // 1. Record the attempt (must happen before backoff calculation).
-    retry_state.record_attempt();
-
-    // 2. Flush renderer so any buffered markdown is queued to the printer,
-    //    then drain the printer instantly so content is visible.
+    // Always flush buffered renderer output and any unflushed partial content
+    // to the stream BEFORE deciding whether to retry or abort. Streamed text
+    // the user already saw must never be dropped just because the error turned
+    // out to be fatal.
     turn_coordinator.flush_renderer();
     printer.flush_instant();
-
-    // 3. Flush any unflushed partial content to the ConversationStream so
-    //    it will be included when the thread is rebuilt for the retry.
     if let Some(content) = turn_coordinator.peek_partial_content() {
         conv.update_events(|stream| {
             stream
@@ -192,9 +179,25 @@ pub async fn handle_stream_error(
                 .expect("Invalid ConversationStream state");
         });
     }
+
+    if !retry_state.can_retry(&error) {
+        // Clear the temp line before printing the final error so it doesn't
+        // linger on screen.
+        retry_state.clear_line(printer);
+
+        error!("Stream error (not retryable or max retries exceeded): {error}");
+        return LoopAction::Return(Err(jp_llm::Error::Stream(error).into()));
+    }
+
+    // Record the attempt (must happen before backoff calculation).
+    retry_state.record_attempt();
+
+    // Reset the coordinator for the next streaming cycle. The flushed partial
+    // content above is now part of the stream and will be rebuilt into the
+    // thread as assistant prefill.
     turn_coordinator.prepare_continuation();
 
-    // 4. Notify the user.
+    // Notify the user.
     let attempt = retry_state.consecutive_failures;
     let max = retry_state.config.max_retries;
     let kind = error.kind.as_str();

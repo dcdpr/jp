@@ -243,6 +243,48 @@ async fn partial_content_flushed_on_retry() {
 }
 
 #[tokio::test]
+async fn partial_content_flushed_on_abort() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut retry_state = make_retry_state(3);
+    let mut turn_coordinator = make_turn_coordinator();
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+    });
+
+    conv.update_events(|stream| {
+        turn_coordinator.handle_event(stream, Event::message(0, "Hello "));
+        turn_coordinator.handle_event(stream, Event::message(0, "world"));
+    });
+
+    // A non-retryable error aborts the turn, but partial content must still be
+    // flushed so streamed work isn't lost.
+    let error = StreamError::other("auth failure");
+    let result = handle_stream_error(
+        error,
+        &mut retry_state,
+        &mut turn_coordinator,
+        &conv,
+        &printer,
+    )
+    .await;
+
+    assert!(matches!(result, LoopAction::Return(Err(_))));
+
+    let has_response = conv.events().iter().any(|e| {
+        e.event.as_chat_response().is_some_and(
+            |r| matches!(r, ChatResponse::Message { message } if message == "Hello world"),
+        )
+    });
+    assert!(
+        has_response,
+        "Partial content should be flushed to ConversationStream even on abort"
+    );
+}
+
+#[tokio::test]
 async fn retry_without_partial_content_still_works() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);

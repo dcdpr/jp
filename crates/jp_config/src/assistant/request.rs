@@ -52,7 +52,7 @@ pub struct RequestConfig {
 
     /// Abort a streaming response after this many seconds of inactivity.
     ///
-    /// Defaults to `60`.
+    /// Defaults to `30`.
     /// Set to `0` to disable the idle timeout.
     ///
     /// The timer resets every time the provider sends data, so it only fires
@@ -63,7 +63,7 @@ pub struct RequestConfig {
     ///
     /// Raise this for models with a very long time-to-first-token (such as
     /// deep-research models) if you observe spurious retries.
-    #[setting(default = 60)]
+    #[setting(default = 30)]
     pub stream_idle_timeout_secs: u32,
 
     /// Prompt caching policy.

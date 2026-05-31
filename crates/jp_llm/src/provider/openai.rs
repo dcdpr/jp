@@ -3,7 +3,7 @@ use std::env;
 use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::NaiveDate;
-use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, future, stream};
+use futures::{StreamExt as _, TryStreamExt as _, stream};
 use indexmap::{IndexMap, IndexSet};
 use jp_attachment::AttachmentContent;
 use jp_config::{
@@ -112,7 +112,6 @@ impl Provider for Openai {
             .or_else(map_error)
             .map_ok(move |v| stream::iter(map_event(v, is_structured, reasoning_enabled)))
             .try_flatten()
-            .chain(future::ready(Ok(Event::Finished(FinishReason::Completed))).into_stream())
             .boxed())
     }
 }
@@ -965,6 +964,7 @@ async fn map_error(error: OpenaiStreamError) -> std::result::Result<types::Event
 }
 
 /// Map an Openai [`types::Event`] into one or more [`Event`]s.
+#[expect(clippy::too_many_lines)]
 fn map_event(
     event: types::Event,
     is_structured: bool,
@@ -1075,6 +1075,19 @@ fn map_event(
 
             events.push(Ok(Event::flush_with_metadata(index, metadata)));
             events
+        }
+        // Terminal lifecycle events. Emit `Finished` from the real protocol
+        // signal so the stream carries its own completion: a stream that ends
+        // without one (a dropped connection) is treated as incomplete by the
+        // consumer and retried, rather than being mistaken for a clean finish.
+        ResponseCompleted { response }
+        | ResponseIncomplete { response }
+        | ResponseFailed { response } => {
+            let incomplete_reason = response.incomplete_details.map(|d| d.reason);
+            match map_non_streaming_finish_reason(response.status, incomplete_reason) {
+                Ok(event) => vec![Ok(event)],
+                Err(error) => vec![Err(StreamError::other(error.to_string()))],
+            }
         }
         Error { error } => vec![Err(classify_stream_error(error))],
         _ => vec![],

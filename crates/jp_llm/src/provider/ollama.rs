@@ -2,7 +2,7 @@ use std::str::FromStr as _;
 
 use async_trait::async_trait;
 use base64::Engine as _;
-use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, future, stream};
+use futures::{StreamExt as _, TryStreamExt as _, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -99,7 +99,6 @@ impl Provider for Ollama {
                 }
             })
             .try_flatten()
-            .chain(future::ready(Ok(Event::Finished(FinishReason::Completed))).into_stream())
             .boxed())
     }
 }
@@ -191,6 +190,11 @@ fn map_event(
             events.push(Event::flush(0));
         }
         events.push(Event::flush(1));
+        // `done` is Ollama's terminal signal. Emit `Finished` from it so the
+        // stream carries its own completion: a stream that ends without it (a
+        // dropped connection) is treated as incomplete by the consumer and
+        // retried, rather than being mistaken for a clean finish.
+        events.push(Event::Finished(FinishReason::Completed));
     }
 
     events
