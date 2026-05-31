@@ -2704,6 +2704,9 @@ async fn test_markdown_flushed_before_tool_header() {
 
         let mut config = AppConfig::new_test();
         config.style.tool_call.show = true;
+        // Disable the animated suffix so the streaming indicator doesn't spawn
+        // a timer task, keeping output deterministic.
+        config.style.tool_call.preparing.show = false;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
         let mut workspace = Workspace::new(root).with_backend(fs.clone());
@@ -2758,7 +2761,8 @@ async fn test_markdown_flushed_before_tool_header() {
             &signal_rx,
             &mcp_client,
             root,
-            false,
+            // The streaming "Calling tool" indicator is a TTY affordance.
+            true,
             &[],
             &lock,
             ToolChoice::Auto,
