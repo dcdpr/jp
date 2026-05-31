@@ -14,9 +14,6 @@ Visit [jp.computer] to learn more.
 > Please consult the [installation instructions](#getting-started) to get
 > started, and [reach out to us] if you need any assistance, or have feedback.
 
-[jp.computer]: https://jp.computer/
-[reach out to us]: https://jp.computer/contact
-
 ## Philosophy
 
 JP is built to be: **[provider-agnostic][1]**, because your workflow shouldn't
@@ -33,13 +30,6 @@ When you adapt your programming tooling and workflow to JP, you are ensuring
 that you will have access to all of the frontier models, all of the local-first
 open source inference runtimes, and all of the major inference aggregation
 services.
-
-[1]: docs/README/providers.md
-[2]: docs/README/privacy-and-security.md
-[3]: docs/README/workflow-integration.md
-[4]: docs/README/extensibility.md
-[5]: docs/README/configuration.md
-[6]: docs/README/open-source.md
 
 ## Architecture / Tool Calling
 
@@ -119,5 +109,13 @@ canonical, always-current view of what's proposed, in progress, and decided.
 If you want to understand where JP is headed or influence where it goes next,
 start there.
 
+[1]: docs/README/providers.md
+[2]: docs/README/privacy-and-security.md
+[3]: docs/README/workflow-integration.md
+[4]: docs/README/extensibility.md
+[5]: docs/README/configuration.md
+[6]: docs/README/open-source.md
+[jp.computer]: https://jp.computer/
+[reach out to us]: https://jp.computer/contact
 [rfds via Web]: https://jp.computer/rfd/
 [rfds local]: docs/rfd/
