@@ -14,31 +14,44 @@ Visit [jp.computer] to learn more.
 > Please consult the [installation instructions](#getting-started) to get
 > started, and [reach out to us] if you need any assistance, or have feedback.
 
+[jp.computer]: https://jp.computer/
+[reach out to us]: https://jp.computer/contact
+
 ## Philosophy
 
-JP is built to be: **[provider-agnostic][1]**,
-  because your workflow shouldn't be coupled to any single LLM backend;
-**[private and secure by default][2]**, 
-  with no implicit network access or silent tool execution;
-a **[proper Unix citizen][3]**
-  as a single static binary that composes with pipes, respects your shell, and stays out of your way;
-**[extensible][4]** through sandboxed plugins;
-**[configurable][5]** where it matters;
-and finally, **[open-source and independent][6]**,
-  holding no allegiance to any LLM provider,
-  funded without the enshittification of VC money, and
-  just striving to be great — thanks to and for its users.
+JP is built to be: **[provider-agnostic][1]**, because your workflow shouldn't
+be coupled to any single LLM backend; **[private and secure by default][2]**,
+with no implicit network access or silent tool execution; a **[proper Unix
+citizen][3]** as a single static binary that composes with pipes, respects your
+shell, and stays out of your way; **[extensible][4]** through sandboxed plugins;
+**[configurable][5]** where it matters; and finally, **[open-source and
+independent][6]**, holding no allegiance to any LLM provider, funded without the
+enshittification of VC money, and just striving to be great — thanks to and for
+its users.
 
 When you adapt your programming tooling and workflow to JP, you are ensuring
 that you will have access to all of the frontier models, all of the local-first
 open source inference runtimes, and all of the major inference aggregation
 services.
 
+[1]: docs/README/providers.md
+[2]: docs/README/privacy-and-security.md
+[3]: docs/README/workflow-integration.md
+[4]: docs/README/extensibility.md
+[5]: docs/README/configuration.md
+[6]: docs/README/open-source.md
+
 ## Architecture / Tool Calling
 
-JP's architecture routes to explicitly configured helper binaries as its list of tools the LLM may call upon.
-The current self-dev configuration uses a sub-project, `jp-tools`, (invoked through the justfile) to satisfy all the binaries required for understanding code, modifying files, interacting with version control, generating RFDs covering new features, filing Github issues, and making selected shell operations.
-JP does not need any tools to operate, but you will want at least a subset of the `jp-tools` colletion for your valid developer configuration.
+JP's architecture routes to explicitly configured helper binaries as its list of
+tools the LLM may call upon.
+The current self-dev configuration uses a sub-project, `jp-tools`, (invoked
+through the justfile) to satisfy all the binaries required for understanding
+code, modifying files, interacting with version control, generating RFDs
+covering new features, filing Github issues, and making selected shell
+operations.
+JP does not need any tools to operate, but you will want at least a subset of
+the `jp-tools` colletion for your valid developer configuration.
 
 ## Getting Started
 
@@ -97,21 +110,12 @@ See what else you can do:
 % jp help
 ```
 
-[1]: docs/README/providers.md
-[2]: docs/README/privacy-and-security.md
-[3]: docs/README/workflow-integration.md
-[4]: docs/README/extensibility.md
-[5]: docs/README/configuration.md
-[6]: docs/README/open-source.md
-[jp.computer]: https://jp.computer/
-[reach out to us]: https://jp.computer/contact
-
 ## Roadmap
 
 JP's direction is planned in the open through Requests for Discussion (RFDs),
 short design documents that precede any significant change.
-The RFD index ([on the web][rfds via web] / [in this repo][rfds local])
-is the canonical, always-current view of what's proposed, in progress, and decided.
+The RFD index ([on the web][rfds via web] / [in this repo][rfds local]) is the
+canonical, always-current view of what's proposed, in progress, and decided.
 If you want to understand where JP is headed or influence where it goes next,
 start there.
 
