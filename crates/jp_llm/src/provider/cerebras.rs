@@ -21,7 +21,9 @@ use serde_json::{Map, Value, json};
 use tracing::{debug, trace, warn};
 
 use super::{
-    EventStream, ModelDetails, Provider, llamacpp::StreamChunk, openai::parameters_with_strict_mode,
+    EventStream, ModelDetails, Provider,
+    llamacpp::{StreamChunk, merge_consecutive_assistant_messages},
+    openai::parameters_with_strict_mode,
 };
 use crate::{
     error::{Error, Result, StreamError},
@@ -481,7 +483,7 @@ fn process_value(value: Value) -> Value {
 }
 
 fn convert_events(events: ConversationStream) -> Vec<Value> {
-    events
+    let messages = events
         .into_iter()
         .filter_map(|event| match event.into_kind() {
             EventKind::ChatRequest(request) => {
@@ -519,7 +521,9 @@ fn convert_events(events: ConversationStream) -> Vec<Value> {
             })),
             _ => None,
         })
-        .collect()
+        .collect();
+
+    merge_consecutive_assistant_messages(messages)
 }
 
 fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<Value> {

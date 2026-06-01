@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user wants the assistant to run the tool \"run_me\" with whatever arguments we want. We can choose arbitrary arguments as per the definition: foo is optional default \"foo\", bar is string or array (must be provided). So let's provide something. For example: foo: \"test\", bar: [\"value1\", \"value2\"].\n\nWe need to invoke the function.",
+                        reasoning: "The user asks: \"Please run the tool, providing whatever arguments you want.\" The tool is run_me with parameters foo (optional default \"foo\") and bar (required string or array). So we need to call the function. Provide arbitrary arguments. Let's pick foo: \"testFoo\" and bar: maybe an array? The type says bar: string | array. Provide something like bar: [\"a\",\"b\",\"c\"]. Use the function.\n\nWe need to call the function with appropriate JSON.",
                     },
                 ),
                 metadata: {},
@@ -20,13 +20,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "513655edb",
+                        id: "a48c92f22",
                         name: "run_me",
                         arguments: {
-                            "foo": String("test"),
+                            "foo": String("testFoo"),
                             "bar": Array [
-                                String("value1"),
-                                String("value2"),
+                                String("a"),
+                                String("b"),
+                                String("c"),
                             ],
                         },
                     },
@@ -44,7 +45,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user asks \"Please run the tool, providing whatever arguments you want.\" The tool is a function called run_me that expects any arguments. The assistant already called the function (with foo and bar). The result is \"working!\". Now we need to respond.\n\nWe should produce a normal response explaining the outcome. Possibly ask follow-up. There's no problem. So respond: \"The tool ran successfully, returned 'working!'.\".",
+                        reasoning: "The user wants the assistant to \"run the tool, providing whatever arguments you want.\" The assistant already used the tool run_me with some arguments and got a response \"working!\". Now the user likely wants the assistant to do something with the tool. In the previous step, we already ran the tool with arguments. The assistant generated a response from the tool: \"working!\". The user has not asked a new question yet; they said \"Please run the tool, providing whatever arguments you want.\" The assistant complied. Possibly they want a result, like \"Tool output: working!\". So we should respond accordingly.\n\nWe can respond: \"I ran the tool with arguments and got the response 'working!'\". Also maybe reflect on the result.\n\nThus produce final answer.",
                     },
                 ),
                 metadata: {},
@@ -55,7 +56,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool ran successfully and returned the response:\n\n```\nworking!\n```",
+                        message: "I ran the tool with the sample arguments `{ \"foo\": \"testFoo\", \"bar\": [\"a\", \"b\", \"c\"] }` and the tool returned:\n\n**“working!”**",
                     },
                 ),
                 metadata: {},

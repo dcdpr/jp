@@ -7,70 +7,119 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "The user wants the assistant to run",
+                "The",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " the tool \"run_me\" with whatever arguments we want",
+                " user asks: \"Please run the tool, providing whatever arguments you want.\" The tool",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ". We can choose arbitrary arguments",
+                " is run_me with parameters foo",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " as per the definition: foo is",
+                " (optional default \"foo\")",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " optional default \"foo\", bar is string or",
+                " and bar (required string or array). So",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " array (must be provided). So",
+                " we need to call the function.",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " let's provide something. For",
+                " Provide arbitrary arguments. Let's pick",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " example: foo: \"test\",",
+                " foo: \"testFoo\"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " bar: [\"value1\", \"",
+                " and bar: maybe an array",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "value2\"].\n\nWe need to invoke the function.",
+                "? The type",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " says",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " bar: string | array. Provide something like",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " bar: [\"a\",\"b\",\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "c",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "\"]. Use the function.\n\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "We need to call the function with appropriate JSON",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".",
             ),
             metadata: {},
         },
@@ -82,7 +131,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "513655edb",
+                    id: "a48c92f22",
                     name: "run_me",
                 },
             ),
@@ -101,7 +150,16 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"foo\":\"test\",\"bar\":[\"value1\",\"value2\"]}",
+                    "{\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo\":\"testFoo\",\"bar\":[\"a\",\"b\",\"c\"]}",
                 ),
             ),
             metadata: {},
@@ -122,77 +180,154 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "The user asks \"Please run the tool,",
+                "The",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " providing whatever arguments you want.\" The tool is a function called run",
+                " user wants the assistant to \"run the tool, providing",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "_me that expects any arguments. The assistant",
+                " whatever arguments you want.\" The assistant already used the",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " already called the function (",
+                " tool run_me with some arguments",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "with foo and bar). The result is",
+                " and got a response \"working",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " \"working!\". Now we need to respond.\n\nWe",
+                "!\". Now the user likely wants the assistant to",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " should produce a normal response explaining",
+                " do something with the tool. In",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " the outcome. Possibly",
+                " the previous step, we already",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " ask follow-up. There's no problem.",
+                " ran the tool with arguments. The",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " So respond: \"The tool ran successfully, returned '",
+                " assistant generated a response from the",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "working!'.\".",
+                " tool: \"working!\". The user has not asked",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " a new question yet; they",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " said \"Please run the tool, providing",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " whatever arguments you want.\" The assistant complied. Possibly they want a result",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ", like \"Tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " output: working!\". So we",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " should respond accordingly.\n\nWe can respond",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ": \"I ran the tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " with arguments and got the response 'working",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "!'\". Also maybe reflect on the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " result.\n\nThus produce final",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " answer.",
             ),
             metadata: {},
         },
@@ -203,14 +338,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "The tool ran successfully and returned the response:\n\n``",
+                "I ran the tool with the sample arguments `{ \"",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "`\nworking!\n```",
+                "foo\": \"testFoo\", \"bar\": [\"a\", \"b\", \"c\"] }",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "` and the tool returned:\n\n**“working!”**",
             ),
             metadata: {},
         },

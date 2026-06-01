@@ -178,34 +178,33 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\" The system has a function called run_me with parameters: foo optional (default \"foo\") and bar: string or array (no default). So we need to call the function with arbitrary arguments. Since we can choose any arguments. Let's provide a bar value, perhaps a string \"test\". The foo default is optional, but we can provide it as well. Provide something. We'll call the function."
+      "reasoning": "The user asks to run the tool, providing whatever arguments we want. The tool is run_me defined with parameters foo?: string default \"foo\", and bar: string | array (required). We can choose arguments. Let's call run_me with maybe bar: \"test\". No foo needed. Use default."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "83de034a9",
+      "id": "dfd5fc767",
       "name": "run_me",
       "arguments": {
-        "foo": "ZXhhbXBsZQ==",
         "bar": "dGVzdA=="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "83de034a9",
+      "id": "dfd5fc767",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user says: \"Please run the tool, providing whatever arguments you want.\"\n\nThe tool \"run_me\" is a function that presumably does something generic? The tool signature is:\n\n```\ntype: function\nname: run_me\ndescription: This tool runs whatever code is given and returns the answer as JSON ...\nparameters:\n  type: object\n  properties:\n    foo:\n      type: string\n    bar:\n      type: string\n```\n\nWe called it with {\"foo\":\"example\",\"bar\":\"test\"} and got response \"working!\". In the previous message, my run shows a function response \"working!\" which is not JSON. The function description says answer as JSON. But we get a string \"working!\". Likely the tool just returns a string.\n\nNow the user wants me to \"run the tool, providing whatever arguments you want\". I've already run the tool. The result is \"working!\". I should respond to the user with the result, maybe discuss that the tool was run. I could also ask if they need something else.\n\nThus respond: The tool was run with arguments foo=\"example\", bar=\"test\" and returned \"working!\". If they need specific arguments, let me know."
+      "reasoning": "The user says: \"Please run the tool, providing whatever arguments you want.\" The tool is \"run_me\" which just prints \"working!\" regardless of arguments. We already called it with {\"bar\":\"test\"} and got \"working!\". The user wants us to run the tool. Possibly they want us to run it with arbitrary arguments and show output. We have already done it. We might ask clarification or provide result. Since we already ran the tool, we can respond confirming the tool ran.\n\nThus respond: I ran the tool with sample args and got \"working!\". If they want something else, they can specify."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "I ran the tool with sample arguments (`foo: \"example\"` and `bar: \"test\"`). The tool returned:\n\n```\nworking!\n```\n\nLet me know if you’d like to try it with different values or need anything else!"
+      "message": "I ran the tool (using a sample argument `{\"bar\":\"test\"}`) and it returned:\n\n```\nworking!\n```\n\nLet me know if you’d like to try different arguments or need anything else!"
     }
   ]
 }
