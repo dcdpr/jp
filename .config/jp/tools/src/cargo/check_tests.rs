@@ -1,17 +1,23 @@
-use camino_tempfile::tempdir;
-use jp_tool::Action;
+use camino_tempfile::{Utf8TempDir, tempdir};
+use jp_tool::{Action, Outcome};
 use pretty_assertions::assert_eq;
 
 use super::*;
 use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput};
 
-#[test]
-fn test_cargo_check_with_warnings() {
+fn ctx() -> (Utf8TempDir, Context) {
     let dir = tempdir().unwrap();
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
     };
+
+    (dir, ctx)
+}
+
+#[test]
+fn test_cargo_check_with_warnings() {
+    let (_dir, ctx) = ctx();
 
     let stderr = indoc::formatdoc! {r#"
             warning: unused `std::result::Result` that must be used
@@ -29,12 +35,14 @@ fn test_cargo_check_with_warnings() {
             "#};
 
     let runner = MockProcessRunner::builder()
-        .expect_any()
+        .expect("cargo")
         .returns(ProcessOutput {
             stdout: String::new(),
             stderr,
             status: ExitCode::success(),
-        });
+        })
+        .expect("comfort")
+        .returns_success("");
 
     let result = cargo_check_impl(&ctx, None, &runner).unwrap();
 
@@ -58,15 +66,149 @@ fn test_cargo_check_with_warnings() {
 
 #[test]
 fn test_cargo_check_no_warnings() {
-    let dir = tempdir().unwrap();
-    let ctx = Context {
-        root: dir.path().to_owned(),
-        action: Action::Run,
-    };
+    let (_dir, ctx) = ctx();
 
-    let runner = MockProcessRunner::success("");
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("");
+
     let result = cargo_check_impl(&ctx, None, &runner).unwrap();
 
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+}
+
+#[test]
+fn clean_clippy_with_comfort_drift_appends_note() {
+    let (_dir, ctx) = ctx();
+    let comfort_stdout = format!("{root}/src/lib.rs\n{root}/src/main.rs", root = ctx.root);
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns(ProcessOutput {
+            stdout: comfort_stdout,
+            stderr: String::new(),
+            status: ExitCode::from_code(1),
+        });
+
+    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            Check succeeded. No warnings or errors found.
+
+            Doc comments in the following files are badly formatted. Run `cargo_fmt` to auto-fix them:
+            - src/lib.rs
+            - src/main.rs"});
+}
+
+#[test]
+fn clippy_warnings_and_comfort_drift_are_both_reported() {
+    let (_dir, ctx) = ctx();
+    let comfort_stdout = format!("{root}/src/lib.rs", root = ctx.root);
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "warning: something".to_owned(),
+            status: ExitCode::success(),
+        })
+        .expect("comfort")
+        .returns(ProcessOutput {
+            stdout: comfort_stdout,
+            stderr: String::new(),
+            status: ExitCode::from_code(1),
+        });
+
+    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+
+    assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
+            ```
+            warning: something
+            ```
+
+            Doc comments in the following files are badly formatted. Run `cargo_fmt` to auto-fix them:
+            - src/lib.rs"});
+}
+
+#[test]
+fn comfort_real_failure_is_reported_as_error() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "comfort: parse error".to_owned(),
+            status: ExitCode::from_code(2),
+        });
+
+    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+    match result {
+        Outcome::Error { message, .. } => {
+            assert_eq!(message, "comfort failed: comfort: parse error");
+        }
+        _ => panic!("Expected Outcome::Error, got: {result:?}"),
+    }
+}
+
+#[test]
+fn clippy_failure_short_circuits_before_running_comfort() {
+    let (_dir, ctx) = ctx();
+    // Single expectation: comfort should never be reached.
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns(ProcessOutput {
+            stdout: String::new(),
+            stderr: "error: build failed".to_owned(),
+            status: ExitCode::from_code(101),
+        });
+
+    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+    match result {
+        Outcome::Error { message, .. } => {
+            assert_eq!(message, "Cargo command failed: error: build failed");
+        }
+        _ => panic!("Expected Outcome::Error, got: {result:?}"),
+    }
+}
+
+#[test]
+fn package_scope_is_passed_through_to_both_tools() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "clippy",
+            "--color=never",
+            "--package=my_pkg",
+            "--quiet",
+            "--all-targets",
+        ])
+        .returns_success("")
+        .expect("comfort")
+        .args(&[
+            "--check",
+            "--list-changed",
+            "--format-markdown",
+            "--reference-links",
+            "--language",
+            "rust",
+            "--package",
+            "my_pkg",
+        ])
+        .returns_success("");
+
+    let result = cargo_check_impl(&ctx, Some("my_pkg"), &runner).unwrap();
     assert_eq!(
         result.into_content().unwrap(),
         "Check succeeded. No warnings or errors found."
