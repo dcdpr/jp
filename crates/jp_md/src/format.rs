@@ -1,13 +1,13 @@
 //! Markdown formatting utilities.
 
-use std::fmt;
+use std::{fmt, sync::LazyLock};
 
 use comrak::{
     Arena,
     nodes::{NodeList, NodeValue},
     options::{Extension, ListStyleType, Render},
 };
-use syntect::highlighting::Theme;
+use syntect::{highlighting::Theme, parsing::SyntaxSet};
 use two_face::syntax;
 
 use crate::{
@@ -15,6 +15,16 @@ use crate::{
     table::TableOptions,
     theme,
 };
+
+/// Process-wide syntax set, deserialized once and shared across all code
+/// highlighting.
+///
+/// `two_face::syntax::extra_newlines` rebuilds the whole `SyntaxSet` from its
+/// embedded dump on each call and returns it with cold, lazily-compiled regex
+/// caches.
+/// Sharing a single instance keeps syntect's grammar regexes compiled once for
+/// the life of the process instead of recompiling them for every code line.
+pub(crate) static SYNTAXES: LazyLock<SyntaxSet> = LazyLock::new(syntax::extra_newlines);
 
 /// Default wrap width for terminal output.
 const DEFAULT_WIDTH: usize = 80;
@@ -398,8 +408,7 @@ impl Formatter {
 
     /// Creates a new code highlighter for the given language.
     fn new_code_highlighter(&self, language: &str) -> Option<CodeHighlighter<'_>> {
-        let ss = syntax::extra_newlines();
-        let syntax = ss.find_syntax_by_token(language)?;
+        let syntax = SYNTAXES.find_syntax_by_token(language)?;
         Some(CodeHighlighter {
             hl: syntect::easy::HighlightLines::new(syntax, &self.theme),
         })
@@ -497,8 +506,7 @@ struct CodeHighlighter<'a> {
 impl<'a> CodeHighlighter<'a> {
     /// Highlight a single line of code.
     fn highlight(&mut self, line: &str) -> Result<String, syntect::Error> {
-        let ss = syntax::extra_newlines();
-        let ranges = self.hl.highlight_line(line, &ss)?;
+        let ranges = self.hl.highlight_line(line, &SYNTAXES)?;
         let mut escaped = syntect::util::as_24_bit_terminal_escaped(&ranges, false);
         escaped.push_str("\x1b[0m");
         Ok(escaped)
