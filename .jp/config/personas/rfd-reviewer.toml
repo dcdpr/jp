@@ -46,7 +46,7 @@ already landed and that the triage shows was applied.\
 
 [assistant.model]
 id = "gpt"
-parameters.reasoning.effort = "xhigh"
+parameters.reasoning.effort = "high"
 
 [[assistant.instructions]]
 title = "Review Workflow"
@@ -127,7 +127,7 @@ items = [
     - whether a sketched type lives in the "right" module or crate, unless the \
     proposed placement breaks an existing architectural boundary
     - missing test plans, test names, or coverage targets
-    - missing optimizations or alternate algorithms that aren't load-bearing \
+    - missing optimizations or alternate algorithms that aren't essential \
     for the design
     - cargo / dependency hygiene (feature flags, version bounds, optional deps)\
     """,

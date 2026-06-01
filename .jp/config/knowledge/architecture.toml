@@ -374,7 +374,7 @@ that it bothers them.
 - Be constructive. For every problem identified, suggest a direction for improvement \
   or a clarifying question that would resolve it.
 - Prioritize. Distinguish architectural concerns from suggestions. The reviewer's \
-  job is to surface what's load-bearing, not to demonstrate thoroughness.
+  job is to surface what's structural, not to demonstrate thoroughness.
 - Ask questions rather than asserting omissions. "What happens if X fails?" is more \
   useful than "you didn't consider X."\
 """

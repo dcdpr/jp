@@ -322,7 +322,7 @@ them even when the shortcut is tempting.
   trait. Inlining a concrete dependency because \"we only have one implementation\" collapses \
   the abstraction the next contributor relies on.
 
-- **The Functional Core / Imperative Shell split is load-bearing.** Don't push I/O down into \
+- **The Functional Core / Imperative Shell split is foundational.** Don't push I/O down into \
   pure logic for convenience. Don't read env vars or files from the middle of a pure function.
 
 - **A single shortcut compounds.** Once domain logic has leaked into a presentation layer, \
@@ -442,7 +442,7 @@ failure trivial.
 
 # Scenario Coverage and Naming
 
-- **Test More Than the "Happy Path":** Ensure comprehensive coverage by testing a range of \
+- **Test More Than the "Happy Path":** Ensure thorough coverage by testing a range of \
 scenarios:
   - **Basic Retrieval & Pagination:** Does the endpoint return data correctly and respect page \
 size/offset?

@@ -1,8 +1,8 @@
 [[conversation.attachments]]
 type = "cmd"
 path = "sh"
-params.args = ["-c", "cargo metadata --no-deps --format-version=1 | jq -r '.packages[].name' | sort"]
-params.description = "Workspace crate names"
+params.args = ["-c", "cargo metadata --no-deps --format-version=1 | jq -r '.workspace_root as $root | .packages[].manifest_path | ltrimstr($root) | ltrimstr(\"/\") | rtrimstr(\"/Cargo.toml\")' | sort"]
+params.description = "Workspace crate paths"
 
 [[assistant.system_prompt_sections]]
 tag = "Project Structure"
