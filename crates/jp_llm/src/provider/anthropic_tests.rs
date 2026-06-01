@@ -1127,6 +1127,121 @@ fn test_create_request_falls_back_to_think_tags_without_signature() {
     ));
 }
 
+/// When the conversation ends with an assistant turn carrying signed thinking
+/// (a resumed/continued turn), that thinking must be rewritten as `<think>`
+/// text rather than re-sent as a native block, which Anthropic rejects in the
+/// continuation target.
+#[test]
+fn test_create_request_downgrades_trailing_assistant_thinking() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-opus-4-6").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(false, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        // No "prefill" feature, so a synthetic continue is appended after the
+        // (downgraded) assistant turn.
+        features: vec!["adaptive-thinking"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn("Question");
+    events.extend([
+        ConversationEvent::now(ChatResponse::reasoning("internal reasoning"))
+            .with_metadata_field(THINKING_SIGNATURE_KEY, "sig_123"),
+        ConversationEvent::now(ChatResponse::message("partial answer")),
+    ]);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    // user, assistant (downgraded), synthetic continue user.
+    assert_eq!(request.messages.len(), 3);
+    let assistant = &request.messages[1];
+    assert_eq!(assistant.role, types::MessageRole::Assistant);
+
+    assert!(
+        !assistant
+            .content
+            .0
+            .iter()
+            .any(|c| matches!(c, types::MessageContent::Thinking(_))),
+        "trailing assistant thinking must be downgraded, not sent natively"
+    );
+    assert!(matches!(
+        &assistant.content.0[0],
+        types::MessageContent::Text(text)
+            if text.text == "<think>\ninternal reasoning\n</think>\n\n"
+    ));
+    assert!(matches!(
+        &assistant.content.0[1],
+        types::MessageContent::Text(text) if text.text == "partial answer"
+    ));
+}
+
+/// Redacted (encrypted) thinking in the continuation target has no readable
+/// form, so it is dropped rather than rewritten.
+#[test]
+fn test_create_request_drops_trailing_redacted_thinking() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        // "prefill" keeps the assistant message as the trailing continuation
+        // target (no synthetic continue).
+        features: vec!["prefill"],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn("Question");
+    events.extend([
+        ConversationEvent::now(ChatResponse::reasoning(""))
+            .with_metadata_field(REDACTED_THINKING_KEY, "encrypted_payload"),
+        ConversationEvent::now(ChatResponse::message("partial answer")),
+    ]);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    let assistant = request.messages.last().unwrap();
+    assert_eq!(assistant.role, types::MessageRole::Assistant);
+    assert_eq!(assistant.content.0.len(), 1, "redacted thinking is dropped");
+    assert!(matches!(
+        &assistant.content.0[0],
+        types::MessageContent::Text(text) if text.text == "partial answer"
+    ));
+}
+
 mod transform_schema {
     use serde_json::{Map, Value, json};
 

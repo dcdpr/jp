@@ -2,7 +2,7 @@
 
 use std::{fmt, time::Duration};
 
-use schematic::Config;
+use schematic::{Config, ConfigError, HandlerError};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -10,7 +10,15 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
+    validate::Validator,
 };
+
+/// Minimum non-zero value accepted for `stream_idle_timeout_secs`.
+///
+/// Windows below this abort healthy streams (for example during slow tool-call
+/// argument generation), so a resolved config rejects `1..MIN` in favor of `0`
+/// (disabled) or a value at or above it.
+pub const MIN_STREAM_IDLE_TIMEOUT_SECS: u32 = 10;
 
 /// Configuration for LLM request behavior.
 ///
@@ -52,8 +60,9 @@ pub struct RequestConfig {
 
     /// Abort a streaming response after this many seconds of inactivity.
     ///
-    /// Defaults to `30`.
-    /// Set to `0` to disable the idle timeout.
+    /// Defaults to `60`.
+    /// Set to `0` to disable the idle timeout; any other value must be at least
+    /// `10`, since smaller windows abort healthy streams.
     ///
     /// The timer resets every time the provider sends data, so it only fires
     /// when a connection goes silent for the full duration without delivering
@@ -63,7 +72,7 @@ pub struct RequestConfig {
     ///
     /// Raise this for models with a very long time-to-first-token (such as
     /// deep-research models) if you observe spurious retries.
-    #[setting(default = 30)]
+    #[setting(default = 60)]
     pub stream_idle_timeout_secs: u32,
 
     /// Prompt caching policy.
@@ -75,6 +84,23 @@ pub struct RequestConfig {
     /// `"long"`).
     #[setting(default)]
     pub cache: CachePolicy,
+}
+
+impl Validator for RequestConfig {
+    /// Rejects a non-zero `stream_idle_timeout_secs` below
+    /// [`MIN_STREAM_IDLE_TIMEOUT_SECS`]; `0` disables the timeout.
+    fn validate(&self) -> Result<(), ConfigError> {
+        if (1..MIN_STREAM_IDLE_TIMEOUT_SECS).contains(&self.stream_idle_timeout_secs) {
+            return Err(HandlerError::new(format!(
+                "assistant.request.stream_idle_timeout_secs must be 0 (disabled) or at least \
+                 {MIN_STREAM_IDLE_TIMEOUT_SECS}, got {}",
+                self.stream_idle_timeout_secs,
+            ))
+            .into());
+        }
+
+        Ok(())
+    }
 }
 
 impl AssignKeyValue for PartialRequestConfig {

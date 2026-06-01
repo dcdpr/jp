@@ -4,6 +4,7 @@ expression: v
 ---
 [
     [
+        KeepAlive,
         Part {
             index: 0,
             part: Message(
@@ -83,6 +84,7 @@ expression: v
             ),
             metadata: {},
         },
+        KeepAlive,
         Part {
             index: 0,
             part: Reasoning(
@@ -199,6 +201,7 @@ expression: v
             ),
             metadata: {},
         },
+        KeepAlive,
         Part {
             index: 0,
             part: ToolCall(
@@ -235,6 +238,7 @@ expression: v
         ),
     ],
     [
+        KeepAlive,
         Part {
             index: 0,
             part: Message(
@@ -321,6 +325,7 @@ expression: v
             ),
             metadata: {},
         },
+        KeepAlive,
         Part {
             index: 0,
             part: Reasoning(

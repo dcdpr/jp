@@ -317,7 +317,7 @@ impl InquiryBackend for LlmInquiryBackend {
                     flushed.extend(builder.handle_flush(index, metadata));
                 }
                 Event::Finished(_) => flushed.extend(builder.drain()),
-                Event::Patch(_) => {}
+                Event::Patch(_) | Event::KeepAlive => {}
             }
         }
 

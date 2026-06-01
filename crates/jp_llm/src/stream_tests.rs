@@ -6,9 +6,9 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use futures::{StreamExt as _, stream};
+use futures::{StreamExt as _, future, stream};
 
-use super::{with_idle_timeout, with_idle_timeout_at};
+use super::{with_idle_timeout, with_idle_timeout_at, with_tool_call_keepalive};
 use crate::{StreamError, StreamErrorKind, event::Event};
 
 #[tokio::test(start_paused = true)]
@@ -51,5 +51,50 @@ async fn active_stream_passes_through_without_timeout() {
 
     assert!(wrapped.next().await.expect("first item").is_ok());
     assert!(wrapped.next().await.expect("second item").is_ok());
+    assert!(wrapped.next().await.is_none(), "inner stream exhausted");
+}
+
+#[tokio::test(start_paused = true)]
+async fn tool_call_keepalive_emitted_during_open_tool_call() {
+    // A tool-call Start opens the call; the model then goes silent for longer
+    // than the keepalive interval before the matching Flush. A KeepAlive must
+    // be injected during the gap so a downstream idle timeout sees activity.
+    let inner = stream::once(future::ready(Ok(Event::tool_call_start(0, "id", "name"))))
+        .chain(stream::once(async {
+            tokio::time::sleep(Duration::from_secs(8)).await;
+            Ok(Event::flush(0))
+        }))
+        .boxed();
+    let mut wrapped = with_tool_call_keepalive(inner, Duration::from_secs(5));
+
+    assert!(matches!(wrapped.next().await, Some(Ok(Event::Part { .. }))));
+    assert!(
+        matches!(wrapped.next().await, Some(Ok(Event::KeepAlive))),
+        "a keepalive is injected during the gap"
+    );
+    assert!(matches!(
+        wrapped.next().await,
+        Some(Ok(Event::Flush { .. }))
+    ));
+    assert!(wrapped.next().await.is_none(), "inner stream exhausted");
+}
+
+#[tokio::test(start_paused = true)]
+async fn no_keepalive_outside_tool_call() {
+    // No tool call is open, so a long gap passes through untouched; the
+    // downstream idle timeout owns liveness in this window.
+    let inner = stream::once(future::ready(Ok(Event::message(0, "a"))))
+        .chain(stream::once(async {
+            tokio::time::sleep(Duration::from_secs(8)).await;
+            Ok(Event::message(1, "b"))
+        }))
+        .boxed();
+    let mut wrapped = with_tool_call_keepalive(inner, Duration::from_secs(5));
+
+    assert!(matches!(wrapped.next().await, Some(Ok(Event::Part { .. }))));
+    assert!(
+        matches!(wrapped.next().await, Some(Ok(Event::Part { .. }))),
+        "the gap is passed through without a keepalive"
+    );
     assert!(wrapped.next().await.is_none(), "inner stream exhausted");
 }

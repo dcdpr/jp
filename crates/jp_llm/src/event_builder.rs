@@ -61,16 +61,17 @@ impl EventBuilder {
         }
     }
 
-    /// Returns the partial content accumulated in unflushed buffers.
+    /// Returns the partial assistant *message* text accumulated in unflushed
+    /// buffers.
     ///
-    /// This is used when the user interrupts streaming and chooses to continue
-    /// with assistant prefill.
-    /// The partial content is injected into the next request so the LLM can
-    /// continue from where it left off.
+    /// Used when a stream is interrupted and the turn resumes from where it
+    /// left off: the partial message is committed as the resume point so the
+    /// model continues from it.
     ///
-    /// Returns `None` if there's no meaningful partial content.
-    /// Structured buffers are excluded — partial JSON isn't useful for
-    /// prefill.
+    /// Returns `None` if there's no partial message text.
+    /// Reasoning, tool-call, and structured buffers are excluded — partial
+    /// reasoning carries no resumable signature, and partial JSON/arguments
+    /// aren't useful for resumption.
     #[must_use]
     pub fn peek_partial_content(&self) -> Option<String> {
         if self.buffers.is_empty() {
@@ -86,12 +87,10 @@ impl EventBuilder {
         for index in indices {
             if let Some(buffer) = self.buffers.get(&index) {
                 match buffer {
-                    IndexBuffer::Reasoning { content } | IndexBuffer::Message { content }
-                        if !content.is_empty() =>
-                    {
+                    IndexBuffer::Message { content } if !content.is_empty() => {
                         parts.push(content.clone());
                     }
-                    // Tool calls, structured buffers, empty content - skip
+                    // Reasoning, tool-call, structured, and empty buffers - skip
                     _ => {}
                 }
             }

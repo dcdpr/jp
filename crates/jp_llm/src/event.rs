@@ -67,6 +67,12 @@ pub enum Event {
 
     /// The response was finished.
     Finished(FinishReason),
+
+    /// A liveness signal from the provider, such as an SSE keep-alive ping.
+    ///
+    /// Carries no content and is never persisted or rendered.
+    /// It signals only that the connection is still alive.
+    KeepAlive,
 }
 
 /// A chunk of streaming data from an LLM provider.

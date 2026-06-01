@@ -50,6 +50,7 @@ pub mod template;
 pub mod types;
 pub mod user;
 pub mod util; // TODO: Rename
+pub(crate) mod validate;
 
 use std::sync::Arc;
 
@@ -62,6 +63,7 @@ pub use schematic::{
     Config, ConfigError, PartialConfig, Schema, SchemaBuilder, SchemaType, Schematic, schema,
 };
 use serde_json::Value;
+pub use validate::Validator;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key, type_error},
@@ -297,15 +299,17 @@ impl AppConfig {
     ///
     /// # Errors
     ///
-    /// Returns an error if `default_values` fails or if the partial is missing
-    /// required fields.
+    /// Returns an error if `default_values` fails, if the partial is missing
+    /// required fields, or if the resolved configuration fails validation.
     pub fn from_partial_with_defaults(partial: PartialAppConfig) -> Result<Self, ConfigError> {
         let partial = match PartialAppConfig::default_values(&())? {
             Some(defaults) => partial.fill_from(defaults),
             None => partial,
         };
 
-        Self::from_partial(partial, vec![])
+        let config = Self::from_partial(partial, vec![])?;
+        config.validate()?;
+        Ok(config)
     }
 
     /// Return a default configuration for testing purposes.
@@ -479,6 +483,12 @@ impl AppConfig {
         }
 
         Ok(())
+    }
+}
+
+impl Validator for AppConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.assistant.validate()
     }
 }
 
