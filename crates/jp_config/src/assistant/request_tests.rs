@@ -13,6 +13,7 @@ fn test_request_config_defaults() {
     assert_eq!(config.max_retries, 5);
     assert_eq!(config.base_backoff_ms, 1000);
     assert_eq!(config.max_backoff_secs, 60);
+    assert_eq!(config.stream_idle_timeout_secs, 60);
     assert_eq!(config.cache, CachePolicy::Short);
 }
 
@@ -31,6 +32,10 @@ fn test_request_config_assign() {
     let kv = KvAssignment::try_from_cli("max_backoff_secs", "120").unwrap();
     p.assign(kv).unwrap();
     assert_eq!(p.max_backoff_secs, Some(120));
+
+    let kv = KvAssignment::try_from_cli("stream_idle_timeout_secs", "30").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.stream_idle_timeout_secs, Some(30));
 }
 
 #[test]

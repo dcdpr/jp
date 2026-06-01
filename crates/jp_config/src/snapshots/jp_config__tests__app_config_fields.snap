@@ -93,6 +93,7 @@ expression: "AppConfig::fields()"
     "assistant.request.cache",
     "assistant.request.max_backoff_secs",
     "assistant.request.max_retries",
+    "assistant.request.stream_idle_timeout_secs",
     "assistant.model.id",
     "assistant.model.parameters.max_tokens",
     "assistant.model.parameters.other",

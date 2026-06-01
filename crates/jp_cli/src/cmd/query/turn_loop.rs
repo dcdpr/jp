@@ -31,6 +31,7 @@ use jp_llm::{
     provider::get_provider,
     query::ChatQuery,
     tool::{ToolDefinition, executor::Executor},
+    with_idle_timeout,
 };
 use jp_printer::Printer;
 use jp_workspace::{ConversationLock, ConversationMut};
@@ -158,6 +159,10 @@ pub(super) async fn run_turn_loop(
 ) -> Result<(), Error> {
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request, is_tty);
+    let idle_timeout = match cfg.assistant.request.stream_idle_timeout_secs {
+        0 => None,
+        secs => Some(Duration::from_secs(u64::from(secs))),
+    };
     let mut turn_coordinator = TurnCoordinator::new(
         printer.clone(),
         cfg.style.clone(),
@@ -270,11 +275,16 @@ pub(super) async fn run_turn_loop(
                     }),
                 );
 
+                let raw_stream = provider
+                    .chat_completion_stream(model, query)
+                    .await
+                    .map_err(|e| map_llm_error(e, vec![]))?;
+                let raw_stream = match idle_timeout {
+                    Some(idle) => with_idle_timeout(raw_stream, idle),
+                    None => raw_stream,
+                };
                 let llm_stream = StreamSource::Llm(
-                    provider
-                        .chat_completion_stream(model, query)
-                        .await
-                        .map_err(|e| map_llm_error(e, vec![]))?
+                    raw_stream
                         .fuse()
                         .map(|result| StreamingLoopEvent::Llm(Box::new(result))),
                 );
