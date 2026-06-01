@@ -3,6 +3,52 @@ source: crates/jp_test/src/mock.rs
 expression: v
 ---
 [
-    [],
-    [],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking me to run a tool with arguments I choose. Looking at the available function, I have `run_me` which requires two parameters:\n- `foo`: a string or null (default is \"foo\")\n- `bar`: a string or array, with enum values [\"foo\", \"bar\"]\n\nSince the user said I can provide whatever arguments I want, I can choose any valid values. Let me pick some reasonable values:\n- foo: I'll use \"test\" (a string value)\n- bar: I'll use [\"foo\", \"bar\"] (an array with both enum values)\n\nBoth are valid according to the schema.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "bJSJqbnctkwroZWyYjEQrObRWJdWOWSV",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("test"),
+                            "bar": String("[\"foo\", \"bar\"]"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool ran successfully with the arguments `foo: \"test\"` and `bar: [\"foo\", \"bar\"]`. The output was:\n\n```\nworking!\n```",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
 ]

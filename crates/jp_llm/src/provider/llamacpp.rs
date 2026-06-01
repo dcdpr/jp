@@ -2,7 +2,7 @@ use std::mem;
 
 use async_trait::async_trait;
 use base64::Engine as _;
-use futures::{StreamExt as _, future, stream};
+use futures::{Stream, StreamExt as _, future, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -17,7 +17,7 @@ use jp_conversation::{
     event::{ChatResponse, EventKind, ToolCallResponse},
     thread::text_attachments_to_xml,
 };
-use reqwest_eventsource::{Event as SseEvent, EventSource};
+use reqwest_eventsource::{Event as SseEvent, EventSource, retry::Never};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
@@ -93,34 +93,58 @@ impl Provider for Llamacpp {
             .header("content-type", "application/json")
             .json(&body);
 
-        let es = EventSource::new(request).map_err(|e| Error::InvalidResponse(e.to_string()))?;
+        let mut es =
+            EventSource::new(request).map_err(|e| Error::InvalidResponse(e.to_string()))?;
+        // Retries are owned by the stream retry layer; disable EventSource's
+        // own auto-reconnect so a closed connection ends the stream instead of
+        // silently re-issuing the request.
+        es.set_retry_policy(Box::new(Never));
 
-        let mut state = StreamState {
-            extractor: ReasoningExtractor::default(),
-            tool_call_indices: Vec::new(),
-            reasoning_flushed: false,
-            message_flushed: false,
-            finish_reason: None,
-            is_structured,
-        };
+        Ok(assemble_event_stream(es, is_structured))
+    }
+}
 
-        Ok(es
-            // EventSource yields Err on close; stop the stream.
-            .take_while(|event| future::ready(event.is_ok()))
-            .then(move |event| {
-                let result = handle_sse_event_sync(event, &mut state);
-                async move {
-                    match result {
-                        Ok(v) => stream::iter(v).boxed(),
-                        Err(e) => {
-                            stream::iter(vec![Err(StreamError::from_eventsource(e).await)]).boxed()
-                        }
+/// Assemble the provider-agnostic event stream from a raw SSE event source.
+fn assemble_event_stream<S>(events: S, is_structured: bool) -> EventStream
+where
+    S: Stream<Item = std::result::Result<SseEvent, reqwest_eventsource::Error>> + Send + 'static,
+{
+    let mut state = StreamState {
+        extractor: ReasoningExtractor::default(),
+        tool_call_indices: Vec::new(),
+        reasoning_flushed: false,
+        message_flushed: false,
+        finished: false,
+        finish_reason: None,
+        is_structured,
+    };
+
+    let mut seen_error = false;
+    events
+        .take_while(move |event| {
+            // Include the first error before stopping: it must reach the
+            // handler below to be surfaced (or dropped once finished), and
+            // stopping prevents the EventSource from reconnecting after a
+            // terminal error.
+            let keep = !seen_error;
+            if event.is_err() {
+                seen_error = true;
+            }
+            future::ready(keep)
+        })
+        .then(move |event| {
+            let result = handle_sse_event_sync(event, &mut state);
+            async move {
+                match result {
+                    Ok(v) => stream::iter(v).boxed(),
+                    Err(e) => {
+                        stream::iter(vec![Err(StreamError::from_eventsource(e).await)]).boxed()
                     }
                 }
-            })
-            .flatten()
-            .boxed())
-    }
+            }
+        })
+        .flatten()
+        .boxed()
 }
 
 /// Mutable state carried across SSE events in a single stream.
@@ -136,6 +160,10 @@ struct StreamState {
     /// both emit it, producing a spurious second flush that downstream
     /// consumers can misinterpret as a re-dispatch signal.
     message_flushed: bool,
+    /// Whether the terminal `Finished` event has been emitted.
+    /// Once set, a subsequent stream error is the benign connection close that
+    /// follows `[DONE]` and is dropped rather than surfaced to the retry layer.
+    finished: bool,
     /// Captured from `finish_reason` in the last choice delta.
     /// Emitted as `Event::Finished` when the `[DONE]` sentinel arrives.
     finish_reason: Option<FinishReason>,
@@ -188,6 +216,7 @@ fn handle_sse_event_sync(
                         .take()
                         .unwrap_or(FinishReason::Completed),
                 )));
+                state.finished = true;
                 return Ok(events);
             }
 
@@ -320,7 +349,13 @@ fn handle_sse_event_sync(
 
             Ok(events)
         }
-        Err(e) => Err(e),
+        Err(e) => {
+            // A stream error after `Finished` is the benign close that
+            // follows `[DONE]`; drop it. Before completion it's a real
+            // transport failure (a dropped or stalled connection) that must
+            // surface so the retry layer can act on it.
+            if state.finished { Ok(vec![]) } else { Err(e) }
+        }
     }
 }
 

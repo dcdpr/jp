@@ -3,6 +3,41 @@ source: crates/jp_test/src/mock.rs
 expression: v
 ---
 [
-    [],
-    [],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "XQaGnE82XyTYGBNOz5nJ4UCK5rTKyxJ3",
+                        name: "run_me",
+                        arguments: {
+                            "foo": String("test"),
+                            "bar": String("[\"foo\", \"bar\"]"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Great! The tool ran successfully with the arguments `foo: \"test\"` and `bar: [\"foo\", \"bar\"]`. The output was: `working!`.\n\nLet me know if you'd like to try it with different arguments or if you need help with anything else!",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
 ]

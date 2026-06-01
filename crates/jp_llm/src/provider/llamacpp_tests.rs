@@ -1,5 +1,7 @@
 use eventsource_stream::Event as MessageEvent;
+use futures::StreamExt as _;
 use jp_conversation::ConversationEvent;
+use reqwest_eventsource::Error as SseError;
 
 use super::*;
 
@@ -18,6 +20,49 @@ fn flush_indices(events: &[Result<Event, StreamError>]) -> Vec<usize> {
             _ => None,
         })
         .collect()
+}
+
+#[test_log::test(tokio::test)]
+async fn surfaces_stream_error_before_completion() {
+    // A transport error before `[DONE]` (a dropped or stalled connection) must
+    // surface as a `StreamError` so the retry layer can act on it, rather than
+    // being silently swallowed.
+    let content = sse_message(
+        r#"{"choices":[{"delta":{"content":"partial"},"index":0,"finish_reason":null}]}"#,
+    );
+    let events = stream::iter(vec![Ok(content), Err(SseError::StreamEnded)]);
+
+    let out: Vec<_> = assemble_event_stream(events, false).collect().await;
+
+    assert!(
+        out.iter().any(std::result::Result::is_err),
+        "pre-completion stream error must surface, got {out:?}",
+    );
+}
+
+#[test_log::test(tokio::test)]
+async fn swallows_stream_error_after_completion() {
+    // The connection close that follows `[DONE]` is the benign EOF; once the
+    // stream has emitted `Finished` it must not be surfaced as an error.
+    let content =
+        sse_message(r#"{"choices":[{"delta":{"content":"hi"},"index":0,"finish_reason":"stop"}]}"#);
+    let events = stream::iter(vec![
+        Ok(content),
+        Ok(sse_message("[DONE]")),
+        Err(SseError::StreamEnded),
+    ]);
+
+    let out: Vec<_> = assemble_event_stream(events, false).collect().await;
+
+    assert!(
+        out.iter().all(std::result::Result::is_ok),
+        "post-completion close must not surface an error, got {out:?}",
+    );
+    assert!(
+        matches!(out.last(), Some(Ok(Event::Finished(_)))),
+        "stream must end with Finished, got {:?}",
+        out.last(),
+    );
 }
 
 #[test]
@@ -234,6 +279,7 @@ fn length_finish_reason_drops_pending_tool_calls() {
         tool_call_indices: Vec::new(),
         reasoning_flushed: false,
         message_flushed: false,
+        finished: false,
         finish_reason: None,
         is_structured: false,
     };
