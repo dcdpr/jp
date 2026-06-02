@@ -144,11 +144,29 @@ fn os_signals(runtime: &Runtime) -> impl Stream<Item = SignalTo> + use<> {
 /// Signals from OS/user.
 #[cfg(windows)]
 fn os_signals() -> impl Stream<Item = SignalTo> {
-    use futures::future::FutureExt;
+    use tokio::signal::windows::{ctrl_break, ctrl_c};
+    use tracing::info;
 
     stream! {
+        let mut ctrl_c = ctrl_c().expect("Failed to set up Ctrl-C handler.");
+        let mut ctrl_break = ctrl_break().expect("Failed to set up Ctrl-Break handler.");
+
         loop {
-            let signal = tokio::signal::ctrl_c().map(|_| SignalTo::Shutdown).await;
+            // Both Ctrl-C and Ctrl-Break request a graceful shutdown. A parent
+            // process can only target a specific child's process group with
+            // Ctrl-Break, so handling it lets a supervisor stop jp cleanly.
+            let signal = jp_macro::select!(
+                ctrl_c.recv(),
+                |_signal| {
+                    info!(message = "Signal received.", signal = "CTRL_C");
+                    SignalTo::Shutdown
+                },
+                ctrl_break.recv(),
+                |_signal| {
+                    info!(message = "Signal received.", signal = "CTRL_BREAK");
+                    SignalTo::Shutdown
+                },
+            );
 
             yield signal;
         }

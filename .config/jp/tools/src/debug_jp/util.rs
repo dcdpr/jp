@@ -27,6 +27,16 @@ pub(crate) fn relative_to(root: &Utf8Path, path: &Utf8Path) -> String {
         .map_or_else(|_| path.to_string(), Utf8Path::to_string)
 }
 
+/// Prepend a shutdown-warning banner to `report` when jp didn't exit on its own
+/// (it was shut down or force-killed by the run timeout).
+/// A naturally-exited run is returned unchanged.
+pub(crate) fn with_termination_note(report: String, result: &launch::LaunchResult) -> String {
+    match result.note() {
+        Some(note) => format!("> [!WARNING]\n> {note}\n\n{report}"),
+        None => report,
+    }
+}
+
 #[cfg(test)]
 #[path = "util_tests.rs"]
 mod tests;

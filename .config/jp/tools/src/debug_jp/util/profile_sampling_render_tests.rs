@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use super::*;
-use crate::debug_jp::util::profile_sampling_parse::{Frame, Thread};
+use crate::debug_jp::util::{
+    launch::Termination,
+    profile_sampling_parse::{Frame, Thread},
+};
 
 fn fixture_threads() -> Vec<Thread> {
     vec![Thread {
@@ -37,6 +40,7 @@ fn fixture_launch() -> LaunchResult {
         stdout: String::new(),
         stderr: String::new(),
         wall_duration: Duration::from_millis(1234),
+        termination: Termination::Exited,
     }
 }
 

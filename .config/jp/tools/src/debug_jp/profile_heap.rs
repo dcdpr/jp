@@ -16,11 +16,12 @@ use crate::{
     Context, Error, Tool,
     debug_jp::util::{
         build::{self, BuildSpec},
-        launch::{self, LaunchSpec},
+        launch::{LaunchSpec, Launcher, RealLauncher, Timeouts},
         profile_heap_parse as heap_parse, profile_heap_render as heap_render,
         sandbox::{Sandbox, SandboxOpts},
+        with_termination_note,
     },
-    util::{ToolResult, error},
+    util::{ToolResult, error, runner::DuctProcessRunner},
 };
 
 /// Tool entrypoint.
@@ -85,13 +86,16 @@ fn format_preview(args: &[String], clone_user_data: bool) -> String {
     out
 }
 
-/// Live execution path.
-/// Builds dhat-instrumented jp, runs it, finds the heap JSON, parses + renders.
-/// Returns the Markdown report.
+/// Live execution path: set up the sandbox, build dhat-instrumented jp, then
+/// [`execute`].
 fn run(workspace_root: &Utf8Path, args: &[String], clone_user_data: bool) -> ToolResult {
-    let sandbox = Sandbox::create(workspace_root, SandboxOpts { clone_user_data })?;
+    let sandbox = Sandbox::create(
+        workspace_root,
+        SandboxOpts { clone_user_data },
+        &DuctProcessRunner,
+    )?;
 
-    let binary = build::build(&BuildSpec {
+    let binary = build::build(&DuctProcessRunner, &BuildSpec {
         working_dir: sandbox.working_dir(),
         package: "jp_cli",
         bin: "jp",
@@ -99,19 +103,43 @@ fn run(workspace_root: &Utf8Path, args: &[String], clone_user_data: bool) -> Too
         features: &["dhat"],
     })?;
 
-    let handle = launch::spawn(&LaunchSpec {
+    let spec = LaunchSpec {
         binary,
         args: args.to_vec(),
         working_dir: sandbox.working_dir().to_owned(),
         env: sandbox.env(),
-    })?;
-    let launch_result = handle.wait()?;
+    };
+
+    execute(workspace_root, &spec, &RealLauncher, Timeouts::DEFAULT)
+}
+
+/// Launch jp via `launcher`, find the heap JSON dhat wrote, parse, and render.
+///
+/// Split from [`run`] so it can be driven with a fake [`Launcher`] in tests,
+/// independent of the sandbox and build steps.
+fn execute(
+    workspace_root: &Utf8Path,
+    spec: &LaunchSpec,
+    launcher: &dyn Launcher,
+    timeouts: Timeouts,
+) -> ToolResult {
+    let launch_result = launcher.run(spec, timeouts, &mut |_| {})?;
 
     // dhat-rs writes `<workspace_root>/tmp/profiling/heap-<ts>.json` (the
     // workspace root is resolved at runtime via `cargo locate-project`).
     // We run inside the sandbox worktree, so that path is relative to the
-    // sandbox.
-    let heap_src = find_latest_heap_json(&sandbox.working_dir().join("tmp/profiling"))?;
+    // sandbox. A force-killed jp never flushes dhat, so fold the termination
+    // note into the error when the JSON is missing.
+    let heap_src = match find_latest_heap_json(&spec.working_dir.join("tmp/profiling")) {
+        Ok(path) => path,
+        Err(e) => {
+            let note = launch_result
+                .note()
+                .map(|n| format!("{n}\n\n"))
+                .unwrap_or_default();
+            return Err(format!("{note}{e}").into());
+        }
+    };
 
     // Copy the heap JSON out of the sandbox so it survives sandbox cleanup.
     let ts = unix_seconds();
@@ -127,7 +155,8 @@ fn run(workspace_root: &Utf8Path, args: &[String], clone_user_data: bool) -> Too
     let profile = heap_parse::parse(&json)
         .map_err(|e| format!("Failed to parse dhat JSON at {heap_dst}: {e}"))?;
     let heap_dst_display = crate::debug_jp::util::relative_to(workspace_root, &heap_dst);
-    let report = heap_render::render(&profile, &launch_result, args, &heap_dst_display);
+    let report = heap_render::render(&profile, &launch_result, &spec.args, &heap_dst_display);
+    let report = with_termination_note(report, &launch_result);
 
     fs::write(&report_dst, &report)?;
     Ok(Outcome::Success { content: report })
@@ -181,3 +210,7 @@ fn unix_seconds() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_secs())
 }
+
+#[cfg(test)]
+#[path = "profile_heap_tests.rs"]
+mod tests;

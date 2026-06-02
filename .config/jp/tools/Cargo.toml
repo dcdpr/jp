@@ -33,6 +33,7 @@ grep-searcher = { workspace = true }
 htmd = { workspace = true }
 ignore = { workspace = true }
 indoc = { workspace = true }
+libc = { workspace = true }
 quick-xml = { workspace = true, features = ["encoding", "serialize"] }
 reflink-copy = { workspace = true }
 reqwest = { workspace = true, features = ["charset", "http2", "json", "rustls-tls", "stream"] }
@@ -45,6 +46,14 @@ similar = { workspace = true, features = ["text", "unicode", "inline"] }
 strip-ansi-escapes = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 url = { workspace = true, features = ["serde", "std"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }

@@ -1,7 +1,10 @@
 use std::time::Duration;
 
 use super::*;
-use crate::debug_jp::util::profile_heap_parse::{Profile, ProgramPoint};
+use crate::debug_jp::util::{
+    launch::Termination,
+    profile_heap_parse::{Profile, ProgramPoint},
+};
 
 fn fixture_profile() -> Profile {
     Profile {
@@ -46,6 +49,7 @@ fn fixture_launch() -> LaunchResult {
         stdout: String::new(),
         stderr: String::new(),
         wall_duration: Duration::from_millis(1234),
+        termination: Termination::Exited,
     }
 }
 

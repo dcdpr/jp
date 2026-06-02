@@ -10,8 +10,8 @@
 
 use std::{
     fs,
-    process::Command,
-    time::{SystemTime, UNIX_EPOCH},
+    process::{Child, Command, Stdio},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use camino::Utf8Path;
@@ -21,11 +21,12 @@ use crate::{
     Context, Tool,
     debug_jp::util::{
         build::{self, BuildSpec},
-        launch::{self, LaunchSpec},
+        launch::{LaunchSpec, Launcher, RealLauncher, Timeouts},
         profile_sampling_parse as sample_parse, profile_sampling_render as sample_render,
         sandbox::{Sandbox, SandboxOpts},
+        with_termination_note,
     },
-    util::{ToolResult, error},
+    util::{ToolResult, error, runner::DuctProcessRunner},
 };
 
 /// Default sample(1) duration ceiling.
@@ -105,9 +106,7 @@ fn format_preview(args: &[String], duration_secs: u32, clone_user_data: bool) ->
     out
 }
 
-/// Live execution path.
-/// Sets up the sandbox, builds jp, runs sample(1) against it, parses + renders.
-/// Returns the Markdown report.
+/// Live execution path: set up the sandbox, build jp, then [`execute`].
 fn run(
     workspace_root: &Utf8Path,
     args: &[String],
@@ -116,12 +115,16 @@ fn run(
 ) -> ToolResult {
     // Set up an isolated workspace + user data dir. RAII guarantees cleanup
     // even on early return.
-    let sandbox = Sandbox::create(workspace_root, SandboxOpts { clone_user_data })?;
+    let sandbox = Sandbox::create(
+        workspace_root,
+        SandboxOpts { clone_user_data },
+        &DuctProcessRunner,
+    )?;
 
     // Build jp from the sandboxed source tree. `profiling` is release-level
     // optimization plus debug info, which is exactly what `sample(1)` needs
     // to resolve symbols cleanly.
-    let binary = build::build(&BuildSpec {
+    let binary = build::build(&DuctProcessRunner, &BuildSpec {
         working_dir: sandbox.working_dir(),
         package: "jp_cli",
         bin: "jp",
@@ -129,6 +132,38 @@ fn run(
         features: &[],
     })?;
 
+    let spec = LaunchSpec {
+        binary,
+        args: args.to_vec(),
+        working_dir: sandbox.working_dir().to_owned(),
+        env: sandbox.env(),
+    };
+
+    // Let jp run slightly past the sample window before the timeout intervenes,
+    // so the explicit `duration_secs` governs the run length rather than the
+    // flat default budget.
+    let timeouts = Timeouts::with_run(Duration::from_secs(u64::from(duration_secs) + 10));
+    execute(
+        workspace_root,
+        &spec,
+        duration_secs,
+        &RealLauncher,
+        timeouts,
+    )
+}
+
+/// Launch jp via `launcher` with `sample(1)` attached to its PID, then parse +
+/// render.
+///
+/// Split from [`run`] so the launch boundary is injectable, independent of the
+/// sandbox and build steps.
+fn execute(
+    workspace_root: &Utf8Path,
+    spec: &LaunchSpec,
+    duration_secs: u32,
+    launcher: &dyn Launcher,
+    timeouts: Timeouts,
+) -> ToolResult {
     // Prepare output paths in the real workspace so the artifacts survive
     // sandbox cleanup.
     let ts = unix_seconds();
@@ -137,35 +172,34 @@ fn run(
     let sample_path = out_dir.join(format!("sample-{ts}.txt"));
     let report_path = out_dir.join(format!("report-sampling-{ts}.md"));
 
-    // Launch jp.
-    let handle = launch::spawn(&LaunchSpec {
-        binary,
-        args: args.to_vec(),
-        working_dir: sandbox.working_dir().to_owned(),
-        env: sandbox.env(),
-    })?;
-
-    // Attach sample(1) immediately. `sample <pid> <dur> <interval_ms> -file
-    // <path>` blocks until the process dies or the duration elapses.
-    let sampler_child = Command::new("sample")
+    // Attach `sample(1)` to jp the moment it spawns, before the supervised
+    // wait. `sample <pid> <dur> <interval_ms> -file <path>` blocks until the
+    // target dies or the duration elapses. Errors are stashed because the
+    // callback can't return them.
+    let mut sampler: Option<Child> = None;
+    let mut sampler_spawn_err: Option<String> = None;
+    let launch_result = launcher.run(spec, timeouts, &mut |pid| match Command::new("sample")
         .args([
-            &handle.pid().to_string(),
+            &pid.to_string(),
             &duration_secs.to_string(),
             "1",
             "-file",
             sample_path.as_str(),
         ])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| format!("Failed to spawn `sample`: {e}"))?;
+    {
+        Ok(child) => sampler = Some(child),
+        Err(e) => sampler_spawn_err = Some(format!("Failed to spawn `sample`: {e}")),
+    })?;
 
-    // Wait for jp first; sample will exit on its own when jp dies. If
-    // sample lingers (e.g. duration not yet hit but jp is gone), wait_with_output
-    // returns once it actually exits.
-    let launch_result = handle.wait()?;
-    let sampler_output = sampler_child
+    if let Some(err) = sampler_spawn_err {
+        return Err(err.into());
+    }
+    let sampler_output = sampler
+        .expect("sampler is set when no spawn error was recorded")
         .wait_with_output()
         .map_err(|e| format!("Failed to wait on `sample`: {e}"))?;
 
@@ -177,12 +211,12 @@ fn run(
         ));
     }
 
-    // Parse + render.
     let raw = fs::read_to_string(&sample_path)
         .map_err(|e| format!("Failed to read sample output at {sample_path}: {e}"))?;
     let threads = sample_parse::parse(&raw);
     let sample_path_display = crate::debug_jp::util::relative_to(workspace_root, &sample_path);
-    let report = sample_render::render(&threads, &launch_result, args, &sample_path_display);
+    let report = sample_render::render(&threads, &launch_result, &spec.args, &sample_path_display);
+    let report = with_termination_note(report, &launch_result);
 
     fs::write(&report_path, &report)?;
 
