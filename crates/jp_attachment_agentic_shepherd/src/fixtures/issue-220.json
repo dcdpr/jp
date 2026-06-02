@@ -1,0 +1,586 @@
+{
+  "issue": {
+    "timestamp": {
+      "user": {
+        "name": "rgrant"
+      },
+      "datetime": "20250721 01:38 UTC"
+    },
+    "issue_id": {
+      "segments": [
+        {
+          "value": 220,
+          "leading_zeroes": 0
+        }
+      ]
+    },
+    "title": "expect update-context command with --section and --json-body parameters for todo updates",
+    "description": [
+      {
+        "indentation": {
+          "spaces_before_content_or_bullet": 2,
+          "decoration_indent": 2
+        },
+        "content": "Create new agentic-shepherd command: update-context",
+        "continuations": []
+      },
+      {
+        "indentation": {
+          "spaces_before_content_or_bullet": 2,
+          "decoration_indent": 2
+        },
+        "content": "Command must have --section parameter to specify which section to update (Analysis, Progress Notes, etc.)",
+        "continuations": []
+      },
+      {
+        "indentation": {
+          "spaces_before_content_or_bullet": 2,
+          "decoration_indent": 2
+        },
+        "content": "Command must have --json-body parameter for the content being added",
+        "continuations": []
+      },
+      {
+        "indentation": {
+          "spaces_before_content_or_bullet": 2,
+          "decoration_indent": 2
+        },
+        "content": "Automatic handling of proper indentation levels for nested content",
+        "continuations": []
+      },
+      {
+        "indentation": {
+          "spaces_before_content_or_bullet": 2,
+          "decoration_indent": 2
+        },
+        "content": "Automatic timestamp generation and formatting for all updates",
+        "continuations": []
+      }
+    ],
+    "catharsis_section": {
+      "commits": [
+        {
+          "ClosedWithCommit": {
+            "indentation": {
+              "spaces_before_content_or_bullet": 4,
+              "decoration_indent": 2
+            },
+            "timestamp": {
+              "user": {
+                "name": "rgrant"
+              },
+              "datetime": "20251010 09:42 UTC"
+            },
+            "hash": "2402e6d",
+            "comments": null,
+            "is_additional": false,
+            "is_obsoleted": false
+          }
+        }
+      ]
+    },
+    "analysis_section": null,
+    "implementation_plan_section": {
+      "timestamp": {
+        "user": {
+          "name": "claude"
+        },
+        "datetime": "20251010 01:42 UTC"
+      },
+      "content": [
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Root cause: PatchItems uses Vec<DescriptionItem> which requires indentation field in JSON",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Tests provide JSON: {\"content\": [{\"content\": \"...\", \"continuations\": []}]} without indentation",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Solution: Create DescriptionItemJsonPatch intermediate type for JSON deserialization",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "DescriptionItemJsonPatch has optional indentation with default of 4 spaces",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Supports full continuations structure for nested items",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Converts to DescriptionItem via From trait",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Changes needed in src/commands/update_context.rs: 1. Add import for Continuation type 2. Add DescriptionItemJsonPatch struct with #[serde(default)] on indentation 3. Add default_json_indentation() helper returning AssignedIndent::new(4) 4. Add From<DescriptionItemJsonPatch> for DescriptionItem implementation 5. Update PatchItems at line 171 to use Vec<DescriptionItemJsonPatch> 6. Update PatchItems at line 269 to use Vec<DescriptionItemJsonPatch> 7. Add .into_iter().map(Into::into).collect() conversions at 6 locations where patch.content is used (lines 184, 197, 242, 250, and 204-212, 222-230 already transform)",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "This isolates JSON API flexibility to update-context without affecting markdown parsing",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Additional issue discovered: error message assertions also failing (separate fix needed)",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "[claude 20251010 01:43 UTC] Add test for nested subitems in continuations to verify full DescriptionItem structure is supported through JSON",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "[claude 20251010 02:51 UTC] Implemented DescriptionItemJsonPatch, ContinuationJsonPatch, and ContinuationSublistJsonPatch to handle JSON deserialization without requiring indentation fields",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "[claude 20251010 02:51 UTC] Used child_indent() from AssignedIndent to properly calculate nested indentation (6 spaces for sublists under 4-space parents)",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "[claude 20251010 02:51 UTC] Created minimal fixture context-with-105-minimal.md to replace 7.9K fixture, improving test performance from 18.83s to 0.95s",
+          "continuations": []
+        }
+      ],
+      "steps": null
+    },
+    "progress_notes_section": {
+      "content": [
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "rgrant"
+            },
+            "datetime": "20251009 22:14 UTC"
+          },
+          "content": "Naming decision: command will be \"update-context\" (not \"context-update\")",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 00:54 UTC"
+          },
+          "content": "Created src/commands/update_context.rs with SectionData helper enum",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 00:54 UTC"
+          },
+          "content": "Implemented SectionData with from_json, exists_in_issue, set_in_issue, get_from_issue, append_items, from_json_with_timestamps",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 00:54 UTC"
+          },
+          "content": "Implemented add_section() and replace_section() functions",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 00:54 UTC"
+          },
+          "content": "Implemented append_to_section() with proper timestamp handling for new items only",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 00:54 UTC"
+          },
+          "content": "Build succeeds, ready to implement update_context() command function",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 01:29 UTC"
+          },
+          "content": "Implemented update_context() and update_context_from_args()",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 01:29 UTC"
+          },
+          "content": "Added CLI integration in main.rs with --operation, --section, --json-body args",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 01:29 UTC"
+          },
+          "content": "Created integration tests in update_context_test.rs",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 01:29 UTC"
+          },
+          "content": "Tests failing: JSON deserialization expects indentation field",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 04:14 UTC"
+          },
+          "content": "Refactored JSON patch types to use context-aware conversions with into_item() and into_continuation() methods that accept parent indentation",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 04:14 UTC"
+          },
+          "content": "Nested sublists now properly calculate indentation recursively using parent_indent.child_indent() at each level",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 04:14 UTC"
+          },
+          "content": "Created test_add_progress_notes_with_nested_subitems to verify sub-subitems work correctly (8-space indentation)",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 04:14 UTC"
+          },
+          "content": "Created minimal fixture context-with-105-minimal.md reducing test time from 18.83s to 0.95s",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 04:37 UTC"
+          },
+          "content": "Added documentation in .agentic-shepherd/instructions/update-context-command.md with section type details and hardcoded field information",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 04:37 UTC"
+          },
+          "content": "Updated bootstrap-commands.md with update-context examples including nested sublists",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 04:37 UTC"
+          },
+          "content": "Updated commands.md to include update-context-command.md via agentic-shepherd-include directive",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 04:37 UTC"
+          },
+          "content": "Added guidance in issue-tracking.md to prefer update-context over manual edits (saves timestamp round trip)",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "claude"
+            },
+            "datetime": "20251010 04:37 UTC"
+          },
+          "content": "Created issues #267-272 for supporting optional fields (root_causes, steps, checklist, test_results, symptoms, debugging_plan)",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "timestamp": {
+            "user": {
+              "name": "rgrant"
+            },
+            "datetime": "20251010 04:39 UTC"
+          },
+          "content": "Interrupted by issue #273: Performance critical - 34s per update-context call blocks workflow",
+          "continuations": []
+        }
+      ],
+      "checklist": null
+    },
+    "implementation_details_section": null,
+    "testing_results_section": null,
+    "debugging_section": {
+      "timestamp": {
+        "user": {
+          "name": "claude"
+        },
+        "datetime": "20251010 04:16 UTC"
+      },
+      "content": [
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Initial approach used From trait for conversions, but From cannot accept context parameters",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Nested sublists were appearing at wrong indentation (6 spaces instead of 8 for sub-subitems)",
+          "continuations": [
+            {
+              "Sublist": {
+                "indentation": {
+                  "spaces_before_content_or_bullet": 4,
+                  "decoration_indent": 2
+                },
+                "items": [
+                  {
+                    "indentation": {
+                      "spaces_before_content_or_bullet": 6,
+                      "decoration_indent": 2
+                    },
+                    "content": "Root cause: From trait conversions always used hardcoded 4-space parent indentation",
+                    "continuations": []
+                  },
+                  {
+                    "indentation": {
+                      "spaces_before_content_or_bullet": 6,
+                      "decoration_indent": 2
+                    },
+                    "content": "This worked for first-level sublists but failed for deeper nesting",
+                    "continuations": []
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Solution: Replaced From trait with into_item() and into_continuation() methods that accept AssignedIndent parameter",
+          "continuations": []
+        },
+        {
+          "indentation": {
+            "spaces_before_content_or_bullet": 4,
+            "decoration_indent": 2
+          },
+          "content": "Test fixture performance issue: context-with-105.md was 7.9K causing parse_issues() to process excessive content",
+          "continuations": [
+            {
+              "Sublist": {
+                "indentation": {
+                  "spaces_before_content_or_bullet": 4,
+                  "decoration_indent": 2
+                },
+                "items": [
+                  {
+                    "indentation": {
+                      "spaces_before_content_or_bullet": 6,
+                      "decoration_indent": 2
+                    },
+                    "content": "find_issue_in_project calls parse_issues which parses every issue in the file",
+                    "continuations": []
+                  },
+                  {
+                    "indentation": {
+                      "spaces_before_content_or_bullet": 6,
+                      "decoration_indent": 2
+                    },
+                    "content": "Created context-with-105-minimal.md with just the essential issue structure",
+                    "continuations": []
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "symptoms": null,
+      "debugging_plan": null
+    }
+  },
+  "file": "done.md",
+  "issue_id": "220"
+}

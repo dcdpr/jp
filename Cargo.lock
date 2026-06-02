@@ -1998,6 +1998,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp_attachment_agentic_shepherd"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "camino",
+ "duct",
+ "indoc",
+ "jp_attachment",
+ "jp_mcp",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "jp_attachment_bear_note"
 version = "0.1.0"
 dependencies = [
@@ -2142,6 +2159,7 @@ dependencies = [
  "inquire",
  "insta",
  "jp_attachment",
+ "jp_attachment_agentic_shepherd",
  "jp_attachment_bear_note",
  "jp_attachment_cmd_output",
  "jp_attachment_file_content",
