@@ -41,7 +41,7 @@ use crate::{
         BG_END, BOLD_END, BOLD_START, FG_END, ITALIC_END, ITALIC_START, STRIKETHROUGH_END,
         STRIKETHROUGH_START, UNDERLINE_END, UNDERLINE_START,
     },
-    format::{DefaultBackground, HrStyle},
+    format::{DefaultBackground, HrStyle, SYNTAXES},
     table,
     writer::TerminalWriter,
 };
@@ -939,14 +939,13 @@ fn highlight_code_block(literal: &str, language: &str, theme: &Theme) -> Option<
         return None;
     }
 
-    let ss = two_face::syntax::extra_newlines();
-    let syntax = ss.find_syntax_by_token(language)?;
+    let syntax = SYNTAXES.find_syntax_by_token(language)?;
 
     let mut h = syntect::easy::HighlightLines::new(syntax, theme);
     let mut buf = String::new();
 
     for line in syntect::util::LinesWithEndings::from(literal) {
-        let ranges = h.highlight_line(line, &ss).ok()?;
+        let ranges = h.highlight_line(line, &SYNTAXES).ok()?;
         let escaped = syntect::util::as_24_bit_terminal_escaped(&ranges, false);
         buf.push_str(&escaped);
     }
