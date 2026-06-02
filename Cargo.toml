@@ -10,6 +10,7 @@ resolver = "3"
 
 [workspace.dependencies]
 jp_attachment = { path = "crates/jp_attachment" }
+jp_attachment_agentic_shepherd = { path = "crates/jp_attachment_agentic_shepherd" }
 jp_attachment_bear_note = { path = "crates/jp_attachment_bear_note" }
 jp_attachment_cmd_output = { path = "crates/jp_attachment_cmd_output" }
 jp_attachment_file_content = { path = "crates/jp_attachment_file_content" }

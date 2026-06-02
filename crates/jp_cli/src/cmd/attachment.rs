@@ -1,3 +1,4 @@
+use jp_attachment_agentic_shepherd as _;
 use jp_attachment_bear_note as _;
 use jp_attachment_cmd_output as _;
 use jp_attachment_file_content as _;
