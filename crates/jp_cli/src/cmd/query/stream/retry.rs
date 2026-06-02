@@ -28,7 +28,6 @@
 use std::{fmt::Write as _, sync::Arc};
 
 use jp_config::assistant::request::RequestConfig;
-use jp_conversation::event::ChatResponse;
 use jp_llm::{StreamError, exponential_backoff};
 use jp_printer::Printer;
 use jp_workspace::ConversationMut;
@@ -170,13 +169,14 @@ pub async fn handle_stream_error(
     // out to be fatal.
     turn_coordinator.flush_renderer();
     printer.flush_instant();
-    if let Some(content) = turn_coordinator.peek_partial_content() {
+    let partial = turn_coordinator.peek_partial_events();
+    if !partial.is_empty() {
         conv.update_events(|stream| {
-            stream
-                .current_turn_mut()
-                .add_chat_response(ChatResponse::message(&content))
-                .build()
-                .expect("Invalid ConversationStream state");
+            let mut turn = stream.current_turn_mut();
+            for response in partial {
+                turn = turn.add_chat_response(response);
+            }
+            turn.build().expect("Invalid ConversationStream state");
         });
     }
 
