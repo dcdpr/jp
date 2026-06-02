@@ -75,6 +75,12 @@ pub struct TerminalWriter<'w> {
 
     /// Optional default background color for all content.
     pub(crate) default_background: Option<DefaultBackground>,
+
+    /// When true, suppress all ANSI escape sequences.
+    pub(crate) plain: bool,
+
+    /// Throwaway sink for attr mutations in plain mode.
+    plain_attrs_sink: AnsiState,
 }
 
 impl<'w> TerminalWriter<'w> {
@@ -113,6 +119,8 @@ impl<'w> TerminalWriter<'w> {
             width,
             attrs,
             default_background,
+            plain: false,
+            plain_attrs_sink: AnsiState::default(),
         }
     }
 
@@ -126,7 +134,25 @@ impl<'w> TerminalWriter<'w> {
     /// The escape is stored in a side-channel and injected into the
     /// output at the correct byte offset when the buffer is flushed or
     /// split by the wrapping logic.
+    /// Returns a mutable reference to `attrs` for updating ANSI state.
+    ///
+    /// In plain mode, returns a throwaway reference so the real attrs
+    /// stay default (preventing RESET/restore emission).
+    pub(crate) const fn attrs_mut(&mut self) -> &mut AnsiState {
+        if self.plain {
+            &mut self.plain_attrs_sink
+        } else {
+            &mut self.attrs
+        }
+    }
+
+    /// Record an ANSI escape at the current position in the wrap buffer.
+    ///
+    /// In plain mode this is a no-op.
     pub(crate) fn write_escape(&mut self, code: &str) -> fmt::Result {
+        if self.plain {
+            return Ok(());
+        }
         if self.width == 0 {
             self.output.write_str(code)
         } else {

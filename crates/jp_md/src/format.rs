@@ -367,7 +367,9 @@ impl<'a> CodeHighlighter<'a> {
         let ss = syntax::extra_newlines();
         let ranges = self.hl.highlight_line(line, &ss)?;
         let mut escaped = color::styled_ranges_to_escaped(&ranges, true, self.color_mode);
-        escaped.push_str("\x1b[0m");
+        if self.color_mode != ColorMode::Plain {
+            escaped.push_str("\x1b[0m");
+        }
         Ok(escaped)
     }
 

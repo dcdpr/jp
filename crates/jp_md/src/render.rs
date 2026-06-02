@@ -136,9 +136,12 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         color_mode: ColorMode,
         output: &'w mut dyn Write,
     ) -> Self {
+        let mut writer = TerminalWriter::new(output, width, default_background);
+        writer.plain = color_mode == ColorMode::Plain;
+
         Self {
             node,
-            writer: TerminalWriter::new(output, width, default_background),
+            writer,
             table_options,
             hr_options,
             theme,
@@ -285,7 +288,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         if entering {
             self.blockquote_depth += 1;
             let (ref param, ref escape) = self.blockquote_fg;
-            self.writer.attrs.foreground = Some(param.clone());
+            self.writer.attrs_mut().foreground = Some(param.clone());
             self.writer.write_escape(escape)?;
             self.writer.output("> ", false)?;
             self.writer.begin_content = true;
@@ -299,10 +302,10 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         self.blockquote_depth -= 1;
         if self.blockquote_depth > 0 {
             let (ref param, ref escape) = self.blockquote_fg;
-            self.writer.attrs.foreground = Some(param.clone());
+            self.writer.attrs_mut().foreground = Some(param.clone());
             self.writer.write_escape(escape)?;
         } else {
-            self.writer.attrs.foreground = None;
+            self.writer.attrs_mut().foreground = None;
             self.writer.write_escape(FG_END)?;
         }
         self.writer.blankline();
@@ -413,14 +416,14 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             self.writer.output(" ", false)?;
             self.writer.begin_content = true;
             self.writer.no_linebreaks = true;
-            self.writer.attrs.bold = true;
+            self.writer.attrs_mut().bold = true;
             self.writer.write_escape(BOLD_START)?;
 
             return Ok(());
         }
 
         self.writer.write_escape(BOLD_END)?;
-        self.writer.attrs.bold = false;
+        self.writer.attrs_mut().bold = false;
         self.writer.no_linebreaks = false;
         self.writer.blankline();
 
@@ -583,7 +586,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             || theme_bg(self.theme, self.color_mode),
             |(p, e)| (p.clone(), e.clone()),
         );
-        self.writer.attrs.background = Some(bg_param);
+        self.writer.attrs_mut().background = Some(bg_param);
         self.writer.write_escape(&bg_escape)?;
 
         for _ in 0..numticks {
@@ -615,11 +618,11 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         if let Some(ref bg) = self.writer.default_background {
             let param = bg.param.clone();
             let esc = format!("\x1b[{param}m");
-            self.writer.attrs.background = Some(param);
+            self.writer.attrs_mut().background = Some(param);
             self.writer.write_escape(&esc)?;
         } else {
             self.writer.write_escape(BG_END)?;
-            self.writer.attrs.background = None;
+            self.writer.attrs_mut().background = None;
         }
 
         Ok(())
@@ -648,7 +651,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
     /// Format bold text with ANSI bold.
     fn format_strong(&mut self, entering: bool) -> fmt::Result {
         if entering {
-            self.writer.attrs.bold = true;
+            self.writer.attrs_mut().bold = true;
             self.writer.write_escape(BOLD_START)?;
         }
 
@@ -656,7 +659,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         if !entering {
             self.writer.write_escape(BOLD_END)?;
-            self.writer.attrs.bold = false;
+            self.writer.attrs_mut().bold = false;
         }
 
         Ok(())
@@ -676,7 +679,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         };
 
         if entering {
-            self.writer.attrs.italic = true;
+            self.writer.attrs_mut().italic = true;
             self.writer.write_escape(ITALIC_START)?;
         }
 
@@ -684,7 +687,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         if !entering {
             self.writer.write_escape(ITALIC_END)?;
-            self.writer.attrs.italic = false;
+            self.writer.attrs_mut().italic = false;
         }
 
         Ok(())
@@ -715,7 +718,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
     /// Format strikethrough text.
     fn format_strikethrough(&mut self, entering: bool) -> fmt::Result {
         if entering {
-            self.writer.attrs.strikethrough = true;
+            self.writer.attrs_mut().strikethrough = true;
             self.writer.write_escape(STRIKETHROUGH_START)?;
         }
 
@@ -723,7 +726,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         if !entering {
             self.writer.write_escape(STRIKETHROUGH_END)?;
-            self.writer.attrs.strikethrough = false;
+            self.writer.attrs_mut().strikethrough = false;
         }
 
         Ok(())
@@ -732,7 +735,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
     /// Format underlined text.
     fn format_underline(&mut self, entering: bool) -> fmt::Result {
         if entering {
-            self.writer.attrs.underline = true;
+            self.writer.attrs_mut().underline = true;
             self.writer.write_escape(UNDERLINE_START)?;
         }
 
@@ -740,7 +743,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         if !entering {
             self.writer.write_escape(UNDERLINE_END)?;
-            self.writer.attrs.underline = false;
+            self.writer.attrs_mut().underline = false;
         }
 
         Ok(())
@@ -973,7 +976,8 @@ fn highlight_code_block(
         buf.push_str(&escaped);
     }
 
-    // Reset colors at the end of the block.
-    buf.push_str("\x1b[0m");
+    if color_mode != ColorMode::Plain {
+        buf.push_str("\x1b[0m");
+    }
     Some(buf)
 }
