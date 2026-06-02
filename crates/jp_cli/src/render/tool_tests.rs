@@ -17,6 +17,63 @@ fn strip_ansi(s: &str) -> String {
     String::from_utf8(bytes).expect("valid utf-8 after stripping ANSI")
 }
 
+/// Resolve cursor-relative output (`\r`, `\n`, and the clear-to-end-of-line
+/// escape `\x1b[K`) into the final visible lines, dropping other ANSI (color)
+/// sequences.
+///
+/// `strip_ansi` removes `\r` along with the escapes, which glues together text
+/// that a real terminal would have overwritten via cursor moves.
+/// This emulates what the terminal actually shows so tests can assert against
+/// it.
+fn visible_lines(raw: &str) -> Vec<String> {
+    let mut lines: Vec<Vec<char>> = vec![Vec::new()];
+    let mut row = 0usize;
+    let mut col = 0usize;
+    let mut chars = raw.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\n' => {
+                row += 1;
+                col = 0;
+                if row == lines.len() {
+                    lines.push(Vec::new());
+                }
+            }
+            '\r' => col = 0,
+            '\x1b' if chars.peek() == Some(&'[') => {
+                chars.next();
+                let mut final_byte = None;
+                for c in chars.by_ref() {
+                    if c.is_ascii_alphabetic() || c == '~' {
+                        final_byte = Some(c);
+                        break;
+                    }
+                }
+                // Clear-to-end-of-line; other CSI (e.g. SGR `m`) are
+                // visual-only and ignored.
+                if final_byte == Some('K') {
+                    lines[row].truncate(col);
+                }
+            }
+            _ => {
+                let line = &mut lines[row];
+                while line.len() < col {
+                    line.push(' ');
+                }
+                if col < line.len() {
+                    line[col] = c;
+                } else {
+                    line.push(c);
+                }
+                col += 1;
+            }
+        }
+    }
+
+    lines.into_iter().map(|l| l.into_iter().collect()).collect()
+}
+
 fn create_renderer() -> (ToolRenderer, SharedBuffer, SharedBuffer) {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
     let mut config = AppConfig::new_test().style;
@@ -29,10 +86,11 @@ fn create_renderer_with_show(show: bool) -> (ToolRenderer, SharedBuffer) {
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let mut config = AppConfig::new_test().style;
     config.tool_call.show = show;
-    config.tool_call.preparing.show = true;
-    config.tool_call.preparing.delay_secs = 0;
-    config.tool_call.preparing.interval_ms = 100;
-    let renderer = ToolRenderer::new(Arc::new(printer), config, "/tmp".into(), false);
+    // The temp line is TTY-gated, so these tests run as a TTY. `preparing.show`
+    // stays off to keep `register` from spawning a timer task (sync tests have
+    // no tokio runtime); `tick` is exercised by calling it directly.
+    config.tool_call.preparing.show = false;
+    let renderer = ToolRenderer::new(Arc::new(printer), config, "/tmp".into(), true);
     (renderer, err)
 }
 
@@ -243,6 +301,40 @@ fn test_complete_does_not_render_permanent_line() {
 }
 
 #[test]
+fn test_completing_one_pending_tool_does_not_collide_with_header() {
+    // Reproduces the fast-multi-tool streaming bug: a second tool-call start
+    // registers (still pending) before the first request is committed. The
+    // turn loop then completes the first tool and immediately prints its
+    // permanent header. The still-pending tool must not leave a temp line
+    // glued to that header (the observed `…fs_read_fileCalling tool…`).
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let mut config = AppConfig::new_test().style;
+    config.tool_call.show = true;
+    // Disable the animated suffix so `register` doesn't spawn a timer task
+    // (this is a sync test with no tokio runtime).
+    config.tool_call.preparing.show = false;
+    let mut renderer = ToolRenderer::new(Arc::new(printer), config, "/tmp".into(), true);
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+    renderer.register("id1", "fs_read_file", &tx);
+    renderer.register("id2", "fs_read_file", &tx);
+
+    renderer.complete("id1");
+    let mut args = Map::new();
+    args.insert("path".into(), Value::String("/a".into()));
+    renderer.render_tool_call("fs_read_file", &args, &ParametersStyle::FunctionCall);
+
+    renderer.printer.flush();
+    let visible = visible_lines(&err.lock());
+    for line in &visible {
+        assert!(
+            line.matches("Calling tool").count() <= 1,
+            "two tool headers collided on one visible line: {visible:?}"
+        );
+    }
+}
+
+#[test]
 fn test_cancel_all_clears_pending() {
     let (mut renderer, _out) = create_renderer_with_show(true);
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
@@ -261,6 +353,24 @@ fn test_reset_clears_everything() {
     renderer.complete("id1");
     renderer.reset();
     assert!(!renderer.has_pending());
+}
+
+#[test]
+fn test_reset_clears_visible_temp_line() {
+    // A temp line is on screen (registered, not yet completed) when a new
+    // streaming cycle begins. `reset` must clear it rather than leave it
+    // stranded on screen.
+    let (mut renderer, err) = create_renderer_with_show(true);
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    renderer.register("id1", "fs_read_file", &tx);
+    renderer.reset();
+
+    renderer.printer.flush();
+    let visible = visible_lines(&err.lock());
+    assert!(
+        visible.iter().all(|l| !l.contains("Calling tool")),
+        "reset left a stale temp line on screen: {visible:?}"
+    );
 }
 
 #[test]

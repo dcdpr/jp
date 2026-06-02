@@ -392,11 +392,15 @@ impl ToolRenderer {
             name: name.to_owned(),
         });
 
-        if self.line_active {
-            self.rewrite_temp_line();
-        } else {
-            self.write_temp_line();
-            self.line_active = true;
+        // The temp line is a cursor-relative redraw (`\r`, `\x1b[K`); it only
+        // makes sense on a TTY. On a pipe it would emit raw control bytes.
+        if self.is_tty {
+            if self.line_active {
+                self.rewrite_temp_line();
+            } else {
+                self.write_temp_line();
+                self.line_active = true;
+            }
         }
 
         self.ensure_timer(tick_tx);
@@ -412,22 +416,22 @@ impl ToolRenderer {
     pub fn complete(&mut self, id: &str) {
         self.pending.retain(|t| t.id != id);
 
+        // Clear the temp line but don't redraw it for the still-pending tools.
+        // The caller prints the completed tool's permanent header immediately
+        // after this returns; a redraw here would land on the same line and the
+        // header would overwrite it, producing a glued "…toolCalling tool…"
+        // line. Remaining tools get a fresh temp line on the next tick.
         if self.line_active {
             let _ = write!(self.printer.err_writer(), "\r\x1b[K");
-        }
-
-        if self.pending.is_empty() {
             self.line_active = false;
-        } else {
-            self.write_temp_line();
         }
     }
 
     /// Updates the temp line with the elapsed time.
     ///
     /// Called on each tick from the timer task.
-    pub fn tick(&self, elapsed: Duration) {
-        if self.pending.is_empty() {
+    pub fn tick(&mut self, elapsed: Duration) {
+        if self.pending.is_empty() || !self.is_tty {
             return;
         }
 
@@ -437,6 +441,9 @@ impl ToolRenderer {
             self.printer.err_writer(),
             "\r\x1b[K{content} (receiving arguments… {secs:.1}s)",
         );
+        // The tick now owns the temp line, so a later `complete` knows to clear
+        // it.
+        self.line_active = true;
     }
 
     /// Returns `true` if there are tools waiting for arguments.
@@ -450,7 +457,7 @@ impl ToolRenderer {
     /// Used before showing interrupt menus.
     /// The next tick will redisplay the temp line.
     pub fn clear_temp_line(&self) {
-        if self.pending.is_empty() {
+        if !self.line_active {
             return;
         }
         let _ = write!(self.printer.err_writer(), "\r\x1b[K");
@@ -470,8 +477,12 @@ impl ToolRenderer {
     }
 
     /// Resets all state for a new streaming cycle.
+    ///
+    /// Clears any on-screen temp line, drops pending tools, and stops the
+    /// timer.
+    /// Don't pre-clear `line_active`: that would skip `cancel_all`'s clear and
+    /// leave a stale temp line on screen.
     pub fn reset(&mut self) {
-        self.line_active = false;
         self.cancel_all();
     }
 
