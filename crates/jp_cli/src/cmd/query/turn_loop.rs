@@ -385,7 +385,16 @@ pub(super) async fn run_turn_loop(
                                     .await
                                     {
                                         LoopAction::Break => break,
-                                        LoopAction::Return(result) => return result,
+                                        LoopAction::Return(result) => {
+                                            // Persist any partial content
+                                            // flushed before aborting, so a
+                                            // fatal stream error doesn't
+                                            // discard streamed work.
+                                            if let Err(err) = conv.flush() {
+                                                warn!("Failed to persist before abort: {err}");
+                                            }
+                                            return result;
+                                        }
                                         LoopAction::Continue => continue,
                                     }
                                 }

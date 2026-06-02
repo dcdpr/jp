@@ -1,5 +1,14 @@
 use super::*;
 
+#[tokio::test]
+async fn stream_ended_classifies_as_retryable() {
+    // A stream that ends without a terminal event is the disconnect case (e.g.
+    // the socket dropped mid-response). It must route through the retry layer,
+    // not be surfaced as a fatal error.
+    let err = StreamError::from_eventsource(reqwest_eventsource::Error::StreamEnded).await;
+    assert!(err.is_retryable());
+}
+
 #[test]
 fn extract_retry_after_from_retry_after_ms() {
     let mut headers = reqwest::header::HeaderMap::new();

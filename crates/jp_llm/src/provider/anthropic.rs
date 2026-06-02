@@ -1,4 +1,4 @@
-use std::{env, future, mem, time::Duration};
+use std::{env, mem, time::Duration};
 
 use async_anthropic::{
     Client,
@@ -13,7 +13,7 @@ use async_stream::try_stream;
 use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::NaiveDate;
-use futures::{FutureExt as _, StreamExt as _, TryStreamExt as _, pin_mut, stream};
+use futures::{StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -264,7 +264,6 @@ fn call(
             .map_err(StreamError::from)
             .map_ok(|v| stream::iter(map_event(v, is_structured)))
             .try_flatten()
-            .chain(future::ready(Ok(Event::Finished(FinishReason::Completed))).into_stream())
             .peekable();
 
         pin_mut!(stream);
@@ -378,8 +377,6 @@ fn call(
                 patch @ Event::Patch(_) => yield patch,
             }
         }
-
-        yield Event::Finished(FinishReason::Completed);
     }))
 }
 
@@ -1318,7 +1315,13 @@ fn map_event(
         }
         ContentBlockStop { index } => vec![Ok(Event::flush(index))],
         MessageDelta { delta, .. } => map_message_delta(&delta).into_iter().map(Ok).collect(),
-        _ => vec![],
+        // `message_stop` is Anthropic's terminal event. Emit `Finished` here so
+        // the stream carries its own completion signal: a stream that ends
+        // without it (a dropped connection mid-response) is treated as
+        // incomplete by the consumer and retried, rather than being mistaken
+        // for a clean completion.
+        MessageStop => vec![Ok(Event::Finished(FinishReason::Completed))],
+        MessageStart { .. } => vec![],
     }
 }
 

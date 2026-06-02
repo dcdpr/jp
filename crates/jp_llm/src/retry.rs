@@ -5,7 +5,9 @@ use std::time::Duration;
 use futures::TryStreamExt as _;
 use tracing::{debug, warn};
 
-use crate::{Provider, error::Result, event::Event, model::ModelDetails, query::ChatQuery};
+use crate::{
+    Provider, StreamError, error::Result, event::Event, model::ModelDetails, query::ChatQuery,
+};
 
 /// Configuration for resilient stream retries.
 #[derive(Debug, Clone)]
@@ -51,41 +53,48 @@ pub async fn collect_with_retry(
             .chat_completion_stream(model, query.clone())
             .await?;
 
-        match stream.try_collect::<Vec<Event>>().await {
-            Ok(events) => return Ok(events),
-            Err(error) => {
-                attempt += 1;
-
-                if !error.is_retryable() || attempt > config.max_retries {
-                    warn!(
-                        attempt,
-                        max = config.max_retries,
-                        error = error.to_string(),
-                        "Stream error (exhausted retries)."
-                    );
-                    return Err(error.into());
-                }
-
-                let delay = match error.retry_after {
-                    Some(d) => d.min(Duration::from_secs(config.max_backoff_secs)),
-                    None => exponential_backoff(
-                        attempt,
-                        config.base_backoff_ms,
-                        config.max_backoff_secs,
-                    ),
-                };
-
-                debug!(
-                    attempt,
-                    max = config.max_retries,
-                    delay_ms = delay.as_millis(),
-                    error = error.to_string(),
-                    "Retryable stream error, backing off."
-                );
-
-                tokio::time::sleep(delay).await;
+        let error = match stream.try_collect::<Vec<Event>>().await {
+            // Contract: a well-formed stream ends with `Event::Finished`. A
+            // stream that ends without one was cut short (e.g. a dropped
+            // connection); treat it as a transient failure and retry rather
+            // than returning a truncated result.
+            Ok(events)
+                if events
+                    .last()
+                    .is_some_and(|e| matches!(e, Event::Finished(_))) =>
+            {
+                return Ok(events);
             }
+            Ok(_) => StreamError::transient("provider stream ended without a terminal event"),
+            Err(error) => error,
+        };
+
+        attempt += 1;
+
+        if !error.is_retryable() || attempt > config.max_retries {
+            warn!(
+                attempt,
+                max = config.max_retries,
+                error = error.to_string(),
+                "Stream error (exhausted retries)."
+            );
+            return Err(error.into());
         }
+
+        let delay = match error.retry_after {
+            Some(d) => d.min(Duration::from_secs(config.max_backoff_secs)),
+            None => exponential_backoff(attempt, config.base_backoff_ms, config.max_backoff_secs),
+        };
+
+        debug!(
+            attempt,
+            max = config.max_retries,
+            delay_ms = delay.as_millis(),
+            error = error.to_string(),
+            "Retryable stream error, backing off."
+        );
+
+        tokio::time::sleep(delay).await;
     }
 }
 

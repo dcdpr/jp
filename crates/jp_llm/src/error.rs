@@ -153,6 +153,14 @@ impl From<reqwest::Error> for StreamError {
             || err.is_decode()
         {
             StreamError::transient(err.to_string()).with_source(err)
+        } else if err.status().is_none() {
+            // No HTTP status means the request never produced a response: a
+            // transport-level failure (connection reset, dropped mid-body, a
+            // DNS hiccup while the network comes back after the machine wakes
+            // from sleep). Retrying may succeed once connectivity returns; a
+            // genuinely unreachable endpoint just exhausts the bounded retry
+            // budget and surfaces a clear error.
+            StreamError::transient(err.to_string()).with_source(err)
         } else {
             StreamError::other(err.to_string()).with_source(err)
         }
@@ -222,11 +230,14 @@ impl StreamError {
                     }
                 }
             }
+            // A stream that "ended" without our having seen a terminal event
+            // is the disconnect case (the connection dropped mid-response).
+            // Treat it as transient so the retry layer rebuilds the stream.
+            error @ Error::StreamEnded => Self::transient(error.to_string()).with_source(error),
             error @ (Error::Utf8(_)
             | Error::Parser(_)
             | Error::InvalidContentType(_, _)
-            | Error::InvalidLastEventId(_)
-            | Error::StreamEnded) => Self::other(error.to_string()).with_source(error),
+            | Error::InvalidLastEventId(_)) => Self::other(error.to_string()).with_source(error),
         }
     }
 }

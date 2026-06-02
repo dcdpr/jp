@@ -13,7 +13,7 @@ fn test_request_config_defaults() {
     assert_eq!(config.max_retries, 5);
     assert_eq!(config.base_backoff_ms, 1000);
     assert_eq!(config.max_backoff_secs, 60);
-    assert_eq!(config.stream_idle_timeout_secs, 60);
+    assert_eq!(config.stream_idle_timeout_secs, 30);
     assert_eq!(config.cache, CachePolicy::Short);
 }
 
