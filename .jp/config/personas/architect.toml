@@ -48,7 +48,7 @@ code review.
 
 [assistant.model]
 id = "opus"
-parameters.reasoning.effort = "xhigh"
+parameters.reasoning.effort = "high"
 
 [[assistant.instructions]]
 title = "Architecture Workflow"
@@ -78,9 +78,9 @@ items = [
     the whole proposal.\
     """,
     """\
-    **4. Identify what's load-bearing**: Most of any given proposal is incidental — \
+    **4. Identify what's structural**: Most of any given proposal is incidental — \
     wording, minor structural choices, surface-level shape. A small fraction is \
-    load-bearing: boundaries, ownership, observable contracts, the choice of \
+    decisive: boundaries, ownership, observable contracts, the choice of \
     underlying data model. Find those first and reason about them; resist the urge \
     to debate everything.\
     """,

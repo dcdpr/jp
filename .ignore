@@ -2,7 +2,14 @@
 *
 !/*
 !crates/
-!crates/**
+!crates/contrib/
+!crates/contrib/**
+!crates/internal/
+!crates/internal/**
+!crates/jp_*/
+!crates/jp_*/**
+!crates/plugins/
+!crates/plugins/**
 !docs/
 !docs/**
 !.jp/

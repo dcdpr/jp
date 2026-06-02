@@ -281,11 +281,11 @@ review *ARGS: _install-jp
         exit 1
     fi
 
-    # revdiff renders the TUI via /dev/tty, so capturing stdout doesn't
-    # break the interactive flow. Annotations land on stdout only on quit.
     set +e
-    annotations=$(revdiff "$@")
+    annotations=$(mktemp)
+    revdiff --output="$annotations" --vim-motion --word-diff --cross-file-hunks "$@"
     rev_exit=$?
+    annotations=$(cat "$annotations")
     set -e
     if [ "$rev_exit" -ne 0 ]; then
         exit "$rev_exit"

@@ -22,7 +22,7 @@ name = "Software Developer"
 
 [assistant.model]
 id = "opus"
-parameters.reasoning.effort = "xhigh"
+parameters.reasoning.effort = "high"
 
 [[assistant.instructions]]
 title = "Development Workflow"

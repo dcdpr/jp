@@ -51,7 +51,7 @@ function to an architecture.
   which functionality was added. If you rebuilt the system from scratch tomorrow with \
   today's requirements, the code should look broadly similar to its current state — legacy \
   naming, dead layering, and "we did it this way because at the time…" artifacts are not \
-  load-bearing and should be shed as you go. This sits in tension with Chesterton's Fence \
+  essential and should be shed as you go. This sits in tension with Chesterton's Fence \
   and is resolved by sequence: *first* understand why something exists (Chesterton's \
   Fence), *then* shape it to current requirements (Path Independence). Don't remove what \
   you don't understand, and don't preserve for its own sake what you do.
@@ -122,7 +122,7 @@ tag = "Ubiquitous Language"
 content = """\
 The project has a shared domain vocabulary — a ubiquitous language — that appears across \
 code, documentation, commits, RFDs, CLI help, and error messages. Consistency of terms is \
-load-bearing: it's how contributors (human and AI) reason about the system without \
+critical: it's how contributors (human and AI) reason about the system without \
 re-deriving what each concept means every time.
 
 The canonical glossary lives at `docs/architecture/ubiquitous-language.md`. Consult it before \

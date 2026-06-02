@@ -3,7 +3,7 @@ enable = false
 run = "unattended"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Run `cargo check` for the given package, validating if the code compiles."
+summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports doc comments that are badly formatted; run `cargo_fmt` to auto-fix them."
 
 examples = """
 ```json
