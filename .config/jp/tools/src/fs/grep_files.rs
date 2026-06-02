@@ -1,11 +1,9 @@
-use std::path::PathBuf;
-
 use camino::{Utf8Path, Utf8PathBuf};
 use grep_printer::StandardBuilder;
 use grep_regex::RegexMatcher;
 use grep_searcher::SearcherBuilder;
 
-use super::utils::clean_workspace_path;
+use super::fs_list_files;
 use crate::{Error, util::OneOrMany};
 
 pub(crate) async fn fs_grep_files(
@@ -13,31 +11,25 @@ pub(crate) async fn fs_grep_files(
     mut pattern: String,
     context: Option<usize>,
     paths: Option<OneOrMany<String>>,
+    extensions: Option<OneOrMany<String>>,
 ) -> std::result::Result<String, Error> {
-    // `None` means "search the whole workspace." An explicit `Some(vec![])`
-    // means "search nothing" (preserved from the previous behavior). An
-    // empty string or bare `.` inside the list is treated as the workspace
-    // root — pre-PR callers used both interchangeably via `root.join(p)`.
-    // Non-empty entries are validated through `clean_workspace_path`, so
-    // escape attempts are a hard error rather than silently filtered.
-    let absolute_paths: Vec<Utf8PathBuf> = match paths.as_deref() {
-        None => vec![root.to_owned()],
-        Some(items) => {
-            let mut out = Vec::with_capacity(items.len());
-            for p in items {
-                if p.is_empty() || p == "." {
-                    out.push(root.to_owned());
-                    continue;
-                }
-                let cleaned = clean_workspace_path(root, p)?;
-                let abs = root.join(&cleaned);
-                if abs.exists() {
-                    out.push(abs);
-                }
-            }
-            out
-        }
-    };
+    // Resolve the file set via `fs_list_files`, which always walks from the
+    // workspace root. Anchoring the walk there is what makes the root
+    // `.ignore` whitelist apply consistently: its anchored patterns (e.g.
+    // `docs/.vitepress/dist/`) don't prune reliably when the walk is rooted
+    // below the `.ignore` file, so scoping by re-rooting would leak ignored
+    // build output into the results.
+    //
+    // `paths` carries the same scoping semantics as `fs_list_files`'s
+    // prefixes: `None` searches the whole workspace, `Some([])` searches
+    // nothing, and `""`/`.` mean the workspace root. Escape attempts surface
+    // as a hard error from the shared path validation.
+    let files: Vec<Utf8PathBuf> = fs_list_files(root, paths.clone(), extensions.clone())
+        .await?
+        .into_files()
+        .into_iter()
+        .map(Utf8PathBuf::from)
+        .collect();
 
     // Guard against a common mistake LLMs seem to make when using this tool.
     // Often the pattern ends with an escaped double quote, which will cause the
@@ -60,27 +52,9 @@ pub(crate) async fn fs_grep_files(
         .max_matches(Some(100))
         .build();
 
-    for path in absolute_paths {
-        let files = if path.is_dir() {
-            super::fs_list_files(&path, None, None)
-                .await?
-                .into_files()
-                .into_iter()
-                .map(Utf8PathBuf::from)
-                .map(|p| root.join(&path).join(p))
-                .filter(|path| path.exists())
-                .collect()
-        } else {
-            vec![path]
-        };
-
-        for file in files {
-            let Ok(path) = file.strip_prefix(root).map(PathBuf::from) else {
-                continue;
-            };
-
-            searcher.search_path(&matcher, &file, printer.sink_with_path(&matcher, &path))?;
-        }
+    for file in files {
+        let absolute = root.join(&file);
+        searcher.search_path(&matcher, &absolute, printer.sink_with_path(&matcher, &file))?;
     }
 
     let matches = String::from_utf8(printer.into_inner().into_inner())?;
@@ -89,7 +63,7 @@ pub(crate) async fn fs_grep_files(
     if matches.is_empty() {
         Ok("No matches found. Broaden your search to see more.".to_owned())
     } else if lines > 200 && context.is_some() {
-        Box::pin(fs_grep_files(root, pattern, None, paths))
+        Box::pin(fs_grep_files(root, pattern, None, paths, extensions))
             .await
             .map(|v| {
                 format!(

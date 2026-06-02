@@ -40,37 +40,32 @@ pub(crate) async fn fs_list_files(
 
     let mut entries = vec![];
     for prefix in &prefixes {
-        // An empty prefix or bare `.` means "walk the whole workspace" —
-        // pre-PR callers used both interchangeably. Non-empty, non-`.`
-        // prefixes are validated through `clean_workspace_path`, which
-        // preserves the user's input shape so partial filename prefixes
-        // (`rfd/D`) still match output paths in the same form.
-        let (walk_dir, path_filter): (Utf8PathBuf, Option<String>) =
-            if prefix.is_empty() || prefix == "." {
-                (root.to_owned(), None)
-            } else {
-                let cleaned = clean_workspace_path(root, prefix)?;
-                let prefixed = root.join(&cleaned);
-
-                // When the prefix points to an existing directory, walk it
-                // directly. Otherwise, walk the parent directory and filter to
-                // entries whose root-relative path starts with the prefix. This
-                // supports partial filename prefixes like "docs/rfd/D".
-                if prefixed.is_dir() {
-                    (prefixed, None)
-                } else {
-                    let parent = prefixed
-                        .parent()
-                        .map_or_else(|| root.to_owned(), Utf8PathBuf::from);
-                    (
-                        parent,
-                        Some(cleaned.as_str().replace('/', std::path::MAIN_SEPARATOR_STR)),
-                    )
-                }
-            };
+        // Scoping is expressed as a path filter, never by re-rooting the
+        // walk: it always starts at the workspace root so the root `.ignore`
+        // whitelist applies consistently. Its anchored directory patterns
+        // (e.g. `docs/.vitepress/dist/`) only prune reliably when the walk is
+        // rooted at the `.ignore` file itself, so re-rooting at a nested
+        // prefix would leak ignored build output.
+        //
+        // An empty prefix or bare `.` means "whole workspace" (callers use
+        // both interchangeably). Other prefixes are validated through
+        // `clean_workspace_path`, which preserves the input shape so partial
+        // filenames like `rfd/D` still match. A prefix naming an existing
+        // directory gets a trailing separator so `docs` matches entries under
+        // it without also matching a sibling `docs2`.
+        let path_filter: Option<String> = if prefix.is_empty() || prefix == "." {
+            None
+        } else {
+            let cleaned = clean_workspace_path(root, prefix)?;
+            let mut filter = cleaned.as_str().replace('/', std::path::MAIN_SEPARATOR_STR);
+            if root.join(&cleaned).is_dir() {
+                filter.push_str(std::path::MAIN_SEPARATOR_STR);
+            }
+            Some(filter)
+        };
 
         let (tx, matches) = crossbeam_channel::unbounded();
-        WalkBuilder::new(&walk_dir)
+        WalkBuilder::new(root)
             // Include hidden and otherwise ignored files.
             .standard_filters(false)
             .follow_links(false)

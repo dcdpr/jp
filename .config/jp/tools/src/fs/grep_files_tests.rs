@@ -19,6 +19,7 @@ async fn dot_means_workspace_root() {
         "world".to_owned(),
         None,
         Some(vec![".".to_owned()].into()),
+        None,
     )
     .await
     .unwrap();
@@ -30,6 +31,74 @@ async fn dot_means_workspace_root() {
 }
 
 #[tokio::test]
+async fn subdir_scope_respects_root_ignore() {
+    // Mirrors the real `docs/.vitepress/dist/` leak: scoping the search to
+    // `docs` must not surface files from an `.ignore`-excluded build-output
+    // dir nested below it.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    std::fs::write(root.join(".ignore"), "docs/.vitepress/dist/\n").unwrap();
+
+    for (path, content) in [
+        ("docs/getting-started.md", "color profile"),
+        ("docs/.vitepress/dist/index.html", "color profile"),
+    ] {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+
+    let matches = fs_grep_files(
+        root,
+        "color profile".to_owned(),
+        None,
+        Some(vec!["docs".to_owned()].into()),
+        None,
+    )
+    .await
+    .unwrap()
+    .replace('\\', "/");
+
+    assert!(
+        matches.contains("docs/getting-started.md"),
+        "expected the doc source in results, got: {matches}"
+    );
+    assert!(
+        !matches.contains(".vitepress/dist"),
+        "build output must be excluded, got: {matches}"
+    );
+}
+
+#[tokio::test]
+async fn restricts_to_extensions() {
+    // The extension filter is how `grep_user_docs` narrows to markdown prose,
+    // dropping vitepress build config like `config.mts`.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    for path in ["docs/guide.md", "docs/config.mts"] {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "find me").unwrap();
+    }
+
+    let matches = fs_grep_files(
+        root,
+        "find me".to_owned(),
+        None,
+        Some(vec!["docs".to_owned()].into()),
+        Some(vec!["md".to_owned()].into()),
+    )
+    .await
+    .unwrap()
+    .replace('\\', "/");
+
+    assert!(matches.contains("docs/guide.md"), "got: {matches}");
+    assert!(!matches.contains("config.mts"), "got: {matches}");
+}
+
+#[tokio::test]
 async fn rejects_workspace_escape() {
     let tmp = tempdir().unwrap();
     let result = fs_grep_files(
@@ -37,6 +106,7 @@ async fn rejects_workspace_escape() {
         "anything".to_owned(),
         None,
         Some(vec!["../escape".to_owned()].into()),
+        None,
     )
     .await;
 
@@ -160,7 +230,7 @@ async fn test_grep_files() {
 
         let paths = (!paths.is_empty()).then_some(paths.into_iter().map(str::to_owned).collect());
 
-        let matches = fs_grep_files(root, pattern.to_owned(), Some(5), paths)
+        let matches = fs_grep_files(root, pattern.to_owned(), Some(5), paths, None)
             .await
             .unwrap()
             .replace('\\', "/");
