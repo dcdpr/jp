@@ -4,6 +4,7 @@ expression: v
 ---
 [
     [
+        KeepAlive,
         Part {
             index: 0,
             part: Message(

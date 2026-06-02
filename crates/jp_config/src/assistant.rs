@@ -10,7 +10,7 @@ pub mod request;
 pub mod sections;
 pub mod tool_choice;
 
-use schematic::{Config, TransformResult};
+use schematic::{Config, ConfigError, TransformResult};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
@@ -29,6 +29,7 @@ use crate::{
         string::{MergeableString, PartialMergeableString, PartialMergedString},
         vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
     },
+    validate::Validator,
 };
 
 /// Assistant-specific configuration.
@@ -210,6 +211,12 @@ fn default_system_prompt(_: &()) -> TransformResult<Option<PartialMergeableStrin
         separator: None,
         discard_when_merged: Some(true),
     })))
+}
+
+impl Validator for AssistantConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.request.validate()
+    }
 }
 
 #[cfg(test)]

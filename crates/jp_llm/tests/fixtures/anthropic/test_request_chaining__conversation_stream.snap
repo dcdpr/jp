@@ -42,7 +42,7 @@ expression: v
         "max_retries": 5,
         "base_backoff_ms": 1000,
         "max_backoff_secs": 60,
-        "stream_idle_timeout_secs": 30,
+        "stream_idle_timeout_secs": 60,
         "cache": true
       }
     },

@@ -297,8 +297,9 @@ impl TurnCoordinator {
                 HandleEventOutcome::new(self.transition_from_streaming(stream, reason))
             }
 
-            // Patch is handled by the caller before reaching here.
-            Event::Patch(_) => HandleEventOutcome::new(Action::Continue),
+            // Patch is handled by the caller before reaching here; KeepAlive is
+            // a liveness signal with nothing to record or render.
+            Event::Patch(_) | Event::KeepAlive => HandleEventOutcome::new(Action::Continue),
         }
     }
 

@@ -291,18 +291,19 @@ fn test_peek_partial_content_single_buffer() {
 }
 
 #[test]
-fn test_peek_partial_content_multiple_buffers() {
+fn test_peek_partial_content_excludes_reasoning() {
     let mut builder = EventBuilder::new();
 
-    // Index 0: Reasoning
+    // Index 0: Reasoning (excluded — partial reasoning has no resumable
+    // signature).
     builder.handle_part(0, EventPart::Reasoning("Let me think".into()), Map::new());
     // Index 1: Message
     builder.handle_part(1, EventPart::Message("The answer is".into()), Map::new());
 
-    // Should concatenate in index order
+    // Only the message text is returned.
     assert_eq!(
         builder.peek_partial_content(),
-        Some("Let me thinkThe answer is".to_string())
+        Some("The answer is".to_string())
     );
 }
 

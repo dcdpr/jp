@@ -1,20 +1,35 @@
 use std::time::Duration;
 
-use schematic::{Config as _, PartialConfig as _};
 use test_log::test;
 
 use super::*;
 
-#[test]
-fn test_request_config_defaults() {
-    let partial = PartialRequestConfig::default_values(&()).unwrap().unwrap();
-    let config = RequestConfig::from_partial(partial, vec![]).expect("valid config");
+/// Build a resolved `RequestConfig` with the given idle timeout, leaving the
+/// other fields at representative defaults.
+fn request_config(stream_idle_timeout_secs: u32) -> RequestConfig {
+    RequestConfig {
+        max_retries: 5,
+        base_backoff_ms: 1000,
+        max_backoff_secs: 60,
+        stream_idle_timeout_secs,
+        cache: CachePolicy::default(),
+    }
+}
 
-    assert_eq!(config.max_retries, 5);
-    assert_eq!(config.base_backoff_ms, 1000);
-    assert_eq!(config.max_backoff_secs, 60);
-    assert_eq!(config.stream_idle_timeout_secs, 30);
-    assert_eq!(config.cache, CachePolicy::Short);
+#[test]
+fn validate_rejects_sub_floor_idle_timeout() {
+    let err = request_config(5).validate().unwrap_err();
+    assert!(
+        err.to_string().contains("stream_idle_timeout_secs"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn validate_allows_disabled_and_at_floor_idle_timeout() {
+    for secs in [0_u32, 10, 60] {
+        assert!(request_config(secs).validate().is_ok(), "secs={secs}");
+    }
 }
 
 #[test]
@@ -33,9 +48,9 @@ fn test_request_config_assign() {
     p.assign(kv).unwrap();
     assert_eq!(p.max_backoff_secs, Some(120));
 
-    let kv = KvAssignment::try_from_cli("stream_idle_timeout_secs", "30").unwrap();
+    let kv = KvAssignment::try_from_cli("stream_idle_timeout_secs", "20").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.stream_idle_timeout_secs, Some(30));
+    assert_eq!(p.stream_idle_timeout_secs, Some(20));
 }
 
 #[test]
@@ -44,14 +59,14 @@ fn test_request_config_assign_object() {
 
     let kv = KvAssignment::try_from_cli(
         ":",
-        r#"{"max_retries":3,"base_backoff_ms":500,"max_backoff_secs":30}"#,
+        r#"{"max_retries":3,"base_backoff_ms":500,"max_backoff_secs":20}"#,
     )
     .unwrap();
     p.assign(kv).unwrap();
 
     assert_eq!(p.max_retries, Some(3));
     assert_eq!(p.base_backoff_ms, Some(500));
-    assert_eq!(p.max_backoff_secs, Some(30));
+    assert_eq!(p.max_backoff_secs, Some(20));
 }
 
 #[test]

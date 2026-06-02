@@ -11,6 +11,7 @@ expression: v
             ),
             metadata: {},
         },
+        KeepAlive,
         Part {
             index: 0,
             part: Reasoning(
@@ -1097,6 +1098,7 @@ expression: v
         ),
     ],
     [
+        KeepAlive,
         Part {
             index: 0,
             part: Message(

@@ -40,7 +40,7 @@ use crate::{
     event_builder::EventBuilder,
     model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
-    stream::{EventStream, chain::find_merge_point},
+    stream::{EventStream, chain::find_merge_point, with_tool_call_keepalive},
     tool::ToolDefinition,
 };
 
@@ -94,6 +94,19 @@ const CONTINUE_MESSAGE: &str = "Continue your response exactly from where you le
 
 /// Default minimum overlap for merge point detection during chaining.
 const CHAIN_MIN_OVERLAP: usize = 5;
+
+/// How often to inject a synthetic keep-alive while a tool call is streaming.
+///
+/// Anthropic emits a large tool-call argument as a single key/value burst after
+/// a potentially long silent gap, which the idle timeout would otherwise treat
+/// as a dead connection.
+/// This interval stays comfortably below the enforced minimum
+/// `stream_idle_timeout_secs` (10s), so the heartbeat always lands before the
+/// idle window elapses.
+///
+/// See:
+/// <https://platform.claude.com/docs/en/build-with-claude/streaming#input-json-delta>
+const TOOL_CALL_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Anthropic {
@@ -172,12 +185,15 @@ impl Provider for Anthropic {
             "Request payload."
         );
 
-        Ok(call(
-            client,
-            request,
-            chain_on_max_tokens,
-            is_structured,
-            forced_tool,
+        Ok(with_tool_call_keepalive(
+            call(
+                client,
+                request,
+                chain_on_max_tokens,
+                is_structured,
+                forced_tool,
+            ),
+            TOOL_CALL_KEEPALIVE_INTERVAL,
         ))
     }
 }
@@ -375,6 +391,7 @@ fn call(
                     yield flush;
                 }
                 patch @ Event::Patch(_) => yield patch,
+                keep_alive @ Event::KeepAlive => yield keep_alive,
             }
         }
     }))
@@ -883,6 +900,12 @@ fn create_request(
         builder.cache_control(types::CacheControl::default());
     }
 
+    // The trailing assistant message, if any, is the continuation target.
+    // Anthropic rejects native thinking blocks there once the turn has been
+    // resumed, so rewrite them as `<think>` text before deciding how to
+    // continue.
+    downgrade_trailing_thinking(&mut messages);
+
     // Models that don't support assistant prefill require the conversation to
     // end with a user message. When the last message is from the assistant
     // (e.g. after an interrupt or retry that flushed partial content), inject a
@@ -1322,6 +1345,9 @@ fn map_event(
         // for a clean completion.
         MessageStop => vec![Ok(Event::Finished(FinishReason::Completed))],
         MessageStart { .. } => vec![],
+        // Keep-alive heartbeat: surface it so the idle-timeout layer treats the
+        // connection as live, but it carries no content.
+        Ping => vec![Ok(Event::KeepAlive)],
     }
 }
 
@@ -1645,6 +1671,53 @@ fn apply_cache_control(content: &mut types::MessageContent) {
     }
 }
 
+/// Rewrite thinking blocks in the trailing assistant message as `<think>` text.
+///
+/// When the conversation ends with an assistant message, that turn is being
+/// continued rather than answered with a tool result.
+/// Anthropic rejects native `thinking`/`redacted_thinking` blocks there: once a
+/// turn has been resumed or replayed, the block sequence no longer matches a
+/// single original generation and the API fails with `thinking blocks ...
+/// cannot be modified`.
+/// Rewriting readable thinking as ordinary `<think>` text preserves the
+/// reasoning as context while sidestepping that validation; redacted
+/// (encrypted) thinking has no readable form, so it is dropped.
+///
+/// Only the final assistant message is rewritten.
+/// Thinking that precedes a tool result in an earlier turn is left native, as
+/// the API requires for tool-use reasoning continuity.
+fn downgrade_trailing_thinking(messages: &mut [types::Message]) {
+    let Some(last) = messages.last_mut() else {
+        return;
+    };
+
+    if last.role != types::MessageRole::Assistant {
+        return;
+    }
+
+    let blocks = mem::take(&mut last.content.0);
+    last.content.0 = blocks
+        .into_iter()
+        .filter_map(|content| match content {
+            types::MessageContent::Thinking(types::Thinking { thinking, .. }) => {
+                Some(think_tag_text(&thinking))
+            }
+            types::MessageContent::RedactedThinking { .. } => None,
+            other => Some(other),
+        })
+        .collect();
+}
+
+/// Wrap reasoning text in `<think>` tags as a plain text content block.
+///
+/// Used wherever reasoning must be sent to Anthropic as ordinary text rather
+/// than a native thinking block: reasoning from other providers replayed
+/// through this provider, and signed thinking in a continuation target that
+/// would otherwise be rejected.
+fn think_tag_text(reasoning: &str) -> types::MessageContent {
+    types::MessageContent::Text(format!("<think>\n{reasoning}\n</think>\n\n").into())
+}
+
 fn convert_event(
     event: ConversationEvent,
     is_anthropic: bool,
@@ -1684,9 +1757,7 @@ fn convert_event(
             } else {
                 match response {
                     // Reasoning from other providers - wrap in <think> tags.
-                    ChatResponse::Reasoning { reasoning } => types::MessageContent::Text(
-                        format!("<think>\n{reasoning}\n</think>\n\n").into(),
-                    ),
+                    ChatResponse::Reasoning { reasoning } => think_tag_text(&reasoning),
                     ChatResponse::Message { message } => {
                         types::MessageContent::Text(message.into())
                     }

@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     pin::Pin,
     time::{Duration, SystemTime},
 };
@@ -7,7 +8,10 @@ use async_stream::stream;
 use futures::{Stream, StreamExt as _};
 use tokio::time::timeout;
 
-use crate::{error::StreamError, event::Event};
+use crate::{
+    error::StreamError,
+    event::{Event, EventPart, ToolCallPart},
+};
 
 pub(super) mod aggregator;
 pub(super) mod chain;
@@ -92,6 +96,78 @@ fn with_idle_timeout_at(
         }
     }
     .boxed()
+}
+
+/// Inject a synthetic [`Event::KeepAlive`] every `interval` while a tool call
+/// is mid-stream.
+///
+/// Some providers emit a large tool-call argument as a burst after a long
+/// silent gap.
+/// Anthropic streams one complete key/value property at a time, with delays
+/// between events while the model works:
+/// <https://platform.claude.com/docs/en/build-with-claude/streaming#input-json-delta>
+/// Downstream, [`with_idle_timeout`] would read that gap as a dead connection;
+/// a keep-alive during the gap keeps it classified as activity.
+///
+/// Apply this per-provider, only where the provider is known to have such gaps.
+/// Providers without them keep their real idle behavior during tool calls, so a
+/// genuine stall there is still surfaced as a timeout.
+/// Outside an open tool call this is a transparent pass-through.
+#[must_use]
+pub fn with_tool_call_keepalive(stream: EventStream, interval: Duration) -> EventStream {
+    stream! {
+        let mut stream = stream;
+        let mut open_tool_calls: HashSet<usize> = HashSet::new();
+        loop {
+            // Outside an open tool call, pass through and let the downstream
+            // idle timeout own liveness.
+            if open_tool_calls.is_empty() {
+                match stream.next().await {
+                    Some(item) => {
+                        track_tool_calls(&item, &mut open_tool_calls);
+                        yield item;
+                    }
+                    None => break,
+                }
+                continue;
+            }
+
+            match timeout(interval, stream.next()).await {
+                Ok(Some(item)) => {
+                    track_tool_calls(&item, &mut open_tool_calls);
+                    yield item;
+                }
+                Ok(None) => break,
+                // No event within `interval` while a tool call is open: emit a
+                // heartbeat so the gap reads as activity, then keep waiting.
+                Err(_elapsed) => yield Ok(Event::KeepAlive),
+            }
+        }
+    }
+    .boxed()
+}
+
+/// Track tool-call open/close boundaries for [`with_tool_call_keepalive`].
+///
+/// A `ToolCallPart::Start` opens the call at its index; the matching `Flush`
+/// closes it.
+/// `Finished` clears any still-open calls, since the stream is ending.
+fn track_tool_calls(item: &Result<Event, StreamError>, open: &mut HashSet<usize>) {
+    let Ok(event) = item else { return };
+    match event {
+        Event::Part {
+            index,
+            part: EventPart::ToolCall(ToolCallPart::Start { .. }),
+            ..
+        } => {
+            open.insert(*index);
+        }
+        Event::Flush { index, .. } => {
+            open.remove(index);
+        }
+        Event::Finished(_) => open.clear(),
+        _ => {}
+    }
 }
 
 #[cfg(test)]
