@@ -659,6 +659,7 @@ impl ToolDefinition {
         root: &Utf8Path,
         cancellation_token: CancellationToken,
         builtin_executors: &builtin::BuiltinExecutors,
+        access: Option<&jp_tool::AccessPolicy>,
     ) -> Result<ExecutionOutcome, ToolError> {
         info!(tool = %self.name, arguments = ?arguments, "Executing tool.");
 
@@ -672,6 +673,7 @@ impl ToolDefinition {
                     tool.as_deref(),
                     root,
                     cancellation_token,
+                    access,
                 )
                 .await
             }
@@ -707,6 +709,7 @@ impl ToolDefinition {
         tool: Option<&str>,
         root: &Utf8Path,
         cancellation_token: CancellationToken,
+        access: Option<&jp_tool::AccessPolicy>,
     ) -> Result<ExecutionOutcome, ToolError> {
         let name = tool.unwrap_or(&self.name);
 
@@ -735,6 +738,7 @@ impl ToolDefinition {
             "context": {
                 "action": Action::Run,
                 "root": root.as_str(),
+                "access": access,
             },
         });
 

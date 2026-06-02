@@ -1,5 +1,6 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use ignore::{WalkBuilder, WalkState};
+use jp_tool::AccessPolicy;
 
 use super::utils::clean_workspace_path;
 use crate::{Error, util::OneOrMany};
@@ -33,6 +34,7 @@ impl serde::Serialize for Files {
 
 pub(crate) async fn fs_list_files(
     root: &Utf8Path,
+    access: Option<&AccessPolicy>,
     prefixes: Option<OneOrMany<String>>,
     extensions: Option<OneOrMany<String>>,
 ) -> std::result::Result<Files, Error> {
@@ -56,7 +58,7 @@ pub(crate) async fn fs_list_files(
         let path_filter: Option<String> = if prefix.is_empty() || prefix == "." {
             None
         } else {
-            let cleaned = clean_workspace_path(root, prefix)?;
+            let cleaned = clean_workspace_path(root, prefix, access)?;
             let mut filter = cleaned.as_str().replace('/', std::path::MAIN_SEPARATOR_STR);
             if root.join(&cleaned).is_dir() {
                 filter.push_str(std::path::MAIN_SEPARATOR_STR);

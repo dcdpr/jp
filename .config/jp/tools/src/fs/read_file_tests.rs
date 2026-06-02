@@ -1,5 +1,5 @@
 use camino_tempfile::tempdir;
-use jp_tool::Outcome;
+use jp_tool::{Action, Context, Outcome};
 
 use super::*;
 
@@ -56,7 +56,12 @@ async fn test_fs_read_file() {
 
         std::fs::write(&path, file_contents).unwrap();
 
-        let result = fs_read_file(tmp.path(), "file.txt".to_owned(), start_line, end_line)
+        let ctx = Context {
+            root: tmp.path().to_path_buf(),
+            action: Action::Run,
+            access: None,
+        };
+        let result = fs_read_file(&ctx, "file.txt".to_owned(), start_line, end_line)
             .await
             .unwrap();
 
@@ -68,4 +73,72 @@ async fn test_fs_read_file() {
 
         assert_eq!(out, expected, "failed test case '{name}'");
     }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn reads_through_approved_external_mount() {
+    use std::os::unix::fs::symlink;
+
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let workspace = tempdir().unwrap();
+    let external = tempdir().unwrap();
+    let external_canonical = external.path().canonicalize_utf8().unwrap();
+    std::fs::write(external_canonical.join("lib.rs"), "external contents\n").unwrap();
+
+    // <ws>/fork -> <external>
+    symlink(external.path(), workspace.path().join("fork")).unwrap();
+
+    let ctx = Context {
+        root: workspace.path().to_path_buf(),
+        action: Action::Run,
+        access: Some(AccessPolicy {
+            fs: vec![
+                FsRule::new("fork")
+                    .with_external(true)
+                    .with_approved_target(Some(external_canonical))
+                    .with_read(true),
+            ],
+            ..AccessPolicy::default()
+        }),
+    };
+
+    let result = fs_read_file(&ctx, "fork/lib.rs".to_owned(), None, None)
+        .await
+        .unwrap();
+
+    let content = match result {
+        Outcome::Success { content } => content,
+        other => panic!("expected success, got {other:?}"),
+    };
+    assert!(
+        content.contains("external contents"),
+        "should read the external file through the mount: {content}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn denies_in_workspace_path_with_no_matching_grant() {
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let workspace = tempdir().unwrap();
+    std::fs::write(workspace.path().join("secret.txt"), "nope").unwrap();
+
+    // A policy that only grants an external mount; in-workspace reads with no
+    // matching rule are default-denied.
+    let ctx = Context {
+        root: workspace.path().to_path_buf(),
+        action: Action::Run,
+        access: Some(AccessPolicy {
+            fs: vec![FsRule::new("fork").with_external(true).with_read(true)],
+            ..AccessPolicy::default()
+        }),
+    };
+
+    let result = fs_read_file(&ctx, "secret.txt".to_owned(), None, None)
+        .await
+        .unwrap();
+    assert!(matches!(result, Outcome::Error { .. }));
 }

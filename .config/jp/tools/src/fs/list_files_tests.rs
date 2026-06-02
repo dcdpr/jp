@@ -99,7 +99,9 @@ async fn test_list_files() {
         let extensions =
             (!extensions.is_empty()).then_some(extensions.into_iter().map(str::to_owned).collect());
 
-        let files = fs_list_files(root, prefixes, extensions).await.unwrap();
+        let files = fs_list_files(root, None, prefixes, extensions)
+            .await
+            .unwrap();
 
         assert_eq!(
             files
@@ -123,7 +125,7 @@ async fn dot_prefix_lists_workspace_root() {
     std::fs::write(root.join("a.txt"), "").unwrap();
     std::fs::write(root.join("b.txt"), "").unwrap();
 
-    let files = fs_list_files(root, Some(vec![".".to_owned()].into()), None)
+    let files = fs_list_files(root, None, Some(vec![".".to_owned()].into()), None)
         .await
         .unwrap();
 
@@ -150,7 +152,7 @@ async fn subdir_scope_respects_root_ignore() {
         std::fs::write(path, "").unwrap();
     }
 
-    let files = fs_list_files(root, Some(vec!["docs".to_owned()].into()), None)
+    let files = fs_list_files(root, None, Some(vec!["docs".to_owned()].into()), None)
         .await
         .unwrap()
         .into_files()
@@ -166,7 +168,7 @@ async fn subdir_scope_respects_root_ignore() {
 async fn test_empty_list() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let files = fs_list_files(root, Some(vec!["foo".to_owned()].into()), None)
+    let files = fs_list_files(root, None, Some(vec!["foo".to_owned()].into()), None)
         .await
         .unwrap();
 

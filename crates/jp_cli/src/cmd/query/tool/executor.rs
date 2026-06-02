@@ -61,6 +61,8 @@ use jp_mcp::Client;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
+use crate::access::{approvals::ApprovalStore, compile::compile_tool_policy};
+
 /// Terminal executor source that creates real [`ToolExecutor`] instances.
 ///
 /// Holds pre-resolved tool definitions so executors don't need to re-resolve
@@ -68,11 +70,16 @@ use tokio_util::sync::CancellationToken;
 pub struct TerminalExecutorSource {
     builtin_executors: BuiltinExecutors,
     definitions: IndexMap<String, ToolDefinition>,
+    approvals: Arc<ApprovalStore>,
 }
 
 impl TerminalExecutorSource {
     #[must_use]
-    pub fn new(builtin_executors: BuiltinExecutors, definitions: &[ToolDefinition]) -> Self {
+    pub fn new(
+        builtin_executors: BuiltinExecutors,
+        definitions: &[ToolDefinition],
+        approvals: Arc<ApprovalStore>,
+    ) -> Self {
         let definitions = definitions
             .iter()
             .map(|d| (d.name.clone(), d.clone()))
@@ -80,6 +87,7 @@ impl TerminalExecutorSource {
         Self {
             builtin_executors,
             definitions,
+            approvals,
         }
     }
 }
@@ -97,6 +105,7 @@ impl ExecutorSource for TerminalExecutorSource {
             config,
             definition,
             Arc::new(self.builtin_executors.clone()),
+            self.approvals.clone(),
         )))
     }
 }
@@ -116,6 +125,7 @@ pub struct ToolExecutor {
     config: ToolConfigWithDefaults,
     definition: ToolDefinition,
     builtin_executors: Arc<BuiltinExecutors>,
+    approvals: Arc<ApprovalStore>,
 }
 
 impl ToolExecutor {
@@ -124,12 +134,14 @@ impl ToolExecutor {
         config: ToolConfigWithDefaults,
         definition: ToolDefinition,
         builtin_executors: Arc<BuiltinExecutors>,
+        approvals: Arc<ApprovalStore>,
     ) -> Self {
         Self {
             request,
             config,
             definition,
             builtin_executors,
+            approvals,
         }
     }
 }
@@ -179,6 +191,11 @@ impl Executor for ToolExecutor {
         root: &Utf8Path,
         cancellation_token: CancellationToken,
     ) -> ExecutorResult {
+        // Compile this tool's access grants into a runtime policy, baking
+        // approved external targets in. The policy travels to the tool in its
+        // context so the tool can self-enforce.
+        let access = compile_tool_policy(self.config.access(), root, &self.approvals);
+
         let result = self
             .definition
             .execute(
@@ -190,6 +207,7 @@ impl Executor for ToolExecutor {
                 root,
                 cancellation_token,
                 &self.builtin_executors,
+                access.as_ref(),
             )
             .await;
 

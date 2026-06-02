@@ -2,11 +2,53 @@ use std::{io, path::PathBuf};
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use clean_path::Clean as _;
+use jp_tool::{AccessPolicy, Capability, lexical_workspace_relative};
 
 use crate::{
     Error,
     util::runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
 };
+
+/// Enforce an access-policy capability on a user-supplied path.
+///
+/// A `None` policy (or an unrestricted one) permits everything.
+/// A restricted policy permits only what a matching rule grants; on denial the
+/// configured grant paths are listed so the user can see what the tool is
+/// allowed to do.
+pub fn authorize(
+    access: Option<&AccessPolicy>,
+    capability: Capability,
+    path: &str,
+) -> Result<(), String> {
+    let Some(policy) = access else {
+        return Ok(());
+    };
+    let lexical = lexical_workspace_relative(Utf8Path::new(path)).unwrap_or_default();
+    if policy.permits(capability, &lexical) {
+        return Ok(());
+    }
+    let grants: Vec<&str> = policy.grant_paths().map(Utf8Path::as_str).collect();
+    Err(format!(
+        "Access denied: cannot {} '{path}'. Granted paths: [{}].",
+        capability.as_str(),
+        grants.join(", ")
+    ))
+}
+
+/// Workspace-relative form of a resolved path.
+///
+/// In-workspace paths strip the canonical root; approved external paths cannot
+/// be stripped, so they fall back to the lexical workspace-relative form (the
+/// path the LLM supplied), which is what rules and display use.
+fn workspace_relative(
+    absolute: &Utf8Path,
+    canonical_root: &Utf8Path,
+    cleaned: &Utf8Path,
+) -> Utf8PathBuf {
+    absolute
+        .strip_prefix(canonical_root)
+        .map_or_else(|_| cleaned.to_owned(), Utf8Path::to_owned)
+}
 
 pub fn is_file_dirty(root: &Utf8Path, file: &Utf8Path) -> Result<bool, Error> {
     is_file_dirty_impl(root, file, &DuctProcessRunner)
@@ -165,14 +207,19 @@ pub struct ResolvedPath {
 /// Dangling symlinks at any position in the path are rejected — there is no
 /// canonical target to bound, so the workspace check cannot prove the path
 /// stays inside.
-pub fn resolve_workspace_path(root: &Utf8Path, path: &str) -> Result<ResolvedPath, String> {
+pub fn resolve_workspace_path(
+    root: &Utf8Path,
+    path: &str,
+    access: Option<&AccessPolicy>,
+) -> Result<ResolvedPath, String> {
     let ValidatedInput {
         cleaned,
         canonical_root,
     } = validate_workspace_input(root, path)?;
 
     let candidate = root.join(&cleaned);
-    let (canonical_ancestor, suffix) = check_ancestor_in_root(&candidate, &canonical_root)?;
+    let (canonical_ancestor, suffix) =
+        check_ancestor_in_root(&candidate, &canonical_root, access, &cleaned)?;
 
     let absolute = if suffix.as_str().is_empty() {
         canonical_ancestor
@@ -180,10 +227,7 @@ pub fn resolve_workspace_path(root: &Utf8Path, path: &str) -> Result<ResolvedPat
         canonical_ancestor.join(&suffix)
     };
 
-    let relative = absolute
-        .strip_prefix(&canonical_root)
-        .map(Utf8Path::to_owned)
-        .map_err(|_| "Path escapes the workspace root.".to_owned())?;
+    let relative = workspace_relative(&absolute, &canonical_root, &cleaned);
 
     Ok(ResolvedPath { absolute, relative })
 }
@@ -200,7 +244,11 @@ pub fn resolve_workspace_path(root: &Utf8Path, path: &str) -> Result<ResolvedPat
 /// All other validation rules from [`resolve_workspace_path`] still apply: the
 /// parent must canonicalize to somewhere inside `canonical_root`, no
 /// dangling-symlink ancestors, length limits, and so on.
-pub fn resolve_workspace_entry(root: &Utf8Path, path: &str) -> Result<ResolvedPath, String> {
+pub fn resolve_workspace_entry(
+    root: &Utf8Path,
+    path: &str,
+    access: Option<&AccessPolicy>,
+) -> Result<ResolvedPath, String> {
     let ValidatedInput {
         cleaned,
         canonical_root,
@@ -221,7 +269,7 @@ pub fn resolve_workspace_entry(root: &Utf8Path, path: &str) -> Result<ResolvedPa
     };
 
     let (canonical_parent, parent_suffix) =
-        check_ancestor_in_root(&parent_candidate, &canonical_root)?;
+        check_ancestor_in_root(&parent_candidate, &canonical_root, access, &cleaned)?;
 
     // Reattach any not-yet-existing parent components, then the final name.
     // The final name is never canonicalized or probed for symlink-ness — its
@@ -232,10 +280,7 @@ pub fn resolve_workspace_entry(root: &Utf8Path, path: &str) -> Result<ResolvedPa
         canonical_parent.join(&parent_suffix).join(&final_name)
     };
 
-    let relative = absolute
-        .strip_prefix(&canonical_root)
-        .map(Utf8Path::to_owned)
-        .map_err(|_| "Path escapes the workspace root.".to_owned())?;
+    let relative = workspace_relative(&absolute, &canonical_root, &cleaned);
 
     Ok(ResolvedPath { absolute, relative })
 }
@@ -250,14 +295,18 @@ pub fn resolve_workspace_entry(root: &Utf8Path, path: &str) -> Result<ResolvedPa
 /// doesn't canonicalize the result.
 /// Use this when output paths should match what the user supplied (read/search
 /// tools).
-pub fn clean_workspace_path(root: &Utf8Path, path: &str) -> Result<Utf8PathBuf, String> {
+pub fn clean_workspace_path(
+    root: &Utf8Path,
+    path: &str,
+    access: Option<&AccessPolicy>,
+) -> Result<Utf8PathBuf, String> {
     let ValidatedInput {
         cleaned,
         canonical_root,
     } = validate_workspace_input(root, path)?;
 
     let candidate = root.join(&cleaned);
-    check_ancestor_in_root(&candidate, &canonical_root)?;
+    check_ancestor_in_root(&candidate, &canonical_root, access, &cleaned)?;
 
     Ok(cleaned)
 }
@@ -373,14 +422,30 @@ fn validate_workspace_input(root: &Utf8Path, path: &str) -> Result<ValidatedInpu
 fn check_ancestor_in_root(
     candidate: &Utf8Path,
     canonical_root: &Utf8Path,
+    access: Option<&AccessPolicy>,
+    lexical: &Utf8Path,
 ) -> Result<(Utf8PathBuf, Utf8PathBuf), String> {
     let (canonical_ancestor, suffix) = canonicalize_existing_ancestor(candidate)?;
 
-    if !canonical_ancestor.starts_with(canonical_root) {
-        return Err("Path escapes the workspace root.".to_owned());
+    if canonical_ancestor.starts_with(canonical_root) {
+        return Ok((canonical_ancestor, suffix));
     }
 
-    Ok((canonical_ancestor, suffix))
+    // The path resolves outside the workspace. Allow it only when the matching
+    // access rule is an approved external mount whose target contains the
+    // resolved ancestor — the nested-escape boundary. Without a policy, or for
+    // any other rule, this stays a hard workspace-escape error.
+    if let Some(policy) = access
+        && let Some(rule) = policy.matching_fs_rule(lexical)
+        && rule.external()
+        && rule
+            .approved_target()
+            .is_some_and(|target| canonical_ancestor.starts_with(target))
+    {
+        return Ok((canonical_ancestor, suffix));
+    }
+
+    Err("Path escapes the workspace root.".to_owned())
 }
 
 /// Walk up `path` until an existing ancestor can be canonicalized.

@@ -16,6 +16,7 @@ async fn dot_means_workspace_root() {
 
     let matches = fs_grep_files(
         tmp.path(),
+        None,
         "world".to_owned(),
         None,
         Some(vec![".".to_owned()].into()),
@@ -51,6 +52,7 @@ async fn subdir_scope_respects_root_ignore() {
 
     let matches = fs_grep_files(
         root,
+        None,
         "color profile".to_owned(),
         None,
         Some(vec!["docs".to_owned()].into()),
@@ -85,6 +87,7 @@ async fn restricts_to_extensions() {
 
     let matches = fs_grep_files(
         root,
+        None,
         "find me".to_owned(),
         None,
         Some(vec!["docs".to_owned()].into()),
@@ -103,6 +106,7 @@ async fn rejects_workspace_escape() {
     let tmp = tempdir().unwrap();
     let result = fs_grep_files(
         tmp.path(),
+        None,
         "anything".to_owned(),
         None,
         Some(vec!["../escape".to_owned()].into()),
@@ -230,7 +234,7 @@ async fn test_grep_files() {
 
         let paths = (!paths.is_empty()).then_some(paths.into_iter().map(str::to_owned).collect());
 
-        let matches = fs_grep_files(root, pattern.to_owned(), Some(5), paths, None)
+        let matches = fs_grep_files(root, None, pattern.to_owned(), Some(5), paths, None)
             .await
             .unwrap()
             .replace('\\', "/");

@@ -75,6 +75,7 @@ fn empty_executor_source() -> Box<dyn ExecutorSource> {
     Box::new(tool::executor::TerminalExecutorSource::new(
         BuiltinExecutors::new(),
         &[],
+        std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
     ))
 }
 

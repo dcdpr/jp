@@ -15,6 +15,60 @@ fn unwrap_success(o: Outcome) -> String {
     }
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn external_mount_delete_respects_capability() {
+    use std::os::unix::fs::symlink;
+
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let workspace = tempdir().unwrap();
+    let external = tempdir().unwrap();
+    let external_canonical = external.path().canonicalize_utf8().unwrap();
+    std::fs::write(external_canonical.join("f.txt"), "x").unwrap();
+    // A second file keeps the directory non-empty so the delete doesn't trip
+    // the empty-parent cleanup.
+    std::fs::write(external_canonical.join("keep.txt"), "x").unwrap();
+    symlink(external.path(), workspace.path().join("fork")).unwrap();
+
+    let mount = |write: bool| AccessPolicy {
+        fs: vec![{
+            let rule = FsRule::new("fork")
+                .with_external(true)
+                .with_approved_target(Some(external_canonical.clone()))
+                .with_read(true);
+            if write { rule.with_write(true) } else { rule }
+        }],
+        ..AccessPolicy::default()
+    };
+
+    // Read-only mount: delete is denied and the file survives.
+    let read_only = mount(false);
+    let result = fs_delete_file(
+        workspace.path(),
+        Some(&read_only),
+        &no_answers(),
+        "fork/f.txt".to_owned(),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(result, Outcome::Error { .. }));
+    assert!(external_canonical.join("f.txt").exists());
+
+    // Read-write mount: delete succeeds.
+    let read_write = mount(true);
+    let result = fs_delete_file(
+        workspace.path(),
+        Some(&read_write),
+        &no_answers(),
+        "fork/f.txt".to_owned(),
+    )
+    .await
+    .unwrap();
+    unwrap_success(result);
+    assert!(!external_canonical.join("f.txt").exists());
+}
+
 #[tokio::test]
 async fn deleting_last_root_level_file_preserves_workspace() {
     // Regression: when the deleted file was the only entry at the
@@ -26,7 +80,7 @@ async fn deleting_last_root_level_file_preserves_workspace() {
     let root = dir.path();
     std::fs::write(root.join("only.txt"), "x").unwrap();
 
-    let result = fs_delete_file(root, &no_answers(), "only.txt".to_owned())
+    let result = fs_delete_file(root, None, &no_answers(), "only.txt".to_owned())
         .await
         .unwrap();
 
@@ -55,9 +109,14 @@ async fn deleting_nested_file_removes_empty_parent() {
     std::fs::create_dir_all(root.join("nested/inner")).unwrap();
     std::fs::write(root.join("nested/inner/file.txt"), "x").unwrap();
 
-    let result = fs_delete_file(root, &no_answers(), "nested/inner/file.txt".to_owned())
-        .await
-        .unwrap();
+    let result = fs_delete_file(
+        root,
+        None,
+        &no_answers(),
+        "nested/inner/file.txt".to_owned(),
+    )
+    .await
+    .unwrap();
 
     let msg = unwrap_success(result);
     assert!(
@@ -84,7 +143,7 @@ async fn deleting_symlink_removes_the_link_entry() {
     )
     .unwrap();
 
-    let result = fs_delete_file(root, &no_answers(), "link.txt".to_owned())
+    let result = fs_delete_file(root, None, &no_answers(), "link.txt".to_owned())
         .await
         .unwrap();
 
@@ -111,7 +170,7 @@ async fn deleting_dangling_symlink_succeeds() {
     )
     .unwrap();
 
-    let result = fs_delete_file(root, &no_answers(), "broken".to_owned())
+    let result = fs_delete_file(root, None, &no_answers(), "broken".to_owned())
         .await
         .unwrap();
 
@@ -122,7 +181,7 @@ async fn deleting_dangling_symlink_succeeds() {
 #[tokio::test]
 async fn deleting_missing_path_errors() {
     let dir = tempdir().unwrap();
-    let result = fs_delete_file(dir.path(), &no_answers(), "ghost.txt".to_owned())
+    let result = fs_delete_file(dir.path(), None, &no_answers(), "ghost.txt".to_owned())
         .await
         .unwrap();
 
@@ -150,7 +209,7 @@ async fn deleting_socket_entry_errors() {
     // Bind keeps the file in place; tempdir cleanup will unlink it.
     let _listener = std::os::unix::net::UnixListener::bind(socket_path.as_std_path()).unwrap();
 
-    let result = fs_delete_file(root, &no_answers(), "my.sock".to_owned())
+    let result = fs_delete_file(root, None, &no_answers(), "my.sock".to_owned())
         .await
         .unwrap();
 
@@ -177,7 +236,7 @@ async fn deleting_directory_errors() {
     let root = dir.path();
     std::fs::create_dir(root.join("subdir")).unwrap();
 
-    let result = fs_delete_file(root, &no_answers(), "subdir".to_owned())
+    let result = fs_delete_file(root, None, &no_answers(), "subdir".to_owned())
         .await
         .unwrap();
 

@@ -1,18 +1,21 @@
-use camino::Utf8Path;
+use jp_tool::{Capability, Context};
 
-use super::utils::resolve_workspace_path;
+use super::utils::{authorize, resolve_workspace_path};
 use crate::util::{ToolResult, error};
 
 pub(crate) async fn fs_read_file(
-    root: &Utf8Path,
+    ctx: &Context,
     path: String,
     start_line: Option<usize>,
     end_line: Option<usize>,
 ) -> ToolResult {
-    let resolved = match resolve_workspace_path(root, &path) {
+    let resolved = match resolve_workspace_path(&ctx.root, &path, ctx.access.as_ref()) {
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
+    if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Read, &path) {
+        return error(msg);
+    }
     let absolute_path = resolved.absolute;
     if !absolute_path.exists() {
         return error("File not found.");

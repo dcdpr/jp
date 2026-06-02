@@ -14,12 +14,12 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::{ContentStyle, Stylize as _};
 use fancy_regex::RegexBuilder;
-use jp_tool::{Outcome, Question};
+use jp_tool::{Capability, Outcome, Question};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use similar::{ChangeTag, TextDiff, udiff::UnifiedDiff};
 
-use super::utils::{is_file_dirty_impl, resolve_workspace_path};
+use super::utils::{authorize, is_file_dirty_impl, resolve_workspace_path};
 use crate::{
     Context, Error,
     util::{
@@ -105,7 +105,10 @@ fn fs_modify_file_impl<R: ProcessRunner>(
         let mut applied_any = false;
 
         for target in &targets {
-            let resolved = match resolve_workspace_path(&ctx.root, target) {
+            if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Update, target) {
+                return error(msg);
+            }
+            let resolved = match resolve_workspace_path(&ctx.root, target, ctx.access.as_ref()) {
                 Ok(r) => r,
                 Err(msg) => return error(msg),
             };

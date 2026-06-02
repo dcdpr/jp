@@ -1,11 +1,11 @@
 use std::fs;
 
 use camino::Utf8Path;
-use jp_tool::{Outcome, Question};
+use jp_tool::{AccessPolicy, Capability, Outcome, Question};
 use serde_json::{Map, Value};
 
 use super::utils::{
-    EntryKind, ResolvedPath, count_dirty_paths_impl, entry_kind, is_file_dirty_impl,
+    EntryKind, ResolvedPath, authorize, count_dirty_paths_impl, entry_kind, is_file_dirty_impl,
     resolve_workspace_entry,
 };
 use crate::{
@@ -30,28 +30,35 @@ enum SourceKind {
 
 pub(crate) async fn fs_move_file(
     root: &Utf8Path,
+    access: Option<&AccessPolicy>,
     answers: &Map<String, Value>,
     source: String,
     target: String,
 ) -> ToolResult {
-    fs_move_file_impl(root, answers, &source, &target, &DuctProcessRunner)
+    fs_move_file_impl(root, access, answers, &source, &target, &DuctProcessRunner)
 }
 
 fn fs_move_file_impl<R: ProcessRunner>(
     root: &Utf8Path,
+    access: Option<&AccessPolicy>,
     answers: &Map<String, Value>,
     source: &str,
     target: &str,
     runner: &R,
 ) -> ToolResult {
-    let src = match resolve_workspace_entry(root, source) {
+    let src = match resolve_workspace_entry(root, source, access) {
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
-    let dst = match resolve_workspace_entry(root, target) {
+    let dst = match resolve_workspace_entry(root, target, access) {
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
+
+    // The source entry is removed and the target written.
+    if let Err(msg) = authorize(access, Capability::Delete, source) {
+        return error(msg);
+    }
 
     if src.absolute == dst.absolute {
         return error(format!(
@@ -86,6 +93,18 @@ fn fs_move_file_impl<R: ProcessRunner>(
     // replace the link without triggering the overwrite prompt and bypass
     // the directory "must not exist" rule.
     let dst_kind = entry_kind(&dst.absolute)?;
+
+    // Overwriting an existing target needs `update`; a fresh target needs
+    // `create`.
+    let target_capability = if dst_kind.is_some() {
+        Capability::Update
+    } else {
+        Capability::Create
+    };
+    if let Err(msg) = authorize(access, target_capability, target) {
+        return error(msg);
+    }
+
     match src_kind {
         SourceKind::File => match dst_kind {
             Some(EntryKind::Dir) => {

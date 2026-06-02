@@ -65,8 +65,15 @@ fn moves_file_to_new_path() {
     let root = dir.path();
     std::fs::write(root.join("a.txt"), "hello").unwrap();
 
-    let result =
-        fs_move_file_impl(root, &no_answers(), "a.txt", "b.txt", &clean_git_runner()).unwrap();
+    let result = fs_move_file_impl(
+        root,
+        None,
+        &no_answers(),
+        "a.txt",
+        "b.txt",
+        &clean_git_runner(),
+    )
+    .unwrap();
 
     let msg = unwrap_success(result);
     assert!(msg.contains("Moved file"), "unexpected message: {msg}");
@@ -85,7 +92,8 @@ fn moves_directory_with_contents() {
     std::fs::write(root.join("old/a.txt"), "1").unwrap();
     std::fs::write(root.join("old/nested/b.txt"), "2").unwrap();
 
-    let result = fs_move_file_impl(root, &no_answers(), "old", "new", &clean_git_runner()).unwrap();
+    let result =
+        fs_move_file_impl(root, None, &no_answers(), "old", "new", &clean_git_runner()).unwrap();
 
     let msg = unwrap_success(result);
     assert!(msg.contains("Moved directory"), "unexpected message: {msg}");
@@ -109,6 +117,7 @@ fn moves_directory_creates_target_parents() {
 
     let result = fs_move_file_impl(
         root,
+        None,
         &no_answers(),
         "src",
         "vendored/upstream/src",
@@ -125,6 +134,7 @@ fn missing_source_errors() {
     let dir = tempdir().unwrap();
     let result = fs_move_file_impl(
         dir.path(),
+        None,
         &no_answers(),
         "ghost.txt",
         "elsewhere.txt",
@@ -141,6 +151,7 @@ fn workspace_escape_rejected() {
     let dir = tempdir().unwrap();
     let result = fs_move_file_impl(
         dir.path(),
+        None,
         &no_answers(),
         "../escape.txt",
         "inside.txt",
@@ -161,6 +172,7 @@ fn file_target_is_directory_errors() {
 
     let result = fs_move_file_impl(
         root,
+        None,
         &no_answers(),
         "a.txt",
         "target_dir",
@@ -179,8 +191,15 @@ fn file_target_exists_prompts_for_overwrite() {
     std::fs::write(root.join("a.txt"), "x").unwrap();
     std::fs::write(root.join("b.txt"), "y").unwrap();
 
-    let result =
-        fs_move_file_impl(root, &no_answers(), "a.txt", "b.txt", &never_git_runner()).unwrap();
+    let result = fs_move_file_impl(
+        root,
+        None,
+        &no_answers(),
+        "a.txt",
+        "b.txt",
+        &never_git_runner(),
+    )
+    .unwrap();
 
     let question = unwrap_needs_input(result);
     assert_eq!(question.id, "overwrite_file");
@@ -195,7 +214,8 @@ fn file_overwrite_approved_succeeds() {
     std::fs::write(root.join("b.txt"), "y").unwrap();
 
     let answers = answers(&[("overwrite_file", json!(true))]);
-    let result = fs_move_file_impl(root, &answers, "a.txt", "b.txt", &clean_git_runner()).unwrap();
+    let result =
+        fs_move_file_impl(root, None, &answers, "a.txt", "b.txt", &clean_git_runner()).unwrap();
 
     unwrap_success(result);
     assert_eq!(std::fs::read_to_string(root.join("b.txt")).unwrap(), "x");
@@ -209,7 +229,8 @@ fn file_overwrite_denied_errors() {
     std::fs::write(root.join("b.txt"), "y").unwrap();
 
     let answers = answers(&[("overwrite_file", json!(false))]);
-    let result = fs_move_file_impl(root, &answers, "a.txt", "b.txt", &never_git_runner()).unwrap();
+    let result =
+        fs_move_file_impl(root, None, &answers, "a.txt", "b.txt", &never_git_runner()).unwrap();
 
     let msg = unwrap_error(result);
     assert!(msg.contains("already exists"), "unexpected: {msg}");
@@ -223,7 +244,8 @@ fn dir_target_exists_errors_without_prompt() {
     std::fs::write(root.join("src/a.rs"), "").unwrap();
     std::fs::create_dir(root.join("dst")).unwrap();
 
-    let result = fs_move_file_impl(root, &no_answers(), "src", "dst", &never_git_runner()).unwrap();
+    let result =
+        fs_move_file_impl(root, None, &no_answers(), "src", "dst", &never_git_runner()).unwrap();
 
     let msg = unwrap_error(result);
     assert!(msg.contains("already exists"), "unexpected: {msg}");
@@ -238,7 +260,8 @@ fn dir_target_exists_as_file_errors() {
     std::fs::create_dir(root.join("src")).unwrap();
     std::fs::write(root.join("dst"), "").unwrap();
 
-    let result = fs_move_file_impl(root, &no_answers(), "src", "dst", &never_git_runner()).unwrap();
+    let result =
+        fs_move_file_impl(root, None, &no_answers(), "src", "dst", &never_git_runner()).unwrap();
 
     unwrap_error(result);
 }
@@ -250,7 +273,7 @@ fn dirty_file_prompts_for_confirmation() {
     std::fs::write(root.join("a.txt"), "x").unwrap();
 
     let runner = dirty_git_runner(" M a.txt\n");
-    let result = fs_move_file_impl(root, &no_answers(), "a.txt", "b.txt", &runner).unwrap();
+    let result = fs_move_file_impl(root, None, &no_answers(), "a.txt", "b.txt", &runner).unwrap();
 
     let question = unwrap_needs_input(result);
     assert_eq!(question.id, "move_dirty_source");
@@ -266,7 +289,7 @@ fn dirty_file_approved_proceeds() {
 
     let runner = dirty_git_runner(" M a.txt\n");
     let answers = answers(&[("move_dirty_source", json!(true))]);
-    let result = fs_move_file_impl(root, &answers, "a.txt", "b.txt", &runner).unwrap();
+    let result = fs_move_file_impl(root, None, &answers, "a.txt", "b.txt", &runner).unwrap();
 
     unwrap_success(result);
     assert!(!root.join("a.txt").exists());
@@ -283,7 +306,7 @@ fn dirty_directory_prompts_with_entry_count() {
     std::fs::write(root.join("d/c"), "").unwrap();
 
     let runner = dirty_git_runner(" M d/a\n M d/b\n?? d/c\n");
-    let result = fs_move_file_impl(root, &no_answers(), "d", "renamed", &runner).unwrap();
+    let result = fs_move_file_impl(root, None, &no_answers(), "d", "renamed", &runner).unwrap();
 
     let question = unwrap_needs_input(result);
     assert_eq!(question.id, "move_dirty_source");
@@ -298,8 +321,15 @@ fn clean_directory_skips_dirty_prompt() {
     std::fs::create_dir(root.join("d")).unwrap();
     std::fs::write(root.join("d/a"), "").unwrap();
 
-    let result =
-        fs_move_file_impl(root, &no_answers(), "d", "renamed", &clean_git_runner()).unwrap();
+    let result = fs_move_file_impl(
+        root,
+        None,
+        &no_answers(),
+        "d",
+        "renamed",
+        &clean_git_runner(),
+    )
+    .unwrap();
 
     unwrap_success(result);
     assert!(root.join("renamed/a").exists());
@@ -311,8 +341,15 @@ fn source_equals_target_errors() {
     let root = dir.path();
     std::fs::write(root.join("a.txt"), "x").unwrap();
 
-    let result =
-        fs_move_file_impl(root, &no_answers(), "a.txt", "a.txt", &never_git_runner()).unwrap();
+    let result = fs_move_file_impl(
+        root,
+        None,
+        &no_answers(),
+        "a.txt",
+        "a.txt",
+        &never_git_runner(),
+    )
+    .unwrap();
 
     let msg = unwrap_error(result);
     assert!(msg.contains("same path"), "unexpected error: {msg}");
@@ -327,6 +364,7 @@ fn empty_parent_directory_is_removed() {
 
     let result = fs_move_file_impl(
         root,
+        None,
         &no_answers(),
         "nested/dir/file.txt",
         "file.txt",
@@ -358,6 +396,7 @@ fn symlink_source_renames_the_link_entry() {
 
     let result = fs_move_file_impl(
         root,
+        None,
         &no_answers(),
         "link.txt",
         "moved.txt",
@@ -391,6 +430,7 @@ fn moving_last_root_level_file_preserves_workspace() {
 
     let result = fs_move_file_impl(
         root,
+        None,
         &no_answers(),
         "only.txt",
         "moved.txt",
@@ -428,6 +468,7 @@ fn file_target_is_dangling_symlink_prompts_for_overwrite() {
 
     let result = fs_move_file_impl(
         root,
+        None,
         &no_answers(),
         "src.txt",
         "dst.txt",
@@ -459,8 +500,15 @@ fn file_target_is_dangling_symlink_overwrite_denied_errors() {
     .unwrap();
 
     let answers = answers(&[("overwrite_file", json!(false))]);
-    let result =
-        fs_move_file_impl(root, &answers, "src.txt", "dst.txt", &never_git_runner()).unwrap();
+    let result = fs_move_file_impl(
+        root,
+        None,
+        &answers,
+        "src.txt",
+        "dst.txt",
+        &never_git_runner(),
+    )
+    .unwrap();
 
     let msg = unwrap_error(result);
     assert!(msg.contains("already exists"), "unexpected: {msg}");
@@ -489,7 +537,8 @@ fn dir_target_is_dangling_symlink_errors() {
     )
     .unwrap();
 
-    let result = fs_move_file_impl(root, &no_answers(), "src", "dst", &never_git_runner()).unwrap();
+    let result =
+        fs_move_file_impl(root, None, &no_answers(), "src", "dst", &never_git_runner()).unwrap();
 
     let msg = unwrap_error(result);
     assert!(msg.contains("already exists"), "unexpected: {msg}");
@@ -512,6 +561,7 @@ fn dir_into_own_subtree_errors_without_mutation() {
 
     let result = fs_move_file_impl(
         root,
+        None,
         &no_answers(),
         "src",
         "src/nested/src",

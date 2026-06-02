@@ -71,7 +71,13 @@ use jp_config::{
         AssistantConfig, instructions::InstructionsConfig, sections::SectionConfig,
         tool_choice::ToolChoice,
     },
-    conversation::{ConversationConfig, tool::Enable},
+    conversation::{
+        ConversationConfig,
+        tool::{
+            Enable, ToolSource,
+            access::{AccessConfig, PartialAccessConfig, PartialFsRuleConfig},
+        },
+    },
     fs::{expand_tilde, load_partial},
     model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
     style::reasoning::ReasoningDisplayConfig,
@@ -104,6 +110,11 @@ use super::{
 };
 use crate::{
     Ctx, PATH_STRING_PREFIX,
+    access::{
+        approvals::{APPROVALS_FILE, ApprovalLookup, ApprovalStore},
+        compile::{ApprovalDecision, compile_policy},
+        mount::{MountMode, MountSpec},
+    },
     cmd::{
         self,
         conversation::fork,
@@ -313,6 +324,18 @@ pub(crate) struct Query {
     /// Disable tool use by the assistant.
     #[arg(short = 'U', long = "no-tool-use")]
     no_tool_use: bool,
+
+    /// Mount an external path into the workspace as a symlink and grant the
+    /// assistant access to it.
+    ///
+    /// Form: `[TOOL:]NAME=PATH[:MODE]`.
+    /// `NAME` is the workspace-relative location for the symlink, `PATH` is the
+    /// external target, and `MODE` is `ro` (default) or `rw`.
+    /// `rw` requires a `TOOL:` prefix; without a `TOOL:` prefix the grant
+    /// applies to all enabled local tools.
+    /// Repeat the flag to mount several paths.
+    #[arg(long = "mount", value_name = "[TOOL:]NAME=PATH[:MODE]", action = ArgAction::Append)]
+    mount: Vec<String>,
 }
 
 impl Query {
@@ -330,6 +353,10 @@ impl Query {
         // 2. --fork/--id/session: resolve an existing conversation, lock it.
         // 3. Lock contention: user picks "new" or "fork" from the prompt.
         let lock = self.acquire_lock(ctx, handle).await?;
+
+        // Create symlinks and seed approvals for any `--mount` flags before the
+        // turn runs, so tools can reach the mounted paths.
+        create_mount_effects(&self.mount, &ctx.workspace, ctx.fs_backend.as_deref(), now)?;
 
         // The two flags are mutually exclusive (enforced by clap), and the
         // resolved conversation may be new, freshly forked (which clones the
@@ -463,6 +490,7 @@ impl Query {
 
         let thread = build_thread(stream, attachments, &cfg.assistant, !tools.is_empty())?;
         let root = ctx.workspace.root().to_path_buf();
+        let approvals = Arc::new(load_approval_store(ctx.fs_backend.as_deref()));
 
         // Sanitize any structural issues (orphaned tool calls, missing
         // user messages, etc.) before sending the stream to the provider.
@@ -480,6 +508,7 @@ impl Query {
                 cfg.assistant.tool_choice.clone(),
                 &tools,
                 ctx.printer.clone(),
+                approvals,
                 chat_request,
             )
             .await
@@ -721,6 +750,7 @@ impl Query {
         tool_choice: ToolChoice,
         tools: &[ToolDefinition],
         printer: Arc<Printer>,
+        approvals: Arc<ApprovalStore>,
         chat_request: ChatRequest,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
@@ -739,7 +769,7 @@ impl Query {
             .collect();
         let builtin_executors =
             BuiltinExecutors::new().register("describe_tools", DescribeTools::new(docs_map));
-        let executor_source = TerminalExecutorSource::new(builtin_executors, tools);
+        let executor_source = TerminalExecutorSource::new(builtin_executors, tools, approvals);
         let tool_coordinator =
             ToolCoordinator::new(cfg.conversation.tools.clone(), Box::new(executor_source));
         let prompt_backend = Arc::new(TerminalPromptBackend);
@@ -1083,6 +1113,7 @@ impl IntoPartialAppConfig for Query {
             fork: _,
             title: _,
             no_title: _,
+            mount,
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
@@ -1105,6 +1136,7 @@ impl IntoPartialAppConfig for Query {
             *no_tool_use,
         )?;
         apply_attachments(&mut partial, attachments, workspace)?;
+        apply_mounts(&mut partial, mount, workspace, merged_config)?;
         apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
 
         for kv in parameters.clone() {
@@ -1374,6 +1406,249 @@ fn apply_reasoning(
         }
         .into(),
     });
+}
+
+/// A resolved mount and the tools it grants access to (stage 1 planning).
+struct MountPlan {
+    rule_path: String,
+    write: bool,
+    /// (tool name, whether its `access.fs` is empty across all layers)
+    targets: Vec<(String, bool)>,
+}
+
+/// Inject `--mount` access grants into the partial config (stage 1).
+///
+/// Pure config mutation: one `access.fs` rule per in-scope tool.
+/// The symlink is not required to exist yet; it is created later in
+/// [`Query::run`].
+/// When a tool had no filesystem rules from any layer, a workspace-default rule
+/// is also injected so the mount doesn't silently switch the tool to deny-all.
+fn apply_mounts(
+    partial: &mut PartialAppConfig,
+    mounts: &[String],
+    workspace: Option<&Workspace>,
+    merged_config: Option<&PartialAppConfig>,
+) -> BoxedResult<()> {
+    if mounts.is_empty() {
+        return Ok(());
+    }
+
+    let workspace = workspace.ok_or("`--mount` requires a workspace")?;
+    let root = workspace.root().to_owned();
+    let cwd = current_dir_utf8()?;
+
+    let existing = merged_config.map_or(&partial.conversation.tools.tools, |v| {
+        &v.conversation.tools.tools
+    });
+
+    let mut plans = Vec::new();
+    for spec in mounts {
+        let spec = MountSpec::parse(spec)?;
+        let rule_path = spec.resolve_name(&cwd, &root)?.as_str().to_owned();
+
+        let targets = match &spec.tool {
+            Some(tool) => vec![(tool.clone(), tool_access_empty(existing, tool))],
+            None => existing
+                .iter()
+                .filter(|(_, cfg)| is_enabled_local(cfg))
+                .map(|(name, _)| (name.clone(), tool_access_empty(existing, name)))
+                .collect(),
+        };
+
+        plans.push(MountPlan {
+            rule_path,
+            write: spec.mode == MountMode::Rw,
+            targets,
+        });
+    }
+
+    for plan in plans {
+        for (tool, access_empty) in plan.targets {
+            let cfg = partial.conversation.tools.tools.entry(tool).or_default();
+            let access = cfg.access.get_or_insert_with(PartialAccessConfig::default);
+
+            let already_present = access
+                .fs
+                .iter()
+                .any(|rule| rule.path.as_deref() == Some(plan.rule_path.as_str()));
+            if already_present {
+                continue;
+            }
+
+            if access_empty && access.fs.is_empty() {
+                access.fs.push(workspace_default_partial_rule());
+            }
+
+            access
+                .fs
+                .push(mount_partial_rule(&plan.rule_path, plan.write));
+        }
+    }
+
+    Ok(())
+}
+
+/// Create the symlinks and seed the approval store for `--mount` flags (stage
+/// 2).
+fn create_mount_effects(
+    mounts: &[String],
+    workspace: &Workspace,
+    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<()> {
+    if mounts.is_empty() {
+        return Ok(());
+    }
+
+    let root = workspace.root().to_owned();
+    let cwd = current_dir_utf8().map_err(|e| Error::CliConfig(e.to_string()))?;
+
+    let approvals_path = approval_store_path(fs_backend);
+    let mut store = approvals_path
+        .as_deref()
+        .map(ApprovalStore::load)
+        .unwrap_or_default();
+
+    let mut rules = Vec::new();
+    for spec in mounts {
+        let spec = MountSpec::parse(spec).map_err(|e| Error::CliConfig(e.to_string()))?;
+        let rule_path = spec
+            .resolve_name(&cwd, &root)
+            .map_err(|e| Error::CliConfig(e.to_string()))?;
+        let link = root.join(&rule_path);
+
+        let target = expand_tilde(&spec.path, env::var("HOME").ok())
+            .unwrap_or_else(|| Utf8PathBuf::from(&spec.path));
+
+        create_workspace_symlink(&link, &target)?;
+
+        let canonical = link.canonicalize_utf8()?;
+        store.record(rule_path.as_str(), canonical, now);
+        rules.push(spec.rule(rule_path.as_str()));
+    }
+
+    if let Some(path) = approvals_path {
+        store.save(&path)?;
+    }
+
+    // Compile the just-created mounts against the seeded approvals to confirm
+    // they resolve to a usable policy, surfacing broken or unapproved targets.
+    let access = AccessConfig { fs: rules };
+    let (_, warnings) = compile_policy(&access, &root, |rule_path, candidate| {
+        match store.lookup(rule_path, candidate) {
+            ApprovalLookup::Approved => ApprovalDecision::Approved,
+            ApprovalLookup::Retargeted { .. } | ApprovalLookup::Unknown => {
+                ApprovalDecision::Rejected
+            }
+        }
+    })
+    .map_err(|e| Error::CliConfig(e.to_string()))?;
+
+    for warning in warnings {
+        warn!("{warning}");
+    }
+
+    Ok(())
+}
+
+/// Create a workspace symlink at `link` pointing to `target`.
+///
+/// A symlink that already points at `target` is a no-op; one pointing
+/// elsewhere, or a non-symlink at `link`, is an error.
+fn create_workspace_symlink(link: &Utf8Path, target: &Utf8Path) -> Result<()> {
+    if let Ok(existing) = fs::read_link(link) {
+        if existing.as_path() == target.as_std_path() {
+            return Ok(());
+        }
+        return Err(Error::CliConfig(format!(
+            "mount '{link}' already exists as a symlink pointing elsewhere"
+        )));
+    }
+
+    if link.exists() {
+        return Err(Error::CliConfig(format!(
+            "cannot create mount: '{link}' already exists and is not a symlink"
+        )));
+    }
+
+    if let Some(parent) = link.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(target.as_std_path(), link.as_std_path())?;
+
+    #[cfg(windows)]
+    if target.is_dir() {
+        std::os::windows::fs::symlink_dir(target.as_std_path(), link.as_std_path())?;
+    } else {
+        std::os::windows::fs::symlink_file(target.as_std_path(), link.as_std_path())?;
+    }
+
+    Ok(())
+}
+
+/// Resolve the path to the user-local approval store, if user storage exists.
+fn approval_store_path(
+    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
+) -> Option<Utf8PathBuf> {
+    fs_backend
+        .and_then(|fs| fs.user_storage_with_path(relative_path::RelativePath::new(APPROVALS_FILE)))
+}
+
+/// Load the approval store, treating missing/in-memory storage as empty.
+fn load_approval_store(
+    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
+) -> ApprovalStore {
+    approval_store_path(fs_backend)
+        .as_deref()
+        .map(ApprovalStore::load)
+        .unwrap_or_default()
+}
+
+fn current_dir_utf8() -> BoxedResult<Utf8PathBuf> {
+    let cwd = env::current_dir()?;
+    Utf8PathBuf::from_path_buf(cwd)
+        .map_err(|path| format!("current directory is not valid UTF-8: {}", path.display()).into())
+}
+
+/// Whether a tool's `access.fs` is empty across all merged layers.
+fn tool_access_empty(
+    tools: &IndexMap<String, jp_config::conversation::tool::PartialToolConfig>,
+    name: &str,
+) -> bool {
+    tools
+        .get(name)
+        .and_then(|cfg| cfg.access.as_ref())
+        .is_none_or(|access| access.fs.is_empty())
+}
+
+/// Whether a partial tool config is an enabled local tool.
+fn is_enabled_local(cfg: &jp_config::conversation::tool::PartialToolConfig) -> bool {
+    matches!(cfg.source, Some(ToolSource::Local { .. }))
+        && !matches!(cfg.enable, Some(Enable::Off | Enable::Explicit))
+}
+
+/// The workspace-default rule injected to preserve a tool's prior implicit
+/// workspace access.
+fn workspace_default_partial_rule() -> PartialFsRuleConfig {
+    PartialFsRuleConfig {
+        path: Some(".".to_owned()),
+        read: Some(true),
+        write: Some(true),
+        ..PartialFsRuleConfig::default()
+    }
+}
+
+/// The `access.fs` rule a mount injects.
+fn mount_partial_rule(rule_path: &str, write: bool) -> PartialFsRuleConfig {
+    PartialFsRuleConfig {
+        path: Some(rule_path.to_owned()),
+        external: Some(true),
+        read: Some(true),
+        write: Some(write),
+        ..PartialFsRuleConfig::default()
+    }
 }
 
 /// Set the terminal title to show the active conversation.
