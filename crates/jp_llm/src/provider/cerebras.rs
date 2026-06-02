@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, time::Duration};
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt as _, future, stream};
@@ -31,10 +31,18 @@ use crate::{
     model::ReasoningDetails,
     provider::trace_to_tmpfile,
     query::ChatQuery,
+    stream::with_tool_call_keepalive,
     tool::ToolDefinition,
 };
 
 static PROVIDER: ProviderId = ProviderId::Cerebras;
+
+/// How often to inject a synthetic keep-alive while a tool call is streaming.
+///
+/// Stays below the enforced minimum `stream_idle_timeout_secs` (10s) so the
+/// heartbeat always lands before the idle window elapses if the model pauses
+/// between argument chunks.
+const TOOL_CALL_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Cerebras {
@@ -107,7 +115,10 @@ impl Provider for Cerebras {
         // silently re-issuing the request.
         es.set_retry_policy(Box::new(Never));
 
-        Ok(assemble_event_stream(es, is_structured))
+        Ok(with_tool_call_keepalive(
+            assemble_event_stream(es, is_structured),
+            TOOL_CALL_KEEPALIVE_INTERVAL,
+        ))
     }
 }
 
