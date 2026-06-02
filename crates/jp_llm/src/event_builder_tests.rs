@@ -272,43 +272,46 @@ fn test_ignores_mismatched_event_type() {
 }
 
 #[test]
-fn test_peek_partial_content_empty() {
+fn test_peek_partial_events_empty() {
     let builder = EventBuilder::new();
-    assert_eq!(builder.peek_partial_content(), None);
+    assert!(builder.peek_partial_events().is_empty());
 }
 
 #[test]
-fn test_peek_partial_content_single_buffer() {
+fn test_peek_partial_events_single_message() {
     let mut builder = EventBuilder::new();
 
     builder.handle_part(0, EventPart::Message("Hello ".into()), Map::new());
     builder.handle_part(0, EventPart::Message("world".into()), Map::new());
 
-    assert_eq!(
-        builder.peek_partial_content(),
-        Some("Hello world".to_string())
+    assert_matches!(
+        builder.peek_partial_events().as_slice(),
+        [ChatResponse::Message { message }] if message == "Hello world"
     );
 }
 
+/// Partial reasoning is preserved as a `Reasoning` response, ordered before a
+/// later message buffer by stream index.
 #[test]
-fn test_peek_partial_content_excludes_reasoning() {
+fn test_peek_partial_events_includes_reasoning() {
     let mut builder = EventBuilder::new();
 
-    // Index 0: Reasoning (excluded — partial reasoning has no resumable
-    // signature).
+    // Index 0: Reasoning
     builder.handle_part(0, EventPart::Reasoning("Let me think".into()), Map::new());
     // Index 1: Message
     builder.handle_part(1, EventPart::Message("The answer is".into()), Map::new());
 
-    // Only the message text is returned.
-    assert_eq!(
-        builder.peek_partial_content(),
-        Some("The answer is".to_string())
+    assert_matches!(
+        builder.peek_partial_events().as_slice(),
+        [
+            ChatResponse::Reasoning { reasoning },
+            ChatResponse::Message { message },
+        ] if reasoning == "Let me think" && message == "The answer is"
     );
 }
 
 #[test]
-fn test_peek_partial_content_after_partial_flush() {
+fn test_peek_partial_events_after_partial_flush() {
     let mut builder = EventBuilder::new();
 
     // Index 0: Reasoning (will be flushed)
@@ -320,9 +323,9 @@ fn test_peek_partial_content_after_partial_flush() {
     builder.handle_flush(0, Map::new());
 
     // Only index 1 should remain
-    assert_eq!(
-        builder.peek_partial_content(),
-        Some("Partial answer".to_string())
+    assert_matches!(
+        builder.peek_partial_events().as_slice(),
+        [ChatResponse::Message { message }] if message == "Partial answer"
     );
 }
 
@@ -378,13 +381,13 @@ fn test_structured_preserves_metadata() {
 }
 
 #[test]
-fn test_structured_not_included_in_peek_partial_content() {
+fn test_structured_not_included_in_peek_partial_events() {
     let mut builder = EventBuilder::new();
 
     builder.handle_part(0, EventPart::Structured("{\"partial".into()), Map::new());
 
-    // Structured buffers are not useful for assistant prefill.
-    assert_eq!(builder.peek_partial_content(), None);
+    // Structured buffers are not a usable resume point.
+    assert!(builder.peek_partial_events().is_empty());
 }
 
 /// Drain emits buffered text for `Reasoning`/`Message`/`Structured` so partial

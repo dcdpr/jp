@@ -355,12 +355,15 @@ impl TurnCoordinator {
         self.state
     }
 
-    /// Returns partial content from unflushed buffers.
+    /// Returns partial assistant content from unflushed buffers, as
+    /// correctly-typed responses in stream order.
     ///
-    /// Used when the user interrupts streaming and wants to continue with
-    /// assistant prefill.
-    pub fn peek_partial_content(&self) -> Option<String> {
-        self.event_builder.peek_partial_content()
+    /// Used when the user interrupts (or a retry resumes) mid-stream: the
+    /// reasoning and message accumulated so far are committed so the turn
+    /// resumes from where it left off, with reasoning kept as reasoning rather
+    /// than folded into the assistant's answer text.
+    pub fn peek_partial_events(&self) -> Vec<ChatResponse> {
+        self.event_builder.peek_partial_events()
     }
 
     /// Resets the coordinator state back to Streaming for a new cycle.
@@ -403,8 +406,8 @@ impl TurnCoordinator {
     /// Injects any partial content into the stream and transitions to Complete
     /// so that the turn loop persists and exits.
     pub fn handle_quit(&mut self, stream: &mut ConversationStream) {
-        if let Some(content) = self.peek_partial_content() {
-            self.push_event(stream, ChatResponse::message(&content));
+        for response in self.peek_partial_events() {
+            self.push_event(stream, response);
         }
 
         self.force_complete();
@@ -424,8 +427,8 @@ impl TurnCoordinator {
         match action {
             InterruptAction::Stop => {
                 // Inject partial content before completing
-                if let Some(content) = self.peek_partial_content() {
-                    self.push_event(conversation_stream, ChatResponse::message(&content));
+                for response in self.peek_partial_events() {
+                    self.push_event(conversation_stream, response);
                 }
 
                 self.state = TurnPhase::Complete;
@@ -434,17 +437,19 @@ impl TurnCoordinator {
             InterruptAction::Abort => self.state = TurnPhase::Aborted,
 
             InterruptAction::Continue => {
-                if let Some(content) = self.peek_partial_content() {
-                    self.push_event(conversation_stream, ChatResponse::message(&content));
+                for response in self.peek_partial_events() {
+                    self.push_event(conversation_stream, response);
                 }
 
                 self.prepare_continuation();
             }
 
             InterruptAction::Reply(content) => {
-                // Inject partial content as assistant message first
-                if let Some(partial) = self.peek_partial_content() {
-                    self.push_event(conversation_stream, ChatResponse::message(&partial));
+                // Inject partial reasoning + message as assistant events first,
+                // before the user's reply, so the resumed model sees its own
+                // interrupted reasoning as context.
+                for response in self.peek_partial_events() {
+                    self.push_event(conversation_stream, response);
                 }
 
                 // Add user's reply as a new request, then render it through

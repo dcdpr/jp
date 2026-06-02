@@ -61,46 +61,41 @@ impl EventBuilder {
         }
     }
 
-    /// Returns the partial assistant *message* text accumulated in unflushed
-    /// buffers.
+    /// Returns the partial assistant content accumulated in unflushed buffers,
+    /// as correctly-typed responses in stream-index order.
     ///
-    /// Used when a stream is interrupted and the turn resumes from where it
-    /// left off: the partial message is committed as the resume point so the
-    /// model continues from it.
+    /// Used when a stream is interrupted or retried and the turn resumes: each
+    /// partial buffer is committed as its own event, so reasoning stays
+    /// reasoning and message text stays message text.
+    /// The provider's request builder decides how to serialize partial
+    /// reasoning back to the model (Anthropic sends unsigned reasoning as
+    /// `<think>` text, never a native thinking block).
     ///
-    /// Returns `None` if there's no partial message text.
-    /// Reasoning, tool-call, and structured buffers are excluded — partial
-    /// reasoning carries no resumable signature, and partial JSON/arguments
-    /// aren't useful for resumption.
+    /// Empty buffers are skipped.
+    /// Tool-call and structured buffers are excluded: a partial tool call would
+    /// orphan a `tool_use`, and partial structured JSON is not a usable resume
+    /// point.
     #[must_use]
-    pub fn peek_partial_content(&self) -> Option<String> {
-        if self.buffers.is_empty() {
-            return None;
-        }
-
-        // Collect content from all buffers, sorted by index for deterministic
-        // output
+    pub fn peek_partial_events(&self) -> Vec<ChatResponse> {
         let mut indices: Vec<_> = self.buffers.keys().copied().collect();
         indices.sort_unstable();
 
-        let mut parts = Vec::new();
-        for index in indices {
-            if let Some(buffer) = self.buffers.get(&index) {
-                match buffer {
-                    IndexBuffer::Message { content } if !content.is_empty() => {
-                        parts.push(content.clone());
-                    }
-                    // Reasoning, tool-call, structured, and empty buffers - skip
-                    _ => {}
+        indices
+            .into_iter()
+            .filter_map(|index| match self.buffers.get(&index)? {
+                IndexBuffer::Reasoning { content } if !content.is_empty() => {
+                    Some(ChatResponse::Reasoning {
+                        reasoning: content.clone(),
+                    })
                 }
-            }
-        }
-
-        if parts.is_empty() {
-            None
-        } else {
-            Some(parts.join(""))
-        }
+                IndexBuffer::Message { content } if !content.is_empty() => {
+                    Some(ChatResponse::Message {
+                        message: content.clone(),
+                    })
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// Handles a streaming chunk from the LLM.

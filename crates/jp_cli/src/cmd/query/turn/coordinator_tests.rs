@@ -133,7 +133,7 @@ fn test_continues_after_tool_execution() {
 }
 
 #[test]
-fn test_peek_partial_content() {
+fn test_peek_partial_events() {
     let mut stream = ConversationStream::new_test();
     let (printer, _, _) = Printer::memory(OutputFormat::Text);
     let mut coordinator = TurnCoordinator::new(
@@ -147,21 +147,23 @@ fn test_peek_partial_content() {
     coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
     // Initially no partial content
-    assert_eq!(coordinator.peek_partial_content(), None);
+    assert!(coordinator.peek_partial_events().is_empty());
 
     // Add a partial message (not flushed)
     coordinator.handle_event(&mut stream, Event::message(0, "Hello "));
     coordinator.handle_event(&mut stream, Event::message(0, "world"));
 
-    // Should have partial content
-    assert_eq!(
-        coordinator.peek_partial_content(),
-        Some("Hello world".to_string())
+    // Should have partial content as a Message response
+    let partial = coordinator.peek_partial_events();
+    assert_eq!(partial.len(), 1);
+    assert!(
+        matches!(&partial[0], ChatResponse::Message { message } if message == "Hello world"),
+        "got {partial:?}"
     );
 
     // Flush clears the buffer
     coordinator.handle_event(&mut stream, Event::flush(0));
-    assert_eq!(coordinator.peek_partial_content(), None);
+    assert!(coordinator.peek_partial_events().is_empty());
 }
 
 #[test]
@@ -231,13 +233,13 @@ fn test_prepare_continuation() {
 
     // Add partial content
     coordinator.handle_event(&mut stream, Event::message(0, "Partial"));
-    assert!(coordinator.peek_partial_content().is_some());
+    assert!(!coordinator.peek_partial_events().is_empty());
 
     // Prepare continuation resets state
     coordinator.prepare_continuation();
 
     assert_eq!(coordinator.current_phase(), TurnPhase::Streaming);
-    assert_eq!(coordinator.peek_partial_content(), None);
+    assert!(coordinator.peek_partial_events().is_empty());
 }
 
 /// Tests the multi-part tool call flow: an initial Part with name+id (empty
@@ -510,6 +512,77 @@ fn interrupt_reply_renders_user_header_for_new_request() {
         after_alice.contains("\u{2500}\u{2500} jp "),
         "expected a fresh `── jp` header after the Reply, got: {output:?}"
     );
+}
+
+/// Regression: interrupting mid-reasoning and replying must preserve the
+/// partial reasoning as a `ChatResponse::Reasoning` event, committed before the
+/// user's reply.
+/// Dropping it made the model re-reason from scratch on resume, leaving the
+/// user's interjection orphaned against reasoning the model no longer has.
+#[test]
+fn interrupt_reply_during_reasoning_preserves_partial_reasoning() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        Some("alice".into()),
+        None,
+        Some("anthropic/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("first question"));
+
+    // The assistant is mid-reasoning when the user interrupts: reasoning
+    // chunks have arrived, but no Flush and no message text.
+    coordinator.handle_event(&mut stream, Event::reasoning(0, "I should consider "));
+    coordinator.handle_event(&mut stream, Event::reasoning(0, "the trade-offs"));
+
+    coordinator.handle_streaming_interrupt(
+        InterruptAction::Reply("actually, do X instead".into()),
+        &mut stream,
+    );
+
+    // The partial reasoning is committed as a Reasoning event...
+    let responses: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.as_chat_response().cloned())
+        .collect();
+    assert_eq!(
+        responses.len(),
+        1,
+        "expected one reasoning response, got {responses:?}"
+    );
+    assert!(
+        matches!(
+            &responses[0],
+            ChatResponse::Reasoning { reasoning } if reasoning == "I should consider the trade-offs"
+        ),
+        "expected partial reasoning preserved, got {responses:?}"
+    );
+
+    // ...and the reply lands after it as a new user request.
+    let requests: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.as_chat_request())
+        .collect();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].content, "actually, do X instead");
+
+    // The reasoning must precede the reply in the stream.
+    let order: Vec<_> = stream
+        .iter()
+        .filter_map(|e| {
+            if e.event.as_chat_response().is_some() {
+                Some("response")
+            } else if e.event.as_chat_request().is_some() {
+                Some("request")
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(order, ["request", "response", "request"]);
 }
 
 /// A `Flush` that produces a `ToolCallRequest` surfaces it as a committed

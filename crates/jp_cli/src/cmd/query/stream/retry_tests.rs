@@ -210,9 +210,11 @@ async fn partial_content_flushed_on_retry() {
     });
 
     // Verify partial content exists before the error
-    assert_eq!(
-        turn_coordinator.peek_partial_content(),
-        Some("Hello world".to_string())
+    let partial = turn_coordinator.peek_partial_events();
+    assert_eq!(partial.len(), 1);
+    assert!(
+        matches!(&partial[0], ChatResponse::Message { message } if message == "Hello world"),
+        "got {partial:?}"
     );
 
     let error = StreamError::connect("connection reset");
@@ -239,7 +241,7 @@ async fn partial_content_flushed_on_retry() {
     );
 
     // TurnCoordinator should be reset for a new cycle
-    assert_eq!(turn_coordinator.peek_partial_content(), None);
+    assert!(turn_coordinator.peek_partial_events().is_empty());
 }
 
 #[tokio::test]
@@ -297,7 +299,7 @@ async fn retry_without_partial_content_still_works() {
     });
 
     // No partial content — error happens before any events
-    assert_eq!(turn_coordinator.peek_partial_content(), None);
+    assert!(turn_coordinator.peek_partial_events().is_empty());
 
     let error = StreamError::transient("503 Service Unavailable");
     let result = handle_stream_error(
