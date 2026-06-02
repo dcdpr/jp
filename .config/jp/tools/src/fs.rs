@@ -42,15 +42,22 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             t.req("pattern")?,
             t.opt("context")?,
             t.opt("paths")?,
+            None,
         )
         .await
         .map(Into::into),
 
+        // Scope to the docs tree and restrict to markdown sources. The
+        // `.ignore` whitelist already prunes the rendered `.vitepress/dist`
+        // and `cache` output; the extension filter additionally drops the
+        // vitepress build config and theme (`.mts`, `.vue`, `.css`, ...),
+        // leaving only the documentation prose.
         "grep_user_docs" => fs_grep_files(
             &ctx.root,
             t.req("pattern")?,
             t.opt("context")?,
             Some(vec!["docs".to_owned()].into()),
+            Some(vec!["md".to_owned()].into()),
         )
         .await
         .map(Into::into),

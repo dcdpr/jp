@@ -133,6 +133,35 @@ async fn dot_prefix_lists_workspace_root() {
 }
 
 #[tokio::test]
+async fn subdir_scope_respects_root_ignore() {
+    // A workspace `.ignore` excludes a build-output dir nested two levels
+    // below the scoped directory (mirroring `docs/.vitepress/dist/`). Scoping
+    // the listing to the parent dir must still honor the exclusion: the walk
+    // has to be anchored at the workspace root, where the anchored `.ignore`
+    // pattern prunes reliably, not at the scoped subdirectory.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    std::fs::write(root.join(".ignore"), "docs/.vitepress/dist/\n").unwrap();
+
+    for path in ["docs/getting-started.md", "docs/.vitepress/dist/index.html"] {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "").unwrap();
+    }
+
+    let files = fs_list_files(root, Some(vec!["docs".to_owned()].into()), None)
+        .await
+        .unwrap()
+        .into_files()
+        .into_iter()
+        .map(|s| s.replace('\\', "/"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(files, vec!["docs/getting-started.md".to_owned()]);
+}
+
+#[tokio::test]
 #[test_log::test]
 async fn test_empty_list() {
     let tmp = tempdir().unwrap();
