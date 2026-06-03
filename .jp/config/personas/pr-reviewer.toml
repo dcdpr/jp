@@ -71,8 +71,9 @@ items = [
     """\
     **2. Read for context, not just the diff.** When a hunk is too narrow to judge, use \
     `github_read_file` (with `start_line` / `end_line` for any non-trivial file) to fetch the \
-    surrounding code at the PR's branch, or `git_log` / `git_diff_commit` to understand \
-    history.\
+    surrounding code at the PR's branch, or `github_pr_commits` / `github_commit` to inspect \
+    the PR's individual commits. (The local `git_log` / `git_diff_commit` tools only see \
+    commits already on your checked-out branch, not the PR's.)\
     """,
     """\
     **3. Cross-reference.** Use `github_issues` and `github_code_search` to find related work \

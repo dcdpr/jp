@@ -71,11 +71,22 @@ mod github_issue_or_pr_redirect {
     }
 
     #[test]
+    fn pull_commits_url_suggests_github_pr_commits() {
+        // `/pull/N/commits` is the commits tab and routes to the dedicated
+        // commit-list tool.
+        let msg = redirect("https://github.com/rust-lang/rust/pull/12345/commits").unwrap();
+        assert!(msg.contains("`github_pr_commits`"));
+        assert!(!msg.contains("`github_pulls`"));
+        assert!(msg.contains(r#""repository": "rust-lang/rust""#));
+        assert!(msg.contains(r#""number": 12345"#));
+    }
+
+    #[test]
     fn pull_other_subpaths_fall_back_to_github_pulls() {
-        // `/commits`, `/checks` etc. don't have dedicated tools — the
+        // `/checks`, `/conflicts` etc. don't have dedicated tools — the
         // metadata+conversation answer is the closest fit, so the redirect
         // keeps them on `github_pulls`.
-        let msg = redirect("https://github.com/foo/bar/pull/42/commits").unwrap();
+        let msg = redirect("https://github.com/foo/bar/pull/42/checks").unwrap();
         assert!(msg.contains("`github_pulls`"));
         assert!(!msg.contains("`github_pr_diff`"));
     }

@@ -3,19 +3,23 @@ use crate::{
     util::{ToolResult, unknown_tool},
 };
 
+mod commit;
 mod create_issue_bug;
 mod create_issue_enhancement;
 mod create_issue_rfd_tracking;
 mod issues;
+mod pr_commits;
 mod pr_diff;
 mod pulls;
 mod repo;
 mod review;
 
+use commit::github_commit;
 use create_issue_bug::github_create_issue_bug;
 use create_issue_enhancement::github_create_issue_enhancement;
 use create_issue_rfd_tracking::github_create_issue_rfd_tracking;
 use issues::github_issues;
+use pr_commits::github_pr_commits;
 use pr_diff::github_pr_diff;
 use pulls::github_pulls;
 use repo::{github_code_search, github_list_files, github_read_file};
@@ -122,6 +126,19 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         "pr_diff" => github_pr_diff(
             t.opt("repository")?,
             t.req("number")?,
+            t.opt("files")?,
+            t.opt("page")?,
+        )
+        .await
+        .map(Into::into),
+
+        "pr_commits" => github_pr_commits(t.opt("repository")?, t.req("number")?, t.opt("page")?)
+            .await
+            .map(Into::into),
+
+        "commit" => github_commit(
+            t.opt("repository")?,
+            t.req("ref")?,
             t.opt("files")?,
             t.opt("page")?,
         )

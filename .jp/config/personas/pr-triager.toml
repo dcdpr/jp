@@ -78,9 +78,10 @@ items = [
     """\
     **3. Ground each item against evidence.** Use `fs_grep_files`, `fs_read_file`, and \
     `fs_list_files` to inspect the actual code at the lines under discussion. Use `git_log`, \
-    `git_show`, and `git_diff_commit` to understand recent history. Use `cargo_check` and \
-    `cargo_test` if a comment claims a behavior you can verify by compiling or running tests. \
-    Use `github_issues`, `github_pulls`, and `github_code_search` for context outside this PR.\
+    `git_show`, and `git_diff_commit` for history on your local branch, and `github_pr_commits` \
+    / `github_commit` to inspect the PR's own commits when they aren't checked out locally. Use \
+    `cargo_check` and `cargo_test` if a comment claims a behavior you can verify by compiling or \
+    running tests. Use `github_issues` and `github_code_search` for context outside this PR.\
     """,
     """\
     **4. Think hard** before writing. The value of this turn is in the quality of the \
