@@ -324,7 +324,8 @@ pub struct EnvRule {
 /// Failure reasons for a filesystem access check.
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum FsAccessError {
-    /// The requested path is absolute; tool calls must be workspace-relative.
+    /// The requested path is absolute or rooted; tool calls must be
+    /// workspace-relative.
     #[error("absolute paths are not permitted: {0}")]
     Absolute(Utf8PathBuf),
 
@@ -405,9 +406,15 @@ impl crate::Context {
         granted: fn(&FsRule) -> bool,
     ) -> Result<Utf8PathBuf, FsAccessError> {
         // Pre-canonical invariant: the tool may only express workspace-relative
-        // paths. Reject absolute paths and `..`-escapes before any I/O so the
-        // LLM's expressible reach is decoupled from the on-disk layout.
-        if input.is_absolute() {
+        // paths. Reject absolute and rooted paths and `..`-escapes before any
+        // I/O so the LLM's expressible reach is decoupled from the on-disk
+        // layout.
+        //
+        // `has_root` catches inputs that `is_absolute` misses on Windows, where
+        // a leading-slash path like `/etc/passwd` is rooted but not absolute (a
+        // Windows absolute path needs a drive prefix). Both are non-relative
+        // and must be rejected on every platform.
+        if input.is_absolute() || input.has_root() {
             return Err(FsAccessError::Absolute(input.to_owned()));
         }
         let lexical =
