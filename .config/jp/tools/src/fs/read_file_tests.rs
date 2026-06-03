@@ -17,27 +17,25 @@ async fn test_fs_read_file() {
             file_contents: "foo\nbar\nbaz\n".to_owned(),
             start_line: None,
             end_line: None,
-            expected: "```txt\nfoo\nbar\nbaz\n\n```\n".to_owned(),
+            expected: "```txt\n1: foo\n2: bar\n3: baz\n4: \n```\n".to_owned(),
         }),
         ("start line", TestCase {
             file_contents: "foo\nbar\nbaz\n".to_owned(),
             start_line: Some(2),
             end_line: None,
-            expected: "```txt\n... (starting from line #2) ...\nbar\nbaz\n\n```\n".to_owned(),
+            expected: "```txt\n2: bar\n3: baz\n4: \n```\n".to_owned(),
         }),
         ("end line", TestCase {
             file_contents: "foo\nbar\nbaz\n".to_owned(),
             start_line: None,
             end_line: Some(2),
-            expected: "```txt\nfoo\nbar\n... (truncated after line #2) ...\n```\n".to_owned(),
+            expected: "```txt\n1: foo\n2: bar\n... (truncated after line #2) ...\n```\n".to_owned(),
         }),
         ("start and end line", TestCase {
             file_contents: "foo\nbar\nbaz\n\n".to_owned(),
             start_line: Some(2),
             end_line: Some(2),
-            expected: "```txt\n... (starting from line #2) ...\nbar\n... (truncated after line \
-                       #2) ...\n```\n"
-                .to_owned(),
+            expected: "```txt\n2: bar\n... (truncated after line #2) ...\n```\n".to_owned(),
         }),
     ];
 
