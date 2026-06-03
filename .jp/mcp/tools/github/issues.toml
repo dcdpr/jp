@@ -4,7 +4,7 @@ run = "unattended"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Find one or more issues in a GitHub repository."
+summary = "Find one or more issues in a GitHub repository. Defaults to dcdpr/jp."
 
 examples = """
 List open issues in the current project's repo:
