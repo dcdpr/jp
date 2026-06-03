@@ -1006,6 +1006,11 @@ fn map_event(
 ) -> Vec<std::result::Result<Event, StreamError>> {
     use types::Event::*;
 
+    trace!(
+        event = serde_json::to_string(&event).unwrap_or_default(),
+        "Received event from OpenAI API."
+    );
+
     #[expect(clippy::cast_possible_truncation)]
     match event {
         // We emit an empty message first, because sometimes the API returns

@@ -133,12 +133,26 @@ fn map_event(
 ) -> Vec<Event> {
     let ChatMessageResponse { message, done, .. } = event;
 
+    // ollama-rs does not derive `Serialize` on its response type, so we record
+    // the salient fields individually rather than the whole event as JSON. Tool
+    // calls are serialized in full (name + arguments) so a stalled or
+    // unexpected call is never left to guesswork.
     trace!(
         content = message.content,
         thinking = message.thinking,
-        tool_calls = message.tool_calls.len(),
+        tool_calls = serde_json::to_string(
+            &message
+                .tool_calls
+                .iter()
+                .map(|tc| serde_json::json!({
+                    "name": tc.function.name.clone(),
+                    "arguments": tc.function.arguments.clone(),
+                }))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap_or_default(),
         done,
-        "Ollama stream chunk."
+        "Received event from Ollama API."
     );
 
     let mut events = Vec::new();

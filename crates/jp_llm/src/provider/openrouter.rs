@@ -292,6 +292,11 @@ fn map_completion(
     v: OpenRouterChunk,
     state: &mut AggregationState,
 ) -> Vec<std::result::Result<Event, StreamError>> {
+    trace!(
+        event = serde_json::to_string(&v).unwrap_or_default(),
+        "Received event from OpenRouter API."
+    );
+
     v.choices
         .into_iter()
         .flat_map(|v| map_event(v, state))
