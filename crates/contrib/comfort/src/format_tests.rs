@@ -7,7 +7,7 @@
 use indoc::indoc;
 use pretty_assertions::assert_eq;
 
-use super::{format_source, reflow_markdown, reflow_paragraph};
+use super::{format_markdown_canonical, format_source, reflow_markdown, reflow_paragraph};
 
 // ---------------------------------------------------------------------------
 // reflow_paragraph: sentence splitting + width wrapping
@@ -94,6 +94,34 @@ fn paragraph_with_trailing_ref_link_defs_reflows_only_the_paragraph() {
         [baz]: qux
     "};
     assert_eq!(reflow_markdown(body, 0), expected);
+}
+
+#[test]
+fn canonical_block_quote_blank_lines_have_no_trailing_whitespace() {
+    // Regression: comrak's CommonMark formatter writes the `> ` block-quote
+    // prefix on blank lines, leaving `> ` with trailing whitespace that git
+    // and editors flag. The canonical pass must strip it.
+    let body = indoc! {"
+        > First sentence. Second sentence here.
+        >
+        > - Item one. More detail.
+    "};
+    let expected = indoc! {"
+        > First sentence.
+        > Second sentence here.
+        >
+        > - Item one.
+        >   More detail.
+    "};
+    assert_eq!(format_markdown_canonical(body, 0), expected);
+}
+
+#[test]
+fn canonical_preserves_marker_only_line_inside_code_block() {
+    // A `> ` line inside a fenced code block is literal sample content, not a
+    // generated block-quote prefix, so its trailing space must survive.
+    let body = concat!("```\n", "> \n", "```\n");
+    assert_eq!(format_markdown_canonical(body, 0), body);
 }
 
 #[test]

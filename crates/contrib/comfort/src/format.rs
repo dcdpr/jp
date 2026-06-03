@@ -237,6 +237,12 @@ fn canonicalize_markdown(body: &str) -> Option<String> {
         return None;
     }
 
+    // Comrak writes the active line prefix (`> ` for block quotes and alerts,
+    // indentation for list items and footnotes) on blank lines too, leaving
+    // trailing whitespace such as `> ` or `   `. Strip it before handing the
+    // text downstream.
+    let canonical = trim_blank_prefix_lines(&canonical);
+
     // Comrak's formatter appends a trailing newline unconditionally;
     // normalise to match the input's convention so the caller (block
     // reassembly for `///` blocks, file writes for `.md` files) sees a
@@ -248,6 +254,80 @@ fn canonicalize_markdown(body: &str) -> Option<String> {
     };
 
     Some(canonical)
+}
+
+/// Trim trailing whitespace from blank lines that carry only block-quote (`>`)
+/// markers or indentation, an artifact of comrak emitting the active line
+/// prefix on blank lines.
+///
+/// Lines inside code blocks and HTML blocks are left alone: there a
+/// `>`-and-spaces line is literal content (e.g. a markdown sample), not a
+/// generated prefix.
+fn trim_blank_prefix_lines(text: &str) -> String {
+    if !text.split('\n').any(is_blank_prefix_line) {
+        return text.to_owned();
+    }
+
+    let arena = Arena::new();
+    let options = comrak_options();
+    let root = comrak::parse_document(&arena, text, &options);
+    let line_starts = line_start_offsets(text);
+
+    let mut verbatim: Vec<Range<usize>> = Vec::new();
+    collect_verbatim_block_ranges(root, text, &line_starts, &mut verbatim);
+
+    let mut out = String::with_capacity(text.len());
+    let mut byte_pos = 0_usize;
+    for (i, line) in text.split('\n').enumerate() {
+        if i > 0 {
+            out.push('\n');
+        }
+        let line_start = byte_pos;
+        let line_end = byte_pos + line.len();
+        byte_pos = line_end + 1;
+
+        let in_verbatim = verbatim
+            .iter()
+            .any(|r| line_start >= r.start && line_end <= r.end);
+        if in_verbatim || !is_blank_prefix_line(line) {
+            out.push_str(line);
+        } else {
+            out.push_str(line.trim_end());
+        }
+    }
+    out
+}
+
+/// A line that has trailing whitespace and contains nothing but block-quote
+/// markers and whitespace, i.e. a blank line that comrak decorated with a line
+/// prefix.
+fn is_blank_prefix_line(line: &str) -> bool {
+    line != line.trim_end() && line.chars().all(|c| c == '>' || c == ' ' || c == '\t')
+}
+
+/// Walk the AST for [`CodeBlock`] and [`HtmlBlock`] ranges, where line content
+/// is literal and must not be trimmed.
+///
+/// [`CodeBlock`]: NodeValue::CodeBlock
+/// [`HtmlBlock`]: NodeValue::HtmlBlock
+fn collect_verbatim_block_ranges<'a>(
+    node: &'a AstNode<'a>,
+    text: &str,
+    line_starts: &[usize],
+    out: &mut Vec<Range<usize>>,
+) {
+    let data = node.data();
+    if matches!(
+        data.value,
+        NodeValue::CodeBlock(_) | NodeValue::HtmlBlock(_)
+    ) && let Some(range) = sourcepos_to_byte_range(line_starts, text.len(), &data.sourcepos)
+    {
+        out.push(range);
+        return;
+    }
+    for child in node.children() {
+        collect_verbatim_block_ranges(child, text, line_starts, out);
+    }
 }
 
 /// Re-parse `text` to find markdown tables, then rewrite each one with column
