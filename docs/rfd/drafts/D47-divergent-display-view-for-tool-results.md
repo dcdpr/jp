@@ -1,4 +1,4 @@
-# RFD D46: Divergent Display View for Tool Results
+# RFD D47: Divergent Display View for Tool Results
 
 - **Status**: Draft
 - **Category**: Design
