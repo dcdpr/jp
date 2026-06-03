@@ -66,14 +66,16 @@ pub(crate) async fn fs_grep_files(
     if matches.is_empty() {
         Ok("No matches found. Broaden your search to see more.".to_owned())
     } else if lines > 200 && context.is_some() {
-        Box::pin(fs_grep_files(root, access, pattern, None, paths, extensions))
-            .await
-            .map(|v| {
-                format!(
-                    "{v}\n[Hidden contextual lines due to excessive number of lines returned. \
-                     Narrow down your search to see more.]"
-                )
-            })
+        Box::pin(fs_grep_files(
+            root, access, pattern, None, paths, extensions,
+        ))
+        .await
+        .map(|v| {
+            format!(
+                "{v}\n[Hidden contextual lines due to excessive number of lines returned. Narrow \
+                 down your search to see more.]"
+            )
+        })
     } else if lines > 100 {
         Ok(indoc::formatdoc! {"
             {}
