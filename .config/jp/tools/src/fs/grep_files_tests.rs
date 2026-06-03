@@ -28,7 +28,8 @@ async fn grep_with_restricted_policy_skips_ungranted_files() {
         None,
     )
     .await
-    .unwrap();
+    .unwrap()
+    .replace('\\', "/");
 
     assert!(matches.contains("src/lib.rs"), "got: {matches}");
     assert!(

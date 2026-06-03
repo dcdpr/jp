@@ -90,24 +90,29 @@ impl AccessPolicy {
         !self.fs.is_empty()
     }
 
-    /// The most specific fs rule matching a workspace-relative lexical path,
-    /// breaking ties toward the rule declared last.
+    /// The most specific fs rule matching a workspace-relative path, breaking
+    /// ties toward the rule declared last.
+    ///
+    /// `relative` is the resolved match form: the canonical workspace-relative
+    /// path for in-workspace targets, the lexical mount-relative path for
+    /// external ones.
     #[must_use]
-    pub fn matching_fs_rule(&self, lexical: &Utf8Path) -> Option<&FsRule> {
-        find_matching_rule(&self.fs, lexical)
+    pub fn matching_fs_rule(&self, relative: &Utf8Path) -> Option<&FsRule> {
+        find_matching_rule(&self.fs, relative)
     }
 
-    /// Whether the policy permits `capability` on a workspace-relative lexical
-    /// path.
+    /// Whether the policy permits `capability` on a workspace-relative path.
     ///
+    /// `relative` is the resolved match form (canonical for in-workspace
+    /// targets, lexical mount-relative for external ones).
     /// Unrestricted policies permit everything; restricted policies permit only
     /// what a matching rule grants (default-deny).
     #[must_use]
-    pub fn permits(&self, capability: Capability, lexical: &Utf8Path) -> bool {
+    pub fn permits(&self, capability: Capability, relative: &Utf8Path) -> bool {
         if !self.is_restricted() {
             return true;
         }
-        match self.matching_fs_rule(lexical) {
+        match self.matching_fs_rule(relative) {
             Some(rule) => match capability {
                 Capability::Read => rule.read(),
                 Capability::Create => rule.create(),

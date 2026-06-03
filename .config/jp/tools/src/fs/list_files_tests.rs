@@ -19,10 +19,13 @@ async fn restricted_policy_filters_listing_to_readable() {
         fs: vec![FsRule::new("src").with_read(true)],
         ..AccessPolicy::default()
     };
-    let files = fs_list_files(ws.path(), Some(&policy), None, None)
+    let files: Vec<String> = fs_list_files(ws.path(), Some(&policy), None, None)
         .await
         .unwrap()
-        .into_files();
+        .into_files()
+        .into_iter()
+        .map(|f| f.replace('\\', "/"))
+        .collect();
 
     assert!(files.iter().any(|f| f == "src/lib.rs"), "got: {files:?}");
     assert!(
