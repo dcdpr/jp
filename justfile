@@ -256,12 +256,15 @@ pr-triage NNN *ARGS: _install-jp
     fi
 
 # Review the current diff with revdiff and send the annotations back to the
-# active jp conversation. ARGS are forwarded to revdiff (see `revdiff --help`):
+# active jp conversation. ARGS before a `--` are forwarded to revdiff (see
+# `revdiff --help`); ARGS after a `--` are forwarded to the `jp query` that
+# receives the annotations:
 #
-#   just review                  # uncommitted changes (default)
-#   just review HEAD~3            # last 3 commits
-#   just review main              # current branch vs main
-#   just review --staged          # staged changes
+#   just review                     # uncommitted changes (default)
+#   just review HEAD~3              # last 3 commits
+#   just review main                # current branch vs main
+#   just review --staged            # staged changes
+#   just review --staged -- --edit  # staged changes; edit the jp prompt
 #
 # Exits silently if revdiff produces no annotations (e.g. you quit with `q`
 # without leaving notes, or `Q` to discard). The matching `git diff` is
@@ -280,6 +283,27 @@ review *ARGS: _install-jp
         echo "https://github.com/umputun/revdiff/releases for binaries." >&2
         exit 1
     fi
+
+    # Split ARGS at the first `--`: everything before it is for revdiff,
+    # everything after it is for the `jp query` below. Rotating the
+    # positional params leaves revdiff's args quoted in "$@" (so e.g.
+    # `--include '*.rs'` survives), while jp args collect into a string
+    # expanded unquoted, like the other recipes.
+    jp_args=""
+    found_sep=false
+    n=$#
+    while [ "$n" -gt 0 ]; do
+        n=$((n - 1))
+        arg="$1"
+        shift
+        if [ "$found_sep" = true ]; then
+            jp_args="${jp_args:+$jp_args }$arg"
+        elif [ "$arg" = "--" ]; then
+            found_sep=true
+        else
+            set -- "$@" "$arg"
+        fi
+    done
 
     set +e
     annotations=$(mktemp)
@@ -324,7 +348,7 @@ review *ARGS: _install-jp
     re-generation, no unrelated cleanup."
 
     printf '%s\n\n%s\n' "$preamble" "$annotations" \
-        | jp query --attach "$diff_attach"
+        | jp query --attach "$diff_attach" $jp_args
 
 # Review an RFD. Accepts a permanent number (41, 041) or a draft ID (D01).
 #
