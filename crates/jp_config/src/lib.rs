@@ -488,7 +488,8 @@ impl AppConfig {
 
 impl Validator for AppConfig {
     fn validate(&self) -> Result<(), ConfigError> {
-        self.assistant.validate()
+        self.assistant.validate()?;
+        self.conversation.validate()
     }
 }
 

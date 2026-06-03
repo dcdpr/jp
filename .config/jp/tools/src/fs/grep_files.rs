@@ -2,12 +2,14 @@ use camino::{Utf8Path, Utf8PathBuf};
 use grep_printer::StandardBuilder;
 use grep_regex::RegexMatcher;
 use grep_searcher::SearcherBuilder;
+use jp_tool::AccessPolicy;
 
 use super::fs_list_files;
 use crate::{Error, util::OneOrMany};
 
 pub(crate) async fn fs_grep_files(
     root: &Utf8Path,
+    access: Option<&AccessPolicy>,
     mut pattern: String,
     context: Option<usize>,
     paths: Option<OneOrMany<String>>,
@@ -23,8 +25,9 @@ pub(crate) async fn fs_grep_files(
     // `paths` carries the same scoping semantics as `fs_list_files`'s
     // prefixes: `None` searches the whole workspace, `Some([])` searches
     // nothing, and `""`/`.` mean the workspace root. Escape attempts surface
-    // as a hard error from the shared path validation.
-    let files: Vec<Utf8PathBuf> = fs_list_files(root, paths.clone(), extensions.clone())
+    // as a hard error from the shared path validation. The access policy is
+    // threaded through so an approved external mount can be searched.
+    let files: Vec<Utf8PathBuf> = fs_list_files(root, access, paths.clone(), extensions.clone())
         .await?
         .into_files()
         .into_iter()
@@ -63,14 +66,16 @@ pub(crate) async fn fs_grep_files(
     if matches.is_empty() {
         Ok("No matches found. Broaden your search to see more.".to_owned())
     } else if lines > 200 && context.is_some() {
-        Box::pin(fs_grep_files(root, pattern, None, paths, extensions))
-            .await
-            .map(|v| {
-                format!(
-                    "{v}\n[Hidden contextual lines due to excessive number of lines returned. \
-                     Narrow down your search to see more.]"
-                )
-            })
+        Box::pin(fs_grep_files(
+            root, access, pattern, None, paths, extensions,
+        ))
+        .await
+        .map(|v| {
+            format!(
+                "{v}\n[Hidden contextual lines due to excessive number of lines returned. Narrow \
+                 down your search to see more.]"
+            )
+        })
     } else if lines > 100 {
         Ok(indoc::formatdoc! {"
             {}

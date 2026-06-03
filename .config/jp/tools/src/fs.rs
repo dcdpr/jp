@@ -22,14 +22,19 @@ use read_file::fs_read_file;
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     match t.name.trim_start_matches("fs_") {
-        "list_files" => fs_list_files(&ctx.root, t.opt("prefixes")?, t.opt("extensions")?)
-            .await
-            .and_then(to_xml)
-            .map(Into::into),
+        "list_files" => fs_list_files(
+            &ctx.root,
+            ctx.access.as_ref(),
+            t.opt("prefixes")?,
+            t.opt("extensions")?,
+        )
+        .await
+        .and_then(to_xml)
+        .map(Into::into),
 
         "read_file" => {
             fs_read_file(
-                &ctx.root,
+                &ctx,
                 t.req("path")?,
                 t.opt("start_line")?,
                 t.opt("end_line")?,
@@ -39,6 +44,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
         "grep_files" => fs_grep_files(
             &ctx.root,
+            ctx.access.as_ref(),
             t.req("pattern")?,
             t.opt("context")?,
             t.opt("paths")?,
@@ -54,6 +60,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         // leaving only the documentation prose.
         "grep_user_docs" => fs_grep_files(
             &ctx.root,
+            ctx.access.as_ref(),
             t.req("pattern")?,
             t.opt("context")?,
             Some(vec!["docs".to_owned()].into()),
@@ -64,10 +71,19 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
         "create_file" => fs_create_file(ctx, &t.answers, t.req("path")?, t.opt("content")?).await,
 
-        "delete_file" => fs_delete_file(&ctx.root, &t.answers, t.req("path")?).await,
+        "delete_file" => {
+            fs_delete_file(&ctx.root, ctx.access.as_ref(), &t.answers, t.req("path")?).await
+        }
 
         "move_file" => {
-            fs_move_file(&ctx.root, &t.answers, t.req("source")?, t.req("target")?).await
+            fs_move_file(
+                &ctx.root,
+                ctx.access.as_ref(),
+                &t.answers,
+                t.req("source")?,
+                t.req("target")?,
+            )
+            .await
         }
 
         "modify_file" => {

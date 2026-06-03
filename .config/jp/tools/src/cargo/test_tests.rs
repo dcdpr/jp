@@ -13,6 +13,7 @@ fn test_cargo_test_success() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
@@ -32,6 +33,7 @@ fn test_cargo_test_with_failure() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let stdout = r#"{"type":"test","event":"failed","name":"my_crate$tests::my_test","stdout":"assertion failed"}"#;
@@ -104,6 +106,7 @@ fn test_backtrace_disabled_by_default() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
@@ -126,6 +129,7 @@ fn test_backtrace_enabled() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;

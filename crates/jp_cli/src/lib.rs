@@ -1,3 +1,4 @@
+mod access;
 mod cmd;
 mod config_pipeline;
 mod ctx;

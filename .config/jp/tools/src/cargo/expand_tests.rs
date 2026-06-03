@@ -11,6 +11,7 @@ fn test_cargo_expand_success() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let stdout = indoc::indoc! { r#"

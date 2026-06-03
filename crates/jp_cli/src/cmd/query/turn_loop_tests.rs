@@ -54,7 +54,11 @@ use crate::{
 };
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
-    Box::new(TerminalExecutorSource::new(BuiltinExecutors::new(), &[]))
+    Box::new(TerminalExecutorSource::new(
+        BuiltinExecutors::new(),
+        &[],
+        std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
+    ))
 }
 
 /// A mock provider that returns different responses on each call.
@@ -1077,6 +1081,7 @@ async fn test_merged_stream_exits_after_tool_response() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1185,6 +1190,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1324,6 +1330,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1470,6 +1477,7 @@ async fn test_tool_call_with_run_mode_unattended() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1604,6 +1612,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1754,6 +1763,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
         // tool_unattended runs automatically
         config
@@ -1773,6 +1783,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1956,6 +1967,7 @@ async fn test_tool_call_returns_error() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2846,6 +2858,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 style: fn_call_style.clone(),
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
         config
             .conversation
@@ -2864,6 +2877,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 style: fn_call_style,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3032,6 +3046,7 @@ async fn test_single_tool_call_rendered_with_args() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3272,6 +3287,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
             })
             .collect(),
         options: IndexMap::default(),
+        access: None,
     }
 }
 
@@ -3569,6 +3585,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3964,6 +3981,7 @@ async fn test_retry_counter_resets_on_successful_event() {
 /// approved + pre-resolved responses, so they appear in the original stream
 /// order.
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn test_unavailable_tool_before_approved_does_not_panic() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -3992,6 +4010,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
                 style: None,
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
+                access: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));

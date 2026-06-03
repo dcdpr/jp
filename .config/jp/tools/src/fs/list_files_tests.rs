@@ -6,6 +6,102 @@ use camino_tempfile::tempdir;
 use super::*;
 
 #[tokio::test]
+async fn restricted_policy_filters_listing_to_readable() {
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let ws = tempdir().unwrap();
+    std::fs::create_dir(ws.path().join("src")).unwrap();
+    std::fs::write(ws.path().join("src/lib.rs"), "").unwrap();
+    std::fs::write(ws.path().join("secret.txt"), "").unwrap();
+
+    // Only `src` is readable; a no-prefix listing must omit `secret.txt`.
+    let policy = AccessPolicy {
+        fs: vec![FsRule::new("src").with_read(true)],
+        ..AccessPolicy::default()
+    };
+    let files: Vec<String> = fs_list_files(ws.path(), Some(&policy), None, None)
+        .await
+        .unwrap()
+        .into_files()
+        .into_iter()
+        .map(|f| f.replace('\\', "/"))
+        .collect();
+
+    assert!(files.iter().any(|f| f == "src/lib.rs"), "got: {files:?}");
+    assert!(
+        !files.iter().any(|f| f == "secret.txt"),
+        "ungranted file leaked: {files:?}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn lists_files_under_approved_external_mount() {
+    use std::os::unix::fs::symlink;
+
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let ws = tempdir().unwrap();
+    let ext = tempdir().unwrap();
+    let ext_canon = ext.path().canonicalize_utf8().unwrap();
+    std::fs::write(ext_canon.join("a.rs"), "").unwrap();
+    std::fs::create_dir(ext_canon.join("sub")).unwrap();
+    std::fs::write(ext_canon.join("sub/b.rs"), "").unwrap();
+    symlink(ext.path(), ws.path().join("fork")).unwrap();
+
+    let policy = AccessPolicy {
+        fs: vec![
+            FsRule::new("fork")
+                .with_external(true)
+                .with_approved_target(Some(ext_canon))
+                .with_read(true),
+        ],
+        ..AccessPolicy::default()
+    };
+    let files = fs_list_files(
+        ws.path(),
+        Some(&policy),
+        Some(vec!["fork".to_owned()].into()),
+        None,
+    )
+    .await
+    .unwrap()
+    .into_files();
+
+    assert!(files.iter().any(|f| f == "fork/a.rs"), "got: {files:?}");
+    assert!(files.iter().any(|f| f == "fork/sub/b.rs"), "got: {files:?}");
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn listing_external_mount_without_grant_is_rejected() {
+    use std::os::unix::fs::symlink;
+
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let ws = tempdir().unwrap();
+    let ext = tempdir().unwrap();
+    std::fs::write(ext.path().canonicalize_utf8().unwrap().join("a.rs"), "").unwrap();
+    symlink(ext.path(), ws.path().join("fork")).unwrap();
+
+    // Policy grants workspace read but no external mount: the symlink escape is
+    // rejected.
+    let policy = AccessPolicy {
+        fs: vec![FsRule::new("").with_read(true)],
+        ..AccessPolicy::default()
+    };
+    let result = fs_list_files(
+        ws.path(),
+        Some(&policy),
+        Some(vec!["fork".to_owned()].into()),
+        None,
+    )
+    .await;
+
+    assert!(result.is_err(), "expected escape rejection");
+}
+
+#[tokio::test]
 #[test_log::test]
 async fn test_list_files() {
     struct TestCase {
@@ -99,7 +195,9 @@ async fn test_list_files() {
         let extensions =
             (!extensions.is_empty()).then_some(extensions.into_iter().map(str::to_owned).collect());
 
-        let files = fs_list_files(root, prefixes, extensions).await.unwrap();
+        let files = fs_list_files(root, None, prefixes, extensions)
+            .await
+            .unwrap();
 
         assert_eq!(
             files
@@ -123,7 +221,7 @@ async fn dot_prefix_lists_workspace_root() {
     std::fs::write(root.join("a.txt"), "").unwrap();
     std::fs::write(root.join("b.txt"), "").unwrap();
 
-    let files = fs_list_files(root, Some(vec![".".to_owned()].into()), None)
+    let files = fs_list_files(root, None, Some(vec![".".to_owned()].into()), None)
         .await
         .unwrap();
 
@@ -150,7 +248,7 @@ async fn subdir_scope_respects_root_ignore() {
         std::fs::write(path, "").unwrap();
     }
 
-    let files = fs_list_files(root, Some(vec!["docs".to_owned()].into()), None)
+    let files = fs_list_files(root, None, Some(vec!["docs".to_owned()].into()), None)
         .await
         .unwrap()
         .into_files()
@@ -166,7 +264,7 @@ async fn subdir_scope_respects_root_ignore() {
 async fn test_empty_list() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let files = fs_list_files(root, Some(vec!["foo".to_owned()].into()), None)
+    let files = fs_list_files(root, None, Some(vec!["foo".to_owned()].into()), None)
         .await
         .unwrap();
 

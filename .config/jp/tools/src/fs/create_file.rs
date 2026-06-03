@@ -5,10 +5,10 @@ use std::{
 
 use crossterm::style::Stylize;
 use jp_md::format::Formatter;
-use jp_tool::{Outcome, Question};
+use jp_tool::{Capability, Outcome, Question};
 use serde_json::{Map, Value};
 
-use super::utils::{EntryKind, entry_kind, resolve_workspace_entry};
+use super::utils::{EntryKind, authorize, entry_kind, resolve_workspace_entry};
 use crate::{
     Context,
     util::{ToolResult, error, fail},
@@ -20,7 +20,7 @@ pub(crate) async fn fs_create_file(
     path: String,
     content: Option<String>,
 ) -> ToolResult {
-    let resolved = match resolve_workspace_entry(&ctx.root, &path) {
+    let resolved = match resolve_workspace_entry(&ctx.root, &path, ctx.access.as_ref()) {
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
@@ -42,7 +42,19 @@ pub(crate) async fn fs_create_file(
     }
 
     let absolute_path = resolved.absolute;
-    match entry_kind(&absolute_path)? {
+    let kind = entry_kind(&absolute_path)?;
+
+    // Writing a new file needs `create`; overwriting an existing one needs
+    // `update`. (Dir/symlink/other are rejected below regardless.)
+    let capability = match kind {
+        Some(EntryKind::File) => Capability::Update,
+        _ => Capability::Create,
+    };
+    if let Err(msg) = authorize(ctx.access.as_ref(), capability, &resolved.relative) {
+        return error(msg);
+    }
+
+    match kind {
         Some(EntryKind::Dir) => return error("Path is an existing directory."),
         // Refuse to write through a symlink. `resolve_workspace_entry` left
         // the final component intact, so an existing symlink shows up here

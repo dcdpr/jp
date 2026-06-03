@@ -3,7 +3,7 @@
 use std::{fmt, str::FromStr};
 
 use indexmap::IndexMap;
-use schematic::{Config, ConfigEnum, PartialConfig as _};
+use schematic::{Config, ConfigEnum, ConfigError, HandlerError, PartialConfig as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tracing::warn;
@@ -14,14 +14,19 @@ pub use crate::types::command::{
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     assistant::PartialAssistantConfig,
-    conversation::tool::style::{DisplayStyleConfig, PartialDisplayStyleConfig},
+    conversation::tool::{
+        access::{AccessConfig, PartialAccessConfig},
+        style::{DisplayStyleConfig, PartialDisplayStyleConfig},
+    },
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_vec},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::json_value::JsonValue,
     util::merge_nested_indexmap,
+    validate::Validator,
 };
 
+pub mod access;
 pub mod style;
 
 /// Tools configuration.
@@ -141,6 +146,39 @@ impl ToolsConfig {
     pub fn insert(&mut self, name: String, tool: ToolConfig) {
         self.tools.insert(name, tool);
     }
+}
+
+impl Validator for ToolsConfig {
+    /// Validate cross-field invariants on the tools configuration.
+    fn validate(&self) -> Result<(), ConfigError> {
+        reject_access_on_non_local_tools(self)
+    }
+}
+
+/// Reject `access` on tools whose finalized source is `builtin` or `mcp`.
+///
+/// `access` is the local-subprocess contract: it is serialized into the
+/// `Context` that local tool binaries self-check.
+/// Builtin tools run in-process and MCP tools run on external servers, so
+/// neither consumes `access` — accepting it there would create false
+/// confidence in a security-relevant field.
+fn reject_access_on_non_local_tools(tools: &ToolsConfig) -> Result<(), ConfigError> {
+    for (name, tool) in tools.iter() {
+        if tool.access().is_none() {
+            continue;
+        }
+        let kind = match tool.source() {
+            ToolSource::Local { .. } => continue,
+            ToolSource::Builtin { .. } => "builtin",
+            ToolSource::Mcp { .. } => "mcp",
+        };
+        return Err(HandlerError::new(format!(
+            "conversation.tools.{name}: `access` is only supported on local tools, but '{name}' \
+             is a {kind} tool"
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 /// Tools defaults configuration.
@@ -367,6 +405,15 @@ pub struct ToolConfig {
     /// Unknown options are silently forwarded.
     #[setting(nested, merge = merge_nested_indexmap)]
     pub options: IndexMap<String, JsonValue>,
+
+    /// Filesystem access grants for the tool.
+    ///
+    /// Declares which workspace-relative paths the tool may touch and what it
+    /// may do there.
+    /// When absent, the tool keeps unrestricted (but workspace-confined)
+    /// access; declaring any rule switches the tool to default-deny.
+    #[setting(nested)]
+    pub access: Option<AccessConfig>,
 }
 
 impl AssignKeyValue for PartialToolConfig {
@@ -386,6 +433,7 @@ impl AssignKeyValue for PartialToolConfig {
             _ if kv.p("style") => self.style.assign(kv)?,
             "questions" => self.questions = kv.try_object()?,
             _ if kv.p("options") => kv.assign_to_entry(&mut self.options)?,
+            _ if kv.p("access") => self.access.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -450,6 +498,7 @@ impl PartialConfigDelta for PartialToolConfig {
                     Some((name, next))
                 })
                 .collect(),
+            access: delta_opt_partial(self.access.as_ref(), next.access),
         }
     }
 }
@@ -484,6 +533,7 @@ impl ToPartial for ToolConfig {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
+            access: partial_opt_config(self.access.as_ref(), defaults.access),
         }
     }
 }
@@ -1100,6 +1150,12 @@ impl ToolConfigWithDefaults {
     #[must_use]
     pub const fn options(&self) -> &IndexMap<String, JsonValue> {
         &self.tool.options
+    }
+
+    /// Return the filesystem access grants for the tool, if declared.
+    #[must_use]
+    pub const fn access(&self) -> Option<&AccessConfig> {
+        self.tool.access.as_ref()
     }
 
     /// Return the question target for the given question ID.

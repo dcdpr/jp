@@ -1,21 +1,28 @@
 use std::fs;
 
 use camino::Utf8Path;
-use jp_tool::{Outcome, Question};
+use jp_tool::{AccessPolicy, Capability, Outcome, Question};
 use serde_json::{Map, Value};
 
-use super::utils::{EntryKind, ResolvedPath, entry_kind, is_file_dirty, resolve_workspace_entry};
+use super::utils::{
+    EntryKind, ResolvedPath, authorize, entry_kind, is_file_dirty, resolve_workspace_entry,
+};
 use crate::util::{ToolResult, error};
 
 pub(crate) async fn fs_delete_file(
     root: &Utf8Path,
+    access: Option<&AccessPolicy>,
     answers: &Map<String, Value>,
     path: String,
 ) -> ToolResult {
-    let resolved = match resolve_workspace_entry(root, &path) {
+    let resolved = match resolve_workspace_entry(root, &path, access) {
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
+
+    if let Err(msg) = authorize(access, Capability::Delete, &resolved.relative) {
+        return error(msg);
+    }
 
     match entry_kind(&resolved.absolute)? {
         None => return error("Path points to non-existing entry"),

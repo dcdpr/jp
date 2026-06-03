@@ -6,7 +6,7 @@ pub mod tool;
 
 use std::{fmt, str::FromStr};
 
-use schematic::{Config, Schematic};
+use schematic::{Config, ConfigError, Schematic};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -28,6 +28,7 @@ use crate::{
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opts},
     types::vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
+    validate::Validator,
 };
 
 /// Conversation-specific configuration.
@@ -78,6 +79,12 @@ pub struct ConversationConfig {
     /// - `previous` / `prev`: session's previously active conversation
     /// - `jp-c...`: a specific conversation ID
     pub default_id: Option<DefaultConversationId>,
+}
+
+impl Validator for ConversationConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.tools.validate()
+    }
 }
 
 impl AssignKeyValue for PartialConversationConfig {

@@ -15,6 +15,7 @@ fn ctx() -> (Utf8TempDir, Context) {
     let ctx = Context {
         root: dir.path().to_path_buf(),
         action: Action::Run,
+        access: None,
     };
     (dir, ctx)
 }
@@ -837,6 +838,7 @@ mod fs_modify_file {
             &Context {
                 root: ctx.root.clone(),
                 action: Action::Run,
+                access: None,
             },
             &Map::new(),
             &Map::new(),
@@ -946,6 +948,7 @@ mod fs_modify_file {
             &Context {
                 root: ctx.root.clone(),
                 action: Action::Run,
+                access: None,
             },
             &Map::new(),
             &Map::new(),
@@ -968,6 +971,7 @@ mod fs_modify_file {
             &Context {
                 root: ctx.root.clone(),
                 action: Action::Run,
+                access: None,
             },
             &answers("broad_replacement", false),
             &Map::new(),
@@ -1035,6 +1039,7 @@ mod fs_modify_file {
             &Context {
                 root: ctx.root.clone(),
                 action: Action::Run,
+                access: None,
             },
             &approved(),
             &Map::new(),
@@ -1059,6 +1064,7 @@ mod fs_modify_file {
             &Context {
                 root: ctx.root.clone(),
                 action: Action::Run,
+                access: None,
             },
             &rejected,
             &Map::new(),
@@ -1084,6 +1090,7 @@ mod fs_modify_file {
             &Context {
                 root: ctx.root.clone(),
                 action: Action::Run,
+                access: None,
             },
             &accepted,
             &Map::new(),

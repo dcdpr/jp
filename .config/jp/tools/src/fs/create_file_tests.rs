@@ -8,6 +8,7 @@ fn format_ctx(dir: &camino_tempfile::Utf8TempDir) -> Context {
     Context {
         root: dir.path().to_path_buf(),
         action: Action::FormatArguments,
+        access: None,
     }
 }
 
@@ -15,6 +16,7 @@ fn run_ctx(dir: &camino_tempfile::Utf8TempDir) -> Context {
     Context {
         root: dir.path().to_path_buf(),
         action: Action::Run,
+        access: None,
     }
 }
 

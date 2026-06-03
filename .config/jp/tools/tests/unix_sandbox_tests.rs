@@ -26,6 +26,7 @@ fn setup() -> (Utf8TempDir, Context) {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
     (dir, ctx)
 }

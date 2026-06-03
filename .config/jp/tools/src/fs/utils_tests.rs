@@ -115,14 +115,14 @@ mod resolve_workspace_path {
     #[test]
     fn rejects_absolute_path() {
         let dir = tempdir().unwrap();
-        let err = resolve_workspace_path(dir.path(), "/etc/passwd").unwrap_err();
+        let err = resolve_workspace_path(dir.path(), "/etc/passwd", None).unwrap_err();
         assert!(err.contains("relative"), "unexpected error: {err}");
     }
 
     #[test]
     fn rejects_escaping_parent_dir() {
         let dir = tempdir().unwrap();
-        let err = resolve_workspace_path(dir.path(), "../../etc/passwd").unwrap_err();
+        let err = resolve_workspace_path(dir.path(), "../../etc/passwd", None).unwrap_err();
         assert!(
             err.contains("escape the workspace"),
             "unexpected error: {err}"
@@ -133,7 +133,7 @@ mod resolve_workspace_path {
     fn rejects_mid_path_parent_dirs_that_still_escape() {
         let dir = tempdir().unwrap();
         // Cleans to `../etc/passwd` — leading `..` survives normalization.
-        let err = resolve_workspace_path(dir.path(), "foo/../../etc/passwd").unwrap_err();
+        let err = resolve_workspace_path(dir.path(), "foo/../../etc/passwd", None).unwrap_err();
         assert!(
             err.contains("escape the workspace"),
             "unexpected error: {err}"
@@ -147,7 +147,7 @@ mod resolve_workspace_path {
         std::fs::write(dir.path().join("target.rs"), "").unwrap();
 
         // `sub/../target.rs` cleans to `target.rs` — well within the workspace.
-        let resolved = resolve_workspace_path(dir.path(), "sub/../target.rs").unwrap();
+        let resolved = resolve_workspace_path(dir.path(), "sub/../target.rs", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("target.rs"));
     }
@@ -158,7 +158,7 @@ mod resolve_workspace_path {
         std::fs::create_dir_all(dir.path().join("a/b")).unwrap();
 
         // `a/b/../c.rs` cleans to `a/c.rs`.
-        let resolved = resolve_workspace_path(dir.path(), "a/b/../c.rs").unwrap();
+        let resolved = resolve_workspace_path(dir.path(), "a/b/../c.rs", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("a/c.rs"));
     }
@@ -166,7 +166,7 @@ mod resolve_workspace_path {
     #[test]
     fn rejects_empty_path() {
         let dir = tempdir().unwrap();
-        let err = resolve_workspace_path(dir.path(), "").unwrap_err();
+        let err = resolve_workspace_path(dir.path(), "", None).unwrap_err();
         assert!(err.contains("empty"), "unexpected error: {err}");
     }
 
@@ -174,7 +174,7 @@ mod resolve_workspace_path {
     fn rejects_oversized_component() {
         let dir = tempdir().unwrap();
         let long = "a".repeat(101);
-        let err = resolve_workspace_path(dir.path(), &long).unwrap_err();
+        let err = resolve_workspace_path(dir.path(), &long, None).unwrap_err();
         assert!(
             err.contains("less than 100 characters"),
             "unexpected error: {err}"
@@ -185,7 +185,7 @@ mod resolve_workspace_path {
     fn rejects_too_many_components() {
         let dir = tempdir().unwrap();
         let deep = vec!["a"; 21].join("/");
-        let err = resolve_workspace_path(dir.path(), &deep).unwrap_err();
+        let err = resolve_workspace_path(dir.path(), &deep, None).unwrap_err();
         assert!(
             err.contains("less than 20 components"),
             "unexpected error: {err}"
@@ -198,7 +198,7 @@ mod resolve_workspace_path {
         let file = dir.path().join("foo.rs");
         std::fs::write(&file, "").unwrap();
 
-        let resolved = resolve_workspace_path(dir.path(), "foo.rs").unwrap();
+        let resolved = resolve_workspace_path(dir.path(), "foo.rs", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("foo.rs"));
         // canonicalized absolute may differ from dir.path() if the temp dir
@@ -215,7 +215,7 @@ mod resolve_workspace_path {
     fn accepts_not_yet_existing_file_with_existing_parent() {
         let dir = tempdir().unwrap();
 
-        let resolved = resolve_workspace_path(dir.path(), "new_file.rs").unwrap();
+        let resolved = resolve_workspace_path(dir.path(), "new_file.rs", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("new_file.rs"));
         assert!(!resolved.absolute.exists());
@@ -228,7 +228,7 @@ mod resolve_workspace_path {
         std::fs::create_dir(dir.path().join("a")).unwrap();
         // dir/a exists; dir/a/b does not.
 
-        let resolved = resolve_workspace_path(dir.path(), "a/b/c.rs").unwrap();
+        let resolved = resolve_workspace_path(dir.path(), "a/b/c.rs", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("a/b/c.rs"));
     }
@@ -239,7 +239,7 @@ mod resolve_workspace_path {
         let file = dir.path().join("foo.rs");
         std::fs::write(&file, "").unwrap();
 
-        let resolved = resolve_workspace_path(dir.path(), "./foo.rs").unwrap();
+        let resolved = resolve_workspace_path(dir.path(), "./foo.rs", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("foo.rs"));
     }
@@ -261,7 +261,7 @@ mod resolve_workspace_path {
         )
         .unwrap();
 
-        let err = resolve_workspace_path(workspace.path(), "dangling").unwrap_err();
+        let err = resolve_workspace_path(workspace.path(), "dangling", None).unwrap_err();
         assert!(
             err.contains("symlink with a missing or non-workspace target"),
             "unexpected error: {err}"
@@ -278,7 +278,7 @@ mod resolve_workspace_path {
         )
         .unwrap();
 
-        let err = resolve_workspace_path(workspace.path(), "dangling/child.rs").unwrap_err();
+        let err = resolve_workspace_path(workspace.path(), "dangling/child.rs", None).unwrap_err();
         assert!(
             err.contains("symlink with a missing or non-workspace target"),
             "unexpected error: {err}"
@@ -300,7 +300,7 @@ mod resolve_workspace_path {
         )
         .unwrap();
 
-        let err = resolve_workspace_path(workspace.path(), "linkfile").unwrap_err();
+        let err = resolve_workspace_path(workspace.path(), "linkfile", None).unwrap_err();
         assert!(
             err.contains("escapes the workspace"),
             "unexpected error: {err}"
@@ -323,7 +323,7 @@ mod resolve_workspace_path {
 
         // Target file does not exist yet; the parent's canonicalization is what
         // catches the escape.
-        let err = resolve_workspace_path(workspace.path(), "linkdir/new.rs").unwrap_err();
+        let err = resolve_workspace_path(workspace.path(), "linkdir/new.rs", None).unwrap_err();
         assert!(
             err.contains("escapes the workspace"),
             "unexpected error: {err}"
@@ -344,7 +344,7 @@ mod resolve_workspace_path {
         )
         .unwrap();
 
-        let resolved = resolve_workspace_path(workspace.path(), "link/foo.rs").unwrap();
+        let resolved = resolve_workspace_path(workspace.path(), "link/foo.rs", None).unwrap();
 
         // The canonical relative reflects the real location, not the symlink.
         assert_eq!(resolved.relative, Utf8PathBuf::from("real/foo.rs"));
@@ -361,14 +361,14 @@ mod resolve_workspace_entry {
     #[test]
     fn rejects_absolute_path() {
         let dir = tempdir().unwrap();
-        let err = resolve_workspace_entry(dir.path(), "/etc/passwd").unwrap_err();
+        let err = resolve_workspace_entry(dir.path(), "/etc/passwd", None).unwrap_err();
         assert!(err.contains("relative"), "unexpected error: {err}");
     }
 
     #[test]
     fn rejects_escaping_parent_dir() {
         let dir = tempdir().unwrap();
-        let err = resolve_workspace_entry(dir.path(), "../../etc/passwd").unwrap_err();
+        let err = resolve_workspace_entry(dir.path(), "../../etc/passwd", None).unwrap_err();
         assert!(
             err.contains("escape the workspace"),
             "unexpected error: {err}"
@@ -380,7 +380,7 @@ mod resolve_workspace_entry {
         let dir = tempdir().unwrap();
         std::fs::write(dir.path().join("foo.rs"), "").unwrap();
 
-        let resolved = resolve_workspace_entry(dir.path(), "foo.rs").unwrap();
+        let resolved = resolve_workspace_entry(dir.path(), "foo.rs", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("foo.rs"));
     }
@@ -393,7 +393,7 @@ mod resolve_workspace_entry {
         // `a` exists; `a/b` does not. The parent walk should produce
         // `<canonical_root>/a/b/c.rs` with the suffix reattached after
         // canonicalization.
-        let resolved = resolve_workspace_entry(dir.path(), "a/b/c.rs").unwrap();
+        let resolved = resolve_workspace_entry(dir.path(), "a/b/c.rs", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("a/b/c.rs"));
     }
@@ -412,7 +412,7 @@ mod resolve_workspace_entry {
         )
         .unwrap();
 
-        let resolved = resolve_workspace_entry(workspace.path(), "link.txt").unwrap();
+        let resolved = resolve_workspace_entry(workspace.path(), "link.txt", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("link.txt"));
         // The entry is reachable via its symlink name, and is itself a
@@ -435,7 +435,7 @@ mod resolve_workspace_entry {
         )
         .unwrap();
 
-        let resolved = resolve_workspace_entry(workspace.path(), "broken").unwrap();
+        let resolved = resolve_workspace_entry(workspace.path(), "broken", None).unwrap();
 
         assert_eq!(resolved.relative, Utf8PathBuf::from("broken"));
     }
@@ -454,7 +454,7 @@ mod resolve_workspace_entry {
         )
         .unwrap();
 
-        let err = resolve_workspace_entry(workspace.path(), "linkdir/new.rs").unwrap_err();
+        let err = resolve_workspace_entry(workspace.path(), "linkdir/new.rs", None).unwrap_err();
         assert!(
             err.contains("escapes the workspace"),
             "unexpected error: {err}"
@@ -473,7 +473,7 @@ mod resolve_workspace_entry {
         )
         .unwrap();
 
-        let err = resolve_workspace_entry(workspace.path(), "dangling/child.rs").unwrap_err();
+        let err = resolve_workspace_entry(workspace.path(), "dangling/child.rs", None).unwrap_err();
         assert!(
             err.contains("symlink with a missing or non-workspace target"),
             "unexpected error: {err}"
@@ -488,7 +488,7 @@ mod resolve_workspace_entry {
         // `has_root()`. The `Prefix(_)` arm in `validate_workspace_input`
         // is what stops it from reaching `root.join(...)`.
         let dir = tempdir().unwrap();
-        let err = resolve_workspace_entry(dir.path(), "C:foo").unwrap_err();
+        let err = resolve_workspace_entry(dir.path(), "C:foo", None).unwrap_err();
         assert!(err.contains("relative"), "unexpected error: {err}");
     }
 }
@@ -499,14 +499,14 @@ mod clean_workspace_path {
     #[test]
     fn rejects_absolute_path() {
         let dir = tempdir().unwrap();
-        let err = clean_workspace_path(dir.path(), "/etc/passwd").unwrap_err();
+        let err = clean_workspace_path(dir.path(), "/etc/passwd", None).unwrap_err();
         assert!(err.contains("relative"), "unexpected error: {err}");
     }
 
     #[test]
     fn rejects_escaping_parent_dir() {
         let dir = tempdir().unwrap();
-        let err = clean_workspace_path(dir.path(), "../../etc/passwd").unwrap_err();
+        let err = clean_workspace_path(dir.path(), "../../etc/passwd", None).unwrap_err();
         assert!(
             err.contains("escape the workspace"),
             "unexpected error: {err}"
@@ -516,14 +516,14 @@ mod clean_workspace_path {
     #[test]
     fn rejects_empty_path() {
         let dir = tempdir().unwrap();
-        let err = clean_workspace_path(dir.path(), "").unwrap_err();
+        let err = clean_workspace_path(dir.path(), "", None).unwrap_err();
         assert!(err.contains("empty"), "unexpected error: {err}");
     }
 
     #[test]
     fn accepts_normal_path_and_returns_cleaned_form() {
         let dir = tempdir().unwrap();
-        let cleaned = clean_workspace_path(dir.path(), "src/main.rs").unwrap();
+        let cleaned = clean_workspace_path(dir.path(), "src/main.rs", None).unwrap();
         assert_eq!(cleaned, Utf8PathBuf::from("src/main.rs"));
     }
 
@@ -531,7 +531,7 @@ mod clean_workspace_path {
     fn collapses_redundant_components() {
         let dir = tempdir().unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
-        let cleaned = clean_workspace_path(dir.path(), "sub/../target.rs").unwrap();
+        let cleaned = clean_workspace_path(dir.path(), "sub/../target.rs", None).unwrap();
         assert_eq!(cleaned, Utf8PathBuf::from("target.rs"));
     }
 
@@ -550,7 +550,7 @@ mod clean_workspace_path {
         )
         .unwrap();
 
-        let cleaned = clean_workspace_path(workspace.path(), "link/foo.rs").unwrap();
+        let cleaned = clean_workspace_path(workspace.path(), "link/foo.rs", None).unwrap();
         assert_eq!(cleaned, Utf8PathBuf::from("link/foo.rs"));
     }
 
@@ -567,7 +567,7 @@ mod clean_workspace_path {
         )
         .unwrap();
 
-        let err = clean_workspace_path(workspace.path(), "linkdir/file.rs").unwrap_err();
+        let err = clean_workspace_path(workspace.path(), "linkdir/file.rs", None).unwrap_err();
         assert!(
             err.contains("escapes the workspace"),
             "unexpected error: {err}"

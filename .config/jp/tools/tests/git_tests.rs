@@ -64,6 +64,7 @@ fn ctx(root: &Utf8Path) -> Context {
     Context {
         root: root.to_owned(),
         action: Action::Run,
+        access: None,
     }
 }
 

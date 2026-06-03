@@ -17,6 +17,7 @@ fn stage_single_file() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let mut answers = serde_json::Map::new();
@@ -60,6 +61,7 @@ fn stage_non_last_hunk_of_multi_hunk_diff() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let mut answers = serde_json::Map::new();
@@ -98,6 +100,7 @@ fn stale_id_is_rejected_with_helpful_message() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let mut answers = serde_json::Map::new();
@@ -131,6 +134,7 @@ fn partial_failure_stages_what_it_can() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let mut answers = serde_json::Map::new();
@@ -199,6 +203,7 @@ fn ids_resolve_in_file_order_regardless_of_request_order() {
     let ctx = Context {
         root: dir.path().to_owned(),
         action: Action::Run,
+        access: None,
     };
 
     let mut answers = serde_json::Map::new();

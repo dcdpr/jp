@@ -16,6 +16,10 @@ version.workspace = true
 camino = { workspace = true, features = ["serde1"] }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std", "preserve_order"] }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
 
 [lints]
 workspace = true

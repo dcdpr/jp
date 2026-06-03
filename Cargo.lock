@@ -2502,8 +2502,10 @@ name = "jp_tool"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "camino-tempfile",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

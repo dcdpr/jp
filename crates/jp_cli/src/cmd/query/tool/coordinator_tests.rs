@@ -13,6 +13,7 @@ fn empty_executor_source() -> Box<dyn jp_llm::tool::executor::ExecutorSource> {
     Box::new(TerminalExecutorSource::new(
         jp_llm::tool::builtin::BuiltinExecutors::new(),
         &[],
+        std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
     ))
 }
 

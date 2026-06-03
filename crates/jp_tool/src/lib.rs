@@ -2,6 +2,12 @@ use camino::Utf8PathBuf;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+mod access;
+pub use access::{
+    AccessPolicy, Capability, EnvRule, FsAccessError, FsRule, NetRule,
+    canonicalize_workspace_target, lexical_workspace_relative,
+};
+
 /// The result of a tool call.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -206,6 +212,15 @@ pub struct Context {
 
     // The action that the tool is being run for.
     pub action: Action,
+
+    /// Access grants for this tool invocation.
+    ///
+    /// When `None`, the tool has unrestricted (but still workspace-confined)
+    /// filesystem access.
+    /// When `Some` with a non-empty `fs` list, only explicitly granted
+    /// capabilities are available.
+    #[serde(default)]
+    pub access: Option<AccessPolicy>,
 }
 
 impl From<String> for Outcome {
