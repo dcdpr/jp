@@ -22,8 +22,22 @@ name), e.g. `["c", "fork"]` runs `jp c fork` inside the sandbox. By default the 
 user-global data directory is cloned into the sandbox via copy-on-write; pass \
 `clone_user_data = false` to start from an empty data directory.
 
+Each invocation gets a *fresh* sandbox (a new worktree plus a new user-data directory) that is \
+discarded when the command exits, so state does not persist between separate tool calls: a \
+conversation created in one call is gone in the next, which re-clones from your live data. To run \
+a multi-step flow (start a conversation, then continue it), pass the follow-up commands via \
+`debug_jp_trace`'s `then` parameter — they run in sequence in the *same* sandbox, so state carries \
+across them.
+
 Reach for `debug_jp_trace` first to understand *what* a command does, then `profile_sampling` \
-or `profile_heap` to understand *where* it spends time or memory. Measure before tuning."""
+or `profile_heap` to understand *where* it spends time or memory. Measure before tuning.
+
+These tools run *arbitrary* `jp` commands, not only tracing and profiling — reach for them to \
+exercise and verify real behavior. `jp`'s surface is larger than this summary; run `jp --help` \
+and `jp <subcommand> --help` to discover subcommands and flags rather than assuming a capability \
+is absent. To drive one specific tool end-to-end (for example, to verify a tool you just \
+changed), force it with `jp query --use-tools <tool> "<prompt>"` instead of relying on the model \
+to pick it."""
 
 [conversation.tools]
 debug_jp_trace = { enable = true }
