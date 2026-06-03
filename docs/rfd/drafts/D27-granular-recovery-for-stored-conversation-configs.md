@@ -339,7 +339,7 @@ That is strictly worse.
 
 [Alternatives]: #alternatives
 [Risks and Open Questions]: #risks-and-open-questions
-[`AppConfig`]: ../../crates/jp_config/src/lib.rs
-[`PartialAppConfig`]: ../../crates/jp_config/src/lib.rs
-[`jp`]: ../../crates/jp_cli
+[`AppConfig`]: ../../../crates/jp_config/src/lib.rs
+[`PartialAppConfig`]: ../../../crates/jp_config/src/lib.rs
+[`jp`]: ../../../crates/jp_cli
 [`serde_path_to_error`]: https://docs.rs/serde_path_to_error

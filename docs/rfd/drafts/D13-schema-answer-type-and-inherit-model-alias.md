@@ -278,6 +278,6 @@ Can be merged independently.
 - [RFD 034: Inquiry-Specific Assistant Configuration][RFD 034] — per-question
   model targeting and the three-layer config merge.
 
-[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
-[RFD 034]: 034-inquiry-specific-assistant-configuration.md
+[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
+[RFD 034]: ../034-inquiry-specific-assistant-configuration.md
 [RFD D14]: D14-inquiry-driven-file-creation.md

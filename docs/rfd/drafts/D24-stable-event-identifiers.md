@@ -443,11 +443,11 @@ That is out of scope here.
 - [RFD D18] — Plugin Event Subscriptions (future consumer)
 - [RFD D21] — Interactive Conversation Stream Editing (future consumer)
 
-[RFD 047]: 047-editor-and-path-access-for-conversations.md
-[RFD 051]: 051-sub-agent-workflows.md
-[RFD 054]: 054-split-conversation-config-and-events.md
-[RFD 064]: 064-non-destructive-conversation-compaction.md
-[RFD 067]: 067-resource-deduplication-for-token-efficiency.md
-[RFD 072]: 072-command-plugin-system.md
-[RFD D18]: drafts/D18-plugin-event-subscriptions-and-query-delegation.md
-[RFD D21]: drafts/D21-interactive-conversation-stream-editing.md
+[RFD 047]: ../047-editor-and-path-access-for-conversations.md
+[RFD 051]: ../051-sub-agent-workflows.md
+[RFD 054]: ../054-split-conversation-config-and-events.md
+[RFD 064]: ../064-non-destructive-conversation-compaction.md
+[RFD 067]: ../067-resource-deduplication-for-token-efficiency.md
+[RFD 072]: ../072-command-plugin-system.md
+[RFD D18]: D18-plugin-event-subscriptions-and-query-delegation.md
+[RFD D21]: D21-interactive-conversation-stream-editing.md

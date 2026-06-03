@@ -1,13 +1,15 @@
 <script setup>
 import { useRoute } from 'vitepress'
 import { ref, watch, computed, onMounted } from 'vue'
-import { data } from '../../.vitepress/loaders/rfds.data.js'
+import { data as published } from '../../.vitepress/loaders/rfds.data.js'
+import { data as drafts } from '../../.vitepress/loaders/rfd-drafts.data.js'
 
 const route = useRoute()
 const trail = ref([])
 
-// Trail only stores `{ num, slug }`; look up titles on render. Drafts
-// (`DNN`) aren't in `data` and gracefully fall through to no tooltip.
+// Published and drafts share one trail. Trail entries store `{ num, slug }`;
+// titles are looked up on render against the combined set.
+const data = [...published, ...drafts]
 const titleByNum = new Map(data.map(r => [r.num, r.title]))
 const tooltip = (num) => {
     const t = titleByNum.get(num)
@@ -16,12 +18,15 @@ const tooltip = (num) => {
 
 const STORAGE_KEY = 'rfd-trail'
 
+// Drafts live one directory deeper (`/rfd/drafts/DNN-slug`), so the optional
+// `drafts/` segment is part of every match. `rfdSlug` keeps that segment so
+// `'/rfd/' + slug` resolves to the right page for both id spaces.
 function rfdNum(path) {
-    return path.match(/\/rfd\/(\d{3}|D\d{2})-/)?.[1] ?? null
+    return path.match(/\/rfd\/(?:drafts\/)?(\d{3}|D\d{2})-/)?.[1] ?? null
 }
 
 function rfdSlug(path) {
-    return path.match(/\/rfd\/((\d{3}|D\d{2})-.+?)(?:\.html)?$/)?.[1] ?? null
+    return path.match(/\/rfd\/((?:drafts\/)?(?:\d{3}|D\d{2})-.+?)(?:\.html)?$/)?.[1] ?? null
 }
 
 function saveTrail() {
@@ -36,7 +41,8 @@ function loadTrail() {
 }
 
 function onNavigate(path) {
-    if (path === '/rfd/' || path === '/rfd') {
+    if (path === '/rfd/' || path === '/rfd'
+        || path === '/rfd/drafts/' || path === '/rfd/drafts') {
         trail.value = []
         saveTrail()
         return
@@ -55,7 +61,7 @@ function onNavigate(path) {
     saveTrail()
 }
 
-const visible = computed(() => /^\/rfd\/(\d{3}|D\d{2})-/.test(route.path))
+const visible = computed(() => /^\/rfd\/(?:drafts\/)?(\d{3}|D\d{2})-/.test(route.path))
 
 onMounted(() => {
     loadTrail()

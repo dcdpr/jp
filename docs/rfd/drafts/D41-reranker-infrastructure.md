@@ -688,5 +688,5 @@ Depends on Phase 5.
 [RFD 016]: ../016-wasm-plugin-architecture.md
 [Voyage AI Reranker API]: https://docs.voyageai.com/docs/reranker
 [`fastembed-rs`]: https://github.com/Anush008/fastembed-rs
-[`jp_llm`]: ../../crates/jp_llm
+[`jp_llm`]: ../../../crates/jp_llm
 [`rozgo/bge-reranker-v2-m3`]: https://huggingface.co/rozgo/bge-reranker-v2-m3

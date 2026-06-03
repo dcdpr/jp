@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-20
-- **Requires**: [RFD 020][RFD 020-2], [RFD 038][RFD 038-2], [RFD 070][RFD 070-2]
+- **Requires**: [RFD 020], [RFD 038], [RFD 070]
 
 ## Summary
 
@@ -303,11 +303,8 @@ Can be merged alongside or after [RFD 020]'s `--fork` implementation.
   Conversation-ID inheritance collapses inner provenance under a single source
   identity.
 
-[RFD 008]: 008-ordered-tool-directives.md
-[RFD 020]: 020-parallel-conversations.md
-[RFD 020-2]: ../020-parallel-conversations.md
-[RFD 038]: 038-config-reset-keywords.md
-[RFD 038-2]: ../038-config-reset-keywords.md
-[RFD 039]: 039-conversation-trees.md
-[RFD 070]: 070-negative-config-deltas.md
-[RFD 070-2]: ../070-negative-config-deltas.md
+[RFD 008]: ../008-ordered-tool-directives.md
+[RFD 020]: ../020-parallel-conversations.md
+[RFD 038]: ../038-config-reset-keywords.md
+[RFD 039]: ../039-conversation-trees.md
+[RFD 070]: ../070-negative-config-deltas.md

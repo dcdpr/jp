@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-06
-- **Extends**: [RFD 072][RFD 072-2]
+- **Extends**: [RFD 072]
 
 ## Summary
 
@@ -481,8 +481,7 @@ need real-time updates.
 - [RFD 026: Agent Loop Extraction][RFD 026]
 - [RFD 027: Client-Server Query Architecture][RFD 027]
 
-[RFD 016]: 016-wasm-plugin-architecture.md
-[RFD 026]: 026-agent-loop-extraction.md
-[RFD 027]: 027-client-server-query-architecture.md
-[RFD 072]: 072-command-plugin-system.md
-[RFD 072-2]: ../072-command-plugin-system.md
+[RFD 016]: ../016-wasm-plugin-architecture.md
+[RFD 026]: ../026-agent-loop-extraction.md
+[RFD 027]: ../027-client-server-query-architecture.md
+[RFD 072]: ../072-command-plugin-system.md

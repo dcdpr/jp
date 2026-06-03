@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-05
-- **Extends**: [RFD 048][RFD 048-2]
+- **Extends**: [RFD 048]
 
 ## Summary
 
@@ -288,5 +288,4 @@ Depends on Phase 2.
 - `crates/jp_cli/src/lib.rs` — current `configure_logging` and `TracingGuard`.
 - `crates/jp_cli/src/session.rs` — session identity resolution.
 
-[RFD 048]: 048-four-channel-output-model.md
-[RFD 048-2]: ../048-four-channel-output-model.md
+[RFD 048]: ../048-four-channel-output-model.md

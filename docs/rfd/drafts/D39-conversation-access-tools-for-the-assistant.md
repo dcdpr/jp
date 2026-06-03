@@ -351,6 +351,6 @@ No phase changes JP's shipped surface; everything is workspace-local.
 - [RFD 074] — Eager loading with command-declared data requirements.
   Relevant for any future pure-core extraction of conversation queries.
 
-[RFD 040]: 040-hidden-conversations-and-tool-context.md
-[RFD 051]: 051-sub-agent-workflows.md
-[RFD 074]: 074-eager-loading-with-command-declared-data-requirements.md
+[RFD 040]: ../040-hidden-conversations-and-tool-context.md
+[RFD 051]: ../051-sub-agent-workflows.md
+[RFD 074]: ../074-eager-loading-with-command-declared-data-requirements.md

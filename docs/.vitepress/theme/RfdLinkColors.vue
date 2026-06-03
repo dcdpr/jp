@@ -1,17 +1,19 @@
 <script setup>
 import { useRoute } from 'vitepress'
 import { watch, nextTick, onMounted } from 'vue'
-import { data } from '../../.vitepress/loaders/rfds.data.js'
+import { data as published } from '../../.vitepress/loaders/rfds.data.js'
+import { data as drafts } from '../../.vitepress/loaders/rfd-drafts.data.js'
 
 const route = useRoute()
 
-// Map RFD number -> data entry, for status + title lookup.
-const byNum = new Map(data.map(r => [r.num, r]))
+// Map RFD id -> data entry, for status + title lookup. Combined so prose
+// links to either id space get a tooltip (and status color on RFD pages).
+const byNum = new Map([...published, ...drafts].map(r => [r.num, r]))
 
 function enhanceLinks() {
     // Status coloring is scoped to RFD pages where the legend makes sense.
     // Tooltips apply everywhere RFD links appear.
-    const colorize = /^\/rfd\/\d{3}-/.test(route.path)
+    const colorize = /^\/rfd\/(?:drafts\/)?(?:\d{3}|D\d{2})-/.test(route.path)
 
     for (const a of document.querySelectorAll('.vp-doc a[href]')) {
         const raw = a.getAttribute('href') ?? ''
@@ -21,7 +23,7 @@ function enhanceLinks() {
         // Use the browser-resolved absolute pathname so we match regardless
         // of whether the source href was relative (`065-foo.md`) or absolute
         // (`/rfd/065-foo`).
-        const num = a.pathname?.match(/\/rfd\/(\d{3})-/)?.[1]
+        const num = a.pathname?.match(/\/rfd\/(?:drafts\/)?(\d{3}|D\d{2})-/)?.[1]
         if (!num) continue
         const rfd = byNum.get(num)
         if (!rfd) continue

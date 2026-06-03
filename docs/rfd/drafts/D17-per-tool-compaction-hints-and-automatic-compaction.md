@@ -267,4 +267,4 @@ the trigger logic.
 
 - [RFD 064] — Non-Destructive Conversation Compaction
 
-[RFD 064]: 064-non-destructive-conversation-compaction.md
+[RFD 064]: ../064-non-destructive-conversation-compaction.md
