@@ -181,6 +181,8 @@ fn handle_sse_event_sync(
     match event {
         Ok(SseEvent::Open) => Ok(vec![]),
         Ok(SseEvent::Message(msg)) => {
+            trace!(event = %msg.data, "Received event from Llamacpp API.");
+
             if msg.data == "[DONE]" {
                 // Finalize the reasoning extractor on stream end.
                 state.extractor.finalize();
