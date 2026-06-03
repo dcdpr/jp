@@ -254,6 +254,55 @@ pub mod repos {
     }
 }
 
+pub mod commits {
+    use super::{DateTime, Deserialize, Serialize, User, Utc, repos::DiffEntry};
+
+    /// A commit, as returned by the PR commit-list and single-commit endpoints.
+    ///
+    /// `stats` and `files` are populated only by the single-commit endpoint
+    /// (`GET /repos/{owner}/{repo}/commits/{ref}`).
+    /// The PR commit-list endpoint omits them, so both are `Option`.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct Commit {
+        pub sha: String,
+        pub commit: CommitDetails,
+        /// The GitHub account linked to the commit author's email, when one
+        /// exists.
+        /// Null for commits whose author isn't a known GitHub user.
+        pub author: Option<User>,
+        #[serde(default)]
+        pub stats: Option<CommitStats>,
+        #[serde(default)]
+        pub files: Option<Vec<DiffEntry>>,
+    }
+
+    /// The git-level commit payload (message and authorship), nested under
+    /// `commit` in the API response.
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CommitDetails {
+        pub message: String,
+        pub author: Option<CommitAuthor>,
+    }
+
+    /// Git authorship recorded in the commit itself, distinct from the GitHub
+    /// account in [`Commit::author`].
+    #[derive(Debug, Clone, Deserialize, Serialize)]
+    pub struct CommitAuthor {
+        pub name: Option<String>,
+        pub email: Option<String>,
+        pub date: Option<DateTime<Utc>>,
+    }
+
+    /// Aggregate line stats for a commit, present on the single-commit
+    /// endpoint.
+    #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+    pub struct CommitStats {
+        pub additions: u64,
+        pub deletions: u64,
+        pub total: u64,
+    }
+}
+
 pub mod search {
     use super::{Deserialize, Serialize};
 

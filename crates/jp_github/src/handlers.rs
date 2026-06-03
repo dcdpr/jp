@@ -296,6 +296,22 @@ impl PullsHandler {
         }
     }
 
+    /// Begin building a single-page fetch of the commits on a pull request.
+    ///
+    /// Like the other list builders, returns a single page rather than
+    /// auto-paginating; callers step through pages explicitly.
+    #[must_use]
+    pub fn list_commits(&self, number: u64) -> PullCommitsListBuilder {
+        PullCommitsListBuilder {
+            client: self.client.clone(),
+            owner: self.owner.clone(),
+            repo: self.repo.clone(),
+            number,
+            page: 1,
+            per_page: 30,
+        }
+    }
+
     /// Fetch a pull request as a unified diff.
     ///
     /// Sends `Accept: application/vnd.github.diff` to the same endpoint as
@@ -861,6 +877,50 @@ impl PullFilesListBuilder {
     }
 }
 
+pub struct PullCommitsListBuilder {
+    pub(crate) client: Octocrab,
+    pub(crate) owner: String,
+    pub(crate) repo: String,
+    pub(crate) number: u64,
+    pub(crate) page: u64,
+    pub(crate) per_page: u8,
+}
+
+impl PullCommitsListBuilder {
+    /// Set the 1-indexed page number to fetch.
+    /// Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
+    /// Set the number of commits per page (max 100 enforced by GitHub).
+    /// Defaults to 30.
+    #[must_use]
+    pub const fn per_page(mut self, per_page: u8) -> Self {
+        self.per_page = per_page;
+        self
+    }
+
+    pub async fn send(self) -> Result<Vec<models::commits::Commit>> {
+        let query = vec![
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
+
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/pulls/{}/commits",
+                    self.owner, self.repo, self.number
+                ),
+                &query,
+            )
+            .await
+    }
+}
+
 pub struct PullListBuilder {
     pub(crate) client: Octocrab,
     pub(crate) owner: String,
@@ -927,6 +987,22 @@ impl ReposHandler {
         }
     }
 
+    /// Begin building a fetch of a single commit by ref (sha, branch, or tag).
+    ///
+    /// The response carries commit metadata, aggregate line stats, and a page
+    /// of changed files with their patches.
+    #[must_use]
+    pub fn get_commit(&self, reference: impl Into<String>) -> RepoCommitBuilder {
+        RepoCommitBuilder {
+            client: self.client.clone(),
+            owner: self.owner.clone(),
+            repo: self.repo.clone(),
+            reference: reference.into(),
+            page: 1,
+            per_page: 100,
+        }
+    }
+
     #[must_use]
     pub fn list_collaborators(&self) -> RepoCollaboratorListBuilder {
         RepoCollaboratorListBuilder {
@@ -982,6 +1058,50 @@ impl RepoContentBuilder {
         .collect::<std::result::Result<Vec<models::repos::ContentItem>, _>>()?;
 
         Ok(models::repos::ContentItems::new(items))
+    }
+}
+
+pub struct RepoCommitBuilder {
+    pub(crate) client: Octocrab,
+    pub(crate) owner: String,
+    pub(crate) repo: String,
+    pub(crate) reference: String,
+    pub(crate) page: u64,
+    pub(crate) per_page: u8,
+}
+
+impl RepoCommitBuilder {
+    /// Set the 1-indexed page of changed files to fetch.
+    /// Defaults to 1.
+    #[must_use]
+    pub const fn page(mut self, page: u64) -> Self {
+        self.page = page;
+        self
+    }
+
+    /// Set the number of changed files per page (max 100 enforced by GitHub).
+    /// Defaults to 100.
+    #[must_use]
+    pub const fn per_page(mut self, per_page: u8) -> Self {
+        self.per_page = per_page;
+        self
+    }
+
+    pub async fn send(self) -> Result<models::commits::Commit> {
+        let query = vec![
+            ("per_page".to_owned(), self.per_page.to_string()),
+            ("page".to_owned(), self.page.to_string()),
+        ];
+
+        self.client
+            .get_json(
+                &format!(
+                    "/repos/{}/{}/commits/{}",
+                    self.owner, self.repo, self.reference
+                ),
+                &query,
+            )
+            .await
     }
 }
 

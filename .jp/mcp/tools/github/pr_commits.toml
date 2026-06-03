@@ -1,0 +1,55 @@
+[conversation.tools.github_pr_commits]
+enable = false
+run = "unattended"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "List the commits that make up a pull request."
+
+examples = """
+List the commits on a PR (sha, subject, author, date):
+```json
+{"number": 42}
+```
+
+Inspect a PR from a different repository:
+```json
+{"repository": "Swatinem/rust-cache", "number": 37}
+```
+
+Walk a PR with more than 100 commits (rare):
+```json
+{"number": 42, "page": 2}
+```
+"""
+
+[conversation.tools.github_pr_commits.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.github_pr_commits.parameters.repository]
+type = "string"
+summary = "Repository to read the pull request from, in `owner/repo` form."
+description = """
+If unspecified, defaults to the current project's GitHub repository.
+"""
+
+[conversation.tools.github_pr_commits.parameters.number]
+type = "integer"
+summary = "Pull request number whose commits to list."
+description = """
+Required. Use `github_pulls` (without `number`) first if you need to
+discover available PR numbers.
+"""
+
+[conversation.tools.github_pr_commits.parameters.page]
+type = "integer"
+summary = "1-indexed page of commits. Defaults to 1."
+description = """
+Selects a page of commits (100 per page). For PRs with more than 100
+commits, walk pages until the page is short.
+
+Each entry carries the commit `sha`; pass it to `github_commit` as `ref`
+to read that commit's changed files and patches.
+"""

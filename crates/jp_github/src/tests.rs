@@ -609,6 +609,123 @@ async fn pulls_list_files_returns_requested_page_only() {
     mock.assert();
 }
 
+fn pr_commit_json(sha: &str, message: &str, login: Option<&str>) -> Value {
+    let author = match login {
+        Some(login) => json!({ "login": login }),
+        None => Value::Null,
+    };
+
+    json!({
+        "sha": sha,
+        "commit": {
+            "message": message,
+            "author": {
+                "name": "Mona",
+                "email": "mona@example.com",
+                "date": "2024-03-01T00:00:00Z"
+            }
+        },
+        "author": author,
+    })
+}
+
+#[tokio::test]
+async fn pulls_list_commits_returns_requested_page_only() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/pulls/42/commits")
+                .query_param("per_page", "100")
+                .query_param("page", "2");
+            then.status(200).json_body(json!([
+                pr_commit_json("abc123", "fix: thing\n\nbody", Some("octocat")),
+                pr_commit_json("def456", "chore: other", None),
+            ]));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let commits = client
+        .pulls("acme", "widgets")
+        .list_commits(42)
+        .page(2)
+        .per_page(100)
+        .send()
+        .await
+        .expect("list commits");
+
+    assert_eq!(commits.len(), 2);
+    assert_eq!(commits[0].sha, "abc123");
+    assert_eq!(commits[0].commit.message, "fix: thing\n\nbody");
+    assert_eq!(
+        commits[0].author.as_ref().map(|u| u.login.as_str()),
+        Some("octocat")
+    );
+    assert_eq!(
+        commits[0]
+            .commit
+            .author
+            .as_ref()
+            .and_then(|a| a.name.as_deref()),
+        Some("Mona")
+    );
+    // The list endpoint omits per-commit files and stats.
+    assert!(commits[0].files.is_none());
+    assert!(commits[0].stats.is_none());
+    assert!(commits[1].author.is_none());
+    mock.assert();
+}
+
+#[tokio::test]
+async fn repo_get_commit_parses_metadata_files_and_stats() {
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(GET)
+                .path("/repos/acme/widgets/commits/abc123")
+                .query_param("per_page", "100")
+                .query_param("page", "1");
+            then.status(200).json_body(json!({
+                "sha": "abc123",
+                "commit": {
+                    "message": "fix: thing",
+                    "author": {
+                        "name": "Mona",
+                        "email": "mona@example.com",
+                        "date": "2024-03-01T00:00:00Z"
+                    }
+                },
+                "author": { "login": "octocat" },
+                "stats": { "additions": 10, "deletions": 2, "total": 12 },
+                "files": [
+                    diff_entry_json("src/foo.rs", Some("@@ -1 +1 @@\n-a\n+b")),
+                ]
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let commit = client
+        .repos("acme", "widgets")
+        .get_commit("abc123")
+        .send()
+        .await
+        .expect("get commit");
+
+    assert_eq!(commit.sha, "abc123");
+    assert_eq!(commit.commit.message, "fix: thing");
+    let stats = commit.stats.expect("stats present");
+    assert_eq!(stats.additions, 10);
+    assert_eq!(stats.deletions, 2);
+    assert_eq!(stats.total, 12);
+    let files = commit.files.expect("files present");
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].filename, "src/foo.rs");
+    assert_eq!(files[0].patch.as_deref(), Some("@@ -1 +1 @@\n-a\n+b"));
+    mock.assert();
+}
+
 #[tokio::test]
 async fn pulls_get_exposes_changed_files_count() {
     let server = MockServer::start_async().await;

@@ -1,0 +1,73 @@
+[conversation.tools.github_commit]
+enable = false
+run = "unattended"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Read a single commit: metadata, stats, and changed files."
+
+examples = """
+Enumerate a commit's changed files (filenames + stats, no patches):
+```json
+{"ref": "6dcb09b5b57875f334f61aebed695e2e4193db5e"}
+```
+
+Fetch the patches for two specific files in the commit. The filenames
+must match what enumerate mode returns:
+```json
+{"ref": "6dcb09b", "files": ["crates/jp_llm/src/builtin.rs", "Cargo.toml"]}
+```
+
+Read a commit from a different repository:
+```json
+{"repository": "Swatinem/rust-cache", "ref": "main"}
+```
+
+Walk a commit that touches more than 100 files (rare):
+```json
+{"ref": "6dcb09b", "page": 2}
+```
+"""
+
+[conversation.tools.github_commit.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.github_commit.parameters.repository]
+type = "string"
+summary = "Repository to read the commit from, in `owner/repo` form."
+description = """
+If unspecified, defaults to the current project's GitHub repository.
+"""
+
+[conversation.tools.github_commit.parameters.ref]
+type = "string"
+summary = "Commit to read: a sha, branch name, or tag."
+description = """
+Required. Discover commit shas with `github_pr_commits` for a pull
+request, or pass a branch or tag name to read its tip commit.
+"""
+
+[conversation.tools.github_commit.parameters.files]
+type = "array"
+items.type = "string"
+summary = "List of changed file paths to fetch patches for."
+description = """
+If unspecified, the tool returns the commit's metadata, aggregate line
+stats, and a page of changed file metadata (filename, status, additions,
+deletions, changes) without patches. Use this to decide which files to
+fetch.
+
+If set, the tool returns the patches for the named files. Filenames not
+present on the current `page` are returned in a `not_found` block; bump
+`page` or call without `files` to locate them.
+"""
+
+[conversation.tools.github_commit.parameters.page]
+type = "integer"
+summary = "1-indexed page of changed files. Defaults to 1."
+description = """
+Selects a page of changed files (100 per page). A commit that touches
+more than 100 files paginates; walk pages until the page is short.
+"""
