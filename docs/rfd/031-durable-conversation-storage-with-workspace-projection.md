@@ -64,8 +64,8 @@ This design builds on the trait-based storage backend from [RFD 073]:
 conversation persistence flows through `PersistBackend::write`, loading through
 `LoadBackend`, and the filesystem implementation (`FsStorageBackend`, wrapping
 the internal `Storage`) is where dual-root reads and writes live.
-Backends that do not model two roots (e.g. `InMemoryStorageBackend`) keep their
-current single-store behavior.
+Backends that do not model two roots (e.g.
+`InMemoryStorageBackend`) keep their current single-store behavior.
 
 ### Storage Model
 
@@ -119,16 +119,18 @@ The rename-on-mismatch logic in `with_user_storage` is replaced by a one-time
 migration that moves existing `<name>-<id>` directories to `<id>`.
 
 The same migration imports existing workspace conversations into the shared
-user-local store. Before this RFD, non-local conversations may exist only under
-`.jp/conversations/`. During migration, JP scans the workspace active and
-archive partitions (`conversations/` and `conversations/.archive/`) and copies
-any conversation missing from user-local into the workspace-ID user-local store,
-so pre-RFD workspace-only conversations become durable before dual-write is
-enabled. If both roots already hold the same conversation ID, JP resolves the
-conflict with the metadata and stream mtime rules from [Manual Editing and
-Conflict Resolution](#manual-editing-and-conflict-resolution). The migration
-never deletes the workspace copy; it only ensures a durable user-local copy
-exists.
+user-local store.
+Before this RFD, non-local conversations may exist only under
+`.jp/conversations/`.
+During migration, JP scans the workspace active and archive partitions
+(`conversations/` and `conversations/.archive/`) and copies any conversation
+missing from user-local into the workspace-ID user-local store, so pre-RFD
+workspace-only conversations become durable before dual-write is enabled.
+If both roots already hold the same conversation ID, JP resolves the conflict
+with the metadata and stream mtime rules from [Manual Editing and Conflict
+Resolution](#manual-editing-and-conflict-resolution).
+The migration never deletes the workspace copy; it only ensures a durable
+user-local copy exists.
 
 ### The `local` Property
 
@@ -150,12 +152,14 @@ formalized as `StoragePresence` below.
 
 ### Storage Presence and Projection
 
-Two related types capture conversation storage state. The distinction matters
-because reads need three states while writes need only two.
+Two related types capture conversation storage state.
+The distinction matters because reads need three states while writes need only
+two.
 
 **`StoragePresence`** is the loaded filesystem fact — which roots hold the
-conversation. It drives listing, the `local` indicator, path resolution, and
-the import decision for external conversations:
+conversation.
+It drives listing, the `local` indicator, path resolution, and the import
+decision for external conversations:
 
 ```rust
 pub enum StoragePresence {
@@ -194,13 +198,13 @@ imports it (see [External Conversations](#external-conversations)); read-only
 operations never need one.
 
 `StoragePresence` lives in the workspace's in-memory state, keyed by
-conversation ID, alongside metadata and events. It is populated by the
-cross-root loader: new conversations insert their initial presence from the
-creation flags, loading derives presence from root existence, and import and
-`jp conversation edit --local` update it. Because only `FsStorageBackend` knows
-about two roots, `LoadBackend` exposes presence; single-store backends
-(`InMemoryStorageBackend`) report a single-store default and ignore projection,
-consistent with the no-user-storage rule below.
+conversation ID, alongside metadata and events.
+It is populated by the cross-root loader: new conversations insert their initial
+presence from the creation flags, loading derives presence from root existence,
+and import and `jp conversation edit --local` update it.
+Because only `FsStorageBackend` knows about two roots, `LoadBackend` exposes
+presence; single-store backends (`InMemoryStorageBackend`) report a single-store
+default and ignore projection, consistent with the no-user-storage rule below.
 
 Concretely, the index load returns presence alongside each ID rather than a bare
 `ConversationId`:
@@ -217,8 +221,8 @@ returning these entries; the exact name is an implementation detail.
 
 `StoragePresence` and `Projection` are storage-layer types (`jp_storage`):
 `Projection` is a parameter to `PersistBackend::write`, and `StoragePresence` is
-a load-time fact. The conversation lock in `jp_workspace` carries the derived
-`Projection`.
+a load-time fact.
+The conversation lock in `jp_workspace` carries the derived `Projection`.
 
 ### Persistence Behavior
 
@@ -234,10 +238,10 @@ filesystem state at write time.
 Persistence is guard-scoped ([RFD 069]): writes happen in
 `ConversationMut::flush` and its `Drop` safety net, not from command code.
 The `Drop` path has no call site that could thread an argument, so projection
-cannot be supplied per-write by the shell. Instead, **projection is carried by
-the conversation lock**: `ConversationLock` / `ConversationMut` holds a
-`Projection`, resolved when the lock is acquired, and passes it to `write` from
-both `flush` and `Drop`.
+cannot be supplied per-write by the shell.
+Instead, **projection is carried by the conversation lock**: `ConversationLock`
+/ `ConversationMut` holds a `Projection`, resolved when the lock is acquired,
+and passes it to `write` from both `flush` and `Drop`.
 
 Projection is resolved and updated as follows:
 
@@ -257,15 +261,17 @@ Given the projection, `write`:
 
 When user-local storage is unavailable (`None`), `FsStorageBackend` ignores
 projection and writes only to workspace storage — the single-write behavior of
-today. `LocalOnly` is unreachable in that mode: `--local` is rejected at the CLI
+today.
+`LocalOnly` is unreachable in that mode: `--local` is rejected at the CLI
 because there is no user-local root to write to.
 
 This replaces the current behavior, where `Storage::persist_conversation` picks
-a single root from `metadata.user` and then calls `remove_stale_conversation_dirs`
-across *both* roots, deleting any directory for the same ID that is not the
-write target. That cross-root cleanup must be reworked: stale-directory removal
-runs *per root*, scoped to the root being written, so a dual-write never deletes
-the copy it just wrote in the other root.
+a single root from `metadata.user` and then calls
+`remove_stale_conversation_dirs` across *both* roots, deleting any directory for
+the same ID that is not the write target.
+That cross-root cleanup must be reworked: stale-directory removal runs *per
+root*, scoped to the root being written, so a dual-write never deletes the copy
+it just wrote in the other root.
 
 The workspace projection is created once (at creation time for projected
 conversations, or via `jp conversation edit --local`) and maintained as long as
@@ -287,7 +293,8 @@ the conversation appears as `local Y` until explicitly re-projected.
 Several commands operate on a specific on-disk path: `jp conversation path` and
 `jp conversation edit --events` / `--metadata` / `--base-config`.
 When both copies exist, these commands need a deterministic rule for which root
-to point at. The rule keeps git-visible editing as the common path:
+to point at.
+The rule keeps git-visible editing as the common path:
 
 - **Projected conversation**: prefer the workspace path.
 - **Local-only conversation**: use the user-local path.
@@ -297,9 +304,10 @@ to point at. The rule keeps git-visible editing as the common path:
 For the JP-managed editor commands (`jp conversation edit --events` /
 `--metadata` / `--base-config`), JP reloads the edited file after the editor
 exits and persists the conversation before the command returns, synchronizing
-the projected copy immediately — a command named `edit` should leave both copies
-consistent, not defer the sync. Manual edits made outside JP are reconciled
-lazily on the next load by the stream/metadata mtime rules below.
+the projected copy immediately — a command named `edit` should leave both
+copies consistent, not defer the sync.
+Manual edits made outside JP are reconciled lazily on the next load by the
+stream/metadata mtime rules below.
 
 ### Conversation Origin
 
@@ -333,11 +341,13 @@ to two independently-resolved units:
 - **The conversation stream** — `base_config.json` plus `events.json` together.
   A conversation's stream is loaded from these two files as a unit (via
   `ConversationStream::to_parts`), so they must be selected from the *same*
-  root. `base_config.json` is written once at creation but is independently
+  root.
+  `base_config.json` is written once at creation but is independently
   user-editable (`jp conversation edit --base-config`), so a root's stream mtime
-  is `max(mtime(base_config.json), mtime(events.json))`. JP loads the stream
-  (both files) from whichever root has the newer stream mtime, and never pairs
-  an `events.json` from one root with a `base_config.json` from the other.
+  is `max(mtime(base_config.json), mtime(events.json))`.
+  JP loads the stream (both files) from whichever root has the newer stream
+  mtime, and never pairs an `events.json` from one root with a
+  `base_config.json` from the other.
   For a legacy root that predates the split (base config packed into
   `events.json`, no `base_config.json` file), the stream mtime is
   `mtime(events.json)`; JP writes the current three-file layout on the next
@@ -353,10 +363,10 @@ After a successful persist, both copies are identical with fresh mtimes.
 
 The full load-persist cycle:
 
-1. **Load**: If both copies exist, resolve the stream
-   (`base_config.json` + `events.json`) as a unit by the newer
-   `max(mtime(base_config.json), mtime(events.json))`, and resolve
-   `metadata.json` independently by its own mtime.
+1. **Load**: If both copies exist, resolve the stream (`base_config.json` +
+   `events.json`) as a unit by the newer `max(mtime(base_config.json),
+   mtime(events.json))`, and resolve `metadata.json` independently by its own
+   mtime.
 2. **Run**: Execute the query, tool calls, etc. The in-memory state reflects the
    user's edits.
 3. **Persist**: Write to user-local, then write to workspace (if projected).
@@ -385,11 +395,13 @@ both user-local and workspace storage:
 2. Load all conversation IDs from workspace `.jp/conversations/`.
 3. Merge and **deduplicate by conversation ID**: a projected conversation
    appears in both roots, so the merged set must collapse the two entries into
-   one. (Today `load_all_conversation_ids` concatenates both roots without
+   one.
+   (Today `load_all_conversation_ids` concatenates both roots without
    deduplicating; under dual storage duplicates become the normal case, so the
-   scan must dedup by ID.) Conversations in user-local are the primary set;
-   conversations that exist only in the workspace are included but marked as
-   workspace-only (see [External Conversations](#external-conversations)).
+   scan must dedup by ID.)
+   Conversations in user-local are the primary set; conversations that exist
+   only in the workspace are included but marked as workspace-only (see
+   [External Conversations](#external-conversations)).
 4. Derive each conversation's `StoragePresence`, which yields the `local`
    indicator (`Projected` → `local N`, `UserLocalOnly` → `local Y`,
    `WorkspaceOnly` → external).
@@ -400,14 +412,14 @@ Conversations can appear in the workspace that do not exist in user-local.
 This happens when another contributor commits a conversation to git and you pull
 it.
 
-These conversations have `StoragePresence::WorkspaceOnly`. They are shown in
-`jp conversation ls` with a distinct indicator (e.g.,
-`origin: <their-worktree-name>` from the stored metadata, or simply the absence
-of a user-local copy).
+These conversations have `StoragePresence::WorkspaceOnly`.
+They are shown in `jp conversation ls` with a distinct indicator (e.g., `origin:
+<their-worktree-name>` from the stored metadata, or simply the absence of a
+user-local copy).
 
-A workspace-only conversation is **imported** into user-local (copied
-workspace → user-local) on the first operation that mutates it for continued
-use, after which it follows the normal dual-write rules:
+A workspace-only conversation is **imported** into user-local (copied workspace
+→ user-local) on the first operation that mutates it for continued use, after
+which it follows the normal dual-write rules:
 
 - `jp query` (assistant turns, tool calls).
 - `jp conversation edit` (`--events`, `--metadata`, `--base-config`, or a
@@ -427,14 +439,15 @@ importing.
 ### Archiving
 
 [RFD 071] gives conversations active and archive partitions
-(`conversations/.archive/`). Archiving must respect projection:
+(`conversations/.archive/`).
+Archiving must respect projection:
 
 - **Projected conversation**: archive in *both* roots, so the workspace
   projection and the durable copy move into their respective archive partitions
-  together. (Today `Storage::archive_conversation` returns after archiving the
-  first root it finds — under dual storage that would leave the other copy
-  active. The implementation must archive every root in which the conversation
-  exists.)
+  together.
+  (Today `Storage::archive_conversation` returns after archiving the first root
+  it finds — under dual storage that would leave the other copy active.
+  The implementation must archive every root in which the conversation exists.)
 - **Local-only conversation**: archive in user-local only.
 - **Workspace-only (external) conversation**: imported first (see [External
   Conversations](#external-conversations)), then archived in both roots.
@@ -444,8 +457,9 @@ importing.
 
 Unarchive is the inverse: a conversation archived from both roots is restored to
 the active partition of both roots; a conversation archived from user-local only
-is restored there only. Restoring re-establishes the projection state the
-conversation had when it was archived.
+is restored there only.
+Restoring re-establishes the projection state the conversation had when it was
+archived.
 
 mtime conflict resolution does **not** apply to archived conversations — they
 are not the target of live edits, so JP restores whatever copy each root holds
@@ -591,19 +605,21 @@ If it becomes one, the check can be batched into a single directory listing.
 ### Sanitizer behavior across roots
 
 `LoadBackend::sanitize` (the filesystem implementation) scans both roots and
-trashes invalid conversation directories independently. Under dual storage a
-conversation can have a corrupt copy in one root and a valid copy in the other.
+trashes invalid conversation directories independently.
+Under dual storage a conversation can have a corrupt copy in one root and a
+valid copy in the other.
 The independent scan is acceptable: the corrupt copy is trashed and the valid
 copy survives, after which the stream/metadata mtime resolution loads the
-surviving copy. This RFD does not change sanitizer scoping; it relies on the
-scan staying per-root.
+surviving copy.
+This RFD does not change sanitizer scoping; it relies on the scan staying
+per-root.
 
 ## Implementation Plan
 
-The phases are ordered so storage is never left in a state where the loader
-sees data it cannot represent. Cross-root loading lands *before* dual-write,
-because once two roots hold the same conversation the existing single-root
-loader would surface duplicate IDs.
+The phases are ordered so storage is never left in a state where the loader sees
+data it cannot represent.
+Cross-root loading lands *before* dual-write, because once two roots hold the
+same conversation the existing single-root loader would surface duplicate IDs.
 
 ### Phase 1: Shared User-Local Storage
 
@@ -622,8 +638,8 @@ Teach `FsStorageBackend` / `LoadBackend` to load from both roots: deduplicate
 IDs by conversation ID, compute `StoragePresence` per conversation
 (`UserLocalOnly` / `Projected` / `WorkspaceOnly`), and resolve conflicts —
 `metadata.json` by its own mtime, the stream (`base_config.json` +
-`events.json`) as a unit by the newer
-`max(mtime(base_config.json), mtime(events.json))`.
+`events.json`) as a unit by the newer `max(mtime(base_config.json),
+mtime(events.json))`.
 Expose `StoragePresence` through `LoadBackend` and store it in the workspace's
 in-memory state so the lock can derive `Projection` from it.
 
@@ -639,16 +655,17 @@ projection model from Phase 2:
 
 - Add the `Projection` argument to `PersistBackend::write` (and update the
   `InMemoryStorageBackend` / `NullPersistBackend` implementations).
-- Carry `Projection` on `ConversationLock` / `ConversationMut`, resolved at
-  lock acquisition, so `flush` and `Drop` persist with the correct projection.
+- Carry `Projection` on `ConversationLock` / `ConversationMut`, resolved at lock
+  acquisition, so `flush` and `Drop` persist with the correct projection.
 - In `FsStorageBackend` / `Storage::persist_conversation`, always write the
   user-local copy and, when `Projected`, the workspace copy.
 - Rework `remove_stale_conversation_dirs` so stale-directory cleanup is scoped
   to the root being written, so a dual-write does not delete the copy just
   written in the other root.
-- Remove the stored `conversation.user` field. Store the derived projection
-  state outside `Conversation` metadata (carried by the lock), and derive the
-  `local` indicator at load time from workspace-copy existence.
+- Remove the stored `conversation.user` field.
+  Store the derived projection state outside `Conversation` metadata (carried by
+  the lock), and derive the `local` indicator at load time from workspace-copy
+  existence.
 
 Depends on: Phase 2.
 
@@ -673,11 +690,11 @@ Depends on: Phase 3.
 ### Phase 6: Archive, Unarchive, Remove, Path, and Editor Behavior
 
 Update `archive_conversation` / `unarchive_conversation` to act on every root in
-which the conversation exists (not just the first found), deduplicate
-`ls --archived`, and apply the path-preference rule to `jp conversation path`
-and `jp conversation edit` (including the immediate re-sync after a managed
-editor command). Confirm `remove_conversation` continues to delete all copies
-in both roots.
+which the conversation exists (not just the first found), deduplicate `ls
+--archived`, and apply the path-preference rule to `jp conversation path` and
+`jp conversation edit` (including the immediate re-sync after a managed editor
+command).
+Confirm `remove_conversation` continues to delete all copies in both roots.
 
 Depends on: Phase 2 and Phase 3.
 
@@ -686,9 +703,10 @@ Depends on: Phase 2 and Phase 3.
 Add filesystem-specific tests for dual storage: projection on first persist,
 dual-write without cross-root clobber, stream-unit conflict resolution
 (including a `base_config.json`-only edit), ID dedup, import on first write, and
-archive/unarchive across roots. The backend parity suite is insufficient on its
-own — `InMemoryStorageBackend` does not model two roots, so projection behavior
-needs dedicated `FsStorageBackend` tests.
+archive/unarchive across roots.
+The backend parity suite is insufficient on its own — `InMemoryStorageBackend`
+does not model two roots, so projection behavior needs dedicated
+`FsStorageBackend` tests.
 
 Depends on: the phases under test.
 
@@ -700,8 +718,9 @@ entry when this RFD is implemented.
 ### Independent: Conversation Origin Metadata
 
 Add the `origin` field to `Conversation`, populated from the worktree directory
-name at creation time, and surface it in `jp conversation ls` and
-`jp conversation show`. Independent of the storage changes; can land any time.
+name at creation time, and surface it in `jp conversation ls` and `jp
+conversation show`.
+Independent of the storage changes; can land any time.
 
 ## References
 
@@ -714,6 +733,7 @@ name at creation time, and surface it in `jp conversation ls` and
 - [RFD 073: Layered Storage Backend for Workspaces][RFD 073] — introduces the
   `PersistBackend` / `LoadBackend` / `FsStorageBackend` traits this design
   builds on.
+
 - [RFD 071: Conversation Archiving][RFD 071] — adds the active/archive
   partitions whose dual-root behavior this RFD specifies.
 
