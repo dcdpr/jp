@@ -1,4 +1,4 @@
-use std::mem;
+use std::{mem, time::Duration};
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -31,11 +31,18 @@ use crate::{
     event::{Event, FinishReason},
     provider::Provider,
     query::ChatQuery,
-    stream::aggregator::reasoning::ReasoningExtractor,
+    stream::{aggregator::reasoning::ReasoningExtractor, with_tool_call_keepalive},
     tool::ToolDefinition,
 };
 
 static PROVIDER: ProviderId = ProviderId::Llamacpp;
+
+/// How often to inject a synthetic keep-alive while a tool call is streaming.
+///
+/// Stays below the enforced minimum `stream_idle_timeout_secs` (10s) so the
+/// heartbeat always lands before the idle window elapses if the model pauses
+/// between argument chunks.
+const TOOL_CALL_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Llamacpp {
@@ -100,7 +107,10 @@ impl Provider for Llamacpp {
         // silently re-issuing the request.
         es.set_retry_policy(Box::new(Never));
 
-        Ok(assemble_event_stream(es, is_structured))
+        Ok(with_tool_call_keepalive(
+            assemble_event_stream(es, is_structured),
+            TOOL_CALL_KEEPALIVE_INTERVAL,
+        ))
     }
 }
 
@@ -181,6 +191,8 @@ fn handle_sse_event_sync(
     match event {
         Ok(SseEvent::Open) => Ok(vec![]),
         Ok(SseEvent::Message(msg)) => {
+            trace!(event = %msg.data, "Received event from Llamacpp API.");
+
             if msg.data == "[DONE]" {
                 // Finalize the reasoning extractor on stream end.
                 state.extractor.finalize();

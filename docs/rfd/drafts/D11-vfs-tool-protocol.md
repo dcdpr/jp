@@ -4,8 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
-- **Requires**: [RFD D09], [RFD D10], [RFD 075][RFD 075-2], [RFD 058]\[RFD
-  058-2\], \[RFD 009\]\[RFD 009-2\]
+- **Requires**: [RFD D09], [RFD D10], [RFD 075], [RFD 058], [RFD 009]
 
 ## Summary
 
@@ -998,13 +997,10 @@ Integration test with a stateful VFS tool.
   `VfsRuntime` implements the `ToolRuntime` trait defined there.
 - [JSON-RPC 2.0 Specification][jsonrpc]
 
-[RFD 009]: 009-stateful-tool-protocol.md
-[RFD 009-2]: ../009-stateful-tool-protocol.md
-[RFD 016]: 016-wasm-plugin-architecture.md
-[RFD 058]: 058-typed-content-blocks-for-tool-responses.md
-[RFD 058-2]: ../058-typed-content-blocks-for-tool-responses.md
-[RFD 075]: 075-tool-sandbox-and-access-policy.md
-[RFD 075-2]: ../075-tool-sandbox-and-access-policy.md
+[RFD 009]: ../009-stateful-tool-protocol.md
+[RFD 016]: ../016-wasm-plugin-architecture.md
+[RFD 058]: ../058-typed-content-blocks-for-tool-responses.md
+[RFD 075]: ../075-tool-sandbox-and-access-policy.md
 [RFD D09]: D09-project-filesystem-abstraction.md
 [RFD D10]: D10-unified-tool-execution-model.md
 [jsonrpc]: https://www.jsonrpc.org/specification

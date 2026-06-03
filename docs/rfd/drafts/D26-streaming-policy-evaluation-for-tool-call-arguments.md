@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-24
 - **Extends**: [RFD D25]
-- **Requires**: [RFD 043][RFD 043-2]
+- **Requires**: [RFD 043]
 
 ## Summary
 
@@ -506,8 +506,7 @@ Can be refined iteratively after the core integration lands.
 - [RFD 075] — Tool sandbox and access policy.
 - [RFD 076] — Tool access grants.
 
-[RFD 043]: 043-incremental-tool-call-argument-streaming.md
-[RFD 043-2]: ../043-incremental-tool-call-argument-streaming.md
-[RFD 075]: 075-tool-sandbox-and-access-policy.md
-[RFD 076]: 076-tool-access-grants.md
+[RFD 043]: ../043-incremental-tool-call-argument-streaming.md
+[RFD 075]: ../075-tool-sandbox-and-access-policy.md
+[RFD 076]: ../076-tool-access-grants.md
 [RFD D25]: D25-argument-conditional-tool-policy.md

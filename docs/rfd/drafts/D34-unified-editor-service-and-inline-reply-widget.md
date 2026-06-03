@@ -507,7 +507,7 @@ Reviewable independently after Phase 3.
   `editor::edit_query` (path A)
 - `crates/jp_config/src/editor.rs` — `EditorConfig::command()` and `path()`
 
-[RFD 045]: 045-layered-interrupt-handler-stack.md
-[RFD 080]: 080-editor-as-a-config-source.md
-[cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
+[RFD 045]: ../045-layered-interrupt-handler-stack.md
+[RFD 080]: ../080-editor-as-a-config-source.md
+[cmd-cfg]: ../../architecture/ubiquitous-language.md#commandconfig
 [reedline]: https://crates.io/crates/reedline

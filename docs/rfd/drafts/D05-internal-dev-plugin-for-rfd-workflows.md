@@ -4,8 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-20
-- **Requires**: [RFD 001][RFD 001-2], [RFD 003][RFD 003-2], [RFD 050]\[RFD
-  050-2\], \[RFD 072\]\[RFD 072-2\]
+- **Requires**: [RFD 001], [RFD 003], [RFD 050], [RFD 072]
 
 ## Summary
 
@@ -832,12 +831,8 @@ Depends on: Phase 6.
 - [RFD D18: Plugin Event Subscriptions and Query Delegation][RFD D18] — future
   protocol-based query delegation.
 
-[RFD 001]: 001-jp-rfd-process.md
-[RFD 001-2]: ../001-jp-rfd-process.md
-[RFD 003]: 003-jp-assisted-rfds.md
-[RFD 003-2]: ../003-jp-assisted-rfds.md
-[RFD 050]: 050-scripting-ergonomics-for-conversation-management.md
-[RFD 050-2]: ../050-scripting-ergonomics-for-conversation-management.md
-[RFD 072]: 072-command-plugin-system.md
-[RFD 072-2]: ../072-command-plugin-system.md
+[RFD 001]: ../001-jp-rfd-process.md
+[RFD 003]: ../003-jp-assisted-rfds.md
+[RFD 050]: ../050-scripting-ergonomics-for-conversation-management.md
+[RFD 072]: ../072-command-plugin-system.md
 [RFD D18]: D18-plugin-event-subscriptions-and-query-delegation.md

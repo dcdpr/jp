@@ -657,9 +657,9 @@ The dispatch logic is fully replaced by runtime resolution.
   `StdioRuntime`'s `root` field will evolve into `Arc<dyn ProjectFiles>` when
   this RFD is implemented.
 
-[RFD 009]: 009-stateful-tool-protocol.md
-[RFD 016]: 016-wasm-plugin-architecture.md
-[RFD 075]: 075-tool-sandbox-and-access-policy.md
+[RFD 009]: ../009-stateful-tool-protocol.md
+[RFD 016]: ../016-wasm-plugin-architecture.md
+[RFD 075]: ../075-tool-sandbox-and-access-policy.md
 [RFD D06]: D06-self-describing-local-tools.md
 [RFD D07]: D07-typed-tool-sdk-for-rust.md
 [RFD D09]: D09-project-filesystem-abstraction.md

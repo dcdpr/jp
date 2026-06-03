@@ -21,6 +21,12 @@ Find every event mentioning a specific path:
 ```json
 {"args": ["c", "fork"], "level": "trace", "grep": "/Users/jean/.jp"}
 ```
+
+Run a multi-step flow in one sandbox so state carries over (start a
+conversation, then continue it):
+```json
+{"args": ["c", "new"], "then": [["q", "hello"], ["q", "and again"]]}
+```
 """
 
 [conversation.tools.debug_jp_trace.style]
@@ -37,6 +43,25 @@ The arguments form the full `jp` command line. For example, \
 `["c", "fork"]` runs `jp c fork` inside the sandbox.
 """
 items = { type = "string" }
+
+[conversation.tools.debug_jp_trace.parameters.then]
+type = "array"
+items = { type = "array", items = { type = "string" } }
+summary = "Additional jp commands to run in sequence in the SAME sandbox after `args`."
+description = """
+Each element is its own argument vector, like `args`. Every command runs \
+in order inside one sandbox that is created once and torn down at the end, \
+so state persists across them: e.g. `args` of `["c", "new"]` followed by a \
+`then` of `[["q", "continue ..."]]` share the same conversation.
+
+This is the only way to exercise a multi-step flow: a separate \
+`debug_jp_trace` call gets a fresh sandbox and cannot see state created by \
+an earlier call.
+
+The report contains one section per command. If a command is force-killed \
+before flushing its trace, the sequence stops and the run fails; artifacts \
+for earlier commands remain under `tmp/profiling`.
+"""
 
 [conversation.tools.debug_jp_trace.parameters.level]
 type = "string"

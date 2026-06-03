@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-15
-- **Requires**: [RFD 052][RFD 052-2], [RFD 054][RFD 054-2], [RFD 070][RFD 070-2]
+- **Requires**: [RFD 052], [RFD 054], [RFD 070]
 
 ## Summary
 
@@ -259,9 +259,6 @@ trash).
   Changes `base_config.json` to contain only the workspace config snapshot,
   enabling automatic rebuild on corruption.
 
-[RFD 052]: 052-workspace-data-store-sanitization.md
-[RFD 052-2]: ../052-workspace-data-store-sanitization.md
-[RFD 054]: 054-split-conversation-config-and-events.md
-[RFD 054-2]: ../054-split-conversation-config-and-events.md
-[RFD 070]: 070-negative-config-deltas.md
-[RFD 070-2]: ../070-negative-config-deltas.md
+[RFD 052]: ../052-workspace-data-store-sanitization.md
+[RFD 054]: ../054-split-conversation-config-and-events.md
+[RFD 070]: ../070-negative-config-deltas.md

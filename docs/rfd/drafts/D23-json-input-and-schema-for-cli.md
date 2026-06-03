@@ -464,7 +464,7 @@ their schemas into the `External` variant.
 - [RFD 072: Command Plugin System][RFD 072]
 - [RFD D19: Structured Plugin Help Protocol][RFD D19]
 
-[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
-[RFD 059]: 059-shell-completions-and-man-pages.md
-[RFD 072]: 072-command-plugin-system.md
+[RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md
+[RFD 059]: ../059-shell-completions-and-man-pages.md
+[RFD 072]: ../072-command-plugin-system.md
 [RFD D19]: D19-structured-plugin-help-protocol.md

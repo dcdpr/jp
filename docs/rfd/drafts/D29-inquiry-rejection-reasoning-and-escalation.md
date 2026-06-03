@@ -4,8 +4,8 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-14
-- **Extends**: [RFD 028][RFD 028-2], [RFD 034][RFD 034-2]
-- **Requires**: [RFD 005][RFD 005-2], [RFD 049][RFD 049-2]
+- **Extends**: [RFD 028], [RFD 034]
+- **Requires**: [RFD 005], [RFD 049]
 
 ## Summary
 
@@ -567,12 +567,8 @@ Depends on Phase 3.
 - [RFD 005: First-Class Inquiry Events][RFD 005] — persisted inquiry events
   gain the `reason` field.
 
-[RFD 005]: 005-first-class-inquiry-events.md
-[RFD 005-2]: ../005-first-class-inquiry-events.md
-[RFD 018]: 018-typed-prompt-routing-enum.md
-[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
-[RFD 028-2]: ../028-structured-inquiry-system-for-tool-questions.md
-[RFD 034]: 034-inquiry-specific-assistant-configuration.md
-[RFD 034-2]: ../034-inquiry-specific-assistant-configuration.md
-[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
-[RFD 049-2]: ../049-non-interactive-mode-and-detached-prompt-policy.md
+[RFD 005]: ../005-first-class-inquiry-events.md
+[RFD 018]: ../018-typed-prompt-routing-enum.md
+[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
+[RFD 034]: ../034-inquiry-specific-assistant-configuration.md
+[RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md

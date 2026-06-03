@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-07
-- **Requires**: [RFD 072][RFD 072-2]
+- **Requires**: [RFD 072]
 - **Required by**: [RFD D23]
 
 ## Summary
@@ -261,6 +261,5 @@ plugin to depend on a CLI framework.
 
 - [RFD 072: Command Plugin System][RFD 072]
 
-[RFD 072]: 072-command-plugin-system.md
-[RFD 072-2]: ../072-command-plugin-system.md
+[RFD 072]: ../072-command-plugin-system.md
 [RFD D23]: D23-json-input-and-schema-for-cli.md

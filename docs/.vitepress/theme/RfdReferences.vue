@@ -1,12 +1,17 @@
 <script setup>
 import { useRoute } from 'vitepress'
 import { computed } from 'vue'
-import { data } from '../../.vitepress/loaders/rfds.data.js'
+import { data as published } from '../../.vitepress/loaders/rfds.data.js'
+import { data as drafts } from '../../.vitepress/loaders/rfd-drafts.data.js'
 
 const route = useRoute()
 
+// References can cross the published/draft boundary (a draft may reference a
+// published RFD), so resolve targets against the combined set.
+const data = [...published, ...drafts]
+
 const rfd = computed(() => {
-    const num = route.path.match(/\/rfd\/(\d{3}|D\d{2})-/)?.[1]
+    const num = route.path.match(/\/rfd\/(?:drafts\/)?(\d{3}|D\d{2})-/)?.[1]
     if (!num) return null
     return data.find(r => r.num === num) ?? null
 })
@@ -34,11 +39,11 @@ const visible = computed(() =>
     <div v-if="visible" class="rfd-references">
         <div v-if="references.length" class="rfd-ref-section">
             <span class="rfd-ref-label">References</span>
-            <a v-for="ref in references" :key="ref.num" :href="'/rfd/' + ref.slug" :title="`RFD ${ref.num}: ${ref.title}`" :class="['rfd-ref-link', 'rfd-link--' + (ref.status?.toLowerCase() ?? 'unknown')]">{{ ref.num }}</a>
+            <a v-for="ref in references" :key="ref.num" :href="ref.path" :title="`RFD ${ref.num}: ${ref.title}`" :class="['rfd-ref-link', 'rfd-link--' + (ref.status?.toLowerCase() ?? 'unknown')]">{{ ref.num }}</a>
         </div>
         <div v-if="referencedBy.length" class="rfd-ref-section">
             <span class="rfd-ref-label">Referenced by</span>
-            <a v-for="ref in referencedBy" :key="ref.num" :href="'/rfd/' + ref.slug" :title="`RFD ${ref.num}: ${ref.title}`" :class="['rfd-ref-link', 'rfd-link--' + (ref.status?.toLowerCase() ?? 'unknown')]">{{ ref.num }}</a>
+            <a v-for="ref in referencedBy" :key="ref.num" :href="ref.path" :title="`RFD ${ref.num}: ${ref.title}`" :class="['rfd-ref-link', 'rfd-link--' + (ref.status?.toLowerCase() ?? 'unknown')]">{{ ref.num }}</a>
         </div>
     </div>
 </template>

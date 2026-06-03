@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-15
-- **Requires**: [RFD 028][RFD 028-2]
+- **Requires**: [RFD 028]
 
 ## Summary
 
@@ -448,13 +448,12 @@ This is the dogfooding check that proves the protocol is wired correctly.
 - [SEP-1319]: MCP request-params `_meta` field — the protocol surface this RFD
   attaches metadata to.
 
-[RFD 009]: 009-stateful-tool-protocol.md
-[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
-[RFD 028-2]: ../028-structured-inquiry-system-for-tool-questions.md
-[RFD 042]: 042-tool-options.md
-[RFD 058]: 058-typed-content-blocks-for-tool-responses.md
-[RFD 065]: 065-typed-resource-model-for-attachments.md
-[RFD 066]: 066-content-addressable-blob-store.md
-[RFD 067]: 067-resource-deduplication-for-token-efficiency.md
+[RFD 009]: ../009-stateful-tool-protocol.md
+[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
+[RFD 042]: ../042-tool-options.md
+[RFD 058]: ../058-typed-content-blocks-for-tool-responses.md
+[RFD 065]: ../065-typed-resource-model-for-attachments.md
+[RFD 066]: ../066-content-addressable-blob-store.md
+[RFD 067]: ../067-resource-deduplication-for-token-efficiency.md
 [RFD D10]: D10-unified-tool-execution-model.md
 [SEP-1319]: https://github.com/modelcontextprotocol/modelcontextprotocol/pull/1319

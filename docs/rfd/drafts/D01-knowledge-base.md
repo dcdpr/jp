@@ -936,6 +936,6 @@ Runs alongside Phase 4.
   that `learn` will migrate to in v2
 
 [#102]: https://github.com/dcdpr/jp/issues/102
-[RFD 016]: 016-wasm-plugin-architecture.md
-[RFD 017]: 017-wasm-attachment-handlers.md
-[Wasm Tools]: ../architecture/wasm-tools.md
+[RFD 016]: ../016-wasm-plugin-architecture.md
+[RFD 017]: ../017-wasm-attachment-handlers.md
+[Wasm Tools]: ../../architecture/wasm-tools.md

@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, time::Duration};
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -39,6 +39,7 @@ use crate::{
     model::{ModelDeprecation, ReasoningDetails},
     provider::trace_to_tmpfile,
     query::ChatQuery,
+    stream::with_tool_call_keepalive,
     tool::ToolDefinition,
 };
 
@@ -55,6 +56,16 @@ const TEMP_REQUIRES_NO_REASONING: &str = "temp_requires_no_reasoning";
 
 /// Feature flag: the model only supports non-streaming Responses API requests.
 const STREAMING_UNSUPPORTED: &str = "streaming_unsupported";
+
+/// How often to inject a synthetic keep-alive while a tool call is streaming.
+///
+/// OpenAI emits the `function_call_arguments` deltas for a large tool call as a
+/// burst that can follow a silent gap, which the idle timeout would otherwise
+/// treat as a dead connection.
+/// This interval stays comfortably below the enforced minimum
+/// `stream_idle_timeout_secs` (10s), so the heartbeat always lands before the
+/// idle window elapses.
+const TOOL_CALL_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Openai {
@@ -105,14 +116,19 @@ impl Provider for Openai {
             return Ok(stream::iter(events.into_iter().map(Ok::<_, StreamError>)).boxed());
         }
 
-        Ok(self
+        let raw_stream = self
             .client
             .stream(request)
             .filter_map(skip_unknown_events)
             .or_else(map_error)
             .map_ok(move |v| stream::iter(map_event(v, is_structured, reasoning_enabled)))
             .try_flatten()
-            .boxed())
+            .boxed();
+
+        Ok(with_tool_call_keepalive(
+            raw_stream,
+            TOOL_CALL_KEEPALIVE_INTERVAL,
+        ))
     }
 }
 
@@ -200,10 +216,28 @@ fn synthesize_non_streaming_output_item_events(
             });
             events
         }
-        types::OutputItem::FunctionCall(function_call) => vec![types::Event::OutputItemDone {
-            item: types::OutputItem::FunctionCall(function_call),
-            output_index,
-        }],
+        types::OutputItem::FunctionCall(function_call) => {
+            // Mirror the streaming event sequence (added -> args delta -> done)
+            // so `map_event` produces the same start/args/flush events it does
+            // for a live stream.
+            let arguments = function_call.arguments.clone();
+            let item_id = function_call.id.clone().unwrap_or_default();
+            vec![
+                types::Event::OutputItemAdded {
+                    item: types::OutputItem::FunctionCall(function_call.clone()),
+                    output_index,
+                },
+                types::Event::FunctionCallArgumentsDelta {
+                    delta: arguments,
+                    item_id,
+                    output_index,
+                },
+                types::Event::OutputItemDone {
+                    item: types::OutputItem::FunctionCall(function_call),
+                    output_index,
+                },
+            ]
+        }
         types::OutputItem::FileSearch(_)
         | types::OutputItem::WebSearchResults(_)
         | types::OutputItem::ComputerToolCall(_) => vec![],
@@ -972,6 +1006,11 @@ fn map_event(
 ) -> Vec<std::result::Result<Event, StreamError>> {
     use types::Event::*;
 
+    trace!(
+        event = serde_json::to_string(&event).unwrap_or_default(),
+        "Received event from OpenAI API."
+    );
+
     #[expect(clippy::cast_possible_truncation)]
     match event {
         // We emit an empty message first, because sometimes the API returns
@@ -1005,6 +1044,19 @@ fn map_event(
             item: types::OutputItem::Reasoning(_),
         } => vec![Ok(Event::reasoning(output_index as usize, String::new()))],
 
+        // Emit the tool-call start as soon as the item is announced, before any
+        // arguments stream in. This renders the call header early and opens the
+        // tool-call window for the keep-alive layer to fill the silent gap
+        // while the model generates the arguments.
+        OutputItemAdded {
+            output_index,
+            item: types::OutputItem::FunctionCall(types::FunctionCall { call_id, name, .. }),
+        } => vec![Ok(Event::tool_call_start(
+            output_index as usize,
+            &call_id,
+            &name,
+        ))],
+
         OutputTextDelta {
             delta,
             output_index,
@@ -1028,6 +1080,12 @@ fn map_event(
             output_index,
             ..
         } => vec![Ok(Event::reasoning(output_index as usize, delta))],
+
+        FunctionCallArgumentsDelta {
+            delta,
+            output_index,
+            ..
+        } => vec![Ok(Event::tool_call_args(output_index as usize, delta))],
 
         OutputItemDone { item, output_index } => {
             let index = output_index as usize;
@@ -1062,17 +1120,9 @@ fn map_event(
                 | types::OutputItem::ComputerToolCall(_) => return vec![],
             };
 
-            if let types::OutputItem::FunctionCall(types::FunctionCall {
-                name,
-                arguments,
-                call_id,
-                ..
-            }) = item
-            {
-                events.push(Ok(Event::tool_call_start(index, &call_id, &name)));
-                events.push(Ok(Event::tool_call_args(index, arguments)));
-            }
-
+            // A function call's start and argument chunks are emitted from the
+            // `OutputItemAdded` and `FunctionCallArgumentsDelta` events; only
+            // the flush remains to be emitted here.
             events.push(Ok(Event::flush_with_metadata(index, metadata)));
             events
         }

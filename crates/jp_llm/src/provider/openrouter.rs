@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, time::Duration};
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -41,6 +41,7 @@ use crate::{
     event::{self, Event, EventPart},
     provider::{Provider, openai::parameters_with_strict_mode},
     query::ChatQuery,
+    stream::with_tool_call_keepalive,
 };
 
 static PROVIDER: ProviderId = ProviderId::Openrouter;
@@ -49,6 +50,15 @@ const ANTHROPIC_REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
 const ANTHROPIC_THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
 const GOOGLE_THOUGHT_SIGNATURE_KEY: &str = "google_thought_signature";
 const OPENAI_ENCRYPTED_CONTENT_KEY: &str = "openai_encrypted_content";
+
+/// How often to inject a synthetic keep-alive while a tool call is streaming.
+///
+/// OpenRouter proxies to upstream providers (Anthropic, OpenAI, ...) that emit
+/// tool-call arguments as a burst after a silent gap, which the idle timeout
+/// would otherwise treat as a dead connection.
+/// Stays below the enforced minimum `stream_idle_timeout_secs` (10s) so the
+/// heartbeat always lands before the idle window elapses.
+const TOOL_CALL_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Openrouter {
@@ -116,13 +126,18 @@ impl Provider for Openrouter {
             is_structured,
         };
 
-        Ok(self
+        let raw_stream = self
             .client
             .chat_completion_stream(request)
             .map_err(StreamError::from)
             .map_ok(move |v| stream::iter(map_completion(v, &mut state)))
             .try_flatten()
-            .boxed())
+            .boxed();
+
+        Ok(with_tool_call_keepalive(
+            raw_stream,
+            TOOL_CALL_KEEPALIVE_INTERVAL,
+        ))
     }
 }
 
@@ -277,6 +292,11 @@ fn map_completion(
     v: OpenRouterChunk,
     state: &mut AggregationState,
 ) -> Vec<std::result::Result<Event, StreamError>> {
+    trace!(
+        event = serde_json::to_string(&v).unwrap_or_default(),
+        "Received event from OpenRouter API."
+    );
+
     v.choices
         .into_iter()
         .flat_map(|v| map_event(v, state))

@@ -959,6 +959,73 @@ mod synthesize_non_streaming_output_item_events {
     }
 }
 
+mod map_event {
+    use openai_responses::types;
+    use serde_json::json;
+
+    use super::super::map_event;
+    use crate::event::Event;
+
+    fn collect(event: types::Event) -> Vec<Event> {
+        map_event(event, false, true)
+            .into_iter()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    #[test]
+    fn function_call_added_emits_tool_call_start() {
+        let events = collect(types::Event::OutputItemAdded {
+            output_index: 2,
+            item: serde_json::from_value(json!({
+                "type": "function_call",
+                "id": "fc_123",
+                "status": "in_progress",
+                "arguments": "",
+                "call_id": "call_123",
+                "name": "run_me"
+            }))
+            .unwrap(),
+        });
+
+        assert_eq!(events, vec![Event::tool_call_start(
+            2, "call_123", "run_me"
+        )]);
+    }
+
+    #[test]
+    fn function_call_argument_delta_streams_as_tool_call_args() {
+        let events = collect(types::Event::FunctionCallArgumentsDelta {
+            delta: r#"{"path":"docs/rfd/drafts/D47"#.to_owned(),
+            item_id: "fc_123".to_owned(),
+            output_index: 2,
+        });
+
+        assert_eq!(events, vec![Event::tool_call_args(
+            2,
+            r#"{"path":"docs/rfd/drafts/D47"#
+        )]);
+    }
+
+    #[test]
+    fn function_call_done_emits_only_flush() {
+        let events = collect(types::Event::OutputItemDone {
+            output_index: 2,
+            item: serde_json::from_value(json!({
+                "type": "function_call",
+                "id": "fc_123",
+                "status": "completed",
+                "arguments": "{\"path\":\"x\"}",
+                "call_id": "call_123",
+                "name": "run_me"
+            }))
+            .unwrap(),
+        });
+
+        assert_eq!(events, vec![Event::flush(2)]);
+    }
+}
+
 mod map_non_streaming_finish_reason {
     use openai_responses::types;
 

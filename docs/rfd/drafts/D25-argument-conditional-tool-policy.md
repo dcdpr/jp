@@ -673,10 +673,10 @@ Can proceed in parallel with Phases 2–5.
 
 [JSON Schema Validation]: https://www.ietf.org/archive/id/draft-bhutton-json-schema-validation-01.html
 [RFC 6901]: https://www.rfc-editor.org/rfc/rfc6901.html
-[RFD 042]: 042-tool-options.md
-[RFD 043]: 043-incremental-tool-call-argument-streaming.md
-[RFD 075]: 075-tool-sandbox-and-access-policy.md
-[RFD 076]: 076-tool-access-grants.md
+[RFD 042]: ../042-tool-options.md
+[RFD 043]: ../043-incremental-tool-call-argument-streaming.md
+[RFD 075]: ../075-tool-sandbox-and-access-policy.md
+[RFD 076]: ../076-tool-access-grants.md
 [RFD D26]: D26-streaming-policy-evaluation-for-tool-call-arguments.md
 [`jsonptr` crate]: https://crates.io/crates/jsonptr
 [json-schema-validation]: https://www.ietf.org/archive/id/draft-bhutton-json-schema-validation-01.html

@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
-- **Requires**: [RFD 078][RFD 078-2]
+- **Requires**: [RFD 078]
 
 ## Summary
 
@@ -237,9 +237,8 @@ Can be merged independently of Phase 1.
 - [RFD 066: Content-Addressable Blob Store][RFD 066] — mitigates large store
   values.
 
-[RFD 039]: 039-conversation-trees.md
-[RFD 064]: 064-non-destructive-conversation-compaction.md
-[RFD 066]: 066-content-addressable-blob-store.md
-[RFD 078]: 078-tool-config-mutation.md
-[RFD 078-2]: ../078-tool-config-mutation.md
+[RFD 039]: ../039-conversation-trees.md
+[RFD 064]: ../064-non-destructive-conversation-compaction.md
+[RFD 066]: ../066-content-addressable-blob-store.md
+[RFD 078]: ../078-tool-config-mutation.md
 [RFD D05]: D05-internal-dev-plugin-for-rfd-workflows.md

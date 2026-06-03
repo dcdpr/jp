@@ -8,7 +8,7 @@ use super::tool::ToolCall;
 
 /// Wrapper for `DateTime<Utc>` that produces `time::OffsetDateTime`-compatible
 /// `Debug` output: `2025-12-09 12:51:48.0 +00:00:00`.
-#[derive(Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct OffsetDateTimeFmt(#[serde(with = "chrono::serde::ts_seconds")] pub DateTime<Utc>);
 
@@ -25,7 +25,7 @@ impl fmt::Debug for OffsetDateTimeFmt {
 }
 
 /// A chat completion response.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ChatCompletion {
     /// The ID of the response.
     pub id: String,
@@ -84,7 +84,21 @@ pub enum ResponseObject {
     ChatCompletionChunk,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+// Manual impl: the `Deserialize` derive uses `#[serde(variant_identifier)]`,
+// which is deserialize-only. Serialize to the same wire strings.
+impl Serialize for ResponseObject {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            Self::ChatCompletion => "chat.completion",
+            Self::ChatCompletionChunk => "chat.completion.chunk",
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Choice {
     NonStreaming(NonStreamingChoice),
@@ -112,7 +126,7 @@ impl Choice {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NonStreamingChoice {
     pub finish_reason: FinishReason,
     pub native_finish_reason: String,
@@ -124,7 +138,7 @@ pub struct NonStreamingChoice {
 }
 
 /// The reason why the assistant stopped generating tokens.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "snake_case", rename_all = "snake_case")]
 pub enum FinishReason {
     /// The assistant has finished requesting a tool call execution.
@@ -162,7 +176,7 @@ impl FinishReason {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NonStreamingMessage {
     pub role: String,
     pub content: Option<String>,
@@ -173,7 +187,7 @@ pub struct NonStreamingMessage {
     pub tool_calls: Vec<ToolCall>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StreamingChoice {
     /// Similar to [`NonStreamingChoice::finish_reason`], but can be `None` if
     /// the stream is not finished.
@@ -186,7 +200,7 @@ pub struct StreamingChoice {
     pub error: Option<ErrorResponse>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct StreamingDelta {
     pub role: Option<String>,
     pub content: Option<String>,
@@ -251,7 +265,7 @@ pub enum ReasoningDetailsKind {
     Unknown(serde_json::Value),
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NonChatChoice {
     pub finish_reason: FinishReason,
     pub text: String,
@@ -265,7 +279,7 @@ pub struct CompletionChunk {
     pub usage: Option<Usage>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Usage {
     pub completion_tokens: u32,
     pub completion_tokens_details: Option<CompletionTokensDetails>,
@@ -275,24 +289,24 @@ pub struct Usage {
     pub total_tokens: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PromptTokensDetails {
     pub cached_tokens: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct CompletionTokensDetails {
     pub reasoning_tokens: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ErrorResponse {
     pub code: u16,
     pub message: String,
     pub metadata: Option<ErrorMetadata>,
 }
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ErrorMetadata {
     /// Model provider flagged the input for moderation.

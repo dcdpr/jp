@@ -120,7 +120,7 @@
     "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
   },
   "031-durable-conversation-storage-with-workspace-projection.md": {
-    "hash": "51f8b9c04a5b9e509662c44eefe3be2ab455f8c71f58a12f8a719eef19e63f97",
+    "hash": "4fe057a97026119a3ad36332f238fe83a74f143da95ddec80965d8e9bb43c0a0",
     "summary": "Make user-local storage the durable source; workspace copies become optional projections for git visibility."
   },
   "032-grizzly-semantic-search.md": {
@@ -276,7 +276,7 @@
     "summary": "Standalone command plugins communicate with JP via JSON-lines protocol to extend subcommands across languages."
   },
   "073-layered-storage-backend-for-workspaces.md": {
-    "hash": "e1108db0fe22e348282f5475ea9f8d0e9794eb518af9e233f1d6cc444a7e9785",
+    "hash": "5a75ad42e8954ecd1e7da4e9cd8812aa1d9e5d85d29ef99b3b3492eb27e71d29",
     "summary": "Replace Workspace's optional Storage with four focused trait objects (Persist, Load, Lock, Session) for cleaner polymorphism."
   },
   "070-negative-config-deltas.md": {
