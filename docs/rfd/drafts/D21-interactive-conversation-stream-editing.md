@@ -543,5 +543,5 @@ Depends on Phase 4.
 - `crates/jp_config/src/editor.rs` — `EditorConfig` and editor resolution
 
 [Issue #57]: https://github.com/dcdpr/jp/issues/57
-[RFD 047]: 047-editor-and-path-access-for-conversations.md
-[RFD 064]: 064-non-destructive-conversation-compaction.md
+[RFD 047]: ../047-editor-and-path-access-for-conversations.md
+[RFD 064]: ../064-non-destructive-conversation-compaction.md

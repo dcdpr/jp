@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
-- **Requires**: [RFD 065][RFD 065-2], [RFD 066][RFD 066-2]
+- **Requires**: [RFD 065], [RFD 066]
 
 ## Summary
 
@@ -295,8 +295,6 @@ and external resources at a glance.
 - [RFD 066: Content-Addressable Blob Store][RFD 066]
 - [RFD 067: Resource Deduplication for Token Efficiency][RFD 067]
 
-[RFD 065]: 065-typed-resource-model-for-attachments.md
-[RFD 065-2]: ../065-typed-resource-model-for-attachments.md
-[RFD 066]: 066-content-addressable-blob-store.md
-[RFD 066-2]: ../066-content-addressable-blob-store.md
-[RFD 067]: 067-resource-deduplication-for-token-efficiency.md
+[RFD 065]: ../065-typed-resource-model-for-attachments.md
+[RFD 066]: ../066-content-addressable-blob-store.md
+[RFD 067]: ../067-resource-deduplication-for-token-efficiency.md

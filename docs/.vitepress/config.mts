@@ -1,9 +1,68 @@
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, posix, resolve } from 'node:path'
 
 import { defineConfig } from 'vitepress'
 import abnfGrammar from './grammars/abnf.tmLanguage.json'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
+
+// Rewrite relative links that climb above the docs root to absolute GitHub
+// URLs. The repo tree is the parent of the docs root, so any link resolving
+// outside `docs/` points at a real repository path. Mapping it to github.com
+// lets it resolve on the website and skips dead-link checking (which only
+// covers internal links), while the markdown source keeps a plain relative
+// link that stays clickable locally and on GitHub.
+const GITHUB_BASE = 'https://github.com/dcdpr/jp'
+const GITHUB_BRANCH = 'main'
+
+function repoLinkFor(href, pageDir) {
+    if (!href) return null
+    // Schemes, protocol-relative, anchors, and site-absolute links: leave as-is.
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|[#/])/i.test(href)) return null
+
+    const cut = href.search(/[?#]/)
+    const linkPath = cut === -1 ? href : href.slice(0, cut)
+    const suffix = cut === -1 ? '' : href.slice(cut)
+
+    const resolved = posix.normalize(posix.join(pageDir, linkPath))
+    // Inside the docs root: a normal internal link, handled by VitePress.
+    if (resolved === 'docs' || resolved.startsWith('docs/')) return null
+    // Above the repo root: can't map it, leave it for the dead-link check.
+    if (resolved.startsWith('..')) return null
+
+    // A last segment with an extension is a file (`/blob/`); otherwise treat
+    // it as a directory (`/tree/`).
+    const last = resolved.slice(resolved.lastIndexOf('/') + 1)
+    const kind = last.includes('.') ? 'blob' : 'tree'
+    return `${GITHUB_BASE}/${kind}/${GITHUB_BRANCH}/${resolved}${suffix}`
+}
+
+// Serve raw `.md` files with an explicit UTF-8 charset on the dev server. The
+// production build bakes a BOM into the copied mirrors (see `buildEnd`), but
+// the dev server streams source files straight from disk, where Vite labels
+// `.md` as `text/markdown` with no charset and browsers fall back to Latin-1.
+// Gated to top-level navigations (Accept: text/html) so it never intercepts
+// the `.md` module requests VitePress uses to render pages.
+const serveMarkdownAsUtf8 = {
+    name: 'serve-markdown-as-utf8',
+    configureServer(server) {
+        server.middlewares.use((req, res, next) => {
+            const url = (req.url || '').split('?')[0]
+            if (
+                req.method === 'GET' &&
+                url.endsWith('.md') &&
+                (req.headers.accept || '').includes('text/html')
+            ) {
+                const file = resolve(server.config.root, '.' + decodeURIComponent(url))
+                if (file.startsWith(server.config.root) && existsSync(file)) {
+                    res.setHeader('Content-Type', 'text/markdown; charset=utf-8')
+                    res.end(readFileSync(file))
+                    return
+                }
+            }
+            next()
+        })
+    },
+}
 
 // https://vitepress.dev/reference/site-config
 
@@ -32,26 +91,54 @@ export default defineConfig({
                     .replace(/\}\}/g, '&#125;&#125;')
                 return `<code>${escaped}</code>`
             }
+
+            // Runs at parse time, before VitePress's link render rule, so a
+            // rewritten (now external) href is treated as external and never
+            // recorded for dead-link checking.
+            md.core.ruler.push('rewrite_repo_links', (state) => {
+                const rel = state.env?.relativePath
+                if (!rel) return
+                const pageDir = posix.dirname(posix.join('docs', rel))
+                for (const token of state.tokens) {
+                    if (token.type !== 'inline' || !token.children) continue
+                    for (const child of token.children) {
+                        if (child.type !== 'link_open') continue
+                        const url = repoLinkFor(child.attrGet('href'), pageDir)
+                        if (url) child.attrSet('href', url)
+                    }
+                }
+            })
         },
     },
     async buildEnd(siteConfig) {
         // Copy raw .md source files into the output directory so every page
         // is also reachable at its .md URL (e.g. /getting-started.md).
         // This lets LLMs and tools fetch clean markdown without parsing HTML.
+        //
+        // Prepend a UTF-8 BOM: GitHub Pages serves `.md` without a
+        // `charset=utf-8` Content-Type, so without an in-band signal browsers
+        // viewing the raw file fall back to Latin-1 and mangle multi-byte
+        // characters (e.g. an em dash renders as `â€”`). The BOM forces UTF-8
+        // decoding and is stripped by virtually all markdown/text parsers.
+        const BOM = '\uFEFF'
         for (const page of siteConfig.pages) {
             const src = resolve(siteConfig.srcDir, page)
             const dest = resolve(siteConfig.outDir, page)
             if (!existsSync(src)) continue
             mkdirSync(dirname(dest), { recursive: true })
-            copyFileSync(src, dest)
+            const content = readFileSync(src, 'utf-8')
+            writeFileSync(dest, content.startsWith(BOM) ? content : BOM + content)
         }
+    },
+    vite: {
+        plugins: [serveMarkdownAsUtf8],
     },
     lang: 'en-US',
     base: '/', // https://jp.computer
     title: "Jean-Pierre",
     description: "An LLM-based Programming Assistant",
     cleanUrls: true,
-    srcExclude: ['README/**', 'rfd/drafts/**'],
+    srcExclude: ['README/**'],
     themeConfig: {
         outline: {
             level: [2, 3]

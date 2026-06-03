@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
-- **Requires**: [RFD 073][RFD 073-2]
+- **Requires**: [RFD 073]
 - **Required by**: [RFD D11]
 
 ## Summary
@@ -753,7 +753,6 @@ The filesystem traversal logic remains, but the root path comes from
   Removes `Workspace::root` and introduces storage backend traits, which this
   RFD complements with a project file abstraction.
 
-[RFD 016]: 016-wasm-plugin-architecture.md
-[RFD 073]: 073-layered-storage-backend-for-workspaces.md
-[RFD 073-2]: ../073-layered-storage-backend-for-workspaces.md
+[RFD 016]: ../016-wasm-plugin-architecture.md
+[RFD 073]: ../073-layered-storage-backend-for-workspaces.md
 [RFD D11]: D11-vfs-tool-protocol.md

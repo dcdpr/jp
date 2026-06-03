@@ -362,6 +362,6 @@ Depends on phases 1 and 2.
 - `MAX_BINARY_SIZE` in `jp_attachment_file_content` — existing 10 MiB hard
   limit on binary file attachments
 
-[RFD 015]: 015-simplified-attachment-handler-trait.md
-[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
-[RFD 065]: 065-typed-resource-model-for-attachments.md
+[RFD 015]: ../015-simplified-attachment-handler-trait.md
+[RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md
+[RFD 065]: ../065-typed-resource-model-for-attachments.md

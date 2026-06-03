@@ -280,6 +280,6 @@ Depends on Phase 1 having shipped for at least one release.
 - [`StdioConfig`][stdio-config] — current field shape
 - [`uv` tool spec syntax][uv-tool-spec] — version pinning for `uvx`
 
-[stdio-config]: ../../crates/jp_config/src/providers/mcp.rs
+[stdio-config]: ../../../crates/jp_config/src/providers/mcp.rs
 [uv-tool-spec]: https://docs.astral.sh/uv/concepts/tools/#package-specification
-[verify-impl]: ../../crates/jp_mcp/src/client.rs
+[verify-impl]: ../../../crates/jp_mcp/src/client.rs

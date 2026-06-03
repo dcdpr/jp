@@ -1152,14 +1152,16 @@ rfd-promote NNN: _install-jp
         new_basename="${num}-${slug}.md"
         new_file="docs/rfd/${new_basename}"
 
-        # Rewrite heading and status. Also strip `../` from markdown link
-        # targets: the file moves from `docs/rfd/drafts/` up to `docs/rfd/`,
-        # so any `[...](../foo.md)` backlink to a non-draft RFD would
-        # otherwise resolve one directory too high.
+        # Rewrite heading and status. Also strip one `../` level from markdown
+        # link targets: the file moves from `docs/rfd/drafts/` up to
+        # `docs/rfd/`, so any backlink to a non-draft RFD would otherwise
+        # resolve one directory too high. Both inline links (`[...](../foo.md)`)
+        # and reference definitions (`[label]: ../foo.md`) are handled.
         sed \
             -e "s/^# RFD [A-Z]*[0-9]*:/# RFD ${num}:/" \
             -e "s/^- \*\*Status\*\*: Draft/- **Status**: Discussion/" \
             -e 's|](\.\./|](|g' \
+            -e 's|^\(\[[^]]*\]:[ ]*\)\.\./|\1|' \
             "$file" > "$new_file"
         rm "$file"
 

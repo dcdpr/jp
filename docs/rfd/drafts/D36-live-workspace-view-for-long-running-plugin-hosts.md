@@ -500,7 +500,7 @@ Not part of v1.
   in [PR #546]).
 
 [PR #546]: https://github.com/dcdpr/jp/pull/546
-[RFD 069]: 069-guard-scoped-persistence-for-conversations.md
-[RFD 072]: 072-command-plugin-system.md
-[RFD 073]: 073-layered-storage-backend-for-workspaces.md
-[RFD D16]: drafts/D16-read-only-web-ui-for-conversations.md
+[RFD 069]: ../069-guard-scoped-persistence-for-conversations.md
+[RFD 072]: ../072-command-plugin-system.md
+[RFD 073]: ../073-layered-storage-backend-for-workspaces.md
+[RFD D16]: D16-read-only-web-ui-for-conversations.md

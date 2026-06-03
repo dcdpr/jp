@@ -893,6 +893,6 @@ Depends on Phase 1 and the chrome verbosity RFD.
 - `crates/jp_cli/src/lib.rs` — current `configure_logging` and `TracingGuard`.
 - `crates/jp_llm/src/provider.rs` — current `trace_to_tmpfile`.
 
-[RFD 048]: 048-four-channel-output-model.md
-[RFD 072]: 072-command-plugin-system.md
+[RFD 048]: ../048-four-channel-output-model.md
+[RFD 072]: ../072-command-plugin-system.md
 [RFD D15]: D15-structured-logging-infrastructure.md

@@ -619,8 +619,8 @@ Mergeable independently of Phase 1, but depends on it.
   fulfills.
 
 [#101]: https://github.com/dcdpr/jp/issues/101
-[RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
-[RFD 040]: 040-hidden-conversations-and-tool-context.md
-[RFD 077]: 077-plugin-configuration-and-trust-policy.md
-[cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
-[tools]: ../../crates/jp_config/src/conversation/tool.rs
+[RFD 031]: ../031-durable-conversation-storage-with-workspace-projection.md
+[RFD 040]: ../040-hidden-conversations-and-tool-context.md
+[RFD 077]: ../077-plugin-configuration-and-trust-policy.md
+[cmd-cfg]: ../../architecture/ubiquitous-language.md#commandconfig
+[tools]: ../../../crates/jp_config/src/conversation/tool.rs

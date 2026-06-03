@@ -439,8 +439,8 @@ Depends on Phase 1.
 - [RFD 049] — `exclusive` flag and detached-policy cascade, inherited from [RFD
   083].
 
-[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
-[RFD 034]: 034-inquiry-specific-assistant-configuration.md
-[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
+[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
+[RFD 034]: ../034-inquiry-specific-assistant-configuration.md
+[RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 083]: ../083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
 [RFD D13]: D13-schema-answer-type-and-inherit-model-alias.md

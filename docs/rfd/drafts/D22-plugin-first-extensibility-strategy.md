@@ -533,11 +533,11 @@ signals — informational, not gatekeeping.
 - [Vector RFC: Registered Internal Events][vector-events] — prior art for
   internal event systems in pipeline architectures.
 
-[RFD 016]: 016-wasm-plugin-architecture.md
-[RFD 017]: 017-wasm-attachment-handlers.md
-[RFD 048]: 048-four-channel-output-model.md
-[RFD 072]: 072-command-plugin-system.md
-[RFD 077]: 077-plugin-configuration-and-trust-policy.md
+[RFD 016]: ../016-wasm-plugin-architecture.md
+[RFD 017]: ../017-wasm-attachment-handlers.md
+[RFD 048]: ../048-four-channel-output-model.md
+[RFD 072]: ../072-command-plugin-system.md
+[RFD 077]: ../077-plugin-configuration-and-trust-policy.md
 [RFD D18]: D18-plugin-event-subscriptions-and-query-delegation.md
 [RFD D19]: D19-structured-plugin-help-protocol.md
 [vector-events]: https://github.com/vectordotdev/vector/blob/master/rfcs/2022-07-28-13691-registered-internal-events.md

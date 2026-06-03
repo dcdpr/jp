@@ -325,6 +325,6 @@ Depends on Phase 1 and [RFD D13] Phase 3 (`inherit` alias).
 - [RFD 034: Inquiry-Specific Assistant Configuration][RFD 034] — per-question
   model targeting.
 
-[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
-[RFD 034]: 034-inquiry-specific-assistant-configuration.md
+[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
+[RFD 034]: ../034-inquiry-specific-assistant-configuration.md
 [RFD D13]: D13-schema-answer-type-and-inherit-model-alias.md
