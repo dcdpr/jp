@@ -16,8 +16,8 @@ See [RFD 001] for the full process.
 - **Guide** — how-tos and reference material for contributors
 - **Process** — how the project operates: workflows, policies, values
 
-Proposals that haven't been assigned a permanent number yet live on the
-[draft RFDs](./drafts/) page.
+Proposals that haven't been assigned a permanent number yet live on the [draft
+RFDs] page.
 
 <script setup>
 import { data } from '../.vitepress/loaders/rfds.data.js'
@@ -27,3 +27,4 @@ import RfdIndex from '../.vitepress/theme/RfdIndex.vue'
 <RfdIndex :entries="data" />
 
 [RFD 001]: ./001-jp-rfd-process
+[draft RFDs]: ./drafts/
