@@ -754,7 +754,79 @@ expression: v
             index: 1,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"foo\":\"foo\",\"bar\":\"foo\"}",
+                    "{\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\",\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "bar",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\"}",
                 ),
             ),
             metadata: {},
