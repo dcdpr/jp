@@ -9,7 +9,7 @@
 
 use camino::Utf8Path;
 use jp_config::conversation::tool::access::{AccessConfig, FsRuleConfig};
-use jp_tool::{AccessPolicy, FsRule, lexical_workspace_relative};
+use jp_tool::{AccessPolicy, FsRule, canonicalize_workspace_target, lexical_workspace_relative};
 use tracing::warn;
 
 use crate::access::approvals::{ApprovalLookup, ApprovalStore};
@@ -74,7 +74,18 @@ pub fn compile_fs(
         let lexical_str = lexical.as_str().to_owned();
 
         if !rule.is_external() {
-            compiled.rules.push(build_rule(rule, lexical, None));
+            // Canonicalize ordinary rule paths to the same canonical
+            // workspace-relative form tool-call targets are matched against, so
+            // a rule written on an in-workspace symlink applies to the
+            // symlink's target. Ordinary rules that resolve outside the
+            // workspace are rejected (RFD 076).
+            let canonical = canonicalize_workspace_target(&root_canonical, &lexical)
+                .map_err(|_| CompileError::NotWorkspaceRelative(rule.path.clone()))?;
+            let canonical_rel = canonical
+                .strip_prefix(&root_canonical)
+                .map(Utf8Path::to_owned)
+                .map_err(|_| CompileError::NotWorkspaceRelative(rule.path.clone()))?;
+            compiled.rules.push(build_rule(rule, canonical_rel, None));
             continue;
         }
 
@@ -113,39 +124,34 @@ pub fn compile_fs(
 /// Compile a tool's `access` config into a runtime [`AccessPolicy`], consulting
 /// the approval store for external targets (trust-on-first-use).
 ///
-/// Returns `None` when the tool declares no `access` — the tool keeps
+/// Returns `Ok(None)` when the tool declares no `access` — the tool keeps
 /// unrestricted, workspace-confined access.
-/// A config that fails to compile (malformed rule path, or `external` resolving
-/// inside the workspace) degrades to an empty policy: workspace-confined with
-/// no external access, rather than silently granting more.
+/// A config that fails to compile (a malformed rule path, or `external = true`
+/// resolving inside the workspace) is a hard error: the caller must fail the
+/// tool invocation rather than run it with an unenforced policy.
+/// An empty policy would mean *unrestricted* workspace access, so degrading to
+/// it would silently widen access — the opposite of what the invalid config
+/// asked for.
 pub(crate) fn compile_tool_policy(
     access: Option<&AccessConfig>,
     root: &Utf8Path,
     approvals: &ApprovalStore,
-) -> Option<AccessPolicy> {
-    let config = access?;
+) -> Result<Option<AccessPolicy>, CompileError> {
+    let Some(config) = access else {
+        return Ok(None);
+    };
 
-    let result = compile_policy(config, root, |rule_path, candidate| {
-        match approvals.lookup(rule_path, candidate) {
-            ApprovalLookup::Approved => ApprovalDecision::Approved,
-            ApprovalLookup::Retargeted { .. } | ApprovalLookup::Unknown => {
-                ApprovalDecision::Rejected
-            }
-        }
-    });
+    let (policy, warnings) = compile_policy(config, root, |rule_path, candidate| match approvals
+        .lookup(rule_path, candidate)
+    {
+        ApprovalLookup::Approved => ApprovalDecision::Approved,
+        ApprovalLookup::Retargeted { .. } | ApprovalLookup::Unknown => ApprovalDecision::Rejected,
+    })?;
 
-    match result {
-        Ok((policy, warnings)) => {
-            for warning in warnings {
-                warn!("{warning}");
-            }
-            Some(policy)
-        }
-        Err(error) => {
-            warn!(%error, "Failed to compile tool access policy; denying external access.");
-            Some(AccessPolicy::default())
-        }
+    for warning in warnings {
+        warn!("{warning}");
     }
+    Ok(Some(policy))
 }
 
 /// Compile a full [`AccessConfig`] into an [`AccessPolicy`].

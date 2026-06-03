@@ -3,7 +3,7 @@
 use std::{fmt, str::FromStr};
 
 use indexmap::IndexMap;
-use schematic::{Config, ConfigEnum, PartialConfig as _};
+use schematic::{Config, ConfigEnum, ConfigError, HandlerError, PartialConfig as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use tracing::warn;
@@ -23,6 +23,7 @@ use crate::{
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::json_value::JsonValue,
     util::merge_nested_indexmap,
+    validate::Validator,
 };
 
 pub mod access;
@@ -144,6 +145,34 @@ impl ToolsConfig {
     /// Insert a tool configuration.
     pub fn insert(&mut self, name: String, tool: ToolConfig) {
         self.tools.insert(name, tool);
+    }
+}
+
+impl Validator for ToolsConfig {
+    /// Reject `access` on tools whose finalized source is `builtin` or `mcp`.
+    ///
+    /// `access` is the local-subprocess contract: it is serialized into the
+    /// `Context` that local tool binaries self-check.
+    /// Builtin tools run in-process and MCP tools run on external servers, so
+    /// neither consumes `access` — accepting it there would create false
+    /// confidence in a security-relevant field.
+    fn validate(&self) -> Result<(), ConfigError> {
+        for (name, tool) in self.iter() {
+            if tool.access().is_none() {
+                continue;
+            }
+            let kind = match tool.source() {
+                ToolSource::Local { .. } => continue,
+                ToolSource::Builtin { .. } => "builtin",
+                ToolSource::Mcp { .. } => "mcp",
+            };
+            return Err(HandlerError::new(format!(
+                "conversation.tools.{name}: `access` is only supported on local tools, but \
+                 '{name}' is a {kind} tool"
+            ))
+            .into());
+        }
+        Ok(())
     }
 }
 

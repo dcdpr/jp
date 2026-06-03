@@ -1437,9 +1437,12 @@ fn apply_mounts(
     let root = workspace.root().to_owned();
     let cwd = current_dir_utf8()?;
 
-    let existing = merged_config.map_or(&partial.conversation.tools.tools, |v| {
-        &v.conversation.tools.tools
-    });
+    // Resolve the tool set and the global enable default from the merged
+    // config (the fully-layered view) so a bare mount expands over the tools
+    // actually enabled in the resolved config, honoring `*` defaults.
+    let tools_config = merged_config.map_or(&partial.conversation.tools, |v| &v.conversation.tools);
+    let default_enable = tools_config.defaults.enable;
+    let existing = &tools_config.tools;
 
     let mut plans = Vec::new();
     for spec in mounts {
@@ -1450,7 +1453,7 @@ fn apply_mounts(
             Some(tool) => vec![(tool.clone(), tool_access_empty(existing, tool))],
             None => existing
                 .iter()
-                .filter(|(_, cfg)| is_enabled_local(cfg))
+                .filter(|(_, cfg)| is_enabled_local(cfg, default_enable))
                 .map(|(name, _)| (name.clone(), tool_access_empty(existing, name)))
                 .collect(),
         };
@@ -1520,9 +1523,12 @@ fn create_mount_effects(
         let target = expand_tilde(&spec.path, env::var("HOME").ok())
             .unwrap_or_else(|| Utf8PathBuf::from(&spec.path));
 
+        // Resolve the target before creating the link so a missing target
+        // fails cleanly instead of leaving a broken symlink behind.
+        let canonical = target.canonicalize_utf8().map_err(|e| {
+            Error::CliConfig(format!("mount target '{target}' cannot be resolved: {e}"))
+        })?;
         create_workspace_symlink(&link, &target)?;
-
-        let canonical = link.canonicalize_utf8()?;
         store.record(rule_path.as_str(), canonical, now);
         rules.push(spec.rule(rule_path.as_str()));
     }
@@ -1553,11 +1559,18 @@ fn create_mount_effects(
 
 /// Create a workspace symlink at `link` pointing to `target`.
 ///
-/// A symlink that already points at `target` is a no-op; one pointing
+/// A symlink that already resolves to the same target is a no-op; one resolving
 /// elsewhere, or a non-symlink at `link`, is an error.
 fn create_workspace_symlink(link: &Utf8Path, target: &Utf8Path) -> Result<()> {
-    if let Ok(existing) = fs::read_link(link) {
-        if existing.as_path() == target.as_std_path() {
+    if link.is_symlink() {
+        // Compare resolved targets rather than the raw link text, so a relative
+        // and an absolute link to the same place are treated as identical.
+        let same = link
+            .canonicalize_utf8()
+            .ok()
+            .zip(target.canonicalize_utf8().ok())
+            .is_some_and(|(existing, wanted)| existing == wanted);
+        if same {
             return Ok(());
         }
         return Err(Error::CliConfig(format!(
@@ -1624,9 +1637,19 @@ fn tool_access_empty(
 }
 
 /// Whether a partial tool config is an enabled local tool.
-fn is_enabled_local(cfg: &jp_config::conversation::tool::PartialToolConfig) -> bool {
+///
+/// The tool's own `enable` takes precedence over the global `*` default; a tool
+/// that is `off` or `explicit` after that resolution is not part of a bare
+/// mount's scope.
+fn is_enabled_local(
+    cfg: &jp_config::conversation::tool::PartialToolConfig,
+    default_enable: Option<Enable>,
+) -> bool {
     matches!(cfg.source, Some(ToolSource::Local { .. }))
-        && !matches!(cfg.enable, Some(Enable::Off | Enable::Explicit))
+        && !matches!(
+            cfg.enable.or(default_enable),
+            Some(Enable::Off | Enable::Explicit)
+        )
 }
 
 /// The workspace-default rule injected to preserve a tool's prior implicit

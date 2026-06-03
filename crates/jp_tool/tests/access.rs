@@ -92,6 +92,63 @@ fn restricted_default_deny_and_capabilities() {
 
 #[cfg(unix)]
 #[test]
+fn internal_symlink_cannot_bypass_specific_deny() {
+    use std::os::unix::fs::symlink;
+
+    let dir = camino_tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize_utf8().unwrap();
+    std::fs::create_dir(root.join("secret")).unwrap();
+    std::fs::write(root.join("secret/f.txt"), "x").unwrap();
+    // An in-workspace symlink to the denied directory.
+    symlink(root.join("secret"), root.join("alias")).unwrap();
+
+    let policy = AccessPolicy {
+        fs: vec![
+            FsRule::new("").with_read(true),
+            FsRule::new("secret").with_read(false),
+        ],
+        ..AccessPolicy::default()
+    };
+    let ctx = ctx(root, Some(policy));
+
+    // Direct access to the denied directory is rejected.
+    assert!(matches!(
+        ctx.check_read("secret/f.txt".into()),
+        Err(FsAccessError::Denied { .. })
+    ));
+    // Access via the in-workspace symlink canonicalizes to `secret/` and is
+    // rejected too — the symlink cannot dodge the more specific deny rule.
+    assert!(matches!(
+        ctx.check_read("alias/f.txt".into()),
+        Err(FsAccessError::Denied { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn internal_symlink_inherits_target_grant() {
+    use std::os::unix::fs::symlink;
+
+    let dir = camino_tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize_utf8().unwrap();
+    std::fs::create_dir(root.join("real")).unwrap();
+    std::fs::write(root.join("real/f.txt"), "x").unwrap();
+    symlink(root.join("real"), root.join("alias")).unwrap();
+
+    // Only `real` is granted; `alias` has no rule of its own.
+    let policy = AccessPolicy {
+        fs: vec![FsRule::new("real").with_read(true)],
+        ..AccessPolicy::default()
+    };
+    let ctx = ctx(root, Some(policy));
+
+    // Reaching the granted target through the symlink is allowed because it
+    // canonicalizes to `real/`.
+    assert!(ctx.check_read("alias/f.txt".into()).is_ok());
+}
+
+#[cfg(unix)]
+#[test]
 fn external_rule_permits_resolution_within_approved_target() {
     use std::os::unix::fs::symlink;
 

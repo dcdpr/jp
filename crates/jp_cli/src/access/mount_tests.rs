@@ -97,6 +97,16 @@ fn resolve_name_escaping_workspace_is_rejected() {
 }
 
 #[test]
+fn resolve_name_absolute_is_rejected() {
+    let root = Utf8Path::new("/ws");
+    let spec = MountSpec::parse("/abs/fork=/p").unwrap();
+    assert!(matches!(
+        spec.resolve_name(Utf8Path::new("/ws"), root),
+        Err(MountResolveError::NotRelative(_))
+    ));
+}
+
+#[test]
 fn resolve_name_into_managed_storage_is_rejected() {
     let root = Utf8Path::new("/ws");
     let spec = MountSpec::parse(".jp/x=/p").unwrap();

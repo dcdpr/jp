@@ -193,8 +193,20 @@ impl Executor for ToolExecutor {
     ) -> ExecutorResult {
         // Compile this tool's access grants into a runtime policy, baking
         // approved external targets in. The policy travels to the tool in its
-        // context so the tool can self-enforce.
-        let access = compile_tool_policy(self.config.access(), root, &self.approvals);
+        // context so the tool can self-enforce. A policy that fails to compile
+        // (invalid config) fails the tool rather than running it unenforced.
+        let access = match compile_tool_policy(self.config.access(), root, &self.approvals) {
+            Ok(access) => access,
+            Err(error) => {
+                return ExecutorResult::Completed(ToolCallResponse {
+                    id: self.request.id.clone(),
+                    result: Err(format!(
+                        "invalid access policy for tool '{}': {error}",
+                        self.request.name
+                    )),
+                });
+            }
+        };
 
         let result = self
             .definition

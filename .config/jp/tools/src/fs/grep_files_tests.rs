@@ -5,6 +5,76 @@ use camino_tempfile::tempdir;
 use super::*;
 
 #[tokio::test]
+async fn grep_with_restricted_policy_skips_ungranted_files() {
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let ws = tempdir().unwrap();
+    std::fs::create_dir(ws.path().join("src")).unwrap();
+    std::fs::write(ws.path().join("src/lib.rs"), "needle in src").unwrap();
+    std::fs::write(ws.path().join("secret.txt"), "needle in secret").unwrap();
+
+    // Only `src` is readable; grep over the whole workspace must not search
+    // `secret.txt`.
+    let policy = AccessPolicy {
+        fs: vec![FsRule::new("src").with_read(true)],
+        ..AccessPolicy::default()
+    };
+    let matches = fs_grep_files(
+        ws.path(),
+        Some(&policy),
+        "needle".to_owned(),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(matches.contains("src/lib.rs"), "got: {matches}");
+    assert!(
+        !matches.contains("secret"),
+        "ungranted file searched: {matches}"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn greps_files_under_approved_external_mount() {
+    use std::os::unix::fs::symlink;
+
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let ws = tempdir().unwrap();
+    let ext = tempdir().unwrap();
+    let ext_canon = ext.path().canonicalize_utf8().unwrap();
+    std::fs::write(ext_canon.join("a.rs"), "the needle is here").unwrap();
+    symlink(ext.path(), ws.path().join("fork")).unwrap();
+
+    let policy = AccessPolicy {
+        fs: vec![
+            FsRule::new("fork")
+                .with_external(true)
+                .with_approved_target(Some(ext_canon))
+                .with_read(true),
+        ],
+        ..AccessPolicy::default()
+    };
+    let matches = fs_grep_files(
+        ws.path(),
+        Some(&policy),
+        "needle".to_owned(),
+        None,
+        Some(vec!["fork".to_owned()].into()),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(matches.contains("needle"), "got: {matches}");
+    assert!(matches.contains("fork/a.rs"), "path missing: {matches}");
+}
+
+#[tokio::test]
 async fn dot_means_workspace_root() {
     // Regression: pre-PR, `paths: ["."]` resolved via `root.join(".")` and
     // walked the workspace. The new validator rejects bare `.` because

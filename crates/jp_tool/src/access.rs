@@ -471,14 +471,26 @@ impl crate::Context {
                 message: e.to_string(),
             })?;
 
-        let canonical =
-            canonicalize_target(&root_canonical, lexical).map_err(|e| FsAccessError::Io {
+        let canonical = canonicalize_workspace_target(&root_canonical, lexical).map_err(|e| {
+            FsAccessError::Io {
                 path: self.root.join(lexical),
                 message: e.to_string(),
-            })?;
+            }
+        })?;
 
-        let inside = canonical.starts_with(&root_canonical);
-        let rule = find_matching_rule(rules, lexical);
+        // Match in-workspace targets on their canonical workspace-relative form
+        // so an in-workspace symlink can't dodge a more specific rule (a target
+        // reached via `alias/` where `alias -> secret` matches the `secret`
+        // rule, not whatever `alias` would match lexically). External targets
+        // (canonical outside the workspace) can't be stripped to a
+        // workspace-relative form, so they match on the lexical mount prefix;
+        // the approved-target boundary is enforced in `check_capability`.
+        let (inside, match_key) = match canonical.strip_prefix(&root_canonical) {
+            Ok(relative) => (true, relative.to_owned()),
+            Err(_) => (false, lexical.to_owned()),
+        };
+
+        let rule = find_matching_rule(rules, &match_key);
 
         Ok(Resolved {
             canonical,
@@ -522,10 +534,13 @@ fn normalize_lexical(input: &Utf8Path) -> Option<Utf8PathBuf> {
     Some(path)
 }
 
-/// Resolve `lexical` against the canonical workspace root, following symlinks
-/// on the deepest existing ancestor and re-appending any not-yet-created
-/// suffix.
-fn canonicalize_target(
+/// Resolve a workspace-relative `lexical` path against the canonical workspace
+/// root, following symlinks on the deepest existing ancestor and re-appending
+/// any not-yet-created suffix.
+///
+/// The host reuses this so compiled rule paths and tool-call targets are
+/// reduced to the same canonical form before matching.
+pub fn canonicalize_workspace_target(
     root_canonical: &Utf8Path,
     lexical: &Utf8Path,
 ) -> std::io::Result<Utf8PathBuf> {

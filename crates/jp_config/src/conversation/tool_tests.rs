@@ -6,6 +6,71 @@ use super::*;
 use crate::types::json_value::JsonValue;
 
 #[test]
+fn access_on_mcp_tool_is_rejected_by_validation() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::stub();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_mcp".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Mcp {
+                server: "server".to_owned(),
+                tool: None,
+            }),
+            access: Some(PartialAccessConfig {
+                fs: vec![PartialFsRuleConfig {
+                    path: Some(".".to_owned()),
+                    read: Some(true),
+                    ..Default::default()
+                }]
+                .into(),
+            }),
+            ..Default::default()
+        });
+
+    let err = build(partial).unwrap_err().to_string();
+    assert!(
+        err.contains("only supported on local tools"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn access_on_local_tool_is_accepted_by_validation() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::stub();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_local".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            access: Some(PartialAccessConfig {
+                fs: vec![PartialFsRuleConfig {
+                    path: Some(".".to_owned()),
+                    read: Some(true),
+                    ..Default::default()
+                }]
+                .into(),
+            }),
+            ..Default::default()
+        });
+
+    assert!(build(partial).is_ok());
+}
+
+#[test]
 fn test_enable_from_bool() {
     assert_eq!(Enable::from(true), Enable::On);
     assert_eq!(Enable::from(false), Enable::Off);

@@ -45,6 +45,44 @@ fn absolute_rule_path_is_rejected() {
 
 #[cfg(unix)]
 #[test]
+fn ordinary_rule_on_internal_symlink_canonicalizes_to_target() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = camino_tempfile::tempdir().unwrap();
+    let canonical = workspace.path().canonicalize_utf8().unwrap();
+    std::fs::create_dir(canonical.join("real")).unwrap();
+    // A rule written on an in-workspace symlink should bind to its target.
+    symlink(canonical.join("real"), canonical.join("alias")).unwrap();
+
+    let config = fs_config(vec![rule("alias")]);
+    let compiled = compile_fs(&config, workspace.path(), |_, _| {
+        panic!("ordinary rules must not consult the approver")
+    })
+    .unwrap();
+
+    assert_eq!(compiled.rules.len(), 1);
+    assert_eq!(compiled.rules[0].lexical_path(), "real");
+}
+
+#[cfg(unix)]
+#[test]
+fn ordinary_rule_resolving_outside_workspace_is_rejected() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = camino_tempfile::tempdir().unwrap();
+    let external = camino_tempfile::tempdir().unwrap();
+    // An ordinary (non-external) rule on a symlink that escapes the workspace.
+    symlink(external.path(), workspace.path().join("escape")).unwrap();
+
+    let config = fs_config(vec![rule("escape")]);
+    assert!(matches!(
+        compile_fs(&config, workspace.path(), |_, _| ApprovalDecision::Approved),
+        Err(CompileError::NotWorkspaceRelative(_))
+    ));
+}
+
+#[cfg(unix)]
+#[test]
 fn external_rule_approved_bakes_target() {
     use std::os::unix::fs::symlink;
 

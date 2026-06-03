@@ -4,7 +4,8 @@ use serde_json::Value;
 
 mod access;
 pub use access::{
-    AccessPolicy, Capability, EnvRule, FsAccessError, FsRule, NetRule, lexical_workspace_relative,
+    AccessPolicy, Capability, EnvRule, FsAccessError, FsRule, NetRule,
+    canonicalize_workspace_target, lexical_workspace_relative,
 };
 
 /// The result of a tool call.
