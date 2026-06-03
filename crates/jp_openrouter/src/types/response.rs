@@ -75,27 +75,13 @@ pub struct ChatCompletionError {
     _other: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged, variant_identifier)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum ResponseObject {
     #[serde(rename = "chat.completion")]
     ChatCompletion,
     #[serde(rename = "chat.completion.chunk")]
     ChatCompletionChunk,
-}
-
-// Manual impl: the `Deserialize` derive uses `#[serde(variant_identifier)]`,
-// which is deserialize-only. Serialize to the same wire strings.
-impl Serialize for ResponseObject {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(match self {
-            Self::ChatCompletion => "chat.completion",
-            Self::ChatCompletionChunk => "chat.completion.chunk",
-        })
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -138,7 +124,7 @@ pub struct NonStreamingChoice {
 }
 
 /// The reason why the assistant stopped generating tokens.
-#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "snake_case", rename_all = "snake_case")]
 pub enum FinishReason {
     /// The assistant has finished requesting a tool call execution.
@@ -173,18 +159,6 @@ impl FinishReason {
             Self::Error => "error",
             Self::Unknown => "unknown",
         }
-    }
-}
-
-// Manual impl: the `Deserialize` derive relies on `#[serde(other)]` for the
-// `Unknown` catch-all, which is deserialize-only. Serialize via the existing
-// wire-name mapping instead.
-impl Serialize for FinishReason {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
     }
 }
 
