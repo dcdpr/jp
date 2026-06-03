@@ -4,7 +4,7 @@ run = "unattended"
 
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Find one or more pull requests in a GitHub repository."
+summary = "Find one or more pull requests in a GitHub repository. Defaults to dcdpr/jp."
 
 examples = """
 List open pull requests in the current project's repo:
