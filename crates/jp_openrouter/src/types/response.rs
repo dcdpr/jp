@@ -75,13 +75,27 @@ pub struct ChatCompletionError {
     _other: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged, variant_identifier)]
 pub enum ResponseObject {
     #[serde(rename = "chat.completion")]
     ChatCompletion,
     #[serde(rename = "chat.completion.chunk")]
     ChatCompletionChunk,
+}
+
+// Manual impl: the `Deserialize` derive uses `#[serde(variant_identifier)]`,
+// which is deserialize-only. Serialize to the same wire strings.
+impl Serialize for ResponseObject {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(match self {
+            Self::ChatCompletion => "chat.completion",
+            Self::ChatCompletionChunk => "chat.completion.chunk",
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
