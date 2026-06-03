@@ -97,12 +97,18 @@ fn resolve_name_escaping_workspace_is_rejected() {
 }
 
 #[test]
-fn resolve_name_absolute_is_rejected() {
+fn resolve_name_absolute_under_workspace_is_trimmed() {
     let root = Utf8Path::new("/ws");
-    let spec = MountSpec::parse("/abs/fork=/p").unwrap();
+    let inside = MountSpec::parse("/ws/fork=/p").unwrap();
+    assert_eq!(
+        inside.resolve_name(Utf8Path::new("/ws"), root).unwrap(),
+        Utf8PathBuf::from("fork")
+    );
+
+    let outside = MountSpec::parse("/elsewhere/fork=/p").unwrap();
     assert!(matches!(
-        spec.resolve_name(Utf8Path::new("/ws"), root),
-        Err(MountResolveError::NotRelative(_))
+        outside.resolve_name(Utf8Path::new("/ws"), root),
+        Err(MountResolveError::OutsideWorkspace(_))
     ));
 }
 

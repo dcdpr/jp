@@ -149,31 +149,36 @@ impl ToolsConfig {
 }
 
 impl Validator for ToolsConfig {
-    /// Reject `access` on tools whose finalized source is `builtin` or `mcp`.
-    ///
-    /// `access` is the local-subprocess contract: it is serialized into the
-    /// `Context` that local tool binaries self-check.
-    /// Builtin tools run in-process and MCP tools run on external servers, so
-    /// neither consumes `access` — accepting it there would create false
-    /// confidence in a security-relevant field.
+    /// Validate cross-field invariants on the tools configuration.
     fn validate(&self) -> Result<(), ConfigError> {
-        for (name, tool) in self.iter() {
-            if tool.access().is_none() {
-                continue;
-            }
-            let kind = match tool.source() {
-                ToolSource::Local { .. } => continue,
-                ToolSource::Builtin { .. } => "builtin",
-                ToolSource::Mcp { .. } => "mcp",
-            };
-            return Err(HandlerError::new(format!(
-                "conversation.tools.{name}: `access` is only supported on local tools, but \
-                 '{name}' is a {kind} tool"
-            ))
-            .into());
-        }
-        Ok(())
+        reject_access_on_non_local_tools(self)
     }
+}
+
+/// Reject `access` on tools whose finalized source is `builtin` or `mcp`.
+///
+/// `access` is the local-subprocess contract: it is serialized into the
+/// `Context` that local tool binaries self-check.
+/// Builtin tools run in-process and MCP tools run on external servers, so
+/// neither consumes `access` — accepting it there would create false
+/// confidence in a security-relevant field.
+fn reject_access_on_non_local_tools(tools: &ToolsConfig) -> Result<(), ConfigError> {
+    for (name, tool) in tools.iter() {
+        if tool.access().is_none() {
+            continue;
+        }
+        let kind = match tool.source() {
+            ToolSource::Local { .. } => continue,
+            ToolSource::Builtin { .. } => "builtin",
+            ToolSource::Mcp { .. } => "mcp",
+        };
+        return Err(HandlerError::new(format!(
+            "conversation.tools.{name}: `access` is only supported on local tools, but '{name}' \
+             is a {kind} tool"
+        ))
+        .into());
+    }
+    Ok(())
 }
 
 /// Tools defaults configuration.

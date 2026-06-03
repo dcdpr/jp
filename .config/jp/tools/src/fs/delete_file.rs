@@ -20,7 +20,7 @@ pub(crate) async fn fs_delete_file(
         Err(msg) => return error(msg),
     };
 
-    if let Err(msg) = authorize(access, Capability::Delete, &path) {
+    if let Err(msg) = authorize(access, Capability::Delete, &resolved.relative) {
         return error(msg);
     }
 

@@ -50,7 +50,7 @@ pub(crate) async fn fs_create_file(
         Some(EntryKind::File) => Capability::Update,
         _ => Capability::Create,
     };
-    if let Err(msg) = authorize(ctx.access.as_ref(), capability, &path) {
+    if let Err(msg) = authorize(ctx.access.as_ref(), capability, &resolved.relative) {
         return error(msg);
     }
 

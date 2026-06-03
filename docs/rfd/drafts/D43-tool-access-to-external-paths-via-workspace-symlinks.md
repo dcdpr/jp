@@ -784,34 +784,40 @@ Plain JSON behind a single read site keeps migration cost bounded.
 
 > [!NOTE]
 > **Current status (PR 727).** This first slice ships cooperative enforcement
-> for local filesystem tools. What it does and does not cover:
->
+> for local filesystem tools.
+> What it does and does not cover:
+> 
 > - Phase 1 (pre-canonical invariant): done.
 > - Phase 2 (`FsRule.external`, rule-path canonicalisation, approved-target
->   boundary): done. In-workspace rules are matched on the canonical
->   workspace-relative form, so an in-workspace symlink cannot dodge a more
->   specific rule; external rules keep their lexical mount prefix plus the
->   approved-target boundary.
-> - Phase 3 (approval lifecycle): partial. The store, lookup, and
->   `--mount`-seeded approvals are in place. A hand-authored `external = true`
->   rule does not yet get a trust-on-first-use prompt: an unapproved or
->   retargeted external rule is dropped with a warning, never silently granted.
+>   boundary): done.
+>   In-workspace rules are matched on the canonical workspace-relative form, so
+>   an in-workspace symlink cannot dodge a more specific rule; external rules
+>   keep their lexical mount prefix plus the approved-target boundary.
+> - Phase 3 (approval lifecycle): partial.
+>   The store, lookup, and `--mount`-seeded approvals are in place.
+>   A hand-authored `external = true` rule does not yet get a trust-on-first-use
+>   prompt: an unapproved or retargeted external rule is dropped with a warning,
+>   never silently granted.
 >   The interactive prompt is deferred.
 > - Phase 5 (`--mount`): done (parsing, symlink creation, approval seeding,
 >   case-based default-deny preservation, expansion over the resolved
->   enabled-local tool set). `--no-mount` is not implemented; cleanup of the
->   symlink and the persisted config is manual until it lands. The broad-mount
->   tool-scope confirmation prompt is also deferred: in this slice the `--mount`
->   invocation is the consent action, and `:rw` still requires an explicit
->   `TOOL:` scope.
+>   enabled-local tool set).
+>   `--no-mount` is not implemented; cleanup of the symlink and the persisted
+>   config is manual until it lands.
+>   The broad-mount tool-scope confirmation prompt is also deferred: in this
+>   slice the `--mount` invocation is the consent action, and `:rw` still
+>   requires an explicit `TOOL:` scope.
 > - Phase 4 (OS sandbox, [RFD 075]) and Phase 6 (Windows junction fallback) are
 >   not started; enforcement is cooperative only, and `net` / `env` rules are
 >   not yet modelled in config.
->
-> Two correctness guarantees hold in this slice: config validation rejects
-> `access` on tools whose finalised source is `builtin` or `mcp` ([RFD 076]),
-> and an `access` config that fails to compile fails the tool invocation rather
-> than degrading to unrestricted workspace access.
+> 
+> Correctness guarantees in this slice: config validation rejects `access` on
+> tools whose finalised source is `builtin` or `mcp` ([RFD 076]); an `access`
+> config that fails to compile fails the tool invocation, and a declared policy
+> whose rules all drop (unapproved or broken external targets) stays
+> default-deny rather than degrading to unrestricted workspace access; and the
+> in-tree fs tools enforce capabilities against the resolved canonical path, so
+> an in-workspace symlink cannot reach a denied location.
 
 ### Phase 1: Pre-canonical invariant in `jp_tool`
 

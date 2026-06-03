@@ -2,14 +2,22 @@ use std::{io, path::PathBuf};
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use clean_path::Clean as _;
-use jp_tool::{AccessPolicy, Capability, lexical_workspace_relative};
+use jp_tool::{AccessPolicy, Capability};
 
 use crate::{
     Error,
     util::runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
 };
 
-/// Enforce an access-policy capability on a user-supplied path.
+/// Enforce an access-policy capability on a resolved workspace-relative path.
+///
+/// `relative` must be the resolver's output (`ResolvedPath::relative`), not the
+/// raw tool input: for in-workspace paths that form has its symlinked ancestors
+/// canonicalized, so a path reached via an in-workspace symlink is matched
+/// against the rule for its real location rather than the rule for the link
+/// name.
+/// External (approved-mount) paths keep their lexical mount-relative form,
+/// which is what external rules match on.
 ///
 /// A `None` policy (or an unrestricted one) permits everything.
 /// A restricted policy permits only what a matching rule grants; on denial the
@@ -18,18 +26,17 @@ use crate::{
 pub fn authorize(
     access: Option<&AccessPolicy>,
     capability: Capability,
-    path: &str,
+    relative: &Utf8Path,
 ) -> Result<(), String> {
     let Some(policy) = access else {
         return Ok(());
     };
-    let lexical = lexical_workspace_relative(Utf8Path::new(path)).unwrap_or_default();
-    if policy.permits(capability, &lexical) {
+    if policy.permits(capability, relative) {
         return Ok(());
     }
     let grants: Vec<&str> = policy.grant_paths().map(Utf8Path::as_str).collect();
     Err(format!(
-        "Access denied: cannot {} '{path}'. Granted paths: [{}].",
+        "Access denied: cannot {} '{relative}'. Granted paths: [{}].",
         capability.as_str(),
         grants.join(", ")
     ))

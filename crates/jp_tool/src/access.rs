@@ -367,6 +367,9 @@ struct Resolved<'a> {
     inside: bool,
     /// The matching rule, if any.
     rule: Option<&'a FsRule>,
+    /// The form rules were matched against: the canonical workspace-relative
+    /// path for in-workspace targets, the lexical path for external ones.
+    match_key: Utf8PathBuf,
 }
 
 impl crate::Context {
@@ -376,34 +379,33 @@ impl crate::Context {
     /// workspace root and canonicalizes it itself.
     /// Do not pre-resolve paths against the root before calling.
     pub fn check_read(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, "read", FsRule::read)
+        self.check_capability(input, Capability::Read)
     }
 
     /// Check create access to `input`, returning the resolved absolute path.
     pub fn check_create(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, "create", FsRule::create)
+        self.check_capability(input, Capability::Create)
     }
 
     /// Check update access to `input`, returning the resolved absolute path.
     pub fn check_update(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, "update", FsRule::update)
+        self.check_capability(input, Capability::Update)
     }
 
     /// Check delete access to `input`, returning the resolved absolute path.
     pub fn check_delete(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, "delete", FsRule::delete)
+        self.check_capability(input, Capability::Delete)
     }
 
     /// Check execute access to `input`, returning the resolved absolute path.
     pub fn check_execute(&self, input: &Utf8Path) -> Result<Utf8PathBuf, FsAccessError> {
-        self.check_capability(input, "execute", FsRule::execute)
+        self.check_capability(input, Capability::Execute)
     }
 
     fn check_capability(
         &self,
         input: &Utf8Path,
-        capability: &'static str,
-        granted: fn(&FsRule) -> bool,
+        capability: Capability,
     ) -> Result<Utf8PathBuf, FsAccessError> {
         // Pre-canonical invariant: the tool may only express workspace-relative
         // paths. Reject absolute and rooted paths and `..`-escapes before any
@@ -421,14 +423,13 @@ impl crate::Context {
             normalize_lexical(input).ok_or_else(|| FsAccessError::InputEscape(input.to_owned()))?;
 
         let rules = self.access.as_ref().map_or(&[][..], |a| a.fs.as_slice());
-        let restricted = !rules.is_empty();
 
-        let resolved = self.resolve(&lexical, rules)?;
         let Resolved {
             canonical,
             inside,
             rule,
-        } = resolved;
+            match_key,
+        } = self.resolve(&lexical, rules)?;
 
         // Post-canonical boundary: a target that escapes the workspace is only
         // allowed through an approved external rule whose approved target
@@ -444,17 +445,22 @@ impl crate::Context {
             }
         }
 
-        if !restricted {
-            return Ok(canonical);
-        }
-
-        match rule {
-            Some(rule) if granted(rule) => Ok(canonical),
-            _ => Err(FsAccessError::Denied {
-                capability,
-                target: lexical,
+        // Grant decision via the single matcher shared with the in-tree fs
+        // tools (`AccessPolicy::permits`), so the rule-matching and capability
+        // logic can't drift between the two call sites. An absent (or
+        // unrestricted) policy permits everything.
+        let granted = self
+            .access
+            .as_ref()
+            .is_none_or(|policy| policy.permits(capability, &match_key));
+        if granted {
+            Ok(canonical)
+        } else {
+            Err(FsAccessError::Denied {
+                capability: capability.as_str(),
+                target: match_key,
                 grants: rules.iter().map(|r| r.lexical_path.clone()).collect(),
-            }),
+            })
         }
     }
 
@@ -496,6 +502,7 @@ impl crate::Context {
             canonical,
             inside,
             rule,
+            match_key,
         })
     }
 }

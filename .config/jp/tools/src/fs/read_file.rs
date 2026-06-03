@@ -13,7 +13,7 @@ pub(crate) async fn fs_read_file(
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
-    if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Read, &path) {
+    if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Read, &resolved.relative) {
         return error(msg);
     }
     let absolute_path = resolved.absolute;

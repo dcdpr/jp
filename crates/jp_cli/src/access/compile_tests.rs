@@ -34,6 +34,29 @@ fn ordinary_rules_compile_without_approval() {
 }
 
 #[test]
+fn dropped_external_rules_keep_policy_default_deny() {
+    let workspace = camino_tempfile::tempdir().unwrap();
+    let external = FsRuleConfig {
+        external: Some(true),
+        ..rule("fork")
+    };
+    let config = fs_config(vec![external]);
+
+    // `fork` does not exist, so the only rule drops as a broken external target.
+    // The resulting policy must stay default-deny, not collapse to an empty
+    // (unrestricted) policy.
+    let (policy, warnings) =
+        compile_policy(&config, workspace.path(), |_, _| ApprovalDecision::Rejected).unwrap();
+
+    assert!(!warnings.is_empty(), "expected a drop warning");
+    assert!(
+        policy.is_restricted(),
+        "declared policy widened to unrestricted"
+    );
+    assert!(!policy.permits(jp_tool::Capability::Read, camino::Utf8Path::new("anything")));
+}
+
+#[test]
 fn absolute_rule_path_is_rejected() {
     let dir = camino_tempfile::tempdir().unwrap();
     let config = fs_config(vec![rule("/etc")]);

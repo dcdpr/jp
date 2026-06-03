@@ -165,8 +165,19 @@ pub fn compile_policy(
     approve: impl FnMut(&str, &Utf8Path) -> ApprovalDecision,
 ) -> Result<(AccessPolicy, Vec<String>), CompileError> {
     let compiled = compile_fs(config, root, approve)?;
+    let mut rules = compiled.rules;
+
+    // The config declared rules but every one compiled away (e.g. all external
+    // rules were unapproved or broken). Keep the policy default-deny with an
+    // explicit deny-all sentinel: an empty `fs` reads as "unrestricted
+    // workspace access" at runtime, which would silently widen access the user
+    // declared a restriction on.
+    if rules.is_empty() && !config.fs.is_empty() {
+        rules.push(FsRule::new(""));
+    }
+
     let policy = AccessPolicy {
-        fs: compiled.rules,
+        fs: rules,
         ..AccessPolicy::default()
     };
     Ok((policy, compiled.warnings))

@@ -149,10 +149,6 @@ impl MountSpec {
 /// Failure reasons for resolving a mount `NAME`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum MountResolveError {
-    /// `NAME` is absolute or rooted; it must be workspace-relative.
-    #[error("mount name '{0}' must be relative")]
-    NotRelative(String),
-
     /// The resolved location escapes the workspace root.
     #[error("mount '{0}' resolves outside the workspace")]
     OutsideWorkspace(String),
@@ -167,15 +163,15 @@ fn resolve_workspace_relative(
     cwd: &Utf8Path,
     workspace_root: &Utf8Path,
 ) -> Result<Utf8PathBuf, MountResolveError> {
-    // `NAME` is interpreted relative to the current directory. Reject absolute
-    // and rooted inputs outright rather than silently accepting one that
-    // happens to fall under the workspace.
-    let raw = Utf8Path::new(name);
-    if raw.is_absolute() || raw.has_root() {
-        return Err(MountResolveError::NotRelative(name.to_owned()));
-    }
-
-    let joined = cwd.join(name);
+    // `NAME` is interpreted relative to the current directory. An absolute
+    // input is accepted only if it falls under the workspace; the
+    // strip-prefix below converts it to the same workspace-relative form a
+    // relative input produces, and rejects anything outside.
+    let joined = if Utf8Path::new(name).is_absolute() {
+        Utf8PathBuf::from(name)
+    } else {
+        cwd.join(name)
+    };
 
     let normalized = normalize_lexical(&joined);
 

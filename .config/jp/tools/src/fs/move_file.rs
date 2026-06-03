@@ -56,7 +56,7 @@ fn fs_move_file_impl<R: ProcessRunner>(
     };
 
     // The source entry is removed and the target written.
-    if let Err(msg) = authorize(access, Capability::Delete, source) {
+    if let Err(msg) = authorize(access, Capability::Delete, &src.relative) {
         return error(msg);
     }
 
@@ -101,7 +101,7 @@ fn fs_move_file_impl<R: ProcessRunner>(
     } else {
         Capability::Create
     };
-    if let Err(msg) = authorize(access, target_capability, target) {
+    if let Err(msg) = authorize(access, target_capability, &dst.relative) {
         return error(msg);
     }
 

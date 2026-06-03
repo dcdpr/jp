@@ -105,13 +105,14 @@ fn fs_modify_file_impl<R: ProcessRunner>(
         let mut applied_any = false;
 
         for target in &targets {
-            if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Update, target) {
-                return error(msg);
-            }
             let resolved = match resolve_workspace_path(&ctx.root, target, ctx.access.as_ref()) {
                 Ok(r) => r,
                 Err(msg) => return error(msg),
             };
+            if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Update, &resolved.relative)
+            {
+                return error(msg);
+            }
 
             // Load file on first access.
             if !files.contains_key(&resolved.relative) {

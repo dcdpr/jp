@@ -1504,6 +1504,7 @@ fn create_mount_effects(
     }
 
     let root = workspace.root().to_owned();
+    let root_canonical = root.canonicalize_utf8().unwrap_or_else(|_| root.clone());
     let cwd = current_dir_utf8().map_err(|e| Error::CliConfig(e.to_string()))?;
 
     let approvals_path = approval_store_path(fs_backend);
@@ -1528,7 +1529,20 @@ fn create_mount_effects(
         let canonical = target.canonicalize_utf8().map_err(|e| {
             Error::CliConfig(format!("mount target '{target}' cannot be resolved: {e}"))
         })?;
-        create_workspace_symlink(&link, &target)?;
+
+        // An external mount must point outside the workspace. Reject an
+        // in-workspace target before any side effect, so a rejected mount
+        // leaves no symlink or approval entry behind.
+        if canonical.starts_with(&root_canonical) {
+            return Err(Error::CliConfig(format!(
+                "mount target '{target}' is inside the workspace; mounts are for external paths"
+            )));
+        }
+
+        // Link to the canonical absolute target so the symlink resolves the
+        // same regardless of where it sits and matches the recorded approval
+        // (a relative target would resolve against the link's parent instead).
+        create_workspace_symlink(&link, &canonical)?;
         store.record(rule_path.as_str(), canonical, now);
         rules.push(spec.rule(rule_path.as_str()));
     }

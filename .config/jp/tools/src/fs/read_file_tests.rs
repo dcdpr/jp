@@ -120,6 +120,52 @@ async fn reads_through_approved_external_mount() {
 
 #[cfg(unix)]
 #[tokio::test]
+async fn read_through_internal_symlink_respects_deny_rule() {
+    use std::os::unix::fs::symlink;
+
+    use jp_tool::{AccessPolicy, FsRule};
+
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().canonicalize_utf8().unwrap();
+    std::fs::create_dir(root.join("secret")).unwrap();
+    std::fs::write(root.join("secret/f.txt"), "classified").unwrap();
+    // An in-workspace symlink to the denied directory.
+    symlink(root.join("secret"), root.join("alias")).unwrap();
+
+    let ctx = Context {
+        root: root.clone(),
+        action: Action::Run,
+        access: Some(AccessPolicy {
+            fs: vec![
+                FsRule::new("").with_read(true),
+                FsRule::new("secret").with_read(false),
+            ],
+            ..AccessPolicy::default()
+        }),
+    };
+
+    // Direct read of the denied path is rejected.
+    let direct = fs_read_file(&ctx, "secret/f.txt".to_owned(), None, None)
+        .await
+        .unwrap();
+    assert!(
+        matches!(direct, Outcome::Error { .. }),
+        "direct read should be denied"
+    );
+
+    // Reaching it through the in-workspace symlink canonicalizes to `secret/`
+    // and must be denied too — the symlink cannot dodge the deny rule.
+    let via_alias = fs_read_file(&ctx, "alias/f.txt".to_owned(), None, None)
+        .await
+        .unwrap();
+    assert!(
+        matches!(via_alias, Outcome::Error { .. }),
+        "symlinked read should be denied"
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
 async fn denies_in_workspace_path_with_no_matching_grant() {
     use jp_tool::{AccessPolicy, FsRule};
 
