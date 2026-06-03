@@ -15,7 +15,7 @@ use crate::{
 
 const ALLOWED_UTILS: &[&str] = &[
     "base64", "bc", "date", "file", "head", "jq", "shasum", "sort", "tail", "uname", "uniq",
-    "uuidgen", "wc",
+    "uuidgen", "wc", "nl",
 ];
 
 /// Truncate output beyond this limit to avoid burning tokens on huge results.

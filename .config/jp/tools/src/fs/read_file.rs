@@ -21,7 +21,7 @@ pub(crate) async fn fs_read_file(
     }
 
     let ext = absolute_path.extension().unwrap_or_default();
-    let mut contents = std::fs::read_to_string(&absolute_path)?;
+    let contents = std::fs::read_to_string(&absolute_path)?;
     let lines = contents.split('\n').count();
 
     if start_line.is_some_and(|v| v > end_line.unwrap_or(usize::MAX)) {
@@ -36,29 +36,30 @@ pub(crate) async fn fs_read_file(
         ));
     }
 
-    if let Some(start_line) = start_line {
-        contents = contents
-            .split('\n')
-            .skip(start_line - 1)
-            .collect::<Vec<_>>()
-            .join("\n");
+    let start = start_line.unwrap_or(1);
+    let end = end_line.unwrap_or(lines).min(lines);
+    let width = end.to_string().len();
 
-        contents.insert_str(0, &format!("... (starting from line #{start_line}) ...\n"));
-    }
+    // Number every line with its absolute position so the model can feed a
+    // range straight back to this tool (or to the line-addressed git tools).
+    let mut body = contents
+        .split('\n')
+        .enumerate()
+        .filter(|(idx, _)| {
+            let num = idx + 1;
+            num >= start && num <= end
+        })
+        .map(|(idx, line)| format!("{num:>width$}: {line}", num = idx + 1))
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    if let Some(end_line) = end_line {
-        contents = contents
-            .split('\n')
-            .take(end_line)
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        contents.push_str(&format!("\n... (truncated after line #{end_line}) ..."));
+    if end < lines {
+        body.push_str(&format!("\n... (truncated after line #{end}) ..."));
     }
 
     Ok(indoc::formatdoc! {"
         ```{ext}
-        {contents}
+        {body}
         ```
     "}
     .into())
