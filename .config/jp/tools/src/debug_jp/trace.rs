@@ -20,10 +20,10 @@ use crate::{
     Context, Error, Tool,
     debug_jp::util::{
         build::{self, BuildSpec},
-        launch::{LaunchSpec, Launcher, RealLauncher, Timeouts},
+        launch::{LaunchResult, LaunchSpec, Launcher, RealLauncher, Timeouts},
         sandbox::{Sandbox, SandboxOpts},
         trace_parse::{self, Level, TraceEvent},
-        trace_render::{self, OutputPaths},
+        trace_render::{self, CommandRun, OutputPaths},
         with_termination_note,
     },
     util::{ToolResult, error, runner::DuctProcessRunner},
@@ -38,6 +38,7 @@ const TRACE_PATH_PREFIX: &str = "Full trace log written to: ";
 #[allow(clippy::unused_async, reason = "awaited by the debug_jp dispatcher")]
 pub(crate) async fn debug_jp_trace(ctx: &Context, t: &Tool) -> ToolResult {
     let args: Vec<String> = t.req("args")?;
+    let then: Vec<Vec<String>> = t.opt("then")?.unwrap_or_default();
     let level_str: Option<String> = t.opt("level")?;
     let target_filter: Option<String> = t.opt("target")?;
     let grep: Option<String> = t.opt("grep")?;
@@ -45,6 +46,13 @@ pub(crate) async fn debug_jp_trace(ctx: &Context, t: &Tool) -> ToolResult {
 
     if args.is_empty() {
         return error("`args` must contain at least one element (the jp subcommand).");
+    }
+    for (i, command) in then.iter().enumerate() {
+        if command.is_empty() {
+            return error(format!(
+                "`then[{i}]` must contain at least one element (the jp subcommand)."
+            ));
+        }
     }
 
     let level = match level_str.as_deref() {
@@ -59,9 +67,15 @@ pub(crate) async fn debug_jp_trace(ctx: &Context, t: &Tool) -> ToolResult {
         },
     };
 
+    // The first command is `args`; any `then` entries run after it in the same
+    // sandbox, sharing state.
+    let mut commands = Vec::with_capacity(1 + then.len());
+    commands.push(args);
+    commands.extend(then);
+
     if ctx.action.is_format_arguments() {
         return Ok(format_preview(
-            &args,
+            &commands,
             level,
             target_filter.as_deref(),
             grep.as_deref(),
@@ -72,7 +86,7 @@ pub(crate) async fn debug_jp_trace(ctx: &Context, t: &Tool) -> ToolResult {
 
     run(
         &ctx.root,
-        &args,
+        &commands,
         level,
         target_filter.as_deref(),
         grep.as_deref(),
@@ -82,7 +96,7 @@ pub(crate) async fn debug_jp_trace(ctx: &Context, t: &Tool) -> ToolResult {
 
 /// Render the format-args preview shown before execution.
 fn format_preview(
-    args: &[String],
+    commands: &[Vec<String>],
     level: Level,
     target_filter: Option<&str>,
     grep: Option<&str>,
@@ -93,10 +107,21 @@ fn format_preview(
     out.push_str("Will execute (under sandbox isolation):\n\n");
     out.push_str("```sh\n");
     out.push_str("cargo build --profile profiling -p jp_cli --bin jp\n");
-    out.push_str(&format!(
-        "JP_DEBUG=1 target/profiling/jp {}    # invoked by absolute path\n",
-        args.join(" ")
-    ));
+    if let [command] = commands {
+        out.push_str(&format!(
+            "JP_DEBUG=1 target/profiling/jp {}    # invoked by absolute path\n",
+            command.join(" ")
+        ));
+    } else {
+        out.push_str("# commands run in sequence in one sandbox (state persists between them):\n");
+        for (i, command) in commands.iter().enumerate() {
+            out.push_str(&format!(
+                "JP_DEBUG=1 target/profiling/jp {}    # command {}\n",
+                command.join(" "),
+                i + 1
+            ));
+        }
+    }
     out.push_str("```\n\n");
     out.push_str(
         "The build artifact at `target/profiling/jp` may be rebuilt to reflect\nthe sandbox's \
@@ -138,10 +163,15 @@ fn format_preview(
     out
 }
 
-/// Live execution path: set up the sandbox, build jp, then [`execute`].
+/// Live execution path: set up the sandbox, build jp once, then run every
+/// command in it.
+///
+/// The sandbox and build are shared across all commands, and the commands run
+/// in sequence against the same `JP_USER_DATA_DIR`, so state created by one
+/// command is visible to the next.
 fn run(
     workspace_root: &Utf8Path,
-    args: &[String],
+    commands: &[Vec<String>],
     level: Level,
     target_filter: Option<&str>,
     grep: Option<&str>,
@@ -163,25 +193,41 @@ fn run(
 
     let mut env = sandbox.env();
     env.push(("JP_DEBUG".to_owned(), "1".to_owned()));
-    let spec = LaunchSpec {
-        binary,
-        args: args.to_vec(),
-        working_dir: sandbox.working_dir().to_owned(),
-        env,
-    };
 
-    execute(
-        workspace_root,
-        &spec,
-        level,
-        target_filter,
-        grep,
-        &RealLauncher,
-        Timeouts::DEFAULT,
-    )
+    let specs: Vec<LaunchSpec> = commands
+        .iter()
+        .map(|args| LaunchSpec {
+            binary: binary.clone(),
+            args: args.clone(),
+            working_dir: sandbox.working_dir().to_owned(),
+            env: env.clone(),
+        })
+        .collect();
+
+    if let [spec] = specs.as_slice() {
+        execute(
+            workspace_root,
+            spec,
+            level,
+            target_filter,
+            grep,
+            &RealLauncher,
+            Timeouts::DEFAULT,
+        )
+    } else {
+        execute_sequence(
+            workspace_root,
+            &specs,
+            level,
+            target_filter,
+            grep,
+            &RealLauncher,
+            Timeouts::DEFAULT,
+        )
+    }
 }
 
-/// Launch jp via `launcher`, retrieve the trace log, filter, and render.
+/// Run a single command and render it as a standalone report.
 ///
 /// Split from [`run`] so it can be driven with a fake [`Launcher`] in tests,
 /// independent of the sandbox and build steps.
@@ -194,6 +240,151 @@ fn execute(
     launcher: &dyn Launcher,
     timeouts: Timeouts,
 ) -> ToolResult {
+    let ts = unix_seconds();
+    let out_dir = workspace_root.join("tmp/profiling");
+    fs::create_dir_all(&out_dir)?;
+
+    let art = run_one(
+        &out_dir,
+        spec,
+        level,
+        target_filter,
+        grep,
+        launcher,
+        timeouts,
+        ts,
+        "",
+    )?;
+
+    let trace_display = crate::debug_jp::util::relative_to(workspace_root, &art.trace_dst);
+    let stdout_display = crate::debug_jp::util::relative_to(workspace_root, &art.stdout_dst);
+    let stderr_display = crate::debug_jp::util::relative_to(workspace_root, &art.stderr_dst);
+    let report = trace_render::render(
+        &art.events,
+        art.total,
+        &art.launch,
+        &spec.args,
+        OutputPaths {
+            trace: &trace_display,
+            stdout: &stdout_display,
+            stderr: &stderr_display,
+        },
+    );
+    let report = with_termination_note(report, &art.launch);
+    fs::write(out_dir.join(format!("report-trace-{ts}.md")), &report)?;
+    Ok(Outcome::Success { content: report })
+}
+
+/// Run a sequence of commands in order and render one combined report.
+///
+/// Fail-fast: if a command never flushes its trace (e.g. force-killed on
+/// timeout), the sequence stops and the error names which command failed.
+/// Artifacts for the commands that did run are already on disk.
+fn execute_sequence(
+    workspace_root: &Utf8Path,
+    specs: &[LaunchSpec],
+    level: Level,
+    target_filter: Option<&str>,
+    grep: Option<&str>,
+    launcher: &dyn Launcher,
+    timeouts: Timeouts,
+) -> ToolResult {
+    let ts = unix_seconds();
+    let out_dir = workspace_root.join("tmp/profiling");
+    fs::create_dir_all(&out_dir)?;
+
+    let mut artifacts = Vec::with_capacity(specs.len());
+    for (i, spec) in specs.iter().enumerate() {
+        let label = format!("-cmd{}", i + 1);
+        let art = run_one(
+            &out_dir,
+            spec,
+            level,
+            target_filter,
+            grep,
+            launcher,
+            timeouts,
+            ts,
+            &label,
+        )
+        .map_err(|e| {
+            format!(
+                "Command {} (`jp {}`) failed, stopping the sequence: {e}\n\nArtifacts for any \
+                 earlier commands remain under tmp/profiling.",
+                i + 1,
+                spec.args.join(" ")
+            )
+        })?;
+        artifacts.push(art);
+    }
+
+    // Hold the display strings alive for the borrows in `CommandRun`.
+    let displays: Vec<(String, String, String)> = artifacts
+        .iter()
+        .map(|a| {
+            (
+                crate::debug_jp::util::relative_to(workspace_root, &a.trace_dst),
+                crate::debug_jp::util::relative_to(workspace_root, &a.stdout_dst),
+                crate::debug_jp::util::relative_to(workspace_root, &a.stderr_dst),
+            )
+        })
+        .collect();
+
+    let runs: Vec<CommandRun<'_>> = specs
+        .iter()
+        .zip(&artifacts)
+        .zip(&displays)
+        .map(|((spec, art), display)| CommandRun {
+            args: &spec.args,
+            events: &art.events,
+            total: art.total,
+            launch: &art.launch,
+            paths: OutputPaths {
+                trace: &display.0,
+                stdout: &display.1,
+                stderr: &display.2,
+            },
+        })
+        .collect();
+
+    let report = trace_render::render_multi(&runs);
+    fs::write(out_dir.join(format!("report-trace-{ts}.md")), &report)?;
+    Ok(Outcome::Success { content: report })
+}
+
+/// One command's launch result plus its extracted, filtered trace events and
+/// the workspace-local paths its artifacts were copied to.
+struct CommandArtifacts {
+    events: Vec<TraceEvent>,
+    total: usize,
+    launch: LaunchResult,
+    trace_dst: Utf8PathBuf,
+    stdout_dst: Utf8PathBuf,
+    stderr_dst: Utf8PathBuf,
+}
+
+/// Launch jp via `launcher`, copy its trace log and streams into `out_dir`
+/// (keyed by `<ts><label>`), and return the filtered events.
+///
+/// `label` distinguishes a command's files within a sequence (e.g.
+/// `-cmd1`); it is empty for a single-command run, preserving the standalone
+/// file names.
+/// Returns an error when jp exits without flushing its trace log.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "thin internal seam over the launch+copy step"
+)]
+fn run_one(
+    out_dir: &Utf8Path,
+    spec: &LaunchSpec,
+    level: Level,
+    target_filter: Option<&str>,
+    grep: Option<&str>,
+    launcher: &dyn Launcher,
+    timeouts: Timeouts,
+    ts: u64,
+    label: &str,
+) -> Result<CommandArtifacts, Error> {
     let launch_result = launcher.run(spec, timeouts, &mut |_| {})?;
 
     // jp prints `Full trace log written to: <path>` on stderr right before
@@ -221,15 +412,11 @@ fn execute(
 
     // Copy the trace log into the real workspace so it survives the system
     // temp dir's eventual cleanup and stays alongside other profile output.
-    // Stdout/stderr are dumped alongside so the whole run — trace +
-    // streams — is one cohesive set of files keyed by `<ts>`.
-    let ts = unix_seconds();
-    let out_dir = workspace_root.join("tmp/profiling");
-    fs::create_dir_all(&out_dir)?;
-    let trace_dst = out_dir.join(format!("trace-{ts}.jsonl"));
-    let stdout_dst = out_dir.join(format!("trace-{ts}-stdout.txt"));
-    let stderr_dst = out_dir.join(format!("trace-{ts}-stderr.txt"));
-    let report_dst = out_dir.join(format!("report-trace-{ts}.md"));
+    // Stdout/stderr are dumped alongside so each command's trace + streams are
+    // one cohesive set of files keyed by `<ts><label>`.
+    let trace_dst = out_dir.join(format!("trace-{ts}{label}.jsonl"));
+    let stdout_dst = out_dir.join(format!("trace-{ts}{label}-stdout.txt"));
+    let stderr_dst = out_dir.join(format!("trace-{ts}{label}-stderr.txt"));
     fs::copy(&trace_src, &trace_dst)
         .map_err(|e| format!("Failed to copy trace log from {trace_src} to {trace_dst}: {e}"))?;
     fs::write(&stdout_dst, &launch_result.stdout)
@@ -241,10 +428,28 @@ fn execute(
         .map_err(|e| format!("Failed to read trace log at {trace_dst}: {e}"))?;
     let all_events = trace_parse::parse_lines(&raw);
     let total = all_events.len();
+    let events = filter_events(all_events, level, target_filter, grep);
 
+    Ok(CommandArtifacts {
+        events,
+        total,
+        launch: launch_result,
+        trace_dst,
+        stdout_dst,
+        stderr_dst,
+    })
+}
+
+/// Apply the level/target/grep filters to a command's parsed events.
+fn filter_events(
+    events: Vec<TraceEvent>,
+    level: Level,
+    target_filter: Option<&str>,
+    grep: Option<&str>,
+) -> Vec<TraceEvent> {
     let target_filter_lc = target_filter.map(str::to_lowercase);
     let grep_lc = grep.map(str::to_lowercase);
-    let filtered: Vec<TraceEvent> = all_events
+    events
         .into_iter()
         .filter(|e| e.level >= level)
         .filter(|e| {
@@ -257,19 +462,7 @@ fn execute(
                 .as_deref()
                 .is_none_or(|needle| event_searchable_text(e).to_lowercase().contains(needle))
         })
-        .collect();
-
-    let trace_dst_display = crate::debug_jp::util::relative_to(workspace_root, &trace_dst);
-    let stdout_dst_display = crate::debug_jp::util::relative_to(workspace_root, &stdout_dst);
-    let stderr_dst_display = crate::debug_jp::util::relative_to(workspace_root, &stderr_dst);
-    let report = trace_render::render(&filtered, total, &launch_result, &spec.args, OutputPaths {
-        trace: &trace_dst_display,
-        stdout: &stdout_dst_display,
-        stderr: &stderr_dst_display,
-    });
-    let report = with_termination_note(report, &launch_result);
-    fs::write(&report_dst, &report)?;
-    Ok(Outcome::Success { content: report })
+        .collect()
 }
 
 /// Build a single haystack for the `grep` filter from everything a user might

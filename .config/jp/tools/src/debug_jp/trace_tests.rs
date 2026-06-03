@@ -57,6 +57,65 @@ fn renders_report_from_launched_trace_log() {
 }
 
 #[test]
+fn renders_combined_report_for_command_sequence() {
+    let workspace = camino_tempfile::tempdir().unwrap();
+    let root = workspace.path();
+
+    // Both commands resolve to the same pre-staged trace log via the mock
+    // launcher; the point under test is the sequencing and combined render.
+    let trace_log = root.join("trace-src.jsonl");
+    std::fs::write(&trace_log, "").unwrap();
+    let launcher = MockLauncher::returning(launched(
+        format!("{TRACE_PATH_PREFIX}{trace_log}\n"),
+        Termination::Exited,
+    ));
+
+    let specs = vec![
+        LaunchSpec {
+            binary: "/does/not/run".into(),
+            args: vec!["c".to_owned(), "new".to_owned()],
+            working_dir: root.to_owned(),
+            env: vec![],
+        },
+        LaunchSpec {
+            binary: "/does/not/run".into(),
+            args: vec!["q".to_owned(), "continue".to_owned()],
+            working_dir: root.to_owned(),
+            env: vec![],
+        },
+    ];
+
+    let outcome = execute_sequence(
+        root,
+        &specs,
+        Level::Info,
+        None,
+        None,
+        &launcher,
+        Timeouts::DEFAULT,
+    )
+    .unwrap();
+
+    let Outcome::Success { content } = outcome else {
+        panic!("expected a success outcome");
+    };
+    assert!(
+        content.contains("## Command 1/2: `jp c new`"),
+        "got:\n{content}"
+    );
+    assert!(
+        content.contains("## Command 2/2: `jp q continue`"),
+        "got:\n{content}"
+    );
+    // Per-command sidecar files are listed with their command index.
+    assert!(content.contains("- Command 1 trace:"));
+    assert!(content.contains("- Command 2 trace:"));
+    // Each command wrote its own labelled sidecars.
+    let profiling = root.join("tmp/profiling");
+    assert!(profiling.exists());
+}
+
+#[test]
 fn force_killed_without_marker_reports_note() {
     let workspace = camino_tempfile::tempdir().unwrap();
     let root = workspace.path();

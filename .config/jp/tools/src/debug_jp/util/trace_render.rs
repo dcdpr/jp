@@ -63,16 +63,69 @@ pub(crate) fn render(
     let mut out = String::new();
     let _ = writeln!(out, "# jp debug · trace\n");
     let _ = writeln!(out, "**Command:** `jp {}`\n", args.join(" "));
-    write_run_stats(&mut out, launch);
-    write_streams(&mut out, launch);
-    write_summary(&mut out, events.len(), total);
-    write_events(&mut out, events);
+    write_body(&mut out, events, total, launch, "##");
     write_footer(&mut out, paths);
     out
 }
 
-fn write_run_stats(out: &mut String, launch: &LaunchResult) {
-    let _ = writeln!(out, "## Run");
+/// A single command's rendered inputs within a sequence.
+pub(crate) struct CommandRun<'a> {
+    pub args: &'a [String],
+    pub events: &'a [TraceEvent],
+    pub total: usize,
+    pub launch: &'a LaunchResult,
+    pub paths: OutputPaths<'a>,
+}
+
+/// Render a sequence of commands that shared one sandbox into a single report.
+///
+/// One `## Command i/n` section per command, each with `###`-level subsections,
+/// followed by a combined file footer.
+/// State persists across the commands because they share the sandbox's
+/// user-data directory.
+pub(crate) fn render_multi(runs: &[CommandRun<'_>]) -> String {
+    let mut out = String::new();
+    let _ = writeln!(out, "# jp debug · trace\n");
+    let _ = writeln!(
+        out,
+        "Ran {} commands in sequence in one sandbox; state persisted across them.\n",
+        runs.len()
+    );
+    for (i, run) in runs.iter().enumerate() {
+        let _ = writeln!(
+            out,
+            "## Command {}/{}: `jp {}`\n",
+            i + 1,
+            runs.len(),
+            run.args.join(" ")
+        );
+        if let Some(note) = run.launch.note() {
+            let _ = writeln!(out, "> [!WARNING]\n> {note}\n");
+        }
+        write_body(&mut out, run.events, run.total, run.launch, "###");
+    }
+    write_multi_footer(&mut out, runs);
+    out
+}
+
+/// One command's section body: run stats, streams, and the trace summary plus
+/// events, written under `heading`-level subsections (`##` for a standalone
+/// report, `###` when nested under a per-command header in a sequence).
+fn write_body(
+    out: &mut String,
+    events: &[TraceEvent],
+    total: usize,
+    launch: &LaunchResult,
+    heading: &str,
+) {
+    write_run_stats(out, launch, heading);
+    write_streams(out, launch, heading);
+    write_summary(out, events.len(), total, heading);
+    write_events(out, events);
+}
+
+fn write_run_stats(out: &mut String, launch: &LaunchResult, heading: &str) {
+    let _ = writeln!(out, "{heading} Run");
     let _ = writeln!(out);
     let status = match launch.exit_code {
         Some(0) => "success".to_owned(),
@@ -88,8 +141,8 @@ fn write_run_stats(out: &mut String, launch: &LaunchResult) {
     let _ = writeln!(out);
 }
 
-fn write_summary(out: &mut String, shown: usize, total: usize) {
-    let _ = writeln!(out, "## Trace");
+fn write_summary(out: &mut String, shown: usize, total: usize, heading: &str) {
+    let _ = writeln!(out, "{heading} Trace");
     let _ = writeln!(out);
     if shown == total {
         let _ = writeln!(out, "- **Events:** {total}");
@@ -169,9 +222,9 @@ fn write_event(out: &mut String, event: &TraceEvent, target_width: usize, run_co
 /// The marker line jp writes to stderr to advertise the trace log path is
 /// stripped here — it's noise once you can already see the path in the report
 /// footer.
-fn write_streams(out: &mut String, launch: &LaunchResult) {
+fn write_streams(out: &mut String, launch: &LaunchResult, heading: &str) {
     if !launch.stdout.is_empty() {
-        let _ = writeln!(out, "## stdout\n");
+        let _ = writeln!(out, "{heading} stdout\n");
         let _ = writeln!(out, "```text");
         let _ = writeln!(out, "{}", launch.stdout.trim_end());
         let _ = writeln!(out, "```\n");
@@ -179,7 +232,7 @@ fn write_streams(out: &mut String, launch: &LaunchResult) {
 
     let stderr = strip_trace_path_marker(&launch.stderr);
     if !stderr.trim().is_empty() {
-        let _ = writeln!(out, "## stderr\n");
+        let _ = writeln!(out, "{heading} stderr\n");
         let _ = writeln!(out, "```text");
         let _ = writeln!(out, "{}", stderr.trim_end());
         let _ = writeln!(out, "```\n");
@@ -192,6 +245,16 @@ fn write_footer(out: &mut String, paths: OutputPaths<'_>) {
     let _ = writeln!(out, "- Trace: `{}`", paths.trace);
     let _ = writeln!(out, "- Stdout: `{}`", paths.stdout);
     let _ = writeln!(out, "- Stderr: `{}`", paths.stderr);
+}
+
+fn write_multi_footer(out: &mut String, runs: &[CommandRun<'_>]) {
+    let _ = writeln!(out, "\n---\n");
+    let _ = writeln!(out, "**Files:**\n");
+    for (i, run) in runs.iter().enumerate() {
+        let _ = writeln!(out, "- Command {} trace: `{}`", i + 1, run.paths.trace);
+        let _ = writeln!(out, "- Command {} stdout: `{}`", i + 1, run.paths.stdout);
+        let _ = writeln!(out, "- Command {} stderr: `{}`", i + 1, run.paths.stderr);
+    }
 }
 
 /// Drop the `Full trace log written to: <path>` line jp emits when `JP_DEBUG=1`
