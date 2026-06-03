@@ -1,4 +1,4 @@
-# RFD D45: Session-Scoped Active Workspace
+# RFD D46: Session-Scoped Active Workspace
 
 - **Status**: Draft
 - **Category**: Design
