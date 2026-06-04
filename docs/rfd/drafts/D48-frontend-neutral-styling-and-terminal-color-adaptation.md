@@ -1,4 +1,4 @@
-# RFD D47: Frontend-Neutral Styling and Terminal Color Adaptation
+# RFD D48: Frontend-Neutral Styling and Terminal Color Adaptation
 
 - **Status**: Draft
 - **Category**: Design
