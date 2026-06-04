@@ -15,10 +15,14 @@ use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use serde_json::Value;
 
 use super::{
-    ConversationFilter, ConversationLockGuard, LoadBackend, LockBackend, PersistBackend,
-    SanitizeReport, SessionBackend,
+    ConversationFilter, ConversationIndexEntry, ConversationLockGuard, LoadBackend, LockBackend,
+    PersistBackend, Projection, SanitizeReport, SessionBackend, StoragePresence,
 };
 use crate::{LoadError, error::Result, load::LoadErrorInner, lock::LockInfo};
+
+/// A stored conversation: metadata, event stream, and the projection of its
+/// most recent write.
+type StoredConversation = (Conversation, ConversationStream, Projection);
 
 /// Purely in-memory storage backend.
 ///
@@ -27,8 +31,8 @@ use crate::{LoadError, error::Result, load::LoadErrorInner, lock::LockInfo};
 /// Locking uses in-process checks (not cross-process `flock`).
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryStorageBackend {
-    conversations: Arc<Mutex<HashMap<ConversationId, (Conversation, ConversationStream)>>>,
-    archived: Arc<Mutex<HashMap<ConversationId, (Conversation, ConversationStream)>>>,
+    conversations: Arc<Mutex<HashMap<ConversationId, StoredConversation>>>,
+    archived: Arc<Mutex<HashMap<ConversationId, StoredConversation>>>,
     locks: Arc<Mutex<HashSet<String>>>,
     sessions: Arc<Mutex<HashMap<String, Value>>>,
 }
@@ -47,11 +51,12 @@ impl PersistBackend for InMemoryStorageBackend {
         id: &ConversationId,
         metadata: &Conversation,
         events: &ConversationStream,
+        projection: Projection,
     ) -> Result<()> {
         self.conversations
             .lock()
             .expect("poisoned")
-            .insert(*id, (metadata.clone(), events.clone()));
+            .insert(*id, (metadata.clone(), events.clone(), projection));
         Ok(())
     }
 
@@ -88,16 +93,27 @@ impl PersistBackend for InMemoryStorageBackend {
 }
 
 impl LoadBackend for InMemoryStorageBackend {
-    fn load_conversation_ids(&self, filter: ConversationFilter) -> Vec<ConversationId> {
+    fn load_conversation_index(&self, filter: ConversationFilter) -> Vec<ConversationIndexEntry> {
         let store = if filter.archived {
             &self.archived
         } else {
             &self.conversations
         };
 
-        let mut ids: Vec<_> = store.lock().expect("poisoned").keys().copied().collect();
-        ids.sort();
-        ids
+        // Single-store backend: presence is derived from the projection
+        // recorded at the conversation's last write, since there is no second
+        // root to project into.
+        let mut entries: Vec<_> = store
+            .lock()
+            .expect("poisoned")
+            .iter()
+            .map(|(id, (_, _, projection))| ConversationIndexEntry {
+                id: *id,
+                presence: StoragePresence::from(*projection),
+            })
+            .collect();
+        entries.sort_by_key(|entry| entry.id);
+        entries
     }
 
     fn load_conversation_metadata(
@@ -105,13 +121,13 @@ impl LoadBackend for InMemoryStorageBackend {
         id: &ConversationId,
     ) -> std::result::Result<Conversation, LoadError> {
         let convs = self.conversations.lock().expect("poisoned");
-        if let Some((meta, _)) = convs.get(id) {
+        if let Some((meta, _, _)) = convs.get(id) {
             return Ok(meta.clone());
         }
         drop(convs);
 
         let archived = self.archived.lock().expect("poisoned");
-        if let Some((meta, _)) = archived.get(id) {
+        if let Some((meta, _, _)) = archived.get(id) {
             return Ok(meta.clone());
         }
         drop(archived);
@@ -127,13 +143,13 @@ impl LoadBackend for InMemoryStorageBackend {
         id: &ConversationId,
     ) -> std::result::Result<ConversationStream, LoadError> {
         let convs = self.conversations.lock().expect("poisoned");
-        if let Some((_, events)) = convs.get(id) {
+        if let Some((_, events, _)) = convs.get(id) {
             return Ok(events.clone());
         }
         drop(convs);
 
         let archived = self.archived.lock().expect("poisoned");
-        if let Some((_, events)) = archived.get(id) {
+        if let Some((_, events, _)) = archived.get(id) {
             return Ok(events.clone());
         }
         drop(archived);
@@ -149,7 +165,7 @@ impl LoadBackend for InMemoryStorageBackend {
             .lock()
             .expect("poisoned")
             .iter()
-            .filter_map(|(id, (meta, _))| {
+            .filter_map(|(id, (meta, _, _))| {
                 let expires_at = meta.expires_at?;
                 (expires_at <= now).then_some(*id)
             })

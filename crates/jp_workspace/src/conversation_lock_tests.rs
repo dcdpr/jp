@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
-use jp_storage::backend::{NoopLockGuard, NullPersistBackend, PersistBackend};
+use jp_storage::backend::{NoopLockGuard, NullPersistBackend, PersistBackend, Projection};
 use parking_lot::RwLock;
 
 use super::*;
@@ -30,6 +30,7 @@ impl PersistBackend for MockPersistBackend {
         id: &ConversationId,
         metadata: &Conversation,
         events: &ConversationStream,
+        _projection: Projection,
     ) -> Result<(), jp_storage::Error> {
         self.writes
             .lock()
@@ -68,6 +69,7 @@ fn test_lock_with_mock() -> (ConversationLock, Arc<MockPersistBackend>) {
         Arc::new(RwLock::new(ConversationStream::new_test())),
         Arc::clone(&mock) as _,
         Box::new(NoopLockGuard),
+        Projection::Projected,
     );
     (lock, mock)
 }
@@ -79,6 +81,7 @@ fn test_lock_no_writer() -> ConversationLock {
         Arc::new(RwLock::new(ConversationStream::new_test())),
         Arc::new(NullPersistBackend),
         Box::new(NoopLockGuard),
+        Projection::Projected,
     )
 }
 

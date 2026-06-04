@@ -2,6 +2,7 @@ use chrono::{DateTime, FixedOffset, Local, Utc};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
+use jp_storage::backend::StoragePresence;
 use jp_term::{osc::hyperlink, table::list};
 use jp_workspace::ConversationHandle;
 use strip_ansi_escapes::strip_str;
@@ -89,6 +90,7 @@ struct Details {
     last_event_at: Option<DateTime<Utc>>,
     expires_at: Option<DateTime<Utc>>,
     local: bool,
+    external: bool,
 }
 
 impl Ls {
@@ -96,7 +98,7 @@ impl Ls {
         ConversationLoadRequest::explicit_or_none(&self.target)
     }
 
-    #[expect(clippy::unnecessary_wraps)]
+    #[expect(clippy::unnecessary_wraps, clippy::too_many_lines)]
     pub(crate) fn run(&self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let active_conversation_id = ctx
             .session
@@ -111,33 +113,45 @@ impl Ls {
             Some(handles.iter().map(ConversationHandle::id).collect())
         };
 
-        let to_details = |id: ConversationId, c: &Conversation| Details {
-            active: active_conversation_id == Some(id),
-            pinned_at: c.pinned_at,
-            archived_at: c.archived_at,
-            title: c.title.clone(),
-            messages: c.events_count,
-            last_event_at: c.last_event_at.or(Some(id.timestamp())),
-            expires_at: c.expires_at,
-            local: c.user,
-            id,
+        let to_details =
+            |id: ConversationId, c: &Conversation, local: bool, external: bool| Details {
+                active: active_conversation_id == Some(id),
+                pinned_at: c.pinned_at,
+                archived_at: c.archived_at,
+                title: c.title.clone(),
+                messages: c.events_count,
+                last_event_at: c.last_event_at.or(Some(id.timestamp())),
+                expires_at: c.expires_at,
+                local,
+                external,
+                id,
+            };
+
+        let matches_filters = |id: &ConversationId, local: bool| -> bool {
+            filter_ids.as_ref().is_none_or(|f| f.contains(id)) && (!self.local || local)
         };
 
-        let matches_filters = |id: &ConversationId, c: &Conversation| -> bool {
-            filter_ids.as_ref().is_none_or(|f| f.contains(id)) && (!self.local || c.user)
-        };
-
+        // `local` is derived from storage presence: a conversation is shown as
+        // local only when it has no workspace projection.
+        let workspace = &ctx.workspace;
         let mut conversations: Vec<_> = if self.archived {
-            ctx.workspace
+            workspace
                 .archived_conversations()
-                .filter(|(id, c)| matches_filters(id, c))
-                .map(|(id, c)| to_details(id, &c))
+                .filter_map(|(id, c, presence)| {
+                    let local = presence == StoragePresence::UserLocalOnly;
+                    let external = presence == StoragePresence::WorkspaceOnly;
+                    matches_filters(&id, local).then(|| to_details(id, &c, local, external))
+                })
                 .collect()
         } else {
-            ctx.workspace
+            workspace
                 .conversations()
-                .filter(|(id, c)| matches_filters(id, c))
-                .map(|(id, c)| to_details(*id, &c))
+                .filter_map(|(id, c)| {
+                    let presence = workspace.conversation_presence(id);
+                    let local = presence == Some(StoragePresence::UserLocalOnly);
+                    let external = presence == Some(StoragePresence::WorkspaceOnly);
+                    matches_filters(id, local).then(|| to_details(*id, &c, local, external))
+                })
                 .collect()
         };
 
@@ -149,7 +163,7 @@ impl Ls {
             Some(Sort::Created) => a.id.timestamp().cmp(&b.id.timestamp()),
             Some(Sort::Messages) => a.messages.cmp(&b.messages),
             Some(Sort::Expires) => a.expires_at.cmp(&b.expires_at),
-            Some(Sort::Local) => a.local.cmp(&b.local),
+            Some(Sort::Local) => (a.external, a.local).cmp(&(b.external, b.local)),
             None if self.archived => b.archived_at.cmp(&a.archived_at),
             Some(Sort::Activity) | None => a.last_event_at.cmp(&b.last_event_at),
         };
@@ -176,7 +190,7 @@ impl Ls {
 
         let mut columns = Columns {
             expires_at: conversations.iter().any(|d| d.expires_at.is_some()),
-            local: conversations.iter().any(|d| d.local),
+            local: conversations.iter().any(|d| d.local || d.external),
             title: conversations.iter().any(|d| d.title.is_some()),
         };
 
@@ -278,13 +292,8 @@ impl Ls {
         }
 
         if columns.local {
-            let local = if details.local {
-                "Y".blue().to_string()
-            } else {
-                "N".to_string()
-            };
-
-            row.add_cell(Cell::new(local).set_alignment(CellAlignment::Center));
+            let cell = local_cell(details.local, details.external);
+            row.add_cell(Cell::new(cell).set_alignment(CellAlignment::Center));
         }
 
         if columns.title {
@@ -381,6 +390,22 @@ fn sort_marker(sort: Option<Sort>, archived: bool, descending: bool) -> Option<S
     };
 
     Some(SortMarker { column, descending })
+}
+
+/// Render the storage-locality cell for a conversation row.
+///
+/// - `Y` (blue): user-local only, no workspace projection.
+/// - `N`: projected into the workspace.
+/// - `ext` (magenta): external — present only in the workspace, not yet
+///   imported into user-local storage.
+fn local_cell(local: bool, external: bool) -> String {
+    if external {
+        "ext".magenta().to_string()
+    } else if local {
+        "Y".blue().to_string()
+    } else {
+        "N".to_string()
+    }
 }
 
 /// Header label for the free-text title column.

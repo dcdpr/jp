@@ -7,7 +7,6 @@ fn test_conversation_serialization() {
     let conv = Conversation {
         title: None,
         last_activated_at: Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap(),
-        user: true,
         pinned_at: None,
         archived_at: None,
         expires_at: None,

@@ -75,7 +75,13 @@ pub struct ConversationConfig {
     #[setting(nested)]
     pub inquiry: InquiryConfig,
 
-    /// Whether to store new conversations in the user-local workspace storage.
+    /// Whether new conversations start local-only.
+    ///
+    /// A local conversation is kept out of the workspace's `.jp/conversations/`
+    /// directory, so it is never committed to version control.
+    /// Defaults to `false`, where new conversations are projected into the
+    /// workspace and can be committed.
+    /// Equivalent to passing `--local` to `jp query`.
     #[setting(default)]
     pub start_local: bool,
 

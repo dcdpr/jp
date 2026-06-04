@@ -301,30 +301,16 @@ The rule keeps git-visible editing as the common path:
   conversation is imported.
 
 For the JP-managed editor commands (`jp conversation edit --events` /
-`--metadata` / `--base-config`), JP reloads the edited file after the editor
-exits and persists the conversation before the command returns, synchronizing
-the projected copy immediately — a command named `edit` should leave both
-copies consistent, not defer the sync.
+`--metadata` / `--base-config`), JP validates the edit after the editor exits by
+loading it back exactly as the next startup would.
+A valid edit is synchronized from the edited workspace copy to the durable
+user-local copy immediately — byte-for-byte, preserving the user's exact
+content — so both copies stay consistent rather than deferring the sync.
+An edit that fails to load is never committed: JP prints the error and asks
+whether to re-open the editor to fix it or discard the edit (restoring the
+original files); a non-interactive run discards it with an error.
 Manual edits made outside JP are reconciled lazily on the next load by the
 stream/metadata mtime rules below.
-
-### Conversation Origin
-
-When JP creates a conversation, it stores the worktree directory name as an
-`origin` field in the conversation metadata.
-This is purely informational — it has no behavioral impact — but provides
-context in `jp conversation ls` for identifying which worktree a conversation
-came from, especially when viewing conversations that were created in a worktree
-that no longer exists.
-
-```json
-{
-  "origin": "feature-a",
-  "last_activated_at": "2025-07-20T10:00:00.000Z"
-}
-```
-
-The `origin` field is set once at creation time and never updated.
 
 ### Manual Editing and Conflict Resolution
 
@@ -357,8 +343,10 @@ Whichever copy is newer in each unit is the version JP loads into memory.
 If the two mtimes are equal, user-local wins: with no evidence the workspace
 projection is newer, the durable copy stays authoritative.
 
-On persist, JP writes to both locations, bringing them back into sync.
-After a successful persist, both copies are identical with fresh mtimes.
+On persist, JP writes to both locations, bringing their content back into sync.
+The write is idempotent: a file is rewritten (and its mtime bumped) only when
+its serialized bytes differ, so after a successful persist both copies hold
+identical content, and unchanged files keep their existing mtimes.
 
 The full load-persist cycle:
 
@@ -412,9 +400,8 @@ This happens when another contributor commits a conversation to git and you pull
 it.
 
 These conversations have `StoragePresence::WorkspaceOnly`.
-They are shown in `jp conversation ls` with a distinct indicator (e.g., `origin:
-<their-worktree-name>` from the stored metadata, or simply the absence of a
-user-local copy).
+They are shown in `jp conversation ls` with a distinct indicator marking the
+absence of a user-local copy.
 
 A workspace-only conversation is **imported** into user-local (copied workspace
 → user-local) on the first operation that mutates it for continued use, after
@@ -577,9 +564,16 @@ The migration must merge their contents without losing conversations.
 If two directories contain a conversation with the same ID (unlikely but
 possible if both worktrees were used concurrently), the most recently modified
 copy should win.
-The workspace-to-user-local import is non-destructive and idempotent: it only
-copies conversations missing from user-local and never deletes the workspace
-copy, so an interrupted migration is safe to re-run.
+The workspace-to-user-local import is non-destructive — it only copies
+conversations missing from user-local and never deletes the workspace copy, so
+no data is ever lost.
+The eager import runs once, gated on the user-local `<id>` directory not yet
+existing.
+If it fails partway after creating that directory, a later startup skips the
+remaining eager import: the conversations it missed keep
+`StoragePresence::WorkspaceOnly` and are imported lazily on their first write —
+the same path conversations committed by other contributors take after
+migration.
 
 ### Workspace copy freshness
 
@@ -713,13 +707,6 @@ Depends on: the phases under test.
 
 Update `docs/architecture/ubiquitous-language.md` with a "Workspace Projection"
 entry when this RFD is implemented.
-
-### Independent: Conversation Origin Metadata
-
-Add the `origin` field to `Conversation`, populated from the worktree directory
-name at creation time, and surface it in `jp conversation ls` and `jp
-conversation show`.
-Independent of the storage changes; can land any time.
 
 ## References
 

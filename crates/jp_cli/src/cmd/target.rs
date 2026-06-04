@@ -478,8 +478,8 @@ impl ConversationTarget {
             Self::Archived => {
                 let id = workspace
                     .archived_conversations()
-                    .max_by_key(|(_, c)| c.archived_at)
-                    .map(|(id, _)| id)
+                    .max_by_key(|(_, c, _)| c.archived_at)
+                    .map(|(id, _, _)| id)
                     .ok_or_else(|| {
                         Error::NotFound("conversation", "no archived conversations".into())
                     })?;
@@ -488,7 +488,7 @@ impl ConversationTarget {
             Self::AllArchived => {
                 let ids: Vec<_> = workspace
                     .archived_conversations()
-                    .map(|(id, _)| id)
+                    .map(|(id, _, _)| id)
                     .collect();
                 if ids.is_empty() {
                     return Err(Error::NotFound(
@@ -830,8 +830,8 @@ fn build_archived_picker_items(
 
     let mut rows: Vec<(PickerRow, Option<DateTime<Utc>>)> = workspace
         .archived_conversations()
-        .filter(|(id, _)| filter.candidate_ids.as_ref().is_none_or(|s| s.contains(id)))
-        .map(|(id, c)| {
+        .filter(|(id, _, _)| filter.candidate_ids.as_ref().is_none_or(|s| s.contains(id)))
+        .map(|(id, c, _)| {
             let row = PickerRow {
                 id,
                 time_str: format_relative(c.archived_at),

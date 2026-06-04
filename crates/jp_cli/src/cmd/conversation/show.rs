@@ -1,3 +1,4 @@
+use jp_storage::backend::StoragePresence;
 use jp_workspace::ConversationHandle;
 
 use crate::{
@@ -23,6 +24,8 @@ impl Show {
 
         for handle in handles {
             let id = handle.id();
+            let local =
+                ctx.workspace.conversation_presence(&id) == Some(StoragePresence::UserLocalOnly);
             let conversation = ctx.workspace.metadata(&handle)?;
             let events = ctx.workspace.events(&handle)?;
             let details = DetailsFmt::new(id)
@@ -32,7 +35,7 @@ impl Show {
                 .with_title(conversation.title.as_ref())
                 .with_last_activated_at(Some(conversation.last_activated_at))
                 .with_pinned_flag(conversation.is_pinned())
-                .with_local_flag(conversation.user)
+                .with_local_flag(local)
                 .with_active_conversation(active_id.unwrap_or(id))
                 .with_expires_at(conversation.expires_at)
                 .with_pretty_printing(ctx.printer.pretty_printing_enabled());

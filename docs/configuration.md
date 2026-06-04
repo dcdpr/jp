@@ -113,8 +113,9 @@ used to override any file- or environment-level configuration.
 
 Some configuration options are automatically added to the conversation metadata
 by the application, such as the `model` and `provider` options.
-Others are not, but can be added manually by editing the conversation metadata
-file in `<workspace path>/.jp/conversations/<conversation id>/metadata.json`.
+Others are not, but can be added manually by editing the conversation's
+`metadata.json` file (run `jp conversation path --metadata <conversation id>` to
+print its location).
 
 This means the following command will re-use the same model for every turn in
 the conversation: `jp query --new --model <provider>/<model>`, unless a new

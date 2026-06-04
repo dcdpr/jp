@@ -67,6 +67,79 @@ fn write_json_overwrites_existing_file() {
 }
 
 #[test]
+fn write_json_skips_rewrite_when_unchanged() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("out.json");
+
+    write_json(&path, &json!({"v": 1})).unwrap();
+
+    // Pin the mtime to a known instant; an unchanged write must leave it.
+    let pinned = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(pinned)
+        .unwrap();
+
+    write_json(&path, &json!({"v": 1})).unwrap();
+
+    assert_eq!(
+        fs::metadata(&path).unwrap().modified().unwrap(),
+        pinned,
+        "identical content must not rewrite the file"
+    );
+}
+
+#[test]
+fn write_json_rewrites_when_content_changes() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("out.json");
+
+    write_json(&path, &json!({"v": 1})).unwrap();
+    let pinned = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(pinned)
+        .unwrap();
+
+    write_json(&path, &json!({"v": 2})).unwrap();
+
+    assert_ne!(
+        fs::metadata(&path).unwrap().modified().unwrap(),
+        pinned,
+        "changed content must rewrite the file"
+    );
+    let content: serde_json::Value = read_json(&path).unwrap();
+    assert_eq!(content, json!({"v": 2}));
+}
+
+#[test]
+fn write_json_force_rewrites_unchanged_content() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("out.json");
+
+    write_json(&path, &json!({"v": 1})).unwrap();
+    let pinned = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000);
+    fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(pinned)
+        .unwrap();
+
+    write_json_force(&path, &json!({"v": 1})).unwrap();
+
+    assert_ne!(
+        fs::metadata(&path).unwrap().modified().unwrap(),
+        pinned,
+        "force write refreshes the mtime even when content is unchanged"
+    );
+}
+
+#[test]
 fn write_json_creates_parent_dirs() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join("a").join("b").join("out.json");

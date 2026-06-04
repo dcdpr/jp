@@ -852,11 +852,8 @@ fn load_workspace(
     let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
 
     let user_root = user_data_dir()?.join("workspace");
-    let name = root
-        .file_name()
-        .ok_or_else(|| jp_workspace::Error::NotDir(root.clone()))?;
     let fs = fs
-        .with_user_storage(&user_root, name, id.to_string())
+        .with_user_storage(&user_root, id.to_string())
         .map_err(jp_workspace::Error::from)?;
 
     let fs = Arc::new(fs);

@@ -32,6 +32,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Tool Call](#tool-call)
     - [Turn](#turn)
     - [Workspace](#workspace)
+    - [Workspace Projection](#workspace-projection)
 
 <!--toc:end-->
 
@@ -152,5 +153,19 @@ state for JP.
 Identified by a `.jp/` directory at the project root.
 Implemented as `Workspace` in `jp_workspace`.
 
+### Workspace Projection
+
+The copy of a conversation written into the workspace's `.jp/conversations/`
+directory so it can be committed to version control alongside the project.
+The durable source of truth is the user-local copy; the workspace copy is a
+*projection* of it.
+Non-local conversations are projected (written to both roots); `--local`
+conversations live only in user-local storage and have no projection.
+The write intent is carried by a conversation's lock (`Projection` in
+`jp_storage`) and derived at load time from where the data lives
+(`StoragePresence`).
+See [RFD-031].
+
 [RFD-001]: ../rfd/001-jp-rfd-process.md
+[RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
 [`shlex::split`]: https://docs.rs/shlex

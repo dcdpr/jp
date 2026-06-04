@@ -40,7 +40,7 @@ fn setup(
     let config = AppConfig::new_test();
     let fs = FsStorageBackend::new(&storage)
         .unwrap()
-        .with_user_storage(&user, "test", "abc")
+        .with_user_storage(&user, "abc")
         .unwrap();
     let fs = Arc::new(fs);
     let mut workspace = Workspace::new(tmp.path()).with_backend(fs.clone());

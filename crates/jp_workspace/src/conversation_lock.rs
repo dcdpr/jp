@@ -72,7 +72,7 @@ use std::sync::{
 };
 
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
-use jp_storage::backend::{ConversationLockGuard, PersistBackend};
+use jp_storage::backend::{ConversationLockGuard, PersistBackend, Projection};
 use parking_lot::{RwLock, RwLockReadGuard};
 use tracing::info;
 
@@ -104,6 +104,7 @@ pub struct ConversationLock {
     events: Arc<RwLock<ConversationStream>>,
     writer: Arc<dyn PersistBackend>,
     lock_guard: Arc<Box<dyn ConversationLockGuard>>,
+    projection: Projection,
 }
 
 impl ConversationLock {
@@ -118,6 +119,7 @@ impl ConversationLock {
         events: Arc<RwLock<ConversationStream>>,
         writer: Arc<dyn PersistBackend>,
         lock_guard: Box<dyn ConversationLockGuard>,
+        projection: Projection,
     ) -> Self {
         Self {
             id: handle.into_inner(),
@@ -125,7 +127,17 @@ impl ConversationLock {
             events,
             writer,
             lock_guard: Arc::new(lock_guard),
+            projection,
         }
+    }
+
+    /// The write projection this lock persists with.
+    ///
+    /// Resolved from storage presence at acquisition (or the creation flags for
+    /// a new conversation), and used to decide which roots a write reaches.
+    #[must_use]
+    pub fn projection(&self) -> Projection {
+        self.projection
     }
 
     /// The conversation ID this lock protects.
@@ -159,6 +171,7 @@ impl ConversationLock {
             events: Arc::clone(&self.events),
             dirty: AtomicBool::new(false),
             writer: Arc::clone(&self.writer),
+            projection: self.projection,
             _lock_guard: Arc::clone(&self.lock_guard),
         }
     }
@@ -176,6 +189,7 @@ impl ConversationLock {
             events: self.events,
             dirty: AtomicBool::new(false),
             writer: self.writer,
+            projection: self.projection,
             _lock_guard: self.lock_guard,
         }
     }
@@ -207,6 +221,7 @@ pub struct ConversationMut {
     events: Arc<RwLock<ConversationStream>>,
     dirty: AtomicBool,
     writer: Arc<dyn PersistBackend>,
+    projection: Projection,
 
     // Holds the lock guard alive. Released when the last Arc drops.
     _lock_guard: Arc<Box<dyn ConversationLockGuard>>,
@@ -310,11 +325,27 @@ impl ConversationMut {
 
         let meta = self.metadata.read();
         let evts = self.events.read();
-        self.writer.write(&self.id, &meta, &evts)?;
+        self.writer.write(&self.id, &meta, &evts, self.projection)?;
         self.dirty.store(false, Ordering::Relaxed);
 
         info!(id = %self.id, "Flushed conversation to disk.");
         Ok(())
+    }
+
+    /// The write projection this scope persists with.
+    #[must_use]
+    pub fn projection(&self) -> Projection {
+        self.projection
+    }
+
+    /// Change the write projection and mark the scope dirty.
+    ///
+    /// The next persist writes to the roots the new projection selects.
+    /// Any stale copy in a no-longer-selected root is left in place;
+    /// reconciling it is the caller's responsibility.
+    pub fn set_projection(&mut self, projection: Projection) {
+        self.projection = projection;
+        self.dirty.store(true, Ordering::Relaxed);
     }
 
     /// Whether any mutations have occurred since creation or last flush.
@@ -350,7 +381,7 @@ impl Drop for ConversationMut {
         let evts = self.events.read();
 
         #[expect(clippy::print_stderr)]
-        if let Err(e) = self.writer.write(&self.id, &meta, &evts) {
+        if let Err(e) = self.writer.write(&self.id, &meta, &evts, self.projection) {
             eprintln!("Failed to persist conversation {}: {e}", self.id);
         }
     }

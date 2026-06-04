@@ -23,7 +23,7 @@ use crate::{
 };
 
 /// The name of the file used to store the current query message.
-const QUERY_FILENAME: &str = "QUERY_MESSAGE.md";
+pub(crate) const QUERY_FILENAME: &str = "QUERY_MESSAGE.md";
 
 /// How to edit the query.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -222,7 +222,7 @@ pub(crate) fn edit_query(
     query: &str,
     cmd: Expression,
     config_error: Option<&str>,
-) -> Result<(String, Utf8PathBuf, PartialAppConfig)> {
+) -> Result<(String, PartialAppConfig)> {
     let query_file_path = conversation_root.join(QUERY_FILENAME);
     let existing_content = fs::read_to_string(&query_file_path).unwrap_or_default();
     let mut doc = QueryDocument::try_from(existing_content.as_str()).unwrap_or_default();
@@ -263,7 +263,7 @@ pub(crate) fn edit_query(
     }
 
     guard.disarm();
-    Ok((doc.query.to_owned(), query_file_path, partial))
+    Ok((doc.query.to_owned(), partial))
 }
 
 fn build_config_text(config: &AppConfig) -> String {

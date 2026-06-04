@@ -12,7 +12,7 @@
 
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 
-use super::{ConversationLockGuard, LockBackend, PersistBackend};
+use super::{ConversationLockGuard, LockBackend, PersistBackend, Projection};
 use crate::{error::Result, lock::LockInfo};
 
 /// A [`PersistBackend`] that silently discards all writes.
@@ -25,6 +25,7 @@ impl PersistBackend for NullPersistBackend {
         _id: &ConversationId,
         _metadata: &Conversation,
         _events: &ConversationStream,
+        _projection: Projection,
     ) -> Result<()> {
         Ok(())
     }

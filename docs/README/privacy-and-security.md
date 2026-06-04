@@ -1,14 +1,15 @@
 # Secure, Local, Private
 
 JP conversations can be scoped to a workspace (e.g. a VCS-backed directory), or
-stored locally on your machine, and you can switch between them at any time:
+kept out of it entirely (and out of version control), and you can switch between
+them at any time:
 
 ```sh
 # Conversations are stored in the current workspace by default
 jp query --new "Where does this error come from?"
 
 # You can start a local conversation, stored outside the workspace directory
-jp query --new-local "What is the purpose of this module?"
+jp query --new --local "What is the purpose of this module?"
 
 # Or switch between them at any time
 jp conversation edit --local

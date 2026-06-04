@@ -25,11 +25,6 @@ pub struct Conversation {
     )]
     pub last_activated_at: DateTime<Utc>,
 
-    /// Whether the conversation is stored in the user or workspace storage.
-    // TODO: rename to `user_local`
-    #[serde(default, rename = "local", skip_serializing_if = "std::ops::Not::not")]
-    pub user: bool,
-
     /// When the conversation was pinned, or `None` if not pinned.
     ///
     /// Pinned conversations are displayed prominently in listings and pickers.
@@ -87,7 +82,6 @@ impl Default for Conversation {
         Self {
             last_activated_at: Utc::now(),
             title: None,
-            user: false,
             pinned_at: None,
             archived_at: None,
             expires_at: None,
@@ -105,13 +99,6 @@ impl Conversation {
             title: Some(title.into()),
             ..Default::default()
         }
-    }
-
-    /// Sets whether the conversation is local.
-    #[must_use]
-    pub const fn with_local(mut self, local: bool) -> Self {
-        self.user = local;
-        self
     }
 
     /// Sets whether the conversation is ephemeral.

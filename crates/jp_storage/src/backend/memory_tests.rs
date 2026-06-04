@@ -3,7 +3,7 @@ use jp_conversation::{Conversation, ConversationId, ConversationStream};
 
 use super::*;
 use crate::backend::{
-    ConversationFilter, LoadBackend, LockBackend, PersistBackend, SessionBackend,
+    ConversationFilter, LoadBackend, LockBackend, PersistBackend, Projection, SessionBackend,
 };
 
 fn test_id(secs: i64) -> ConversationId {
@@ -17,7 +17,9 @@ fn persist_write_and_load() {
     let meta = Conversation::default();
     let events = ConversationStream::new_test();
 
-    backend.write(&id, &meta, &events).unwrap();
+    backend
+        .write(&id, &meta, &events, Projection::Projected)
+        .unwrap();
 
     let loaded_meta = backend.load_conversation_metadata(&id).unwrap();
     assert_eq!(loaded_meta.title, meta.title);
@@ -36,6 +38,7 @@ fn persist_remove() {
             &id,
             &Conversation::default(),
             &ConversationStream::new_test(),
+            Projection::Projected,
         )
         .unwrap();
 
@@ -73,6 +76,7 @@ fn load_ids_sorted() {
             &id2,
             &Conversation::default(),
             &ConversationStream::new_test(),
+            Projection::Projected,
         )
         .unwrap();
     backend
@@ -80,6 +84,7 @@ fn load_ids_sorted() {
             &id1,
             &Conversation::default(),
             &ConversationStream::new_test(),
+            Projection::Projected,
         )
         .unwrap();
 
@@ -116,6 +121,7 @@ fn load_expired_none_when_no_expiry() {
             &id,
             &Conversation::default(),
             &ConversationStream::new_test(),
+            Projection::Projected,
         )
         .unwrap();
 
@@ -131,7 +137,12 @@ fn load_expired_returns_past_conversations() {
     let past = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
     let meta = Conversation::default().with_ephemeral(Some(past));
     backend
-        .write(&id, &meta, &ConversationStream::new_test())
+        .write(
+            &id,
+            &meta,
+            &ConversationStream::new_test(),
+            Projection::Projected,
+        )
         .unwrap();
 
     let expired = backend.load_expired_conversation_ids(Utc::now());
@@ -147,7 +158,12 @@ fn load_expired_skips_future_conversations() {
     let future = Utc::now() + chrono::Duration::hours(1);
     let meta = Conversation::default().with_ephemeral(Some(future));
     backend
-        .write(&id, &meta, &ConversationStream::new_test())
+        .write(
+            &id,
+            &meta,
+            &ConversationStream::new_test(),
+            Projection::Projected,
+        )
         .unwrap();
 
     let expired = backend.load_expired_conversation_ids(Utc::now());
