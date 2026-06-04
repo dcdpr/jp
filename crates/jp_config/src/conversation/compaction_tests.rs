@@ -61,6 +61,33 @@ fn reasoning_mode_parse() {
 }
 
 #[test]
+fn rule_bound_deserializes_from_integer_and_string() {
+    // Config files write bare integers (`keep_first = 1`); those must map to
+    // `Turns`, while string forms keep working.
+    assert_eq!(
+        serde_json::from_value::<RuleBound>(serde_json::json!(3)).unwrap(),
+        RuleBound::Turns(3)
+    );
+    assert_eq!(
+        serde_json::from_value::<RuleBound>(serde_json::json!("last")).unwrap(),
+        RuleBound::AfterLastCompaction
+    );
+    assert!(matches!(
+        serde_json::from_value::<RuleBound>(serde_json::json!("5h")).unwrap(),
+        RuleBound::Duration(_)
+    ));
+}
+
+#[test]
+fn rule_config_deserializes_integer_bounds() {
+    // Mirrors the documented TOML: `keep_first = 1`, `keep_last = 3`.
+    let rule: PartialCompactionRuleConfig =
+        serde_json::from_value(serde_json::json!({ "keep_first": 1, "keep_last": 3 })).unwrap();
+    assert_eq!(rule.keep_first, Some(RuleBound::Turns(1)));
+    assert_eq!(rule.keep_last, Some(RuleBound::Turns(3)));
+}
+
+#[test]
 fn rule_partial_roundtrip_json() {
     let rule = PartialCompactionRuleConfig {
         keep_first: None,

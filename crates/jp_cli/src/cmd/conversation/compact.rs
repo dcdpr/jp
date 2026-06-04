@@ -10,7 +10,8 @@ use jp_config::{
     types::vec::MergeableVec,
 };
 use jp_conversation::{
-    Compaction, ConversationStream, RangeBound, ReasoningPolicy, SummaryPolicy, ToolCallPolicy,
+    Compaction, CompactionRange, ConversationStream, RangeBound, ReasoningPolicy, SummaryPolicy,
+    ToolCallPolicy,
     compaction::{extend_summary_range, resolve_range},
 };
 use jp_workspace::{ConversationHandle, ConversationMut};
@@ -61,7 +62,7 @@ pub(crate) struct Compact {
     to: Option<CliRangeBound>,
 
     /// Strip reasoning (thinking) blocks from the compacted range.
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with = "compact")]
     reasoning: bool,
 
     /// Strip tool call content from the compacted range.
@@ -79,6 +80,7 @@ pub(crate) struct Compact {
         value_parser = parse_tool_calls_mode,
         num_args = 0..=1,
         default_missing_value = "strip",
+        conflicts_with = "compact",
     )]
     tools: Option<ToolCallsMode>,
 
@@ -86,7 +88,7 @@ pub(crate) struct Compact {
     ///
     /// When enabled, the compacted turns are replaced with a single
     /// LLM-generated summary.
-    #[arg(short, long)]
+    #[arg(short, long, conflicts_with = "compact")]
     summarize: bool,
 
     /// Preview what would change without applying.
@@ -96,28 +98,37 @@ pub(crate) struct Compact {
     /// Remove all compaction events from the stream.
     ///
     /// Restores the raw event history so the LLM sees all original events.
-    #[arg(long)]
+    /// Mutually exclusive with the policy, range, and DSL flags: `--reset`
+    /// undoes compaction, it does not re-compact in the same invocation.
+    /// Composes with `--dry-run` to preview the removal.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "keep_first", "keep_last", "from", "to", "reasoning", "tools",
+            "summarize", "compact",
+        ],
+    )]
     reset: bool,
 
     /// Compact using an inline DSL rule.
     ///
-    /// Can be used alongside the dedicated flags above, or on its own.
+    /// Mutually exclusive with the dedicated `--reasoning`/`--tools`/
+    /// `--summarize` flags above: use either the flags or the DSL, not both.
     /// See `jp query --help` for DSL syntax.
     #[command(flatten)]
     compact_flag: crate::cmd::compact_flag::CompactFlag,
 }
 
 impl Compact {
-    /// Returns `true` if any flag that overrides compaction rule config is set.
+    /// Returns `true` if any dedicated policy flag is set.
     ///
-    /// When true, the rules array is replaced with a single ad-hoc rule built
-    /// from the CLI flags via [`IntoPartialAppConfig`].
-    fn has_rule_overrides(&self) -> bool {
-        self.keep_first.is_some()
-            || self.keep_last.is_some()
-            || self.reasoning
-            || self.tools.is_some()
-            || self.summarize
+    /// Policy flags (`--reasoning`/`--tools`/`--summarize`) build a single
+    /// ad-hoc rule.
+    /// Range flags (`--keep-first`/`--keep-last`/`--from`/`--to`) are
+    /// deliberately excluded: they are applied at runtime as range overrides on
+    /// the active rules, not as a rule of their own.
+    fn has_policy_overrides(&self) -> bool {
+        self.reasoning || self.tools.is_some() || self.summarize
     }
 }
 
@@ -127,18 +138,20 @@ impl IntoPartialAppConfig for Compact {
         _workspace: Option<&jp_workspace::Workspace>,
         mut partial: PartialAppConfig,
         _merged_config: Option<&PartialAppConfig>,
-        _handles: &[jp_workspace::ConversationHandle],
     ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        // Dedicated flags build a single ad-hoc rule.
-        if self.has_rule_overrides() {
-            let mut rule = PartialCompactionRuleConfig::default();
+        // Dedicated policy flags build a single ad-hoc rule; inline DSL specs
+        // each build one. clap makes the two mutually exclusive (the policy
+        // flags `conflicts_with` the `compact` flag), so at most one side is
+        // ever populated here.
+        //
+        // Range flags are NOT rules — `compact_one` applies them as range
+        // overrides on whichever rules end up active (see `resolve_from` /
+        // `resolve_to`), so a range-only invocation narrows the configured
+        // rules instead of replacing them with a policy-less no-op.
+        let mut rules: Vec<PartialCompactionRuleConfig> = Vec::new();
 
-            if let Some(bound) = &self.keep_first {
-                rule.keep_first = Some(bound.clone());
-            }
-            if let Some(bound) = &self.keep_last {
-                rule.keep_last = Some(bound.clone());
-            }
+        if self.has_policy_overrides() {
+            let mut rule = PartialCompactionRuleConfig::default();
             if self.reasoning {
                 rule.reasoning = Some(ReasoningMode::Strip);
             }
@@ -146,12 +159,22 @@ impl IntoPartialAppConfig for Compact {
             if self.summarize {
                 rule.summary = Some(PartialSummaryConfig::default());
             }
-
-            partial.conversation.compaction.rules = MergeableVec::Vec(vec![rule]);
+            rules.push(rule);
         }
 
-        // DSL specs (from --compact=SPEC / -k) compose on top.
-        self.compact_flag.apply_to_config(&mut partial);
+        rules.extend(self.compact_flag.dsl_rules());
+
+        if !rules.is_empty() {
+            // Explicit policy/DSL rules replace the configured rules, unless a
+            // bare `--compact` is also present, in which case they append to
+            // the config rules (seeding the built-in default when the config
+            // provides none).
+            if self.compact_flag.use_config_rules {
+                crate::cmd::compact_flag::append_config_rules(&mut partial, rules);
+            } else {
+                partial.conversation.compaction.rules = MergeableVec::Vec(rules);
+            }
+        }
 
         Ok(partial)
     }
@@ -196,38 +219,89 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
     })
 }
 
+/// The resolution of one range bound (`from` or `to`) against a stream.
+///
+/// Separates "no bound configured for this side" (use the side's default) from
+/// "this bound selects no turns" (so the whole compaction is a no-op), which a
+/// plain `Option<RangeBound>` conflated — e.g. `keep_last = "30d"` covering
+/// the entire conversation must preserve everything, not fall back to the
+/// default `keep_last` and compact through the end.
+#[derive(Debug, Clone)]
+pub(crate) enum Bound {
+    /// No bound configured; the range defaults to the start (`from`) or end
+    /// (`to`) of the conversation.
+    Default,
+    /// The bound resolves to a concrete `RangeBound`.
+    At(RangeBound),
+    /// The bound falls outside the conversation such that nothing is compacted.
+    Empty,
+}
+
+/// Resolve the turn range a single rule would compact.
+///
+/// Applies the runtime range overrides (`--from`/`--to`/`--keep-first`/
+/// `--keep-last`) on top of the rule's own bounds and, for summary rules,
+/// extends the range to subsume partially overlapping summaries.
+///
+/// Shared by the dry-run preview and [`build_compaction_event`] so the preview
+/// and the actual mutation always agree on the range.
+fn resolve_rule_range(
+    events: &ConversationStream,
+    rule: &CompactionRuleConfig,
+    from_override: Bound,
+    to_override: Bound,
+) -> Option<CompactionRange> {
+    // A CLI override (`--from`/`--to`/`--keep-first`/`--keep-last`) takes
+    // precedence; otherwise fall back to the rule's own bound. Either side
+    // resolving to `Empty` means nothing is compacted.
+    let from = match from_override {
+        Bound::Default => keep_first_to_bound(&rule.keep_first, events),
+        other => other,
+    };
+    let to = match to_override {
+        Bound::Default => keep_last_to_bound(&rule.keep_last, events),
+        other => other,
+    };
+
+    let from = match from {
+        Bound::Empty => return None,
+        Bound::Default => None,
+        Bound::At(b) => Some(b),
+    };
+    let to = match to {
+        Bound::Empty => return None,
+        Bound::Default => None,
+        Bound::At(b) => Some(b),
+    };
+
+    let range = resolve_range(events, from, to)?;
+    Some(if rule.summary.is_some() {
+        extend_summary_range(events, range)
+    } else {
+        range
+    })
+}
+
 /// Build a [`Compaction`] event from a resolved config rule.
 ///
 /// `from_override` and `to_override` are runtime-resolved range bounds
-/// (`--from`/`--to`) that take precedence over the rule's `keep_first`/
-/// `keep_last`.
+/// (`--from`/`--to`/`--keep-first`/`--keep-last`) that take precedence over the
+/// rule's `keep_first`/`keep_last`.
 ///
 /// Returns `None` if the resolved range is empty (nothing to compact).
 pub(crate) async fn build_compaction_event(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,
     rule: &CompactionRuleConfig,
-    from_override: Option<RangeBound>,
-    to_override: Option<RangeBound>,
+    from_override: Bound,
+    to_override: Bound,
     printer: &jp_printer::Printer,
 ) -> crate::Result<Option<Compaction>> {
-    let from = from_override.or_else(|| keep_first_to_bound(&rule.keep_first, events));
-    let to = to_override.or_else(|| keep_last_to_bound(&rule.keep_last, events));
-
-    let Some(range) = resolve_range(events, from, to) else {
+    let Some(range) = resolve_rule_range(events, rule, from_override, to_override) else {
         return Ok(None);
     };
 
-    let should_summarize = rule.summary.is_some();
-
-    // Auto-extend range if summary would partially overlap existing summaries.
-    let range = if should_summarize {
-        extend_summary_range(events, range)
-    } else {
-        range
-    };
-
-    let summary_text = if should_summarize {
+    let summary_text = if rule.summary.is_some() {
         printer.println("Generating summary...");
         let text = super::summarize::generate_summary(
             events,
@@ -258,14 +332,20 @@ pub(crate) async fn build_compaction_event(
 pub(crate) async fn build_compaction_events_from_config(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,
-    from_override: Option<RangeBound>,
-    to_override: Option<RangeBound>,
+    from_override: Bound,
+    to_override: Bound,
     printer: &jp_printer::Printer,
 ) -> crate::Result<Vec<Compaction>> {
+    // Accumulate generated compactions onto a working stream so each rule's
+    // summary-overlap extension sees the compactions produced by earlier rules
+    // in this same invocation, not just those already on the stream. Turn
+    // iteration ignores compaction overlays, so this does not affect the events
+    // a summarizer reads or the turn-count used for range resolution.
+    let mut working = events.clone();
     let mut compactions = Vec::new();
     for rule in &cfg.conversation.compaction.rules {
         if let Some(c) = build_compaction_event(
-            events,
+            &working,
             cfg,
             rule,
             from_override.clone(),
@@ -274,6 +354,7 @@ pub(crate) async fn build_compaction_events_from_config(
         )
         .await?
         {
+            working.add_compaction(c.clone());
             compactions.push(c);
         }
     }
@@ -298,27 +379,46 @@ pub(crate) fn apply_compactions(
     }
 }
 
-/// Convert a `keep_first` rule bound to a `from` `RangeBound`.
-fn keep_first_to_bound(bound: &RuleBound, events: &ConversationStream) -> Option<RangeBound> {
+/// Convert a `keep_first` rule bound to a `from` [`Bound`].
+fn keep_first_to_bound(bound: &RuleBound, events: &ConversationStream) -> Bound {
     match bound {
-        RuleBound::Turns(n) => Some(RangeBound::Absolute(*n)),
+        // "Keep first N" means compaction starts at turn N.
+        RuleBound::Turns(n) | RuleBound::Absolute(n) => Bound::At(RangeBound::Absolute(*n)),
+        RuleBound::FromEnd(n) => Bound::At(RangeBound::FromEnd(*n)),
         RuleBound::Duration(d) => {
-            let dt = chrono::Utc::now() - *d;
-            Some(RangeBound::Absolute(events.turn_at_time(dt)?.index()))
+            // Preserve the opening `d` window: start compacting at the first
+            // turn after `conversation_start + d`. A window covering the whole
+            // conversation preserves everything.
+            let Some(first) = events.iter().next() else {
+                return Bound::Empty;
+            };
+            let Ok(d) = chrono::Duration::from_std(*d) else {
+                return Bound::Empty;
+            };
+            match events.turn_at_time(first.event.timestamp + d) {
+                Some(turn) => Bound::At(RangeBound::Absolute(turn.index() + 1)),
+                None => Bound::At(RangeBound::Absolute(0)),
+            }
         }
-        RuleBound::AfterLastCompaction => Some(RangeBound::AfterLastCompaction),
+        RuleBound::AfterLastCompaction => Bound::At(RangeBound::AfterLastCompaction),
     }
 }
 
-/// Convert a `keep_last` rule bound to a `to` `RangeBound`.
-fn keep_last_to_bound(bound: &RuleBound, events: &ConversationStream) -> Option<RangeBound> {
+/// Convert a `keep_last` rule bound to a `to` [`Bound`].
+fn keep_last_to_bound(bound: &RuleBound, events: &ConversationStream) -> Bound {
     match bound {
-        RuleBound::Turns(n) => Some(RangeBound::FromEnd(*n)),
+        // "Keep last N" means compaction stops N turns before the end.
+        RuleBound::Turns(n) | RuleBound::FromEnd(n) => Bound::At(RangeBound::FromEnd(*n)),
+        RuleBound::Absolute(n) => Bound::At(RangeBound::Absolute(*n)),
         RuleBound::Duration(d) => {
-            let dt = chrono::Utc::now() - *d;
-            Some(RangeBound::Absolute(events.turn_at_time(dt)?.index()))
+            // Compact turns older than the last `d` window. A window covering
+            // the whole conversation preserves everything → nothing to compact.
+            match events.turn_at_time(Utc::now() - *d) {
+                Some(turn) => Bound::At(RangeBound::Absolute(turn.index())),
+                None => Bound::Empty,
+            }
         }
-        RuleBound::AfterLastCompaction => None,
+        RuleBound::AfterLastCompaction => Bound::Default,
     }
 }
 
@@ -380,29 +480,63 @@ impl Compact {
         let events_snapshot = conv.events().clone();
 
         if self.reset {
-            let removed = conv.update_events(ConversationStream::remove_compactions);
-            if removed > 0 {
-                ctx.printer
-                    .println(format!("Removed {removed} compaction event(s)."));
+            if self.dry_run {
+                // Preview only — `--dry-run` must not mutate the conversation.
+                let count = events_snapshot.compactions().count();
+                if count > 0 {
+                    ctx.printer
+                        .println(format!("Would remove {count} compaction event(s)."));
+                } else {
+                    ctx.printer.println("No compaction events to remove.");
+                }
             } else {
-                ctx.printer.println("No compaction events to remove.");
+                let removed = conv.update_events(ConversationStream::remove_compactions);
+                if removed > 0 {
+                    ctx.printer
+                        .println(format!("Removed {removed} compaction event(s)."));
+                } else {
+                    ctx.printer.println("No compaction events to remove.");
+                }
             }
             return Ok(());
         }
 
-        // --from/--to are runtime-resolved range overrides (they need the
-        // stream for duration and "last" resolution). They apply to all rules.
+        // Range overrides (`--from`/`--to`/`--keep-first`/`--keep-last`) are
+        // resolved at runtime (they need the stream for duration and "last"
+        // resolution) and apply on top of every active rule.
         let from_override = self.resolve_from(&events_snapshot);
         let to_override = self.resolve_to(&events_snapshot);
 
         if self.dry_run {
-            let range = resolve_range(&events_snapshot, from_override.clone(), to_override.clone());
-            if let Some(range) = range {
+            // Preview using the same per-rule range resolution as the real run
+            // (minus the summarizer and the mutation) so the reported ranges
+            // match what would actually be applied.
+            let mut working = events_snapshot.clone();
+            let mut printed = false;
+            for rule in &cfg.conversation.compaction.rules {
+                let Some(range) =
+                    resolve_rule_range(&working, rule, from_override.clone(), to_override.clone())
+                else {
+                    continue;
+                };
                 ctx.printer.println(format!(
                     "Would compact turns {}..={}",
                     range.from_turn, range.to_turn,
                 ));
-            } else {
+                // Mirror the real run's overlap accumulation so later summary
+                // rules preview the same (possibly extended) ranges.
+                if rule.summary.is_some() {
+                    working.add_compaction(
+                        Compaction::new(range.from_turn, range.to_turn).with_summary(
+                            SummaryPolicy {
+                                summary: String::new(),
+                            },
+                        ),
+                    );
+                }
+                printed = true;
+            }
+            if !printed {
                 ctx.printer.println("Nothing to compact.");
             }
             return Ok(());
@@ -427,23 +561,63 @@ impl Compact {
         Ok(())
     }
 
-    /// Resolve `--from` to a `RangeBound`, if present.
-    fn resolve_from(&self, events: &ConversationStream) -> Option<RangeBound> {
-        resolve_cli_bound(self.from.as_ref()?, events)
+    /// Resolve the `from` range override, preferring `--from` over
+    /// `--keep-first`.
+    /// Returns [`Bound::Default`] when neither is set.
+    fn resolve_from(&self, events: &ConversationStream) -> Bound {
+        if let Some(bound) = self.from.as_ref() {
+            return resolve_cli_from(bound, events);
+        }
+        match &self.keep_first {
+            Some(bound) => keep_first_to_bound(bound, events),
+            None => Bound::Default,
+        }
     }
 
-    /// Resolve `--to` to a `RangeBound`, if present.
-    fn resolve_to(&self, events: &ConversationStream) -> Option<RangeBound> {
-        resolve_cli_bound(self.to.as_ref()?, events)
+    /// Resolve the `to` range override, preferring `--to` over `--keep-last`.
+    /// Returns [`Bound::Default`] when neither is set.
+    fn resolve_to(&self, events: &ConversationStream) -> Bound {
+        if let Some(bound) = self.to.as_ref() {
+            return resolve_cli_to(bound, events);
+        }
+        match &self.keep_last {
+            Some(bound) => keep_last_to_bound(bound, events),
+            None => Bound::Default,
+        }
     }
 }
 
-fn resolve_cli_bound(bound: &CliRangeBound, events: &ConversationStream) -> Option<RangeBound> {
+/// Resolve a `--from <duration>` cutoff: compaction starts at the first turn
+/// after the cutoff.
+/// No turn after the cutoff (an old conversation) means nothing to compact; a
+/// cutoff before the conversation starts compacts from the beginning.
+fn resolve_cli_from(bound: &CliRangeBound, events: &ConversationStream) -> Bound {
     match bound {
-        CliRangeBound::Resolved(b) => Some(b.clone()),
-        CliRangeBound::Duration(dt) => {
-            Some(RangeBound::Absolute(events.turn_at_time(*dt)?.index()))
-        }
+        CliRangeBound::Resolved(b) => Bound::At(b.clone()),
+        CliRangeBound::Duration(dt) => match events.turn_at_time(*dt) {
+            Some(turn) => {
+                let from = turn.index() + 1;
+                if from >= events.turn_count() {
+                    Bound::Empty
+                } else {
+                    Bound::At(RangeBound::Absolute(from))
+                }
+            }
+            None => Bound::At(RangeBound::Absolute(0)),
+        },
+    }
+}
+
+/// Resolve a `--to <duration>` cutoff: compaction stops at (and includes) the
+/// turn active at the cutoff.
+/// A cutoff preceding the conversation means nothing to compact.
+fn resolve_cli_to(bound: &CliRangeBound, events: &ConversationStream) -> Bound {
+    match bound {
+        CliRangeBound::Resolved(b) => Bound::At(b.clone()),
+        CliRangeBound::Duration(dt) => match events.turn_at_time(*dt) {
+            Some(turn) => Bound::At(RangeBound::Absolute(turn.index())),
+            None => Bound::Empty,
+        },
     }
 }
 

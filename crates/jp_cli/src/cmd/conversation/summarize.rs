@@ -47,7 +47,10 @@ pub async fn generate_summary(
         .and_then(|c| c.model.clone())
         .unwrap_or_else(|| app_cfg.assistant.model.clone());
 
-    let model_id = model.id.resolved();
+    // Aliases are resolved by `AppConfig::resolve_aliases` (including compaction
+    // summary models) before we get here, so `resolved()` is safe. The owned id
+    // is reused for provider lookup below.
+    let model_id = model.id.resolved().clone();
 
     let range_events = collect_range_events(events, range_from, range_to);
 
@@ -55,11 +58,11 @@ pub async fn generate_summary(
     let mut stream = ConversationStream::new(events.base_config());
     stream.extend(range_events);
 
-    // Override the model in the stream config so the provider picks up the
-    // summary model.
+    // Override the full assistant model (id plus parameters) so a
+    // summary-specific model can also set max tokens, temperature, reasoning,
+    // and provider-specific parameters — not just the model id.
     let mut partial = PartialAppConfig::empty();
-    partial.assistant.model.id =
-        jp_config::model::id::PartialModelIdOrAliasConfig::Id(model_id.to_partial());
+    partial.assistant.model = model.to_partial();
     stream.add_config_delta(partial);
 
     let instructions = summary_cfg

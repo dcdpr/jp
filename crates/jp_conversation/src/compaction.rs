@@ -161,20 +161,26 @@ pub struct CompactionRange {
 /// Extend a summary compaction range to fully subsume any partially overlapping
 /// existing summary compactions in the stream.
 ///
-/// When two summary ranges partially overlap (each covers turns the other
-/// doesn't), the projected view produces two synthetic pairs instead of one
-/// coherent summary.
-/// This function prevents that by expanding the proposed range to cover any
-/// such partial overlaps.
+/// A summary is a holistic representation of its range — it cannot be split,
+/// and a finer summary cannot be nested inside a coarser one coherently.
+/// So re-summarizing a region that any existing summary already touches is
+/// treated as a *refresh*: the new range grows to the union of every
+/// overlapping summary, and the summarizer re-reads the raw events for that
+/// whole range.
 ///
-/// The extension repeats until no partial overlaps remain, handling transitive
-/// chains (A overlaps B, B overlaps C → extend to cover all three).
+/// This covers both partial overlaps (each range covers turns the other
+/// doesn't) and containment (the new range sits inside an existing summary, or
+/// vice versa): in every case the result is a single summary spanning the union
+/// rather than two synthetic pairs in the projected view.
+///
+/// The extension repeats until stable, handling transitive chains (A overlaps
+/// B, B overlaps C → extend to cover all three).
 ///
 /// Only considers existing compactions that have `summary: Some(...)`.
-/// Returns the input range unchanged if there are no overlapping summaries.
+/// Returns the input range unchanged if no summary overlaps it.
 ///
 /// Call this before generating the summary text so the summarizer reads events
-/// for the full extended range.
+/// for the full refreshed range.
 #[must_use]
 pub fn extend_summary_range(
     stream: &crate::ConversationStream,
@@ -192,16 +198,18 @@ pub fn extend_summary_range(
                 continue;
             }
 
+            // Grow to the union of any summary we touch (partial overlap *or*
+            // containment), so adding a contained summary refreshes the whole
+            // enclosing range instead of nesting inside it.
             let intersects = from <= c.to_turn && to >= c.from_turn;
-            let new_contains_old = from <= c.from_turn && to >= c.to_turn;
-            let old_contains_new = c.from_turn <= from && c.to_turn >= to;
-
-            // Only extend on partial overlap: ranges intersect but neither
-            // fully contains the other.
-            if intersects && !new_contains_old && !old_contains_new {
-                from = from.min(c.from_turn);
-                to = to.max(c.to_turn);
-                changed = true;
+            if intersects {
+                let new_from = from.min(c.from_turn);
+                let new_to = to.max(c.to_turn);
+                if new_from != from || new_to != to {
+                    from = new_from;
+                    to = new_to;
+                    changed = true;
+                }
             }
         }
 
@@ -234,21 +242,54 @@ pub fn resolve_range(
     }
     let last = count - 1;
 
-    let resolve = |bound: RangeBound| -> usize {
-        match bound {
-            RangeBound::Absolute(n) => n.min(last),
+    // The two ends clamp differently. A start past the end (e.g. `keep_first`
+    // larger than the conversation, or `--from last` once the latest compaction
+    // already reaches the end) must preserve every turn, so it resolves
+    // one-past-the-end and lets the `from > to` guard below produce an empty
+    // range. An end that asks to preserve more trailing turns than exist
+    // likewise yields nothing, so it returns `None` rather than clamping back
+    // onto a real turn (which would recompact it).
+    let resolve_from = |bound: RangeBound| -> Option<usize> {
+        Some(match bound {
+            RangeBound::Absolute(n) if n > last => return None,
+            RangeBound::Absolute(n) => n,
             RangeBound::FromEnd(n) => last.saturating_sub(n),
+            RangeBound::AfterLastCompaction => {
+                let pos = stream
+                    .compactions()
+                    .map(|c| c.to_turn + 1)
+                    .max()
+                    .unwrap_or(0);
+                if pos > last {
+                    return None;
+                }
+                pos
+            }
+        })
+    };
+
+    let resolve_to = |bound: RangeBound| -> Option<usize> {
+        Some(match bound {
+            RangeBound::Absolute(n) => n.min(last),
+            RangeBound::FromEnd(n) if n > last => return None,
+            RangeBound::FromEnd(n) => last - n,
             RangeBound::AfterLastCompaction => stream
                 .compactions()
                 .map(|c| c.to_turn + 1)
                 .max()
                 .unwrap_or(0)
                 .min(last),
-        }
+        })
     };
 
-    let from_turn = from.map_or(0, resolve);
-    let to_turn = to.map_or(last, resolve);
+    let from_turn = match from {
+        Some(bound) => resolve_from(bound)?,
+        None => 0,
+    };
+    let to_turn = match to {
+        Some(bound) => resolve_to(bound)?,
+        None => last,
+    };
 
     if from_turn > to_turn {
         return None;

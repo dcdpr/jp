@@ -122,15 +122,10 @@ impl IntoPartialAppConfig for Conversation {
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
-        handles: &[jp_workspace::ConversationHandle],
     ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match &self.command {
-            Commands::Compact(args) => {
-                args.apply_cli_config(workspace, partial, merged_config, handles)
-            }
-            Commands::Fork(args) => {
-                args.apply_cli_config(workspace, partial, merged_config, handles)
-            }
+            Commands::Compact(args) => args.apply_cli_config(workspace, partial, merged_config),
+            Commands::Fork(args) => args.apply_cli_config(workspace, partial, merged_config),
             _ => Ok(partial),
         }
     }

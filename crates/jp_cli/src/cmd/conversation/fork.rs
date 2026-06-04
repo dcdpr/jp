@@ -64,10 +64,19 @@ impl Fork {
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         for source in handles {
             let lock = fork_conversation(ctx, source, |events| {
+                // The time filter can drop or renumber turns; positional
+                // compaction overlays would then point at the wrong turns, so
+                // drop them when the filter actually removes a turn. (The
+                // turn-truncating helpers below do the same for `--first`/
+                // `--last`.)
+                let turns_before = events.turn_count();
                 events.retain(|event| {
                     self.from.is_none_or(|t| event.timestamp >= *t)
                         && self.until.is_none_or(|t| event.timestamp < *t)
                 });
+                if events.turn_count() != turns_before {
+                    events.remove_compactions();
+                }
 
                 let first = self.first.map(|v| v.unwrap_or(1));
                 let last = self.last.map(|v| v.unwrap_or(1));
@@ -85,8 +94,8 @@ impl Fork {
                 let compactions = super::compact::build_compaction_events_from_config(
                     &events_snapshot,
                     &cfg,
-                    None,
-                    None,
+                    super::compact::Bound::Default,
+                    super::compact::Bound::Default,
                     &ctx.printer,
                 )
                 .await?;
@@ -122,7 +131,6 @@ impl IntoPartialAppConfig for Fork {
         _workspace: Option<&jp_workspace::Workspace>,
         mut partial: jp_config::PartialAppConfig,
         _merged_config: Option<&jp_config::PartialAppConfig>,
-        _handles: &[jp_workspace::ConversationHandle],
     ) -> Result<jp_config::PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         self.compact.apply_to_config(&mut partial);
         Ok(partial)

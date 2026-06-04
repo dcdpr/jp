@@ -10,7 +10,8 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use jp_config::{
     PartialAppConfig,
     conversation::compaction::{
-        PartialCompactionRuleConfig, PartialSummaryConfig, ReasoningMode, RuleBound, ToolCallsMode,
+        PartialCompactionConfig, PartialCompactionRuleConfig, PartialSummaryConfig, ReasoningMode,
+        RuleBound, ToolCallsMode,
     },
     types::vec::MergeableVec,
 };
@@ -40,29 +41,49 @@ impl CompactFlag {
         self.use_config_rules || !self.specs.is_empty()
     }
 
+    /// The inline DSL specs converted to partial compaction rules.
+    pub(crate) fn dsl_rules(&self) -> Vec<PartialCompactionRuleConfig> {
+        self.specs
+            .iter()
+            .map(CompactSpec::to_partial_rule)
+            .collect()
+    }
+
     /// Apply DSL specs to the config partial.
     ///
     /// - If only specs (no bare `--compact`): replace the rules array.
-    /// - If bare `--compact` + specs: append DSL rules to existing config
-    ///   rules.
+    /// - If bare `--compact` + specs: append DSL rules to the config rules.
     /// - If bare `--compact` only: leave config unchanged (rules apply as-is).
     pub fn apply_to_config(&self, partial: &mut PartialAppConfig) {
-        if self.specs.is_empty() {
+        let rules = self.dsl_rules();
+        if rules.is_empty() {
             return;
         }
 
-        let rules: Vec<PartialCompactionRuleConfig> = self
-            .specs
-            .iter()
-            .map(CompactSpec::to_partial_rule)
-            .collect();
-
         if self.use_config_rules {
-            partial.conversation.compaction.rules.extend(rules);
+            append_config_rules(partial, rules);
         } else {
             partial.conversation.compaction.rules = MergeableVec::Vec(rules);
         }
     }
+}
+
+/// Append `rules` to the partial's compaction rules under bare `--compact`
+/// ("config rules plus these rules") semantics.
+///
+/// The config rules are not materialized until finalize, so appending to an
+/// otherwise-empty list would let `PartialCompactionConfig::fill_from` treat
+/// the result as user-supplied and skip the built-in default rule.
+/// Seed the built-in defaults first when the config provides none.
+pub(crate) fn append_config_rules(
+    partial: &mut PartialAppConfig,
+    rules: Vec<PartialCompactionRuleConfig>,
+) {
+    if partial.conversation.compaction.rules.is_empty() {
+        partial.conversation.compaction.rules =
+            MergeableVec::Vec(PartialCompactionConfig::builtin_rules());
+    }
+    partial.conversation.compaction.rules.extend(rules);
 }
 
 impl clap::Args for CompactFlag {
@@ -141,15 +162,19 @@ pub(crate) struct CompactSpec {
     pub range: Option<DslRange>,
 }
 
-/// A parsed DSL range.
+/// A parsed DSL range, Python-slice style.
+///
+/// Each bound is an absolute turn index (positive in the DSL) or a from-end
+/// offset (negative).
+/// `None` means that end is open (the start or the end of the conversation).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DslRange {
-    /// Left bound: turns to preserve at the start.
-    /// `None` = 0.
-    pub keep_first: Option<usize>,
-    /// Right bound: turns to preserve at the end.
-    /// `None` = 0.
-    pub keep_last: Option<usize>,
+    /// Left bound (compaction start).
+    /// `None` = start of the conversation.
+    pub from: Option<RuleBound>,
+    /// Right bound (compaction end).
+    /// `None` = end of the conversation.
+    pub to: Option<RuleBound>,
 }
 
 impl CompactSpec {
@@ -165,8 +190,10 @@ impl CompactSpec {
         }
 
         if let Some(range) = &self.range {
-            rule.keep_first = Some(RuleBound::Turns(range.keep_first.unwrap_or(0)));
-            rule.keep_last = Some(RuleBound::Turns(range.keep_last.unwrap_or(0)));
+            // Open ends map to start / end: `Absolute(0)` is turn 0, `FromEnd(0)`
+            // is the last turn.
+            rule.keep_first = Some(range.from.clone().unwrap_or(RuleBound::Absolute(0)));
+            rule.keep_last = Some(range.to.clone().unwrap_or(RuleBound::FromEnd(0)));
         }
 
         rule
@@ -233,52 +260,48 @@ impl FromStr for CompactSpec {
     }
 }
 
+/// Parse one DSL range bound: a positive integer is an absolute turn index, a
+/// negative integer is an offset from the end.
+fn parse_dsl_bound(s: &str) -> Result<RuleBound, String> {
+    if let Some(rest) = s.strip_prefix('-') {
+        let n = rest
+            .parse()
+            .map_err(|_| format!("invalid bound '-{rest}'"))?;
+        Ok(RuleBound::FromEnd(n))
+    } else {
+        let n = s.parse().map_err(|_| format!("invalid bound '{s}'"))?;
+        Ok(RuleBound::Absolute(n))
+    }
+}
+
 fn parse_dsl_range(s: &str) -> Result<DslRange, String> {
-    // Full range: FROM..TO
+    // Explicit range: FROM..TO (either side may be empty). Both ends are
+    // Python-slice style: positive = absolute turn, negative = from the end.
     if let Some((left, right)) = s.split_once("..") {
-        let keep_first = if left.is_empty() {
+        let from = if left.is_empty() {
             None
         } else {
-            let n: usize = left
-                .parse()
-                .map_err(|_| format!("invalid left bound '{left}'"))?;
-            Some(n)
+            Some(parse_dsl_bound(left)?)
         };
-
-        let keep_last = if right.is_empty() {
+        let to = if right.is_empty() {
             None
-        } else if let Some(rest) = right.strip_prefix('-') {
-            let n: usize = rest
-                .parse()
-                .map_err(|_| format!("invalid right bound '-{rest}'"))?;
-            Some(n)
         } else {
-            return Err(format!(
-                "right bound must be negative (from end), got '{right}'"
-            ));
+            Some(parse_dsl_bound(right)?)
         };
-
-        return Ok(DslRange {
-            keep_first,
-            keep_last,
-        });
+        return Ok(DslRange { from, to });
     }
 
-    // Single number shorthand
-    if let Some(rest) = s.strip_prefix('-') {
-        let n: usize = rest
-            .parse()
-            .map_err(|_| format!("invalid range '-{rest}'"))?;
-        Ok(DslRange {
-            keep_first: None,
-            keep_last: Some(n),
-        })
-    } else {
-        let n: usize = s.parse().map_err(|_| format!("invalid range '{s}'"))?;
-        Ok(DslRange {
-            keep_first: Some(n),
-            keep_last: None,
-        })
+    // Single-number shorthand: positive `N` = `N..` (keep first N), negative
+    // `-N` = `..-N` (keep last N).
+    match parse_dsl_bound(s)? {
+        bound @ RuleBound::FromEnd(_) => Ok(DslRange {
+            from: None,
+            to: Some(bound),
+        }),
+        bound => Ok(DslRange {
+            from: Some(bound),
+            to: None,
+        }),
     }
 }
 

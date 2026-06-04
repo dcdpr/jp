@@ -135,7 +135,7 @@ Range bounds accept several formats:
 | `last`           | `--from last` | Turn of the most recent compaction   |
 |                  |               | event, or start if none.             |
 
-`--from` without a value defaults to `last`.
+`--from` requires a value (use `--from last` for the most recent compaction).
 All bounds are **resolved to absolute turn indices at creation time** and stored
 as integers.
 
@@ -188,31 +188,41 @@ POLICY   = "r" | "reasoning"
          | "t" | "tools"
          | "s" | "summarize"
 RANGE    = [BOUND] ".." [BOUND]    # explicit range (at least "..")
-         | BOUND                   # single-number shorthand
-BOUND    = INTEGER                 # positive = absolute turn, negative = from end
+         | BOUND                    # single-bound shorthand
+BOUND    = INTEGER                 # >= 0: absolute turn index
+         | "-" INTEGER             # <  0: offset from the end
 ```
 
 The range describes **which turns the policy applies to** (consistent with
 `from_turn`/`to_turn` in the `Compaction` event).
 Turns outside the range are unaffected.
+Bounds are Python-slice style: a non-negative number is an absolute, 0-based
+turn index, and a negative number is an offset from the end (`-1` is the last
+turn).
+Either end may use either form, and both ends are **inclusive**.
+An omitted left bound means the start of the conversation; an omitted right
+bound means the end.
 
 **Range semantics:**
 
 Full `FROM..TO` form:
 
-| Syntax  | Meaning                                            |
-| ------- | -------------------------------------------------- |
-| `..`    | All turns (start to end).                          |
-| `5..`   | Turn 5 onward (keeps first 5 uncompacted).         |
-| `..-3`  | Start through 3-from-end (keeps last 3).           |
-| `5..-3` | Turn 5 through 3-from-end (keeps first 5, last 3). |
+| Syntax    | Meaning                                            |
+| --------- | -------------------------------------------------- |
+| `..`      | All turns (start to end).                          |
+| `5..`     | Turn 5 through the end (keeps the first 5).        |
+| `..-3`    | Start through 3-from-end (keeps the last 3).       |
+| `5..-3`   | Turn 5 through 3-from-end (keeps first 5, last 3). |
+| `5..10`   | Absolute turns 5 through 10.                       |
+| `..10`    | Start through absolute turn 10.                    |
+| `-10..-3` | 10-from-end through 3-from-end.                    |
 
-Single-number shorthands:
+Single-bound shorthands:
 
-| Syntax | Expands to | Meaning                   |
-| ------ | ---------- | ------------------------- |
-| `-3`   | `..-3`     | Keep last 3 uncompacted.  |
-| `5`    | `5..`      | Keep first 5 uncompacted. |
+| Syntax | Expands to | Meaning                       |
+| ------ | ---------- | ----------------------------- |
+| `-3`   | `..-3`     | Keep last 3 uncompacted.      |
+| `5`    | `5..`      | Turn 5 onward (keep first 5). |
 
 **Examples:**
 
@@ -225,6 +235,7 @@ Single-number shorthands:
 | `s:..`     | Summarize all events.                       |
 | `r:5..`    | Strip reasoning from turn 5 onward.         |
 | `s:5..-3`  | Summarize turns 5 through 3-from-end.       |
+| `s:5..10`  | Summarize absolute turns 5 through 10.      |
 | `s:-3`     | Summarize all but last 3 (shorthand).       |
 | `r:-20`    | Strip reasoning, keep last 20 (shorthand).  |
 
@@ -254,8 +265,9 @@ policies:
 ```rust
 /// A compaction overlay stored in the event stream.
 ///
-/// Defines how events within [from_turn, to_turn] should be projected
-/// when building the LLM request. The original events are unmodified.
+/// Defines how events within [from_turn, to_turn] should be projected when
+/// building the LLM request.
+/// The original events are unmodified.
 pub struct Compaction {
     pub timestamp: DateTime<Utc>,
 
@@ -265,9 +277,9 @@ pub struct Compaction {
     /// Last turn in the compacted range (inclusive, 0-based).
     pub to_turn: usize,
 
-    /// When set, replaces ALL provider-visible events in the range
-    /// with a pre-computed summary. Takes precedence over `reasoning`
-    /// and `tool_calls`.
+    /// When set, replaces ALL provider-visible events in the range with a
+    /// pre-computed summary.
+    /// Takes precedence over `reasoning` and `tool_calls`.
     pub summary: Option<SummaryPolicy>,
 
     /// Policy for ChatResponse::Reasoning events.
@@ -294,9 +306,10 @@ pub enum ReasoningPolicy {
     Strip,
 }
 
-/// Replaces ALL provider-visible events in the range with a
-/// pre-computed summary. Messages, reasoning, and tool calls are
-/// all replaced by a single synthetic ChatRequest/ChatResponse pair.
+/// Replaces ALL provider-visible events in the range with a pre-computed
+/// summary.
+/// Messages, reasoning, and tool calls are all replaced by a single synthetic
+/// ChatRequest/ChatResponse pair.
 pub struct SummaryPolicy {
     /// The summary text, generated at compaction-creation time.
     pub summary: String,
@@ -304,9 +317,11 @@ pub struct SummaryPolicy {
 
 pub enum ToolCallPolicy {
     /// Replace request arguments and/or response content with compact
-    /// summaries. Preserves tool name, call ID, and success/error status.
+    /// summaries.
+    /// Preserves tool name, call ID, and success/error status.
     ///
     /// Parses from strings for config ergonomics:
+    ///
     /// - `"strip"` → Strip { request: true, response: true }
     /// - `"strip-responses"` → Strip { request: false, response: true }
     /// - `"strip-requests"` → Strip { request: true, response: false }
@@ -426,7 +441,7 @@ Projected view:
   ToolCallResponse(id="1", ok, "[compacted] fs_create_file: success")
   ChatResponse::Message("Created src/main.rs with a basic setup.")
   ChatRequest("add error handling")
-  ToolCallRequest(id="2", fs_read_file, {path: "src/main.rs"})
+  ToolCallRequest(id="2", fs_read_file, {[compacted]})
   ToolCallResponse(id="2", ok, "[compacted] fs_read_file: success")
   ToolCallRequest(id="3", fs_modify_file, {[compacted]})
   ToolCallResponse(id="3", ok, "[compacted] fs_modify_file: success")
@@ -438,12 +453,11 @@ Projected view:
   ...turns 3+ uncompacted...
 ```
 
-Reasoning is stripped, tool arguments and responses are compacted.
-Note that `fs_read_file` at id="2" keeps its arguments (per-tool hint `request =
-"keep"`) while `fs_create_file` and `fs_modify_file` have their arguments
-stripped (per-tool hint `request = "strip"` because they carry large file
-content).
+Reasoning is stripped, and every tool call's arguments and responses are
+compacted uniformly.
 Messages and conversation structure are preserved.
+Selective, per-tool exemptions (e.g. keeping `fs_read_file` arguments while
+stripping `fs_create_file` content) are deferred to a future RFD.
 
 With a summarization config (`-c compaction/heavy`):
 
@@ -569,7 +583,7 @@ the specified range.
 At projection time, tool response content is replaced with a status line
 (`[compacted] {tool_name}: {success|error}`) and/or request arguments are
 replaced with a compact summary.
-Which fields are stripped depends on the rule configuration and per-tool hints.
+Which fields are stripped depends on the rule configuration.
 
 **Impact:** High.
 Tool responses and arguments (especially for file-writing tools) dominate token
@@ -631,8 +645,8 @@ keep_first = 1
 keep_last = 3
 tool_calls = "strip"
 
-[conversation.compaction.rules.summary]
-model = "anthropic/claude-haiku"
+[conversation.compaction.rules.summary.model]
+id = "anthropic/claude-haiku"
 ```
 
 ```toml
@@ -686,12 +700,17 @@ duration string (e.g.
 `tool_calls` accepts: `"strip"` (both), `"strip-responses"`, `"strip-requests"`,
 `"omit"`.
 
-`summary` is a nested table:
+`summary` is a nested table.
+`model` is itself a table (it mirrors `assistant.model`), so the model id goes
+under `summary.model.id`:
 
 ```toml
 [conversation.compaction.rules.summary]
-model = "anthropic/claude-haiku" # optional, defaults to main assistant model
 instructions = "..." # optional, custom summarization prompt
+
+# optional, defaults to the main assistant model
+[conversation.compaction.rules.summary.model]
+id = "anthropic/claude-haiku"
 ```
 
 When `summary` is set, it replaces all events in the range — `reasoning` and
@@ -699,33 +718,10 @@ When `summary` is set, it replaces all events in the range — `reasoning` and
 
 ### Per-Tool Compaction Hints
 
-Tools can declare how their calls should be compacted.
-This is a new optional field in the tool configuration:
-
-```toml
-[conversation.tools.fs_read_file.compaction]
-request = "keep" # "keep" | "strip"
-response = "strip" # "keep" | "strip"
-```
-
-Per-tool hints override the rule's `Strip` policy for individual tools.
-A tool with `response = "keep"` is exempted from response stripping even under a
-rule that sets `response: true`.
-
-Example defaults for the JP project:
-
-| Tool             | `request` | `response` |
-| ---------------- | --------- | ---------- |
-| `fs_read_file`   | `keep`    | `strip`    |
-| `fs_grep_files`  | `keep`    | `strip`    |
-| `cargo_check`    | `keep`    | `strip`    |
-| `cargo_test`     | `keep`    | `strip`    |
-| `fs_create_file` | `strip`   | `keep`     |
-| `fs_modify_file` | `strip`   | `strip`    |
-| `git_commit`     | `strip`   | `keep`     |
-
-These are workspace-level tool configurations, not built-in defaults.
-Each workspace defines its own tools and compaction hints.
+Per-tool hints — letting individual tools declare whether their request
+arguments and/or response content should be exempt from stripping — are
+deferred to a future RFD.
+Compaction here applies the `tool_calls` policies uniformly across all tools.
 
 ## Drawbacks
 
@@ -931,12 +927,11 @@ Depends on Phase 2.
 1. Add `conversation.compaction` config section with `rules` as
    `MergedVec<CompactionRuleConfig>`.
 2. Implement built-in default rule with `discard_when_merged: true`.
-3. Add per-tool `compaction` hints to `ToolConfig`.
-4. Implement the `--compact[=SPEC]` DSL parser.
-5. Wire `--compact` / `-k` into `query`, `fork`, and `compact` with composition
+3. Implement the `--compact[=SPEC]` DSL parser.
+4. Wire `--compact` / `-k` into `query`, `fork`, and `compact` with composition
    semantics (bare `--compact` = config rules, `--compact=SPEC` = DSL rule, both
    compose).
-6. Add config and DSL tests.
+5. Add config and DSL tests.
 
 Depends on Phase 3.
 Can be partially parallelized with Phase 3 (config types and DSL parser can be

@@ -199,14 +199,11 @@ pub(crate) trait IntoPartialAppConfig {
     ///
     /// `merged_config` may contain the full configuration for validation when
     /// `partial` is incomplete.
-    /// `handles` are the resolved conversation targets for this invocation (may
-    /// be empty for commands that don't target conversations).
     fn apply_cli_config(
         &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
-        handles: &[jp_workspace::ConversationHandle],
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>>;
 
     #[expect(unused_variables)]

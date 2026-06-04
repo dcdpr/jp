@@ -444,9 +444,140 @@ fn summary_partial_range() {
     assert!(matches!(events[2], EventKind::ChatRequest(r) if r.content == "add error handling"));
 }
 
+#[test]
+fn summary_is_injected_as_its_own_turn() {
+    let mut stream = two_turn_stream();
+    // Summarize only the second turn (turn 1).
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        from_turn: 1,
+        to_turn: 1,
+        summary: Some(SummaryPolicy {
+            summary: "summary of turn 1".into(),
+        }),
+        reasoning: None,
+        tool_calls: None,
+    });
+
+    stream.apply_projection();
+
+    // The synthetic summary pair carries its own `TurnStart`, so it stays a
+    // distinct turn instead of folding into turn 0.
+    assert_eq!(stream.turn_count(), 2);
+    let turns: Vec<_> = stream.iter_turns().collect();
+    let summary_turn = turns.last().unwrap();
+    assert!(
+        summary_turn.iter().next().unwrap().event.is_turn_start(),
+        "summary turn must begin with a TurnStart"
+    );
+    assert!(summary_turn.iter().any(|e| matches!(
+        &e.event.kind,
+        EventKind::ChatResponse(ChatResponse::Message { message })
+            if message.contains("summary of turn 1")
+    )));
+}
+
+#[test]
+fn contained_summary_reinjects_outer_summary_tail() {
+    // Four single-message turns.
+    let mut stream = ConversationStream::new_test();
+    for t in 0..4 {
+        stream.push(ConversationEvent::new(TurnStart, ts(0)));
+        stream.push(ConversationEvent::new(
+            ChatRequest::from(format!("q{t}")),
+            ts(0),
+        ));
+        stream.push(ConversationEvent::new(
+            ChatResponse::message(format!("m{t}")),
+            ts(0),
+        ));
+    }
+
+    // Outer summary over all turns, then a newer summary fully contained in it.
+    stream.add_compaction(Compaction {
+        timestamp: ts(1),
+        from_turn: 0,
+        to_turn: 3,
+        summary: Some(SummaryPolicy {
+            summary: "OUTER".into(),
+        }),
+        reasoning: None,
+        tool_calls: None,
+    });
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        from_turn: 1,
+        to_turn: 2,
+        summary: Some(SummaryPolicy {
+            summary: "INNER".into(),
+        }),
+        reasoning: None,
+        tool_calls: None,
+    });
+
+    stream.apply_projection();
+
+    let messages: Vec<String> = stream
+        .iter()
+        .filter_map(|e| match &e.event.kind {
+            EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // turn 0 -> OUTER, turns 1..=2 -> INNER, turn 3 -> OUTER again. The outer
+    // summary's tail (turn 3) must not be dropped just because OUTER was
+    // already injected at turn 0.
+    let outer = messages.iter().filter(|m| m.as_str() == "OUTER").count();
+    let inner = messages.iter().filter(|m| m.as_str() == "INNER").count();
+    assert_eq!(
+        outer, 2,
+        "outer summary should bracket the inner one: {messages:?}"
+    );
+    assert_eq!(inner, 1, "{messages:?}");
+}
+
 // ---------------------------------------------------------------------------
 // Stacking: latest timestamp wins
 // ---------------------------------------------------------------------------
+
+#[test]
+fn timestamp_tie_breaks_by_stream_order() {
+    let mut stream = two_turn_stream();
+    // Two compactions over the same turns with the SAME timestamp and
+    // conflicting tool policy. The one added later in the stream must win.
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        from_turn: 0,
+        to_turn: 1,
+        summary: None,
+        reasoning: None,
+        tool_calls: Some(ToolCallPolicy::Omit),
+    });
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        from_turn: 0,
+        to_turn: 1,
+        summary: None,
+        reasoning: None,
+        tool_calls: Some(ToolCallPolicy::Strip {
+            request: true,
+            response: true,
+        }),
+    });
+
+    stream.apply_projection();
+
+    // Later compaction (Strip) wins the tie, so tool calls are present
+    // (stripped, not omitted).
+    let events = visible_events(&stream);
+    assert!(
+        events
+            .iter()
+            .any(|k| matches!(k, EventKind::ToolCallRequest(_))),
+        "later compaction in stream order must win the timestamp tie"
+    );
+}
 
 #[test]
 fn later_compaction_wins_for_same_turn() {
@@ -1207,4 +1338,68 @@ fn turn_indices_basic() {
 
     let indices = assign_turn_indices(&events);
     assert_eq!(indices, vec![0, 0, 1, 1, 2, 2]);
+}
+
+#[test]
+fn turn_indices_with_implicit_leading_turn() {
+    use super::assign_turn_indices;
+    use crate::stream::InternalEvent;
+
+    // Events before the first `TurnStart` form an implicit turn 0, so the first
+    // explicit turn is turn 1 — matching `IterTurns` (see
+    // `turn_index_with_implicit_leading_turn` in turn_iter_tests).
+    let events = vec![
+        InternalEvent::Event(Box::new(ConversationEvent::new(
+            ChatRequest::from("orphan"),
+            ts(0),
+        ))),
+        InternalEvent::Event(Box::new(ConversationEvent::new(TurnStart, ts(1)))),
+        InternalEvent::Event(Box::new(ConversationEvent::new(
+            ChatRequest::from("q1"),
+            ts(1),
+        ))),
+    ];
+
+    let indices = assign_turn_indices(&events);
+    assert_eq!(indices, vec![0, 1, 1]);
+}
+
+#[test]
+fn compaction_targets_correct_turn_with_implicit_leading_turn() {
+    // A stream whose first event predates any `TurnStart` has an implicit
+    // leading turn 0; the first explicit turn is turn 1. A compaction aimed at
+    // turn 1 (built against `iter_turns()` indices) must strip turn 1's
+    // reasoning and leave the implicit turn 0 untouched.
+    let mut stream = ConversationStream::new_test();
+    stream.push(ConversationEvent::new(ChatRequest::from("q0"), ts(0)));
+    stream.push(ConversationEvent::new(ChatResponse::reasoning("r0"), ts(0)));
+    stream.push(ConversationEvent::new(TurnStart, ts(1)));
+    stream.push(ConversationEvent::new(ChatRequest::from("q1"), ts(1)));
+    stream.push(ConversationEvent::new(ChatResponse::reasoning("r1"), ts(1)));
+
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        from_turn: 1,
+        to_turn: 1,
+        summary: None,
+        reasoning: Some(ReasoningPolicy::Strip),
+        tool_calls: None,
+    });
+
+    stream.apply_projection();
+
+    let reasonings: Vec<String> = stream
+        .iter()
+        .filter_map(|e| match &e.event.kind {
+            EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
+                Some(reasoning.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        reasonings,
+        vec!["r0".to_owned()],
+        "only turn 1's reasoning should be stripped"
+    );
 }

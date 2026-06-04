@@ -50,8 +50,8 @@ fn parse_tool_mode_with_range() {
         tools: Some(ToolCallsMode::StripResponses),
         summarize: false,
         range: Some(DslRange {
-            keep_first: None,
-            keep_last: Some(3),
+            from: None,
+            to: Some(RuleBound::FromEnd(3)),
         }),
     });
 }
@@ -63,8 +63,8 @@ fn parse_with_range() {
         tools: None,
         summarize: true,
         range: Some(DslRange {
-            keep_first: None,
-            keep_last: Some(3),
+            from: None,
+            to: Some(RuleBound::FromEnd(3)),
         }),
     });
     assert_eq!(
@@ -74,8 +74,8 @@ fn parse_with_range() {
             tools: Some(ToolCallsMode::Strip),
             summarize: false,
             range: Some(DslRange {
-                keep_first: Some(5),
-                keep_last: Some(3),
+                from: Some(RuleBound::Absolute(5)),
+                to: Some(RuleBound::FromEnd(3)),
             }),
         }
     );
@@ -84,8 +84,8 @@ fn parse_with_range() {
         tools: None,
         summarize: true,
         range: Some(DslRange {
-            keep_first: None,
-            keep_last: None,
+            from: None,
+            to: None,
         }),
     });
     assert_eq!("r:5..".parse::<CompactSpec>().unwrap(), CompactSpec {
@@ -93,32 +93,58 @@ fn parse_with_range() {
         tools: None,
         summarize: false,
         range: Some(DslRange {
-            keep_first: Some(5),
-            keep_last: None,
+            from: Some(RuleBound::Absolute(5)),
+            to: None,
         }),
     });
 }
 
 #[test]
+fn parse_absolute_range() {
+    // Python-slice: positive bounds are absolute turn indices on both ends.
+    assert_eq!(
+        "s:5..10".parse::<CompactSpec>().unwrap().range,
+        Some(DslRange {
+            from: Some(RuleBound::Absolute(5)),
+            to: Some(RuleBound::Absolute(10)),
+        })
+    );
+    assert_eq!(
+        "s:..10".parse::<CompactSpec>().unwrap().range,
+        Some(DslRange {
+            from: None,
+            to: Some(RuleBound::Absolute(10)),
+        })
+    );
+    assert_eq!(
+        "s:-10..-3".parse::<CompactSpec>().unwrap().range,
+        Some(DslRange {
+            from: Some(RuleBound::FromEnd(10)),
+            to: Some(RuleBound::FromEnd(3)),
+        })
+    );
+}
+
+#[test]
 fn parse_single_number_shorthand() {
-    // Negative: keep last N
+    // Negative shorthand `-3` = `..-3` (keep last 3).
     assert_eq!("s:-3".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: false,
         tools: None,
         summarize: true,
         range: Some(DslRange {
-            keep_first: None,
-            keep_last: Some(3),
+            from: None,
+            to: Some(RuleBound::FromEnd(3)),
         }),
     });
-    // Positive: keep first N
+    // Positive shorthand `5` = `5..` (keep first 5).
     assert_eq!("r:5".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: true,
         tools: None,
         summarize: false,
         range: Some(DslRange {
-            keep_first: Some(5),
-            keep_last: None,
+            from: Some(RuleBound::Absolute(5)),
+            to: None,
         }),
     });
 }
@@ -128,8 +154,8 @@ fn parse_errors() {
     assert!("".parse::<CompactSpec>().is_err());
     assert!("x".parse::<CompactSpec>().is_err());
     assert!("s:abc".parse::<CompactSpec>().is_err());
-    // Positive right bound not supported
-    assert!("s:5..10".parse::<CompactSpec>().is_err());
+    // Non-numeric bound
+    assert!("s:5..x".parse::<CompactSpec>().is_err());
     // Unknown tool mode
     assert!("t=nope".parse::<CompactSpec>().is_err());
     // Boolean policies reject values
@@ -144,8 +170,9 @@ fn to_partial_rule_with_range() {
     assert_eq!(rule.reasoning, Some(ReasoningMode::Strip));
     assert_eq!(rule.tool_calls, Some(ToolCallsMode::Strip));
     assert!(rule.summary.is_none());
-    assert_eq!(rule.keep_first, Some(RuleBound::Turns(0)));
-    assert_eq!(rule.keep_last, Some(RuleBound::Turns(3)));
+    // Open start maps to absolute turn 0; `-3` keeps the last 3.
+    assert_eq!(rule.keep_first, Some(RuleBound::Absolute(0)));
+    assert_eq!(rule.keep_last, Some(RuleBound::FromEnd(3)));
 }
 
 #[test]
@@ -171,6 +198,26 @@ fn apply_specs_only_replaces_rules() {
 
     let rules: &[_] = &partial.conversation.compaction.rules;
     assert_eq!(rules.len(), 1);
+}
+
+#[test]
+fn bare_compact_plus_dsl_seeds_builtin_default() {
+    // `--compact` (config rules) plus an inline DSL spec on an otherwise-default
+    // config must run the built-in default rule *and* the DSL rule, not just
+    // the DSL rule.
+    let flag = CompactFlag {
+        use_config_rules: true,
+        specs: vec!["s:..-3".parse().unwrap()],
+    };
+    let mut partial = PartialAppConfig::default();
+    flag.apply_to_config(&mut partial);
+
+    let rules: &[_] = &partial.conversation.compaction.rules;
+    assert_eq!(rules.len(), 2);
+    // Built-in default first (strip reasoning + tools), then the summary spec.
+    assert_eq!(rules[0].reasoning, Some(ReasoningMode::Strip));
+    assert_eq!(rules[0].tool_calls, Some(ToolCallsMode::Strip));
+    assert!(rules[1].summary.is_some());
 }
 
 #[test]

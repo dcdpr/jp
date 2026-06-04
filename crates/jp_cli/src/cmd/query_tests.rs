@@ -101,7 +101,7 @@ fn build_query_config(
     .unwrap();
 
     partial = query
-        .apply_cli_config(Some(workspace), partial, None, &[])
+        .apply_cli_config(Some(workspace), partial, None)
         .unwrap();
 
     build(partial).unwrap()
@@ -160,7 +160,6 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -192,7 +191,6 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -224,7 +222,6 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -254,7 +251,6 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -285,7 +281,6 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -318,7 +313,6 @@ fn test_query_tools_and_no_tools() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -353,7 +347,6 @@ fn test_explicit_tool_enabled_by_name() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -381,7 +374,6 @@ fn test_enable_all_and_explicit_by_name() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -413,7 +405,6 @@ fn test_enable_all_skips_unnamed_explicit() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -447,7 +438,6 @@ fn test_interleaved_disable_all_then_enable_named() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -487,7 +477,6 @@ fn test_interleaved_enable_all_then_disable_named() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -522,7 +511,6 @@ fn test_interleaved_disable_all_then_enable_all() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -563,7 +551,6 @@ fn test_interleaved_three_step_composition() {
         None,
         partial,
         None,
-        &[],
     )
     .unwrap();
 
@@ -608,7 +595,7 @@ fn query_model_override_is_persisted_as_config_delta() {
     };
 
     let partial = query
-        .apply_cli_config(None, base_config.to_partial(), None, &[])
+        .apply_cli_config(None, base_config.to_partial(), None)
         .unwrap();
     let runtime_config = build(partial).unwrap();
 
@@ -859,11 +846,9 @@ fn no_title_does_not_persist_into_partial_config() {
         no_title: true,
         ..Default::default()
     }
-    .apply_cli_config(None, base.clone(), None, &[])
+    .apply_cli_config(None, base.clone(), None)
     .unwrap();
-    let without_flag = Query::default()
-        .apply_cli_config(None, base, None, &[])
-        .unwrap();
+    let without_flag = Query::default().apply_cli_config(None, base, None).unwrap();
 
     assert_eq!(
         with_flag.conversation.title.generate.auto,

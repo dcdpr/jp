@@ -73,6 +73,7 @@ use jp_config::{
     },
     conversation::{
         ConversationConfig,
+        compaction::PartialCompactionConfig,
         tool::{
             Enable, ToolSource,
             access::{AccessConfig, PartialAccessConfig, PartialFsRuleConfig},
@@ -879,8 +880,8 @@ impl Query {
         let compactions = super::conversation::compact::build_compaction_events_from_config(
             &events,
             cfg,
-            None,
-            None,
+            super::conversation::compact::Bound::Default,
+            super::conversation::compact::Bound::Default,
             &ctx.printer,
         )
         .await?;
@@ -1162,7 +1163,14 @@ fn get_config_delta_from_cli(
         .map(|c| c.to_partial())
         .map_err(jp_conversation::Error::from)?;
 
-    let partial = partial.delta(cfg.to_partial());
+    let mut partial = partial.delta(cfg.to_partial());
+
+    // Compaction rules are a one-shot plan applied as overlay events by
+    // `apply_pre_query_compaction`, not persistent conversation config. Drop
+    // them from the recorded delta so an inline `-k SPEC` rule isn't replayed
+    // by future bare `--compact` invocations on the same conversation.
+    partial.conversation.compaction = PartialCompactionConfig::default();
+
     if partial.is_empty() {
         return Ok(None);
     }
@@ -1176,7 +1184,6 @@ impl IntoPartialAppConfig for Query {
         workspace: Option<&Workspace>,
         mut partial: PartialAppConfig,
         merged_config: Option<&PartialAppConfig>,
-        _handles: &[jp_workspace::ConversationHandle],
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         let Self {
             model,

@@ -259,13 +259,18 @@ fn extend_old_fully_contains_new() {
     let mut stream = stream_with_turns(10);
     stream.add_compaction(summary_compaction(0, 9, 10));
 
-    // New [3, 5] fully contained by old [0, 9] → no extension.
+    // New [3, 5] sits inside the existing summary [0, 9]. A summary can't be
+    // nested inside another, so re-summarizing a contained range refreshes the
+    // whole enclosing range: the result grows to [0, 9].
     let range = CompactionRange {
         from_turn: 3,
         to_turn: 5,
     };
     let result = extend_summary_range(&stream, range);
-    assert_eq!(result, range);
+    assert_eq!(result, CompactionRange {
+        from_turn: 0,
+        to_turn: 9
+    });
 }
 
 #[test]

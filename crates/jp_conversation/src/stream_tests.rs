@@ -1042,6 +1042,39 @@ fn test_compaction_preserved_by_retain() {
 }
 
 #[test]
+fn test_retain_last_turns_drops_compactions() {
+    let mut stream = ConversationStream::new_test();
+    for t in 0..6 {
+        stream.start_turn(format!("turn {t}"));
+    }
+    // A compaction over the early turns; dropping leading turns renumbers the
+    // survivors, so this overlay would otherwise point at the wrong turns.
+    stream.add_compaction(make_compaction(0, 4));
+
+    stream.retain_last_turns(2);
+
+    assert_eq!(stream.turn_count(), 2);
+    assert_eq!(
+        stream.compactions().count(),
+        0,
+        "truncating turns must drop now-misaligned compactions"
+    );
+}
+
+#[test]
+fn test_retain_last_turns_no_truncation_keeps_compactions() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b");
+    stream.add_compaction(make_compaction(0, 1));
+
+    // No turns are dropped (2 <= 5), so the overlay stays valid and survives.
+    stream.retain_last_turns(5);
+
+    assert_eq!(stream.compactions().count(), 1);
+}
+
+#[test]
 fn test_compaction_skipped_by_iter() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("hello"));
@@ -1292,6 +1325,48 @@ fn test_resolve_range_after_last_compaction() {
     let range = resolve_range(&stream, Some(RangeBound::AfterLastCompaction), None).unwrap();
     assert_eq!(range.from_turn, 2);
     assert_eq!(range.to_turn, 3);
+}
+
+#[test]
+fn test_resolve_range_after_last_compaction_at_end_is_none() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b");
+    stream.start_turn("c");
+    stream.start_turn("d"); // turns 0..=3
+
+    // The latest compaction already reaches the final turn, so incremental
+    // `--from last` has nothing left to do and must not recompact turn 3.
+    stream.add_compaction(make_compaction(0, 3));
+
+    let range = resolve_range(&stream, Some(RangeBound::AfterLastCompaction), None);
+    assert!(range.is_none(), "got {range:?}");
+}
+
+#[test]
+fn test_resolve_range_keep_first_beyond_end_is_none() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b");
+    stream.start_turn("c");
+    stream.start_turn("d"); // turns 0..=3
+
+    // `keep_first = 5` on a 4-turn conversation preserves everything.
+    let range = resolve_range(&stream, Some(RangeBound::Absolute(5)), None);
+    assert!(range.is_none(), "got {range:?}");
+}
+
+#[test]
+fn test_resolve_range_keep_last_beyond_end_is_none() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("a");
+    stream.start_turn("b");
+    stream.start_turn("c");
+    stream.start_turn("d"); // turns 0..=3
+
+    // `keep_last = 5` (`..-5`) on a 4-turn conversation preserves everything.
+    let range = resolve_range(&stream, None, Some(RangeBound::FromEnd(5)));
+    assert!(range.is_none(), "got {range:?}");
 }
 
 #[test]

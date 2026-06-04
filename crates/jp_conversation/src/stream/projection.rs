@@ -13,7 +13,7 @@ use serde_json::Map;
 use super::InternalEvent;
 use crate::{
     ReasoningPolicy, ToolCallPolicy,
-    event::{ChatRequest, ChatResponse, ConversationEvent},
+    event::{ChatRequest, ChatResponse, ConversationEvent, TurnStart},
 };
 
 /// Resolved compaction policies for a single turn.
@@ -30,12 +30,10 @@ struct TurnPolicy {
 }
 
 /// A summary that won the latest-timestamp contest for a set of turns.
+#[derive(PartialEq, Eq)]
 struct ResolvedSummary {
     /// The summary text to inject.
     text: String,
-    /// The `from_turn` of the originating compaction, used to determine where
-    /// the synthetic pair is injected.
-    from_turn: usize,
 }
 
 /// Apply compaction projection to the event list in place.
@@ -69,6 +67,20 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
     let policies = resolve_policies(max_turn, &compactions);
     let tool_names = build_tool_name_map(events);
 
+    // Inject a summary once per contiguous run of turns that resolve to the
+    // same winning summary. Injecting only at the originating `from_turn` drops
+    // the tail of a summary that a newer, fully-contained summary splits in two
+    // (e.g. A covers turns 0..=9, a newer B covers 3..=5: turns 6..=9 still
+    // belong to A and must be re-injected after B).
+    let inject_at_turn: HashSet<usize> = (0..policies.len())
+        .filter(|&t| {
+            let Some(summary) = policies[t].summary.as_ref() else {
+                return false;
+            };
+            t == 0 || policies[t - 1].summary.as_ref() != Some(summary)
+        })
+        .collect();
+
     let mut projected = Vec::with_capacity(events.len());
     let mut summaries_injected: HashSet<usize> = HashSet::new();
 
@@ -90,7 +102,7 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
 
                 // Summary takes precedence over all per-type policies.
                 if let Some(summary) = &policy.summary {
-                    if summary.from_turn == turn && summaries_injected.insert(turn) {
+                    if inject_at_turn.contains(&turn) && summaries_injected.insert(turn) {
                         inject_summary(&mut projected, &summary.text, conv_event.timestamp);
                     }
                     // Drop the original event — it's covered by the summary.
@@ -137,29 +149,40 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
 
 /// Assign a 0-based turn index to each event position.
 ///
-/// Turn boundaries are marked by [`TurnStart`] events.
-/// Everything before the first `TurnStart` (or from the first `TurnStart`
-/// onward until the next) belongs to turn 0.
-/// Non-event entries (`ConfigDelta`, `Compaction`) inherit the current turn
-/// index.
+/// Turn boundaries are marked by [`TurnStart`] events, using the same rule as
+/// [`IterTurns`]: a `TurnStart` opens a new turn only when the current turn
+/// already holds a conversation event.
+/// Any conversation events before the first `TurnStart` therefore form an
+/// implicit turn 0, and the first explicit `TurnStart` opens turn 1.
+/// This must match `IterTurns` exactly, because compaction ranges are created
+/// against `iter_turns()` indices but applied here.
 ///
+/// Non-event entries (`ConfigDelta`, `Compaction`) are invisible to turn
+/// iteration; they inherit the current turn index and do not open a turn.
+///
+/// [`IterTurns`]: super::IterTurns
 /// [`TurnStart`]: crate::event::TurnStart
 pub(super) fn assign_turn_indices(events: &[InternalEvent]) -> Vec<usize> {
     let mut indices = Vec::with_capacity(events.len());
     let mut turn: usize = 0;
-    let mut first_turn_seen = false;
+    // Whether the current turn already contains a conversation event. A
+    // `TurnStart` only opens a new turn when this is set, mirroring
+    // `IterTurns`' "flush when `current` is non-empty" boundary.
+    let mut current_has_event = false;
 
     for event in events {
-        let is_turn_start = matches!(event, InternalEvent::Event(ev) if ev.is_turn_start());
-
-        if is_turn_start && first_turn_seen {
-            turn += 1;
+        match event {
+            InternalEvent::Event(ev) => {
+                if ev.is_turn_start() && current_has_event {
+                    turn += 1;
+                }
+                indices.push(turn);
+                current_has_event = true;
+            }
+            InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => {
+                indices.push(turn);
+            }
         }
-        if is_turn_start {
-            first_turn_seen = true;
-        }
-
-        indices.push(turn);
     }
 
     indices
@@ -170,6 +193,12 @@ pub(super) fn assign_turn_indices(events: &[InternalEvent]) -> Vec<usize> {
 /// For each turn, the compaction with the latest timestamp wins per policy
 /// type.
 /// Summary, reasoning, and `tool_calls` are resolved independently.
+///
+/// `compactions` is in stream (stored) order.
+/// Ties are broken by that order via `>=`, so a later compaction overrides an
+/// earlier one even when both share a timestamp — several compactions
+/// generated in one command all call `Compaction::new()` and can land on the
+/// same clock reading.
 fn resolve_policies(max_turn: usize, compactions: &[crate::Compaction]) -> Vec<TurnPolicy> {
     let count = max_turn + 1;
 
@@ -190,20 +219,19 @@ fn resolve_policies(max_turn: usize, compactions: &[crate::Compaction]) -> Vec<T
         let to = c.to_turn.min(max_turn);
 
         for turn in c.from_turn..=to {
-            if c.summary.is_some() && summary_ts[turn].is_none_or(|ts| c.timestamp > ts) {
+            if c.summary.is_some() && summary_ts[turn].is_none_or(|ts| c.timestamp >= ts) {
                 summary_ts[turn] = Some(c.timestamp);
                 policies[turn].summary = c.summary.as_ref().map(|s| ResolvedSummary {
                     text: s.summary.clone(),
-                    from_turn: c.from_turn,
                 });
             }
 
-            if c.reasoning.is_some() && reasoning_ts[turn].is_none_or(|ts| c.timestamp > ts) {
+            if c.reasoning.is_some() && reasoning_ts[turn].is_none_or(|ts| c.timestamp >= ts) {
                 reasoning_ts[turn] = Some(c.timestamp);
                 policies[turn].reasoning.clone_from(&c.reasoning);
             }
 
-            if c.tool_calls.is_some() && tool_calls_ts[turn].is_none_or(|ts| c.timestamp > ts) {
+            if c.tool_calls.is_some() && tool_calls_ts[turn].is_none_or(|ts| c.timestamp >= ts) {
                 tool_calls_ts[turn] = Some(c.timestamp);
                 policies[turn].tool_calls.clone_from(&c.tool_calls);
             }
@@ -214,7 +242,16 @@ fn resolve_policies(max_turn: usize, compactions: &[crate::Compaction]) -> Vec<T
 }
 
 /// Inject a synthetic `ChatRequest`/`ChatResponse` pair for a summary.
+///
+/// A leading `TurnStart` keeps the synthetic pair as its own turn so that
+/// `iter_turns()` (and `print --compacted --turn/--last`) treats the summary as
+/// a distinct turn rather than folding it into the preceding one.
+/// The `TurnStart` is not provider-visible, so it is filtered out before the
+/// LLM request is built.
 fn inject_summary(events: &mut Vec<InternalEvent>, summary: &str, timestamp: DateTime<Utc>) {
+    events.push(InternalEvent::Event(Box::new(ConversationEvent::new(
+        TurnStart, timestamp,
+    ))));
     events.push(InternalEvent::Event(Box::new(ConversationEvent::new(
         ChatRequest::from("[Summary of previous conversation]"),
         timestamp,

@@ -467,6 +467,18 @@ impl AppConfig {
             })?;
         }
 
+        for rule in &mut self.conversation.compaction.rules {
+            if let Some(summary) = rule.summary.as_mut()
+                && let Some(model) = summary.model.as_mut()
+            {
+                model.id.resolve_in_place(aliases).map_err(|e| {
+                    Error::Custom(
+                        format!("conversation.compaction.rules[].summary.model.id: {e}").into(),
+                    )
+                })?;
+            }
+        }
+
         Ok(())
     }
 }

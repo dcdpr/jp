@@ -723,7 +723,7 @@ pub(crate) fn resolve_config(
 
     // Phase 3: CLI flag overrides.
     partial = command
-        .apply_cli_config(Some(workspace), partial, None, &handles)
+        .apply_cli_config(Some(workspace), partial, None)
         .map_err(|error| Error::CliConfig(error.to_string()))?;
 
     // Consume default_id so it doesn't appear in the runtime config.

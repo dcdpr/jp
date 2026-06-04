@@ -46,15 +46,28 @@ pub struct CompactionConfig {
 #[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
 fn default_rules(_: &()) -> schematic::TransformResult<MergeableVec<PartialCompactionRuleConfig>> {
     Ok(MergeableVec::Merged(MergedVec {
-        value: vec![PartialCompactionRuleConfig {
-            reasoning: Some(ReasoningMode::Strip),
-            tool_calls: Some(ToolCallsMode::Strip),
-            ..Default::default()
-        }],
+        value: PartialCompactionConfig::builtin_rules(),
         strategy: None,
         dedup: None,
         discard_when_merged: true,
     }))
+}
+
+impl PartialCompactionConfig {
+    /// The built-in default compaction rules (strip reasoning + tool calls).
+    ///
+    /// Exposed so callers that compose with the config rules *before* finalize
+    /// (bare `--compact` plus inline DSL rules) can materialize the defaults
+    /// rather than appending to an empty list, which would make `fill_from`
+    /// treat the result as user-supplied and silently drop these defaults.
+    #[must_use]
+    pub fn builtin_rules() -> Vec<PartialCompactionRuleConfig> {
+        vec![PartialCompactionRuleConfig {
+            reasoning: Some(ReasoningMode::Strip),
+            tool_calls: Some(ToolCallsMode::Strip),
+            ..Default::default()
+        }]
+    }
 }
 
 impl AssignKeyValue for PartialCompactionConfig {
@@ -96,7 +109,18 @@ impl FillDefaults for PartialCompactionConfig {
             .flatten()
             .unwrap_or_default();
 
-        let mut rules = self.rules.fill_from(defaults.rules);
+        // When the user supplies no rules, inherit the built-in defaults.
+        // `MergeableVec::fill_from` keeps the (empty) left-hand vec rather than
+        // copying the defaults, and taking `defaults.rules` directly would
+        // carry its `discard_when_merged` marker (dropped again at finalize).
+        // Unwrap the default values into a plain `Vec` so an otherwise empty
+        // config keeps the documented default rule instead of resolving to
+        // zero rules (which makes bare `jp conversation compact` a no-op).
+        let mut rules = if self.rules.is_empty() {
+            MergeableVec::Vec(defaults.rules.into())
+        } else {
+            self.rules.fill_from(defaults.rules)
+        };
         for rule in rules.iter_mut() {
             *rule = mem::take(rule).fill_from(rule_defaults.clone());
         }
@@ -124,7 +148,7 @@ pub struct CompactionRuleConfig {
     /// Number of turns to preserve at the start of the conversation.
     ///
     /// Accepts a positive integer (turn count) or a duration string (e.g.
-    /// `"5h"` — preserve turns from the last 5 hours).
+    /// `"5h"` — preserve turns from the first 5 hours of the conversation).
     ///
     /// Defaults to 1 (preserve the initial request).
     #[setting(default = default_keep_first)]
@@ -285,12 +309,22 @@ impl ToPartial for SummaryConfig {
 
 /// A range bound for compaction rules.
 ///
-/// Rules only accept relative bounds (stable across invocations).
-/// CLI flags extend this with absolute turn indices and dates.
+/// Config rules use the relative [`Turns`] form (a "keep N" count), which is
+/// stable as the conversation grows.
+/// The CLI `--from`/`--to` flags and the inline DSL extend this with absolute
+/// and from-end bounds for one-shot invocations.
+///
+/// [`Turns`]: Self::Turns
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleBound {
-    /// A number of turns to preserve.
+    /// A number of turns to preserve (relative; the stable config form).
     Turns(usize),
+    /// An absolute, 0-based turn index.
+    /// Written `@N` as a string.
+    Absolute(usize),
+    /// An offset from the end (`FromEnd(3)` = three turns before the last).
+    /// Written `-N` as a string.
+    FromEnd(usize),
     /// Preserve turns within this duration, e.g. `"5h"`, `"2days"`.
     Duration(std::time::Duration),
     /// Start after the most recent compaction's `to_turn`.
@@ -304,6 +338,20 @@ impl FromStr for RuleBound {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         if s.eq_ignore_ascii_case("last") {
             return Ok(Self::AfterLastCompaction);
+        }
+
+        if let Some(rest) = s.strip_prefix('@') {
+            return rest
+                .parse()
+                .map(Self::Absolute)
+                .map_err(|_| format!("invalid absolute turn `{s}`").into());
+        }
+
+        if let Some(rest) = s.strip_prefix('-') {
+            return rest
+                .parse()
+                .map(Self::FromEnd)
+                .map_err(|_| format!("invalid from-end bound `{s}`").into());
         }
 
         if let Ok(n) = s.parse::<usize>() {
@@ -320,6 +368,8 @@ impl fmt::Display for RuleBound {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Turns(n) => write!(f, "{n}"),
+            Self::Absolute(n) => write!(f, "@{n}"),
+            Self::FromEnd(n) => write!(f, "-{n}"),
             Self::Duration(d) => write!(f, "{}", humantime::format_duration(*d)),
             Self::AfterLastCompaction => write!(f, "last"),
         }
@@ -334,8 +384,33 @@ impl Serialize for RuleBound {
 
 impl<'de> Deserialize<'de> for RuleBound {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
+        struct RuleBoundVisitor;
+
+        impl serde::de::Visitor<'_> for RuleBoundVisitor {
+            type Value = RuleBound;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a turn count, a duration string like `5h`, or `last`")
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<RuleBound, E> {
+                usize::try_from(v).map(RuleBound::Turns).map_err(E::custom)
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<RuleBound, E> {
+                usize::try_from(v)
+                    .map(RuleBound::Turns)
+                    .map_err(|_| E::custom(format!("turn count must be non-negative, got `{v}`")))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<RuleBound, E> {
+                v.parse().map_err(E::custom)
+            }
+        }
+
+        // `deserialize_any` lets self-describing formats (TOML, JSON, YAML)
+        // supply either an integer (`keep_first = 1`) or a string (`"5h"`).
+        deserializer.deserialize_any(RuleBoundVisitor)
     }
 }
 
@@ -352,7 +427,15 @@ impl Default for RuleBound {
 
 impl schematic::Schematic for RuleBound {
     fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
-        schema.string_default()
+        // Accepts either a bare integer (turn count, `keep_first = 1`) or a
+        // string (`"5h"`, `"last"`), matching what the deserializer takes.
+        schema.union(schematic::schema::UnionType {
+            variants_types: vec![
+                Box::new(schema.infer::<usize>()),
+                Box::new(schema.infer::<String>()),
+            ],
+            ..Default::default()
+        })
     }
 }
 
