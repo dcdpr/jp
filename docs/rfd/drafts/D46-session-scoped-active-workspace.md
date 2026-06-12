@@ -6,6 +6,7 @@
 - **Date**: 2026-06-01
 - **Extends**: [RFD 020]
 - **Requires**: [RFD 031]
+- **Required by**: [RFD D49]
 
 ## Summary
 
@@ -310,3 +311,4 @@ Depends on: Phase 3.
 [RFD 020]: ../020-parallel-conversations.md
 [RFD 031]: ../031-durable-conversation-storage-with-workspace-projection.md
 [RFD 065]: ../065-typed-resource-model-for-attachments.md
+[RFD D49]: D49-conversation-export-and-import.md
