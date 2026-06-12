@@ -824,6 +824,44 @@ fn sgr_params_in_order(s: &str) -> Vec<String> {
     out
 }
 
+/// When two or more attributes are active (here: blockquote fg + bold), the
+/// restore escape pushed after the first soft wrap is a *compound* sequence.
+/// The second wrap must still account for it when reconstructing the state at
+/// the break point: every continuation line re-establishes the attributes, and
+/// every wrapped line ends with a reset.
+#[test]
+fn test_double_wrap_preserves_compound_attrs() {
+    let formatter = Formatter::with_width(20);
+    let input = "> **aaaa bbbb cccc dddd eeee ffff gggg hhhh iiii jjjj**\n";
+    let output = formatter.format_terminal(input).unwrap();
+
+    let lines: Vec<&str> = output.lines().collect();
+    assert!(
+        lines.len() >= 4,
+        "expected at least 4 wrapped lines, got: {lines:#?}"
+    );
+
+    for (idx, line) in lines.iter().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // Each continuation line must re-establish bold (SGR 1); the first
+        // line sets it inline.
+        assert!(
+            line.contains("\x1b[1m"),
+            "line {idx} lost bold: {line:?}\nfull output: {output:?}"
+        );
+        // Every line except the last must end in a full reset so styling
+        // cannot bleed depending on terminal state.
+        if idx < lines.len() - 1 {
+            assert!(
+                line.ends_with("\x1b[0m"),
+                "line {idx} missing trailing reset: {line:?}\nfull output: {output:?}"
+            );
+        }
+    }
+}
+
 #[test]
 fn test_code_block_inherits_default_background() {
     // Bug: when rendering with a default background (reasoning mode),

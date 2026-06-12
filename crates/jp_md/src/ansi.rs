@@ -112,20 +112,9 @@ impl AnsiState {
 
     /// Update state by scanning all ANSI escape sequences in `s`.
     pub(crate) fn update_from_str(&mut self, s: &str) {
-        let mut in_escape = false;
-        let mut esc = String::new();
-        for c in s.chars() {
-            if in_escape {
-                esc.push(c);
-                if c.is_ascii_alphabetic() || c == '~' {
-                    in_escape = false;
-                    self.update(&esc);
-                    esc.clear();
-                }
-            } else if c == '\x1b' {
-                in_escape = true;
-                esc.clear();
-                esc.push(c);
+        for segment in segments(s) {
+            if let Segment::Escape(esc) = segment {
+                self.update(esc);
             }
         }
     }
@@ -159,28 +148,73 @@ impl AnsiState {
     }
 }
 
+/// A lexical segment of a string that may contain ANSI escape sequences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Segment<'a> {
+    /// A run of visible characters (no escape bytes).
+    Text(&'a str),
+
+    /// A complete ANSI escape sequence, including the leading `\x1b`.
+    /// An unterminated trailing escape is yielded as-is.
+    Escape(&'a str),
+}
+
+/// Split `s` into visible-text runs and ANSI escape sequences.
+///
+/// An escape sequence runs from `\x1b` through the first ASCII letter or `~` —
+/// sufficient for the SGR/CSI sequences this crate emits and consumes.
+/// This is the single tokenizer for every escape-aware routine in the crate
+/// (width computation, state tracking, table wrapping), so the termination rule
+/// cannot drift between call sites.
+pub const fn segments(s: &str) -> Segments<'_> {
+    Segments { rest: s }
+}
+
+/// Iterator returned by [`segments`].
+pub struct Segments<'a> {
+    /// Remaining unscanned input.
+    rest: &'a str,
+}
+
+impl<'a> Iterator for Segments<'a> {
+    type Item = Segment<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.rest.is_empty() {
+            return None;
+        }
+
+        if let Some(after_esc) = self.rest.strip_prefix('\x1b') {
+            let end = after_esc
+                .char_indices()
+                .find(|&(_, c)| c.is_ascii_alphabetic() || c == '~')
+                .map_or(self.rest.len(), |(idx, c)| 1 + idx + c.len_utf8());
+            let (escape, rest) = self.rest.split_at(end);
+            self.rest = rest;
+            return Some(Segment::Escape(escape));
+        }
+
+        let end = self.rest.find('\x1b').unwrap_or(self.rest.len());
+        let (text, rest) = self.rest.split_at(end);
+        self.rest = rest;
+        Some(Segment::Text(text))
+    }
+}
+
 /// Calculate the visual width of a string, ignoring ANSI escape sequences.
 ///
-/// Strips ANSI escape sequences, then delegates to `UnicodeWidthStr::width()`
-/// which correctly handles multi-codepoint sequences like emoji presentation
-/// (VS16), ZWJ sequences, and script-specific ligatures.
+/// Delegates to `UnicodeWidthStr::width()` for the visible runs, which
+/// correctly handles multi-codepoint sequences like emoji presentation (VS16),
+/// ZWJ sequences, and script-specific ligatures within a run.
 pub fn visual_width(s: &str) -> usize {
     use unicode_width::UnicodeWidthStr as _;
 
-    let mut plain = String::new();
-    let mut in_escape = false;
-    for c in s.chars() {
-        if in_escape {
-            if c.is_ascii_alphabetic() || c == '~' {
-                in_escape = false;
-            }
-        } else if c == '\x1b' {
-            in_escape = true;
-        } else {
-            plain.push(c);
-        }
-    }
-    plain.width()
+    segments(s)
+        .map(|segment| match segment {
+            Segment::Text(text) => text.width(),
+            Segment::Escape(_) => 0,
+        })
+        .sum()
 }
 
 #[cfg(test)]

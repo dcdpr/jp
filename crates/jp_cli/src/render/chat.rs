@@ -37,14 +37,16 @@ use jp_config::style::{
 };
 use jp_conversation::event::ChatResponse;
 use jp_md::{
-    buffer::{Buffer, Event, EventFixup, FenceEscalationFixup, OrphanedFenceFixup},
+    buffer::{Buffer, Event, Fixups},
     format::{
         BackgroundFill, CodeBlockState, DefaultBackground, Formatter, TerminalOptions,
         render_separator,
     },
+    theme,
 };
 use jp_printer::{PrintableExt as _, Printer};
 use tokio_util::sync::CancellationToken;
+use tracing::warn;
 
 use crate::timer::spawn_line_timer;
 
@@ -86,7 +88,7 @@ pub struct ChatRenderer {
     /// gives way to a message, tool call, or end of stream.
     reasoning_separator_pending: bool,
     /// Post-processing fixups for LLM quirks in the event stream.
-    fixups: Vec<Box<dyn EventFixup>>,
+    fixups: Fixups,
 }
 
 impl ChatRenderer {
@@ -108,10 +110,7 @@ impl ChatRenderer {
             code_block: None,
             reasoning_timer: None,
             reasoning_separator_pending: false,
-            fixups: vec![
-                Box::new(OrphanedFenceFixup::new()),
-                Box::new(FenceEscalationFixup),
-            ],
+            fixups: Fixups::llm_quirks(),
         }
     }
 
@@ -293,58 +292,66 @@ impl ChatRenderer {
     fn flush_buffer_blocks(&mut self) {
         while let Some(raw_event) = self.buffer.next() {
             // Apply fixups (LLM quirk corrections) to the raw event.
-            let Some(event) = self.apply_fixups(raw_event) else {
-                continue;
-            };
-            match event {
-                Event::Block { content, indent } | Event::Flush { content, indent } => {
-                    self.print_block(&content, indent);
+            if let Some(event) = self.fixups.apply(raw_event) {
+                self.handle_event(event);
+            }
+        }
+    }
+
+    /// Render a single (post-fixup) buffer event to the printer.
+    ///
+    /// Shared by the steady-state streaming loop and the end-of-region flush so
+    /// both paths treat fenced-code events identically: escalated fences,
+    /// syntax-highlighted lines, and a trailing separator at the top level.
+    fn handle_event(&mut self, event: Event) {
+        match event {
+            Event::Block { content, indent } | Event::Flush { content, indent } => {
+                self.print_block(&content, indent);
+            }
+            Event::FencedCodeStart {
+                ref language,
+                indent,
+                ..
+            } => {
+                // A code block inside reasoning consumes the deferred
+                // separator the same way another reasoning block would.
+                if self.last_content_kind == Some(ContentKind::Reasoning) {
+                    self.emit_pending_reasoning_separator(true);
                 }
-                Event::FencedCodeStart {
-                    ref language,
-                    indent,
-                    ..
-                } => {
-                    // A code block inside reasoning consumes the deferred
-                    // separator the same way another reasoning block would.
-                    if self.last_content_kind == Some(ContentKind::Reasoning) {
-                        self.emit_pending_reasoning_separator(true);
-                    }
-                    self.code_block = Some(self.formatter.begin_code_block(language));
-                    let bg = self.terminal_options(0).default_background;
-                    let rendered = self
-                        .formatter
-                        .render_code_fence(&format!("{event}\n"), bg.as_ref());
-                    self.print_code(&rendered, indent);
+                self.code_block = Some(self.formatter.begin_code_block(language));
+                let bg = self.terminal_options(0).default_background;
+                let rendered = self
+                    .formatter
+                    .render_code_fence(&format!("{event}\n"), bg.as_ref());
+                self.print_code(&rendered, indent);
+            }
+            Event::FencedCodeLine { content, indent } => {
+                let bg = self.terminal_options(0).default_background;
+                let rendered = if let Some(ref mut state) = self.code_block {
+                    self.formatter
+                        .render_code_line(&content, state, bg.as_ref())
+                } else {
+                    content
+                };
+                self.print_code(&rendered, indent);
+            }
+            Event::FencedCodeEnd { fence, indent } => {
+                let bg = self.terminal_options(0).default_background;
+                // At top level (indent == 0), append a blank-line
+                // separator to keep the conventional gap between a
+                // closing fence and the next block. Inside a list
+                // item (indent > 0) the separator would break the
+                // visual flow of the list, so we emit the fence on
+                // its own and let the next event handle its own
+                // separation.
+                let mut rendered = self
+                    .formatter
+                    .render_code_fence(&format!("{fence}\n"), bg.as_ref());
+                if indent == 0 {
+                    rendered.push_str(&render_separator(bg.as_ref()));
                 }
-                Event::FencedCodeLine { content, indent } => {
-                    let bg = self.terminal_options(0).default_background;
-                    let rendered = if let Some(ref mut state) = self.code_block {
-                        self.formatter
-                            .render_code_line(&content, state, bg.as_ref())
-                    } else {
-                        content
-                    };
-                    self.print_code(&rendered, indent);
-                }
-                Event::FencedCodeEnd { fence, indent } => {
-                    let bg = self.terminal_options(0).default_background;
-                    // At top level (indent == 0), append a blank-line
-                    // separator to keep the conventional gap between a
-                    // closing fence and the next block. Inside a list
-                    // item (indent > 0) the separator would break the
-                    // visual flow of the list, so we emit the fence on
-                    // its own and let the next event handle its own
-                    // separation.
-                    let mut rendered = self
-                        .formatter
-                        .render_code_fence(&format!("{fence}\n"), bg.as_ref());
-                    if indent == 0 {
-                        rendered.push_str(&render_separator(bg.as_ref()));
-                    }
-                    self.print_code(&rendered, indent);
-                    self.code_block = None;
-                }
+                self.print_code(&rendered, indent);
+                self.code_block = None;
             }
         }
     }
@@ -451,18 +458,18 @@ impl ChatRenderer {
 
     pub fn flush(&mut self) {
         self.cancel_reasoning_timer();
-        // If we're mid-code-block, the stream ended without a closing fence.
-        // Emit what we have as raw text.
-        self.code_block = None;
-        for ev in self.buffer.flush_events() {
-            match ev {
-                Event::Block { content, indent } | Event::Flush { content, indent } => {
-                    self.print_block(&content, indent);
-                }
-                // flush_events doesn't emit fenced-code events.
-                _ => {}
+
+        // Drain the buffer's end-of-region events through the same fixup +
+        // render path as streaming. A code block left open by the stream is
+        // closed here with a matched, escalated fence (recognized or
+        // synthesized by `flush_events`) instead of leaking its body as
+        // re-parsed markdown.
+        for raw_event in self.buffer.flush_events() {
+            if let Some(event) = self.fixups.apply(raw_event) {
+                self.handle_event(event);
             }
         }
+        self.code_block = None;
 
         // Reaching a flush means we're leaving the current content region (a
         // content-kind transition, a role header, or end of stream). Emit any
@@ -512,19 +519,7 @@ impl ChatRenderer {
         self.reasoning_separator_pending = false;
         self.reasoning_chars_count = 0;
         self.code_block = None;
-        self.fixups = vec![
-            Box::new(OrphanedFenceFixup::new()),
-            Box::new(FenceEscalationFixup),
-        ];
-    }
-
-    /// Run the event through all fixups.
-    /// Returns `None` if suppressed.
-    fn apply_fixups(&mut self, event: Event) -> Option<Event> {
-        self.fixups
-            .iter_mut()
-            .try_fold(event, |ev, fixup| fixup.process(ev).ok_or(()))
-            .ok()
+        self.fixups = Fixups::llm_quirks();
     }
 }
 
@@ -601,13 +596,20 @@ fn indent_lines(content: &str, indent: usize) -> String {
 }
 
 fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
+    let theme_name = if pretty {
+        config.markdown.theme.as_deref()
+    } else {
+        None
+    };
+    if let Some(name) = theme_name
+        && !theme::exists(name)
+    {
+        warn!("Unknown theme {name:?} in `style.markdown.theme`, falling back to the default.");
+    }
+
     Formatter::with_width(config.markdown.wrap_width)
         .table_max_column_width(config.markdown.table_max_column_width)
-        .theme(if pretty {
-            config.markdown.theme.as_deref()
-        } else {
-            None
-        })
+        .theme(theme_name)
         .pretty_hr(pretty && config.markdown.hr_style.is_line())
         .inline_code_bg(
             config

@@ -343,6 +343,70 @@ fn test_buffer_nested_fenced_code() {
 }
 
 #[test]
+fn test_buffer_flush_closes_fence_without_trailing_newline() {
+    // A closing fence that is the last line of the stream with no trailing
+    // newline must still be recognized as a close, not dumped as text.
+    let mut buf = Buffer::new();
+    buf.push("```sh\necho hi\n```");
+
+    let streamed: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(streamed, vec![
+        Event::FencedCodeStart {
+            language: "sh".into(),
+            fence_type: FenceType::Backtick,
+            fence_length: 3,
+            indent: 0,
+        },
+        Event::fenced_code_line("echo hi\n"),
+    ]);
+
+    assert_eq!(buf.flush_events(), vec![Event::fenced_code_end("```")]);
+}
+
+#[test]
+fn test_buffer_flush_synthesizes_close_for_unterminated_fence() {
+    // A fenced block that never closes is balanced with a synthetic closing
+    // fence at flush, so consumers can match the opening fence.
+    let mut buf = Buffer::new();
+    buf.push("```rust\nlet x = 1;\n");
+
+    let streamed: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(streamed, vec![
+        Event::FencedCodeStart {
+            language: "rust".into(),
+            fence_type: FenceType::Backtick,
+            fence_length: 3,
+            indent: 0,
+        },
+        Event::fenced_code_line("let x = 1;\n"),
+    ]);
+
+    assert_eq!(buf.flush_events(), vec![Event::fenced_code_end("```")]);
+}
+
+#[test]
+fn test_buffer_flush_emits_partial_last_code_line_then_close() {
+    // The final code line lacks a trailing newline and there is no closing
+    // fence: end-of-region completes the line, then a synthetic close
+    // balances the block.
+    let mut buf = Buffer::new();
+    buf.push("```sh\necho hi");
+
+    let streamed: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(streamed, vec![Event::FencedCodeStart {
+        language: "sh".into(),
+        fence_type: FenceType::Backtick,
+        fence_length: 3,
+        indent: 0,
+    }]);
+
+    assert_eq!(buf.flush_events(), vec![
+        Event::fenced_code_line("echo hi\n"),
+        Event::fenced_code_end("```"),
+    ]);
+}
+
+#[test]
 fn test_buffer_flush_events_renumbers_partial_list_items() {
     // The buffer can't flush items until the *next* line has arrived
     // with a complete newline, so when a stream ends with a partial
@@ -1498,6 +1562,89 @@ fn test_is_atx_header() {
     // Invalid: doesn't start with #
     assert!(!is_atx_header("foo # bar"));
     assert!(!is_atx_header(""));
+}
+
+/// Characterization: `flush_events` on a mid-list buffer splits the remaining
+/// content at item boundaries and renumbers ordered items, consistent with the
+/// streaming path.
+///
+/// The multi-segment case is reachable in normal exhaust-then-flush usage: an
+/// item cannot flush until its *next sibling's* line is complete, so a stream
+/// ending mid-line leaves one complete item plus the partial tail queued.
+#[test]
+fn test_flush_events_mid_list_segments() {
+    // Same-kind siblings: both segments renumbered against the list start.
+    let mut buf = Buffer::new();
+    buf.push("1. one\n5. two\n9. three");
+    let streamed: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(streamed, vec![Event::block("1. one\n")]);
+    assert_eq!(buf.flush_events(), vec![
+        Event::block("2. two\n"),
+        Event::flush("3. three"),
+    ]);
+
+    // Mixed delimiter in the tail: `9) three` is not a sibling of the `.`
+    // list. It still marks a segment boundary, but must not be renumbered.
+    let mut buf = Buffer::new();
+    buf.push("1. one\n5. two\n9) three");
+    let streamed: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(streamed, vec![Event::block("1. one\n")]);
+    assert_eq!(buf.flush_events(), vec![
+        Event::block("2. two\n"),
+        Event::flush("9) three"),
+    ]);
+
+    // Bullet list with an ordered tail: no renumbering anywhere.
+    let mut buf = Buffer::new();
+    buf.push("- one\n- two\n1. three");
+    let streamed: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(streamed, vec![Event::block("- one\n")]);
+    assert_eq!(buf.flush_events(), vec![
+        Event::block("- two\n"),
+        Event::flush("1. three"),
+    ]);
+}
+
+/// A paragraph interruption decision must wait for the next line to be
+/// complete: a partial prefix can look like a block starter (`#`, `<div`, `
+/// ```a `) while the completed line is not one.
+/// Chunked and whole-document parsing must agree.
+#[test]
+fn test_paragraph_interrupt_waits_for_complete_line() {
+    let cases = vec![
+        // "#" alone is a valid ATX header; "#hello" is not (no space).
+        ("atx_prefix", "para\n#hello\n\nnext\n\n", vec![
+            "para\n#",
+            "hello\n\nnext\n\n",
+        ]),
+        // "```" alone opens a fence; "```a`b" does not (backtick in info).
+        ("fence_info_backtick", "para\n```a`b\n\nnext\n\n", vec![
+            "para\n```",
+            "a`b\n\nnext\n\n",
+        ]),
+        // "<div" alone is an HTML type-6 starter; "<divx" is not a known
+        // tag (and type 7 cannot interrupt a paragraph).
+        ("html_tag_prefix", "para\n<divx>\n\nnext\n\n", vec![
+            "para\n<div",
+            "x>\n\nnext\n\n",
+        ]),
+    ];
+
+    for (name, whole, chunks) in cases {
+        let mut whole_buf = Buffer::from(whole);
+        let mut expected: Vec<Event> = whole_buf.by_ref().collect();
+        expected.extend(whole_buf.flush_events());
+
+        let mut chunked_buf = Buffer::new();
+        let mut actual = Vec::new();
+        for chunk in chunks {
+            chunked_buf.push(chunk);
+            actual.extend(chunked_buf.by_ref());
+        }
+        actual.extend(chunked_buf.flush_events());
+
+        assert_eq!(actual, expected, "failed case: {name}");
+    }
 }
 
 #[test]

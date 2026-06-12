@@ -58,6 +58,36 @@ pub struct HrOptions {
     pub terminal_width: Option<usize>,
 }
 
+/// Bundled inputs for the terminal renderer.
+///
+/// Groups the configuration the AST walker and the table formatter need so it
+/// can be passed as a unit and re-derived for nested renders (table cells
+/// disable wrapping and indent but inherit everything else).
+#[derive(Clone, Copy)]
+pub struct RenderOptions<'a> {
+    /// Target line width for wrapping.
+    /// `0` disables wrapping.
+    pub width: usize,
+
+    /// Table formatting options.
+    pub table_options: &'a table::TableOptions,
+
+    /// Horizontal rule rendering options.
+    pub hr_options: &'a HrOptions,
+
+    /// Syntax highlighting theme.
+    pub theme: &'a Theme,
+
+    /// Default background color applied to all content.
+    pub default_background: Option<&'a DefaultBackground>,
+
+    /// Override background for inline code spans, if configured.
+    pub inline_code_bg: Option<&'a (String, String)>,
+
+    /// Visual indent (in spaces) applied to wrap-routed content.
+    pub indent: usize,
+}
+
 /// Format a comrak AST as styled terminal output.
 ///
 /// This is the public entry point, called from [`Formatter::format_terminal`].
@@ -65,26 +95,10 @@ pub struct HrOptions {
 /// [`Formatter::format_terminal`]: crate::format::Formatter::format_terminal
 pub fn format_terminal(
     root: Node<'_>,
-    width: usize,
-    table_options: &table::TableOptions,
-    hr_options: &HrOptions,
-    theme: &Theme,
-    default_background: Option<&DefaultBackground>,
-    inline_code_bg: Option<&(String, String)>,
-    indent: usize,
+    options: RenderOptions<'_>,
     output: &mut dyn Write,
 ) -> fmt::Result {
-    let mut f = TerminalFormatter::new(
-        root,
-        width,
-        table_options,
-        hr_options,
-        theme,
-        default_background,
-        inline_code_bg,
-        indent,
-        output,
-    );
+    let mut f = TerminalFormatter::new(root, options, output);
     f.format(root)
 }
 
@@ -99,17 +113,8 @@ pub struct TerminalFormatter<'a, 'w> {
     /// The terminal writer handling output and wrapping.
     writer: TerminalWriter<'w>,
 
-    /// Table formatting options.
-    table_options: &'w table::TableOptions,
-
-    /// Horizontal rule rendering options.
-    hr_options: &'w HrOptions,
-
-    /// Syntax highlighting theme.
-    theme: &'w Theme,
-
-    /// Override background for inline code spans, if configured.
-    inline_code_bg: Option<&'w (String, String)>,
+    /// Renderer configuration (widths, theme, table and HR options).
+    options: RenderOptions<'w>,
 
     /// Stack of ordered list start numbers.
     ol_stack: Vec<usize>,
@@ -123,27 +128,19 @@ pub struct TerminalFormatter<'a, 'w> {
 
 impl<'a, 'w> TerminalFormatter<'a, 'w> {
     /// Create a new terminal formatter.
-    pub fn new(
-        node: Node<'a>,
-        width: usize,
-        table_options: &'w table::TableOptions,
-        hr_options: &'w HrOptions,
-        theme: &'w Theme,
-        default_background: Option<&DefaultBackground>,
-        inline_code_bg: Option<&'w (String, String)>,
-        indent: usize,
-        output: &'w mut dyn Write,
-    ) -> Self {
+    pub fn new(node: Node<'a>, options: RenderOptions<'w>, output: &'w mut dyn Write) -> Self {
         Self {
             node,
-            writer: TerminalWriter::new(output, width, default_background, indent),
-            table_options,
-            hr_options,
-            theme,
-            inline_code_bg,
+            writer: TerminalWriter::new(
+                output,
+                options.width,
+                options.default_background,
+                options.indent,
+            ),
+            options,
             ol_stack: vec![],
             blockquote_depth: 0,
-            blockquote_fg: theme_blockquote_fg(theme),
+            blockquote_fg: theme_blockquote_fg(options.theme),
         }
     }
 
@@ -459,7 +456,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         self.writer.cr();
 
         // Content — try syntax highlighting, fall back to plain text.
-        if let Some(highlighted) = highlight_code_block(literal, info, self.theme) {
+        if let Some(highlighted) = highlight_code_block(literal, info, self.options.theme) {
             self.writer.write_raw(&highlighted)?;
         } else {
             self.writer.output(literal, false)?;
@@ -495,12 +492,13 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         }
 
         self.writer.blankline();
-        match self.hr_options.style {
+        match self.options.hr_options.style {
             HrStyle::Markdown => {
                 self.writer.output("-----", false)?;
             }
             HrStyle::Line => {
                 let line_width = self
+                    .options
                     .hr_options
                     .terminal_width
                     .filter(|&w| w > 0)
@@ -569,9 +567,10 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         let numticks = shortest_unused_sequence(literal.as_bytes(), b'`');
 
-        let (bg_param, bg_escape) = self
-            .inline_code_bg
-            .map_or_else(|| theme_bg(self.theme), |(p, e)| (p.clone(), e.clone()));
+        let (bg_param, bg_escape) = self.options.inline_code_bg.map_or_else(
+            || theme_bg(self.options.theme),
+            |(p, e)| (p.clone(), e.clone()),
+        );
         self.writer.attrs.background = Some(bg_param);
         self.writer.write_escape(&bg_escape)?;
 
@@ -793,14 +792,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         self.writer.blankline();
 
-        if let Some(rendered) = table::format_table(
-            node,
-            self.table_options,
-            self.hr_options,
-            self.theme,
-            self.writer.default_background.as_ref(),
-            self.inline_code_bg,
-        ) {
+        if let Some(rendered) = table::format_table(node, self.options) {
             self.writer.output(&rendered, false)?;
         }
 

@@ -22,38 +22,37 @@ pub trait EventFixup {
     fn process(&mut self, event: Event) -> Option<Event>;
 }
 
-/// Wraps a buffer iterator and applies a chain of [`EventFixup`]s to each
-/// emitted event.
-pub struct FixupChain<I> {
-    /// The underlying event source.
-    inner: I,
-
+/// An ordered set of [`EventFixup`]s applied to each event.
+#[derive(Default)]
+pub struct Fixups {
     /// Fixups applied in order to each event.
     fixups: Vec<Box<dyn EventFixup>>,
 }
 
-impl<I: Iterator<Item = Event>> FixupChain<I> {
-    /// Wrap an event iterator with a set of fixups.
-    pub fn new(inner: I, fixups: Vec<Box<dyn EventFixup>>) -> Self {
-        Self { inner, fixups }
+impl Fixups {
+    /// Create a set from the given fixups.
+    /// Fixups are applied in the order given.
+    #[must_use]
+    pub fn new(fixups: Vec<Box<dyn EventFixup>>) -> Self {
+        Self { fixups }
     }
-}
 
-impl<I: Iterator<Item = Event>> Iterator for FixupChain<I> {
-    type Item = Event;
+    /// The fixup set applied to LLM output: orphaned-fence correction and fence
+    /// escalation.
+    #[must_use]
+    pub fn llm_quirks() -> Self {
+        Self::new(vec![
+            Box::new(OrphanedFenceFixup::new()),
+            Box::new(FenceEscalationFixup),
+        ])
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let event = self.inner.next()?;
-            let result = self
-                .fixups
-                .iter_mut()
-                .try_fold(event, |ev, fixup| fixup.process(ev).ok_or(()));
-            if let Ok(event) = result {
-                return Some(event);
-            }
-            // Event was suppressed — try the next one.
-        }
+    /// Run an event through all fixups in order.
+    /// Returns `None` if any fixup suppressed the event.
+    pub fn apply(&mut self, event: Event) -> Option<Event> {
+        self.fixups
+            .iter_mut()
+            .try_fold(event, |event, fixup| fixup.process(event))
     }
 }
 

@@ -19,9 +19,11 @@ fn orphaned_fence_converts_to_block() {
     let mut buf = Buffer::new();
     buf.push(input);
 
-    let fixups: Vec<Box<dyn EventFixup>> = vec![Box::new(OrphanedFenceFixup::new())];
-    let mut chain = FixupChain::new(buf.by_ref(), fixups);
-    let events: Vec<Event> = chain.by_ref().collect();
+    let mut fixups = Fixups::new(vec![Box::new(OrphanedFenceFixup::new())]);
+    let events: Vec<Event> = buf
+        .by_ref()
+        .filter_map(|event| fixups.apply(event))
+        .collect();
 
     // The paragraph after the list should be present, not swallowed as code.
     let has_paragraph = events.iter().any(
@@ -51,9 +53,11 @@ fn real_code_block_not_suppressed() {
     let mut buf = Buffer::new();
     buf.push(input);
 
-    let fixups: Vec<Box<dyn EventFixup>> = vec![Box::new(OrphanedFenceFixup::new())];
-    let mut chain = FixupChain::new(buf.by_ref(), fixups);
-    let events: Vec<Event> = chain.by_ref().collect();
+    let mut fixups = Fixups::new(vec![Box::new(OrphanedFenceFixup::new())]);
+    let events: Vec<Event> = buf
+        .by_ref()
+        .filter_map(|event| fixups.apply(event))
+        .collect();
 
     let has_fence_start = events
         .iter()
@@ -71,9 +75,11 @@ fn fence_escalation_rewrites_lengths() {
     let mut buf = Buffer::new();
     buf.push(input);
 
-    let fixups: Vec<Box<dyn EventFixup>> = vec![Box::new(FenceEscalationFixup)];
-    let mut chain = FixupChain::new(buf.by_ref(), fixups);
-    let events: Vec<Event> = chain.by_ref().collect();
+    let mut fixups = Fixups::new(vec![Box::new(FenceEscalationFixup)]);
+    let events: Vec<Event> = buf
+        .by_ref()
+        .filter_map(|event| fixups.apply(event))
+        .collect();
 
     // Opening fence should be escalated to 5.
     assert!(
@@ -103,9 +109,11 @@ fn fence_escalation_preserves_longer_fences() {
     let mut buf = Buffer::new();
     buf.push(input);
 
-    let fixups: Vec<Box<dyn EventFixup>> = vec![Box::new(FenceEscalationFixup)];
-    let mut chain = FixupChain::new(buf.by_ref(), fixups);
-    let events: Vec<Event> = chain.by_ref().collect();
+    let mut fixups = Fixups::new(vec![Box::new(FenceEscalationFixup)]);
+    let events: Vec<Event> = buf
+        .by_ref()
+        .filter_map(|event| fixups.apply(event))
+        .collect();
 
     assert!(
         matches!(&events[0], Event::FencedCodeStart {
@@ -123,9 +131,11 @@ fn fence_escalation_handles_tildes() {
     let mut buf = Buffer::new();
     buf.push(input);
 
-    let fixups: Vec<Box<dyn EventFixup>> = vec![Box::new(FenceEscalationFixup)];
-    let mut chain = FixupChain::new(buf.by_ref(), fixups);
-    let events: Vec<Event> = chain.by_ref().collect();
+    let mut fixups = Fixups::new(vec![Box::new(FenceEscalationFixup)]);
+    let events: Vec<Event> = buf
+        .by_ref()
+        .filter_map(|event| fixups.apply(event))
+        .collect();
 
     assert!(
         matches!(&events[0], Event::FencedCodeStart {
@@ -155,9 +165,11 @@ fn bare_fence_after_normal_paragraph_not_suppressed() {
     let mut buf = Buffer::new();
     buf.push(input);
 
-    let fixups: Vec<Box<dyn EventFixup>> = vec![Box::new(OrphanedFenceFixup::new())];
-    let mut chain = FixupChain::new(buf.by_ref(), fixups);
-    let events: Vec<Event> = chain.by_ref().collect();
+    let mut fixups = Fixups::new(vec![Box::new(OrphanedFenceFixup::new())]);
+    let events: Vec<Event> = buf
+        .by_ref()
+        .filter_map(|event| fixups.apply(event))
+        .collect();
 
     let has_fence_start = events
         .iter()

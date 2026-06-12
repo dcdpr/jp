@@ -17,8 +17,8 @@ pub enum State {
 
     /// We are inside a list, buffering the current list item.
     ///
-    /// While in this state, indented content at any column greater than
-    /// `marker_column` is treated as continuation of the current item.
+    /// While in this state, indented content at any column greater than the
+    /// list's marker column is treated as continuation of the current item.
     /// In particular, content at column 4 is *not* treated as an indented code
     /// block — that classification only applies at block boundaries outside a
     /// list.
@@ -27,26 +27,7 @@ pub enum State {
     /// pushes the current `InList` state onto its parents stack and switches to
     /// the inner state.
     /// On close, the parent is popped back.
-    InList {
-        /// Column where the list's markers appear.
-        /// Sibling items must share this column.
-        marker_column: usize,
-        /// Column where item content (post-marker) starts.
-        /// Deeper markers seen at this column or beyond start a nested list.
-        content_column: usize,
-        /// Whether the list is ordered (digit + delim).
-        /// Bullet otherwise.
-        is_ordered: bool,
-        /// The marker delimiter character: `.` or `)` for ordered, `-`/ `*`/`+`
-        /// for bullet.
-        delimiter: u8,
-        /// For ordered lists, the marker number on the first item.
-        /// Used to renumber emitted items so the output is consistent with
-        /// CommonMark's renumbering even though we stream items individually.
-        start_number: u32,
-        /// Number of items already flushed from this list.
-        items_flushed: u32,
-    },
+    InList(ListState),
 
     /// We are inside a fenced code block and looking for the closing fence.
     InFencedCode {
@@ -75,6 +56,37 @@ pub enum State {
         /// The rule for how this specific HTML block terminates.
         block_type: HtmlBlockRule,
     },
+}
+
+/// The shape and progress of the list currently being buffered.
+///
+/// Carried by [`State::InList`] and passed as a unit to the list handlers and
+/// the line classifier.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ListState {
+    /// Column where the list's markers appear.
+    /// Sibling items must share this column.
+    pub marker_column: usize,
+
+    /// Column where item content (post-marker) starts.
+    /// Deeper markers seen at this column or beyond start a nested list.
+    pub content_column: usize,
+
+    /// Whether the list is ordered (digit + delim).
+    /// Bullet otherwise.
+    pub is_ordered: bool,
+
+    /// The marker delimiter character: `.` or `)` for ordered, `-`/`*`/`+` for
+    /// bullet.
+    pub delimiter: u8,
+
+    /// For ordered lists, the marker number on the first item.
+    /// Used to renumber emitted items so the output is consistent with
+    /// CommonMark's renumbering even though we stream items individually.
+    pub start_number: u32,
+
+    /// Number of items already flushed from this list.
+    pub items_flushed: u32,
 }
 
 /// Represents the type of fence character used.
@@ -119,17 +131,27 @@ pub enum HtmlBlockRule {
 }
 
 impl HtmlBlockRule {
-    /// Get the end tag for this tag.
-    pub const fn end_tag(self) -> &'static str {
+    /// How a block of this type terminates.
+    pub const fn terminator(self) -> HtmlTerminator {
         match self {
-            Self::Type1(tag) => tag.end_tag(),
-            Self::Type2 => "-->",
-            Self::Type3 => "?>",
-            Self::Type4 => ">",
-            Self::Type5 => "]]>",
-            Self::Type6(_) | Self::Type7 => "\n\n",
+            Self::Type1(tag) => HtmlTerminator::Tag(tag.end_tag()),
+            Self::Type2 => HtmlTerminator::Tag("-->"),
+            Self::Type3 => HtmlTerminator::Tag("?>"),
+            Self::Type4 => HtmlTerminator::Tag(">"),
+            Self::Type5 => HtmlTerminator::Tag("]]>"),
+            Self::Type6(_) | Self::Type7 => HtmlTerminator::BlankLine,
         }
     }
+}
+
+/// How an HTML block terminates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HtmlTerminator {
+    /// The block ends at the end of the line containing this substring.
+    Tag(&'static str),
+
+    /// The block ends at the first blank line.
+    BlankLine,
 }
 
 /// Represents the specific tag for an HTML Block Type 1.

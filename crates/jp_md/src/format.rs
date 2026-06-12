@@ -11,7 +11,7 @@ use syntect::{highlighting::Theme, parsing::SyntaxSet};
 use two_face::syntax;
 
 use crate::{
-    render::{self, HrOptions},
+    render::{self, HrOptions, RenderOptions},
     table::TableOptions,
     theme,
 };
@@ -288,19 +288,18 @@ impl Formatter {
             style: self.hr_style,
             terminal_width: self.terminal_width,
         };
+        let render_options = RenderOptions {
+            width: self.width,
+            table_options: &table_options,
+            hr_options: &hr_options,
+            theme: &self.theme,
+            default_background: options.default_background.as_ref(),
+            inline_code_bg: self.inline_code_bg.as_ref(),
+            indent: options.indent,
+        };
 
         let mut buf = String::new();
-        render::format_terminal(
-            ast,
-            self.width,
-            &table_options,
-            &hr_options,
-            &self.theme,
-            options.default_background.as_ref(),
-            self.inline_code_bg.as_ref(),
-            options.indent,
-            &mut buf,
-        )?;
+        render::format_terminal(ast, render_options, &mut buf)?;
 
         // In streaming mode, append inter-block separator. Suppress
         // only for mid-list items: tight list AND no trailing blank
