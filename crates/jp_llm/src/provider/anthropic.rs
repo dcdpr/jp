@@ -95,6 +95,10 @@ const CONTINUE_MESSAGE: &str = "Continue your response exactly from where you le
 /// Default minimum overlap for merge point detection during chaining.
 const CHAIN_MIN_OVERLAP: usize = 5;
 
+/// How many escalating soft-force retries to attempt for models that can't
+/// disable thinking, before accepting a response without the forced tool call.
+const SOFT_FORCE_MAX_RETRIES: u8 = 3;
+
 /// How often to inject a synthetic keep-alive while a tool call is streaming.
 ///
 /// Anthropic emits a large tool-call argument as a single key/value burst after
@@ -198,6 +202,21 @@ impl Provider for Anthropic {
     }
 }
 
+/// How `call()` retries when a soft-forced request finishes without calling the
+/// required tool.
+#[derive(Debug, Clone, Copy)]
+enum ForceStrategy {
+    /// Disable thinking and re-issue with the real forced `tool_choice`.
+    /// Only available on models that allow disabling thinking.
+    DisableThinking,
+
+    /// Keep thinking on and re-issue with an escalating nudge, up to
+    /// `remaining` more times.
+    /// Used for models that always think (Fable 5), where forced `tool_choice`
+    /// stays rejected and thinking can't be disabled.
+    EscalatingNudge { remaining: u8 },
+}
+
 /// Context for retrying with forced tool use when an initial soft-forced
 /// request (reasoning enabled + `tool_choice: auto` with a system prompt nudge)
 /// completes without the model calling any tool.
@@ -209,6 +228,9 @@ struct ForcedToolFallback {
     /// The Anthropic API `tool_choice` to use on the retry request (the
     /// original forced value before we downgraded it to `auto`).
     tool_choice: types::ToolChoice,
+
+    /// How to retry when the constraint isn't satisfied.
+    strategy: ForceStrategy,
 }
 
 impl ForcedToolFallback {
@@ -319,21 +341,15 @@ fn call(
 
                 // The model finished without calling the required tool, but the
                 // caller originally requested a forced tool call that was
-                // downgraded due to the reasoning + tool_choice API
-                // restriction. Retry with thinking disabled and the real forced
-                // tool_choice.
+                // downgraded due to the reasoning + tool_choice API restriction.
+                // Retry using the strategy chosen for this model.
                 Event::Finished(FinishReason::Completed)
                     if let Some(fallback) = forced_tool_fallback
                         .as_ref()
                         .filter(|fb| !fb.is_satisfied_by(&tool_names_called)) =>
                 {
-                    info!(
-                        "Model did not call the required tool during soft-forced request. \
-                         Retrying with thinking disabled and forced tool_choice."
-                    );
-
                     chain_events.extend(chain_builder.drain());
-                    for await event in force_tool_retry(
+                    for await event in dispatch_force_retry(
                         client.clone(),
                         request.clone(),
                         chain_events,
@@ -491,6 +507,32 @@ fn chain(
     }))
 }
 
+/// Dispatch the forced-tool retry that matches `fallback`'s strategy.
+fn dispatch_force_retry(
+    client: Client,
+    request: types::CreateMessagesRequest,
+    events: Vec<ConversationEvent>,
+    fallback: &ForcedToolFallback,
+    is_structured: bool,
+) -> EventStream {
+    match fallback.strategy {
+        ForceStrategy::DisableThinking => {
+            info!(
+                "Model did not call the required tool. Retrying with thinking disabled and forced \
+                 tool_choice."
+            );
+            force_tool_retry(client, request, events, fallback, is_structured)
+        }
+        ForceStrategy::EscalatingNudge { remaining } => {
+            info!(
+                remaining,
+                "Model did not call the required tool. Retrying with a firmer nudge."
+            );
+            soft_force_retry(client, request, events, fallback, is_structured, remaining)
+        }
+    }
+}
+
 /// Retry with thinking disabled and forced `tool_choice` after the initial
 /// soft-forced request (reasoning + `tool_choice: auto`) completed without
 /// producing a tool call.
@@ -564,6 +606,80 @@ fn force_tool_retry(
             }
 
             yield event;
+        }
+
+        return;
+    }))
+}
+
+/// Retry a soft-forced request with an escalating nudge, for models that can't
+/// disable thinking.
+///
+/// Thinking-always-on models (Fable 5) can't take the disable-thinking hard
+/// retry: forced `tool_choice` is rejected while thinking is on, and thinking
+/// can't be turned off.
+/// When the soft-forced request finishes without calling the required tool,
+/// re-issue it with a progressively firmer instruction, up to `remaining` more
+/// times, before accepting the response.
+fn soft_force_retry(
+    client: Client,
+    mut request: types::CreateMessagesRequest,
+    events: Vec<ConversationEvent>,
+    fallback: &ForcedToolFallback,
+    is_structured: bool,
+    remaining: u8,
+) -> EventStream {
+    // Append the assistant's (non-compliant) response from the previous attempt.
+    let message = events
+        .into_iter()
+        .filter_map(|event| convert_event(event, true).map(|v| v.1))
+        .fold(
+            types::Message {
+                role: types::MessageRole::Assistant,
+                ..Default::default()
+            },
+            |mut message, content| {
+                message.content.push(content);
+                message
+            },
+        );
+
+    request.messages.push(message);
+
+    // Escalate the firmness with each attempt.
+    let attempt = SOFT_FORCE_MAX_RETRIES - remaining + 1;
+    let target = match &fallback.tool_choice {
+        types::ToolChoice::Tool { name, .. } => format!("the tool named '{name}'"),
+        _ => "at least one tool".to_string(),
+    };
+    let intensifier = match attempt {
+        1 => "",
+        2 => "You have now failed to do this twice. ",
+        _ => "This is your final attempt. ",
+    };
+    let prompt = format!(
+        "{intensifier}You did not call {target} as required. You MUST call {target} now. Do not \
+         produce any other text, reasoning, or questions; just make the tool call."
+    );
+
+    request.messages.push(types::Message {
+        role: types::MessageRole::User,
+        content: types::MessageContentList(vec![types::MessageContent::Text(prompt.into())]),
+    });
+
+    // Keep thinking on (can't be disabled) and tool_choice on auto (forced
+    // choice stays rejected while thinking is on). Decrement the retry budget so
+    // the loop terminates; the final attempt carries no further fallback.
+    let next_fallback = (remaining > 1).then(|| ForcedToolFallback {
+        tool_choice: fallback.tool_choice.clone(),
+        strategy: ForceStrategy::EscalatingNudge {
+            remaining: remaining - 1,
+        },
+    });
+
+    Box::pin(try_stream!({
+        for await event in call(client, request, false, is_structured, next_fallback) {
+            yield event?;
         }
 
         return;
@@ -987,8 +1103,7 @@ fn create_request(
     //
     // Anthropic does not support forced tool_choice with extended thinking.
     // We downgrade to auto + a system prompt nudge, and if the model still
-    // doesn't call a tool, `call()` retries with thinking disabled and the
-    // real forced tool_choice.
+    // doesn't call a tool, `call()` retries using the strategy chosen below.
     let forced_tool_fallback = if reasoning_config.is_some() && tool_choice.is_forced_call() {
         info!(
             ?tool_choice,
@@ -996,10 +1111,20 @@ fn create_request(
              to soft-force mode with forced-tool fallback."
         );
 
-        // Capture the original forced choice for the fallback before
-        // downgrading to auto.
+        // Capture the original forced choice for the fallback before downgrading
+        // to auto. Models that can disable thinking get a single hard retry;
+        // models that always think (Fable 5) get escalating soft-force nudges,
+        // since forced tool_choice stays rejected for them.
+        let strategy = if model.supports_disabling_thinking() {
+            ForceStrategy::DisableThinking
+        } else {
+            ForceStrategy::EscalatingNudge {
+                remaining: SOFT_FORCE_MAX_RETRIES,
+            }
+        };
         let fallback = ForcedToolFallback {
             tool_choice: convert_tool_choice(tool_choice.clone()),
+            strategy,
         };
 
         // Build the system prompt nudge.
@@ -1108,9 +1233,12 @@ fn create_request(
             // Other reasoning details (Leveled, Unsupported) - no thinking config
             _ => {}
         }
-    } else if supports_thinking {
+    } else if supports_thinking && model.supports_disabling_thinking() {
         // Reasoning is off but the model supports it — explicitly disable
         // to prevent the model from thinking by default.
+        //
+        // Models that always think reject `thinking: disabled`, so the guard
+        // above skips this branch for them and lets them think adaptively.
         builder.thinking(types::ExtendedThinking::Disabled);
     }
 
@@ -1163,6 +1291,22 @@ fn create_request(
 fn map_model(model: types::Model) -> Result<ModelDetails> {
     #[expect(clippy::match_same_arms)]
     let details = match model.id.as_str() {
+        "claude-fable-5" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some(model.display_name),
+            context_window: Some(1_000_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::adaptive(true, true)),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: Some(true),
+            features: vec![
+                "interleaved-thinking",
+                "context-editing",
+                "adaptive-thinking",
+                "thinking-always-on",
+            ],
+        },
         "claude-opus-4-8" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some(model.display_name),
@@ -1305,9 +1449,20 @@ fn map_model(model: types::Model) -> Result<ModelDetails> {
         },
         id => {
             debug!(model = id, ?model, "Missing model details.");
-            let mut model = ModelDetails::empty((PROVIDER, id).try_into()?);
-            model.display_name = Some(id.to_string());
-            model
+
+            // Unknown model: source what we can from the API. A `0` token limit
+            // means "unspecified", so treat it as unknown and let the request
+            // fall back to its default rather than capping at zero.
+            let max_output_tokens = (model.max_tokens != 0).then_some(model.max_tokens);
+            let context_window = (model.max_input_tokens != 0).then_some(model.max_input_tokens);
+            let structured_output = Some(model.capabilities.structured_outputs.supported);
+
+            let mut details = ModelDetails::empty((PROVIDER, id).try_into()?);
+            details.display_name = Some(id.to_string());
+            details.max_output_tokens = max_output_tokens;
+            details.context_window = context_window;
+            details.structured_output = structured_output;
+            details
         }
     };
 
