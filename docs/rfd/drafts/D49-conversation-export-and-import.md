@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-12
-- **Requires**: [RFD 031](../031-durable-conversation-storage-with-workspace-projection.md), [RFD D46](D46-session-scoped-active-workspace.md)
+- **Requires**: [RFD 031], [RFD D46]
 
 ## Summary
 
@@ -29,10 +29,9 @@ Conversations are already self-contained where it matters: each one carries a
 full config snapshot (`base_config.json` plus `ConfigDelta` events), and a
 resumed conversation's config layer masks the workspace's file/env layer for
 every key it sets.
-A conversation therefore behaves identically after relocation, regardless of
-how different the target workspace's configuration is.
-What is missing is not portability of the data but a supported transport for
-it.
+A conversation therefore behaves identically after relocation, regardless of how
+different the target workspace's configuration is.
+What is missing is not portability of the data but a supported transport for it.
 
 ## Design
 
@@ -59,8 +58,8 @@ It is read-only and takes no conversation lock.
 `import` reads envelopes from stdin until EOF, validates all of them, then
 writes each conversation through the target workspace's storage backend.
 Validation happens before any write: if any envelope fails to parse or any
-conversation ID already exists in the target, the import aborts with a
-non-zero exit code and writes nothing.
+conversation ID already exists in the target, the import aborts with a non-zero
+exit code and writes nothing.
 
 This is a **copy, not a move**.
 The pipe cannot report the import's outcome back to the exporting process, so
@@ -81,22 +80,21 @@ Export writes one JSON object per conversation, newline-delimited (NDJSON):
 }
 ```
 
-- The format is implicitly versioned: an envelope without a `version` field
-  is version 1.
+- The format is implicitly versioned: an envelope without a `version` field is
+  version 1.
   Import treats a missing `version` as `1` and rejects any `version` value it
   does not know.
   This reader-side rule ships with the first importer — it is what allows a
-  future version 2 to add an explicit `version` field and be cleanly rejected
-  by older binaries instead of silently misparsed.
+  future version 2 to add an explicit `version` field and be cleanly rejected by
+  older binaries instead of silently misparsed.
   The moment this format hits stdout, scripts depend on it (Hyrum's Law);
   evolution within version 1 is additive only.
-- `metadata`, `base_config`, and `events` carry the canonical JSON
-  serialization defined by `jp_conversation` (the same values
-  `ConversationStream::to_parts` produces), including the base64 encoding of
-  content fields.
-  This makes the round-trip trivially lossless and reuses the existing
-  tolerant deserialization path (unknown fields in events and config deltas
-  are preserved or ignored exactly as they are when loading from storage).
+- `metadata`, `base_config`, and `events` carry the canonical JSON serialization
+  defined by `jp_conversation` (the same values `ConversationStream::to_parts`
+  produces), including the base64 encoding of content fields.
+  This makes the round-trip trivially lossless and reuses the existing tolerant
+  deserialization path (unknown fields in events and config deltas are preserved
+  or ignored exactly as they are when loading from storage).
 - `projection` records where the conversation lives, as the write intent for
   import (see below).
 
@@ -108,11 +106,11 @@ which storage roots hold the conversation (`StoragePresence`).
 
 Export derives the envelope's `projection` field from the source presence:
 
-| Source presence | Envelope value |
-| --- | --- |
-| user-local only | `local` |
-| projected (both roots) | `projected` |
-| workspace-only (`ext`) | `projected` |
+| Source presence        | Envelope value |
+| ---------------------- | -------------- |
+| user-local only        | `local`        |
+| projected (both roots) | `projected`    |
+| workspace-only (`ext`) | `projected`    |
 
 `ext` is a transitional presence, not an intent — a conversation committed by
 another contributor was in the shared directory, so shared is its last known
@@ -120,8 +118,8 @@ state.
 It never appears in the wire format.
 
 Import uses the envelope's `projection` as the write intent.
-This is deliberate: a `local` conversation is often local *on purpose*
-(private, kept out of version control).
+This is deliberate: a `local` conversation is often local *on purpose* (private,
+kept out of version control).
 If import defaulted to the target workspace's `conversation.start_local`, a
 private conversation could silently land in `.jp/conversations/` and be
 committed.
@@ -132,11 +130,10 @@ To change locality after import, use `jp c edit --local`.
 
 - **Session mappings and locks.** Per-workspace runtime state; import creates
   fresh state in the target.
-- **Mount approvals.** Approvals bind workspace-relative paths to canonical
-  host paths in user-workspace storage; the target workspace re-prompts on
-  first use.
-- **Tool definitions.** The config snapshot references tools by name; the
-  target workspace may not define them.
+- **Mount approvals.** Approvals bind workspace-relative paths to canonical host
+  paths in user-workspace storage; the target workspace re-prompts on first use.
+- **Tool definitions.** The config snapshot references tools by name; the target
+  workspace may not define them.
   Import warns when the envelope's config references tools unknown to the
   target, and the conversation otherwise imports normally.
 
@@ -146,19 +143,19 @@ resolved *after* the move can break.
 
 ### Interaction with workspace targeting
 
-`-w <id>` resolution follows [RFD D46]: a piped import is non-interactive
-(stdin carries data, not answers), so a workspace ID with multiple live
-checkouts is an error listing the roots, per D46's non-interactive rule.
+`-w <id>` resolution follows [RFD D46]: a piped import is non-interactive (stdin
+carries data, not answers), so a workspace ID with multiple live checkouts is an
+error listing the roots, per D46's non-interactive rule.
 Scripts that need determinism should pass a workspace path.
-Import never prompts on stdin; any future interaction goes through the
-terminal channels per [RFD 048].
+Import never prompts on stdin; any future interaction goes through the terminal
+channels per [RFD 048].
 
 ### No backend trait changes
 
 No process ever holds two storage backends.
-Export reads through the source workspace's `LoadBackend`; import writes
-through the target workspace's `PersistBackend` (with the `Projection`
-argument from [RFD 031]) and checks collisions via `load_conversation_index`.
+Export reads through the source workspace's `LoadBackend`; import writes through
+the target workspace's `PersistBackend` (with the `Projection` argument from
+[RFD 031]) and checks collisions via `load_conversation_index`.
 Both commands work with any backend implementation through the existing trait
 surface.
 The new public contract is the envelope format, not a trait method.
@@ -168,13 +165,13 @@ objects (`Conversation`, `ConversationStream`), not backend internals.
 The backends are the adapters — `LoadBackend` produces domain objects from
 whatever the source stores, and `PersistBackend` translates them into whatever
 the target stores.
-This is what makes cross-backend transfer (e.g. a future sqlite-backed
-workspace exporting into a filesystem-backed one) work without any
-format-translation matrix: one interchange format, N backend adapters that
-already exist as the load/persist traits.
-A per-backend export format (e.g. SQL dumps from an sqlite backend) would be
-backup tooling for that backend, not conversation interchange, and is out of
-scope here.
+This is what makes cross-backend transfer (e.g. a future sqlite-backed workspace
+exporting into a filesystem-backed one) work without any format-translation
+matrix: one interchange format, N backend adapters that already exist as the
+load/persist traits.
+A per-backend export format (e.g.
+SQL dumps from an sqlite backend) would be backup tooling for that backend, not
+conversation interchange, and is out of scope here.
 
 ### Naming: "import" is now two things
 
@@ -201,8 +198,8 @@ user-local adoption of `ext` conversations.
 ## Alternatives
 
 - **In-process `jp c mv --to <workspace>`.** Rejected: requires bootstrapping
-  two workspaces in one process, a structural change to `jp_cli` startup for
-  no capability gain — and it cannot be more atomic than the pipe in practice,
+  two workspaces in one process, a structural change to `jp_cli` startup for no
+  capability gain — and it cannot be more atomic than the pipe in practice,
   since the write to the target and the removal from the source are separate
   filesystem operations either way.
 - **Expanding the backend traits with a cross-backend copy operation.**
@@ -218,21 +215,21 @@ user-local adoption of `ext` conversations.
   separate step.
 - **Projection override flags on import.** Import always honors the envelope's
   `projection`; locality is changed afterwards with `jp c edit --local`.
-- **Collision resolution.** Import refuses colliding conversation IDs; re-ID
-  or rename strategies are future work.
+- **Collision resolution.** Import refuses colliding conversation IDs; re-ID or
+  rename strategies are future work.
 - **Cross-machine portability guarantees.** The envelope may contain absolute
   paths and user-specific values from the source machine's config snapshot.
   Same-machine transfer is the supported case; the format does not preclude
   cross-machine use, but this RFD makes no promises about it.
-- **Archived conversations.** Export operates on active conversations;
-  unarchive first.
+- **Archived conversations.** Export operates on active conversations; unarchive
+  first.
 
 ## Risks and Open Questions
 
 - **Secrets in the envelope.** `base_config.json` snapshots resolved config,
   which can include sensitive values.
-  This is the same exposure the on-disk snapshot already has, but a pipe
-  invites redirection to files and chat messages.
+  This is the same exposure the on-disk snapshot already has, but a pipe invites
+  redirection to files and chat messages.
   Worth a note in the command's help text.
 - **Envelope size.** Long conversations produce large single lines.
   NDJSON consumers handle this fine, but `import` should stream-parse rather
