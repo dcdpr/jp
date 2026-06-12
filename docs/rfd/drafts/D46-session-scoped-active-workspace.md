@@ -6,6 +6,7 @@
 - **Date**: 2026-06-01
 - **Extends**: [RFD 020]
 - **Requires**: [RFD 031]
+- **Required by**: [RFD D49](D49-conversation-export-and-import.md)
 
 ## Summary
 
