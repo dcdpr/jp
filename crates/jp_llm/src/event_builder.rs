@@ -258,6 +258,28 @@ impl EventBuilder {
             })
             .collect()
     }
+
+    /// Names of tool-call buffers that are still incomplete.
+    ///
+    /// These are the buffers [`drain`] discards when a stream ends
+    /// mid-tool-call.
+    /// Query this before draining to report what was lost.
+    /// Names are sorted for deterministic output.
+    ///
+    /// [`drain`]: Self::drain
+    #[must_use]
+    pub fn incomplete_tool_calls(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .buffers
+            .values()
+            .filter_map(|buffer| match buffer {
+                IndexBuffer::ToolCall { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect();
+        names.sort();
+        names
+    }
 }
 
 impl Default for EventBuilder {

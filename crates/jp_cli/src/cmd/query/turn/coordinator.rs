@@ -163,6 +163,12 @@ pub struct TurnCoordinator {
     ///
     /// [`ChatRequest`]: jp_conversation::event::ChatRequest
     author: Option<String>,
+
+    /// Printer for chrome notices on stderr (e.g. a non-standard finish
+    /// reason).
+    /// Shares the view's printer, so it is suppressed in JSON mode, matching
+    /// content rendering.
+    printer: Arc<Printer>,
 }
 
 impl TurnCoordinator {
@@ -181,7 +187,7 @@ impl TurnCoordinator {
             (None, printer.clone())
         };
 
-        let view = TurnView::new(printer, style, assistant_name, model_id);
+        let view = TurnView::new(printer.clone(), style, assistant_name, model_id);
 
         Self {
             state: TurnPhase::Idle,
@@ -189,6 +195,7 @@ impl TurnCoordinator {
             view,
             json_emitter,
             author,
+            printer,
         }
     }
 
@@ -283,6 +290,9 @@ impl TurnCoordinator {
                 HandleEventOutcome::committed(Action::Continue, committed)
             }
             Event::Finished(reason) => {
+                // Capture tool-call buffers about to be discarded (e.g. a tool
+                // call truncated by max_tokens) so the notice can name them.
+                let dropped_tools = self.event_builder.incomplete_tool_calls();
                 for event in self.event_builder.drain() {
                     self.push_event(stream, event);
                 }
@@ -294,6 +304,13 @@ impl TurnCoordinator {
                 // cycle's first chunk resets the controller back to live
                 // mode.
                 self.view.signal_typewriter_drain();
+
+                // Surface a chrome line for a non-standard finish (truncation,
+                // unknown stop reason); a clean completion stays silent.
+                if let Some(notice) = finish_notice(&reason, &dropped_tools) {
+                    self.printer.eprintln(notice);
+                }
+
                 HandleEventOutcome::new(self.transition_from_streaming(stream, reason))
             }
 
@@ -547,6 +564,39 @@ fn has_unresponded_tool_calls_in_current_turn(stream: &ConversationStream) -> bo
             .as_tool_call_request()
             .is_some_and(|r| !responded_ids.contains(r.id.as_str()))
     })
+}
+
+/// Build the chrome notice for a stream that ended on a non-standard finish
+/// reason, or `None` for a clean completion.
+///
+/// `dropped_tools` names any tool calls discarded because the stream stopped
+/// mid-call (typically a max-tokens truncation).
+/// Returns `None` for [`FinishReason::Completed`] and the internal
+/// [`FinishReason::Retry`] signal.
+fn finish_notice(reason: &FinishReason, dropped_tools: &[String]) -> Option<String> {
+    match reason {
+        FinishReason::Completed | FinishReason::Retry => None,
+        FinishReason::MaxTokens => Some(match dropped_tools {
+            [] => "Response truncated: reached the model's max output tokens. Raise `max_tokens` \
+                   or narrow the request."
+                .to_string(),
+            [name] => format!(
+                "Response truncated while building the `{name}` tool call: reached the model's \
+                 max output tokens. Raise `max_tokens` or narrow the request."
+            ),
+            names => format!(
+                "Response truncated while building tool calls ({}): reached the model's max \
+                 output tokens. Raise `max_tokens` or narrow the request.",
+                names.join(", ")
+            ),
+        }),
+        FinishReason::Other(value) => {
+            let detail = value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned);
+            Some(format!("Model stopped early ({detail})."))
+        }
+    }
 }
 
 /// Emits [`ConversationEvent`]s as NDJSON lines via the printer.
