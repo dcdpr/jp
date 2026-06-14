@@ -1099,12 +1099,19 @@ fn create_request(
 
     let reasoning_config = model.custom_reasoning_config(parameters.reasoning);
 
+    // Whether this request runs with thinking active. Configuring reasoning
+    // turns it on; so does a model that always thinks (Fable 5), which keeps
+    // thinking on even when `reasoning = off` because it cannot honor a
+    // `thinking: disabled` it does not support. The disabled-thinking branch
+    // below derives from the same predicate, so the two cannot disagree.
+    let thinking_active = reasoning_config.is_some() || !model.supports_disabling_thinking();
+
     // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
     //
-    // Anthropic does not support forced tool_choice with extended thinking.
-    // We downgrade to auto + a system prompt nudge, and if the model still
-    // doesn't call a tool, `call()` retries using the strategy chosen below.
-    let forced_tool_fallback = if reasoning_config.is_some() && tool_choice.is_forced_call() {
+    // Anthropic does not support forced tool_choice while thinking is active. We
+    // downgrade to auto + a system prompt nudge, and if the model still doesn't
+    // call a tool, `call()` retries using the strategy chosen below.
+    let forced_tool_fallback = if thinking_active && tool_choice.is_forced_call() {
         info!(
             ?tool_choice,
             "Anthropic API does not support reasoning when tool_choice forces tool use. Switching \
@@ -1233,12 +1240,13 @@ fn create_request(
             // Other reasoning details (Leveled, Unsupported) - no thinking config
             _ => {}
         }
-    } else if supports_thinking && model.supports_disabling_thinking() {
-        // Reasoning is off but the model supports it — explicitly disable
-        // to prevent the model from thinking by default.
+    } else if supports_thinking && !thinking_active {
+        // Reasoning is off and the model can disable thinking, so disable it
+        // explicitly to prevent thinking by default.
         //
-        // Models that always think reject `thinking: disabled`, so the guard
-        // above skips this branch for them and lets them think adaptively.
+        // Models that always think never reach here (`thinking_active` stays
+        // true for them); omitting the field lets them think adaptively, the
+        // only mode they support.
         builder.thinking(types::ExtendedThinking::Disabled);
     }
 

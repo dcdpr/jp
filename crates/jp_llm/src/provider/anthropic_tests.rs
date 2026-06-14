@@ -788,6 +788,69 @@ fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
     ));
 }
 
+/// Fable 5 keeps thinking on even when the user sets `reasoning = "off"` (it
+/// cannot disable thinking), so a real forced `tool_choice` would still 400.
+/// The gate must treat thinking-always-on as active and soft-force regardless
+/// of the reasoning config.
+#[test]
+fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
+    use crate::tool::{ToolDefinition, ToolDocs};
+
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-fable-5").try_into().unwrap(),
+        display_name: Some("Claude Fable 5".to_string()),
+        context_window: Some(1_000_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(true, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(true),
+        features: vec!["adaptive-thinking", "thinking-always-on"],
+    };
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![ToolDefinition {
+            name: "my_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: IndexMap::new(),
+        }],
+        tool_choice: ToolChoice::Function("my_tool".into()),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+
+    // The forced choice must be downgraded to auto; sending it while thinking is
+    // active is the 400 this guards against.
+    assert!(
+        matches!(request.tool_choice, Some(types::ToolChoice::Auto { .. })),
+        "Expected Auto tool_choice, got {:?}",
+        request.tool_choice
+    );
+
+    // The escalating-nudge fallback is set up (thinking stays on, can't disable).
+    let fallback = fallback.expect("Expected an escalating-nudge fallback");
+    assert!(matches!(
+        fallback.strategy,
+        ForceStrategy::EscalatingNudge { .. }
+    ));
+
+    // Thinking is never disabled for Fable; with reasoning off the field is
+    // omitted and the model thinks adaptively.
+    assert_eq!(request.thinking, None);
+}
+
 /// With multiple tools, `Function("specific")` is NOT normalized to `Required`
 /// and the fallback should carry `Tool { name }` so the retry targets that
 /// specific tool.
