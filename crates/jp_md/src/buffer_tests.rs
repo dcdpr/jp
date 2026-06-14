@@ -1605,6 +1605,36 @@ fn test_flush_events_mid_list_segments() {
     ]);
 }
 
+/// `flush_events` must drain *all* remaining content, including a trailing
+/// block that follows a closing fence in the same buffer.
+///
+/// When the buffer is mid-fence and the buffered data holds a closing fence
+/// followed by more content, completing the fence transitions the state out of
+/// `InFencedCode`; the trailing block must still be emitted rather than
+/// silently dropped by the end-of-flush state reset.
+#[test]
+fn test_flush_events_keeps_content_after_closing_fence() {
+    let mut buf = Buffer::new();
+    buf.push("```rust\n");
+    // Open the fence so the buffer is left in `InFencedCode`.
+    let opening: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(opening, vec![Event::FencedCodeStart {
+        language: "rust".into(),
+        fence_type: FenceType::Backtick,
+        fence_length: 3,
+        indent: 0,
+    }]);
+
+    // A closing fence plus a trailing paragraph, no terminating newline.
+    buf.push("```\npara");
+    let events = buf.flush_events();
+
+    assert_eq!(events, vec![
+        Event::fenced_code_end("```"),
+        Event::flush("para\n"),
+    ]);
+}
+
 /// A paragraph interruption decision must wait for the next line to be
 /// complete: a partial prefix can look like a block starter (`#`, `<div`, `
 /// ```a `) while the completed line is not one.

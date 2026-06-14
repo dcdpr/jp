@@ -35,6 +35,15 @@ fn test_visual_width_vs16_emoji() {
     assert_eq!(visual_width("\x1b[1m\u{26A0}\u{FE0F}\x1b[22m"), 2);
 }
 
+/// An ANSI escape between a base character and its VS16 must not change the
+/// measured width: `visual_width` ignores escapes, so the visible text is the
+/// contiguous glyph U+26A0 U+FE0F (width 2), not a width-1 warning sign plus a
+/// width-0 VS16 measured in isolation.
+#[test]
+fn test_visual_width_escape_splitting_vs16_glyph() {
+    assert_eq!(visual_width("\u{26A0}\x1b[1m\u{FE0F}\x1b[22m"), 2);
+}
+
 #[test]
 fn test_visual_width_zwj_sequences() {
     // ZWJ family emoji: multiple emoji joined into a single glyph.

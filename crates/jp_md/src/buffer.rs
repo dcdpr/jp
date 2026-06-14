@@ -198,25 +198,35 @@ impl Buffer {
     /// event with the active indent (stripping the fence's indent for
     /// `InFencedCode`, leaving content as-is otherwise).
     pub fn flush_events(&mut self) -> Vec<Event> {
-        let events = if matches!(self.state, State::InFencedCode { .. }) {
-            // An open fenced code block is handled specially: end-of-region
-            // completes the final line, so a closing fence that arrived
-            // without a trailing newline is still recognized, and a block
-            // that never closed is balanced with a synthetic closing fence.
+        // An open fenced code block is handled specially: end-of-region
+        // completes the final line, so a closing fence that arrived without a
+        // trailing newline is still recognized, and a block that never closed
+        // is balanced with a synthetic closing fence. This drains the fence
+        // and every now-complete trailing block through the state machine,
+        // which can transition us out of `InFencedCode` with one trailing
+        // partial block still buffered (e.g. a paragraph after the close).
+        let mut events = if matches!(self.state, State::InFencedCode { .. }) {
             self.flush_fenced_code_events()
         } else {
-            let raw = std::mem::take(&mut self.data);
-            if raw.is_empty() {
-                Vec::new()
-            } else if let State::InList(list) = self.state {
-                Self::flush_list_events(&raw, list)
+            Vec::new()
+        };
+
+        // Flush whatever remains as a trailing partial, in the current
+        // (possibly just-transitioned) state. `flush_fenced_code_events`
+        // emits every *complete* block via the iterator, so at most one
+        // partial block is left here; the non-fenced path takes this branch
+        // directly with its untouched buffer.
+        let raw = std::mem::take(&mut self.data);
+        if !raw.is_empty() {
+            if let State::InList(list) = self.state {
+                events.extend(Self::flush_list_events(&raw, list));
             } else {
-                vec![Event::Flush {
+                events.push(Event::Flush {
                     content: raw,
                     indent: self.current_indent(),
-                }]
+                });
             }
-        };
+        }
 
         // `flush_events` is the explicit "wipe the slate" boundary:
         // `ChatRenderer::flush()` calls this on every content-kind

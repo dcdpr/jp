@@ -203,18 +203,22 @@ impl<'a> Iterator for Segments<'a> {
 
 /// Calculate the visual width of a string, ignoring ANSI escape sequences.
 ///
-/// Delegates to `UnicodeWidthStr::width()` for the visible runs, which
-/// correctly handles multi-codepoint sequences like emoji presentation (VS16),
-/// ZWJ sequences, and script-specific ligatures within a run.
+/// Strips ANSI escape sequences (via the shared [`segments`] scanner), then
+/// delegates to `UnicodeWidthStr::width()` on the contiguous visible text.
+/// Measuring the visible text as a unit is what lets multi-codepoint sequences
+/// (emoji presentation via VS16, ZWJ sequences, script-specific ligatures)
+/// width correctly even when an escape sits between a base character and its
+/// combining mark.
 pub fn visual_width(s: &str) -> usize {
     use unicode_width::UnicodeWidthStr as _;
 
-    segments(s)
-        .map(|segment| match segment {
-            Segment::Text(text) => text.width(),
-            Segment::Escape(_) => 0,
-        })
-        .sum()
+    let mut plain = String::new();
+    for segment in segments(s) {
+        if let Segment::Text(text) = segment {
+            plain.push_str(text);
+        }
+    }
+    plain.width()
 }
 
 #[cfg(test)]
