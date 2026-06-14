@@ -469,6 +469,38 @@ fn test_fenced_code_block_with_language_tag() {
 }
 
 #[test]
+fn test_code_block_without_trailing_newline_is_balanced() {
+    let (mut renderer, out, _err) = create_renderer();
+
+    // The common LLM shape: a message ending on its closing fence with no
+    // trailing newline. The close previously fell into the flush path, got
+    // re-parsed by comrak into a stray fence pair, and left the escalated
+    // opening fence unmatched.
+    renderer.render_response(&ChatResponse::Message {
+        message: "```sh\necho hi\n```".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let plain = strip_ansi(&out.lock());
+    assert!(
+        plain.contains("echo hi"),
+        "code content should render, got: {plain:?}"
+    );
+    // One escalated opening fence and one matching escalated closing fence.
+    assert_eq!(
+        plain.matches("`````").count(),
+        2,
+        "expected a matched pair of escalated fences, got: {plain:?}"
+    );
+    // No leftover comrak-generated bare fence pair.
+    assert!(
+        !plain.contains("```\n```"),
+        "should not emit a duplicated 3-backtick fence pair, got: {plain:?}"
+    );
+}
+
+#[test]
 fn test_text_before_and_after_code_block() {
     let (mut renderer, out, _err) = create_renderer();
 

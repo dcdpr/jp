@@ -51,6 +51,18 @@ fn resolve_by_name(themes: &EmbeddedLazyThemeSet, name: &str) -> Theme {
     themes[DEFAULT_DARK].clone()
 }
 
+/// Whether `name` matches an embedded theme (case-insensitive).
+///
+/// [`resolve`] silently falls back to the default theme for unknown names;
+/// callers can use this to surface a warning for misspelled theme names before
+/// resolving.
+#[must_use]
+pub fn exists(name: &str) -> bool {
+    all_theme_names()
+        .iter()
+        .any(|variant| variant.as_name().eq_ignore_ascii_case(name))
+}
+
 /// The canonical name of the default dark theme.
 #[must_use]
 pub fn default_theme_name() -> &'static str {

@@ -264,7 +264,12 @@ impl<'w> TerminalWriter<'w> {
         let mut late_escapes: Vec<(usize, String)> = Vec::new();
         for (offset, code) in self.escapes.drain(..) {
             if offset <= break_pos {
-                attrs_at_break.update(&code);
+                // A recorded escape can be a *compound* sequence: the restore
+                // pushed after a previous wrap concatenates one escape per
+                // active attribute. Scan the whole string rather than parsing
+                // it as a single escape, or every attribute in a compound
+                // restore is silently dropped from the reconstructed state.
+                attrs_at_break.update_from_str(&code);
             } else {
                 let new_offset = self.prefix.len() + (offset - rest_start);
                 late_escapes.push((new_offset, code));
@@ -532,7 +537,6 @@ impl<'w> TerminalWriter<'w> {
                 self.column = self.prefix_width();
             }
 
-            let nextb = bytes.get(i + 1);
             if c == ' ' && wrap {
                 if !self.begin_line {
                     let last_nonspace = self.wrap_buffer.len();
@@ -544,9 +548,7 @@ impl<'w> TerminalWriter<'w> {
                     while let Some((_, ' ')) = it.clone().next() {
                         it.next();
                     }
-                    if !nextb.is_some_and(|&c| c.is_ascii_digit()) {
-                        self.last_breakable = last_nonspace;
-                    }
+                    self.last_breakable = last_nonspace;
                 }
             } else if bytes[i] == b'\n' {
                 self.write_visible("\n")?;

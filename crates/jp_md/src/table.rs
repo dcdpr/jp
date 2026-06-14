@@ -18,12 +18,10 @@
 use std::{cmp::min, fmt::Write as _};
 
 use comrak::nodes::{NodeValue, TableAlignment};
-use syntect::highlighting::Theme;
 
 use crate::{
-    ansi::{self, AnsiState, RESET},
-    format::DefaultBackground,
-    render::{HrOptions, TerminalFormatter},
+    ansi::{self, AnsiState, RESET, Segment},
+    render::{RenderOptions, TerminalFormatter},
 };
 
 /// Type alias for comrak AST node references.
@@ -57,22 +55,9 @@ impl TableOptions {
 /// 3. Computes visual column widths (ignoring ANSI bytes).
 /// 4. Word-wraps cells that exceed the maximum column width.
 /// 5. Pads and aligns cells according to the table's alignment markers.
-pub fn format_table(
-    node: Node<'_>,
-    options: &TableOptions,
-    hr_options: &HrOptions,
-    theme: &Theme,
-    default_background: Option<&DefaultBackground>,
-    inline_code_bg: Option<&(String, String)>,
-) -> Option<String> {
-    let (alignments, rows) = extract_table(
-        node,
-        options,
-        hr_options,
-        theme,
-        default_background,
-        inline_code_bg,
-    )?;
+pub fn format_table(node: Node<'_>, options: RenderOptions<'_>) -> Option<String> {
+    let (alignments, rows) = extract_table(node, options)?;
+    let max_column_width = options.table_options.max_column_width;
 
     // Compute visual widths for each column.
     let num_cols = alignments.len();
@@ -90,9 +75,9 @@ pub fn format_table(
     }
 
     // Apply max column width cap.
-    if options.max_column_width > 0 {
+    if max_column_width > 0 {
         for w in &mut col_widths {
-            *w = min(*w, options.max_column_width);
+            *w = min(*w, max_column_width);
         }
     }
 
@@ -104,7 +89,7 @@ pub fn format_table(
         let wrapped: Vec<Vec<String>> = (0..num_cols)
             .map(|col| {
                 let content = row.get(col).map_or("", |c| c.rendered.as_str());
-                if options.max_column_width > 0 {
+                if max_column_width > 0 {
                     wrap_to_visual_width(content, col_widths[col])
                 } else {
                     vec![content.to_string()]
@@ -159,11 +144,7 @@ struct RenderedCell {
 /// Returns the alignment list and a 2D vector of rendered cells.
 fn extract_table(
     node: Node<'_>,
-    options: &TableOptions,
-    hr_options: &HrOptions,
-    theme: &Theme,
-    default_background: Option<&DefaultBackground>,
-    inline_code_bg: Option<&(String, String)>,
+    options: RenderOptions<'_>,
 ) -> Option<(Vec<TableAlignment>, Vec<Vec<RenderedCell>>)> {
     let alignments = match node.data().value {
         NodeValue::Table(ref nt) => nt.alignments.clone(),
@@ -183,14 +164,7 @@ fn extract_table(
                 continue;
             }
 
-            let rendered = render_cell_content(
-                cell_node,
-                options,
-                hr_options,
-                theme,
-                default_background,
-                inline_code_bg,
-            );
+            let rendered = render_cell_content(cell_node, options);
             cells.push(RenderedCell { rendered });
         }
         rows.push(cells);
@@ -202,35 +176,23 @@ fn extract_table(
 /// Render the inline content of a table cell using the terminal formatter.
 ///
 /// Uses `width: 0` to disable line wrapping inside cells.
-fn render_cell_content(
-    cell_node: Node<'_>,
-    options: &TableOptions,
-    hr_options: &HrOptions,
-    theme: &Theme,
-    default_background: Option<&DefaultBackground>,
-    inline_code_bg: Option<&(String, String)>,
-) -> String {
+fn render_cell_content(cell_node: Node<'_>, options: RenderOptions<'_>) -> String {
     let mut buf = String::new();
     {
         // Use TerminalFormatter to render the cell's children.
         //
-        // We use width=0 to disable wrapping (we handle it at the cell level).
-        // We pass the cell node itself — `TerminalFormatter` will visit its
-        // children.
+        // Wrapping and indent are handled at the cell level, so the nested
+        // renderer runs with both disabled; everything else (theme,
+        // backgrounds, HR style) is inherited.
         //
         // Note: `TerminalFormatter` emits a default background escape if one is
         // set.
-        let mut formatter = TerminalFormatter::new(
-            cell_node,
-            0,
-            options,
-            hr_options,
-            theme,
-            default_background,
-            inline_code_bg,
-            0,
-            &mut buf,
-        );
+        let cell_options = RenderOptions {
+            width: 0,
+            indent: 0,
+            ..options
+        };
+        let mut formatter = TerminalFormatter::new(cell_node, cell_options, &mut buf);
 
         // format() visits the node and its children.
         //
@@ -288,29 +250,22 @@ fn wrap_to_visual_width(content: &str, max_width: usize) -> Vec<String> {
     // Accumulate the current word (visible chars + interspersed ANSI).
     let mut word = String::new();
 
-    let mut in_escape = false;
-    let mut escape_buf = String::new();
-
-    for c in content.chars() {
-        if in_escape {
-            escape_buf.push(c);
-            if c.is_ascii_alphabetic() || c == '~' {
-                in_escape = false;
-                // Append the escape to the word buffer (not yet committed).
-                word.push_str(&escape_buf);
-                escape_buf.clear();
+    for segment in ansi::segments(content) {
+        let text = match segment {
+            // Append the escape to the word buffer (not yet committed).
+            Segment::Escape(escape) => {
+                word.push_str(escape);
+                continue;
             }
-            continue;
-        }
+            Segment::Text(text) => text,
+        };
 
-        if c == '\x1b' {
-            in_escape = true;
-            escape_buf.clear();
-            escape_buf.push(c);
-            continue;
-        }
+        for c in text.chars() {
+            if c != ' ' {
+                word.push(c);
+                continue;
+            }
 
-        if c == ' ' {
             // Flush the pending word.
             flush_word(&mut lines, &mut current, &mut state, &word, max_width);
             word.clear();
@@ -324,11 +279,7 @@ fn wrap_to_visual_width(content: &str, max_width: usize) -> Vec<String> {
                 finalize_line(&mut lines, &mut current, &state);
                 current = state.restore_sequence();
             }
-            continue;
         }
-
-        // Visible character.
-        word.push(c);
     }
 
     // Flush any remaining word.
@@ -425,34 +376,24 @@ fn hard_break_into(
     word: &str,
     max_width: usize,
 ) {
-    let mut in_escape = false;
-    let mut escape_buf = String::new();
-
-    for c in word.chars() {
-        if in_escape {
-            escape_buf.push(c);
-            if c.is_ascii_alphabetic() || c == '~' {
-                in_escape = false;
-                state.update(&escape_buf);
-                current.push_str(&escape_buf);
-                escape_buf.clear();
+    for segment in ansi::segments(word) {
+        let text = match segment {
+            Segment::Escape(escape) => {
+                state.update(escape);
+                current.push_str(escape);
+                continue;
             }
-            continue;
-        }
+            Segment::Text(text) => text,
+        };
 
-        if c == '\x1b' {
-            in_escape = true;
-            escape_buf.clear();
-            escape_buf.push(c);
-            continue;
-        }
-
-        current.push(c);
-        if ansi::visual_width(current) > max_width {
-            current.pop();
-            finalize_line(lines, current, state);
-            *current = state.restore_sequence();
+        for c in text.chars() {
             current.push(c);
+            if ansi::visual_width(current) > max_width {
+                current.pop();
+                finalize_line(lines, current, state);
+                *current = state.restore_sequence();
+                current.push(c);
+            }
         }
     }
 }

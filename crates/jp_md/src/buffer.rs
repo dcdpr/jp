@@ -3,9 +3,9 @@
 
 use std::fmt;
 
-pub use fixup::{EventFixup, FenceEscalationFixup, FixupChain, OrphanedFenceFixup};
+pub use fixup::{EventFixup, FenceEscalationFixup, Fixups, OrphanedFenceFixup};
 pub use state::FenceType;
-use state::{HtmlBlockRule, HtmlType1Tag, HtmlType6Tag, State};
+use state::{HtmlBlockRule, HtmlTerminator, HtmlType1Tag, HtmlType6Tag, ListState, State};
 
 pub mod fixup;
 mod state;
@@ -198,35 +198,35 @@ impl Buffer {
     /// event with the active indent (stripping the fence's indent for
     /// `InFencedCode`, leaving content as-is otherwise).
     pub fn flush_events(&mut self) -> Vec<Event> {
-        let raw = std::mem::take(&mut self.data);
-
-        let events = if raw.is_empty() {
-            Vec::new()
-        } else if let State::InList {
-            marker_column,
-            content_column,
-            is_ordered,
-            delimiter,
-            start_number,
-            items_flushed,
-        } = self.state
-        {
-            Self::flush_list_events(
-                &raw,
-                marker_column,
-                content_column,
-                is_ordered,
-                delimiter,
-                start_number,
-                items_flushed,
-            )
+        // An open fenced code block is handled specially: end-of-region
+        // completes the final line, so a closing fence that arrived without a
+        // trailing newline is still recognized, and a block that never closed
+        // is balanced with a synthetic closing fence. This drains the fence
+        // and every now-complete trailing block through the state machine,
+        // which can transition us out of `InFencedCode` with one trailing
+        // partial block still buffered (e.g. a paragraph after the close).
+        let mut events = if matches!(self.state, State::InFencedCode { .. }) {
+            self.flush_fenced_code_events()
         } else {
-            let (content, indent) = match self.state {
-                State::InFencedCode { indent, .. } => (strip_lines_indent(&raw, indent), indent),
-                _ => (raw, self.current_indent()),
-            };
-            vec![Event::Flush { content, indent }]
+            Vec::new()
         };
+
+        // Flush whatever remains as a trailing partial, in the current
+        // (possibly just-transitioned) state. `flush_fenced_code_events`
+        // emits every *complete* block via the iterator, so at most one
+        // partial block is left here; the non-fenced path takes this branch
+        // directly with its untouched buffer.
+        let raw = std::mem::take(&mut self.data);
+        if !raw.is_empty() {
+            if let State::InList(list) = self.state {
+                events.extend(Self::flush_list_events(&raw, list));
+            } else {
+                events.push(Event::Flush {
+                    content: raw,
+                    indent: self.current_indent(),
+                });
+            }
+        }
 
         // `flush_events` is the explicit "wipe the slate" boundary:
         // `ChatRenderer::flush()` calls this on every content-kind
@@ -242,69 +242,101 @@ impl Buffer {
         events
     }
 
+    /// Flush an open fenced code block at end-of-region.
+    ///
+    /// End-of-region completes the final buffered line, so a closing fence that
+    /// arrived without a trailing newline is recognized as a
+    /// [`Event::FencedCodeEnd`] rather than dumped as opaque text; preceding
+    /// partial lines are emitted as [`Event::FencedCodeLine`]s.
+    /// If no closing fence is present at all, a synthetic one is emitted so the
+    /// opening fence is always balanced for downstream consumers.
+    fn flush_fenced_code_events(&mut self) -> Vec<Event> {
+        // Treat the end of the region as a line terminator so the final line
+        // parses (the in-fence handler only acts on newline-terminated lines).
+        if !self.data.is_empty() && !self.data.ends_with('\n') {
+            self.data.push('\n');
+        }
+
+        // Drain the now-complete lines through the normal state machine.
+        let mut events: Vec<Event> = self.by_ref().collect();
+
+        // Still inside the block means no closing fence was present: synthesize
+        // one at the source fence length. The escalation fixup, if any, widens
+        // it to match the (also-escalated) opening fence.
+        if let State::InFencedCode {
+            fence_type,
+            fence_length,
+            indent,
+            ..
+        } = self.state
+        {
+            let fence = fence_type.as_char().to_string().repeat(fence_length);
+            events.push(Event::FencedCodeEnd { fence, indent });
+        }
+
+        events
+    }
+
     /// Implements [`Self::flush_events`] for `InList` state: scan the remaining
-    /// buffer for sibling-marker boundaries, emit each complete preceding item
-    /// as a `Block` (renumbered against the list's start), and emit the final
-    /// segment as a `Flush`.
-    fn flush_list_events(
-        raw: &str,
-        marker_column: usize,
-        content_column: usize,
-        is_ordered: bool,
-        delimiter: u8,
-        start_number: u32,
-        items_flushed: u32,
-    ) -> Vec<Event> {
-        // Walk lines, splitting at every sibling-marker boundary.
-        let bytes = raw.as_bytes();
+    /// buffer for item boundaries (using the same line classifier as the
+    /// streaming walk), emit each complete preceding segment as a `Block`
+    /// (renumbered against the list's start), and emit the final segment as a
+    /// `Flush`.
+    fn flush_list_events(raw: &str, list: ListState) -> Vec<Event> {
+        // Walk lines, splitting at every boundary line: a sibling marker
+        // (next item of this list) or a foreign marker at the marker column
+        // (a new list of a different kind). `classify_list_line` is the
+        // single source of truth for that distinction, shared with the
+        // streaming walk in `handle_in_list`.
         let mut segments: Vec<(usize, usize)> = Vec::new();
         let mut seg_start = 0;
         let mut idx = 0;
+        let mut prev_blank = false;
 
-        while idx < bytes.len() {
-            let line_end = raw[idx..].find('\n').map_or(bytes.len(), |p| idx + p);
+        while idx < raw.len() {
+            let line_end = raw[idx..].find('\n').map_or(raw.len(), |p| idx + p);
             let line = &raw[idx..line_end];
-            let (line_indent, line_content) = get_indent(line);
-            if idx > seg_start && line_indent == marker_column && is_list_marker(line_content) {
-                segments.push((seg_start, idx));
-                seg_start = idx;
+            let (indent, content) = get_indent(line);
+
+            if content.is_empty() {
+                prev_blank = true;
+            } else {
+                let kind = classify_list_line(indent, content, list, prev_blank);
+                let is_boundary = match kind {
+                    ListLineKind::SiblingMarker => true,
+                    ListLineKind::Terminator => {
+                        indent == list.marker_column && is_list_marker(content)
+                    }
+                    ListLineKind::NestedContainer | ListLineKind::Continuation => false,
+                };
+                if idx > seg_start && is_boundary {
+                    segments.push((seg_start, idx));
+                    seg_start = idx;
+                }
+                prev_blank = false;
             }
-            idx = if line_end < bytes.len() {
+
+            idx = if line_end < raw.len() {
                 line_end + 1
             } else {
-                bytes.len()
+                raw.len()
             };
         }
-        if seg_start < bytes.len() {
-            segments.push((seg_start, bytes.len()));
+        if seg_start < raw.len() {
+            segments.push((seg_start, raw.len()));
         }
 
         let last_idx = segments.len().saturating_sub(1);
-        let mut count = items_flushed;
+        let mut items_flushed = list.items_flushed;
         let mut events = Vec::with_capacity(segments.len());
 
         for (i, (start, end)) in segments.iter().enumerate() {
-            let segment = &raw[*start..*end];
-            let first_line = segment.lines().next().unwrap_or("");
-            let (first_indent, first_content) = get_indent(first_line);
-            let is_item = first_indent == marker_column && is_list_marker(first_content);
+            let (content, indent) =
+                render_list_segment(&raw[*start..*end], list, &mut items_flushed);
 
-            let (content, indent) = if is_item {
-                let stripped = strip_lines_indent(segment, marker_column);
-                let final_content = if is_ordered {
-                    renumber_first_marker(stripped, start_number + count, delimiter)
-                } else {
-                    stripped
-                };
-                count += 1;
-                (final_content, marker_column)
-            } else {
-                (strip_lines_indent(segment, content_column), content_column)
-            };
-
-            // All segments except the last are complete items (a sibling
-            // marker followed them); emit as `Block`. The final segment
-            // is the partial remainder, emit as `Flush`.
+            // All segments except the last are complete items (a boundary
+            // line followed them); emit as `Block`. The final segment is
+            // the partial remainder, emit as `Flush`.
             if i == last_idx {
                 events.push(Event::Flush { content, indent });
             } else {
@@ -318,14 +350,14 @@ impl Buffer {
     /// Returns the visual indent (in spaces) active for the current state.
     fn current_indent(&self) -> usize {
         match self.state {
-            State::InList { marker_column, .. } => marker_column,
+            State::InList(list) => list.marker_column,
             State::InFencedCode { indent, .. } => indent,
             _ => self
                 .parents
                 .iter()
                 .rev()
                 .find_map(|s| match *s {
-                    State::InList { marker_column, .. } => Some(marker_column),
+                    State::InList(list) => Some(list.marker_column),
                     State::InFencedCode { indent, .. } => Some(indent),
                     _ => None,
                 })
@@ -417,14 +449,17 @@ impl Buffer {
         if indent_len <= 3
             && let Some(marker) = parse_list_marker(line_content)
         {
-            return (None, State::InList {
-                marker_column: indent_len,
-                content_column: indent_len + marker.marker_width,
-                is_ordered: marker.is_ordered,
-                delimiter: marker.delimiter,
-                start_number: marker.number,
-                items_flushed: 0,
-            });
+            return (
+                None,
+                State::InList(ListState {
+                    marker_column: indent_len,
+                    content_column: indent_len + marker.marker_width,
+                    is_ordered: marker.is_ordered,
+                    delimiter: marker.delimiter,
+                    start_number: marker.number,
+                    items_flushed: 0,
+                }),
+            );
         }
 
         if indent_len >= 4 && !line_content.is_empty() {
@@ -457,28 +492,25 @@ impl Buffer {
                 break;
             }
 
-            // Not a blank line. Get the content of the next line.
+            // Not a blank line. The next line must be complete before it can
+            // be classified: a partial prefix can look like a block starter
+            // ("#", "<div", "```") while the completed line is not one
+            // ("#hello", "<divx>", "```a`b"). Deciding on the prefix would
+            // make chunked parsing diverge from whole-document parsing.
             let rest = &self.data[line_after_start..];
-            if rest.is_empty() {
-                continue; // This was the last \n, need more data
-            }
+            let Some(next_line_end) = rest.find('\n') else {
+                continue; // Incomplete next line; wait for more data.
+            };
 
-            let (next_line_indent, next_line_content) =
-                get_indent(rest.lines().next().unwrap_or(""));
+            let (next_line_indent, next_line_content) = get_indent(&rest[..next_line_end]);
 
             // Check Setext headers first, takes precedence in paragraph
-            // context.
+            // context. The underline terminates the paragraph and is included
+            // in the flushed block.
             if is_setext_underline(next_line_content) {
-                // We found a setext underline. We must include it. Find the end
-                // of *this* underline line.
-                if let Some(setext_end_pos) = rest.find('\n') {
-                    terminator_pos = Some(idx);
-                    flush_len = line_after_start + setext_end_pos + 1;
-                    break;
-                }
-
-                // We found a setext line but not its end. Need more data.
-                return (None, State::BufferingParagraph);
+                terminator_pos = Some(idx);
+                flush_len = line_after_start + next_line_end + 1;
+                break;
             }
 
             // Interruption by a new block (HTML blocks and < 4 indent code
@@ -514,24 +546,8 @@ impl Buffer {
     ///
     /// Blank lines and indented continuations (column \> `marker_column`) are
     /// buffered, not flushed.
-    #[expect(clippy::too_many_lines)]
-    fn handle_in_list(
-        &mut self,
-        marker_column: usize,
-        content_column: usize,
-        is_ordered: bool,
-        delimiter: u8,
-        start_number: u32,
-        items_flushed: u32,
-    ) -> (Option<Event>, State) {
-        let current_state = State::InList {
-            marker_column,
-            content_column,
-            is_ordered,
-            delimiter,
-            start_number,
-            items_flushed,
-        };
+    fn handle_in_list(&mut self, list: ListState) -> (Option<Event>, State) {
+        let current_state = State::InList(list);
 
         // Drop a single leading blank line: it belongs to the trailing
         // separator of whatever block was emitted just before us (e.g.
@@ -555,9 +571,7 @@ impl Buffer {
         // If the buffer starts with a nested marker or a fence at
         // content_column or deeper, we may be re-entering after a flush.
         // Transition to the nested container directly.
-        if let Some(transition) =
-            self.maybe_enter_nested_from_list_head(marker_column, content_column)
-        {
+        if let Some(transition) = self.maybe_enter_nested_from_list_head(list) {
             self.parents.push(current_state);
             return transition;
         }
@@ -581,15 +595,7 @@ impl Buffer {
                 };
                 let line = &slice[..newline_pos];
                 let (indent, content) = get_indent(line);
-                let kind = classify_list_line(
-                    indent,
-                    content,
-                    marker_column,
-                    content_column,
-                    is_ordered,
-                    delimiter,
-                    prev_blank,
-                );
+                let kind = classify_list_line(indent, content, list, prev_blank);
                 (newline_pos + 1, content.is_empty(), kind)
             };
 
@@ -607,35 +613,15 @@ impl Buffer {
                         last_content_end = scan;
                         continue;
                     }
-                    let (event, new_state) = self.flush_list_segment(
-                        scan,
-                        scan,
-                        marker_column,
-                        content_column,
-                        is_ordered,
-                        delimiter,
-                        start_number,
-                        items_flushed,
-                    );
+                    let (event, new_state) = self.flush_list_segment(scan, scan, list);
                     return (Some(event), new_state);
                 }
                 ListLineKind::NestedContainer => {
                     if scan > 0 {
-                        let (event, new_state) = self.flush_list_segment(
-                            scan,
-                            scan,
-                            marker_column,
-                            content_column,
-                            is_ordered,
-                            delimiter,
-                            start_number,
-                            items_flushed,
-                        );
+                        let (event, new_state) = self.flush_list_segment(scan, scan, list);
                         return (Some(event), new_state);
                     }
-                    if let Some(transition) =
-                        self.maybe_enter_nested_from_list_head(marker_column, content_column)
-                    {
+                    if let Some(transition) = self.maybe_enter_nested_from_list_head(list) {
                         self.parents.push(current_state);
                         return transition;
                     }
@@ -670,16 +656,7 @@ impl Buffer {
                     // drain only up to `last_content_end` so those same
                     // blank lines stay in the buffer for the parent state
                     // to see as `prev_blank=true`.
-                    let (event, _) = self.flush_list_segment(
-                        scan,
-                        last_content_end,
-                        marker_column,
-                        content_column,
-                        is_ordered,
-                        delimiter,
-                        start_number,
-                        items_flushed,
-                    );
+                    let (event, _) = self.flush_list_segment(scan, last_content_end, list);
                     return (Some(event), next_state);
                 }
                 ListLineKind::Continuation => {
@@ -700,26 +677,25 @@ impl Buffer {
     /// `parents` before returning.
     fn maybe_enter_nested_from_list_head(
         &mut self,
-        marker_column: usize,
-        content_column: usize,
+        list: ListState,
     ) -> Option<(Option<Event>, State)> {
         let first_line_end = self.data.find('\n')?;
         let first_line = &self.data[..first_line_end];
         let (indent, content) = get_indent(first_line);
 
-        if indent <= marker_column || indent < content_column {
+        if indent <= list.marker_column || indent < list.content_column {
             return None;
         }
 
         if let Some(marker) = parse_list_marker(content) {
-            let nested = State::InList {
+            let nested = State::InList(ListState {
                 marker_column: indent,
                 content_column: indent + marker.marker_width,
                 is_ordered: marker.is_ordered,
                 delimiter: marker.delimiter,
                 start_number: marker.number,
                 items_flushed: 0,
-            };
+            });
             return Some((None, nested));
         }
 
@@ -755,21 +731,13 @@ impl Buffer {
     /// *and* in the buffer (so the popped-to parent state can pick up
     /// `prev_blank=true`).
     ///
-    /// The first line of the segment is inspected to decide whether the segment
-    /// is an item-style flush (starts with this list's marker) or a
-    /// paragraph-style flush (continuation content inside the item).
-    /// Item flushes are renumbered against `start_number + items_flushed` for
-    /// ordered lists, and the returned `items_flushed` is incremented.
+    /// Stripping and renumbering are delegated to [`render_list_segment`]; the
+    /// returned state carries the updated `items_flushed`.
     fn flush_list_segment(
         &mut self,
         content_end: usize,
         drain_end: usize,
-        marker_column: usize,
-        content_column: usize,
-        is_ordered: bool,
-        delimiter: u8,
-        start_number: u32,
-        items_flushed: u32,
+        list: ListState,
     ) -> (Event, State) {
         debug_assert!(
             drain_end <= content_end,
@@ -777,31 +745,14 @@ impl Buffer {
         );
         let raw: String = self.data[..content_end].to_string();
         self.data.drain(..drain_end);
-        let first_line = raw.lines().next().unwrap_or("");
-        let (first_indent, first_content) = get_indent(first_line);
-        let is_item = first_indent == marker_column && is_list_marker(first_content);
 
-        let (content, indent, next_items_flushed) = if is_item {
-            let stripped = strip_lines_indent(&raw, marker_column);
-            let final_content = if is_ordered {
-                renumber_first_marker(stripped, start_number + items_flushed, delimiter)
-            } else {
-                stripped
-            };
-            (final_content, marker_column, items_flushed + 1)
-        } else {
-            let stripped = strip_lines_indent(&raw, content_column);
-            (stripped, content_column, items_flushed)
-        };
+        let mut items_flushed = list.items_flushed;
+        let (content, indent) = render_list_segment(&raw, list, &mut items_flushed);
 
-        let new_state = State::InList {
-            marker_column,
-            content_column,
-            is_ordered,
-            delimiter,
-            start_number,
-            items_flushed: next_items_flushed,
-        };
+        let new_state = State::InList(ListState {
+            items_flushed,
+            ..list
+        });
         (Event::Block { content, indent }, new_state)
     }
 
@@ -1020,10 +971,11 @@ impl Buffer {
     /// Handles `InHtmlBlock`: look for termination based on its rule.
     fn handle_in_html_block(&mut self, block_type: HtmlBlockRule) -> (Option<Event>, State) {
         let current_state = State::InHtmlBlock { block_type };
-        let end_pos = self.data.find(block_type.end_tag());
-        let terminator = match block_type {
-            HtmlBlockRule::Type6(_) | HtmlBlockRule::Type7 => end_pos.map(|pos| pos + 2),
-            _ => end_pos.and_then(|tag_pos| {
+        let terminator = match block_type.terminator() {
+            // The block runs through the end of the blank line.
+            HtmlTerminator::BlankLine => self.data.find("\n\n").map(|pos| pos + "\n\n".len()),
+            // The block runs through the end of the line containing the tag.
+            HtmlTerminator::Tag(tag) => self.data.find(tag).and_then(|tag_pos| {
                 self.data[tag_pos..]
                     .find('\n')
                     .map(|line_end| tag_pos + line_end + 1)
@@ -1070,21 +1022,7 @@ impl Iterator for Buffer {
                 State::AtBoundary => self.handle_at_boundary(),
                 State::BufferingParagraph => self.handle_buffering_paragraph(),
                 State::InIndentedCode => self.handle_in_indented_code(),
-                State::InList {
-                    marker_column,
-                    content_column,
-                    is_ordered,
-                    delimiter,
-                    start_number,
-                    items_flushed,
-                } => self.handle_in_list(
-                    marker_column,
-                    content_column,
-                    is_ordered,
-                    delimiter,
-                    start_number,
-                    items_flushed,
-                ),
+                State::InList(list) => self.handle_in_list(list),
                 State::InFencedCode {
                     fence_type,
                     fence_length,
@@ -1209,19 +1147,16 @@ enum ListLineKind {
     Continuation,
 }
 
-/// Classify a non-blank line for `handle_in_list`.
+/// Classify a non-blank line for `handle_in_list` and `flush_list_events`.
 ///
-/// `is_ordered` and `delimiter` describe the active list's marker shape, used
-/// to distinguish sibling markers from markers that start a *new* list at the
-/// same column (per CommonMark §5.2: two markers are the same kind only if they
-/// share `is_ordered` and their delimiter character).
+/// `list` describes the active list's marker shape, used to distinguish sibling
+/// markers from markers that start a *new* list at the same column (per
+/// CommonMark §5.2: two markers are the same kind only if they share
+/// `is_ordered` and their delimiter character).
 fn classify_list_line(
     indent: usize,
     content: &str,
-    marker_column: usize,
-    content_column: usize,
-    is_ordered: bool,
-    delimiter: u8,
+    list: ListState,
     prev_blank: bool,
 ) -> ListLineKind {
     if content.is_empty() {
@@ -1235,13 +1170,14 @@ fn classify_list_line(
     // A marker is only a sibling of the current list if it matches the
     // current list's kind (ordered vs bullet) and uses the same delimiter
     // character. A mismatched marker at the same column starts a new list.
-    let is_sibling = marker.is_some_and(|m| m.is_ordered == is_ordered && m.delimiter == delimiter);
+    let is_sibling =
+        marker.is_some_and(|m| m.is_ordered == list.is_ordered && m.delimiter == list.delimiter);
 
-    if indent == marker_column && is_sibling {
+    if indent == list.marker_column && is_sibling {
         return ListLineKind::SiblingMarker;
     }
 
-    if indent >= content_column && (is_marker || is_fence) {
+    if indent >= list.content_column && (is_marker || is_fence) {
         return ListLineKind::NestedContainer;
     }
 
@@ -1256,12 +1192,58 @@ fn classify_list_line(
     // `marker_column`; mismatched ones fall through to here. Non-marker
     // lines only terminate after a blank line, otherwise they're lazy
     // continuation of the current paragraph.
-    let is_outer_marker = is_marker && indent < content_column;
-    if (indent < content_column && prev_blank) || is_outer_marker || is_block_interrupter {
+    let is_outer_marker = is_marker && indent < list.content_column;
+    if (indent < list.content_column && prev_blank) || is_outer_marker || is_block_interrupter {
         return ListLineKind::Terminator;
     }
 
     ListLineKind::Continuation
+}
+
+/// Strip and (when applicable) renumber a single list segment for emission.
+///
+/// The segment's first line decides the treatment:
+///
+/// - A *sibling* marker of `list` at the marker column: strip the marker
+///   column's indent, renumber ordered markers against `start_number +
+///   items_flushed`, and increment `items_flushed`.
+/// - A *foreign* marker at the marker column (different kind or delimiter, i.e.
+///   the start of a new list): strip the marker column's indent, leaving the
+///   marker untouched.
+/// - Anything else is continuation content inside the current item: strip the
+///   content column's indent.
+///
+/// Returns the rendered content and the visual indent the consumer should
+/// apply.
+/// Shared by the streaming path (`flush_list_segment`) and the end-of-region
+/// path (`flush_list_events`) so both agree on stripping and renumbering.
+fn render_list_segment(segment: &str, list: ListState, items_flushed: &mut u32) -> (String, usize) {
+    let first_line = segment.lines().next().unwrap_or("");
+    let (first_indent, first_content) = get_indent(first_line);
+    let marker = (first_indent == list.marker_column)
+        .then(|| parse_list_marker(first_content))
+        .flatten();
+
+    let Some(marker) = marker else {
+        return (
+            strip_lines_indent(segment, list.content_column),
+            list.content_column,
+        );
+    };
+
+    let stripped = strip_lines_indent(segment, list.marker_column);
+    let is_sibling = marker.is_ordered == list.is_ordered && marker.delimiter == list.delimiter;
+    if !is_sibling {
+        return (stripped, list.marker_column);
+    }
+
+    let content = if list.is_ordered {
+        renumber_first_marker(stripped, list.start_number + *items_flushed, list.delimiter)
+    } else {
+        stripped
+    };
+    *items_flushed += 1;
+    (content, list.marker_column)
 }
 
 /// Strip up to `max_strip` leading spaces from `line`.
