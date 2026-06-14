@@ -281,6 +281,9 @@ fn test_map_model_opus_4_8() {
         display_name: "Claude Opus 4.8".to_string(),
         created_at: String::new(),
         model_type: "model".to_string(),
+        max_input_tokens: 0,
+        max_tokens: 0,
+        capabilities: types::ModelCapabilities::default(),
     };
 
     let details = map_model(model).unwrap();
@@ -301,6 +304,124 @@ fn test_map_model_opus_4_8() {
     assert!(details.features.contains(&"adaptive-thinking"));
     assert!(details.features.contains(&"interleaved-thinking"));
     assert!(details.features.contains(&"context-editing"));
+}
+
+/// Verify the `map_model` arm for Claude Fable 5 produces the expected
+/// `ModelDetails`, including the `thinking-always-on` capability that stops JP
+/// from sending `thinking: disabled` (which Fable rejects).
+#[test]
+fn test_map_model_fable_5() {
+    let model = types::Model {
+        id: "claude-fable-5".to_string(),
+        display_name: "Claude Fable 5".to_string(),
+        created_at: String::new(),
+        model_type: "model".to_string(),
+        max_input_tokens: 0,
+        max_tokens: 0,
+        capabilities: types::ModelCapabilities::default(),
+    };
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.id, (PROVIDER, "claude-fable-5").try_into().unwrap());
+    assert_eq!(details.display_name.as_deref(), Some("Claude Fable 5"));
+    assert_eq!(details.context_window, Some(1_000_000));
+    assert_eq!(details.max_output_tokens, Some(128_000));
+    assert_eq!(
+        details.knowledge_cutoff,
+        NaiveDate::from_ymd_opt(2026, 1, 1)
+    );
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::adaptive(true, true))
+    );
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert!(details.features.contains(&"adaptive-thinking"));
+    assert!(details.features.contains(&"interleaved-thinking"));
+    assert!(details.features.contains(&"context-editing"));
+    assert!(!details.supports_disabling_thinking());
+    assert!(!details.supports_prefill());
+}
+
+/// Unknown models fall back to the API-reported token limits.
+#[test]
+fn test_map_model_unknown_uses_api_token_limits() {
+    let model = types::Model {
+        id: "claude-future-99".to_string(),
+        display_name: "Claude Future 99".to_string(),
+        created_at: String::new(),
+        model_type: "model".to_string(),
+        max_input_tokens: 200_000,
+        max_tokens: 64_000,
+        capabilities: types::ModelCapabilities::default(),
+    };
+
+    let details = map_model(model).unwrap();
+    assert_eq!(details.max_output_tokens, Some(64_000));
+    assert_eq!(details.context_window, Some(200_000));
+    // Default capabilities report structured outputs as unsupported.
+    assert_eq!(details.structured_output, Some(false));
+}
+
+/// A `0` token limit from the API means "unspecified", so it stays unknown and
+/// the request later falls back to its default rather than capping at zero.
+#[test]
+fn test_map_model_unknown_zero_tokens_is_unknown() {
+    let model = types::Model {
+        id: "claude-future-99".to_string(),
+        display_name: "Claude Future 99".to_string(),
+        created_at: String::new(),
+        model_type: "model".to_string(),
+        max_input_tokens: 0,
+        max_tokens: 0,
+        capabilities: types::ModelCapabilities::default(),
+    };
+
+    let details = map_model(model).unwrap();
+    assert_eq!(details.max_output_tokens, None);
+    assert_eq!(details.context_window, None);
+}
+
+/// Fable 5 always runs with adaptive thinking.
+/// Even when reasoning is disabled, the request must not send `thinking:
+/// disabled`, which the API rejects with a 400 error.
+#[test]
+fn test_fable_5_reasoning_off_omits_disabled_thinking() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-fable-5").try_into().unwrap(),
+        display_name: Some("Claude Fable 5".to_string()),
+        context_window: Some(1_000_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(true, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(true),
+        features: vec!["adaptive-thinking", "thinking-always-on"],
+    };
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    // Thinking-always-on model: the disabled-thinking branch is skipped, so no
+    // `thinking` field is sent and the model thinks adaptively.
+    assert_eq!(request.thinking, None);
 }
 
 /// Unit test: Verify budget-based model (Opus 4.5) still uses Enabled thinking.
@@ -589,6 +710,147 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
     );
 }
 
+/// Fable 5 keeps thinking on permanently, so the disable-thinking hard retry
+/// isn't available.
+/// `create_request` downgrades to a soft-force (auto + system nudge) and sets
+/// up an escalating-nudge fallback that keeps thinking on.
+#[test]
+fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
+    use crate::tool::{ToolDefinition, ToolDocs};
+
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-fable-5").try_into().unwrap(),
+        display_name: Some("Claude Fable 5".to_string()),
+        context_window: Some(1_000_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(true, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(true),
+        features: vec!["adaptive-thinking", "thinking-always-on"],
+    };
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![ToolDefinition {
+            name: "my_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: IndexMap::new(),
+        }],
+        tool_choice: ToolChoice::Function("my_tool".into()),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+
+    // Thinking-always-on model uses the escalating-nudge strategy, not the
+    // disable-thinking hard retry.
+    let fallback = fallback.expect("Expected an escalating-nudge fallback");
+    assert!(matches!(
+        fallback.strategy,
+        ForceStrategy::EscalatingNudge {
+            remaining: SOFT_FORCE_MAX_RETRIES
+        }
+    ));
+
+    // The soft-force downgrade still happens: tool_choice becomes auto and the
+    // system prompt carries the nudge.
+    assert!(
+        matches!(request.tool_choice, Some(types::ToolChoice::Auto { .. })),
+        "Expected Auto tool_choice, got {:?}",
+        request.tool_choice
+    );
+    let system = request.system.as_ref().expect("Expected system prompt");
+    let system_text = match system {
+        types::System::Content(parts) => parts
+            .iter()
+            .map(|p| match p {
+                types::SystemContent::Text(t) => t.text.as_str(),
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+        types::System::String(s) => s.clone(),
+    };
+    assert!(
+        system_text.contains("MUST"),
+        "System prompt should contain tool forcing nudge"
+    );
+
+    // Thinking stays adaptive, never disabled.
+    assert!(matches!(
+        request.thinking,
+        Some(types::ExtendedThinking::Adaptive { .. })
+    ));
+}
+
+/// Fable 5 keeps thinking on even when the user sets `reasoning = "off"` (it
+/// cannot disable thinking), so a real forced `tool_choice` would still 400.
+/// The gate must treat thinking-always-on as active and soft-force regardless
+/// of the reasoning config.
+#[test]
+fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
+    use crate::tool::{ToolDefinition, ToolDocs};
+
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-fable-5").try_into().unwrap(),
+        display_name: Some("Claude Fable 5".to_string()),
+        context_window: Some(1_000_000),
+        max_output_tokens: Some(128_000),
+        reasoning: Some(ReasoningDetails::adaptive(true, true)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(true),
+        features: vec!["adaptive-thinking", "thinking-always-on"],
+    };
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![ToolDefinition {
+            name: "my_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: IndexMap::new(),
+        }],
+        tool_choice: ToolChoice::Function("my_tool".into()),
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, fallback) = create_request(&model, query, true, &beta).unwrap();
+
+    // The forced choice must be downgraded to auto; sending it while thinking is
+    // active is the 400 this guards against.
+    assert!(
+        matches!(request.tool_choice, Some(types::ToolChoice::Auto { .. })),
+        "Expected Auto tool_choice, got {:?}",
+        request.tool_choice
+    );
+
+    // The escalating-nudge fallback is set up (thinking stays on, can't disable).
+    let fallback = fallback.expect("Expected an escalating-nudge fallback");
+    assert!(matches!(
+        fallback.strategy,
+        ForceStrategy::EscalatingNudge { .. }
+    ));
+
+    // Thinking is never disabled for Fable; with reasoning off the field is
+    // omitted and the model thinks adaptively.
+    assert_eq!(request.thinking, None);
+}
+
 /// With multiple tools, `Function("specific")` is NOT normalized to `Required`
 /// and the fallback should carry `Tool { name }` so the retry targets that
 /// specific tool.
@@ -658,6 +920,7 @@ fn test_forced_tool_function_multi_tool_preserves_name() {
 fn test_fallback_any_satisfied_by_any_tool() {
     let fb = ForcedToolFallback {
         tool_choice: types::ToolChoice::any(),
+        strategy: ForceStrategy::DisableThinking,
     };
     assert!(!fb.is_satisfied_by(&[]));
     assert!(fb.is_satisfied_by(&["whatever".into()]));

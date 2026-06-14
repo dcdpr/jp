@@ -69,6 +69,17 @@ impl ModelDetails {
         self.features.contains(&"prefill")
     }
 
+    /// Returns `true` if the model supports disabling reasoning.
+    ///
+    /// Models that always run with adaptive thinking, and reject an explicit
+    /// `thinking: disabled`, return `false`.
+    /// For those, callers must omit the thinking field rather than disabling
+    /// it.
+    #[must_use]
+    pub fn supports_disabling_thinking(&self) -> bool {
+        !self.features.contains(&"thinking-always-on")
+    }
+
     #[must_use]
     pub fn name(&self) -> &str {
         self.display_name.as_deref().unwrap_or(&self.id.name)
