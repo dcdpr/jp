@@ -266,6 +266,13 @@ impl EventBuilder {
     /// Query this before draining to report what was lost.
     /// Names are sorted for deterministic output.
     ///
+    /// Unnamed buffers are skipped.
+    /// A malformed stream can open a tool-call buffer from an argument chunk
+    /// that arrives before its `Start`, which leaves both the name and id
+    /// empty; reporting `""` would render an empty tool name in the diagnostic,
+    /// so those buffers are dropped here rather than surfaced.
+    /// [`drain`] still logs them.
+    ///
     /// [`drain`]: Self::drain
     #[must_use]
     pub fn incomplete_tool_calls(&self) -> Vec<String> {
@@ -273,7 +280,7 @@ impl EventBuilder {
             .buffers
             .values()
             .filter_map(|buffer| match buffer {
-                IndexBuffer::ToolCall { name, .. } => Some(name.clone()),
+                IndexBuffer::ToolCall { name, .. } if !name.is_empty() => Some(name.clone()),
                 _ => None,
             })
             .collect();

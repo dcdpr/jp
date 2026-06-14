@@ -54,6 +54,37 @@ fn test_handles_tool_call() {
     assert_eq!(req.name, "test_tool");
 }
 
+/// A malformed stream can open a tool-call buffer from an argument chunk that
+/// arrives before any `Start`, leaving the name empty.
+/// Those unnamed buffers must not appear in the diagnostic, where they would
+/// render as empty names.
+#[test]
+fn test_incomplete_tool_calls_skips_unnamed_buffers() {
+    let mut builder = EventBuilder::new();
+
+    // A real, named tool call still mid-stream (no flush yet).
+    builder.handle_part(
+        0,
+        EventPart::ToolCall(ToolCallPart::Start {
+            id: "call_1".into(),
+            name: "fs_modify_file".into(),
+        }),
+        Map::new(),
+    );
+
+    // A malformed buffer: an argument chunk before any `Start`, so its name and
+    // id are both empty.
+    builder.handle_part(
+        1,
+        EventPart::ToolCall(ToolCallPart::ArgumentChunk("{}".into())),
+        Map::new(),
+    );
+
+    assert_eq!(builder.incomplete_tool_calls(), vec![
+        "fs_modify_file".to_string()
+    ]);
+}
+
 #[test]
 fn test_merges_multi_part_tool_call() {
     let mut builder = EventBuilder::new();
