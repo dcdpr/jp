@@ -63,6 +63,110 @@ fn test_transitions_to_executing_on_tool_call() {
 }
 
 #[test]
+fn finish_notice_silent_for_completed_and_retry() {
+    assert!(finish_notice(&FinishReason::Completed, &[]).is_none());
+    assert!(finish_notice(&FinishReason::Retry, &[]).is_none());
+}
+
+#[test]
+fn finish_notice_max_tokens_plain() {
+    let msg = finish_notice(&FinishReason::MaxTokens, &[]).expect("notice");
+    assert!(msg.contains("max output tokens"));
+    assert!(!msg.contains("tool call"));
+}
+
+#[test]
+fn finish_notice_max_tokens_names_dropped_tool() {
+    let dropped = vec!["fs_modify_file".to_string()];
+    let msg = finish_notice(&FinishReason::MaxTokens, &dropped).expect("notice");
+    assert!(msg.contains("fs_modify_file"));
+    assert!(msg.contains("tool call"));
+}
+
+#[test]
+fn finish_notice_other_uses_unquoted_string_detail() {
+    let reason = FinishReason::Other(json!("content_filter"));
+    let msg = finish_notice(&reason, &[]).expect("notice");
+    assert!(msg.contains("content_filter"));
+    assert!(
+        !msg.contains('"'),
+        "string detail should be unquoted: {msg}"
+    );
+}
+
+/// A max-tokens finish surfaces a chrome notice on stderr, never on stdout.
+#[test]
+fn test_max_tokens_finish_emits_chrome_notice() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, err) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        printer.clone(),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::MaxTokens));
+    printer.flush();
+
+    let chrome = err.lock();
+    assert!(
+        chrome.contains("max output tokens"),
+        "truncation notice should be on stderr.\nstderr:\n{chrome}"
+    );
+    drop(chrome);
+
+    let stdout = out.lock();
+    assert!(
+        !stdout.contains("max output tokens"),
+        "notice must not leak onto stdout.\nstdout:\n{stdout}"
+    );
+}
+
+/// In JSON mode the notice is suppressed: it must not reach stderr, and stdout
+/// carries only the NDJSON conversation events.
+/// This guards the printer/sink split in `TurnCoordinator::new`.
+#[test]
+fn test_max_tokens_finish_suppressed_in_json_mode() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, err) = Printer::memory(OutputFormat::Json);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        printer.clone(),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::MaxTokens));
+    printer.flush();
+
+    // The notice is chrome; in JSON mode it goes to the sink, so stderr is empty.
+    let chrome = err.lock();
+    assert!(
+        chrome.is_empty(),
+        "JSON mode must not emit chrome to stderr.\nstderr:\n{chrome}"
+    );
+    drop(chrome);
+
+    // stdout carries the NDJSON conversation events and never the notice.
+    let stdout = out.lock();
+    assert!(
+        !stdout.contains("max output tokens"),
+        "notice must never reach stdout.\nstdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("test"),
+        "stdout should contain the NDJSON conversation events.\nstdout:\n{stdout}"
+    );
+}
+
+#[test]
 fn test_transitions_to_complete_no_tools() {
     let mut _turn_state = TurnState::default();
     let mut stream = ConversationStream::new_test();
