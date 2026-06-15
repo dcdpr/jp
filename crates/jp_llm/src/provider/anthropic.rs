@@ -2062,6 +2062,20 @@ fn map_content_delta(delta: types::ContentBlockDelta, index: usize, is_structure
 fn map_message_delta(delta: &types::MessageDelta) -> Option<Event> {
     match delta.stop_reason.as_deref()? {
         "max_tokens" => Some(Event::Finished(FinishReason::MaxTokens)),
+        // A safety classifier declined the request. `stop_details` carries the
+        // category and explanation; both are absent for an uncategorized
+        // refusal.
+        "refusal" => {
+            let (category, explanation) = delta
+                .stop_details
+                .as_ref()
+                .map(|d| (d.category.clone(), d.explanation.clone()))
+                .unwrap_or_default();
+            Some(Event::Finished(FinishReason::Refused {
+                category,
+                explanation,
+            }))
+        }
         _ => None,
     }
 }

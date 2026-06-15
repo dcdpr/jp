@@ -309,6 +309,22 @@ pub enum FinishReason {
     /// The stream is finished and no further events will be produced.
     Retry,
 
+    /// A safety classifier declined the request.
+    ///
+    /// This is a successful, terminal state: the model chose not to answer
+    /// rather than failing.
+    /// Any partial output already streamed should be discarded.
+    Refused {
+        /// The policy area that triggered the decline (e.g.
+        /// `cyber`, `bio`), or `None` when the refusal maps to no named
+        /// category.
+        category: Option<String>,
+
+        /// A human-readable explanation.
+        /// Display it; do not parse it.
+        explanation: Option<String>,
+    },
+
     /// The assistant has stopped generating tokens for some reason.
     Other(Value),
 }

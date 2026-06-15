@@ -385,6 +385,44 @@ fn test_map_model_unknown_zero_tokens_is_unknown() {
     assert_eq!(details.context_window, None);
 }
 
+/// A `stop_reason: "refusal"` maps to `FinishReason::Refused`, carrying the
+/// category and explanation from `stop_details`.
+#[test]
+fn test_map_message_delta_refusal() {
+    let delta: types::MessageDelta = serde_json::from_value(serde_json::json!({
+        "stop_reason": "refusal",
+        "stop_details": {
+            "type": "refusal",
+            "category": "cyber",
+            "explanation": "This request was declined.",
+        },
+    }))
+    .unwrap();
+
+    assert!(matches!(
+        map_message_delta(&delta),
+        Some(Event::Finished(FinishReason::Refused { category, explanation }))
+            if category.as_deref() == Some("cyber")
+                && explanation.as_deref() == Some("This request was declined.")
+    ));
+}
+
+/// An uncategorized refusal (no `stop_details`) still maps to `Refused`, with
+/// both fields `None`.
+#[test]
+fn test_map_message_delta_refusal_uncategorized() {
+    let delta: types::MessageDelta =
+        serde_json::from_value(serde_json::json!({ "stop_reason": "refusal" })).unwrap();
+
+    assert!(matches!(
+        map_message_delta(&delta),
+        Some(Event::Finished(FinishReason::Refused {
+            category: None,
+            explanation: None,
+        }))
+    ));
+}
+
 /// Fable 5 always runs with adaptive thinking.
 /// Even when reasoning is disabled, the request must not send `thinking:
 /// disabled`, which the API rejects with a 400 error.

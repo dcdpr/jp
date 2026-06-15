@@ -287,6 +287,16 @@ impl EventBuilder {
         names.sort();
         names
     }
+
+    /// Discard all buffered partial events without producing any
+    /// [`ConversationEvent`]s.
+    ///
+    /// Used when a stream ends in a way that invalidates partial output (a
+    /// refusal): the buffered content must be dropped rather than flushed.
+    pub fn clear(&mut self) {
+        self.buffers.clear();
+        self.metadata.clear();
+    }
 }
 
 impl Default for EventBuilder {

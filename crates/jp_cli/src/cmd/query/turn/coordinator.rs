@@ -293,9 +293,20 @@ impl TurnCoordinator {
                 // Capture tool-call buffers about to be discarded (e.g. a tool
                 // call truncated by max_tokens) so the notice can name them.
                 let dropped_tools = self.event_builder.incomplete_tool_calls();
-                for event in self.event_builder.drain() {
-                    self.push_event(stream, event);
+
+                if matches!(reason, FinishReason::Refused { .. }) {
+                    // `FinishReason::Refused` contract: any partial output
+                    // already streamed must be discarded. Drop the unflushed
+                    // buffer instead of pushing it, and remove any assistant
+                    // content already flushed into the current turn this cycle.
+                    self.event_builder.clear();
+                    stream.pop_while(ConversationEvent::is_chat_response);
+                } else {
+                    for event in self.event_builder.drain() {
+                        self.push_event(stream, event);
+                    }
                 }
+
                 self.view.flush();
                 // The provider has stopped emitting. Switch the printer's
                 // bounded-latency controller into drain mode so its
@@ -306,7 +317,8 @@ impl TurnCoordinator {
                 self.view.signal_typewriter_drain();
 
                 // Surface a chrome line for a non-standard finish (truncation,
-                // unknown stop reason); a clean completion stays silent.
+                // refusal, unknown stop reason); a clean completion stays
+                // silent.
                 if let Some(notice) = finish_notice(&reason, &dropped_tools) {
                     self.printer.eprintln(notice);
                 }
@@ -590,6 +602,20 @@ fn finish_notice(reason: &FinishReason, dropped_tools: &[String]) -> Option<Stri
                 names.join(", ")
             ),
         }),
+        FinishReason::Refused {
+            category,
+            explanation,
+        } => {
+            let category = category
+                .as_deref()
+                .map_or_else(String::new, |c| format!(" ({c})"));
+            let explanation = explanation
+                .as_deref()
+                .map_or_else(|| ".".to_string(), |e| format!(": {e}"));
+            Some(format!(
+                "The model declined this request{category}{explanation}"
+            ))
+        }
         FinishReason::Other(value) => {
             let detail = value
                 .as_str()

@@ -94,6 +94,98 @@ fn finish_notice_other_uses_unquoted_string_detail() {
     );
 }
 
+#[test]
+fn finish_notice_refused_renders_category_and_explanation() {
+    let reason = FinishReason::Refused {
+        category: Some("cyber".to_string()),
+        explanation: Some("declined for safety".to_string()),
+    };
+    let msg = finish_notice(&reason, &[]).expect("notice");
+    assert_eq!(
+        msg,
+        "The model declined this request (cyber): declined for safety"
+    );
+}
+
+#[test]
+fn finish_notice_refused_uncategorized() {
+    let reason = FinishReason::Refused {
+        category: None,
+        explanation: None,
+    };
+    let msg = finish_notice(&reason, &[]).expect("notice");
+    assert_eq!(msg, "The model declined this request.");
+}
+
+/// A refusal after buffered (unflushed) partial text discards it: the
+/// `FinishReason::Refused` contract says partial output must not persist.
+#[test]
+fn test_refused_discards_buffered_partial_text() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("explain X"));
+    // Partial assistant text streams but never flushes before the refusal.
+    coordinator.handle_event(&mut stream, Event::message(0, "Here is the par"));
+    coordinator.handle_event(
+        &mut stream,
+        Event::Finished(FinishReason::Refused {
+            category: Some("cyber".to_string()),
+            explanation: Some("declined".to_string()),
+        }),
+    );
+
+    assert!(
+        !stream.iter().any(|e| e.event.is_chat_response()),
+        "refusal must discard partial assistant output"
+    );
+    // The user's request is retained.
+    assert!(stream.iter().any(|e| e.event.is_chat_request()));
+}
+
+/// A refusal after *flushed* partial text also discards it: the block was
+/// already pushed into the stream during streaming, so the refused path must
+/// remove it, not just drop the buffer.
+#[test]
+fn test_refused_discards_flushed_partial_text() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("explain X"));
+    coordinator.handle_event(&mut stream, Event::message(0, "A complete sentence."));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    // Sanity: the flushed block reached the stream before the refusal.
+    assert!(stream.iter().any(|e| e.event.is_chat_response()));
+
+    coordinator.handle_event(
+        &mut stream,
+        Event::Finished(FinishReason::Refused {
+            category: None,
+            explanation: None,
+        }),
+    );
+
+    assert!(
+        !stream.iter().any(|e| e.event.is_chat_response()),
+        "refusal must discard already-flushed partial assistant output"
+    );
+    assert!(stream.iter().any(|e| e.event.is_chat_request()));
+}
+
 /// A max-tokens finish surfaces a chrome notice on stderr, never on stdout.
 #[test]
 fn test_max_tokens_finish_emits_chrome_notice() {
