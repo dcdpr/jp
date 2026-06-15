@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use indexmap::IndexMap;
 use jp_config::model::parameters::{
     PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort,
@@ -2144,4 +2146,43 @@ mod thinking_signature_recovery {
         // Turn 1, flat index 3 = ToolResult in messages[2]
         assert_eq!(resolve_turn_position(&msgs, 1, 3), Some((2, 0)));
     }
+}
+
+#[test]
+fn test_resolve_cache_control_off_disables_caching() {
+    assert_eq!(resolve_cache_control(CachePolicy::Off), None);
+}
+
+#[test]
+fn test_resolve_cache_control_short_requests_explicit_5m() {
+    let cc = resolve_cache_control(CachePolicy::Short).unwrap();
+    assert_eq!(cc.kind, types::CacheControlKind::Ephemeral);
+    assert_eq!(cc.ttl, Some(types::CacheControlTtl::Ttl5Minutes));
+}
+
+#[test]
+fn test_resolve_cache_control_long_requests_1h() {
+    let cc = resolve_cache_control(CachePolicy::Long).unwrap();
+    assert_eq!(cc.ttl, Some(types::CacheControlTtl::Ttl1Hour));
+}
+
+#[test]
+fn test_resolve_cache_control_custom_rounds_at_30_minutes() {
+    let ttl = |p| resolve_cache_control(p).unwrap().ttl;
+
+    // Below the 30-minute threshold rounds down to 5m.
+    assert_eq!(
+        ttl(CachePolicy::Custom(Duration::from_mins(10))),
+        Some(types::CacheControlTtl::Ttl5Minutes)
+    );
+    // Exactly 30 minutes rounds up to 1h.
+    assert_eq!(
+        ttl(CachePolicy::Custom(Duration::from_mins(30))),
+        Some(types::CacheControlTtl::Ttl1Hour)
+    );
+    // Above 30 minutes rounds up to 1h.
+    assert_eq!(
+        ttl(CachePolicy::Custom(Duration::from_hours(1))),
+        Some(types::CacheControlTtl::Ttl1Hour)
+    );
 }

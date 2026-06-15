@@ -77,11 +77,20 @@ pub struct RequestConfig {
 
     /// Prompt caching policy.
     ///
-    /// Controls whether the provider should apply prompt caching optimizations
-    /// (e.g., Anthropic's `cache_control` annotations).
+    /// Controls whether the provider applies prompt caching optimizations (e.g.
+    /// Anthropic's `cache_control` annotations).
     ///
-    /// Accepts booleans (`true`/`false`) or strings (`"off"`, `"short"`,
-    /// `"long"`).
+    /// Defaults to `short`.
+    /// Accepted values:
+    ///
+    /// - `false` / `off`: Disable caching.
+    /// - `true` / `short`: Cache with the provider's default short TTL
+    ///   (typically ~5 minutes).
+    /// - `long`: Cache with the provider's extended TTL (typically ~1 hour
+    ///   where supported).
+    /// - a duration such as `10m` or `1h`: Request that exact TTL.
+    ///   Providers that don't support arbitrary durations round to the nearest
+    ///   available option.
     #[setting(default)]
     pub cache: CachePolicy,
 }
