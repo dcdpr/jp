@@ -33,14 +33,14 @@ pub struct TitleConfig {
     ///
     /// An explicit `--title` or `--no-title` flag takes precedence over both.
     #[setting(default = true)]
-    pub from_header: bool,
+    pub from_heading: bool,
 }
 
 impl AssignKeyValue for PartialTitleConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "from_header" => self.from_header = kv.try_some_bool()?,
+            "from_heading" => self.from_heading = kv.try_some_bool()?,
             _ if kv.p("generate") => self.generate.assign(kv)?,
             _ => return missing_key(&kv),
         }
@@ -53,7 +53,7 @@ impl PartialConfigDelta for PartialTitleConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             generate: self.generate.delta(next.generate),
-            from_header: delta_opt(self.from_header.as_ref(), next.from_header),
+            from_heading: delta_opt(self.from_heading.as_ref(), next.from_heading),
         }
     }
 }
@@ -62,7 +62,7 @@ impl FillDefaults for PartialTitleConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             generate: self.generate.fill_from(defaults.generate),
-            from_header: self.from_header.or(defaults.from_header),
+            from_heading: self.from_heading.or(defaults.from_heading),
         }
     }
 }
@@ -71,7 +71,7 @@ impl ToPartial for TitleConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
             generate: self.generate.to_partial(),
-            from_header: partial_opt(&self.from_header, None),
+            from_heading: partial_opt(&self.from_heading, None),
         }
     }
 }

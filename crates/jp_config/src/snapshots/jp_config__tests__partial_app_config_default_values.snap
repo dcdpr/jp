@@ -101,7 +101,7 @@ Ok(
                         ),
                         model: None,
                     },
-                    from_header: Some(
+                    from_heading: Some(
                         true,
                     ),
                 },
