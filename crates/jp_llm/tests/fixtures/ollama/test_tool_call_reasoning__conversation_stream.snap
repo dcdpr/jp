@@ -46,7 +46,7 @@ expression: v
         "generate": {
           "auto": false
         },
-        "from_header": true
+        "from_heading": true
       },
       "tools": {
         "*": {
