@@ -56,10 +56,9 @@ fn default_rules(_: &()) -> schematic::TransformResult<MergeableVec<PartialCompa
 impl PartialCompactionConfig {
     /// The built-in default compaction rules (strip reasoning + tool calls).
     ///
-    /// Exposed so callers that compose with the config rules *before* finalize
-    /// (bare `--compact` plus inline DSL rules) can materialize the defaults
-    /// rather than appending to an empty list, which would make `fill_from`
-    /// treat the result as user-supplied and silently drop these defaults.
+    /// Used as the schematic default for `rules` (see `default_rules`) so an
+    /// otherwise-unconfigured workspace still compacts sensibly, and dropped
+    /// the moment any user-defined rule appears.
     #[must_use]
     pub fn builtin_rules() -> Vec<PartialCompactionRuleConfig> {
         vec![PartialCompactionRuleConfig {
@@ -134,6 +133,34 @@ impl ToPartial for CompactionConfig {
         Self::Partial {
             rules: vec_to_mergeable_partial(&self.rules),
         }
+    }
+}
+
+impl CompactionConfig {
+    /// Finalize CLI-supplied partial rules into resolved rules.
+    ///
+    /// Rules built from CLI flags or the inline `--compact` DSL bypass the
+    /// normal config-resolution path, which is the only place the per-rule
+    /// defaults (`keep_first = 1`, `keep_last = 3`) are applied.
+    /// Without this, an unset bound would resolve to `RuleBound::default()` (0)
+    /// and compact the whole conversation.
+    /// Applying the defaults here keeps inline rules consistent with
+    /// config-sourced ones.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the per-rule defaults fail to build or a rule is
+    /// missing a required field.
+    pub fn finalize_rules(
+        rules: Vec<PartialCompactionRuleConfig>,
+    ) -> Result<Vec<CompactionRuleConfig>, schematic::ConfigError> {
+        let defaults = PartialCompactionRuleConfig::default_values(&())?.unwrap_or_default();
+        rules
+            .into_iter()
+            .map(|rule| {
+                CompactionRuleConfig::from_partial(rule.fill_from(defaults.clone()), vec![])
+            })
+            .collect()
     }
 }
 

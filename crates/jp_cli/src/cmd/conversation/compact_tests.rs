@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use clap::Parser as _;
 use jp_config::{
-    AppConfig, PartialAppConfig,
+    AppConfig,
     conversation::compaction::{CompactionRuleConfig, RuleBound, ToolCallsMode},
 };
 use jp_conversation::{
@@ -12,8 +12,7 @@ use jp_conversation::{
 use jp_printer::Printer;
 use serde_json::{Map, Value};
 
-use super::{Bound, Compact, build_compaction_event, build_compaction_events_from_config};
-use crate::ctx::IntoPartialAppConfig as _;
+use super::{Bound, Compact, build_compaction_event, build_compaction_events};
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
 fn parse_compact(args: &[&str]) -> Compact {
@@ -38,15 +37,16 @@ fn bare_compact_flag_parses_without_a_value() {
 
 #[test]
 fn keep_last_only_does_not_inject_a_policyless_rule() {
-    // Range-only flags must narrow the configured rules at runtime, not replace
-    // them with a policy-less rule (which would project to a no-op).
+    // Range-only flags carry no policy, so `effective_rules` must fall through
+    // to the configured rules unchanged rather than synthesize a policy-less
+    // rule (which would project to a no-op). The range itself is applied as a
+    // runtime override on those rules, not as a rule of its own.
     let compact = parse_compact(&["--keep-last", "5"]);
-    let partial = compact
-        .apply_cli_config(None, PartialAppConfig::default(), None)
-        .unwrap();
-    assert!(
-        partial.conversation.compaction.rules.is_empty(),
-        "range-only flags must leave the rules array untouched"
+    let cfg = AppConfig::new_test();
+    let rules = compact.effective_rules(&cfg).unwrap();
+    assert_eq!(
+        rules, cfg.conversation.compaction.rules,
+        "range-only flags must leave the active rules untouched"
     );
 }
 
@@ -210,8 +210,8 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
     }
 
     // Resolved config rule: strip requests, keep first 1 and last 1.
-    let mut cfg = AppConfig::new_test();
-    cfg.conversation.compaction.rules = vec![CompactionRuleConfig {
+    let cfg = AppConfig::new_test();
+    let rules = vec![CompactionRuleConfig {
         keep_first: RuleBound::Turns(1),
         keep_last: RuleBound::Turns(1),
         reasoning: None,
@@ -220,9 +220,10 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
     }];
 
     let compactions = runtime()
-        .block_on(build_compaction_events_from_config(
+        .block_on(build_compaction_events(
             &stream,
             &cfg,
+            &rules,
             Bound::Default,
             Bound::Default,
             &Printer::sink(),

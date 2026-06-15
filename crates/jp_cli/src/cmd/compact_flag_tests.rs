@@ -187,47 +187,52 @@ fn to_partial_rule_no_range() {
     assert!(rule.keep_last.is_none());
 }
 
+/// Resolved config rules to combine against (the built-in default: strip
+/// reasoning + tools).
+fn config_rules() -> Vec<CompactionRuleConfig> {
+    CompactionConfig::finalize_rules(
+        jp_config::conversation::compaction::PartialCompactionConfig::builtin_rules(),
+    )
+    .unwrap()
+}
+
 #[test]
-fn apply_specs_only_replaces_rules() {
+fn specs_only_replace_config_rules() {
+    // No bare `--compact`: the inline DSL rule replaces the config rules.
     let flag = CompactFlag {
         use_config_rules: false,
         specs: vec!["t=sreq:..-3".parse().unwrap()],
     };
-    let mut partial = PartialAppConfig::default();
-    flag.apply_to_config(&mut partial);
+    let rules = flag.effective_rules(&config_rules()).unwrap();
 
-    let rules: &[_] = &partial.conversation.compaction.rules;
     assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].tool_calls, Some(ToolCallsMode::StripRequests));
 }
 
 #[test]
-fn bare_compact_plus_dsl_seeds_builtin_default() {
-    // `--compact` (config rules) plus an inline DSL spec on an otherwise-default
-    // config must run the built-in default rule *and* the DSL rule, not just
-    // the DSL rule.
+fn bare_compact_plus_dsl_appends_to_config_rules() {
+    // `--compact` plus an inline DSL spec runs the config rules *and* the DSL
+    // rule, config rules first.
     let flag = CompactFlag {
         use_config_rules: true,
         specs: vec!["s:..-3".parse().unwrap()],
     };
-    let mut partial = PartialAppConfig::default();
-    flag.apply_to_config(&mut partial);
+    let rules = flag.effective_rules(&config_rules()).unwrap();
 
-    let rules: &[_] = &partial.conversation.compaction.rules;
     assert_eq!(rules.len(), 2);
-    // Built-in default first (strip reasoning + tools), then the summary spec.
+    // Config default first (strip reasoning + tools), then the summary spec.
     assert_eq!(rules[0].reasoning, Some(ReasoningMode::Strip));
     assert_eq!(rules[0].tool_calls, Some(ToolCallsMode::Strip));
     assert!(rules[1].summary.is_some());
 }
 
 #[test]
-fn apply_bare_compact_leaves_config_unchanged() {
+fn bare_compact_only_uses_config_rules_unchanged() {
     let flag = CompactFlag {
         use_config_rules: true,
         specs: vec![],
     };
-    let mut partial = PartialAppConfig::default();
-    let before = partial.conversation.compaction.rules.len();
-    flag.apply_to_config(&mut partial);
-    assert_eq!(partial.conversation.compaction.rules.len(), before);
+    let config = config_rules();
+    let rules = flag.effective_rules(&config).unwrap();
+    assert_eq!(rules, config);
 }

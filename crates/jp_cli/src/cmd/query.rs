@@ -73,7 +73,6 @@ use jp_config::{
     },
     conversation::{
         ConversationConfig,
-        compaction::PartialCompactionConfig,
         tool::{
             Enable, ToolSource,
             access::{AccessConfig, PartialAccessConfig, PartialFsRuleConfig},
@@ -877,9 +876,17 @@ impl Query {
     ) -> Result<()> {
         let events = lock.events().clone();
 
-        let compactions = super::conversation::compact::build_compaction_events_from_config(
+        // The inline DSL plan never enters the config; assemble the effective
+        // rules from the resolved config rules plus any `-k SPEC` here.
+        let rules = self
+            .compact
+            .effective_rules(&cfg.conversation.compaction.rules)
+            .map_err(|e| Error::Compaction(e.to_string()))?;
+
+        let compactions = super::conversation::compact::build_compaction_events(
             &events,
             cfg,
+            &rules,
             super::conversation::compact::Bound::Default,
             super::conversation::compact::Bound::Default,
             &ctx.printer,
@@ -1163,13 +1170,7 @@ fn get_config_delta_from_cli(
         .map(|c| c.to_partial())
         .map_err(jp_conversation::Error::from)?;
 
-    let mut partial = partial.delta(cfg.to_partial());
-
-    // Compaction rules are a one-shot plan applied as overlay events by
-    // `apply_pre_query_compaction`, not persistent conversation config. Drop
-    // them from the recorded delta so an inline `-k SPEC` rule isn't replayed
-    // by future bare `--compact` invocations on the same conversation.
-    partial.conversation.compaction = PartialCompactionConfig::default();
+    let partial = partial.delta(cfg.to_partial());
 
     if partial.is_empty() {
         return Ok(None);
@@ -1209,7 +1210,7 @@ impl IntoPartialAppConfig for Query {
             expires_in: _,
             target: _,
             fork: _,
-            compact,
+            compact: _,
             title: _,
             no_title: _,
             mount,
@@ -1249,8 +1250,6 @@ impl IntoPartialAppConfig for Query {
         if *hide_tool_calls {
             partial.style.tool_call.show = Some(false);
         }
-
-        compact.apply_to_config(&mut partial);
 
         Ok(partial)
     }

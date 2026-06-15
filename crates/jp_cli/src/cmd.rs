@@ -132,10 +132,8 @@ impl IntoPartialAppConfig for Commands {
             Commands::AttachmentAdd(args) => {
                 args.apply_cli_config(workspace, partial, merged_config)
             }
-            Commands::Conversation(args) => {
-                args.apply_cli_config(workspace, partial, merged_config)
-            }
             Commands::Config(_)
+            | Commands::Conversation(_)
             | Commands::Init(_)
             | Commands::Plugin(_)
             | Commands::External(_) => Ok(partial),

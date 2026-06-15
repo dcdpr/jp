@@ -7,13 +7,9 @@
 use std::str::FromStr;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use jp_config::{
-    PartialAppConfig,
-    conversation::compaction::{
-        PartialCompactionConfig, PartialCompactionRuleConfig, PartialSummaryConfig, ReasoningMode,
-        RuleBound, ToolCallsMode,
-    },
-    types::vec::MergeableVec,
+use jp_config::conversation::compaction::{
+    CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
+    ReasoningMode, RuleBound, ToolCallsMode,
 };
 
 /// Shared compaction flag that can be embedded in any command.
@@ -49,41 +45,48 @@ impl CompactFlag {
             .collect()
     }
 
-    /// Apply DSL specs to the config partial.
+    /// Resolve the effective compaction rules for this invocation.
     ///
-    /// - If only specs (no bare `--compact`): replace the rules array.
-    /// - If bare `--compact` + specs: append DSL rules to the config rules.
-    /// - If bare `--compact` only: leave config unchanged (rules apply as-is).
-    pub fn apply_to_config(&self, partial: &mut PartialAppConfig) {
-        let rules = self.dsl_rules();
-        if rules.is_empty() {
-            return;
-        }
-
-        if self.use_config_rules {
-            append_config_rules(partial, rules);
-        } else {
-            partial.conversation.compaction.rules = MergeableVec::Vec(rules);
-        }
+    /// `config_rules` are the resolved rules from configuration (files,
+    /// `--cfg`, conversation config).
+    /// Used by `query` and `fork`, which carry no dedicated policy flags of
+    /// their own.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if an inline DSL rule fails to finalize.
+    pub(crate) fn effective_rules(
+        &self,
+        config_rules: &[CompactionRuleConfig],
+    ) -> Result<Vec<CompactionRuleConfig>, jp_config::ConfigError> {
+        let dsl = CompactionConfig::finalize_rules(self.dsl_rules())?;
+        Ok(combine_rules(config_rules, self.use_config_rules, dsl))
     }
 }
 
-/// Append `rules` to the partial's compaction rules under bare `--compact`
-/// ("config rules plus these rules") semantics.
+/// Combine configured rules with explicit (policy-flag or DSL) rules.
 ///
-/// The config rules are not materialized until finalize, so appending to an
-/// otherwise-empty list would let `PartialCompactionConfig::fill_from` treat
-/// the result as user-supplied and skip the built-in default rule.
-/// Seed the built-in defaults first when the config provides none.
-pub(crate) fn append_config_rules(
-    partial: &mut PartialAppConfig,
-    rules: Vec<PartialCompactionRuleConfig>,
-) {
-    if partial.conversation.compaction.rules.is_empty() {
-        partial.conversation.compaction.rules =
-            MergeableVec::Vec(PartialCompactionConfig::builtin_rules());
+/// - No explicit rules: the configured rules apply unchanged (bare `--compact`,
+///   or no compaction flags at all).
+/// - Bare `--compact` plus explicit rules: configured rules first, then the
+///   explicit rules.
+/// - Explicit rules only: they replace the configured rules.
+pub(crate) fn combine_rules(
+    config_rules: &[CompactionRuleConfig],
+    use_config_rules: bool,
+    explicit: Vec<CompactionRuleConfig>,
+) -> Vec<CompactionRuleConfig> {
+    if explicit.is_empty() {
+        return config_rules.to_vec();
     }
-    partial.conversation.compaction.rules.extend(rules);
+
+    if use_config_rules {
+        let mut rules = config_rules.to_vec();
+        rules.extend(explicit);
+        rules
+    } else {
+        explicit
+    }
 }
 
 impl clap::Args for CompactFlag {

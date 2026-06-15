@@ -4,7 +4,7 @@ use tracing::debug;
 
 use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds, time::TimeThreshold},
-    ctx::{Ctx, IntoPartialAppConfig},
+    ctx::Ctx,
 };
 
 #[derive(Debug, clap::Args)]
@@ -91,9 +91,14 @@ impl Fork {
             if self.compact.should_compact() {
                 let cfg = ctx.config();
                 let events_snapshot = lock.events().clone();
-                let compactions = super::compact::build_compaction_events_from_config(
+                let rules = self
+                    .compact
+                    .effective_rules(&cfg.conversation.compaction.rules)
+                    .map_err(|e| crate::error::Error::Compaction(e.to_string()))?;
+                let compactions = super::compact::build_compaction_events(
                     &events_snapshot,
                     &cfg,
+                    &rules,
                     super::compact::Bound::Default,
                     super::compact::Bound::Default,
                     &ctx.printer,
@@ -122,18 +127,6 @@ impl Fork {
         }
         ctx.printer.println("Conversation forked.");
         Ok(())
-    }
-}
-
-impl IntoPartialAppConfig for Fork {
-    fn apply_cli_config(
-        &self,
-        _workspace: Option<&jp_workspace::Workspace>,
-        mut partial: jp_config::PartialAppConfig,
-        _merged_config: Option<&jp_config::PartialAppConfig>,
-    ) -> Result<jp_config::PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        self.compact.apply_to_config(&mut partial);
-        Ok(partial)
     }
 }
 

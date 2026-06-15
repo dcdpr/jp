@@ -622,6 +622,76 @@ fn query_model_override_is_persisted_as_config_delta() {
     );
 }
 
+#[test]
+fn query_cfg_sourced_compaction_persists_as_config_delta() {
+    // Compaction config that arrives through the config layers (e.g. `-c
+    // compaction/heavy` or `--cfg conversation.compaction.rules=...`) is
+    // ordinary conversation config: it must persist as a delta like any other
+    // key. The one-shot inline DSL is the only compaction input kept out of the
+    // config (see `inline_compact_dsl_is_not_written_into_query_config`).
+    use jp_config::{
+        conversation::compaction::{PartialCompactionRuleConfig, ReasoningMode},
+        types::vec::MergeableVec,
+    };
+
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(2000);
+
+    let mut workspace = Workspace::new("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    // Stand in for a `-c`/`--cfg` layer that sets a compaction rule differing
+    // from the stored conversation config (reasoning-only vs the built-in
+    // reasoning + tools default).
+    let mut partial = base_config.to_partial();
+    partial.conversation.compaction.rules = MergeableVec::Vec(vec![PartialCompactionRuleConfig {
+        reasoning: Some(ReasoningMode::Strip),
+        ..Default::default()
+    }]);
+    let runtime_config = build(partial).unwrap();
+
+    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+        .unwrap()
+        .expect("cfg-sourced compaction config should produce a delta");
+
+    assert!(
+        !delta.conversation.compaction.rules.is_empty(),
+        "compaction config from the config layers must persist as a conversation delta",
+    );
+}
+
+#[test]
+fn inline_compact_dsl_is_not_written_into_query_config() {
+    // The inline `-k SPEC` plan is applied as overlay events at query time, not
+    // as config. `apply_cli_config` must leave `conversation.compaction`
+    // untouched so the spec is never recorded as a conversation config delta and
+    // replayed by a future bare `--compact`.
+    use crate::cmd::compact_flag::CompactFlag;
+
+    // Start from an empty partial so any compaction rules in the result could
+    // only have been written by `apply_cli_config` itself.
+    let base = jp_config::PartialAppConfig::default();
+    let query = Query {
+        compact: CompactFlag {
+            use_config_rules: false,
+            specs: vec!["s:..-3".parse().unwrap()],
+        },
+        ..Default::default()
+    };
+
+    let partial = query.apply_cli_config(None, base, None).unwrap();
+    assert!(
+        partial.conversation.compaction.rules.is_empty(),
+        "inline -k DSL must not be written into the config partial",
+    );
+}
+
 #[tokio::test]
 async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_query() {
     let tmp = camino_tempfile::tempdir().unwrap();

@@ -1,13 +1,9 @@
 use std::{str::FromStr as _, time::Duration};
 
 use chrono::{DateTime, Utc};
-use jp_config::{
-    PartialAppConfig,
-    conversation::compaction::{
-        CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig, ReasoningMode,
-        RuleBound, ToolCallsMode,
-    },
-    types::vec::MergeableVec,
+use jp_config::conversation::compaction::{
+    CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
+    ReasoningMode, RuleBound, ToolCallsMode,
 };
 use jp_conversation::{
     Compaction, CompactionRange, ConversationStream, RangeBound, ReasoningPolicy, SummaryPolicy,
@@ -22,7 +18,7 @@ use crate::{
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
     },
-    ctx::{Ctx, IntoPartialAppConfig},
+    ctx::Ctx,
 };
 
 #[derive(Debug, clap::Args)]
@@ -132,23 +128,27 @@ impl Compact {
     }
 }
 
-impl IntoPartialAppConfig for Compact {
-    fn apply_cli_config(
+impl Compact {
+    /// Resolve the effective compaction rules for this invocation.
+    ///
+    /// Dedicated policy flags (`--reasoning`/`--tools`/`--summarize`) build one
+    /// ad-hoc rule; inline DSL specs (`-k SPEC`) each build one. clap makes the
+    /// two mutually exclusive (the policy flags `conflicts_with` the `compact`
+    /// flag), so at most one side is ever populated.
+    /// These explicit rules replace the configured rules, unless a bare
+    /// `--compact` is also present, in which case they are appended to the
+    /// configured rules.
+    ///
+    /// Range flags (`--keep-first`/`--keep-last`/`--from`/`--to`) are NOT
+    /// rules: `compact_one` applies them as range overrides on whichever rules
+    /// end up active (see `resolve_from`/`resolve_to`), so a range-only
+    /// invocation narrows the configured rules instead of replacing them with a
+    /// policy-less no-op.
+    fn effective_rules(
         &self,
-        _workspace: Option<&jp_workspace::Workspace>,
-        mut partial: PartialAppConfig,
-        _merged_config: Option<&PartialAppConfig>,
-    ) -> Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        // Dedicated policy flags build a single ad-hoc rule; inline DSL specs
-        // each build one. clap makes the two mutually exclusive (the policy
-        // flags `conflicts_with` the `compact` flag), so at most one side is
-        // ever populated here.
-        //
-        // Range flags are NOT rules — `compact_one` applies them as range
-        // overrides on whichever rules end up active (see `resolve_from` /
-        // `resolve_to`), so a range-only invocation narrows the configured
-        // rules instead of replacing them with a policy-less no-op.
-        let mut rules: Vec<PartialCompactionRuleConfig> = Vec::new();
+        cfg: &jp_config::AppConfig,
+    ) -> Result<Vec<CompactionRuleConfig>, jp_config::ConfigError> {
+        let mut explicit: Vec<PartialCompactionRuleConfig> = Vec::new();
 
         if self.has_policy_overrides() {
             let mut rule = PartialCompactionRuleConfig::default();
@@ -159,24 +159,17 @@ impl IntoPartialAppConfig for Compact {
             if self.summarize {
                 rule.summary = Some(PartialSummaryConfig::default());
             }
-            rules.push(rule);
+            explicit.push(rule);
         }
 
-        rules.extend(self.compact_flag.dsl_rules());
+        explicit.extend(self.compact_flag.dsl_rules());
 
-        if !rules.is_empty() {
-            // Explicit policy/DSL rules replace the configured rules, unless a
-            // bare `--compact` is also present, in which case they append to
-            // the config rules (seeding the built-in default when the config
-            // provides none).
-            if self.compact_flag.use_config_rules {
-                crate::cmd::compact_flag::append_config_rules(&mut partial, rules);
-            } else {
-                partial.conversation.compaction.rules = MergeableVec::Vec(rules);
-            }
-        }
-
-        Ok(partial)
+        let explicit = CompactionConfig::finalize_rules(explicit)?;
+        Ok(crate::cmd::compact_flag::combine_rules(
+            &cfg.conversation.compaction.rules,
+            self.compact_flag.use_config_rules,
+            explicit,
+        ))
     }
 }
 
@@ -325,13 +318,14 @@ pub(crate) async fn build_compaction_event(
     Ok(Some(compaction))
 }
 
-/// Build compaction events from all config rules.
+/// Build compaction events from the given resolved rules.
 ///
 /// Each rule produces one `Compaction` event.
 /// Runtime range overrides (`--from`/`--to`) apply to every rule.
-pub(crate) async fn build_compaction_events_from_config(
+pub(crate) async fn build_compaction_events(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,
+    rules: &[CompactionRuleConfig],
     from_override: Bound,
     to_override: Bound,
     printer: &jp_printer::Printer,
@@ -343,7 +337,7 @@ pub(crate) async fn build_compaction_events_from_config(
     // a summarizer reads or the turn-count used for range resolution.
     let mut working = events.clone();
     let mut compactions = Vec::new();
-    for rule in &cfg.conversation.compaction.rules {
+    for rule in rules {
         if let Some(c) = build_compaction_event(
             &working,
             cfg,
@@ -501,6 +495,12 @@ impl Compact {
             return Ok(());
         }
 
+        // The effective rules combine the configured rules with any policy
+        // flags / inline DSL (replace, or append under bare `--compact`).
+        let rules = self
+            .effective_rules(&cfg)
+            .map_err(|e| crate::error::Error::Compaction(e.to_string()))?;
+
         // Range overrides (`--from`/`--to`/`--keep-first`/`--keep-last`) are
         // resolved at runtime (they need the stream for duration and "last"
         // resolution) and apply on top of every active rule.
@@ -513,7 +513,7 @@ impl Compact {
             // match what would actually be applied.
             let mut working = events_snapshot.clone();
             let mut printed = false;
-            for rule in &cfg.conversation.compaction.rules {
+            for rule in &rules {
                 let Some(range) =
                     resolve_rule_range(&working, rule, from_override.clone(), to_override.clone())
                 else {
@@ -542,9 +542,10 @@ impl Compact {
             return Ok(());
         }
 
-        let compactions = build_compaction_events_from_config(
+        let compactions = build_compaction_events(
             &events_snapshot,
             &cfg,
+            &rules,
             from_override,
             to_override,
             &ctx.printer,
