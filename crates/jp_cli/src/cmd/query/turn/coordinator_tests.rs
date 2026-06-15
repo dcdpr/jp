@@ -94,6 +94,28 @@ fn finish_notice_other_uses_unquoted_string_detail() {
     );
 }
 
+#[test]
+fn finish_notice_refused_renders_category_and_explanation() {
+    let reason = FinishReason::Refused {
+        category: Some("cyber".to_string()),
+        explanation: Some("declined for safety".to_string()),
+    };
+    let msg = finish_notice(&reason, &[]).expect("notice");
+    assert!(msg.contains("declined"), "{msg}");
+    assert!(msg.contains("cyber"), "{msg}");
+    assert!(msg.contains("declined for safety"), "{msg}");
+}
+
+#[test]
+fn finish_notice_refused_uncategorized() {
+    let reason = FinishReason::Refused {
+        category: None,
+        explanation: None,
+    };
+    let msg = finish_notice(&reason, &[]).expect("notice");
+    assert_eq!(msg, "The model declined this request.");
+}
+
 /// A max-tokens finish surfaces a chrome notice on stderr, never on stdout.
 #[test]
 fn test_max_tokens_finish_emits_chrome_notice() {

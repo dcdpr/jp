@@ -590,6 +590,20 @@ fn finish_notice(reason: &FinishReason, dropped_tools: &[String]) -> Option<Stri
                 names.join(", ")
             ),
         }),
+        FinishReason::Refused {
+            category,
+            explanation,
+        } => {
+            let category = category
+                .as_deref()
+                .map_or_else(String::new, |c| format!(" ({c})"));
+            let explanation = explanation
+                .as_deref()
+                .map_or_else(|| ".".to_string(), |e| format!(": {e}"));
+            Some(format!(
+                "The model declined this request{category}{explanation}"
+            ))
+        }
         FinishReason::Other(value) => {
             let detail = value
                 .as_str()
