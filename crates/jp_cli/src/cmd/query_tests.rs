@@ -740,6 +740,49 @@ fn lock_with_title(
 }
 
 #[test]
+fn resolve_new_title_uses_leading_heading() {
+    assert_eq!(
+        resolve_new_title(true, true, "# Fix the parser\n\nbody text"),
+        NewTitle::FromHeading("Fix the parser".to_owned())
+    );
+}
+
+#[test]
+fn resolve_new_title_heading_wins_when_generation_disabled() {
+    // The two flags are independent: `from_heading` still applies even
+    // with LLM generation turned off.
+    assert_eq!(
+        resolve_new_title(true, false, "# Title"),
+        NewTitle::FromHeading("Title".to_owned())
+    );
+}
+
+#[test]
+fn resolve_new_title_disabled_heading_falls_through_to_generation() {
+    assert_eq!(
+        resolve_new_title(false, true, "# Title"),
+        NewTitle::Generate
+    );
+}
+
+#[test]
+fn resolve_new_title_no_heading_generates() {
+    assert_eq!(
+        resolve_new_title(true, true, "just a plain prompt"),
+        NewTitle::Generate
+    );
+}
+
+#[test]
+fn resolve_new_title_skips_when_both_disabled() {
+    assert_eq!(resolve_new_title(false, false, "# Title"), NewTitle::Skip);
+    assert_eq!(
+        resolve_new_title(true, false, "no heading here"),
+        NewTitle::Skip
+    );
+}
+
+#[test]
 fn apply_title_override_no_title_clears_existing_title() {
     // `--no-title` should clear an inherited title (the
     // `--fork --no-title` case from PR #600 review): a forked

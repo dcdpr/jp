@@ -14,10 +14,16 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct GenerateConfig {
-    /// Whether to automatically generate titles for conversations.
+    /// Whether to generate conversation titles with the LLM.
     ///
-    /// If true, a title will be generated based on the first prompt of the
-    /// conversation.
+    /// Defaults to `true`.
+    /// When enabled, a title is generated from the first prompt of a new
+    /// conversation via a background model request.
+    ///
+    /// This controls only LLM-based generation.
+    /// A title derived from a leading markdown heading
+    /// (`conversation.title.from_heading`) is set independently and is not
+    /// affected by this setting.
     #[setting(default = true)]
     pub auto: bool,
 

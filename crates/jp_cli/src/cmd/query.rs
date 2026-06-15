@@ -452,21 +452,44 @@ impl Query {
 
         let stream = lock.events().clone();
 
-        // Generate title for new or empty conversations (including forks).
+        // Set the title for new or empty conversations (including forks).
         // Skip when `--title` or `--no-title` was provided (the user already
-        // expressed an intent for the title), or when the resolved config
-        // has auto-generation disabled.
+        // expressed an intent for the title).
+        //
+        // A leading markdown heading in the prompt is used verbatim as the
+        // title, short-circuiting the LLM round-trip. Otherwise, fall back to
+        // background title generation when enabled.
         if (self.is_new() || self.fork.is_some() || stream.is_empty())
             && ctx.term.args.persist
             && self.title.is_none()
             && !self.no_title
-            && cfg.conversation.title.generate.auto
         {
-            debug!("Generating title for new conversation");
-            let mut stream = stream.clone();
-            stream.start_turn(chat_request.clone());
-            ctx.task_handler
-                .spawn(TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty)?);
+            match resolve_new_title(
+                cfg.conversation.title.from_heading,
+                cfg.conversation.title.generate.auto,
+                &chat_request.content,
+            ) {
+                NewTitle::FromHeading(title) => {
+                    debug!("Using leading markdown heading as conversation title");
+                    lock.as_mut()
+                        .update_metadata(|m| m.title = Some(title.clone()));
+                    if ctx.term.is_tty {
+                        jp_term::osc::set_title(format!("{cid}: {title}"));
+                    }
+                }
+                NewTitle::Generate => {
+                    debug!("Generating title for new conversation");
+                    let mut stream = stream.clone();
+                    stream.start_turn(chat_request.clone());
+                    ctx.task_handler.spawn(TitleGeneratorTask::new(
+                        cid,
+                        stream,
+                        &cfg,
+                        ctx.term.is_tty,
+                    )?);
+                }
+                NewTitle::Skip => {}
+            }
         }
 
         // Wait for all MCP servers to finish loading.
@@ -1039,6 +1062,38 @@ fn fork_conversation(
             events.retain_last_turns(n);
         }
     })
+}
+
+/// How a new conversation's title is set from its first prompt, before the turn
+/// runs.
+#[derive(Debug, PartialEq)]
+enum NewTitle {
+    /// Use this text, taken verbatim from a leading markdown heading.
+    FromHeading(String),
+
+    /// Generate a title in the background via the LLM.
+    Generate,
+
+    /// Leave the title unset.
+    Skip,
+}
+
+/// Decide how to title a new conversation from its first prompt `content`.
+///
+/// A leading markdown heading wins when `from_heading` is enabled; otherwise
+/// background generation is chosen when `generate_auto` is enabled.
+/// The two flags are independent: disabling generation does not disable
+/// heading-derived titles.
+fn resolve_new_title(from_heading: bool, generate_auto: bool, content: &str) -> NewTitle {
+    if from_heading && let Some(title) = jp_md::heading::leading_heading(content) {
+        return NewTitle::FromHeading(title);
+    }
+
+    if generate_auto {
+        return NewTitle::Generate;
+    }
+
+    NewTitle::Skip
 }
 
 /// Apply `--title` / `--no-title` to the resolved conversation.
