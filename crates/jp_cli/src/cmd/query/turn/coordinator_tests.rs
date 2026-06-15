@@ -101,7 +101,10 @@ fn finish_notice_refused_renders_category_and_explanation() {
         explanation: Some("declined for safety".to_string()),
     };
     let msg = finish_notice(&reason, &[]).expect("notice");
-    assert_eq!(msg, "The model declined this request (cyber): declined for safety");
+    assert_eq!(
+        msg,
+        "The model declined this request (cyber): declined for safety"
+    );
 }
 
 #[test]
