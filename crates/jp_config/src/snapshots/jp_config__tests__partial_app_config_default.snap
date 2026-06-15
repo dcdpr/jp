@@ -47,6 +47,7 @@ PartialAppConfig {
                 auto: None,
                 model: None,
             },
+            from_header: None,
         },
         tools: PartialToolsConfig {
             defaults: PartialToolsDefaultsConfig {

@@ -48,7 +48,8 @@ expression: v
       "title": {
         "generate": {
           "auto": false
-        }
+        },
+        "from_header": true
       },
       "tools": {
         "*": {

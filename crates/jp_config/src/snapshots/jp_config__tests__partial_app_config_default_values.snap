@@ -101,6 +101,9 @@ Ok(
                         ),
                         model: None,
                     },
+                    from_header: Some(
+                        true,
+                    ),
                 },
                 tools: PartialToolsConfig {
                     defaults: PartialToolsDefaultsConfig {

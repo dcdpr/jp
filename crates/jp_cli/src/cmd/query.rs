@@ -452,21 +452,43 @@ impl Query {
 
         let stream = lock.events().clone();
 
-        // Generate title for new or empty conversations (including forks).
+        // Set the title for new or empty conversations (including forks).
         // Skip when `--title` or `--no-title` was provided (the user already
-        // expressed an intent for the title), or when the resolved config
-        // has auto-generation disabled.
+        // expressed an intent for the title).
+        //
+        // A leading markdown heading in the prompt is used verbatim as the
+        // title, short-circuiting the LLM round-trip. Otherwise, fall back to
+        // background title generation when enabled.
         if (self.is_new() || self.fork.is_some() || stream.is_empty())
             && ctx.term.args.persist
             && self.title.is_none()
             && !self.no_title
-            && cfg.conversation.title.generate.auto
         {
-            debug!("Generating title for new conversation");
-            let mut stream = stream.clone();
-            stream.start_turn(chat_request.clone());
-            ctx.task_handler
-                .spawn(TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty)?);
+            let header_title = cfg
+                .conversation
+                .title
+                .from_header
+                .then(|| jp_md::heading::leading_heading(&chat_request.content))
+                .flatten();
+
+            if let Some(title) = header_title {
+                debug!("Using leading markdown heading as conversation title");
+                lock.as_mut()
+                    .update_metadata(|m| m.title = Some(title.clone()));
+                if ctx.term.is_tty {
+                    jp_term::osc::set_title(format!("{cid}: {title}"));
+                }
+            } else if cfg.conversation.title.generate.auto {
+                debug!("Generating title for new conversation");
+                let mut stream = stream.clone();
+                stream.start_turn(chat_request.clone());
+                ctx.task_handler.spawn(TitleGeneratorTask::new(
+                    cid,
+                    stream,
+                    &cfg,
+                    ctx.term.is_tty,
+                )?);
+            }
         }
 
         // Wait for all MCP servers to finish loading.

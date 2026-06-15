@@ -30,6 +30,7 @@
 mod ansi;
 pub mod buffer;
 pub mod format;
+pub mod heading;
 mod render;
 mod table;
 pub mod theme;
