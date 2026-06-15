@@ -25,7 +25,8 @@ when:
         "effort": "high"
       },
       "cache_control": {
-        "type": "ephemeral"
+        "type": "ephemeral",
+        "ttl": "5m"
       }
     }
 then:
