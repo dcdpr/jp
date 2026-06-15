@@ -139,6 +139,26 @@ fn test_trim_trailing_empty_turn_keeps_non_empty_turn() {
 }
 
 #[test]
+fn test_pop_while_removes_only_the_trailing_run() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("hello"); // TurnStart + ChatRequest
+    stream.push(ChatResponse::Reasoning {
+        reasoning: "thinking".into(),
+    });
+    stream.push(ChatResponse::Message {
+        message: "partial".into(),
+    });
+    assert_eq!(stream.len(), 4);
+
+    let popped = stream.pop_while(ConversationEvent::is_chat_response);
+
+    assert_eq!(popped.len(), 2, "both trailing responses are popped");
+    assert_eq!(stream.len(), 2, "TurnStart + ChatRequest remain");
+    assert!(stream.iter().all(|e| !e.event.is_chat_response()));
+    assert!(stream.iter().any(|e| e.event.is_chat_request()));
+}
+
+#[test]
 fn sanitize_removes_trailing_empty_turn_after_popped_chat_request() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn("hello");

@@ -486,6 +486,28 @@ impl ConversationStream {
         self.pop()
     }
 
+    /// Pop trailing events while `f` returns `true`, returning the removed
+    /// events in pop order (last in the stream first).
+    ///
+    /// Built on [`pop_if`]: it stops at the first event that fails the
+    /// predicate, so only a trailing run is removed, never matching events
+    /// deeper in the stream.
+    /// Use this instead of [`retain`] when the removal must be confined to the
+    /// tail.
+    ///
+    /// [`pop_if`]: Self::pop_if
+    /// [`retain`]: Self::retain
+    pub fn pop_while(
+        &mut self,
+        f: impl Fn(&ConversationEvent) -> bool,
+    ) -> Vec<ConversationEventWithConfig> {
+        let mut popped = Vec::new();
+        while let Some(event) = self.pop_if(&f) {
+            popped.push(event);
+        }
+        popped
+    }
+
     /// Retains only the [`ConversationEvent`]s that pass the predicate.
     ///
     /// This does NOT remove the [`ConfigDelta`]s.
