@@ -14,6 +14,7 @@ use crate::{
     },
     ctx::Ctx,
     format::conversation::DetailsFmt,
+    shared::confirm::ConfirmFlag,
 };
 
 #[derive(Debug, clap::Args)]
@@ -25,9 +26,11 @@ pub(crate) struct Rm {
     #[command(flatten)]
     range: CreationRange,
 
-    /// Do not prompt for confirmation.
-    #[arg(long, short = 'y')]
-    yes: bool,
+    /// Confirmation prompting: `--confirm`, `--no-confirm`, or `--yes`.
+    ///
+    /// Removal always prompts by default; `--no-confirm` / `--yes` skips it.
+    #[command(flatten)]
+    confirm: ConfirmFlag,
 }
 
 impl Rm {
@@ -49,8 +52,11 @@ impl Rm {
             }
         }
 
+        // Removal is destructive, so the default (`None`) prompts; only an
+        // explicit `--no-confirm` / `--yes` skips it.
+        let force = self.confirm.preference() == Some(false);
         for handle in handles {
-            remove(ctx, handle, active_id, self.yes).await?;
+            remove(ctx, handle, active_id, force).await?;
         }
 
         ctx.printer.println("Conversation(s) removed.");

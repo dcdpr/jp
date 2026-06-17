@@ -21,7 +21,7 @@ fn empty_rm() -> Rm {
     Rm {
         target: PositionalIds::from_targets(vec![]),
         range: CreationRange::default(),
-        yes: false,
+        confirm: ConfirmFlag::default(),
     }
 }
 

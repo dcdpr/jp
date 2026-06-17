@@ -39,13 +39,13 @@ fn workspace_with_active_conversation(id: ConversationId) -> (Workspace, Session
     (ws, session)
 }
 
-/// Default constructor for tests — no targets, no filters, no `--yes`.
+/// Default constructor for tests — no targets, no filters, default confirm.
 fn empty_archive() -> Archive {
     Archive {
         target: PositionalIds::from_targets(vec![]),
         range: CreationRange::default(),
         inactive_since: None,
-        yes: false,
+        confirm: ConfirmFlag::default(),
     }
 }
 

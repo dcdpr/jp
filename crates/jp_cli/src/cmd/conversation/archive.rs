@@ -11,6 +11,7 @@ use crate::{
         time::{CreationRange, TimeThreshold},
     },
     ctx::Ctx,
+    shared::confirm::ConfirmFlag,
 };
 
 /// Archive conversations.
@@ -18,8 +19,10 @@ use crate::{
 /// Without IDs, archives the session's active conversation (same fallback chain
 /// as `jp c show`: session active → `conversation.default_id` → picker).
 /// With IDs, archives each one.
-/// Prompts for confirmation when archiving pinned or active conversations
-/// (suppress with `--yes`).
+/// By default, prompts for confirmation only when archiving pinned or active
+/// conversations.
+/// Pass `--confirm` to prompt for every conversation, or `--no-confirm` /
+/// `--yes` to skip all prompts.
 ///
 /// Use `--from`/`--until` to archive a range of conversations by creation date,
 /// or `--inactive-since` to archive everything unused since a given time.
@@ -45,9 +48,11 @@ pub(crate) struct Archive {
     #[arg(long, conflicts_with = "id")]
     inactive_since: Option<TimeThreshold>,
 
-    /// Do not prompt for confirmation on pinned or active conversations.
-    #[arg(long, short = 'y')]
-    yes: bool,
+    /// Confirmation prompting: `--confirm`, `--no-confirm`, or `--yes`.
+    ///
+    /// Without a flag, prompts only for pinned or active conversations.
+    #[command(flatten)]
+    confirm: ConfirmFlag,
 }
 
 impl Archive {
@@ -77,10 +82,11 @@ impl Archive {
             handles
         };
 
+        let preference = self.confirm.preference();
         for handle in handles {
             let id = handle.id();
 
-            if !self.yes && !confirm_archive(ctx, &id)? {
+            if !confirm_archive(ctx, &id, preference)? {
                 continue;
             }
 
@@ -120,10 +126,21 @@ impl Archive {
     }
 }
 
-/// Prompt for confirmation when archiving a pinned or active conversation.
+/// Decide whether to archive `id`, prompting when appropriate.
 ///
-/// Returns `true` if the user confirms (or no prompt is needed).
-fn confirm_archive(ctx: &mut Ctx, id: &ConversationId) -> Result<bool, crate::error::Error> {
+/// Returns `true` to proceed, `false` to skip.
+/// `preference` is the resolved `--confirm` / `--no-confirm` choice:
+/// `Some(true)` always prompts, `Some(false)` never prompts, and `None` prompts
+/// only for pinned or active conversations.
+fn confirm_archive(
+    ctx: &mut Ctx,
+    id: &ConversationId,
+    preference: Option<bool>,
+) -> Result<bool, crate::error::Error> {
+    if preference == Some(false) {
+        return Ok(true);
+    }
+
     let handle = ctx.workspace.acquire_conversation(id)?;
     let meta = ctx.workspace.metadata(&handle)?;
 
@@ -134,16 +151,22 @@ fn confirm_archive(ctx: &mut Ctx, id: &ConversationId) -> Result<bool, crate::er
         == Some(*id);
     let is_pinned = meta.is_pinned();
 
-    if !is_active && !is_pinned {
+    // Default (`None`) prompts only for pinned or active; `--confirm`
+    // (`Some(true)`) prompts for everything.
+    if preference != Some(true) && !is_active && !is_pinned {
         return Ok(true);
     }
 
-    // Active subsumes pinned in the prompt.
-    let qualifier = if is_active { "active" } else { "pinned" };
-    let prompt = format!(
-        "Archive the {qualifier} conversation {}?",
-        id.to_string().bold().yellow()
-    );
+    // Active subsumes pinned in the prompt; with `--confirm` a plain
+    // conversation gets an unqualified prompt.
+    let id_label = id.to_string().bold().yellow();
+    let prompt = if is_active {
+        format!("Archive the active conversation {id_label}?")
+    } else if is_pinned {
+        format!("Archive the pinned conversation {id_label}?")
+    } else {
+        format!("Archive conversation {id_label}?")
+    };
 
     let options = vec![
         InlineOption::new('y', "yes, archive"),

@@ -8,4 +8,5 @@
 //! Inclusion test: a module belongs here when it's used by more than one
 //! subcommand and isn't part of the bootstrap path.
 
+pub(crate) mod confirm;
 pub(crate) mod search;
