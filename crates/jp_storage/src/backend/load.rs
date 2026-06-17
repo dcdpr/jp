@@ -31,6 +31,20 @@ pub trait LoadBackend: Send + Sync + Debug {
         id: &ConversationId,
     ) -> std::result::Result<Conversation, LoadError>;
 
+    /// Load metadata for many conversations at once.
+    ///
+    /// Backends that resolve directories per id (filesystem) override this to
+    /// scan once instead of once per conversation.
+    /// The default loads each id individually.
+    fn load_conversation_metadata_batch(
+        &self,
+        ids: &[ConversationId],
+    ) -> Vec<(ConversationId, std::result::Result<Conversation, LoadError>)> {
+        ids.iter()
+            .map(|id| (*id, self.load_conversation_metadata(id)))
+            .collect()
+    }
+
     /// Load a single conversation's event stream.
     fn load_conversation_stream(
         &self,

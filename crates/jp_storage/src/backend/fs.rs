@@ -203,6 +203,13 @@ impl LoadBackend for FsStorageBackend {
             .or_else(|_| self.storage.load_archived_conversation_metadata(id))
     }
 
+    fn load_conversation_metadata_batch(
+        &self,
+        ids: &[ConversationId],
+    ) -> Vec<(ConversationId, std::result::Result<Conversation, LoadError>)> {
+        self.storage.load_conversation_metadata_batch(ids)
+    }
+
     fn load_conversation_stream(
         &self,
         id: &ConversationId,
