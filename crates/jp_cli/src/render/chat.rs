@@ -305,9 +305,13 @@ impl ChatRenderer {
     /// syntax-highlighted lines, and a trailing separator at the top level.
     fn handle_event(&mut self, event: Event) {
         match event {
-            Event::Block { content, indent } | Event::Flush { content, indent } => {
-                self.print_block(&content, indent);
-            }
+            // `Event::Flush` is the terminal block of a content region (the
+            // buffer's end-of-region drain); `Event::Block` is a mid-stream
+            // block. Only the terminal block forces its trailing separator, so
+            // a region ending in a tight list still gets a blank line before
+            // whatever follows.
+            Event::Block { content, indent } => self.print_block(&content, indent, false),
+            Event::Flush { content, indent } => self.print_block(&content, indent, true),
             Event::FencedCodeStart {
                 ref language,
                 indent,
@@ -372,7 +376,7 @@ impl ChatRenderer {
         self.printer.print(content.typewriter(delay.into()));
     }
 
-    fn print_block(&mut self, block: &str, indent: usize) {
+    fn print_block(&mut self, block: &str, indent: usize, terminal: bool) {
         // Skip whitespace-only blocks. These can appear when the LLM emits
         // blank text content blocks (e.g. "\n\n" between interleaved thinking
         // blocks) that survive a buffer flush.
@@ -394,6 +398,11 @@ impl ChatRenderer {
         // follows is shaded depends on whether more reasoning or other content
         // comes next, which isn't known until the next event arrives.
         opts.suppress_trailing_separator = is_reasoning;
+        // A terminal (flushed) message block ends its region, so a tight list
+        // here is complete and should keep its trailing separator. Reasoning
+        // defers its separator via `suppress_trailing_separator` above, so it
+        // never forces.
+        opts.force_trailing_separator = terminal && !is_reasoning;
 
         let formatted = self
             .formatter
@@ -419,6 +428,7 @@ impl ChatRenderer {
             },
             indent,
             suppress_trailing_separator: false,
+            force_trailing_separator: false,
         }
     }
 

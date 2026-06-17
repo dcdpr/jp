@@ -31,6 +31,29 @@ fn test_renders_message() {
     assert_eq!(*out.lock(), "Hello world\n\n");
 }
 
+/// A streamed message ending in a tight list, then flushed (e.g. because a tool
+/// call follows), must still emit its trailing blank-line separator.
+/// The "Calling tool" header is chrome on stderr and emits no leading blank
+/// line of its own, so the gap has to come from the flushed markdown.
+#[test]
+fn test_terminal_list_flush_emits_trailing_separator() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "- first\n- second\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let rendered = strip_ansi(&out.lock());
+    assert!(
+        rendered.ends_with("\n\n"),
+        "list-terminated message should end with a blank-line separator, got: {rendered:?}"
+    );
+}
+
 #[test]
 fn test_renders_reasoning_full_mode() {
     let mut config = AppConfig::new_test();
