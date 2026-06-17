@@ -30,10 +30,24 @@ struct TurnPolicy {
 }
 
 /// A summary that won the latest-timestamp contest for a set of turns.
+///
+/// Equality carries the originating compaction's identity (its turn range and
+/// timestamp), not just the text.
+/// `inject_at_turn` treats a contiguous run of turns with equal
+/// `ResolvedSummary` as one injected summary, so every turn a single summary
+/// covers must compare equal (same source), while two distinct adjacent summary
+/// compactions that happen to produce identical text must compare unequal and
+/// stay separate synthetic turns.
 #[derive(PartialEq, Eq)]
 struct ResolvedSummary {
     /// The summary text to inject.
     text: String,
+    /// First turn of the originating compaction's range.
+    from_turn: usize,
+    /// Last turn of the originating compaction's range.
+    to_turn: usize,
+    /// Timestamp of the originating compaction.
+    timestamp: DateTime<Utc>,
 }
 
 /// Apply compaction projection to the event list in place.
@@ -223,6 +237,9 @@ fn resolve_policies(max_turn: usize, compactions: &[crate::Compaction]) -> Vec<T
                 summary_ts[turn] = Some(c.timestamp);
                 policies[turn].summary = c.summary.as_ref().map(|s| ResolvedSummary {
                     text: s.summary.clone(),
+                    from_turn: c.from_turn,
+                    to_turn: c.to_turn,
+                    timestamp: c.timestamp,
                 });
             }
 

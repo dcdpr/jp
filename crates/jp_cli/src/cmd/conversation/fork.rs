@@ -64,19 +64,16 @@ impl Fork {
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         for source in handles {
             let lock = fork_conversation(ctx, source, |events| {
-                // The time filter can drop or renumber turns; positional
-                // compaction overlays would then point at the wrong turns, so
-                // drop them when the filter actually removes a turn. (The
-                // turn-truncating helpers below do the same for `--first`/
-                // `--last`.)
-                let turns_before = events.turn_count();
+                // `retain` invalidates compaction overlays from the earliest
+                // removed turn onward (overlays confined to the untouched prefix
+                // survive), so a time filter that strips whole turns *or* events
+                // inside a surviving turn can't leave a stale overlay pointing at
+                // — or summarizing — content no longer in the fork. The
+                // `--first`/`--last` helpers below inherit the same guarantee.
                 events.retain(|event| {
                     self.from.is_none_or(|t| event.timestamp >= *t)
                         && self.until.is_none_or(|t| event.timestamp < *t)
                 });
-                if events.turn_count() != turns_before {
-                    events.remove_compactions();
-                }
 
                 let first = self.first.map(|v| v.unwrap_or(1));
                 let last = self.last.map(|v| v.unwrap_or(1));

@@ -618,12 +618,65 @@ impl ConversationStream {
 
     /// Retains only the [`ConversationEvent`]s that pass the predicate.
     ///
-    /// This does NOT remove [`ConfigDelta`]s or [`Compaction`] events.
+    /// [`ConfigDelta`]s are always preserved: they apply to the conversation as
+    /// a whole, regardless of position.
+    ///
+    /// [`Compaction`] overlays are dropped **selectively** when this call
+    /// removes turn-scoped events.
+    /// An overlay whose turn range lies entirely before the earliest removed
+    /// event is kept: those turns lose no content and aren't renumbered
+    /// (nothing earlier was removed), so the overlay's positional anchors stay
+    /// valid as-is.
+    /// From the earliest removed turn onward a turn may be renumbered or have
+    /// lost a covered event, and an overlay there can't be rebased or (for
+    /// summaries) re-clipped while anchors are positional ([RFD D24]), so it is
+    /// dropped.
+    /// This is the single enforcement point for that invariant, so
+    /// turn-truncation helpers and the `fork` time filter inherit it without
+    /// each tracking overlay validity themselves.
+    ///
+    /// [RFD D24]: https://github.com/dcdpr/jp/blob/main/docs/rfd/drafts/D24-stable-event-identifiers.md
     pub fn retain(&mut self, mut f: impl FnMut(&ConversationEvent) -> bool) {
-        self.events.retain(|event| match event.scope() {
-            EventScope::Global => true,
-            EventScope::Turn => event.as_event().is_some_and(&mut f),
+        // Fast path: with no overlays present there's nothing to invalidate, so
+        // skip the turn-index bookkeeping.
+        if !self
+            .events
+            .iter()
+            .any(|e| matches!(e, InternalEvent::Compaction(_)))
+        {
+            self.events.retain(|event| match event.scope() {
+                EventScope::Global => true,
+                EventScope::Turn => event.as_event().is_some_and(&mut f),
+            });
+            return;
+        }
+
+        // Turn index (original numbering) of every entry, so a removal can be
+        // attributed to the turn it falls in.
+        let turn_indices = projection::assign_turn_indices(&self.events);
+        let mut first_removed_turn: Option<usize> = None;
+        let mut index = 0;
+        self.events.retain(|event| {
+            let keep = match event.scope() {
+                EventScope::Global => true,
+                EventScope::Turn => event.as_event().is_some_and(&mut f),
+            };
+            if !keep {
+                let turn = turn_indices[index];
+                first_removed_turn = Some(first_removed_turn.map_or(turn, |m| m.min(turn)));
+            }
+            index += 1;
+            keep
         });
+
+        // Drop only overlays the removal could have invalidated: those whose
+        // range reaches the earliest removed turn or beyond.
+        if let Some(threshold) = first_removed_turn {
+            self.events.retain(|event| match event {
+                InternalEvent::Compaction(c) => c.to_turn < threshold,
+                _ => true,
+            });
+        }
     }
 
     /// Clears the stream of any events, leaving the base configuration intact.
@@ -958,18 +1011,13 @@ impl ConversationStream {
     /// A turn is delimited by a [`TurnStart`] event.
     /// If there are `n` or fewer turns, the stream is left unchanged.
     ///
-    /// Dropping leading turns renumbers the remaining ones, which would leave
-    /// any [`Compaction`] overlays pointing at the wrong turns, so they are
-    /// removed whenever turns are actually dropped.
-    /// Compaction anchors are positional today; once stable event identifiers
-    /// ([RFD D24]) land and compaction migrates to them, truncation could
-    /// rebase overlays instead of dropping them.
+    /// Dropping leading turns renumbers the remaining ones; [`Self::retain`]
+    /// drops any [`Compaction`] overlays when it removes turns (see its docs
+    /// for why overlays can't be rebased while anchors are positional).
     ///
-    /// [RFD D24]: https://github.com/dcdpr/jp/blob/main/docs/rfd/drafts/D24-stable-event-identifiers.md
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn retain_last_turns(&mut self, n: usize) {
         if n == 0 {
-            self.remove_compactions();
             self.retain(|_| false);
             return;
         }
@@ -984,7 +1032,6 @@ impl ConversationStream {
             return;
         }
 
-        self.remove_compactions();
         let skip = turn_count - n;
         let mut turns_seen = 0;
         let mut keeping = false;
@@ -1005,6 +1052,10 @@ impl ConversationStream {
     /// Mirrors [`Self::retain_last_turns`] for the leading end of the stream.
     /// A turn is delimited by a [`TurnStart`] event.
     /// If there are `n` or fewer turns, the stream is left unchanged.
+    ///
+    /// The kept turns keep their indices.
+    /// A [`Compaction`] overlay confined to them survives; [`Self::retain`]
+    /// drops overlays that reach into the dropped trailing turns.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn retain_first_turns(&mut self, n: usize) {
@@ -1042,9 +1093,9 @@ impl ConversationStream {
     /// If `first + last` is greater than or equal to the total number of turns,
     /// the stream is left unchanged.
     ///
-    /// Dropping the middle turns renumbers the trailing block, which would
-    /// leave any [`Compaction`] overlays pointing at the wrong turns, so they
-    /// are removed whenever turns are actually dropped.
+    /// Dropping the middle turns renumbers the trailing block; [`Self::retain`]
+    /// drops [`Compaction`] overlays from the first dropped turn onward, while
+    /// overlays confined to the kept leading block survive.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn retain_first_and_last_turns(&mut self, first: usize, last: usize) {
@@ -1058,7 +1109,6 @@ impl ConversationStream {
             return;
         }
 
-        self.remove_compactions();
         let last_start = turn_count.saturating_sub(last);
         let mut turns_seen = 0;
         let mut keeping = false;

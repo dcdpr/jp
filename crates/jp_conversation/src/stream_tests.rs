@@ -1025,20 +1025,132 @@ fn test_compaction_not_counted_by_is_empty() {
 }
 
 #[test]
-fn test_compaction_preserved_by_retain() {
+fn test_retain_removing_events_drops_compactions() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("hello"));
     stream.add_compaction(make_compaction(0, 0));
 
-    // Retain nothing — all conversation events removed.
+    // Retain nothing — all conversation events removed. A compaction overlay
+    // describes events that no longer exist, so it's dropped too.
     stream.retain(|_| false);
 
     assert_eq!(stream.len(), 0);
     assert_eq!(
         stream.compactions().count(),
-        1,
-        "Compaction should survive retain"
+        0,
+        "retain that removes events must drop compactions"
     );
+}
+
+#[test]
+fn test_retain_keeping_everything_preserves_compactions() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 0));
+
+    // Retain removes nothing, so the overlay stays valid and survives.
+    stream.retain(|_| true);
+
+    assert_eq!(
+        stream.compactions().count(),
+        1,
+        "retain that removes nothing must keep compactions"
+    );
+}
+
+#[test]
+fn test_retain_removing_within_turn_event_drops_compactions() {
+    // A summary overlay's text is generated from the events in its range, so
+    // removing even a single event inside a surviving turn (here, the response,
+    // leaving the TurnStart and request so the turn count is unchanged)
+    // invalidates it. `retain` must drop on any removal, not only when a turn
+    // disappears.
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.push(ConversationEvent::new(
+        ChatResponse::message("world"),
+        Utc.with_ymd_and_hms(2025, 7, 1, 12, 0, 1).unwrap(),
+    ));
+    stream.add_compaction(make_compaction(0, 0));
+
+    let turns_before = stream.turn_count();
+    stream.retain(|e| !e.is_chat_response());
+
+    assert_eq!(
+        stream.turn_count(),
+        turns_before,
+        "the turn survives — only an event within it was removed"
+    );
+    assert_eq!(
+        stream.compactions().count(),
+        0,
+        "removing an in-range event must still drop the overlay"
+    );
+}
+
+#[test]
+fn test_retain_first_turns_drops_compactions() {
+    let mut stream = ConversationStream::new_test();
+    for t in 0..6 {
+        stream.start_turn(format!("turn {t}"));
+    }
+    // A summary over the early turns; `--first 2` keeps turns 0-1 but the
+    // summary text covers turns the fork no longer has.
+    stream.add_compaction(make_compaction(0, 5));
+
+    stream.retain_first_turns(2);
+
+    assert_eq!(stream.turn_count(), 2);
+    assert_eq!(
+        stream.compactions().count(),
+        0,
+        "dropping trailing turns must drop overlays that summarize them"
+    );
+}
+
+#[test]
+fn test_retain_keeps_compactions_entirely_before_removal() {
+    let mut stream = ConversationStream::new_test();
+    for t in 0..6 {
+        stream.start_turn(format!("turn {t}"));
+    }
+    // A compaction confined to the first two turns.
+    stream.add_compaction(make_compaction(0, 1));
+
+    // `--first 4` drops turns 4-5; turns 0-1 are untouched and not renumbered,
+    // so the overlay over them keeps valid anchors and survives.
+    stream.retain_first_turns(4);
+
+    assert_eq!(stream.turn_count(), 4);
+    let compactions: Vec<_> = stream.compactions().collect();
+    assert_eq!(
+        compactions.len(),
+        1,
+        "an overlay entirely before the removal must not be dropped"
+    );
+    assert_eq!((compactions[0].from_turn, compactions[0].to_turn), (0, 1));
+}
+
+#[test]
+fn test_retain_first_and_last_keeps_leading_block_compaction() {
+    let mut stream = ConversationStream::new_test();
+    for t in 0..8 {
+        stream.start_turn(format!("turn {t}"));
+    }
+    // One overlay in the kept leading block, one spanning the dropped middle.
+    stream.add_compaction(make_compaction(0, 1));
+    stream.add_compaction(make_compaction(3, 6));
+
+    // Keep first 3 and last 2 turns, dropping the middle (turns 3-5).
+    stream.retain_first_and_last_turns(3, 2);
+
+    let compactions: Vec<_> = stream.compactions().collect();
+    assert_eq!(
+        compactions.len(),
+        1,
+        "only the overlay reaching into the dropped middle is removed"
+    );
+    assert_eq!((compactions[0].from_turn, compactions[0].to_turn), (0, 1));
 }
 
 #[test]

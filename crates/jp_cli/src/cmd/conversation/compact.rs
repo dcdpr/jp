@@ -232,14 +232,22 @@ pub(crate) enum Bound {
 
 /// Resolve the turn range a single rule would compact.
 ///
-/// Applies the runtime range overrides (`--from`/`--to`/`--keep-first`/
-/// `--keep-last`) on top of the rule's own bounds and, for summary rules,
-/// extends the range to subsume partially overlapping summaries.
+/// `range_stream` is the baseline for resolving bounds, including
+/// `AfterLastCompaction` (`--from last`): it must be the stream as it existed
+/// at the start of the invocation, so every rule resolves "last" against the
+/// same compactions and a rule generated earlier in the same invocation doesn't
+/// shift the baseline for a later one.
 ///
-/// Shared by the dry-run preview and [`build_compaction_event`] so the preview
-/// and the actual mutation always agree on the range.
+/// `overlap_stream` is consulted only to extend summary ranges over partially
+/// overlapping summaries; it accumulates the compactions generated so far in
+/// this invocation so two summary rules can't be appended unextended.
+///
+/// For non-summary rules the two streams are interchangeable (only
+/// `extend_summary_range` reads `overlap_stream`).
+/// Shared by the dry-run preview and the real build so they always agree.
 fn resolve_rule_range(
-    events: &ConversationStream,
+    range_stream: &ConversationStream,
+    overlap_stream: &ConversationStream,
     rule: &CompactionRuleConfig,
     from_override: Bound,
     to_override: Bound,
@@ -248,11 +256,11 @@ fn resolve_rule_range(
     // precedence; otherwise fall back to the rule's own bound. Either side
     // resolving to `Empty` means nothing is compacted.
     let from = match from_override {
-        Bound::Default => keep_first_to_bound(&rule.keep_first, events),
+        Bound::Default => keep_first_to_bound(&rule.keep_first, range_stream),
         other => other,
     };
     let to = match to_override {
-        Bound::Default => keep_last_to_bound(&rule.keep_last, events),
+        Bound::Default => keep_last_to_bound(&rule.keep_last, range_stream),
         other => other,
     };
 
@@ -267,33 +275,25 @@ fn resolve_rule_range(
         Bound::At(b) => Some(b),
     };
 
-    let range = resolve_range(events, from, to)?;
+    let range = resolve_range(range_stream, from, to)?;
     Some(if rule.summary.is_some() {
-        extend_summary_range(events, range)
+        extend_summary_range(overlap_stream, range)
     } else {
         range
     })
 }
 
-/// Build a [`Compaction`] event from a resolved config rule.
+/// Generate the summary text (if any) and assemble a [`Compaction`] for an
+/// already-resolved range.
 ///
-/// `from_override` and `to_override` are runtime-resolved range bounds
-/// (`--from`/`--to`/`--keep-first`/`--keep-last`) that take precedence over the
-/// rule's `keep_first`/`keep_last`.
-///
-/// Returns `None` if the resolved range is empty (nothing to compact).
-pub(crate) async fn build_compaction_event(
+/// The summarizer reads the raw events in `events` for the range.
+async fn build_compaction_for_range(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,
     rule: &CompactionRuleConfig,
-    from_override: Bound,
-    to_override: Bound,
+    range: CompactionRange,
     printer: &jp_printer::Printer,
-) -> crate::Result<Option<Compaction>> {
-    let Some(range) = resolve_rule_range(events, rule, from_override, to_override) else {
-        return Ok(None);
-    };
-
+) -> crate::Result<Compaction> {
     let summary_text = if rule.summary.is_some() {
         printer.println("Generating summary...");
         let text = super::summarize::generate_summary(
@@ -315,7 +315,7 @@ pub(crate) async fn build_compaction_event(
         compaction = compaction.with_summary(SummaryPolicy { summary: text });
     }
 
-    Ok(Some(compaction))
+    Ok(compaction)
 }
 
 /// Build compaction events from the given resolved rules.
@@ -330,27 +330,31 @@ pub(crate) async fn build_compaction_events(
     to_override: Bound,
     printer: &jp_printer::Printer,
 ) -> crate::Result<Vec<Compaction>> {
-    // Accumulate generated compactions onto a working stream so each rule's
-    // summary-overlap extension sees the compactions produced by earlier rules
-    // in this same invocation, not just those already on the stream. Turn
-    // iteration ignores compaction overlays, so this does not affect the events
-    // a summarizer reads or the turn-count used for range resolution.
-    let mut working = events.clone();
+    // Two distinct baselines:
+    //
+    // - Range resolution uses the original `events` for every rule, so
+    //   `AfterLastCompaction` (`--from last` / `keep_first = "last"`) resolves
+    //   against the compactions present at invocation start and applies
+    //   uniformly, rather than each rule starting after the previous rule's
+    //   freshly generated compaction.
+    // - `overlap` accumulates the compactions generated so far, so a later
+    //   summary rule's overlap extension sees earlier summaries in this same
+    //   invocation and can't be appended unextended.
+    let mut overlap = events.clone();
     let mut compactions = Vec::new();
     for rule in rules {
-        if let Some(c) = build_compaction_event(
-            &working,
-            cfg,
+        let Some(range) = resolve_rule_range(
+            events,
+            &overlap,
             rule,
             from_override.clone(),
             to_override.clone(),
-            printer,
-        )
-        .await?
-        {
-            working.add_compaction(c.clone());
-            compactions.push(c);
-        }
+        ) else {
+            continue;
+        };
+        let compaction = build_compaction_for_range(events, cfg, rule, range, printer).await?;
+        overlap.add_compaction(compaction.clone());
+        compactions.push(compaction);
     }
 
     Ok(compactions)
@@ -510,13 +514,19 @@ impl Compact {
         if self.dry_run {
             // Preview using the same per-rule range resolution as the real run
             // (minus the summarizer and the mutation) so the reported ranges
-            // match what would actually be applied.
-            let mut working = events_snapshot.clone();
+            // match what would actually be applied: range resolution against the
+            // original snapshot for every rule, summary-overlap extension
+            // against the accumulating `overlap`.
+            let mut overlap = events_snapshot.clone();
             let mut printed = false;
             for rule in &rules {
-                let Some(range) =
-                    resolve_rule_range(&working, rule, from_override.clone(), to_override.clone())
-                else {
+                let Some(range) = resolve_rule_range(
+                    &events_snapshot,
+                    &overlap,
+                    rule,
+                    from_override.clone(),
+                    to_override.clone(),
+                ) else {
                     continue;
                 };
                 ctx.printer.println(format!(
@@ -524,9 +534,11 @@ impl Compact {
                     range.from_turn, range.to_turn,
                 ));
                 // Mirror the real run's overlap accumulation so later summary
-                // rules preview the same (possibly extended) ranges.
+                // rules preview the same (possibly extended) ranges. Only
+                // summaries affect overlap extension, so a placeholder summary is
+                // enough.
                 if rule.summary.is_some() {
-                    working.add_compaction(
+                    overlap.add_compaction(
                         Compaction::new(range.from_turn, range.to_turn).with_summary(
                             SummaryPolicy {
                                 summary: String::new(),

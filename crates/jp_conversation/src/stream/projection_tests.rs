@@ -478,6 +478,63 @@ fn summary_is_injected_as_its_own_turn() {
 }
 
 #[test]
+fn distinct_adjacent_summaries_with_identical_text_stay_separate() {
+    // Two distinct single-turn summary compactions over adjacent turns that
+    // happen to produce identical text must remain two synthetic turns. The old
+    // text-only `ResolvedSummary` equality collapsed them into one run, dropping
+    // a turn.
+    let mut stream = ConversationStream::new_test();
+    for t in 0..2 {
+        stream.push(ConversationEvent::new(TurnStart, ts(0)));
+        stream.push(ConversationEvent::new(
+            ChatRequest::from(format!("q{t}")),
+            ts(0),
+        ));
+        stream.push(ConversationEvent::new(
+            ChatResponse::message(format!("m{t}")),
+            ts(0),
+        ));
+    }
+
+    stream.add_compaction(Compaction {
+        timestamp: ts(1),
+        from_turn: 0,
+        to_turn: 0,
+        summary: Some(SummaryPolicy {
+            summary: "SAME".into(),
+        }),
+        reasoning: None,
+        tool_calls: None,
+    });
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        from_turn: 1,
+        to_turn: 1,
+        summary: Some(SummaryPolicy {
+            summary: "SAME".into(),
+        }),
+        reasoning: None,
+        tool_calls: None,
+    });
+
+    stream.apply_projection();
+
+    assert_eq!(
+        stream.turn_count(),
+        2,
+        "distinct summaries must stay distinct turns"
+    );
+    let messages: Vec<String> = stream
+        .iter()
+        .filter_map(|e| match &e.event.kind {
+            EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(messages, vec!["SAME".to_owned(), "SAME".to_owned()]);
+}
+
+#[test]
 fn contained_summary_reinjects_outer_summary_tail() {
     // Four single-message turns.
     let mut stream = ConversationStream::new_test();
