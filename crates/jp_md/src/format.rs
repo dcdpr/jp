@@ -95,6 +95,14 @@ pub struct TerminalOptions {
     /// it knows what follows — for instance, to decide whether the gap between
     /// two blocks carries a background.
     pub suppress_trailing_separator: bool,
+
+    /// When `true`, emit the trailing separator even after a tight list.
+    ///
+    /// The tight-list suppression keeps streamed mid-list items visually tight.
+    /// A caller flushing the *final* block of a region — the list is over —
+    /// sets this so the terminal item still gets its separator, instead of
+    /// gluing the next content directly onto the last item.
+    pub force_trailing_separator: bool,
 }
 
 /// A formatter for markdown text.
@@ -298,7 +306,9 @@ impl Formatter {
         // only for mid-list items: tight list AND no trailing blank
         // line in the source (the buffer ends terminal items with
         // "\n\n" but mid-list items with just "\n").
-        let is_mid_list = ends_with_tight_list(ast) && !text.ends_with("\n\n");
+        let is_mid_list = ends_with_tight_list(ast)
+            && !text.ends_with("\n\n")
+            && !options.force_trailing_separator;
         if auto_separator && !is_mid_list && !options.suppress_trailing_separator {
             buf.push_str(&render_separator(options.default_background.as_ref()));
         }
