@@ -1,8 +1,7 @@
 //! Shared confirmation-prompt flag for mutating conversation commands.
 //!
 //! Exposes `--confirm`, `--no-confirm`, and the `--yes` / `-y` alias.
-//! With no flag, the decision is left to the command's own default: destructive
-//! commands (`rm`) prompt, reversible ones (`archive`) don't.
+//! With no flag, the decision is left to the command's own default.
 
 /// Confirmation-prompt preference shared by mutating commands.
 ///
