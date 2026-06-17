@@ -212,6 +212,70 @@ fn build_resolves_chained_aliases() {
 }
 
 #[test]
+fn compaction_rule_unset_bounds_resolve_to_field_defaults() {
+    use crate::{
+        conversation::{
+            compaction::{PartialCompactionRuleConfig, RuleBound, ToolCallsMode},
+            tool::RunMode,
+        },
+        model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        types::vec::MergeableVec,
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+        provider: Some(ProviderId::Anthropic),
+        name: "claude-opus-4".parse().ok(),
+    });
+
+    // A rule that sets only a tool-call policy, leaving keep_first/keep_last
+    // unset — exactly what `jp c compact -t sreq` produces.
+    partial.conversation.compaction.rules = MergeableVec::Vec(vec![PartialCompactionRuleConfig {
+        tool_calls: Some(ToolCallsMode::StripRequests),
+        ..Default::default()
+    }]);
+
+    let config = build(partial).expect("valid config");
+
+    let rule = &config.conversation.compaction.rules[0];
+    assert_eq!(rule.keep_first, RuleBound::Turns(1));
+    assert_eq!(rule.keep_last, RuleBound::Turns(3));
+}
+
+#[test]
+fn empty_config_preserves_default_compaction_rule() {
+    use crate::{
+        conversation::{
+            compaction::{ReasoningMode, RuleBound, ToolCallsMode},
+            tool::RunMode,
+        },
+        model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        util::build,
+    };
+
+    // A config that sets only the required fields and leaves compaction
+    // untouched must still resolve to the built-in default rule, so bare
+    // `jp conversation compact` / `jp query --compact` are not no-ops.
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+        provider: Some(ProviderId::Anthropic),
+        name: "claude-opus-4".parse().ok(),
+    });
+
+    let config = build(partial).expect("valid config");
+
+    let rules = &config.conversation.compaction.rules;
+    assert_eq!(rules.len(), 1, "default rule must survive an empty config");
+    assert_eq!(rules[0].reasoning, Some(ReasoningMode::Strip));
+    assert_eq!(rules[0].tool_calls, Some(ToolCallsMode::Strip));
+    assert_eq!(rules[0].keep_first, RuleBound::Turns(1));
+    assert_eq!(rules[0].keep_last, RuleBound::Turns(3));
+}
+
+#[test]
 fn build_rejects_alias_cycle() {
     use crate::{
         conversation::tool::RunMode,

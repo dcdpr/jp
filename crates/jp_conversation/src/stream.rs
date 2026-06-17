@@ -8,12 +8,14 @@ use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 use tracing::error;
 
+mod projection;
 pub mod turn_iter;
 pub mod turn_mut;
 pub use turn_iter::{IterTurns, Turn};
 pub use turn_mut::TurnMut;
 
 use crate::{
+    Compaction,
     compat::deserialize_partial_config,
     event::{ChatRequest, ConversationEvent, EventKind, InquiryId, ToolCallResponse, TurnStart},
     storage::{decode_event_value, encode_event},
@@ -41,6 +43,10 @@ enum InternalEvent {
     ConfigDelta(ConfigDelta),
     /// An event in the conversation stream.
     Event(Box<ConversationEvent>),
+    /// A compaction overlay that modifies how preceding events are projected
+    /// when building the LLM request.
+    /// Does not modify or delete any existing events.
+    Compaction(Compaction),
 }
 
 impl Serialize for InternalEvent {
@@ -69,8 +75,40 @@ impl Serialize for InternalEvent {
                 encode_event(&mut value, &event.kind);
                 value.serialize(serializer)
             }
+            Self::Compaction(compaction) => {
+                #[derive(Serialize)]
+                struct Tagged<'a> {
+                    #[serde(rename = "type")]
+                    tag: &'static str,
+                    #[serde(flatten)]
+                    inner: &'a Compaction,
+                }
+
+                Tagged {
+                    tag: "compaction",
+                    inner: compaction,
+                }
+                .serialize(serializer)
+            }
         }
     }
+}
+
+/// Whether an [`InternalEvent`] belongs to a single turn or applies to the
+/// conversation as a whole.
+///
+/// This is the single source of truth for which events survive turn-level
+/// pruning (`pop`, `trim_chat_request`, `pop_if`, `retain`).
+/// Adding a new `InternalEvent` variant forces a classification here —
+/// [`InternalEvent::scope`] is an exhaustive match — so no pruning caller can
+/// silently mistreat it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EventScope {
+    /// Survives turn pruning: config deltas and compaction overlays apply to
+    /// the conversation regardless of position.
+    Global,
+    /// Belongs to a turn and is removed when that turn is pruned.
+    Turn,
 }
 
 impl InternalEvent {
@@ -80,7 +118,7 @@ impl InternalEvent {
     fn into_event(self) -> Option<ConversationEvent> {
         match self {
             Self::Event(event) => Some(*event),
-            Self::ConfigDelta(_) => None,
+            Self::ConfigDelta(_) | Self::Compaction(_) => None,
         }
     }
 
@@ -89,7 +127,17 @@ impl InternalEvent {
     fn as_event(&self) -> Option<&ConversationEvent> {
         match self {
             Self::Event(event) => Some(event),
-            Self::ConfigDelta(_) => None,
+            Self::ConfigDelta(_) | Self::Compaction(_) => None,
+        }
+    }
+
+    /// Classify the event as turn-scoped or global.
+    /// See [`EventScope`].
+    #[must_use]
+    const fn scope(&self) -> EventScope {
+        match self {
+            Self::ConfigDelta(_) | Self::Compaction(_) => EventScope::Global,
+            Self::Event(_) => EventScope::Turn,
         }
     }
 }
@@ -271,7 +319,7 @@ impl ConversationStream {
         let mut partial = self.base_config.to_partial();
         let iter = self.events.iter().filter_map(|event| match event {
             InternalEvent::ConfigDelta(delta) => Some(delta.clone()),
-            InternalEvent::Event(_) => None,
+            InternalEvent::Event(_) | InternalEvent::Compaction(_) => None,
         });
 
         for delta in iter {
@@ -283,18 +331,38 @@ impl ConversationStream {
 
     /// Removes all events from the end of the stream, until a [`ChatRequest`]
     /// is found, returning that request.
+    ///
+    /// [`ConfigDelta`] and [`Compaction`] overlays encountered while trimming
+    /// are preserved (re-appended) rather than discarded — they apply to the
+    /// conversation as a whole, not to the turn being replayed.
     #[must_use]
     pub fn trim_chat_request(&mut self) -> Option<ChatRequest> {
-        loop {
-            if let Some(event) = self
-                .events
-                .pop()?
-                .into_event()
-                .and_then(ConversationEvent::into_chat_request)
-            {
-                return Some(event);
+        let mut preserved = Vec::new();
+        let mut request = None;
+
+        while let Some(internal) = self.events.pop() {
+            match internal.scope() {
+                EventScope::Global => preserved.push(internal),
+                EventScope::Turn => {
+                    if let Some(req) = internal
+                        .into_event()
+                        .and_then(ConversationEvent::into_chat_request)
+                    {
+                        request = Some(req);
+                        break;
+                    }
+                    // A non-chat-request conversation event (response,
+                    // reasoning, tool call) — part of the replayed turn; drop.
+                }
             }
         }
+
+        // Re-append preserved overlays in their original order, whether or not
+        // a request was found, so they survive the trim.
+        preserved.reverse();
+        self.events.append(&mut preserved);
+
+        request
     }
 
     /// Add a config delta to the stream.
@@ -327,10 +395,54 @@ impl ConversationStream {
         self
     }
 
+    /// Add a compaction overlay to the stream.
+    pub fn add_compaction(&mut self, compaction: Compaction) {
+        self.events.push(InternalEvent::Compaction(compaction));
+    }
+
+    /// Remove all compaction events from the stream.
+    ///
+    /// Returns the number of compaction events removed.
+    pub fn remove_compactions(&mut self) -> usize {
+        let before = self.events.len();
+        self.events
+            .retain(|e| !matches!(e, InternalEvent::Compaction(_)));
+        before - self.events.len()
+    }
+
+    /// Returns an iterator over the [`Compaction`] events in the stream.
+    pub fn compactions(&self) -> impl Iterator<Item = &Compaction> {
+        self.events.iter().filter_map(|e| match e {
+            InternalEvent::Compaction(c) => Some(c),
+            _ => None,
+        })
+    }
+
+    /// Apply compaction projection to the stream.
+    ///
+    /// Reads all compaction overlays and transforms the event list so that the
+    /// projected view reflects the compaction policies.
+    /// After this call, the stream's conversation events represent what the LLM
+    /// should see.
+    ///
+    /// This is a no-op when no compaction events are present.
+    ///
+    /// This method is called by [`Thread::into_parts()`] before provider
+    /// visibility filtering.
+    ///
+    /// [`Thread::into_parts()`]: crate::thread::Thread::into_parts
+    pub fn apply_projection(&mut self) {
+        projection::apply(&mut self.events);
+    }
+
     /// Start a new turn with the given chat request.
     ///
     /// Atomically adds a [`TurnStart`] and the [`ChatRequest`] to the stream.
     /// This is the only public way to create turn boundaries.
+    ///
+    /// Global events (config deltas, compactions) are position-independent and
+    /// invisible to turn iteration ([`Self::iter`] skips them), so no attempt
+    /// is made to associate trailing globals with the new turn.
     pub fn start_turn(&mut self, request: impl Into<ChatRequest>) {
         self.push(ConversationEvent::now(TurnStart));
         self.push(ConversationEvent::now(request.into()));
@@ -441,28 +553,23 @@ impl ConversationStream {
     /// [`PartialAppConfig`] at the time the event was added.
     #[must_use]
     pub fn pop(&mut self) -> Option<ConversationEventWithConfig> {
-        loop {
-            let config = match self.events.last() {
-                // No events, so we're done.
-                None => return None,
+        // The last conversation event, ignoring any trailing overlays
+        // (`ConfigDelta`/`Compaction`) that follow it. Those overlays are left
+        // in place rather than discarded — a `Compaction` references turn
+        // ranges and applies regardless of tail position.
+        let pos = self
+            .events
+            .iter()
+            .rposition(|e| e.scope() == EventScope::Turn)?;
 
-                // If the last event is a `ConversationEvent`, we handle it.
-                Some(InternalEvent::Event(_)) => self
-                    .last()
-                    .map_or_else(|| self.base_config.to_partial(), |v| v.config),
+        let config = self
+            .last()
+            .map_or_else(|| self.base_config.to_partial(), |v| v.config);
 
-                // Any other event we remove, and continue.
-                _ => {
-                    self.events.pop();
-                    continue;
-                }
-            };
-
-            return self.events.pop().and_then(|e| {
-                e.into_event()
-                    .map(|event| ConversationEventWithConfig { event, config })
-            });
-        }
+        self.events
+            .remove(pos)
+            .into_event()
+            .map(|event| ConversationEventWithConfig { event, config })
     }
 
     /// Similar to [`Self::pop`], but only pops if the predicate returns `true`.
@@ -470,16 +577,17 @@ impl ConversationStream {
         &mut self,
         f: impl Fn(&ConversationEvent) -> bool,
     ) -> Option<ConversationEventWithConfig> {
-        if !self
+        let last_turn_event_matches = self
             .events
             .iter()
             .rev()
-            .find_map(|event| match event {
-                InternalEvent::Event(event) => Some(f(event)),
-                InternalEvent::ConfigDelta(_) => None,
+            .find_map(|event| match event.scope() {
+                EventScope::Turn => event.as_event().map(&f),
+                EventScope::Global => None,
             })
-            .unwrap_or(false)
-        {
+            .unwrap_or(false);
+
+        if !last_turn_event_matches {
             return None;
         }
 
@@ -510,12 +618,65 @@ impl ConversationStream {
 
     /// Retains only the [`ConversationEvent`]s that pass the predicate.
     ///
-    /// This does NOT remove the [`ConfigDelta`]s.
+    /// [`ConfigDelta`]s are always preserved: they apply to the conversation as
+    /// a whole, regardless of position.
+    ///
+    /// [`Compaction`] overlays are dropped **selectively** when this call
+    /// removes turn-scoped events.
+    /// An overlay whose turn range lies entirely before the earliest removed
+    /// event is kept: those turns lose no content and aren't renumbered
+    /// (nothing earlier was removed), so the overlay's positional anchors stay
+    /// valid as-is.
+    /// From the earliest removed turn onward a turn may be renumbered or have
+    /// lost a covered event, and an overlay there can't be rebased or (for
+    /// summaries) re-clipped while anchors are positional ([RFD D24]), so it is
+    /// dropped.
+    /// This is the single enforcement point for that invariant, so
+    /// turn-truncation helpers and the `fork` time filter inherit it without
+    /// each tracking overlay validity themselves.
+    ///
+    /// [RFD D24]: https://github.com/dcdpr/jp/blob/main/docs/rfd/drafts/D24-stable-event-identifiers.md
     pub fn retain(&mut self, mut f: impl FnMut(&ConversationEvent) -> bool) {
-        self.events.retain(|event| match event {
-            InternalEvent::ConfigDelta(_) => true,
-            InternalEvent::Event(event) => f(event),
+        // Fast path: with no overlays present there's nothing to invalidate, so
+        // skip the turn-index bookkeeping.
+        if !self
+            .events
+            .iter()
+            .any(|e| matches!(e, InternalEvent::Compaction(_)))
+        {
+            self.events.retain(|event| match event.scope() {
+                EventScope::Global => true,
+                EventScope::Turn => event.as_event().is_some_and(&mut f),
+            });
+            return;
+        }
+
+        // Turn index (original numbering) of every entry, so a removal can be
+        // attributed to the turn it falls in.
+        let turn_indices = projection::assign_turn_indices(&self.events);
+        let mut first_removed_turn: Option<usize> = None;
+        let mut index = 0;
+        self.events.retain(|event| {
+            let keep = match event.scope() {
+                EventScope::Global => true,
+                EventScope::Turn => event.as_event().is_some_and(&mut f),
+            };
+            if !keep {
+                let turn = turn_indices[index];
+                first_removed_turn = Some(first_removed_turn.map_or(turn, |m| m.min(turn)));
+            }
+            index += 1;
+            keep
         });
+
+        // Drop only overlays the removal could have invalidated: those whose
+        // range reaches the earliest removed turn or beyond.
+        if let Some(threshold) = first_removed_turn {
+            self.events.retain(|event| match event {
+                InternalEvent::Compaction(c) => c.to_turn < threshold,
+                _ => true,
+            });
+        }
     }
 
     /// Clears the stream of any events, leaving the base configuration intact.
@@ -582,7 +743,7 @@ impl ConversationStream {
                 return true;
             }
             match event {
-                InternalEvent::ConfigDelta(_) => true,
+                InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => true,
                 InternalEvent::Event(e) => e.is_turn_start(),
             }
         });
@@ -812,10 +973,47 @@ impl ConversationStream {
         IterTurns::new(self.iter())
     }
 
+    /// Returns the number of turns in the stream.
+    ///
+    /// A turn is delimited by [`TurnStart`] events.
+    /// A stream with no events has 0 turns.
+    /// A stream with events but no `TurnStart` has 1 implicit turn.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    #[must_use]
+    pub fn turn_count(&self) -> usize {
+        self.iter_turns().len()
+    }
+
+    /// Returns the turn that was active at the given time.
+    ///
+    /// Finds the last turn whose starting timestamp is ≤ `dt`.
+    /// Returns `None` if the stream has no turns, or if `dt` is before the
+    /// first turn.
+    ///
+    /// Use [`Turn::index()`] on the result to get the 0-based turn index.
+    #[must_use]
+    pub fn turn_at_time(&self, dt: DateTime<Utc>) -> Option<Turn<'_>> {
+        let mut result = None;
+        for turn in self.iter_turns() {
+            let start = turn.iter().next()?.event.timestamp;
+            if start <= dt {
+                result = Some(turn);
+            } else {
+                break;
+            }
+        }
+        result
+    }
+
     /// Retain only the last `n` turns, dropping earlier ones.
     ///
     /// A turn is delimited by a [`TurnStart`] event.
     /// If there are `n` or fewer turns, the stream is left unchanged.
+    ///
+    /// Dropping leading turns renumbers the remaining ones; [`Self::retain`]
+    /// drops any [`Compaction`] overlays when it removes turns (see its docs
+    /// for why overlays can't be rebased while anchors are positional).
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn retain_last_turns(&mut self, n: usize) {
@@ -855,6 +1053,10 @@ impl ConversationStream {
     /// A turn is delimited by a [`TurnStart`] event.
     /// If there are `n` or fewer turns, the stream is left unchanged.
     ///
+    /// The kept turns keep their indices.
+    /// A [`Compaction`] overlay confined to them survives; [`Self::retain`]
+    /// drops overlays that reach into the dropped trailing turns.
+    ///
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn retain_first_turns(&mut self, n: usize) {
         if n == 0 {
@@ -890,6 +1092,10 @@ impl ConversationStream {
     /// A turn is delimited by a [`TurnStart`] event.
     /// If `first + last` is greater than or equal to the total number of turns,
     /// the stream is left unchanged.
+    ///
+    /// Dropping the middle turns renumbers the trailing block; [`Self::retain`]
+    /// drops [`Compaction`] overlays from the first dropped turn onward, while
+    /// overlays confined to the kept leading block survive.
     ///
     /// [`TurnStart`]: crate::event::TurnStart
     pub fn retain_first_and_last_turns(&mut self, first: usize, last: usize) {
@@ -1049,6 +1255,7 @@ impl Iterator for IntoIter {
                         config: self.current_config.clone(),
                     });
                 }
+                InternalEvent::Compaction(_) => {}
             }
         }
     }
@@ -1060,10 +1267,10 @@ impl DoubleEndedIterator for IntoIter {
             let event = self.inner_iter.next_back()?;
 
             match event {
-                InternalEvent::ConfigDelta(_) => {
-                    // A delta at the very end of the list affects nothing that
-                    // follows it (because nothing follows it), and it doesn't
-                    // affect previous items. We simply discard it.
+                InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => {
+                    // A delta/compaction at the very end of the list affects
+                    // nothing that follows it, and it doesn't affect previous
+                    // items. We simply discard it.
                 }
                 InternalEvent::Event(event) => {
                     // Start with the state currently at the front of the line
@@ -1125,6 +1332,7 @@ impl<'a> Iterator for Iter<'a> {
                         config: self.front_config.clone(),
                     });
                 }
+                InternalEvent::Compaction(_) => {}
             }
         }
 
@@ -1184,6 +1392,7 @@ impl<'a> Iterator for IterMut<'a> {
                         config: self.front_config.clone(),
                     });
                 }
+                InternalEvent::Compaction(_) => {}
             }
         }
 
@@ -1497,6 +1706,12 @@ impl<'de> Deserialize<'de> for InternalEvent {
 
         if tag == "config_delta" {
             return Ok(Self::ConfigDelta(deserialize_config_delta(&value)));
+        }
+
+        if tag == "compaction" {
+            return serde_json::from_value(value)
+                .map(Self::Compaction)
+                .map_err(serde::de::Error::custom);
         }
 
         // Decode base64-encoded storage fields before deserializing.

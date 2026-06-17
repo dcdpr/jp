@@ -81,38 +81,49 @@ builds a projection plan, and yields the appropriate view to the provider.
 jp conversation compact [ID] [OPTIONS]
 ```
 
-Compacts the active conversation (or the specified one) by appending a
-compaction event.
+Compacts the active conversation (or the specified one) by appending one or more
+compaction events based on the configured rules.
 The original events are untouched.
 
 ```sh
 # Compact with workspace defaults
 jp conversation compact
 
-# Compact using a named profile
-jp conversation compact --profile heavy
+# Compact with overrides from a config file
+jp -c compaction/heavy conversation compact
+
+# Override range via flags
+jp conversation compact --keep-last 5
 
 # Compact a specific range
 jp conversation compact --from 5h --to 1h
 
-# Compact everything except the last 3 turns
-jp conversation compact --keep-last 3
+# Strip only reasoning
+jp conversation compact --reasoning
 
 # Preview what would change
 jp conversation compact --dry-run
+
+# Remove all compaction events (undo)
+jp conversation compact --reset
 ```
 
 **Flags:**
 
 | Flag               | Default               | Description                             |
 | ------------------ | --------------------- | --------------------------------------- |
-| `--profile <name>` | `default`             | Named compaction profile from config.   |
+| `--keep-first <N>` | from config           | Preserve the first N turns.             |
+| `--keep-last <N>`  | from config           | Preserve the last N turns.              |
 | `--from <bound>`   | start of conversation | Start of the compacted range            |
-|                    |                       | (inclusive).                            |
+|                    |                       | (inclusive). Overrides `--keep-first`.  |
 | `--to <bound>`     | end of conversation   | End of the compacted range (inclusive). |
-| `--keep <N>`       | from config           | Shorthand for `--to` N turns ago.       |
-| `--dry-run`        | `false`               | Preview mechanical effects without      |
-|                    |                       | applying.                               |
+|                    |                       | Overrides `--keep-last`.                |
+| `--reasoning`      | from config           | Strip reasoning (thinking) blocks.      |
+| `--tools`          | from config           | Strip tool call arguments/responses.    |
+| `--summarize`      | from config           | Generate an LLM summary for the range.  |
+| `--dry-run`        | `false`               | Preview effects without applying.       |
+| `--reset`          | `false`               | Remove all compaction events from the   |
+|                    |                       | stream.                                 |
 
 Range bounds accept several formats:
 
@@ -124,36 +135,115 @@ Range bounds accept several formats:
 | `last`           | `--from last` | Turn of the most recent compaction   |
 |                  |               | event, or start if none.             |
 
-`--from` without a value defaults to `last`.
+`--from` requires a value (use `--from last` for the most recent compaction).
 All bounds are **resolved to absolute turn indices at creation time** and stored
 as integers.
 
-#### The `--compact` Flag on `query`
+`--reset` removes all `InternalEvent::Compaction` variants from the stream,
+restoring the raw event history.
+The projection layer then has nothing to apply, and the LLM sees the original
+uncompacted events.
+This is useful for undoing compaction when the result is unsatisfactory.
+
+#### The `--compact` Flag (DSL)
+
+The `--compact` flag is available on `query`, `fork`, and `compact` itself.
+It supports two forms:
+
+- **Bare `--compact`** (no value): apply the compaction rules from the resolved
+  configuration.
+- **`--compact=SPEC`** (with a DSL value): apply an inline compaction rule.
+  Each `--compact=SPEC` adds one compaction event.
+
+Both forms compose: bare `--compact` includes config rules, and each
+`--compact=SPEC` adds a DSL rule.
+When only `--compact=SPEC` is present (no bare `--compact`), config rules are
+not included — only the explicit DSL rules apply.
+
+The short flag is `-k`.
 
 ```sh
-# Compact with default profile, then query
+# Apply config rules, then query
 jp query --compact -- "Continue working on the feature"
 
-# Compact with a named profile, then query
-jp query --compact=heavy "Continue working on the feature"
+# Apply config rules via short flag
+jp query -k -- "Continue"
+
+# Inline DSL: summarize all but last 3, then query
+jp query -k s:..-3 -- "Continue"
+
+# Two inline rules on fork
+jp conversation fork -k r:..-20 -k s:..-3
+
+# Mix config rules + inline rule
+jp query --compact -k s:..-1 -- "Continue"
 ```
 
-Equivalent to `jp conversation compact` followed by `jp query`.
-`--compact` alone uses the conversation's default profile; `--compact=<name>`
-uses the named profile.
+##### DSL Grammar
 
-#### The `--compact` Flag on `fork`
-
-```sh
-# Fork and compact with default profile
-jp conversation fork --compact
-
-# Fork and compact with a named profile
-jp conversation fork --compact=heavy
+```
+SPEC     = POLICIES [":" RANGE]
+POLICIES = POLICY ["+" POLICY]*
+POLICY   = "r" | "reasoning"
+         | "t" | "tools"
+         | "s" | "summarize"
+RANGE    = [BOUND] ".." [BOUND]    # explicit range (at least "..")
+         | BOUND                    # single-bound shorthand
+BOUND    = INTEGER                 # >= 0: absolute turn index
+         | "-" INTEGER             # <  0: offset from the end
 ```
 
-Forks the conversation and appends a compaction event to the fork.
-Uses the forked conversation's resolved compaction config.
+The range describes **which turns the policy applies to** (consistent with
+`from_turn`/`to_turn` in the `Compaction` event).
+Turns outside the range are unaffected.
+Bounds are Python-slice style: a non-negative number is an absolute, 0-based
+turn index, and a negative number is an offset from the end (`-1` is the last
+turn).
+Either end may use either form, and both ends are **inclusive**.
+An omitted left bound means the start of the conversation; an omitted right
+bound means the end.
+
+**Range semantics:**
+
+Full `FROM..TO` form:
+
+| Syntax    | Meaning                                            |
+| --------- | -------------------------------------------------- |
+| `..`      | All turns (start to end).                          |
+| `5..`     | Turn 5 through the end (keeps the first 5).        |
+| `..-3`    | Start through 3-from-end (keeps the last 3).       |
+| `5..-3`   | Turn 5 through 3-from-end (keeps first 5, last 3). |
+| `5..10`   | Absolute turns 5 through 10.                       |
+| `..10`    | Start through absolute turn 10.                    |
+| `-10..-3` | 10-from-end through 3-from-end.                    |
+
+Single-bound shorthands:
+
+| Syntax | Expands to | Meaning                       |
+| ------ | ---------- | ----------------------------- |
+| `-3`   | `..-3`     | Keep last 3 uncompacted.      |
+| `5`    | `5..`      | Turn 5 onward (keep first 5). |
+
+**Examples:**
+
+| DSL spec   | Meaning                                     |
+| ---------- | ------------------------------------------- |
+| `s`        | Summarize, range from config defaults.      |
+| `r+t`      | Strip reasoning + tools, range from config. |
+| `s:..-3`   | Summarize all but last 3 turns.             |
+| `r+t:..-3` | Strip reasoning + tools, keep last 3.       |
+| `s:..`     | Summarize all events.                       |
+| `r:5..`    | Strip reasoning from turn 5 onward.         |
+| `s:5..-3`  | Summarize turns 5 through 3-from-end.       |
+| `s:5..10`  | Summarize absolute turns 5 through 10.      |
+| `s:-3`     | Summarize all but last 3 (shorthand).       |
+| `r:-20`    | Strip reasoning, keep last 20 (shorthand).  |
+
+When a DSL spec omits the range, the config's `keep_first` and `keep_last`
+defaults are used.
+When a DSL spec is provided, the policies are self-contained — no policies are
+inherited from config.
+The DSL defines the complete rule.
 
 #### Viewing Compacted Conversations
 
@@ -175,8 +265,9 @@ policies:
 ```rust
 /// A compaction overlay stored in the event stream.
 ///
-/// Defines how events within [from_turn, to_turn] should be projected
-/// when building the LLM request. The original events are unmodified.
+/// Defines how events within [from_turn, to_turn] should be projected when
+/// building the LLM request.
+/// The original events are unmodified.
 pub struct Compaction {
     pub timestamp: DateTime<Utc>,
 
@@ -186,9 +277,9 @@ pub struct Compaction {
     /// Last turn in the compacted range (inclusive, 0-based).
     pub to_turn: usize,
 
-    /// When set, replaces ALL provider-visible events in the range
-    /// with a pre-computed summary. Takes precedence over `reasoning`
-    /// and `tool_calls`.
+    /// When set, replaces ALL provider-visible events in the range with a
+    /// pre-computed summary.
+    /// Takes precedence over `reasoning` and `tool_calls`.
     pub summary: Option<SummaryPolicy>,
 
     /// Policy for ChatResponse::Reasoning events.
@@ -215,9 +306,10 @@ pub enum ReasoningPolicy {
     Strip,
 }
 
-/// Replaces ALL provider-visible events in the range with a
-/// pre-computed summary. Messages, reasoning, and tool calls are
-/// all replaced by a single synthetic ChatRequest/ChatResponse pair.
+/// Replaces ALL provider-visible events in the range with a pre-computed
+/// summary.
+/// Messages, reasoning, and tool calls are all replaced by a single synthetic
+/// ChatRequest/ChatResponse pair.
 pub struct SummaryPolicy {
     /// The summary text, generated at compaction-creation time.
     pub summary: String,
@@ -225,9 +317,11 @@ pub struct SummaryPolicy {
 
 pub enum ToolCallPolicy {
     /// Replace request arguments and/or response content with compact
-    /// summaries. Preserves tool name, call ID, and success/error status.
+    /// summaries.
+    /// Preserves tool name, call ID, and success/error status.
     ///
     /// Parses from strings for config ergonomics:
+    ///
     /// - `"strip"` → Strip { request: true, response: true }
     /// - `"strip-responses"` → Strip { request: false, response: true }
     /// - `"strip-requests"` → Strip { request: true, response: false }
@@ -330,7 +424,7 @@ Raw stream (turns 0-2, then turns 3+ uncompacted):
   Turn 2: ChatResponse::Message("Added tracing-based logging.")
 ```
 
-With the `default` profile (`reasoning: Strip, tool_calls: Strip`):
+With default config (`reasoning: strip, tool_calls: strip`):
 
 ```txt
 Compaction event (after turn 2):
@@ -347,7 +441,7 @@ Projected view:
   ToolCallResponse(id="1", ok, "[compacted] fs_create_file: success")
   ChatResponse::Message("Created src/main.rs with a basic setup.")
   ChatRequest("add error handling")
-  ToolCallRequest(id="2", fs_read_file, {path: "src/main.rs"})
+  ToolCallRequest(id="2", fs_read_file, {[compacted]})
   ToolCallResponse(id="2", ok, "[compacted] fs_read_file: success")
   ToolCallRequest(id="3", fs_modify_file, {[compacted]})
   ToolCallResponse(id="3", ok, "[compacted] fs_modify_file: success")
@@ -359,14 +453,13 @@ Projected view:
   ...turns 3+ uncompacted...
 ```
 
-Reasoning is stripped, tool arguments and responses are compacted.
-Note that `fs_read_file` at id="2" keeps its arguments (per-tool hint `request =
-"keep"`) while `fs_create_file` and `fs_modify_file` have their arguments
-stripped (per-tool hint `request = "strip"` because they carry large file
-content).
+Reasoning is stripped, and every tool call's arguments and responses are
+compacted uniformly.
 Messages and conversation structure are preserved.
+Selective, per-tool exemptions (e.g. keeping `fs_read_file` arguments while
+stripping `fs_create_file` content) are deferred to a future RFD.
 
-With the `heavy` profile (`summary: Summarize`):
+With a summarization config (`-c compaction/heavy`):
 
 ```txt
 Compaction event (after turn 2):
@@ -384,13 +477,13 @@ Projected view:
   ...turns 3+ uncompacted...
 ```
 
-The two profiles show the distinction:
+These two configurations show the distinction:
 
-- **`default` (mechanical):** Conversation structure is preserved.
+- **Mechanical (default):** Conversation structure is preserved.
   Reasoning is stripped, tool responses are replaced with status lines.
   Messages and tool call requests remain — the model sees the full flow of what
   happened, minus the bulk.
-- **`heavy` (summarization):** Everything in the range is replaced by a single
+- **Summarization (heavy):** Everything in the range is replaced by a single
   summary.
   The summarizer reads ALL raw events (messages, reasoning, tool calls) to
   produce the summary, so tool usage and decisions are captured in the text.
@@ -421,6 +514,12 @@ Compaction B (turn 30): from=0, to=30, tool_calls=Strip { request: false, respon
 | 25   | Reasoning  | out of range | —     | Keep           |
 
 \* `summary` takes precedence over per-type policies when both cover an event.
+
+This stacking behavior is what makes multi-rule configurations and the DSL work:
+each rule produces a separate compaction event, and the projection layer
+composes them at read time.
+Rule ordering does not affect correctness — the projection resolves conflicts
+by timestamp, and summaries always read the raw (uncompacted) stream.
 
 #### Summary Overlap Resolution
 
@@ -484,7 +583,7 @@ the specified range.
 At projection time, tool response content is replaced with a status line
 (`[compacted] {tool_name}: {success|error}`) and/or request arguments are
 replaced with a compact summary.
-Which fields are stripped depends on the profile and per-tool hints.
+Which fields are stripped depends on the rule configuration.
 
 **Impact:** High.
 Tool responses and arguments (especially for file-writing tools) dominate token
@@ -501,86 +600,128 @@ When set, this replaces all provider-visible events in the range.
 
 The summarization prompt instructs the model to preserve key decisions, file
 paths, error resolutions, and the current state of the task.
-The model and prompt are configurable per-profile (see
-[Configuration](#configuration)).
+The model and prompt are configurable (see [Configuration](#configuration)).
 
 **Impact:** High.
 Replaces an arbitrary number of turns with a short summary.
 
 ### Configuration
 
-Compaction is configured at the workspace and conversation level, following the
-same defaults-plus-named-profiles pattern used by tool configuration.
+Compaction is configured at the workspace and conversation level under
+`conversation.compaction`.
+Configuration defines compaction **rules** — each rule produces one
+`Compaction` event when applied.
+Variation across workspaces or conversations is handled through JP's standard
+config layering (`-c` flag, `config.d/` directories), not through a custom
+profile mechanism.
 
 ```toml
 [conversation.compaction]
-# The profile to use when --profile is not specified.
-default_profile = "default"
+# Reserved for future features (e.g. auto-compaction).
 
-# Number of recent turns to preserve (used by profiles that don't
-# override it). Shorthand for setting `to` to N turns ago.
+# Rules are applied in order. Each rule produces one compaction event.
+[[conversation.compaction.rules]]
+keep_first = 1
 keep_last = 3
-
-# Default compaction profile. Applied by `--compact` with no arguments.
-[conversation.compaction.profiles.default]
 reasoning = "strip"
 tool_calls = "strip"
+```
 
-# A heavier profile that includes summarization.
-# When summary is set, it replaces all events in the range —
-# reasoning and tool_calls policies are not needed.
-[conversation.compaction.profiles.heavy.summary]
-policy = "summarize"
-model = "anthropic/claude-haiku"
-# instructions = """
-# Summarize this conversation for continuity. Preserve:
-# - File paths and code structures discussed
-# - Key decisions and their rationale
-# - Current task state and next steps
-# """
+To define alternative compaction configurations, create config files in the
+workspace's `config.d/` directory and load them with `-c`:
 
-# A minimal profile for quick cleanup.
-[conversation.compaction.profiles.light]
+```toml
+# .jp/config.d/compaction/heavy.toml
+#
+# Usage: jp -c compaction/heavy conversation compact
+#        jp -c compaction/heavy query --compact -- "Continue"
+
+[[conversation.compaction.rules]]
+keep_last = 20
+reasoning = "strip"
+
+[[conversation.compaction.rules]]
+keep_first = 1
+keep_last = 3
+tool_calls = "strip"
+
+[conversation.compaction.rules.summary.model]
+id = "anthropic/claude-haiku"
+```
+
+```toml
+# .jp/config.d/compaction/light.toml
+#
+# Usage: jp -c compaction/light conversation compact
+
+[[conversation.compaction.rules]]
+keep_last = 5
 reasoning = "strip"
 ```
 
-Profiles define which per-type policies to apply.
-The range (`from`, `to`, `keep_last`) comes from the CLI flags or the top-level
-`keep_last` default.
-A profile does not encode a range — ranges are an invocation-time concern.
+Multiple `-c` files compose via `MergedVec` append semantics:
 
-Conversation-level overrides (via `--cfg`) can change any of these for a
-specific conversation.
+```sh
+# Appends both rule sets: strip reasoning + summarize middle
+jp -c compaction/strip-reasoning -c compaction/summarize-middle conversation compact
+```
+
+#### Rules Array and Merging
+
+The `rules` field is a `MergedVec<CompactionRuleConfig>` with `append` as the
+default merge strategy.
+When multiple config sources define rules, they are concatenated in load order.
+
+The built-in default (strip reasoning + tools, keep last 3) uses
+`discard_when_merged: true`, so it is dropped as soon as any user-defined rule
+is present.
+This means compaction works out of the box without configuration, but defining
+even one rule replaces the defaults entirely.
+
+If no rules are configured (and no DSL spec is provided), `jp conversation
+compact` applies the built-in default.
+
+#### Rule Fields
+
+Each rule in the array defines a single compaction operation:
+
+| Field        | Type              | Default | Description                     |
+| ------------ | ----------------- | ------- | ------------------------------- |
+| `keep_first` | turns or duration | `1`     | Turns to preserve at the start. |
+| `keep_last`  | turns or duration | `3`     | Turns to preserve at the end.   |
+| `reasoning`  | `"strip"`         | —       | Strip reasoning blocks.         |
+| `tool_calls` | mode string       | —       | Strip or omit tool calls.       |
+| `summary`    | table             | —       | Generate an LLM summary.        |
+
+`keep_first` and `keep_last` accept a positive integer (turn count) or a
+duration string (e.g.
+`"5h"`).
+
+`tool_calls` accepts: `"strip"` (both), `"strip-responses"`, `"strip-requests"`,
+`"omit"`.
+
+`summary` is a nested table.
+`model` is itself a table (it mirrors `assistant.model`), so the model id goes
+under `summary.model.id`:
+
+```toml
+[conversation.compaction.rules.summary]
+instructions = "..." # optional, custom summarization prompt
+
+# optional, defaults to the main assistant model
+[conversation.compaction.rules.summary.model]
+id = "anthropic/claude-haiku"
+```
+
+When `summary` is set, it replaces all events in the range — `reasoning` and
+`tool_calls` on the same rule are ignored.
 
 ### Per-Tool Compaction Hints
 
-Tools can declare how their calls should be compacted.
-This is a new optional field in the tool configuration:
-
-```toml
-[conversation.tools.fs_read_file.compaction]
-request = "keep" # "keep" | "strip"
-response = "strip" # "keep" | "strip"
-```
-
-Per-tool hints override the profile's `Strip` policy for individual tools.
-A tool with `response = "keep"` is exempted from response stripping even under a
-policy that sets `response: true`.
-
-Example defaults for the JP project:
-
-| Tool             | `request` | `response` |
-| ---------------- | --------- | ---------- |
-| `fs_read_file`   | `keep`    | `strip`    |
-| `fs_grep_files`  | `keep`    | `strip`    |
-| `cargo_check`    | `keep`    | `strip`    |
-| `cargo_test`     | `keep`    | `strip`    |
-| `fs_create_file` | `strip`   | `keep`     |
-| `fs_modify_file` | `strip`   | `strip`    |
-| `git_commit`     | `strip`   | `keep`     |
-
-These are workspace-level tool configurations, not built-in defaults.
-Each workspace defines its own tools and compaction hints.
+Per-tool hints — letting individual tools declare whether their request
+arguments and/or response content should be exempt from stripping — are
+deferred to a future RFD.
+Compaction here applies the `tool_calls` policies uniformly across all tools.
 
 ## Drawbacks
 
@@ -632,6 +773,16 @@ Rejected because:
 4. **Conflated concerns.** Destructive compaction mixes "what to send to the
    LLM" (a view concern) with "what to store on disk" (a persistence concern).
 
+### Named compaction profiles
+
+A `profiles` map keyed by name (e.g.
+`default`, `heavy`, `light`) inside `conversation.compaction`, with a
+`--profile` flag to select one at invocation time.
+Rejected because JP's config pipeline already provides this capability: variant
+configs live in `config.d/` files and are loaded with `-c`.
+Profiles would duplicate the config layering mechanism with a
+compaction-specific lookup that adds complexity without adding capability.
+
 ### Automatic compaction on every turn
 
 Compact transparently when approaching the context window limit.
@@ -646,7 +797,7 @@ One "compact" that does everything.
 Rejected: different conversations need different compaction.
 A coding conversation benefits from tool response stripping; a discussion
 benefits from summarization.
-Named profiles with per-type policies let users tailor the operation.
+Composable rules with per-type policies let users tailor the operation.
 
 ## Non-Goals
 
@@ -719,6 +870,17 @@ Named profiles with per-type policies let users tailor the operation.
   user/assistant alternation that providers expect.
   Needs testing across Anthropic, OpenAI, Google, and local providers.
 
+- **Migration of `Event::Patch` to the overlay model.** The `Event::Patch`
+  mechanism (introduced for stale thinking-block signature recovery in Anthropic
+  and Google providers) currently mutates historical events in the conversation
+  stream in-place.
+  This is a known deviation from the append-only principle.
+  Once the projection layer from Phase 2 exists, `Event::Patch` should be
+  migrated to append a metadata-patch event to the stream, with the projection
+  layer applying it at request-build time.
+  The `PatchAction` vocabulary should not be expanded beyond `RemoveMetadata`
+  until this migration is complete.
+
 ## Implementation Plan
 
 ### Phase 1: Compaction Event Model
@@ -735,11 +897,11 @@ No behavioral changes.
 
 ### Phase 2: Projection Layer
 
-1. Add `ConversationStream::projected_iter()` that applies compaction overlays
-   to yield the projected view.
+1. Add `ConversationStream::apply_projection()` that applies compaction overlays
+   to transform the event list.
 2. Implement the stacking semantics (latest-wins per content type).
 3. Implement summary injection (synthetic `ChatRequest`/`ChatResponse` pair).
-4. Wire `Thread::into_parts()` to use `projected_iter()`.
+4. Wire `Thread::into_parts()` to call `apply_projection()`.
 5. Add unit tests for each policy type, stacking, and summary overlap
    auto-extension.
 
@@ -752,34 +914,35 @@ After this phase, compaction events in the stream will affect what the LLM sees.
    Each produces a `Compaction` event.
 2. Implement range bound resolution (negative integers, duration strings, `last`
    → absolute turn index).
-3. Add the `jp conversation compact` CLI command with `--profile`, `--from`,
-   `--to`, `--keep-last`, `--dry-run`.
-4. Add `--compact[=profile]` to `jp conversation fork`.
+3. Add the `jp conversation compact` command with `--keep-first`, `--keep-last`,
+   `--from`, `--to`, `--reasoning`, `--tools`, `--dry-run`, `--reset`.
+4. Add `--compact` / `-k` to `jp conversation fork`.
 5. Add `--compacted` to `jp conversation print`.
 6. Add integration tests.
 
 Depends on Phase 2.
 
-### Phase 4: Configuration
+### Phase 4: Configuration and DSL
 
-1. Add `conversation.compaction` config section with `default_profile`,
-   `keep_last`.
-2. Add `conversation.compaction.profiles` support (named policy sets).
-3. Add per-tool `compaction` hints to `ToolConfig`.
-4. Wire profiles into the CLI (`--profile` flag, `--compact` defaults).
-5. Add config tests.
+1. Add `conversation.compaction` config section with `rules` as
+   `MergedVec<CompactionRuleConfig>`.
+2. Implement built-in default rule with `discard_when_merged: true`.
+3. Implement the `--compact[=SPEC]` DSL parser.
+4. Wire `--compact` / `-k` into `query`, `fork`, and `compact` with composition
+   semantics (bare `--compact` = config rules, `--compact=SPEC` = DSL rule, both
+   compose).
+5. Add config and DSL tests.
 
 Depends on Phase 3.
-Can be partially parallelized with Phase 3 (config types can be defined before
-the CLI is wired up).
+Can be partially parallelized with Phase 3 (config types and DSL parser can be
+built before the CLI is wired up).
 
 ### Phase 5: LLM-Assisted Summarization
 
 1. Implement the `summarize` strategy: read raw events, call the configured
    model, produce `SummaryPolicy { summary }`.
 2. Implement the summary overlap auto-extension logic.
-3. Add `--compact[=profile]` to `jp query`.
-4. Add integration tests (with mock LLM).
+3. Add integration tests (with mock LLM).
 
 Depends on Phase 2.
 Can proceed in parallel with Phases 3 and 4.

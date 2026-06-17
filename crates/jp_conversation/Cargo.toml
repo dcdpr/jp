@@ -28,6 +28,7 @@ tracing = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["json"] }
+proptest = { workspace = true, features = ["std"] }
 test-log = { workspace = true }
 
 [lints]

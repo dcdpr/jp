@@ -325,6 +325,10 @@ pub(crate) struct Query {
     #[arg(short = 'U', long = "no-tool-use")]
     no_tool_use: bool,
 
+    /// Compact the conversation before querying.
+    #[command(flatten)]
+    compact: crate::cmd::compact_flag::CompactFlag,
+
     /// Mount an external path into the workspace as a symlink and grant the
     /// assistant access to it.
     ///
@@ -375,6 +379,11 @@ impl Query {
         if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
             lock.as_mut()
                 .update_events(|events| events.add_config_delta(delta));
+        }
+
+        // Compact the conversation before querying, if requested.
+        if self.compact.should_compact() {
+            self.apply_pre_query_compaction(&lock, &cfg, ctx).await?;
         }
 
         let mut mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
@@ -855,6 +864,40 @@ impl Query {
             .or_else(|| Some(Duration::new(0, 0)))
     }
 
+    /// Apply compaction before the query turn starts.
+    ///
+    /// Applies all compaction rules from the resolved config and appends the
+    /// compaction events to the conversation.
+    async fn apply_pre_query_compaction(
+        &self,
+        lock: &ConversationLock,
+        cfg: &AppConfig,
+        ctx: &Ctx,
+    ) -> Result<()> {
+        let events = lock.events().clone();
+
+        // The inline DSL plan never enters the config; assemble the effective
+        // rules from the resolved config rules plus any `-k SPEC` here.
+        let rules = self
+            .compact
+            .effective_rules(&cfg.conversation.compaction.rules)
+            .map_err(|e| Error::Compaction(e.to_string()))?;
+
+        let compactions = super::conversation::compact::build_compaction_events(
+            &events,
+            cfg,
+            &rules,
+            super::conversation::compact::Bound::Default,
+            super::conversation::compact::Bound::Default,
+            &ctx.printer,
+        )
+        .await?;
+
+        super::conversation::compact::apply_compactions(&lock.as_mut(), compactions, &ctx.printer);
+
+        Ok(())
+    }
+
     async fn acquire_lock(
         &self,
         ctx: &mut Ctx,
@@ -1128,6 +1171,7 @@ fn get_config_delta_from_cli(
         .map_err(jp_conversation::Error::from)?;
 
     let partial = partial.delta(cfg.to_partial());
+
     if partial.is_empty() {
         return Ok(None);
     }
@@ -1166,6 +1210,7 @@ impl IntoPartialAppConfig for Query {
             expires_in: _,
             target: _,
             fork: _,
+            compact: _,
             title: _,
             no_title: _,
             mount,

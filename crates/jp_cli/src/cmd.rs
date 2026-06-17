@@ -1,4 +1,5 @@
 mod attachment;
+pub(crate) mod compact_flag;
 mod config;
 mod conversation;
 pub(crate) mod conversation_id;
@@ -403,6 +404,7 @@ impl From<crate::error::Error> for Error {
                     disable_persistence: false,
                 };
             }
+            Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }

@@ -13,7 +13,7 @@ fn access_on_mcp_tool_is_rejected_by_validation() {
         util::build,
     };
 
-    let mut partial = PartialAppConfig::stub();
+    let mut partial = PartialAppConfig::new_test();
     partial
         .conversation
         .tools
@@ -49,7 +49,7 @@ fn access_on_local_tool_is_accepted_by_validation() {
         util::build,
     };
 
-    let mut partial = PartialAppConfig::stub();
+    let mut partial = PartialAppConfig::new_test();
     partial
         .conversation
         .tools

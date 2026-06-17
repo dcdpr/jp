@@ -319,22 +319,7 @@ impl AppConfig {
     #[doc(hidden)]
     #[must_use]
     pub fn new_test() -> Self {
-        use crate::{
-            conversation::tool::RunMode,
-            model::id::{Name, PartialModelIdConfig, ProviderId},
-        };
-
-        let mut partial = PartialAppConfig::empty();
-
-        partial.conversation.title.generate.auto = Some(false);
-        partial.conversation.tools.defaults.run = Some(RunMode::Ask);
-        partial.assistant.model.id = PartialModelIdConfig {
-            provider: Some(ProviderId::Anthropic),
-            name: Some(Name("test".to_owned())),
-        }
-        .into();
-
-        Self::from_partial_with_defaults(partial).expect("valid config")
+        Self::from_partial_with_defaults(PartialAppConfig::new_test()).expect("valid config")
     }
 
     /// Build the schema for the configuration.
@@ -482,6 +467,18 @@ impl AppConfig {
             })?;
         }
 
+        for rule in &mut self.conversation.compaction.rules {
+            if let Some(summary) = rule.summary.as_mut()
+                && let Some(model) = summary.model.as_mut()
+            {
+                model.id.resolve_in_place(aliases).map_err(|e| {
+                    Error::Custom(
+                        format!("conversation.compaction.rules[].summary.model.id: {e}").into(),
+                    )
+                })?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -554,25 +551,25 @@ impl PartialAppConfig {
         }
     }
 
-    /// Create a new partial configuration with stub values for testing
-    /// purposes.
+    /// Return a partial configuration with required fields populated for
+    /// testing purposes.
     ///
-    /// # Panics
-    ///
-    /// This function cannot panic.
+    /// This CANNOT be used in release mode.
+    #[cfg(debug_assertions)]
     #[doc(hidden)]
     #[must_use]
-    pub fn stub() -> Self {
+    pub fn new_test() -> Self {
         use crate::{
             conversation::tool::RunMode,
-            model::id::{PartialModelIdConfig, ProviderId},
+            model::id::{Name, PartialModelIdConfig, ProviderId},
         };
 
         let mut partial = Self::empty();
-        partial.conversation.tools.defaults.run = Some(RunMode::Unattended);
+        partial.conversation.title.generate.auto = Some(false);
+        partial.conversation.tools.defaults.run = Some(RunMode::Ask);
         partial.assistant.model.id = PartialModelIdConfig {
-            provider: Some(ProviderId::Ollama),
-            name: Some("world".try_into().expect("valid name")),
+            provider: Some(ProviderId::Anthropic),
+            name: Some(Name("test".to_owned())),
         }
         .into();
         partial

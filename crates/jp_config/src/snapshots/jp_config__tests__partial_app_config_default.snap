@@ -68,6 +68,11 @@ PartialAppConfig {
             },
             tools: {},
         },
+        compaction: PartialCompactionConfig {
+            rules: Vec(
+                [],
+            ),
+        },
         attachments: Vec(
             [],
         ),

@@ -4,6 +4,7 @@ use super::{ConversationLoadRequest, Output};
 use crate::ctx::Ctx;
 
 mod archive;
+pub(crate) mod compact;
 mod edit;
 pub(crate) mod fork;
 mod grep;
@@ -12,6 +13,7 @@ mod path;
 mod print;
 mod rm;
 mod show;
+pub(crate) mod summarize;
 mod unarchive;
 mod use_;
 
@@ -27,7 +29,8 @@ impl Conversation {
             Commands::Show(args) => args.run(ctx, handles),
             Commands::Remove(args) => args.run(ctx, handles).await,
             Commands::Edit(args) => args.run(ctx, handles).await,
-            Commands::Fork(args) => args.run(ctx, &handles),
+            Commands::Fork(args) => args.run(ctx, &handles).await,
+            Commands::Compact(args) => args.run(ctx, handles).await,
             Commands::Grep(args) => args.run(ctx, handles),
             Commands::Print(args) => args.run(ctx, &handles),
             Commands::Path(args) => args.run(ctx, handles),
@@ -44,6 +47,7 @@ impl Conversation {
             Commands::Remove(args) => args.conversation_load_request(),
             Commands::Edit(args) => args.conversation_load_request(),
             Commands::Fork(args) => args.conversation_load_request(),
+            Commands::Compact(args) => args.conversation_load_request(),
             Commands::Grep(args) => args.conversation_load_request(),
             Commands::Print(args) => args.conversation_load_request(),
             Commands::Path(args) => args.conversation_load_request(),
@@ -80,6 +84,15 @@ enum Commands {
     /// Fork a conversation.
     #[command(name = "fork", visible_alias = "f")]
     Fork(fork::Fork),
+
+    /// Compact a conversation to reduce context size.
+    ///
+    /// Appends a compaction overlay that instructs the LLM projection layer to
+    /// strip reasoning blocks and/or tool call content from the specified
+    /// range.
+    /// The original events are preserved.
+    #[command(name = "compact")]
+    Compact(compact::Compact),
 
     /// Search through conversation history.
     #[command(name = "grep", alias = "rg", visible_alias = "g")]

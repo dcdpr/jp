@@ -47,6 +47,10 @@ pub(crate) struct Fork {
     #[arg(long, short = 'l')]
     last: Option<Option<usize>>,
 
+    /// Compact the forked conversation.
+    #[command(flatten)]
+    compact: crate::cmd::compact_flag::CompactFlag,
+
     /// Set a custom title for the forked conversation.
     #[arg(long, short)]
     title: Option<String>,
@@ -57,9 +61,15 @@ impl Fork {
         ConversationLoadRequest::explicit_or_session(&self.target)
     }
 
-    pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+    pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         for source in handles {
             let lock = fork_conversation(ctx, source, |events| {
+                // `retain` invalidates compaction overlays from the earliest
+                // removed turn onward (overlays confined to the untouched prefix
+                // survive), so a time filter that strips whole turns *or* events
+                // inside a surviving turn can't leave a stale overlay pointing at
+                // — or summarizing — content no longer in the fork. The
+                // `--first`/`--last` helpers below inherit the same guarantee.
                 events.retain(|event| {
                     self.from.is_none_or(|t| event.timestamp >= *t)
                         && self.until.is_none_or(|t| event.timestamp < *t)
@@ -74,6 +84,28 @@ impl Fork {
                     (Some(f), Some(l)) => events.retain_first_and_last_turns(f, l),
                 }
             })?;
+
+            if self.compact.should_compact() {
+                let cfg = ctx.config();
+                let events_snapshot = lock.events().clone();
+                let rules = self
+                    .compact
+                    .effective_rules(&cfg.conversation.compaction.rules)
+                    .map_err(|e| crate::error::Error::Compaction(e.to_string()))?;
+                let compactions = super::compact::build_compaction_events(
+                    &events_snapshot,
+                    &cfg,
+                    &rules,
+                    super::compact::Bound::Default,
+                    super::compact::Bound::Default,
+                    &ctx.printer,
+                )
+                .await?;
+                for compaction in compactions {
+                    lock.as_mut()
+                        .update_events(|events| events.add_compaction(compaction));
+                }
+            }
 
             if let Some(title) = &self.title {
                 lock.as_mut().update_metadata(|m| {

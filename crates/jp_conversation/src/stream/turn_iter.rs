@@ -17,11 +17,19 @@ use super::ConversationEventWithConfigRef;
 /// [`TurnStart`]: crate::event::TurnStart
 #[derive(Debug)]
 pub struct Turn<'a> {
+    /// The 0-based index of this turn in the conversation.
+    index: usize,
     /// The events in this turn, including the leading `TurnStart` (if present).
     events: Vec<ConversationEventWithConfigRef<'a>>,
 }
 
 impl<'a> Turn<'a> {
+    /// The 0-based index of this turn in the conversation.
+    #[must_use]
+    pub const fn index(&self) -> usize {
+        self.index
+    }
+
     /// Iterate over the events in this turn.
     pub fn iter(&self) -> std::slice::Iter<'_, ConversationEventWithConfigRef<'a>> {
         self.events.iter()
@@ -61,14 +69,22 @@ impl<'a> IterTurns<'a> {
 
         for event in events {
             if event.event.is_turn_start() && !current.is_empty() {
-                turns.push(Turn { events: current });
+                let index = turns.len();
+                turns.push(Turn {
+                    index,
+                    events: current,
+                });
                 current = Vec::new();
             }
             current.push(event);
         }
 
         if !current.is_empty() {
-            turns.push(Turn { events: current });
+            let index = turns.len();
+            turns.push(Turn {
+                index,
+                events: current,
+            });
         }
 
         Self(turns.into_iter())

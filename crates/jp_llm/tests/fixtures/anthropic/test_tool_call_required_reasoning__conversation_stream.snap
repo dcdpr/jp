@@ -64,6 +64,20 @@ expression: v
           }
         }
       },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "3",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
       "attachments": {
         "value": [],
         "strategy": "replace",

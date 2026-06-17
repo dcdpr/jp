@@ -195,17 +195,14 @@ impl Ctx {
 
 /// A trait for converting any type into a partial [`AppConfig`].
 pub(crate) trait IntoPartialAppConfig {
+    /// Apply CLI flag overrides to the partial config.
+    ///
+    /// `merged_config` may contain the full configuration for validation when
+    /// `partial` is incomplete.
     fn apply_cli_config(
         &self,
         workspace: Option<&Workspace>,
         partial: PartialAppConfig,
-
-        // Whenever called the `partial` argument might be empty, or contain
-        // any subset of the full configuration. This might prevent validating
-        // certain fields before applying them. In these situations, the
-        // `merged_config` argument can be used to provide the full
-        // configuration, and the partial configuration can be validated against
-        // it.
         merged_config: Option<&PartialAppConfig>,
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>>;
 
