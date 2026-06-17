@@ -51,15 +51,6 @@ pub struct StreamingInterruptConfig {
     ///   so far is kept as context.
     #[setting(default)]
     pub action: StreamingInterruptAction,
-
-    /// Open your editor straight away when replying, instead of the inline
-    /// "press `e` to open editor, enter to send" prompt.
-    ///
-    /// Applies whenever you reply to a streaming interrupt, whether `reply` is
-    /// the configured action or chosen from the menu.
-    /// Defaults to `false`.
-    #[setting(default = false)]
-    pub reply_in_editor: bool,
 }
 
 /// Ctrl-C behavior while tools are executing.
@@ -75,15 +66,6 @@ pub struct ToolInterruptConfig {
     ///   assistant in their place.
     #[setting(default)]
     pub action: ToolInterruptAction,
-
-    /// Open your editor straight away when replying, instead of the inline
-    /// "press `e` to open editor, enter to send" prompt.
-    ///
-    /// Applies whenever you reply to a tool interrupt (the `stop_reply` action
-    /// or the menu's reply option).
-    /// Defaults to `false`.
-    #[setting(default = false)]
-    pub reply_in_editor: bool,
 }
 
 /// What Ctrl-C does while the assistant is generating content.
@@ -148,7 +130,6 @@ impl AssignKeyValue for PartialStreamingInterruptConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "action" => self.action = kv.try_some_from_str()?,
-            "reply_in_editor" => self.reply_in_editor = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -161,7 +142,6 @@ impl AssignKeyValue for PartialToolInterruptConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "action" => self.action = kv.try_some_from_str()?,
-            "reply_in_editor" => self.reply_in_editor = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -182,7 +162,6 @@ impl PartialConfigDelta for PartialStreamingInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             action: delta_opt(self.action.as_ref(), next.action),
-            reply_in_editor: delta_opt(self.reply_in_editor.as_ref(), next.reply_in_editor),
         }
     }
 }
@@ -191,7 +170,6 @@ impl PartialConfigDelta for PartialToolInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             action: delta_opt(self.action.as_ref(), next.action),
-            reply_in_editor: delta_opt(self.reply_in_editor.as_ref(), next.reply_in_editor),
         }
     }
 }
@@ -209,7 +187,6 @@ impl FillDefaults for PartialStreamingInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             action: self.action.or(defaults.action),
-            reply_in_editor: self.reply_in_editor.or(defaults.reply_in_editor),
         }
     }
 }
@@ -218,7 +195,6 @@ impl FillDefaults for PartialToolInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             action: self.action.or(defaults.action),
-            reply_in_editor: self.reply_in_editor.or(defaults.reply_in_editor),
         }
     }
 }
@@ -238,7 +214,6 @@ impl ToPartial for StreamingInterruptConfig {
 
         Self::Partial {
             action: partial_opt(&self.action, defaults.action),
-            reply_in_editor: partial_opt(&self.reply_in_editor, defaults.reply_in_editor),
         }
     }
 }
@@ -249,7 +224,6 @@ impl ToPartial for ToolInterruptConfig {
 
         Self::Partial {
             action: partial_opt(&self.action, defaults.action),
-            reply_in_editor: partial_opt(&self.reply_in_editor, defaults.reply_in_editor),
         }
     }
 }

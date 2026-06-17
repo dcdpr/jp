@@ -8,20 +8,14 @@ fn make_printer() -> Printer {
     printer
 }
 
-/// Streaming config with the given action and the inline (non-editor) reply.
+/// Streaming config with the given action.
 fn streaming(action: StreamingInterruptAction) -> StreamingInterruptConfig {
-    StreamingInterruptConfig {
-        action,
-        reply_in_editor: false,
-    }
+    StreamingInterruptConfig { action }
 }
 
-/// Tool config with the given action and the inline (non-editor) reply.
+/// Tool config with the given action.
 fn tool(action: ToolInterruptAction) -> ToolInterruptConfig {
-    ToolInterruptConfig {
-        action,
-        reply_in_editor: false,
-    }
+    ToolInterruptConfig { action }
 }
 
 #[test]
@@ -264,24 +258,6 @@ fn configured_streaming_reply_uses_inline_prompt() {
 }
 
 #[test]
-fn streaming_reply_in_editor_opens_editor() {
-    // Only an editor response is queued. Routing to `text_input` would find no
-    // text response and yield an empty reply, so a non-empty result proves the
-    // editor path was taken.
-    let backend = MockPromptBackend::new().with_editor_responses(["written in editor"]);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let config = StreamingInterruptConfig {
-        action: StreamingInterruptAction::Reply,
-        reply_in_editor: true,
-    };
-    let action = handler.handle_streaming_interrupt(&config, &mut writer, true);
-    assert_eq!(action, InterruptAction::Reply("written in editor".into()));
-}
-
-#[test]
 fn configured_tool_restart_skips_menu() {
     let handler = InterruptHandler::with_backend(MockPromptBackend::new());
     let printer = make_printer();
@@ -301,22 +277,5 @@ fn configured_tool_stop_reply_uses_inline_prompt() {
     let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::StopReply), &mut writer);
     assert_eq!(action, InterruptAction::ToolCancelled {
         response: "use ripgrep".into()
-    });
-}
-
-#[test]
-fn tool_stop_reply_in_editor_opens_editor() {
-    let backend = MockPromptBackend::new().with_editor_responses(["use ripgrep instead"]);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let config = ToolInterruptConfig {
-        action: ToolInterruptAction::StopReply,
-        reply_in_editor: true,
-    };
-    let action = handler.handle_tool_interrupt(&config, &mut writer);
-    assert_eq!(action, InterruptAction::ToolCancelled {
-        response: "use ripgrep instead".into()
     });
 }

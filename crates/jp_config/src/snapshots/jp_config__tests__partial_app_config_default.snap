@@ -144,11 +144,9 @@ PartialAppConfig {
     interrupt: PartialInterruptConfig {
         streaming: PartialStreamingInterruptConfig {
             action: None,
-            reply_in_editor: None,
         },
         tool_call: PartialToolInterruptConfig {
             action: None,
-            reply_in_editor: None,
         },
     },
     editor: PartialEditorConfig {

@@ -136,12 +136,10 @@ expression: v
     },
     "interrupt": {
       "streaming": {
-        "action": "prompt",
-        "reply_in_editor": false
+        "action": "prompt"
       },
       "tool_call": {
-        "action": "prompt",
-        "reply_in_editor": false
+        "action": "prompt"
       }
     },
     "editor": {

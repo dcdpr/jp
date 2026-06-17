@@ -105,8 +105,7 @@ impl<P: PromptBackend> InterruptHandler<P> {
     ///
     /// When `config.action` is `prompt` the interrupt menu is shown; otherwise
     /// the configured action runs directly without a menu.
-    /// A reply still collects text — via the editor when
-    /// `config.reply_in_editor` is set, otherwise via the inline prompt.
+    /// A `reply` still prompts for the reply text.
     pub fn handle_streaming_interrupt(
         &self,
         config: &StreamingInterruptConfig,
@@ -135,26 +134,15 @@ impl<P: PromptBackend> InterruptHandler<P> {
         match choice {
             'c' if stream_alive => InterruptAction::Resume,
             'c' => InterruptAction::Continue,
-            'r' => InterruptAction::Reply(self.reply_text(config.reply_in_editor, writer)),
+            'r' => InterruptAction::Reply(
+                self.backend
+                    .text_input("Reply:", writer)
+                    .unwrap_or_default(),
+            ),
             's' => InterruptAction::Stop,
             'a' => InterruptAction::Abort,
             _ => unreachable!("unexpected choice"),
         }
-    }
-
-    /// Collect the reply text for an interrupt reply.
-    ///
-    /// Opens the editor directly when `in_editor` is set; otherwise shows the
-    /// inline text prompt.
-    /// An empty string is returned when input is cancelled.
-    fn reply_text(&self, in_editor: bool, writer: &mut dyn Write) -> String {
-        let result = if in_editor {
-            self.backend.editor_input()
-        } else {
-            self.backend.text_input("Reply:", writer)
-        };
-
-        result.unwrap_or_default()
     }
 
     /// Handle an interrupt during tool execution.
@@ -166,8 +154,7 @@ impl<P: PromptBackend> InterruptHandler<P> {
     ///
     /// When `config.action` is `prompt` the interrupt menu is shown; otherwise
     /// the configured action runs directly without a menu.
-    /// A reply still collects text — via the editor when
-    /// `config.reply_in_editor` is set, otherwise via the inline prompt.
+    /// A `stop_reply` still prompts for the reply text.
     pub fn handle_tool_interrupt(
         &self,
         config: &ToolInterruptConfig,
@@ -193,7 +180,10 @@ impl<P: PromptBackend> InterruptHandler<P> {
         match choice {
             'c' => InterruptAction::Resume,
             's' => {
-                let response = self.reply_text(config.reply_in_editor, writer);
+                let response = self
+                    .backend
+                    .text_input("Reply:", writer)
+                    .unwrap_or_default();
 
                 let response = if response.trim().is_empty() {
                     DEFAULT_TOOL_CANCELLED_RESPONSE.to_owned()

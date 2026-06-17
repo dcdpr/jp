@@ -40,8 +40,11 @@ pub enum LoopAction<T> {
 
 /// Handle a signal received during LLM streaming.
 ///
-/// Shows the interrupt menu when Ctrl+C is received, then delegates to the turn
-/// coordinator's state machine for state transitions and content injection.
+/// On Ctrl+C, applies the configured streaming interrupt behavior: the menu is
+/// shown only when `config.action` is `prompt`, otherwise the configured action
+/// runs directly.
+/// Then delegates to the turn coordinator's state machine for state transitions
+/// and content injection.
 pub fn handle_streaming_signal(
     signal: SignalTo,
     turn_coordinator: &mut TurnCoordinator,
@@ -202,12 +205,14 @@ pub enum ToolSignalResult {
 
 /// Handle a signal received during tool execution.
 ///
-/// Shows the tool interrupt menu when Ctrl+C is received, then delegates to the
-/// turn coordinator for state machine updates.
+/// On Ctrl+C, applies the configured tool interrupt behavior: the menu is shown
+/// only when `config.action` is `prompt`, otherwise the configured action runs
+/// directly.
+/// Then delegates to the turn coordinator for state machine updates.
 ///
 /// If any tool is currently showing an interactive prompt (permission,
-/// question, result edit), the interrupt menu is suppressed and we let the
-/// active prompt handle Ctrl+C instead.
+/// question, result edit), the interrupt is suppressed and we let the active
+/// prompt handle Ctrl+C instead.
 /// This prevents UI conflicts between the interrupt menu and the active prompt.
 ///
 /// # Arguments

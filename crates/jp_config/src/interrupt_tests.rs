@@ -63,13 +63,10 @@ fn unknown_action_is_rejected() {
 }
 
 #[test]
-fn assign_sets_nested_action_and_reply_in_editor() {
+fn assign_sets_nested_action() {
     let mut partial = PartialInterruptConfig::default();
     partial
         .assign(KvAssignment::try_from_cli("streaming.action", "stop").unwrap())
-        .unwrap();
-    partial
-        .assign(KvAssignment::try_from_cli("streaming.reply_in_editor", "true").unwrap())
         .unwrap();
     partial
         .assign(KvAssignment::try_from_cli("tool_call.action", "restart").unwrap())
@@ -79,6 +76,5 @@ fn assign_sets_nested_action_and_reply_in_editor() {
         partial.streaming.action,
         Some(StreamingInterruptAction::Stop)
     );
-    assert_eq!(partial.streaming.reply_in_editor, Some(true));
     assert_eq!(partial.tool_call.action, Some(ToolInterruptAction::Restart));
 }

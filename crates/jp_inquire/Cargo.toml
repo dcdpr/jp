@@ -13,7 +13,6 @@ version.workspace = true
 
 [dependencies]
 inquire = { workspace = true, features = ["crossterm", "editor"] }
-open-editor = { workspace = true }
 parking_lot = { workspace = true }
 
 [lints]

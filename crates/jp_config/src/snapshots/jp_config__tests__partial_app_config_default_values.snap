@@ -284,15 +284,9 @@ Ok(
             interrupt: PartialInterruptConfig {
                 streaming: PartialStreamingInterruptConfig {
                     action: None,
-                    reply_in_editor: Some(
-                        false,
-                    ),
                 },
                 tool_call: PartialToolInterruptConfig {
                     action: None,
-                    reply_in_editor: Some(
-                        false,
-                    ),
                 },
             },
             editor: PartialEditorConfig {
