@@ -141,6 +141,10 @@ PartialAppConfig {
             max_latency: None,
         },
     },
+    interrupt: PartialInterruptConfig {
+        streaming: None,
+        tool_call: None,
+    },
     editor: PartialEditorConfig {
         cmd: None,
         envs: None,

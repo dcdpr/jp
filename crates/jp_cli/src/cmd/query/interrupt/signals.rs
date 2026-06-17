@@ -8,6 +8,7 @@
 //! 2. Delegates state transitions to the `TurnCoordinator` state machine
 //! 3. Returns a `LoopAction` for the caller to handle control flow
 
+use jp_config::interrupt::{StreamingInterrupt, ToolInterrupt};
 use jp_conversation::ConversationStream;
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction};
@@ -47,6 +48,7 @@ pub fn handle_streaming_signal(
     conversation_stream: &mut ConversationStream,
     printer: &Printer,
     backend: &dyn PromptBackend,
+    action: StreamingInterrupt,
     llm_stream_finished: bool,
 ) -> LoopAction<()> {
     info!(?signal, "Received signal during streaming.");
@@ -68,8 +70,11 @@ pub fn handle_streaming_signal(
             turn_coordinator.flush_renderer();
             printer.flush_instant();
 
-            let action = InterruptHandler::with_backend(backend)
-                .handle_streaming_interrupt(&mut printer.prompt_writer(), !llm_stream_finished);
+            let action = InterruptHandler::with_backend(backend).handle_streaming_interrupt(
+                action,
+                &mut printer.prompt_writer(),
+                !llm_stream_finished,
+            );
 
             // `Resume` means "keep waiting for the current stream." The state
             // machine is a no-op for it, and we must NOT break the inner loop:
@@ -217,6 +222,7 @@ pub fn handle_tool_signal(
     is_prompting: bool,
     printer: &Printer,
     backend: &dyn PromptBackend,
+    action: ToolInterrupt,
 ) -> ToolSignalResult {
     match signal {
         SignalTo::Quit => {
@@ -237,7 +243,7 @@ pub fn handle_tool_signal(
             }
 
             let action = InterruptHandler::with_backend(backend)
-                .handle_tool_interrupt(&mut printer.prompt_writer());
+                .handle_tool_interrupt(action, &mut printer.prompt_writer());
 
             // Notify the state machine (reserved for future state transitions).
             turn_coordinator.handle_tool_interrupt(&action);

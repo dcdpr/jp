@@ -61,6 +61,8 @@ expression: "AppConfig::fields()"
     "plugins.auto_install",
     "plugins.command",
     "plugins.shutdown_timeout_secs",
+    "interrupt.streaming",
+    "interrupt.tool_call",
     "editor.cmd",
     "editor.envs",
     "conversation.attachments",

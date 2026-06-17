@@ -19,6 +19,7 @@
 
 use std::io::Write;
 
+use jp_config::interrupt::{StreamingInterrupt, ToolInterrupt};
 use jp_inquire::{
     InlineOption,
     prompt::{PromptBackend, TerminalPromptBackend},
@@ -99,22 +100,34 @@ impl<P: PromptBackend> InterruptHandler<P> {
     }
 
     /// Handle an interrupt during LLM streaming.
+    ///
+    /// When `action` is [`StreamingInterrupt::Prompt`] the interrupt menu is
+    /// shown; otherwise the configured action runs directly without a menu.
+    /// `reply` still prompts for the reply text.
     pub fn handle_streaming_interrupt(
         &self,
+        action: StreamingInterrupt,
         writer: &mut dyn Write,
         stream_alive: bool,
     ) -> InterruptAction {
-        let options = vec![
-            InlineOption::new('c', "Continue"),
-            InlineOption::new('r', "Reply (discard & reply)"),
-            InlineOption::new('s', "Stop (save & exit)"),
-            InlineOption::new('a', "Abort (discard & exit)"),
-        ];
+        let choice = match action {
+            StreamingInterrupt::Prompt => {
+                let options = vec![
+                    InlineOption::new('c', "Continue"),
+                    InlineOption::new('r', "Reply (stop & respond)"),
+                    InlineOption::new('s', "Stop (save & exit)"),
+                    InlineOption::new('a', "Abort (discard & exit)"),
+                ];
 
-        let choice = self
-            .backend
-            .inline_select("Interrupted", options, None, writer)
-            .unwrap_or('s');
+                self.backend
+                    .inline_select("Interrupted", options, None, writer)
+                    .unwrap_or('s')
+            }
+            StreamingInterrupt::Continue => 'c',
+            StreamingInterrupt::Reply => 'r',
+            StreamingInterrupt::Stop => 's',
+            StreamingInterrupt::Abort => 'a',
+        };
 
         match choice {
             'c' if stream_alive => InterruptAction::Resume,
@@ -136,17 +149,31 @@ impl<P: PromptBackend> InterruptHandler<P> {
     /// waiting.
     /// When the user chooses "Stop & Reply", they can supply a custom message.
     /// An empty input produces a canned default.
-    pub fn handle_tool_interrupt(&self, writer: &mut dyn Write) -> InterruptAction {
-        let options = vec![
-            InlineOption::new('c', "Continue"),
-            InlineOption::new('s', "Stop & Reply"),
-            InlineOption::new('r', "Restart"),
-        ];
+    ///
+    /// When `action` is [`ToolInterrupt::Prompt`] the interrupt menu is shown;
+    /// otherwise the configured action runs directly without a menu.
+    /// `stop_reply` still prompts for the reply text.
+    pub fn handle_tool_interrupt(
+        &self,
+        action: ToolInterrupt,
+        writer: &mut dyn Write,
+    ) -> InterruptAction {
+        let choice = match action {
+            ToolInterrupt::Prompt => {
+                let options = vec![
+                    InlineOption::new('c', "Continue"),
+                    InlineOption::new('s', "Stop & Reply"),
+                    InlineOption::new('r', "Restart"),
+                ];
 
-        let choice = self
-            .backend
-            .inline_select("Interrupted", options, None, writer)
-            .unwrap_or('c');
+                self.backend
+                    .inline_select("Interrupted", options, None, writer)
+                    .unwrap_or('c')
+            }
+            ToolInterrupt::Continue => 'c',
+            ToolInterrupt::Restart => 'r',
+            ToolInterrupt::StopReply => 's',
+        };
 
         match choice {
             'c' => InterruptAction::Resume,

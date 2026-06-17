@@ -15,7 +15,7 @@ fn test_streaming_interrupt_stop() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_streaming_interrupt(&mut writer, true);
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Prompt, &mut writer, true);
     assert_eq!(action, InterruptAction::Stop);
 }
 
@@ -26,7 +26,7 @@ fn test_streaming_interrupt_abort() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_streaming_interrupt(&mut writer, true);
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Prompt, &mut writer, true);
     assert_eq!(action, InterruptAction::Abort);
 }
 
@@ -39,7 +39,7 @@ fn test_streaming_interrupt_reply() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_streaming_interrupt(&mut writer, true);
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Prompt, &mut writer, true);
     assert_eq!(action, InterruptAction::Reply("my reply message".into()));
 }
 
@@ -51,7 +51,7 @@ fn test_streaming_interrupt_reply_empty_on_cancel() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_streaming_interrupt(&mut writer, true);
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Prompt, &mut writer, true);
     assert_eq!(action, InterruptAction::Reply(String::new()));
 }
 
@@ -62,7 +62,7 @@ fn test_streaming_interrupt_continue_stream_alive() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_streaming_interrupt(&mut writer, true);
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Prompt, &mut writer, true);
     assert_eq!(action, InterruptAction::Resume);
 }
 
@@ -73,7 +73,7 @@ fn test_streaming_interrupt_continue_stream_dead() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_streaming_interrupt(&mut writer, false);
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Prompt, &mut writer, false);
     assert_eq!(action, InterruptAction::Continue);
 }
 
@@ -85,7 +85,7 @@ fn test_streaming_interrupt_defaults_to_stop_on_error() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_streaming_interrupt(&mut writer, true);
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Prompt, &mut writer, true);
     assert_eq!(action, InterruptAction::Stop);
 }
 
@@ -98,7 +98,7 @@ fn test_tool_interrupt_stop_with_custom_response() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_tool_interrupt(&mut writer);
+    let action = handler.handle_tool_interrupt(ToolInterrupt::Prompt, &mut writer);
     assert_eq!(action, InterruptAction::ToolCancelled {
         response: "don't run this tool".into()
     });
@@ -112,7 +112,7 @@ fn test_tool_interrupt_stop_empty_uses_canned_response() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_tool_interrupt(&mut writer);
+    let action = handler.handle_tool_interrupt(ToolInterrupt::Prompt, &mut writer);
     assert!(
         matches!(action, InterruptAction::ToolCancelled { response } if response.contains("intentionally rejected"))
     );
@@ -125,7 +125,7 @@ fn test_tool_interrupt_restart() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_tool_interrupt(&mut writer);
+    let action = handler.handle_tool_interrupt(ToolInterrupt::Prompt, &mut writer);
     assert_eq!(action, InterruptAction::RestartTool);
 }
 
@@ -136,8 +136,85 @@ fn test_tool_interrupt_continue() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_tool_interrupt(&mut writer);
+    let action = handler.handle_tool_interrupt(ToolInterrupt::Prompt, &mut writer);
     assert_eq!(action, InterruptAction::Resume);
+}
+
+// A configured (non-prompt) action must run without consulting the prompt
+// backend: the empty backend would panic / error if the menu were shown.
+
+#[test]
+fn configured_streaming_stop_skips_menu() {
+    let backend = MockPromptBackend::new();
+    let handler = InterruptHandler::with_backend(backend);
+    let printer = make_printer();
+    let mut writer = printer.out_writer();
+
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Stop, &mut writer, true);
+    assert_eq!(action, InterruptAction::Stop);
+}
+
+#[test]
+fn configured_streaming_abort_skips_menu() {
+    let backend = MockPromptBackend::new();
+    let handler = InterruptHandler::with_backend(backend);
+    let printer = make_printer();
+    let mut writer = printer.out_writer();
+
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Abort, &mut writer, true);
+    assert_eq!(action, InterruptAction::Abort);
+}
+
+#[test]
+fn configured_streaming_continue_tracks_stream_liveness() {
+    let printer = make_printer();
+    let mut writer = printer.out_writer();
+
+    let alive = InterruptHandler::with_backend(MockPromptBackend::new())
+        .handle_streaming_interrupt(StreamingInterrupt::Continue, &mut writer, true);
+    assert_eq!(alive, InterruptAction::Resume);
+
+    let dead = InterruptHandler::with_backend(MockPromptBackend::new()).handle_streaming_interrupt(
+        StreamingInterrupt::Continue,
+        &mut writer,
+        false,
+    );
+    assert_eq!(dead, InterruptAction::Continue);
+}
+
+#[test]
+fn configured_streaming_reply_still_prompts_for_text() {
+    let backend = MockPromptBackend::new().with_text_responses(["changed my mind"]);
+    let handler = InterruptHandler::with_backend(backend);
+    let printer = make_printer();
+    let mut writer = printer.out_writer();
+
+    let action = handler.handle_streaming_interrupt(StreamingInterrupt::Reply, &mut writer, true);
+    assert_eq!(action, InterruptAction::Reply("changed my mind".into()));
+}
+
+#[test]
+fn configured_tool_restart_skips_menu() {
+    let backend = MockPromptBackend::new();
+    let handler = InterruptHandler::with_backend(backend);
+    let printer = make_printer();
+    let mut writer = printer.out_writer();
+
+    let action = handler.handle_tool_interrupt(ToolInterrupt::Restart, &mut writer);
+    assert_eq!(action, InterruptAction::RestartTool);
+}
+
+#[test]
+fn configured_tool_stop_reply_still_prompts_for_text() {
+    let backend = MockPromptBackend::new().with_text_responses(["use ripgrep"]);
+    let handler = InterruptHandler::with_backend(backend);
+    let printer = make_printer();
+    let mut writer = printer.out_writer();
+
+    let action = handler.handle_tool_interrupt(ToolInterrupt::StopReply, &mut writer);
+    assert_eq!(action, InterruptAction::ToolCancelled {
+        response: "use ripgrep".into()
+    });
 }
 
 #[test]
@@ -148,6 +225,6 @@ fn test_tool_interrupt_defaults_to_continue_on_error() {
     let printer = make_printer();
     let mut writer = printer.out_writer();
 
-    let action = handler.handle_tool_interrupt(&mut writer);
+    let action = handler.handle_tool_interrupt(ToolInterrupt::Prompt, &mut writer);
     assert_eq!(action, InterruptAction::Resume);
 }
