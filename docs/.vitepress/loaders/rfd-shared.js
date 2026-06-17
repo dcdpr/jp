@@ -330,3 +330,36 @@ export function findCycles(graph) {
         .join('\n')
     return `Dependency cycles detected (Requires ∪ Extends):\n${report}`
 }
+
+// Reject a `Requires` entry that targets an already-`Implemented` RFD.
+//
+// `Requires` exists to gate promotion on an unbuilt dependency: it tells the
+// gate (and readers) that the target must reach a sufficient status first.
+// Once the target is `Implemented`, the dependency is satisfied for good and the
+// link is redundant. `rfd-promote` strips `Requires` when an RFD itself reaches
+// `Implemented`; this check catches the other direction, a dependency that
+// became `Implemented` while the dependent RFD is still in flight. Use `Extends`
+// instead when the relationship is design lineage worth keeping past
+// implementation.
+export function checkRequiresOnImplemented(graph) {
+    const violations = []
+    for (const [num, entry] of graph) {
+        for (const dep of entry.requires) {
+            if (graph.get(dep)?.status === 'Implemented') {
+                violations.push({ file: entry.file, num, dep })
+            }
+        }
+    }
+
+    if (violations.length === 0) return null
+
+    const report = violations
+        .map(({ file, num, dep }) =>
+            `  ${file}: RFD ${num} requires RFD ${dep}, which is Implemented`)
+        .join('\n')
+    return `\`Requires\` on an Implemented RFD:\n${report}\n\n` +
+        `\`Requires\` gates promotion on an unbuilt dependency; once the target ` +
+        `is Implemented the link is redundant. Remove the \`Requires\` entry ` +
+        `(and the matching \`Required by\` back-link), or use \`Extends\` if the ` +
+        `relationship is design lineage worth keeping.`
+}

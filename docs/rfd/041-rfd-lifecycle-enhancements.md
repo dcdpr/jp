@@ -4,7 +4,6 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-09
-- **Requires**: [RFD 001], [RFD 003]
 
 ## Summary
 

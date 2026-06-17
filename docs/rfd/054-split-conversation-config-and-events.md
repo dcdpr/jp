@@ -4,7 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-11
-- **Required by**: [RFD 070], [RFD 079]
 
 ## Summary
 
@@ -259,5 +258,3 @@ This is a single-phase change that can be merged in one PR.
 - [RFD 020] — conversation locks that protect concurrent write access
 
 [RFD 020]: 020-parallel-conversations.md
-[RFD 070]: 070-negative-config-deltas.md
-[RFD 079]: 079-config-sources-and-load-order.md

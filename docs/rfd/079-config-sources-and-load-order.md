@@ -4,7 +4,7 @@
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-20
-- **Requires**: [RFD 008], [RFD 035], [RFD 038], [RFD 054]
+- **Requires**: [RFD 038]
 - **Required by**: [RFD 080]
 
 ## Summary

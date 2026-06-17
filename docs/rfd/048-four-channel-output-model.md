@@ -251,4 +251,3 @@ Independent of Phases 1-2.
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 051]: 051-sub-agent-workflows.md
 [RFD 086]: 086-line-oriented-stdin-input-for-cli-arguments.md
-[\#518]: https://github.com/dcdpr/jp/issues/518

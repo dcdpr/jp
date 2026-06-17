@@ -4,7 +4,6 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
-- **Required by**: [RFD 003]
 
 ## Summary
 
@@ -274,7 +273,6 @@ The quality and correctness of the result is your responsibility.
 - [RFD 001: The JP RFD Process] — how we write and manage RFDs.
 
 [RFD 001: The JP RFD Process]: 001-jp-rfd-process.md
-[RFD 003]: 003-jp-assisted-rfds.md
 [oxide-rfd-576]: https://rfd.shared.oxide.computer/rfd/0576
 [rfc-3]: https://datatracker.ietf.org/doc/html/rfc3
 [rubber-duck]: https://en.wikipedia.org/wiki/Rubber_duck_debugging

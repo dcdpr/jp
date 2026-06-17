@@ -5,7 +5,6 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-04
 - **Extended by**: [RFD 034]
-- **Required by**: [RFD 005], [RFD 009], [RFD 018], [RFD 058], [RFD 083]
 
 ## Summary
 
@@ -321,5 +320,3 @@ Depends on Phase 4.
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 018]: 018-typed-prompt-routing-enum.md
 [RFD 034]: 034-inquiry-specific-assistant-configuration.md
-[RFD 058]: 058-typed-content-blocks-for-tool-responses.md
-[RFD 083]: 083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md

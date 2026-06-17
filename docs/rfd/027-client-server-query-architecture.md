@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
-- **Requires**: [RFD 020], [RFD 023], [RFD 026], [RFD 049]
+- **Requires**: [RFD 023], [RFD 026], [RFD 049]
 
 > [!WARNING]
 > This RFD is an early draft and incomplete.

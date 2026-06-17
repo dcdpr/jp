@@ -5,12 +5,14 @@ import {
     buildEntries,
     buildGraph,
     checkRelationshipDuplicates,
+    checkRequiresOnImplemented,
     checkStatusGate,
     findCycles,
     findDuplicateIds,
 } from './rfd-shared.js'
 
 const draftsDir = resolve(import.meta.dirname, '../../rfd/drafts')
+const rfdDir = resolve(import.meta.dirname, '../../rfd')
 
 export default {
     load() {
@@ -29,9 +31,23 @@ export default {
         // build. Summaries and the stray-draft-reference rule don't apply to
         // drafts at all.
         const graph = buildGraph(draftsDir, files)
+
+        // `checkRequiresOnImplemented` needs the *published* statuses to tell
+        // whether a draft's `Requires` target is already Implemented (a draft
+        // can require a published RFD). Merge a published graph in: draft
+        // entries supply the `Requires` sources, published entries supply the
+        // target statuses.
+        const publishedFiles = readdirSync(rfdDir)
+            .filter(f => /^\d{3}-.+\.md$/.test(f) && !f.startsWith('000-'))
+        const combined = new Map([
+            ...buildGraph(rfdDir, publishedFiles),
+            ...graph,
+        ])
+
         const warnings = [
             checkRelationshipDuplicates(graph),
             checkStatusGate(graph),
+            checkRequiresOnImplemented(combined),
             findCycles(graph),
         ]
         for (const warning of warnings) {

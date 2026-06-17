@@ -4,7 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
-- **Required by**: [RFD 070], [RFD 079]
 
 ## Summary
 
@@ -263,5 +262,3 @@ This is a single-phase change, localized to `load_cli_cfg_args` in
 - `crates/jp_config/src/util.rs` — `find_file_in_load_path`.
 
 [Configuration documentation]: ../configuration.md
-[RFD 070]: 070-negative-config-deltas.md
-[RFD 079]: 079-config-sources-and-load-order.md

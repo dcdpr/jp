@@ -5,7 +5,6 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-13
 - **Tracking Issue**: [\#437]
-- **Required by**: [RFD 079]
 - **Extended by**: [RFD 081]
 
 ## Summary
@@ -97,6 +96,5 @@ Single PR scoped to `crates/jp_cli/src/cmd/query.rs` and `query_tests.rs`:
 3. Rewrite `apply_enable_tools` to iterate directives sequentially.
 4. Update existing tests; add new tests for interleaved ordering.
 
-[RFD 079]: 079-config-sources-and-load-order.md
 [RFD 081]: 081-decompose-tool-enable-into-state-and-allow_toggle.md
 [\#437]: https://github.com/dcdpr/jp/issues/437
