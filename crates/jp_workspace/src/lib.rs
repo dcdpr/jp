@@ -34,7 +34,6 @@ use jp_storage::{
     lock::LockInfo,
 };
 use parking_lot::{ArcRwLockReadGuard, RawRwLock, RwLock, RwLockReadGuard};
-use rayon::prelude::*;
 pub use sanitize::{SanitizeReport, TrashedConversation};
 use state::State;
 use tracing::{debug, trace, warn};
@@ -630,21 +629,14 @@ impl Workspace {
             return;
         }
 
-        let loader = &self.loader;
-        let loaded: Vec<_> = uninitialized
-            .par_iter()
-            .filter_map(|id| match loader.load_conversation_metadata(id) {
-                Ok(meta) => Some((*id, meta)),
-                Err(error) => {
-                    warn!(%id, %error, "Failed to load conversation metadata.");
-                    None
+        for (id, result) in self.loader.load_conversation_metadata_batch(&uninitialized) {
+            match result {
+                Ok(meta) => {
+                    if let Some(cell) = self.state.conversations.get(&id) {
+                        let _err = cell.set(Arc::new(RwLock::new(meta)));
+                    }
                 }
-            })
-            .collect();
-
-        for (id, meta) in loaded {
-            if let Some(cell) = self.state.conversations.get(&id) {
-                let _err = cell.set(Arc::new(RwLock::new(meta)));
+                Err(error) => warn!(%id, %error, "Failed to load conversation metadata."),
             }
         }
     }

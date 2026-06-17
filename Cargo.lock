@@ -2525,7 +2525,6 @@ dependencies = [
  "jp_storage",
  "libc",
  "parking_lot",
- "rayon",
  "serde",
  "serde_json",
  "serial_test",

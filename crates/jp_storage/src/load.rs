@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     io::{self, BufReader},
     time::Duration,
@@ -9,7 +9,10 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use jp_conversation::{Conversation, ConversationId, ConversationStream, StreamError};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
-use serde::{Deserialize, de::DeserializeOwned};
+use serde::{
+    Deserialize, Deserializer,
+    de::{DeserializeOwned, SeqAccess, Visitor},
+};
 use serde_json::value::RawValue;
 use tracing::warn;
 
@@ -231,23 +234,94 @@ impl Storage {
                 continue;
             };
 
-            let path = conv_dir.join(METADATA_FILE);
-            if !path.is_file() {
-                continue;
+            let is_user = Some(root) == self.user.as_ref();
+            match Self::load_conversation_metadata_at(&conv_dir, id, is_user) {
+                Err(error) if error.kind().is_missing() => {}
+                other => return other,
             }
-
-            let mut conversation: Conversation = load_json(&path)?;
-            conversation.user = Some(root) == self.user.as_ref();
-            (conversation.events_count, conversation.last_event_at) =
-                load_count_and_timestamp_events(&conv_dir).unwrap_or((0, None));
-
-            return Ok(conversation);
         }
 
         Err(LoadError {
             path: build_conversation_dir_prefix(&self.root, id),
             error: LoadErrorInner::MissingConversationMetadata(*id),
         })
+    }
+
+    /// Load metadata for many conversations from a single directory scan.
+    ///
+    /// Each conversation directory is resolved once from one enumeration per
+    /// root, rather than re-scanning the conversations directory per id (which
+    /// is quadratic across the whole index).
+    /// The id-to-path map lives only for the duration of this call.
+    ///
+    /// On a map miss or a stale path (a concurrent persist renamed the
+    /// directory between the scan and the read), the affected id falls back to
+    /// [`Self::load_conversation_metadata`], which rescans with the
+    /// in-flight-persist retry.
+    pub fn load_conversation_metadata_batch(
+        &self,
+        ids: &[ConversationId],
+    ) -> Vec<(ConversationId, Result<Conversation>)> {
+        let mut dirs: HashMap<ConversationId, (Utf8PathBuf, bool)> = HashMap::new();
+        for (root, is_user) in [(Some(&self.root), false), (self.user.as_ref(), true)] {
+            let Some(root) = root else {
+                continue;
+            };
+            for entry in dir_entries(root.join(CONVERSATIONS_DIR)) {
+                if let Some(id) = load_conversation_id_from_entry(&entry) {
+                    // The root (non-user) directory wins, matching the root
+                    // precedence in `load_conversation_metadata`.
+                    dirs.entry(id)
+                        .or_insert_with(|| (entry.into_path(), is_user));
+                }
+            }
+        }
+
+        ids.par_iter()
+            .map(|id| {
+                // Fast path: read straight from the resolved directory. On any
+                // miss or failure (stale path, corrupt active metadata), fall
+                // back to the rescanning loader, including the archive — this
+                // mirrors `FsStorageBackend::load_conversation_metadata`.
+                let result = match dirs.get(id) {
+                    Some((dir, is_user)) => Self::load_conversation_metadata_at(dir, id, *is_user),
+                    None => Err(LoadError {
+                        path: build_conversation_dir_prefix(&self.root, id),
+                        error: LoadErrorInner::MissingConversationMetadata(*id),
+                    }),
+                }
+                .or_else(|_| self.load_conversation_metadata(id))
+                .or_else(|_| self.load_archived_conversation_metadata(id));
+
+                (*id, result)
+            })
+            .collect()
+    }
+
+    /// Load conversation metadata from an already-resolved directory.
+    ///
+    /// Returns a [`LoadErrorInner::MissingConversationMetadata`] error when the
+    /// directory holds no `metadata.json`, so callers can fall through to the
+    /// next storage root.
+    fn load_conversation_metadata_at(
+        conv_dir: &Utf8Path,
+        id: &ConversationId,
+        is_user: bool,
+    ) -> Result<Conversation> {
+        let path = conv_dir.join(METADATA_FILE);
+        if !path.is_file() {
+            return Err(LoadError {
+                path,
+                error: LoadErrorInner::MissingConversationMetadata(*id),
+            });
+        }
+
+        let mut conversation: Conversation = load_json(&path)?;
+        conversation.user = is_user;
+        (conversation.events_count, conversation.last_event_at) =
+            load_count_and_timestamp_events(conv_dir).unwrap_or((0, None));
+
+        Ok(conversation)
     }
 }
 
@@ -268,16 +342,13 @@ pub(crate) fn load_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
 pub(crate) fn load_count_and_timestamp_events(
     root: &Utf8Path,
 ) -> Option<(usize, Option<DateTime<Utc>>)> {
-    #[derive(Deserialize)]
-    struct RawEvent {
-        timestamp: Box<RawValue>,
-    }
     let path = root.join(EVENTS_FILE);
     let file = fs::File::open(&path).ok()?;
     let reader = BufReader::new(file);
 
-    let events: Vec<RawEvent> = match serde_json::from_reader(reader) {
-        Ok(events) => events,
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    let summary = match EventSummary::deserialize(&mut deserializer) {
+        Ok(summary) => summary,
         Err(error) => {
             warn!(
                 error = error.to_string(),
@@ -288,15 +359,64 @@ pub(crate) fn load_count_and_timestamp_events(
         }
     };
 
-    let mut event_count = 0;
-    let mut last_timestamp = None;
-    for event in events {
-        event_count += 1;
-        let ts = event.timestamp.get();
+    let last_timestamp = summary.last_timestamp.and_then(|ts| {
+        let ts = ts.get();
         if ts.len() >= 2 && ts.starts_with('"') && ts.ends_with('"') {
-            last_timestamp = parse_datetime(&ts[1..ts.len() - 1]);
+            parse_datetime(&ts[1..ts.len() - 1])
+        } else {
+            None
         }
-    }
+    });
 
-    Some((event_count, last_timestamp))
+    Some((summary.count, last_timestamp))
+}
+
+/// Streaming summary of a conversation's event array.
+///
+/// Counts events and keeps only the last event's raw timestamp, pulling one
+/// element at a time from the reader so the whole array is never materialized.
+struct EventSummary {
+    count: usize,
+    last_timestamp: Option<Box<RawValue>>,
+}
+
+impl<'de> Deserialize<'de> for EventSummary {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct SummaryVisitor;
+
+        impl<'de> Visitor<'de> for SummaryVisitor {
+            type Value = EventSummary;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("an array of conversation events")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error>
+            where
+                A: SeqAccess<'de>,
+            {
+                #[derive(Deserialize)]
+                struct RawEvent {
+                    timestamp: Box<RawValue>,
+                }
+
+                let mut count = 0;
+                let mut last_timestamp = None;
+                while let Some(event) = seq.next_element::<RawEvent>()? {
+                    count += 1;
+                    last_timestamp = Some(event.timestamp);
+                }
+
+                Ok(EventSummary {
+                    count,
+                    last_timestamp,
+                })
+            }
+        }
+
+        deserializer.deserialize_seq(SummaryVisitor)
+    }
 }
