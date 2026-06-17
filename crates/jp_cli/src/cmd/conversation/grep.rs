@@ -12,7 +12,7 @@ use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds},
     ctx::Ctx,
     output::print_json,
-    shared::search::{ConcreteScope, contains_substr, event_lines, event_scope, title_for},
+    shared::search::{ConcreteScope, Matcher, event_lines, event_scope, title_for},
 };
 
 /// Maximum number of characters to show from a matching line.
@@ -46,6 +46,14 @@ pub(crate) struct Grep {
     #[arg(long)]
     raw: bool,
 
+    /// Treat the pattern as a regular expression instead of a substring.
+    #[arg(long, short)]
+    regex: bool,
+
+    /// Print only the IDs of conversations that contain a match, one per line.
+    #[arg(long = "list", short = 'l')]
+    ids: bool,
+
     /// Restrict the search to specific parts of the conversation.
     ///
     /// Repeatable or comma-separated.
@@ -62,10 +70,11 @@ impl Grep {
 
     #[expect(clippy::needless_pass_by_value)]
     pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        let pattern = if self.ignore_case {
-            self.pattern.to_lowercase()
+        let matcher = if self.regex {
+            Matcher::regex(&self.pattern, self.ignore_case)
+                .map_err(|e| format!("invalid regex pattern: {e}"))?
         } else {
-            self.pattern.clone()
+            Matcher::substring(&self.pattern, self.ignore_case)
         };
 
         let wanted = expand_scopes(&self.scopes);
@@ -79,7 +88,7 @@ impl Grep {
 
         self.sort_ids(&mut ids, ctx);
 
-        let hits = self.collect_hits(&ids, &pattern, &wanted, ctx);
+        let hits = self.collect_hits(&ids, &matcher, &wanted, ctx);
 
         if hits.is_empty() {
             return Err("No matches found.".into());
@@ -92,7 +101,7 @@ impl Grep {
     fn collect_hits(
         &self,
         ids: &[ConversationId],
-        pattern: &str,
+        matcher: &Matcher,
         wanted: &HashSet<ConcreteScope>,
         ctx: &Ctx,
     ) -> Vec<Hit> {
@@ -107,7 +116,7 @@ impl Grep {
         // while keeping the (already-sorted) id order intact.
         let per_id: Vec<Vec<Hit>> = ids
             .par_iter()
-            .map(|&id| self.collect_hits_for_id(id, pattern, wanted, needs_events, ctx))
+            .map(|&id| self.collect_hits_for_id(id, matcher, wanted, needs_events, ctx))
             .collect();
 
         per_id.into_iter().flatten().collect()
@@ -119,7 +128,7 @@ impl Grep {
     fn collect_hits_for_id(
         &self,
         id: ConversationId,
-        pattern: &str,
+        matcher: &Matcher,
         wanted: &HashSet<ConcreteScope>,
         needs_events: bool,
         ctx: &Ctx,
@@ -144,8 +153,7 @@ impl Grep {
                 id,
                 ConcreteScope::Title,
                 &lines,
-                pattern,
-                self.ignore_case,
+                matcher,
                 self.context,
             );
         }
@@ -172,15 +180,7 @@ impl Grep {
 
             let lines = event_lines(&event.event.kind);
             let line_refs: Vec<&str> = lines.iter().map(AsRef::as_ref).collect();
-            collect_scope_hits(
-                &mut hits,
-                id,
-                scope,
-                &line_refs,
-                pattern,
-                self.ignore_case,
-                self.context,
-            );
+            collect_scope_hits(&mut hits, id, scope, &line_refs, matcher, self.context);
         }
 
         hits
@@ -189,7 +189,9 @@ impl Grep {
     fn render(&self, hits: &[Hit], ctx: &Ctx) {
         let format = ctx.printer.format();
 
-        if format.is_json() {
+        if self.ids {
+            Self::render_ids(hits, ctx);
+        } else if format.is_json() {
             Self::render_json(hits, ctx);
         } else if self.raw {
             Self::render_raw(hits, ctx);
@@ -293,6 +295,24 @@ impl Grep {
             .collect();
 
         print_json(&ctx.printer, &json!(entries));
+    }
+
+    /// Print the unique conversation IDs that contain a match, one per line
+    /// (JSON array under `-F json`), in the sorted hit order.
+    fn render_ids(hits: &[Hit], ctx: &Ctx) {
+        let mut seen = HashSet::new();
+        let ids: Vec<String> = hits
+            .iter()
+            .filter(|h| seen.insert(h.id))
+            .map(|h| h.id.to_string())
+            .collect();
+
+        if ctx.printer.format().is_json() {
+            print_json(&ctx.printer, &json!(ids));
+            return;
+        }
+
+        ctx.printer.println_raw(ids.join("\n"));
     }
 
     fn sort_ids(&self, ids: &mut [ConversationId], ctx: &Ctx) {
@@ -449,15 +469,14 @@ fn collect_scope_hits(
     id: ConversationId,
     scope: ConcreteScope,
     lines: &[&str],
-    pattern: &str,
-    ignore_case: bool,
+    matcher: &Matcher,
     context: usize,
 ) {
     if lines.is_empty() {
         return;
     }
 
-    let match_indices = matching_lines(lines, pattern, ignore_case);
+    let match_indices = matching_lines(lines, matcher);
     if match_indices.is_empty() {
         return;
     }
@@ -477,11 +496,11 @@ fn collect_scope_hits(
 }
 
 /// Return indices of lines that match the pattern.
-fn matching_lines(lines: &[&str], pattern: &str, ignore_case: bool) -> Vec<usize> {
+fn matching_lines(lines: &[&str], matcher: &Matcher) -> Vec<usize> {
     lines
         .iter()
         .enumerate()
-        .filter(|(_, line)| contains_substr(line, pattern, ignore_case))
+        .filter(|(_, line)| matcher.is_match(line))
         .map(|(i, _)| i)
         .collect()
 }

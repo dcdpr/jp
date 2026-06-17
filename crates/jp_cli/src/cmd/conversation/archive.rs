@@ -19,8 +19,9 @@ use crate::{
 /// Without IDs, archives the session's active conversation (same fallback chain
 /// as `jp c show`: session active → `conversation.default_id` → picker).
 /// With IDs, archives each one.
-/// By default, prompts for confirmation only when archiving pinned or active
-/// conversations.
+///
+/// By default, prompts for confirmation when archiving pinned or active
+/// conversations, or when archiving more than one conversation at once.
 /// Pass `--confirm` to prompt for every conversation, or `--no-confirm` /
 /// `--yes` to skip all prompts.
 ///
@@ -50,7 +51,8 @@ pub(crate) struct Archive {
 
     /// Confirmation prompting: `--confirm`, `--no-confirm`, or `--yes`.
     ///
-    /// Without a flag, prompts only for pinned or active conversations.
+    /// Without a flag, prompts only for pinned or active conversations, or when
+    /// archiving more than one conversation at once.
     #[command(flatten)]
     confirm: ConfirmFlag,
 }
@@ -83,10 +85,11 @@ impl Archive {
         };
 
         let preference = self.confirm.preference();
+        let multi = handles.len() > 1;
         for handle in handles {
             let id = handle.id();
 
-            if !confirm_archive(ctx, &id, preference)? {
+            if !confirm_archive(ctx, &id, preference, multi)? {
                 continue;
             }
 
@@ -131,11 +134,15 @@ impl Archive {
 /// Returns `true` to proceed, `false` to skip.
 /// `preference` is the resolved `--confirm` / `--no-confirm` choice:
 /// `Some(true)` always prompts, `Some(false)` never prompts, and `None` prompts
-/// only for pinned or active conversations.
+/// only for pinned or active conversations, or when archiving more than one
+/// conversation at once (`multi`).
+/// The conversation title, when known, is shown so a bulk selection can be
+/// verified.
 fn confirm_archive(
     ctx: &mut Ctx,
     id: &ConversationId,
     preference: Option<bool>,
+    multi: bool,
 ) -> Result<bool, crate::error::Error> {
     if preference == Some(false) {
         return Ok(true);
@@ -151,21 +158,27 @@ fn confirm_archive(
         == Some(*id);
     let is_pinned = meta.is_pinned();
 
-    // Default (`None`) prompts only for pinned or active; `--confirm`
-    // (`Some(true)`) prompts for everything.
-    if preference != Some(true) && !is_active && !is_pinned {
+    // Default (`None`) prompts only for pinned, active, or bulk archives;
+    // `--confirm` (`Some(true)`) prompts for everything.
+    if preference != Some(true) && !is_active && !is_pinned && !multi {
         return Ok(true);
     }
 
     // Active subsumes pinned in the prompt; with `--confirm` a plain
-    // conversation gets an unqualified prompt.
+    // conversation gets an unqualified prompt. The title, when known, is shown
+    // so a bulk selection can be verified.
     let id_label = id.to_string().bold().yellow();
+    let title = meta
+        .title
+        .as_deref()
+        .map(|t| format!(" \"{t}\""))
+        .unwrap_or_default();
     let prompt = if is_active {
-        format!("Archive the active conversation {id_label}?")
+        format!("Archive the active conversation {id_label}{title}?")
     } else if is_pinned {
-        format!("Archive the pinned conversation {id_label}?")
+        format!("Archive the pinned conversation {id_label}{title}?")
     } else {
-        format!("Archive conversation {id_label}?")
+        format!("Archive conversation {id_label}{title}?")
     };
 
     let options = vec![
@@ -175,7 +188,7 @@ fn confirm_archive(
 
     let result = jp_inquire::InlineSelect::new(&prompt, options)
         .with_default('n')
-        .prompt(&mut ctx.printer.out_writer());
+        .prompt(&mut ctx.printer.prompt_writer());
 
     match result {
         Ok('y') => Ok(true),

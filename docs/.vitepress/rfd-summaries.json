@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "ea37f99b435ad309fa63f28cea019bb7dc7f112d4ac06b490259bb869cb9adc4",
+    "hash": "1017d9b6c7c64acb5133aeb5305200e74afbc3f5a0a024b23a62723b0b5a9547",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -338,5 +338,9 @@
   "085-query-explain.md": {
     "hash": "3d46dd516939328c6c3256cdd24dea057bb955751620c7d383aefd4afcf48d0f",
     "summary": "Add --explain flag to jp query showing rendered system prompt, tools, attachments, and final request without calling the LLM provider."
+  },
+  "086-line-oriented-stdin-input-for-cli-arguments.md": {
+    "hash": "df319f2f8d8476bcfec18dc2315a29ddba75f0cc212d6ec7ec6fd1d695746d7b",
+    "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   }
 }

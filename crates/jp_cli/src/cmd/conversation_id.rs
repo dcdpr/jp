@@ -193,9 +193,25 @@ fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), c
         ));
     }
 
-    // Reject multi-target keywords (+session, +pinned) on single-target commands.
+    // The stdin target `-` reads many IDs from a single stream, so it cannot be
+    // combined with any other target.
+    if ids.len() > 1 && ids.iter().any(|t| matches!(t, ConversationTarget::Stdin)) {
+        return Err(clap::Error::raw(
+            clap::error::ErrorKind::InvalidValue,
+            "the stdin target '-' cannot be combined with other targets\n",
+        ));
+    }
+
+    // Reject multi-target keywords (+session, +pinned) and stdin (-) on
+    // single-target commands.
     if !MULTI {
         for target in ids {
+            if matches!(target, ConversationTarget::Stdin) {
+                return Err(clap::Error::raw(
+                    clap::error::ErrorKind::InvalidValue,
+                    "the stdin target '-' is not supported by this command\n",
+                ));
+            }
             if matches!(
                 target,
                 ConversationTarget::AllSession | ConversationTarget::AllPinned
@@ -321,10 +337,12 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
         let multi_target = t("Multi-Target Keywords");
         let h_multi_pinned = h("target all pinned");
         let h_multi_session = h("target all activated in session");
+        let h_stdin = h("read IDs from stdin, one per line");
         help.push_str(&indoc::formatdoc! {"
             \n{multi_target}:
               +p, +pinned                   {h_multi_pinned}
               +s, +session                  {h_multi_session}
+              -                             {h_stdin}
         "});
     }
 

@@ -60,6 +60,25 @@ fn positional_multi_session_keyword() {
 }
 
 #[test]
+fn positional_multi_stdin_dash() {
+    let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", "-"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Stdin]);
+}
+
+#[test]
+fn positional_multi_rejects_stdin_with_id() {
+    let err =
+        TestPositionalMulti::try_parse_from(["test-positional-multi", "-", "jp-c17000000000"]);
+    assert!(err.is_err());
+}
+
+#[test]
+fn positional_single_rejects_stdin() {
+    let err = TestPositionalSingle::try_parse_from(["test-positional-single", "-"]);
+    assert!(err.is_err());
+}
+
+#[test]
 fn positional_multi_multiple_ids() {
     let cmd = TestPositionalMulti::try_parse_from([
         "test-positional-multi",

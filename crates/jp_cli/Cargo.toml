@@ -63,6 +63,7 @@ comrak = { workspace = true }
 crossterm = { workspace = true }
 dhat = { workspace = true, optional = true }
 duct = { workspace = true }
+fancy-regex = { workspace = true, features = ["std", "unicode"] }
 futures = { workspace = true }
 humantime = { workspace = true }
 indexmap = { workspace = true }
