@@ -959,6 +959,37 @@ fn test_blockquote_with_code_block_has_prefix_on_fences() {
 }
 
 #[test]
+fn test_list_with_code_block_indents_content() {
+    // Bug: a fenced code block nested in a list item rendered its content
+    // lines at column 0 while the opening and closing fences sat at the
+    // item's content column. Syntax-highlighted content (write_raw) bypassed
+    // the list indentation entirely.
+    let input = "- intro:\n\n  ```sh\n  echo hi\n  ```\n";
+    let formatter = Formatter::with_width(0);
+    let actual = formatter.format_terminal(input).unwrap();
+    let plain = strip_ansi_for_test(&actual);
+    let lines: Vec<&str> = plain.lines().collect();
+
+    let open = lines
+        .iter()
+        .position(|l| l.contains("```sh"))
+        .unwrap_or_else(|| panic!("no opening fence in {lines:?}"));
+
+    assert!(
+        lines[open].starts_with("  ```sh"),
+        "opening fence: {lines:?}"
+    );
+    assert!(
+        lines[open + 1].starts_with("  echo hi"),
+        "code content should be indented to the list column: {lines:?}"
+    );
+    assert!(
+        lines[open + 2].starts_with("  ```"),
+        "closing fence: {lines:?}"
+    );
+}
+
+#[test]
 fn test_terminal_list_last_item_gets_separator() {
     // Bug: the last list item (ending with \n\n from the buffer) is
     // parsed by comrak as a tight single-item list. ends_with_tight_list

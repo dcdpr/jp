@@ -18,7 +18,7 @@ use std::{
 };
 
 use crate::{
-    ansi::{self, AnsiState, RESET},
+    ansi::{self, AnsiState, RESET, Segment},
     format::{self, BackgroundFill, DefaultBackground},
 };
 
@@ -104,20 +104,16 @@ pub struct TerminalWriter<'w> {
 impl<'w> TerminalWriter<'w> {
     /// Create a new terminal writer.
     ///
-    /// `indent` seeds the initial prefix with that many spaces, so every
-    /// wrap-routed line of rendered content (paragraphs, headers, list items,
-    /// blockquotes, inline-code wrap continuations) starts at the requested
-    /// visual column.
+    /// `indent` seeds the initial prefix with that many spaces, so every line
+    /// of rendered content (paragraphs, headers, list items, blockquotes,
+    /// inline-code wrap continuations, and code-block bodies) starts at the
+    /// requested visual column.
     /// Used by the streaming buffer to put nested list-item content at its
     /// parent's content column.
     ///
-    /// Note: pre-formatted content emitted via [`write_raw`] (currently used
-    /// for syntax-highlighted code-block bodies) is *not* indented by this
-    /// option.
-    /// Callers that need indented code lines should apply the indent at the
-    /// call site before rendering.
-    /// The chat renderer does this with its `indent_lines` helper when emitting
-    /// `Event::FencedCode*` events from the streaming buffer.
+    /// Pre-formatted code-block bodies emitted via [`write_raw`] are indented
+    /// to the same column, with visible prefix characters (a blockquote's `>`)
+    /// rendered as plain spaces so code is not quote-marked.
     ///
     /// [`write_raw`]: Self::write_raw
     pub(crate) fn new(
@@ -590,11 +586,14 @@ impl<'w> TerminalWriter<'w> {
     ///
     /// Flushes any pending wrap buffer content first, emits pending newlines,
     /// then writes `s` directly.
+    /// Each line is indented to the current prefix column (see [`new`]).
     /// Resets line tracking state afterward (column, `begin_line`, window).
     ///
     /// When a default background is active, the background escape is injected
     /// at the start of each line and line-fill is applied before each newline,
     /// so syntax-highlighted code blocks inherit the reasoning background.
+    ///
+    /// [`new`]: Self::new
     pub(crate) fn write_raw(&mut self, s: &str) -> fmt::Result {
         if !self.wrap_buffer.is_empty() {
             self.flush_wrap_buffer()?;
@@ -612,12 +611,20 @@ impl<'w> TerminalWriter<'w> {
             self.need_cr -= 1;
         }
 
-        if let Some(ref bg) = self.default_background {
-            let with_bg = format::apply_line_background(s, Some(bg));
-            self.output.write_str(&with_bg)?;
-        } else {
-            self.output.write_str(s)?;
-        }
+        let body = self.default_background.as_ref().map_or_else(
+            || s.to_string(),
+            |bg| format::apply_line_background(s, Some(bg)),
+        );
+
+        // Indent each line to the current prefix column. Code content is
+        // preformatted, so visible prefix characters (e.g. a blockquote's
+        // `> `) are reproduced as plain spaces rather than quote markers —
+        // only the column is preserved. List indentation, already spaces,
+        // passes through unchanged. With a default background active, the
+        // spaces sit after the per-line background escape so the indentation
+        // inherits the fill.
+        let body = indent_to_column(&body, self.prefix_width());
+        self.output.write_str(&body)?;
 
         self.column = 0;
         self.begin_line = true;
@@ -665,6 +672,40 @@ impl Write for TerminalWriter<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         self.output(s, false)
     }
+}
+
+/// Prepend `indent` spaces before the first visible character of each line.
+///
+/// ANSI escape sequences are zero-width: the spaces are inserted before the
+/// first visible character on a line, not before any leading escapes, so a line
+/// that opens with a color or background escape keeps that escape at the very
+/// start and the indentation inherits it.
+/// Blank lines (a bare newline) get no trailing spaces.
+fn indent_to_column(s: &str, indent: usize) -> String {
+    if indent == 0 {
+        return s.to_string();
+    }
+
+    let pad = " ".repeat(indent);
+    let mut out = String::with_capacity(s.len() + indent);
+    let mut needs_indent = true;
+    for segment in ansi::segments(s) {
+        match segment {
+            Segment::Escape(esc) => out.push_str(esc),
+            Segment::Text(text) => {
+                for ch in text.chars() {
+                    if ch == '\n' {
+                        needs_indent = true;
+                    } else if needs_indent {
+                        out.push_str(&pad);
+                        needs_indent = false;
+                    }
+                    out.push(ch);
+                }
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]
