@@ -41,6 +41,7 @@ pub mod error;
 pub(crate) mod fill;
 pub mod fs;
 pub(crate) mod internal;
+pub mod interrupt;
 pub mod model;
 mod partial;
 pub mod plugins;
@@ -71,6 +72,7 @@ use crate::{
     conversation::{ConversationConfig, PartialConversationConfig},
     delta::{PartialConfigDelta, delta_opt_vec},
     editor::{EditorConfig, PartialEditorConfig},
+    interrupt::{InterruptConfig, PartialInterruptConfig},
     partial::partial_opt,
     plugins::{PartialPluginsConfig, PluginsConfig},
     providers::{PartialProviderConfig, ProviderConfig},
@@ -145,6 +147,13 @@ pub struct AppConfig {
     #[setting(nested)]
     pub style: StyleConfig,
 
+    /// Interrupt (Ctrl-C) behavior.
+    ///
+    /// Controls what pressing Ctrl-C does during a query: show the interrupt
+    /// menu (default) or take a fixed action without prompting.
+    #[setting(nested)]
+    pub interrupt: InterruptConfig,
+
     /// Editor configuration.
     ///
     /// Tweak how Jean-Pierre opens files for editing, for example when editing
@@ -201,6 +210,7 @@ impl AssignKeyValue for PartialAppConfig {
             _ if kv.p("assistant") => self.assistant.assign(kv)?,
             _ if kv.p("conversation") => self.conversation.assign(kv)?,
             _ if kv.p("style") => self.style.assign(kv)?,
+            _ if kv.p("interrupt") => self.interrupt.assign(kv)?,
             _ if kv.p("editor") => self.editor.assign(kv)?,
             _ if kv.p("template") => self.template.assign(kv)?,
             _ if kv.p("providers") => self.providers.assign(kv)?,
@@ -235,6 +245,7 @@ impl PartialConfigDelta for PartialAppConfig {
             assistant: self.assistant.delta(next.assistant),
             conversation: self.conversation.delta(next.conversation),
             style: self.style.delta(next.style),
+            interrupt: self.interrupt.delta(next.interrupt),
             editor: self.editor.delta(next.editor),
             template: self.template.delta(next.template),
             providers: self.providers.delta(next.providers),
@@ -253,6 +264,7 @@ impl FillDefaults for PartialAppConfig {
             assistant: self.assistant.fill_from(defaults.assistant),
             conversation: self.conversation.fill_from(defaults.conversation),
             style: self.style.fill_from(defaults.style),
+            interrupt: self.interrupt.fill_from(defaults.interrupt),
             editor: self.editor.fill_from(defaults.editor),
             template: self.template.fill_from(defaults.template),
             providers: self.providers.fill_from(defaults.providers),
@@ -273,6 +285,7 @@ impl ToPartial for AppConfig {
             assistant: self.assistant.to_partial(),
             conversation: self.conversation.to_partial(),
             style: self.style.to_partial(),
+            interrupt: self.interrupt.to_partial(),
             editor: self.editor.to_partial(),
             template: self.template.to_partial(),
             providers: self.providers.to_partial(),

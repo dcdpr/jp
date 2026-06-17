@@ -84,8 +84,11 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use indexmap::IndexMap;
-use jp_config::conversation::tool::{
-    FormatMode, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
+use jp_config::{
+    conversation::tool::{
+        FormatMode, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
+    },
+    interrupt::ToolInterruptConfig,
 };
 use jp_conversation::{
     ConversationStream,
@@ -275,6 +278,7 @@ pub struct ToolCoordinator {
     executors: Vec<(usize, Box<dyn Executor>)>,
     tool_states: HashMap<String, ToolCallState>,
     tools_config: ToolsConfig,
+    interrupt_config: ToolInterruptConfig,
     executor_source: Box<dyn ExecutorSource>,
     cancellation_token: CancellationToken,
     /// Rendered custom argument output accumulated during the permission phase.
@@ -289,10 +293,20 @@ impl ToolCoordinator {
             executors: Vec::new(),
             tool_states: HashMap::new(),
             tools_config,
+            interrupt_config: ToolInterruptConfig::default(),
             executor_source,
             cancellation_token: CancellationToken::new(),
             rendered_arguments: HashMap::new(),
         }
+    }
+
+    /// Set the Ctrl-C behavior while tools are executing.
+    ///
+    /// Defaults to showing the interrupt menu.
+    #[must_use]
+    pub fn with_interrupt(mut self, config: ToolInterruptConfig) -> Self {
+        self.interrupt_config = config;
+        self
     }
 
     /// Drain accumulated rendered argument content.
@@ -1092,6 +1106,7 @@ impl ToolCoordinator {
                             self.is_prompting(),
                             printer,
                             prompt_backend,
+                            &self.interrupt_config,
                         ) {
                             ToolSignalResult::Continue => {}
                             ToolSignalResult::Restart => {

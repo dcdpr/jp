@@ -803,7 +803,8 @@ impl Query {
             BuiltinExecutors::new().register("describe_tools", DescribeTools::new(docs_map));
         let executor_source = TerminalExecutorSource::new(builtin_executors, tools, approvals);
         let tool_coordinator =
-            ToolCoordinator::new(cfg.conversation.tools.clone(), Box::new(executor_source));
+            ToolCoordinator::new(cfg.conversation.tools.clone(), Box::new(executor_source))
+                .with_interrupt(cfg.interrupt.tool_call.clone());
         let prompt_backend = Arc::new(TerminalPromptBackend);
 
         run_turn_loop(

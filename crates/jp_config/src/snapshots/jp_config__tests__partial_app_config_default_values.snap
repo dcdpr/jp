@@ -281,6 +281,14 @@ Ok(
                     ),
                 },
             },
+            interrupt: PartialInterruptConfig {
+                streaming: PartialStreamingInterruptConfig {
+                    action: None,
+                },
+                tool_call: PartialToolInterruptConfig {
+                    action: None,
+                },
+            },
             editor: PartialEditorConfig {
                 cmd: None,
                 envs: Some(

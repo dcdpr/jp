@@ -8,6 +8,7 @@
 //! 2. Delegates state transitions to the `TurnCoordinator` state machine
 //! 3. Returns a `LoopAction` for the caller to handle control flow
 
+use jp_config::interrupt::{StreamingInterruptConfig, ToolInterruptConfig};
 use jp_conversation::ConversationStream;
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction};
@@ -39,14 +40,18 @@ pub enum LoopAction<T> {
 
 /// Handle a signal received during LLM streaming.
 ///
-/// Shows the interrupt menu when Ctrl+C is received, then delegates to the turn
-/// coordinator's state machine for state transitions and content injection.
+/// On Ctrl+C, applies the configured streaming interrupt behavior: the menu is
+/// shown only when `config.action` is `prompt`, otherwise the configured action
+/// runs directly.
+/// Then delegates to the turn coordinator's state machine for state transitions
+/// and content injection.
 pub fn handle_streaming_signal(
     signal: SignalTo,
     turn_coordinator: &mut TurnCoordinator,
     conversation_stream: &mut ConversationStream,
     printer: &Printer,
     backend: &dyn PromptBackend,
+    config: &StreamingInterruptConfig,
     llm_stream_finished: bool,
 ) -> LoopAction<()> {
     info!(?signal, "Received signal during streaming.");
@@ -68,8 +73,11 @@ pub fn handle_streaming_signal(
             turn_coordinator.flush_renderer();
             printer.flush_instant();
 
-            let action = InterruptHandler::with_backend(backend)
-                .handle_streaming_interrupt(&mut printer.prompt_writer(), !llm_stream_finished);
+            let action = InterruptHandler::with_backend(backend).handle_streaming_interrupt(
+                config,
+                &mut printer.prompt_writer(),
+                !llm_stream_finished,
+            );
 
             // `Resume` means "keep waiting for the current stream." The state
             // machine is a no-op for it, and we must NOT break the inner loop:
@@ -197,12 +205,14 @@ pub enum ToolSignalResult {
 
 /// Handle a signal received during tool execution.
 ///
-/// Shows the tool interrupt menu when Ctrl+C is received, then delegates to the
-/// turn coordinator for state machine updates.
+/// On Ctrl+C, applies the configured tool interrupt behavior: the menu is shown
+/// only when `config.action` is `prompt`, otherwise the configured action runs
+/// directly.
+/// Then delegates to the turn coordinator for state machine updates.
 ///
 /// If any tool is currently showing an interactive prompt (permission,
-/// question, result edit), the interrupt menu is suppressed and we let the
-/// active prompt handle Ctrl+C instead.
+/// question, result edit), the interrupt is suppressed and we let the active
+/// prompt handle Ctrl+C instead.
 /// This prevents UI conflicts between the interrupt menu and the active prompt.
 ///
 /// # Arguments
@@ -217,6 +227,7 @@ pub fn handle_tool_signal(
     is_prompting: bool,
     printer: &Printer,
     backend: &dyn PromptBackend,
+    config: &ToolInterruptConfig,
 ) -> ToolSignalResult {
     match signal {
         SignalTo::Quit => {
@@ -237,7 +248,7 @@ pub fn handle_tool_signal(
             }
 
             let action = InterruptHandler::with_backend(backend)
-                .handle_tool_interrupt(&mut printer.prompt_writer());
+                .handle_tool_interrupt(config, &mut printer.prompt_writer());
 
             // Notify the state machine (reserved for future state transitions).
             turn_coordinator.handle_tool_interrupt(&action);

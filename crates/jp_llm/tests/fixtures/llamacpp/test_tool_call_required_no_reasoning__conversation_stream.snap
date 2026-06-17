@@ -134,6 +134,14 @@ expression: v
         "max_latency": "0s"
       }
     },
+    "interrupt": {
+      "streaming": {
+        "action": "prompt"
+      },
+      "tool_call": {
+        "action": "prompt"
+      }
+    },
     "editor": {
       "envs": [
         "JP_EDITOR",
