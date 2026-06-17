@@ -903,3 +903,38 @@ async fn graphql_posts_json_to_graphql_endpoint() {
     assert_eq!(result["data"]["viewer"]["login"], "alice");
     mock.assert();
 }
+
+#[tokio::test]
+async fn graphql_surfaces_top_level_errors_as_error() {
+    use crate::Error;
+
+    // GitHub answers GraphQL failures with HTTP 200 plus a top-level `errors`
+    // array. `graphql` must turn that into an `Err` so it reaches the caller
+    // (and, for tool-backed calls, the LLM) rather than being read as success.
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/graphql");
+            then.status(200).json_body(json!({
+                "data": null,
+                "errors": [{"message": "Field 'bogus' doesn't exist on type 'Query'"}]
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let err = client
+        .graphql::<Value>(&json!({"query": "{ bogus }"}))
+        .await
+        .expect_err("top-level GraphQL errors should surface as Err");
+
+    match err {
+        Error::GitHub { source, .. } => assert!(
+            source.message.contains("Field 'bogus' doesn't exist"),
+            "unexpected error message: {}",
+            source.message
+        ),
+        other => panic!("unexpected error variant: {other:?}"),
+    }
+    mock.assert();
+}

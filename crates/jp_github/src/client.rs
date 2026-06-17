@@ -76,7 +76,38 @@ impl Octocrab {
 
     pub async fn graphql<T: DeserializeOwned>(&self, body: &Value) -> Result<T> {
         let request = self.inner.client.post(&self.inner.graphql_url).json(body);
-        self.send_json(request).await
+        let response: Value = self.send_json(request).await?;
+
+        // GraphQL returns HTTP 200 with a top-level `errors` array on failure,
+        // including partial failures where some `data` resolved and some did
+        // not. `send_json` only inspects the HTTP status, so treat any GraphQL
+        // error as a hard failure here. This propagates to the caller (and, for
+        // tool-backed calls, to the LLM) instead of silently returning
+        // partial/empty data or reporting a half-applied mutation as success.
+        if let Some(errors) = response.get("errors").and_then(Value::as_array)
+            && !errors.is_empty()
+        {
+            let message = errors
+                .iter()
+                .filter_map(|e| e.get("message").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join("; ");
+            let message = if message.is_empty() {
+                "unknown GraphQL error".to_owned()
+            } else {
+                message
+            };
+
+            return Err(Error::GitHub {
+                source: GitHubError {
+                    status_code: StatusCode::new(200),
+                    message: format!("GraphQL error: {message}"),
+                },
+                body: Some(Value::Array(errors.clone()).to_string()),
+            });
+        }
+
+        serde_json::from_value(response).map_err(Into::into)
     }
 
     #[allow(clippy::unused_async)] // Keep async for octocrab API compatibility at callsites.

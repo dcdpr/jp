@@ -329,22 +329,16 @@ impl PullsHandler {
     /// review comments authored by the current user.
     ///
     /// Uses GraphQL `pullRequest.reviewThreads` so each returned
-    /// [`ReviewComment`] carries:
-    ///
-    /// - The thread-level [`Side`] in `side` / `start_side`.
-    /// - GitHub's authoritative `outdated` flag ([`ReviewComment::outdated`]).
-    /// - File-line anchors (`line`, `start_line`, `original_line`,
-    ///   `original_start_line`) directly from GraphQL, which are reliable even
-    ///   for pending comments where REST returns null.
+    /// [`ReviewComment`] carries the thread-level [`Side`], GitHub's
+    /// authoritative `outdated` flag, and file-line anchors that are reliable
+    /// even for pending comments where REST returns null.
     ///
     /// Caps at the first 100 threads, each with up to 100 comments.
     /// Larger PRs are silently truncated for now; pagination can be added if it
     /// becomes a real limit.
     ///
-    /// [`ReviewComment::outdated`]: models::pulls::ReviewComment::outdated
     /// [`ReviewComment`]: models::pulls::ReviewComment
     /// [`Side`]: models::pulls::Side
-    #[allow(clippy::too_many_lines, reason = "linear walk over GraphQL JSON")]
     pub async fn fetch_review_comments(
         &self,
         number: u64,
@@ -406,66 +400,15 @@ impl PullsHandler {
                 .unwrap_or(false);
 
             let comments = thread.pointer("/comments/nodes").and_then(|v| v.as_array());
-
             for comment in comments.into_iter().flatten() {
-                let Some(id) = parse_full_database_id(comment.get("fullDatabaseId")) else {
-                    continue;
-                };
-                let path = comment
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
-                let body = comment
-                    .get("body")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
-                // The thread-level `isOutdated` is canonical; the
-                // per-comment `outdated` field should agree, but fall back
-                // to the thread if it is somehow missing.
-                let outdated = comment
-                    .get("outdated")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(thread_outdated);
-                let line = comment.get("line").and_then(Value::as_u64);
-                let start_line = comment.get("startLine").and_then(Value::as_u64);
-                let original_line = comment.get("originalLine").and_then(Value::as_u64);
-                let original_start_line = comment.get("originalStartLine").and_then(Value::as_u64);
-                let created_at = comment
-                    .get("createdAt")
-                    .and_then(Value::as_str)
-                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                    .map(|dt| dt.with_timezone(&chrono::Utc));
-                let user = comment
-                    .pointer("/author/login")
-                    .and_then(Value::as_str)
-                    .map(|login| models::User {
-                        login: login.to_owned(),
-                    });
-                let in_reply_to_id =
-                    parse_full_database_id(comment.pointer("/replyTo/fullDatabaseId"));
-                let pull_request_review_id =
-                    parse_full_database_id(comment.pointer("/pullRequestReview/fullDatabaseId"));
-
-                out.push(models::pulls::ReviewComment {
-                    id,
-                    pull_request_review_id,
-                    path,
-                    line,
-                    side: thread_side,
-                    start_line,
-                    start_side: thread_start_side,
-                    original_line,
-                    original_side: thread_side,
-                    original_start_line,
-                    original_start_side: thread_start_side,
-                    in_reply_to_id,
-                    body,
-                    user,
-                    created_at,
-                    outdated,
-                });
+                if let Some(rc) = parse_review_comment_node(
+                    comment,
+                    thread_side,
+                    thread_start_side,
+                    Some(thread_outdated),
+                ) {
+                    out.push(rc);
+                }
             }
         }
 
@@ -581,25 +524,10 @@ impl PullsHandler {
             "variables": { "input": Value::Object(input) },
         });
 
-        let response: Value = self.client.graphql(&body).await?;
-        if let Some(errors) = response.get("errors")
-            && !errors.is_null()
-        {
-            let message = errors
-                .as_array()
-                .and_then(|arr| arr.first())
-                .and_then(|e| e.get("message"))
-                .and_then(Value::as_str)
-                .unwrap_or("unknown GraphQL error");
-
-            return Err(Error::GitHub {
-                source: GitHubError {
-                    status_code: StatusCode::new(200),
-                    message: format!("addPullRequestReviewThread: {message}"),
-                },
-                body: Some(errors.to_string()),
-            });
-        }
+        // `client.graphql` raises any GraphQL `errors` as an `Err`, so a failed
+        // mutation surfaces to the caller (and the LLM) rather than reporting
+        // success.
+        self.client.graphql::<Value>(&body).await?;
 
         Ok(())
     }
@@ -715,25 +643,10 @@ impl PullsHandler {
             "variables": { "input": Value::Object(input) },
         });
 
-        let response: Value = self.client.graphql(&payload).await?;
-        if let Some(errors) = response.get("errors")
-            && !errors.is_null()
-        {
-            let message = errors
-                .as_array()
-                .and_then(|arr| arr.first())
-                .and_then(|e| e.get("message"))
-                .and_then(Value::as_str)
-                .unwrap_or("unknown GraphQL error");
-
-            return Err(Error::GitHub {
-                source: GitHubError {
-                    status_code: StatusCode::new(200),
-                    message: format!("addPullRequestReviewThreadReply: {message}"),
-                },
-                body: Some(errors.to_string()),
-            });
-        }
+        // `client.graphql` raises any GraphQL `errors` as an `Err`, so a failed
+        // reply surfaces to the caller (and the LLM) rather than reporting
+        // success.
+        self.client.graphql::<Value>(&payload).await?;
 
         Ok(())
     }
@@ -744,6 +657,83 @@ const fn side_to_str(side: models::pulls::Side) -> &'static str {
         models::pulls::Side::Right => "RIGHT",
         models::pulls::Side::Left => "LEFT",
     }
+}
+
+/// Parse one GraphQL `PullRequestReviewComment` node into a [`ReviewComment`].
+///
+/// `side` / `start_side` come from the enclosing thread; `thread_outdated` is
+/// the thread's `isOutdated` flag, used as a fallback when the per-comment
+/// `outdated` field is missing.
+///
+/// Returns `None` (after a warning) when the node has no parseable
+/// `fullDatabaseId`.
+///
+/// [`ReviewComment`]: models::pulls::ReviewComment
+fn parse_review_comment_node(
+    comment: &Value,
+    side: Option<models::pulls::Side>,
+    start_side: Option<models::pulls::Side>,
+    thread_outdated: Option<bool>,
+) -> Option<models::pulls::ReviewComment> {
+    let Some(id) = parse_full_database_id(comment.get("fullDatabaseId")) else {
+        tracing::warn!(node = %comment, "Skipping review comment with no parseable fullDatabaseId");
+        return None;
+    };
+
+    let path = comment
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    let body = comment
+        .get("body")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    // The thread-level `isOutdated` is canonical; the per-comment `outdated`
+    // field should agree, but fall back to the thread (when one applies) if it
+    // is somehow missing.
+    let outdated = comment
+        .get("outdated")
+        .and_then(Value::as_bool)
+        .unwrap_or(thread_outdated.unwrap_or(false));
+    let line = comment.get("line").and_then(Value::as_u64);
+    let start_line = comment.get("startLine").and_then(Value::as_u64);
+    let original_line = comment.get("originalLine").and_then(Value::as_u64);
+    let original_start_line = comment.get("originalStartLine").and_then(Value::as_u64);
+    let created_at = comment
+        .get("createdAt")
+        .and_then(Value::as_str)
+        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+    let user = comment
+        .pointer("/author/login")
+        .and_then(Value::as_str)
+        .map(|login| models::User {
+            login: login.to_owned(),
+        });
+    let in_reply_to_id = parse_full_database_id(comment.pointer("/replyTo/fullDatabaseId"));
+    let pull_request_review_id =
+        parse_full_database_id(comment.pointer("/pullRequestReview/fullDatabaseId"));
+
+    Some(models::pulls::ReviewComment {
+        id,
+        pull_request_review_id,
+        path,
+        line,
+        side,
+        start_line,
+        start_side,
+        original_line,
+        original_side: side,
+        original_start_line,
+        original_start_side: start_side,
+        in_reply_to_id,
+        body,
+        user,
+        created_at,
+        outdated,
+    })
 }
 
 /// Parse a GraphQL `DiffSide` enum value into [`models::pulls::Side`].
