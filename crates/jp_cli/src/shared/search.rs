@@ -136,6 +136,58 @@ pub(crate) fn contains_substr(haystack: &str, needle: &str, ignore_case: bool) -
     }
 }
 
+/// A compiled match predicate over a single line of text.
+///
+/// `c grep` builds one of these from the user's pattern and reuses it across
+/// every line of every conversation it searches.
+pub(crate) enum Matcher {
+    /// Substring match.
+    /// `needle` is pre-lowercased when `ignore_case` is set.
+    Substring { needle: String, ignore_case: bool },
+
+    /// Regular-expression match.
+    /// `fancy-regex` supports look-around and backreferences in addition to the
+    /// standard syntax.
+    Regex(Box<fancy_regex::Regex>),
+}
+
+impl Matcher {
+    /// Build a substring matcher.
+    pub(crate) fn substring(pattern: &str, ignore_case: bool) -> Self {
+        let needle = if ignore_case {
+            pattern.to_lowercase()
+        } else {
+            pattern.to_owned()
+        };
+        Self::Substring {
+            needle,
+            ignore_case,
+        }
+    }
+
+    /// Compile a regular-expression matcher.
+    pub(crate) fn regex(pattern: &str, ignore_case: bool) -> Result<Self, fancy_regex::Error> {
+        let re = fancy_regex::RegexBuilder::new(pattern)
+            .case_insensitive(ignore_case)
+            .build()?;
+        Ok(Self::Regex(Box::new(re)))
+    }
+
+    /// Whether `line` matches.
+    pub(crate) fn is_match(&self, line: &str) -> bool {
+        match self {
+            Self::Substring {
+                needle,
+                ignore_case,
+            } => contains_substr(line, needle, *ignore_case),
+            // A regex that errors mid-match (e.g. an exceeded backtrack limit on
+            // a fancy pattern) counts as a non-match rather than aborting the
+            // whole search.
+            Self::Regex(re) => re.is_match(line).unwrap_or(false),
+        }
+    }
+}
+
 /// Filter conversation IDs to those whose title or chat content contains
 /// `pattern` as a substring.
 ///

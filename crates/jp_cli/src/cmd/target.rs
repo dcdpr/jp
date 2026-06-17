@@ -18,7 +18,7 @@
 
 use std::{
     collections::HashMap,
-    io::{self, IsTerminal as _},
+    io::{self, BufRead as _, IsTerminal as _},
 };
 
 use jp_config::conversation::DefaultConversationId;
@@ -244,6 +244,10 @@ pub(crate) enum ConversationTarget {
     /// `+archived`, `+a`
     AllArchived,
 
+    /// All conversation IDs read from standard input, one per line.
+    /// `-`
+    Stdin,
+
     /// Interactive picker, optionally filtered.
     /// `?`, `?p`, `?pinned`, `?s`, `?session`, `?a`, `?archived`
     Picker(PickerFilter),
@@ -338,6 +342,9 @@ impl ConversationTarget {
             "+pinned" | "+p" => Self::AllPinned,
             "+archived" | "+a" => Self::AllArchived,
 
+            // Read targets from standard input, one per line.
+            "-" => Self::Stdin,
+
             "help" => Self::Help,
 
             // Try as conversation ID, fall back to fuzzy picker.
@@ -376,7 +383,7 @@ impl ConversationTarget {
         match self {
             Self::Picker(f) if f.pinned => Some("pinned"),
             Self::Picker(f) if f.archived => Some("archived"),
-            Self::Id(_) | Self::Picker(_) | Self::Help => None,
+            Self::Id(_) | Self::Picker(_) | Self::Help | Self::Stdin => None,
             Self::Newest => Some("newest"),
             Self::Latest => Some("latest"),
             Self::LatestPinned => Some("pinned"),
@@ -491,9 +498,41 @@ impl ConversationTarget {
                 }
                 Ok(ids)
             }
+            Self::Stdin => read_stdin_ids(),
             Self::Picker(_) | Self::Help => Ok(vec![]),
         }
     }
+}
+
+/// Read conversation IDs from standard input, one per line.
+///
+/// Blank lines are skipped.
+/// Order and duplicates are preserved, so the result is identical to passing
+/// the same IDs on the command line.
+/// Errors when stdin is a terminal (nothing piped) or when no IDs are provided.
+fn read_stdin_ids() -> Result<Vec<ConversationId>> {
+    if io::stdin().is_terminal() {
+        return Err(Error::NoConversationTarget);
+    }
+
+    let mut ids = Vec::new();
+    for line in io::stdin().lock().lines() {
+        let line = line?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        ids.push(trimmed.parse()?);
+    }
+
+    if ids.is_empty() {
+        return Err(Error::NotFound(
+            "conversation",
+            "no conversation IDs provided on stdin".into(),
+        ));
+    }
+
+    Ok(ids)
 }
 
 /// Resolve parsed targets into concrete conversation IDs.

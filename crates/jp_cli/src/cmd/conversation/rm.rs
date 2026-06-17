@@ -132,14 +132,14 @@ fn confirm_and_remove(
             id.to_string().bold().yellow()
         ));
 
-        writeln!(ctx.printer.out_writer(), "{details}\n")?;
+        writeln!(ctx.printer.prompt_writer(), "{details}\n")?;
 
         let confirm = Confirm::new("Are you sure?")
             .with_default(false)
             .with_confirm_on_input(true)
             .with_help_message("this action cannot be undone");
 
-        match confirm.prompt_with_writer(&mut ctx.printer.out_writer()) {
+        match confirm.prompt_with_writer(&mut ctx.printer.prompt_writer()) {
             Ok(true) => {}
             Ok(false) | Err(_) => return Err(1.into()),
         }

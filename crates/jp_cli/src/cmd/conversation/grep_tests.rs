@@ -708,13 +708,15 @@ fn test_plain_text_no_ansi() {
 #[test]
 fn test_matching_lines_basic() {
     let lines = vec!["foo", "bar", "baz"];
-    assert_eq!(matching_lines(&lines, "bar", false), vec![1]);
+    let matcher = Matcher::substring("bar", false);
+    assert_eq!(matching_lines(&lines, &matcher), vec![1]);
 }
 
 #[test]
 fn test_matching_lines_case_insensitive() {
     let lines = vec!["Foo", "BAR", "baz"];
-    assert_eq!(matching_lines(&lines, "bar", true), vec![1]);
+    let matcher = Matcher::substring("bar", true);
+    assert_eq!(matching_lines(&lines, &matcher), vec![1]);
 }
 
 #[test]
@@ -993,6 +995,73 @@ fn test_scope_column_hidden_when_single_scope() {
         !output.contains("user:"),
         "unexpected scope label: {output}"
     );
+}
+
+#[test]
+fn test_grep_regex_anchored_ids_output() {
+    // Only `triage-001` matches the anchored, three-digit pattern: `triage-0012`
+    // has a trailing digit past `\z`, and `xtriage-001` fails the `\A` anchor.
+    let id_match = make_id(20_000);
+    let id_extra_digit = make_id(20_001);
+    let id_prefixed = make_id(20_002);
+    let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+    let entries = vec![
+        (
+            id_match,
+            Conversation {
+                title: Some("triage-001".into()),
+                ..Default::default()
+            },
+            vec![ConversationEvent::new(ChatRequest::from("x"), ts)],
+        ),
+        (
+            id_extra_digit,
+            Conversation {
+                title: Some("triage-0012".into()),
+                ..Default::default()
+            },
+            vec![ConversationEvent::new(ChatRequest::from("x"), ts)],
+        ),
+        (
+            id_prefixed,
+            Conversation {
+                title: Some("xtriage-001".into()),
+                ..Default::default()
+            },
+            vec![ConversationEvent::new(ChatRequest::from("x"), ts)],
+        ),
+    ];
+    let (mut ctx, _, out) = setup_ctx_with_conversations(entries);
+
+    let grep = Grep {
+        pattern: r"\Atriage-\d{3}\z".into(),
+        regex: true,
+        ids: true,
+        scopes: vec![Scope::Title],
+        ..Default::default()
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+    let output = out.lock().clone();
+    let lines: Vec<&str> = output.trim().lines().collect();
+    assert_eq!(lines, vec![id_match.to_string()]);
+}
+
+#[test]
+fn test_grep_invalid_regex_errors() {
+    let id = make_id(20_100);
+    let (mut ctx, _, _out) = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
+        ChatRequest::from("anything"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    let grep = Grep {
+        pattern: "(unclosed".into(),
+        regex: true,
+        ..Default::default()
+    };
+    assert!(grep.run(&mut ctx, vec![]).is_err());
 }
 
 #[test]

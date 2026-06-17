@@ -2152,6 +2152,7 @@ dependencies = [
  "crossterm",
  "dhat",
  "duct",
+ "fancy-regex 0.17.0",
  "futures",
  "humantime",
  "indexmap",
