@@ -355,7 +355,7 @@ pub(super) async fn run_turn_loop(
                                     stream,
                                     &printer,
                                     prompt_backend.as_ref(),
-                                    cfg.interrupt.streaming,
+                                    &cfg.interrupt.streaming,
                                     !llm_alive,
                                 )
                             });

@@ -28,6 +28,14 @@ pub trait PromptBackend: Send + Sync {
     /// Returns the entered text, or empty string on error.
     fn text_input(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError>;
 
+    /// Open the user's editor immediately and return the edited content.
+    ///
+    /// Unlike [`text_input`], which shows an inline prompt with an "open
+    /// editor" escape hatch, this launches the editor straight away.
+    ///
+    /// [`text_input`]: PromptBackend::text_input
+    fn editor_input(&self) -> Result<String, InquireError>;
+
     /// Display a single-line text input prompt.
     fn text(
         &self,
@@ -60,6 +68,10 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
 
     fn text_input(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
         (*self).text_input(message, writer)
+    }
+
+    fn editor_input(&self) -> Result<String, InquireError> {
+        (*self).editor_input()
     }
 
     fn text(
@@ -105,6 +117,10 @@ impl PromptBackend for TerminalPromptBackend {
         inquire::Editor::new(message).prompt_with_writer(writer)
     }
 
+    fn editor_input(&self) -> Result<String, InquireError> {
+        open_editor::edit_string("").map_err(|e| InquireError::Custom(Box::new(e)))
+    }
+
     fn text(
         &self,
         message: &str,
@@ -143,6 +159,7 @@ impl PromptBackend for TerminalPromptBackend {
 pub struct MockPromptBackend {
     inline_responses: Mutex<VecDeque<char>>,
     text_responses: Mutex<VecDeque<String>>,
+    editor_responses: Mutex<VecDeque<String>>,
     select_responses: Mutex<VecDeque<String>>,
 }
 
@@ -165,6 +182,16 @@ impl MockPromptBackend {
         responses: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         *self.text_responses.lock() = responses.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Add responses returned by `editor_input`.
+    #[must_use]
+    pub fn with_editor_responses(
+        self,
+        responses: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        *self.editor_responses.lock() = responses.into_iter().map(Into::into).collect();
         self
     }
 
@@ -194,6 +221,13 @@ impl PromptBackend for MockPromptBackend {
 
     fn text_input(&self, _message: &str, _writer: &mut dyn Write) -> Result<String, InquireError> {
         self.text_responses
+            .lock()
+            .pop_front()
+            .ok_or(InquireError::OperationCanceled)
+    }
+
+    fn editor_input(&self) -> Result<String, InquireError> {
+        self.editor_responses
             .lock()
             .pop_front()
             .ok_or(InquireError::OperationCanceled)

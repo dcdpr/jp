@@ -13,6 +13,14 @@ fn make_printer() -> Printer {
     printer
 }
 
+fn streaming_prompt() -> StreamingInterruptConfig {
+    StreamingInterruptConfig::default()
+}
+
+fn tool_prompt() -> ToolInterruptConfig {
+    ToolInterruptConfig::default()
+}
+
 fn make_turn_coordinator() -> TurnCoordinator {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     TurnCoordinator::new(
@@ -48,7 +56,7 @@ fn streaming_signal_resume_continues_without_breaking_loop() {
         &mut stream,
         &printer,
         &backend,
-        StreamingInterrupt::Prompt,
+        &streaming_prompt(),
         false, // stream NOT finished -> stream alive -> Resume path
     );
 
@@ -83,7 +91,7 @@ fn streaming_signal_continue_breaks_for_prefill_request() {
         &mut stream,
         &printer,
         &backend,
-        StreamingInterrupt::Prompt,
+        &streaming_prompt(),
         true, // stream finished -> dead -> Continue path
     );
 
@@ -106,7 +114,7 @@ fn streaming_signal_quit_breaks_for_persist() {
         &mut stream,
         &printer,
         &TerminalPromptBackend,
-        StreamingInterrupt::Prompt,
+        &streaming_prompt(),
         false, // stream not finished
     );
 
@@ -128,7 +136,7 @@ fn tool_signal_quit_cancels_and_continues() {
         false, // not prompting
         &printer,
         &TerminalPromptBackend,
-        ToolInterrupt::Prompt,
+        &tool_prompt(),
     );
 
     // Quit cancels tools and continues so normal persistence flow happens
@@ -152,7 +160,7 @@ fn regression_streaming_quit_must_not_skip_persistence() {
         &mut stream,
         &printer,
         &TerminalPromptBackend,
-        StreamingInterrupt::Prompt,
+        &streaming_prompt(),
         false, // stream not finished
     );
 
@@ -179,7 +187,7 @@ fn regression_tool_quit_must_not_skip_persistence() {
         false, // not prompting
         &printer,
         &TerminalPromptBackend,
-        ToolInterrupt::Prompt,
+        &tool_prompt(),
     );
 
     assert!(
@@ -210,7 +218,7 @@ fn tool_signal_shutdown_restart_returns_restart() {
         false, // not prompting
         &printer,
         &backend,
-        ToolInterrupt::Prompt,
+        &tool_prompt(),
     );
 
     assert_eq!(result, ToolSignalResult::Restart);
@@ -238,7 +246,7 @@ fn tool_signal_shutdown_cancelled_returns_cancelled_with_canned_response() {
         false, // not prompting
         &printer,
         &backend,
-        ToolInterrupt::Prompt,
+        &tool_prompt(),
     );
 
     assert_matches!(
@@ -268,7 +276,7 @@ fn tool_signal_shutdown_cancelled_with_custom_response() {
         false, // not prompting
         &printer,
         &backend,
-        ToolInterrupt::Prompt,
+        &tool_prompt(),
     );
 
     assert_eq!(result, ToolSignalResult::Cancelled {
@@ -295,7 +303,7 @@ fn tool_signal_shutdown_resume_continues_without_cancel() {
         false, // not prompting
         &printer,
         &backend,
-        ToolInterrupt::Prompt,
+        &tool_prompt(),
     );
 
     assert_eq!(result, ToolSignalResult::Continue);
@@ -323,7 +331,7 @@ fn tool_signal_shutdown_suppressed_when_prompting() {
         true, // prompting
         &printer,
         &backend,
-        ToolInterrupt::Prompt,
+        &tool_prompt(),
     );
 
     // Should continue without cancelling (prompt handles Ctrl+C)
@@ -352,7 +360,7 @@ fn tool_signal_shutdown_not_suppressed_when_not_prompting() {
         false, // not prompting
         &printer,
         &backend,
-        ToolInterrupt::Prompt,
+        &tool_prompt(),
     );
 
     // Should process the interrupt and cancel

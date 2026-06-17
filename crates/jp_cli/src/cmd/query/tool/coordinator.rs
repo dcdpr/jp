@@ -88,7 +88,7 @@ use jp_config::{
     conversation::tool::{
         FormatMode, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
     },
-    interrupt::ToolInterrupt,
+    interrupt::ToolInterruptConfig,
 };
 use jp_conversation::{
     ConversationStream,
@@ -278,7 +278,7 @@ pub struct ToolCoordinator {
     executors: Vec<(usize, Box<dyn Executor>)>,
     tool_states: HashMap<String, ToolCallState>,
     tools_config: ToolsConfig,
-    interrupt_action: ToolInterrupt,
+    interrupt_config: ToolInterruptConfig,
     executor_source: Box<dyn ExecutorSource>,
     cancellation_token: CancellationToken,
     /// Rendered custom argument output accumulated during the permission phase.
@@ -293,19 +293,19 @@ impl ToolCoordinator {
             executors: Vec::new(),
             tool_states: HashMap::new(),
             tools_config,
-            interrupt_action: ToolInterrupt::default(),
+            interrupt_config: ToolInterruptConfig::default(),
             executor_source,
             cancellation_token: CancellationToken::new(),
             rendered_arguments: HashMap::new(),
         }
     }
 
-    /// Set what Ctrl-C does while tools are executing.
+    /// Set the Ctrl-C behavior while tools are executing.
     ///
-    /// Defaults to [`ToolInterrupt::Prompt`] (show the interrupt menu).
+    /// Defaults to showing the interrupt menu.
     #[must_use]
-    pub fn with_interrupt(mut self, action: ToolInterrupt) -> Self {
-        self.interrupt_action = action;
+    pub fn with_interrupt(mut self, config: ToolInterruptConfig) -> Self {
+        self.interrupt_config = config;
         self
     }
 
@@ -1106,7 +1106,7 @@ impl ToolCoordinator {
                             self.is_prompting(),
                             printer,
                             prompt_backend,
-                            self.interrupt_action,
+                            &self.interrupt_config,
                         ) {
                             ToolSignalResult::Continue => {}
                             ToolSignalResult::Restart => {

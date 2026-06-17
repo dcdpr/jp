@@ -6,9 +6,11 @@
 //! menu.
 //!
 //! ```toml
-//! [interrupt]
-//! streaming = "prompt"   # while the assistant is generating content
-//! tool_call = "prompt"   # while tools are executing
+//! [interrupt.streaming]
+//! action = "prompt"   # while the assistant is generating content
+//!
+//! [interrupt.tool_call]
+//! action = "prompt"   # while tools are executing
 //! ```
 
 use schematic::{Config, ConfigEnum};
@@ -25,7 +27,20 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct InterruptConfig {
-    /// What Ctrl-C does while the assistant is generating content.
+    /// Ctrl-C behavior while the assistant is generating content.
+    #[setting(nested)]
+    pub streaming: StreamingInterruptConfig,
+
+    /// Ctrl-C behavior while tools are executing.
+    #[setting(nested)]
+    pub tool_call: ToolInterruptConfig,
+}
+
+/// Ctrl-C behavior while the assistant is generating content.
+#[derive(Debug, Clone, PartialEq, Default, Config)]
+#[config(rename_all = "snake_case")]
+pub struct StreamingInterruptConfig {
+    /// What Ctrl-C does.
     ///
     /// - `prompt`: Show the interrupt menu and choose (default).
     /// - `continue`: Resume the response (keep waiting for it, or continue from
@@ -35,9 +50,23 @@ pub struct InterruptConfig {
     /// - `reply`: Stop the response and send a new message; what was generated
     ///   so far is kept as context.
     #[setting(default)]
-    pub streaming: StreamingInterrupt,
+    pub action: StreamingInterruptAction,
 
-    /// What Ctrl-C does while tools are executing.
+    /// Open your editor straight away when replying, instead of the inline
+    /// "press `e` to open editor, enter to send" prompt.
+    ///
+    /// Applies whenever you reply to a streaming interrupt, whether `reply` is
+    /// the configured action or chosen from the menu.
+    /// Defaults to `false`.
+    #[setting(default = false)]
+    pub reply_in_editor: bool,
+}
+
+/// Ctrl-C behavior while tools are executing.
+#[derive(Debug, Clone, PartialEq, Default, Config)]
+#[config(rename_all = "snake_case")]
+pub struct ToolInterruptConfig {
+    /// What Ctrl-C does.
     ///
     /// - `prompt`: Show the interrupt menu and choose (default).
     /// - `continue`: Keep waiting for the running tools to finish.
@@ -45,13 +74,22 @@ pub struct InterruptConfig {
     /// - `stop_reply`: Cancel the running tools and send a message back to the
     ///   assistant in their place.
     #[setting(default)]
-    pub tool_call: ToolInterrupt,
+    pub action: ToolInterruptAction,
+
+    /// Open your editor straight away when replying, instead of the inline
+    /// "press `e` to open editor, enter to send" prompt.
+    ///
+    /// Applies whenever you reply to a tool interrupt (the `stop_reply` action
+    /// or the menu's reply option).
+    /// Defaults to `false`.
+    #[setting(default = false)]
+    pub reply_in_editor: bool,
 }
 
 /// What Ctrl-C does while the assistant is generating content.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
-pub enum StreamingInterrupt {
+pub enum StreamingInterruptAction {
     /// Show the interrupt menu and let the user choose.
     #[default]
     Prompt,
@@ -75,7 +113,7 @@ pub enum StreamingInterrupt {
 /// What Ctrl-C does while tools are executing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
-pub enum ToolInterrupt {
+pub enum ToolInterruptAction {
     /// Show the interrupt menu and let the user choose.
     #[default]
     Prompt,
@@ -93,11 +131,37 @@ pub enum ToolInterrupt {
 }
 
 impl AssignKeyValue for PartialInterruptConfig {
+    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
+            _ if kv.p("streaming") => self.streaming.assign(kv)?,
+            _ if kv.p("tool_call") => self.tool_call.assign(kv)?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl AssignKeyValue for PartialStreamingInterruptConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "streaming" => self.streaming = kv.try_some_from_str()?,
-            "tool_call" => self.tool_call = kv.try_some_from_str()?,
+            "action" => self.action = kv.try_some_from_str()?,
+            "reply_in_editor" => self.reply_in_editor = kv.try_some_bool()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl AssignKeyValue for PartialToolInterruptConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
+            "action" => self.action = kv.try_some_from_str()?,
+            "reply_in_editor" => self.reply_in_editor = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -108,8 +172,26 @@ impl AssignKeyValue for PartialInterruptConfig {
 impl PartialConfigDelta for PartialInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            streaming: delta_opt(self.streaming.as_ref(), next.streaming),
-            tool_call: delta_opt(self.tool_call.as_ref(), next.tool_call),
+            streaming: self.streaming.delta(next.streaming),
+            tool_call: self.tool_call.delta(next.tool_call),
+        }
+    }
+}
+
+impl PartialConfigDelta for PartialStreamingInterruptConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            action: delta_opt(self.action.as_ref(), next.action),
+            reply_in_editor: delta_opt(self.reply_in_editor.as_ref(), next.reply_in_editor),
+        }
+    }
+}
+
+impl PartialConfigDelta for PartialToolInterruptConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            action: delta_opt(self.action.as_ref(), next.action),
+            reply_in_editor: delta_opt(self.reply_in_editor.as_ref(), next.reply_in_editor),
         }
     }
 }
@@ -117,19 +199,57 @@ impl PartialConfigDelta for PartialInterruptConfig {
 impl FillDefaults for PartialInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
-            streaming: self.streaming.or(defaults.streaming),
-            tool_call: self.tool_call.or(defaults.tool_call),
+            streaming: self.streaming.fill_from(defaults.streaming),
+            tool_call: self.tool_call.fill_from(defaults.tool_call),
+        }
+    }
+}
+
+impl FillDefaults for PartialStreamingInterruptConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            action: self.action.or(defaults.action),
+            reply_in_editor: self.reply_in_editor.or(defaults.reply_in_editor),
+        }
+    }
+}
+
+impl FillDefaults for PartialToolInterruptConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            action: self.action.or(defaults.action),
+            reply_in_editor: self.reply_in_editor.or(defaults.reply_in_editor),
         }
     }
 }
 
 impl ToPartial for InterruptConfig {
     fn to_partial(&self) -> Self::Partial {
+        Self::Partial {
+            streaming: self.streaming.to_partial(),
+            tool_call: self.tool_call.to_partial(),
+        }
+    }
+}
+
+impl ToPartial for StreamingInterruptConfig {
+    fn to_partial(&self) -> Self::Partial {
         let defaults = Self::Partial::default();
 
         Self::Partial {
-            streaming: partial_opt(&self.streaming, defaults.streaming),
-            tool_call: partial_opt(&self.tool_call, defaults.tool_call),
+            action: partial_opt(&self.action, defaults.action),
+            reply_in_editor: partial_opt(&self.reply_in_editor, defaults.reply_in_editor),
+        }
+    }
+}
+
+impl ToPartial for ToolInterruptConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            action: partial_opt(&self.action, defaults.action),
+            reply_in_editor: partial_opt(&self.reply_in_editor, defaults.reply_in_editor),
         }
     }
 }

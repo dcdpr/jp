@@ -1,77 +1,84 @@
 use std::str::FromStr as _;
 
 use super::*;
+use crate::assignment::KvAssignment;
 
 #[test]
-fn streaming_interrupt_default_is_prompt() {
-    assert_eq!(StreamingInterrupt::default(), StreamingInterrupt::Prompt);
+fn action_defaults_are_prompt() {
+    assert_eq!(
+        StreamingInterruptAction::default(),
+        StreamingInterruptAction::Prompt
+    );
+    assert_eq!(ToolInterruptAction::default(), ToolInterruptAction::Prompt);
 }
 
 #[test]
-fn tool_interrupt_default_is_prompt() {
-    assert_eq!(ToolInterrupt::default(), ToolInterrupt::Prompt);
-}
-
-#[test]
-fn streaming_interrupt_parses_config_values() {
+fn streaming_action_parses_config_values() {
     assert_eq!(
-        StreamingInterrupt::from_str("prompt").unwrap(),
-        StreamingInterrupt::Prompt
+        StreamingInterruptAction::from_str("prompt").unwrap(),
+        StreamingInterruptAction::Prompt
     );
     assert_eq!(
-        StreamingInterrupt::from_str("continue").unwrap(),
-        StreamingInterrupt::Continue
+        StreamingInterruptAction::from_str("continue").unwrap(),
+        StreamingInterruptAction::Continue
     );
     assert_eq!(
-        StreamingInterrupt::from_str("stop").unwrap(),
-        StreamingInterrupt::Stop
+        StreamingInterruptAction::from_str("stop").unwrap(),
+        StreamingInterruptAction::Stop
     );
     assert_eq!(
-        StreamingInterrupt::from_str("abort").unwrap(),
-        StreamingInterrupt::Abort
+        StreamingInterruptAction::from_str("abort").unwrap(),
+        StreamingInterruptAction::Abort
     );
     assert_eq!(
-        StreamingInterrupt::from_str("reply").unwrap(),
-        StreamingInterrupt::Reply
-    );
-}
-
-#[test]
-fn tool_interrupt_parses_config_values() {
-    assert_eq!(
-        ToolInterrupt::from_str("prompt").unwrap(),
-        ToolInterrupt::Prompt
-    );
-    assert_eq!(
-        ToolInterrupt::from_str("continue").unwrap(),
-        ToolInterrupt::Continue
-    );
-    assert_eq!(
-        ToolInterrupt::from_str("restart").unwrap(),
-        ToolInterrupt::Restart
-    );
-    assert_eq!(
-        ToolInterrupt::from_str("stop_reply").unwrap(),
-        ToolInterrupt::StopReply
+        StreamingInterruptAction::from_str("reply").unwrap(),
+        StreamingInterruptAction::Reply
     );
 }
 
 #[test]
-fn unknown_value_is_rejected() {
-    assert!(StreamingInterrupt::from_str("restart").is_err());
-    assert!(ToolInterrupt::from_str("abort").is_err());
+fn tool_action_parses_config_values() {
+    assert_eq!(
+        ToolInterruptAction::from_str("prompt").unwrap(),
+        ToolInterruptAction::Prompt
+    );
+    assert_eq!(
+        ToolInterruptAction::from_str("continue").unwrap(),
+        ToolInterruptAction::Continue
+    );
+    assert_eq!(
+        ToolInterruptAction::from_str("restart").unwrap(),
+        ToolInterruptAction::Restart
+    );
+    assert_eq!(
+        ToolInterruptAction::from_str("stop_reply").unwrap(),
+        ToolInterruptAction::StopReply
+    );
 }
 
 #[test]
-fn assign_sets_per_context_action() {
+fn unknown_action_is_rejected() {
+    assert!(StreamingInterruptAction::from_str("restart").is_err());
+    assert!(ToolInterruptAction::from_str("abort").is_err());
+}
+
+#[test]
+fn assign_sets_nested_action_and_reply_in_editor() {
     let mut partial = PartialInterruptConfig::default();
     partial
-        .assign(KvAssignment::try_from_cli("streaming", "stop").unwrap())
+        .assign(KvAssignment::try_from_cli("streaming.action", "stop").unwrap())
         .unwrap();
     partial
-        .assign(KvAssignment::try_from_cli("tool_call", "restart").unwrap())
+        .assign(KvAssignment::try_from_cli("streaming.reply_in_editor", "true").unwrap())
+        .unwrap();
+    partial
+        .assign(KvAssignment::try_from_cli("tool_call.action", "restart").unwrap())
         .unwrap();
 
-    assert_eq!(partial.streaming, Some(StreamingInterrupt::Stop));
-    assert_eq!(partial.tool_call, Some(ToolInterrupt::Restart));
+    assert_eq!(
+        partial.streaming.action,
+        Some(StreamingInterruptAction::Stop)
+    );
+    assert_eq!(partial.streaming.reply_in_editor, Some(true));
+    assert_eq!(partial.tool_call.action, Some(ToolInterruptAction::Restart));
 }
