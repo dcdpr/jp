@@ -19,6 +19,9 @@ pub(crate) struct Ls {
     target: PositionalIds<true, true>,
 
     /// Sort conversations by a specific field.
+    ///
+    /// Defaults to last activity (archived conversations default to archive
+    /// time).
     #[arg(long)]
     sort: Option<Sort>,
 
@@ -43,15 +46,37 @@ pub(crate) struct Ls {
     archived: bool,
 }
 
-#[derive(Debug, Default, Clone, Copy, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
 enum Sort {
-    #[default]
     Id,
     Created,
     Activity,
     Expires,
     Messages,
     Local,
+}
+
+/// The table column a sort field maps to, used to draw the sort marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SortColumn {
+    Id,
+    Messages,
+    Activity,
+    Expires,
+    Local,
+}
+
+/// The active sort, rendered as an up/down marker on its column header.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SortMarker {
+    column: SortColumn,
+    descending: bool,
+}
+
+impl SortMarker {
+    fn arrow(self) -> char {
+        if self.descending { '↓' } else { '↑' }
+    }
 }
 
 struct Details {
@@ -120,13 +145,13 @@ impl Ls {
         let skip = count.saturating_sub(limit);
 
         let sort_cmp = |a: &Details, b: &Details| match self.sort {
+            Some(Sort::Id) => a.id.cmp(&b.id),
             Some(Sort::Created) => a.id.timestamp().cmp(&b.id.timestamp()),
             Some(Sort::Messages) => a.messages.cmp(&b.messages),
-            Some(Sort::Activity) => a.last_event_at.cmp(&b.last_event_at),
             Some(Sort::Expires) => a.expires_at.cmp(&b.expires_at),
             Some(Sort::Local) => a.local.cmp(&b.local),
             None if self.archived => b.archived_at.cmp(&a.archived_at),
-            _ => a.id.cmp(&b.id),
+            Some(Sort::Activity) | None => a.last_event_at.cmp(&b.last_event_at),
         };
 
         conversations.sort_by(|a, b| {
@@ -155,6 +180,8 @@ impl Ls {
             title: conversations.iter().any(|d| d.title.is_some()),
         };
 
+        let marker = sort_marker(self.sort, self.archived, self.descending);
+
         // Shrink or drop the free-text title column so the pretty box table
         // fits the terminal. Only the box table mangles its borders by
         // overflowing; piped and JSON output keep full titles for machines.
@@ -164,7 +191,7 @@ impl Ls {
             && let Some(max_width) = ctx.term.width.map(usize::from)
         {
             let probe = list(
-                build_header_row(columns),
+                build_header_row(columns, marker),
                 self.build_body(ctx, &conversations, columns, None, hidden),
                 false,
             );
@@ -179,7 +206,7 @@ impl Ls {
             }
         }
 
-        let header = build_header_row(columns);
+        let header = build_header_row(columns, marker);
         let rows = self.build_body(ctx, &conversations, columns, title_budget, hidden);
         let footer = rows.len() > 20;
         print_table(&ctx.printer, header, rows, footer);
@@ -302,18 +329,30 @@ impl Ls {
     }
 }
 
-fn build_header_row(columns: Columns) -> Row {
+fn build_header_row(columns: Columns, marker: Option<SortMarker>) -> Row {
+    let label = |base: &str, column: SortColumn| match marker {
+        Some(m) if m.column == column => format!("{base} {}", m.arrow()),
+        _ => base.to_string(),
+    };
+
     let mut header = Row::new();
-    header.add_cell(Cell::new("ID"));
-    header.add_cell(Cell::new("#").set_alignment(CellAlignment::Right));
-    header.add_cell(Cell::new("Activity").set_alignment(CellAlignment::Right));
+    header.add_cell(Cell::new(label("ID", SortColumn::Id)));
+    header
+        .add_cell(Cell::new(label("#", SortColumn::Messages)).set_alignment(CellAlignment::Right));
+    header.add_cell(
+        Cell::new(label("Activity", SortColumn::Activity)).set_alignment(CellAlignment::Right),
+    );
 
     if columns.expires_at {
-        header.add_cell(Cell::new("Expires In").set_alignment(CellAlignment::Right));
+        header.add_cell(
+            Cell::new(label("Expires In", SortColumn::Expires)).set_alignment(CellAlignment::Right),
+        );
     }
 
     if columns.local {
-        header.add_cell(Cell::new("Local").set_alignment(CellAlignment::Right));
+        header.add_cell(
+            Cell::new(label("Local", SortColumn::Local)).set_alignment(CellAlignment::Right),
+        );
     }
 
     if columns.title {
@@ -321,6 +360,27 @@ fn build_header_row(columns: Columns) -> Row {
     }
 
     header
+}
+
+/// The column header that should carry the sort marker, if any.
+///
+/// Returns `None` when the active sort has no visible column: an archived
+/// listing with no explicit `--sort` orders by archive time, which has no
+/// column of its own.
+fn sort_marker(sort: Option<Sort>, archived: bool, descending: bool) -> Option<SortMarker> {
+    if sort.is_none() && archived {
+        return None;
+    }
+
+    let column = match sort.unwrap_or(Sort::Activity) {
+        Sort::Id | Sort::Created => SortColumn::Id,
+        Sort::Messages => SortColumn::Messages,
+        Sort::Activity => SortColumn::Activity,
+        Sort::Expires => SortColumn::Expires,
+        Sort::Local => SortColumn::Local,
+    };
+
+    Some(SortMarker { column, descending })
 }
 
 /// Header label for the free-text title column.

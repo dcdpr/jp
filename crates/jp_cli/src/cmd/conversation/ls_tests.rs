@@ -48,6 +48,49 @@ fn display_width_ignores_color_codes() {
 }
 
 #[test]
+fn sort_marker_defaults_to_activity() {
+    let m = sort_marker(None, false, false).expect("active list marks a column");
+    assert_eq!(m.column, SortColumn::Activity);
+    assert!(!m.descending);
+}
+
+#[test]
+fn sort_marker_archived_default_has_no_column() {
+    // Archived listing defaults to archive-time order, which has no column.
+    assert_eq!(sort_marker(None, true, false), None);
+}
+
+#[test]
+fn sort_marker_created_marks_the_id_column() {
+    // `created` orders by the ID timestamp, so the ID column carries the marker.
+    let m = sort_marker(Some(Sort::Created), false, false).unwrap();
+    assert_eq!(m.column, SortColumn::Id);
+}
+
+#[test]
+fn sort_marker_follows_explicit_field_and_direction() {
+    let m = sort_marker(Some(Sort::Messages), false, true).unwrap();
+    assert_eq!(m.column, SortColumn::Messages);
+    assert!(m.descending);
+}
+
+#[test]
+fn header_marks_only_the_sorted_column() {
+    let columns = Columns {
+        expires_at: false,
+        local: false,
+        title: true,
+    };
+    let rendered = list(
+        build_header_row(columns, sort_marker(None, false, false)),
+        vec![],
+        false,
+    );
+    assert!(rendered.contains("Activity ↑"), "got:\n{rendered}");
+    assert!(!rendered.contains("ID ↑"), "got:\n{rendered}");
+}
+
+#[test]
 fn display_width_ignores_osc8_hyperlinks() {
     // The hyperlinked ID column must measure as its visible text only.
     // If the URL bytes were counted, the fit math would under-shave and the
