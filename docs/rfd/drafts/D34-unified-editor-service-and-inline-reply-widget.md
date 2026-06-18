@@ -83,9 +83,9 @@ After the editor closes (when invoked via `Ctrl+E`):
 - If the editor's output is non-empty, the inline reply prompt re-appears with
   the editor's output as the buffer; the user must press Enter to send.
 
-**Opt-in: straight to the editor.**
-Setting `interrupt.streaming.reply_in_editor = true` skips the inline widget for
-`r` and opens the configured editor immediately, seeded empty.
+**Opt-in: straight to the editor.** Setting `interrupt.streaming.reply_in_editor
+= true` skips the inline widget for `r` and opens the configured editor
+immediately, seeded empty.
 A non-empty result is sent as-is; an empty result returns to the interrupt menu.
 This serves users who always want a full editor for replies and would rather not
 pass through the inline step.
@@ -460,8 +460,8 @@ Reimplementing those badly is a worse use of time than the dependency cost.
   The mock implementation is straightforward — script a vector of
   `ReplyOutcome` values — but verify it composes cleanly with the existing
   `MockEditorBackend` for full end-to-end tests of the loop.
-- **Cancel semantics when `reply` / `stop_reply` is a *configured* action.**
-  The `[interrupt].*.action` config (shipped separately) can make `reply` run
+- **Cancel semantics when `reply` / `stop_reply` is a *configured* action.** The
+  `[interrupt].*.action` config (shipped separately) can make `reply` run
   without ever showing the menu.
   There is then no menu to return to on `Esc` or empty input, unlike the
   menu-driven `r`.
@@ -516,8 +516,9 @@ Estimated diff: ~250 LOC.
 - Read `reply_in_editor` from the existing `interrupt.{streaming,tool_call}`
   config and pass it into `collect_reply`; resolve the configured-action cancel
   fallback (see Risks).
-- Update existing handler tests; add tests for the `Cancelled → menu → submit`,
-  `OpenEditor → empty → menu`, and `reply_in_editor` straight-to-editor paths.
+- Update existing handler tests; add tests for the `Cancelled → menu →
+  submit`, `OpenEditor → empty → menu`, and `reply_in_editor`
+  straight-to-editor paths.
 
 Depends on Phases 1 and 2.
 Closes path C. Ships the new `r` UX.
