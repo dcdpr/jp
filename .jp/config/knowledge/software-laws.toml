@@ -27,6 +27,15 @@ function to an architecture.
   change. If a single change to a feature requires edits in many places, your boundaries are \
   wrong.
 
+- **Orthogonality.** Two concerns are orthogonal when changing one doesn't force a change to \
+  the other — they vary along independent axes. Orthogonal pieces *compose*: N of them give \
+  you the N-way combinations for free, without writing each combination by hand. This is among \
+  the highest-leverage properties a design can have, because each new orthogonal primitive \
+  multiplies what's buildable next instead of merely adding to it. The test is "if I change \
+  this, what else do I have to touch?" — when the answer is repeatedly "this unrelated \
+  thing," the two are entangled, not orthogonal. See "Orthogonality and Composability" for \
+  the full treatment.
+
 - **YAGNI (You Aren't Gonna Need It).** Don't build for speculative future requirements. Add \
   functionality when you actually need it, not when you imagine you will — the imagined \
   requirement is almost always wrong in detail.
