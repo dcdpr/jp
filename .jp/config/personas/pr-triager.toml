@@ -20,7 +20,7 @@ reasoning.display = "timer"
 # The triager replies to existing review threads. Each reply is gated on
 # user approval — the tool's parameters formatter shows a preview of the
 # parent comment + proposed reply before posting.
-github_pr_review_add_reply = { enable = true, run = "ask" }
+github_pr_review_add_reply = { run = "ask" }
 # `github_pulls` is redundant: the PR's title, description, and unified
 # diff are in the attached `gh:pull/N/diff` resource. Skip the duplicate
 # fetch.

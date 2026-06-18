@@ -22,5 +22,5 @@ The reviews attachment surfaces each comment's GitHub id as `id=<n>`; pass that 
 """
 
 [conversation.tools]
-github_pr_review_add_comment = { enable = false, style.inline_results = "off", style.results_file_link = "off" }
-github_pr_review_add_reply = { enable = false, style.inline_results = "off", style.results_file_link = "off" }
+github_pr_review_add_comment = { enable = true, style.inline_results = "off", style.results_file_link = "off" }
+github_pr_review_add_reply = { enable = true, style.inline_results = "off", style.results_file_link = "off" }
