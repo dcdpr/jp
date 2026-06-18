@@ -1783,7 +1783,13 @@ vet-ci: (_install "cargo-vet@" + vet_version)
 @_install +CRATES: _install-binstall
     cargo binstall {{quiet_flag}} --locked --disable-telemetry --no-confirm --only-signed {{CRATES}}
 
-@_install-jp *args:
+_install-jp *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -n "${JP_NO_INSTALL:-}" ]; then
+        echo "Skipping jp rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+        exit 0
+    fi
     cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
 
 @_install-comfort *args:
