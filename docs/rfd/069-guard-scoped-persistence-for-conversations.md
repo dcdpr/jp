@@ -5,7 +5,6 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-26
 - **Extends**: [RFD 020]
-- **Required by**: [RFD 073], [RFD 074]
 
 ## Summary
 
@@ -446,5 +445,3 @@ conv.flush()?;
 
 [RFD 020]: 020-parallel-conversations.md
 [RFD 052]: 052-workspace-data-store-sanitization.md
-[RFD 073]: 073-layered-storage-backend-for-workspaces.md
-[RFD 074]: 074-eager-loading-with-command-declared-data-requirements.md

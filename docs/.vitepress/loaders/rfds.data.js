@@ -5,6 +5,7 @@ import {
     buildEntries,
     buildGraph,
     checkRelationshipDuplicates,
+    checkRequiresOnImplemented,
     checkStatusGate,
     checkSummaries,
     findCycles,
@@ -45,6 +46,7 @@ export default {
             findStrayDraftRefs(rfdDir, files, dnnAllowlist),
             checkRelationshipDuplicates(graph),
             checkStatusGate(graph),
+            checkRequiresOnImplemented(graph),
             findCycles(graph),
         ]
         for (const error of errors) {

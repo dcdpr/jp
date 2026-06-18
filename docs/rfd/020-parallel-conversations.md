@@ -5,7 +5,6 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
 - **Extended by**: [RFD 069]
-- **Required by**: [RFD 027], [RFD 039], [RFD 050]
 
 ## Summary
 
@@ -1153,9 +1152,7 @@ We use `libc` and `windows-sys` directly rather than `fd-lock` to avoid
 Session identity uses the three-layer resolution described above, which works on
 both platforms.
 
-[RFD 027]: 027-client-server-query-architecture.md
 [RFD 039]: 039-conversation-trees.md
-[RFD 050]: 050-scripting-ergonomics-for-conversation-management.md
 [RFD 052]: 052-workspace-data-store-sanitization.md
 [RFD 061]: 061-interactive-config.md
 [RFD 069]: 069-guard-scoped-persistence-for-conversations.md

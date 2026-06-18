@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
-- **Requires**: [RFD 005], [RFD 009]
+- **Requires**: [RFD 009]
 - **Required by**: [RFD 037]
 
 ## Summary
@@ -649,7 +649,6 @@ Each producer is independent and can be added incrementally.
   potential future notification producer.
 
 [Query Stream Pipeline]: ../architecture/query-stream-pipeline.md
-[RFD 005]: 005-first-class-inquiry-events.md
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 010]: 010-pty-infrastructure-and-interactive-tool-sdk.md
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md

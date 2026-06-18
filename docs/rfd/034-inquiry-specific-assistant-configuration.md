@@ -6,7 +6,6 @@
 - **Date**: 2026-03-07
 - **Supersedes**: [RFD 033]
 - **Extends**: [RFD 028]
-- **Required by**: [RFD 083]
 
 ## Summary
 
@@ -578,7 +577,6 @@ Depends on Phase 6.
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
 [RFD 033]: 033-cache-preserving-inquiry-via-tool-use.md
 [RFD 036]: 036-conversation-compaction.md
-[RFD 083]: 083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
 [cache-docs]: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
 [structured-docs]: https://platform.claude.com/docs/en/build-with-claude/structured-outputs
 [structured-docs]: https://platform.claude.com/docs/en/build-with-claude/structured-outputs

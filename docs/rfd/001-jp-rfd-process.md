@@ -4,7 +4,6 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
-- **Required by**: [RFD 003], [RFD 041]
 
 ## Summary
 
@@ -354,6 +353,19 @@ The `Requires` and `Required by` fields capture hard dependencies: "this RFD
 cannot be Accepted (or Implemented) until that one is."
 They are maintained by `just rfd-require`.
 
+`Requires` exists only to gate promotion on an unbuilt dependency.
+Once a target reaches `Implemented`, the dependency is satisfied for good and
+the link serves no further purpose, so a `Requires` entry is never recorded
+against an already-`Implemented` RFD.
+When an RFD itself reaches `Implemented`, `just rfd-promote` strips its
+`Requires` entries and the matching `Required by` back-links on the targets; by
+that point the gate guarantees every target is already `Implemented` or
+`Superseded`.
+The docs build rejects any published RFD that lists a `Requires` on an
+`Implemented` target.
+Use `Extends` instead when the relationship is design lineage worth recording
+past implementation.
+
 **Both relationships participate in the same gate.** An extension is a kind of
 dependency (`Extends ⊆ Requires`) — if A extends B, then A also depends on B.
 So `rfd-promote` and the docs build enforce both fields uniformly:
@@ -575,8 +587,6 @@ The steps are:
 
 [RFC 3]: https://datatracker.ietf.org/doc/html/rfc3
 [RFD 002]: 002-using-llms.md
-[RFD 003]: 003-jp-assisted-rfds.md
-[RFD 041]: 041-rfd-lifecycle-enhancements.md
 [`000-decision-template.md`]: 000-decision-template.md
 [`000-design-template.md`]: 000-design-template.md
 [`000-guide-template.md`]: 000-guide-template.md

@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-15
-- **Requires**: [RFD 009], [RFD 028], [RFD 065]
+- **Requires**: [RFD 009], [RFD 065]
 - **Required by**: [RFD 066], [RFD 067]
 
 ## Summary
@@ -826,7 +826,6 @@ Depends on Phase 5.
 [MCP Tasks Specification (2025-11-25)]: https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/tasks
 [MCP Tools Specification (2025-11-25)]: https://modelcontextprotocol.io/specification/2025-11-25/server/tools
 [RFD 009]: 009-stateful-tool-protocol.md
-[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
 [RFD 036]: 036-conversation-compaction.md
 [RFD 065]: 065-typed-resource-model-for-attachments.md
 [RFD 066]: 066-content-addressable-blob-store.md

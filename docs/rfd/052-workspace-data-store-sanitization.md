@@ -4,7 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-18
-- **Required by**: [RFD 073]
 
 ## Summary
 
@@ -563,4 +562,3 @@ Wire sanitization into `cli/lib.rs`:
 [RFD 006]: 006-turn-scoped-mutations.md
 [RFD 020]: 020-parallel-conversations.md
 [RFD 023]: 023-resumable-conversation-turns.md
-[RFD 073]: 073-layered-storage-backend-for-workspaces.md

@@ -4,8 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
-- **Required by**: [RFD 071], [RFD 074], [RFD 031]
-- **Requires**: [RFD 069], [RFD 052]
 
 ## Summary
 
@@ -814,5 +812,3 @@ remains, backed by the trait swap).
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 052]: 052-workspace-data-store-sanitization.md
 [RFD 069]: 069-guard-scoped-persistence-for-conversations.md
-[RFD 071]: 071-conversation-archiving.md
-[RFD 074]: 074-eager-loading-with-command-declared-data-requirements.md

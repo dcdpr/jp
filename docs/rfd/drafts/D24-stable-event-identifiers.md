@@ -7,9 +7,13 @@
 
 ## Summary
 
-Every entry in a conversation's event stream — both `ConversationEvent`s and
-`ConfigDelta`s — carries a stable identifier, unique within its stream.
-Stream entries and overlays reference each other by ID rather than by position.
+Every entry in a conversation's event stream carries a stable identifier, unique
+within its stream.
+The identifier lives on the stream-entry wrapper, so every kind of entry
+(conversation events, config deltas, compaction overlays, and any future kind)
+is addressable by a stable ID instead of by position.
+Future reference-bearing entries and overlays reference entries by ID rather
+than by position.
 Loaded entries without an ID get a fresh random ID assigned at load time and
 persisted on the next save.
 
@@ -53,6 +57,21 @@ D18]).
 Conversation compaction ([RFD 064]) currently anchors ranges by turn index; once
 D24 lands, event-ID anchors are a candidate replacement, though that migration
 is compaction's call, not D24's.
+That migration also splits along the policy kind, which is worth recording now
+so it isn't re-derived later.
+A **mechanical** overlay (reasoning/tool-call stripping) carries no derived
+content, so by-ID anchoring lets projection apply it to whichever covered events
+still exist after a mutation — a robust rebase, no drop needed.
+A **summary** overlay carries LLM-generated text describing the events in its
+range; removing any covered event makes that text stale, and prose can't be
+clipped, so by-ID anchoring buys *precise staleness detection* (the covered-ID
+set is no longer fully present) but not a content fix.
+The only sound responses to a stale summary are drop or regenerate, and
+regeneration is effectful (provider, model config, async), so it must live in
+the imperative shell, never in the pure projection layer.
+Until that migration lands, every event-removing transformation drops overlays
+wholesale (see `ConversationStream::retain`); this is the conservative,
+positional-safe behavior the by-ID design later refines for mechanical overlays.
 
 Without stable IDs, each of these features either reinvents positional
 references and inherits the same mutation hazards, or builds a parallel ID
@@ -70,8 +89,11 @@ For users who edit `events.json` by hand:
 - Each stream entry has a short opaque `event_id` field.
 - Editing an entry's content keeps its ID; existing references stay valid.
 - Duplicating an entry produces two entries with the same ID.
-  Storage's load-time repair detects this and regenerates the ID on the later
-  occurrence.
+  Storage's load-time repair detects the collision and regenerates the ID on the
+  later occurrence, so the file again has unique IDs.
+  A reference that pointed at the duplicated ID is now ambiguous, and reference
+  resolution treats it as unresolved rather than silently binding to one of the
+  copies.
 - Deleting an entry invalidates references to it.
   Downstream features drop the dependent reference.
 
@@ -80,41 +102,65 @@ note that copies and references behave as described.
 
 ### What the data model looks like
 
-`ConversationEvent` and `ConfigDelta` each gain an `event_id` field alongside
-`timestamp`:
+The stream-entry identifier lives on the wrapper that holds every entry, not on
+each event type.
+`InternalEvent` becomes a struct with the `event_id` and a flattened payload
+enum:
 
 ```rust
-pub struct ConversationEvent {
-    pub event_id: EventId,
-    pub timestamp: DateTime<Utc>,
-    pub kind: EventKind,
-    pub metadata: Map<String, Value>,
+struct InternalEvent {
+    event_id: EventId,
+    payload: EventPayload,
 }
 
-pub struct ConfigDelta {
-    pub event_id: EventId,
-    pub timestamp: DateTime<Utc>,
-    pub delta: Box<PartialAppConfig>,
+enum EventPayload {
+    Event(Box<ConversationEvent>),
+    ConfigDelta(ConfigDelta),
+    Compaction(Compaction),
 }
 ```
 
+Modeling the ID on the wrapper, rather than as a field on each event type,
+guarantees at the type level that every stream entry has one.
+A new payload variant cannot be added without an ID, and the `Compaction`
+overlay is covered for free.
+The point of stable IDs is that *any* item in the event array is addressable by
+a stable ID instead of by position, whether or not a consumer needs that ID
+today.
+
+The `timestamp` stays on each payload variant.
+`event_id` is identity the stream assigns at insertion; `timestamp` is reported
+by whoever created the event, and synthetic events deliberately preserve a
+source timestamp.
+Their provenance differs, so the wrapper owns identity while each payload owns
+its own time.
+
+`event_id` and the flattened payload serialize into a single JSON object, so the
+on-disk shape is unchanged except for the added `event_id` key:
+
+```json
+{ "event_id": "k3m9x2a", "type": "...", "timestamp": "...", ... }
+```
+
 The persisted JSON key is `event_id` rather than `id`.
-`ConversationEvent` flattens its `kind` into the same JSON object, and several
-event kinds (`ToolCallRequest`, `ToolCallResponse`, `InquiryRequest`,
+Several event kinds (`ToolCallRequest`, `ToolCallResponse`, `InquiryRequest`,
 `InquiryResponse`) already serialize a top-level `id` carrying their own
-meaning.
+meaning, and a `ConversationEvent` flattens its `kind` into the same object.
 Using `event_id` for the stream-entry identifier keeps both fields side by side
-without collision and keeps older readers tolerant — `event_id` is genuinely
+without collision and keeps older readers tolerant: `event_id` is genuinely
 unknown to legacy code.
 
 `EventId` is a small opaque newtype in `jp_conversation`, serialized
 transparently as a string.
-It is a thin wrapper over `String`: deserialization accepts any non-empty
-string.
+It is strict: deserialization accepts a non-empty string and rejects an empty
+one.
 The lowercase-alphanumeric form is a *generation* convention, not a *parsing*
-constraint — hand-edited IDs that don't match the format are kept as-is, as
-long as they're non-empty and unique.
-Empty strings are treated as missing IDs and regenerated at load.
+constraint, so hand-edited IDs that don't match the format are kept as-is as
+long as they're non-empty.
+Leniency for a missing or empty ID lives at the storage boundary, not in
+`EventId` itself: the stream-entry deserialization treats a missing or empty
+`event_id` as "assign a fresh ID at load," matching the existing `InternalEvent`
+/ `deserialize_config_delta` compat path.
 
 `EventId` is **not** a `jp_id::Id`.
 "Internal" here means: event IDs are not part of JP's user-facing CLI
@@ -123,15 +169,20 @@ Users do not type them as command arguments, JP does not print them outside
 raw-JSON contexts, and they do not share the `jp_id` format contract carried by
 `ConversationId` and `ProviderId`.
 They are visible in `events.json` and, by [RFD 072]'s design, in the
-command-plugin protocol — adding `event_id` extends that surface in the same
-way any new event field would, and the stability of that exposure is governed by
-RFD 072, not by this RFD.
+command-plugin protocol.
+Adding `event_id` extends that surface the same way any new event field would.
+One interaction is worth naming: a legacy conversation that has never been
+re-saved gets fresh random IDs at each load (see Drawbacks), so a read-only
+plugin can observe different `event_id` values for the same legacy entry across
+invocations until the stream is persisted.
+The stability contract for that exposure is governed by RFD 072, not by this
+RFD.
 
 The format is intentionally short: 7 lowercase alphanumeric characters.
 That matches Git's short-ref ergonomic and gives ~78 billion values from a
-base-36 alphabet — far more than enough at the ~10k-entry upper bound,
-especially with deterministic load-time repair on collision (see [Storage-layer
-repair](#storage-layer-repair) below).
+base-36 alphabet, far more than enough at the ~10k-entry upper bound, especially
+with uniqueness enforced at insertion and deterministic load-time repair on
+collision (see [Storage-layer repair](#storage-layer-repair) below).
 
 The format is internal and unstable.
 Nothing in the public surface relies on the ID's character count, alphabet, or
@@ -140,50 +191,47 @@ content addressing, or any property beyond identity-within-a-stream.
 
 ### How IDs are assigned
 
-Both `ConversationEvent` and `ConfigDelta` expose a three-way constructor
-pattern:
+The stream assigns the `event_id` when it wraps a payload into an
+`InternalEvent`, which is the one place that has every existing ID in scope.
+The event constructors are unchanged: `ConversationEvent::new(kind, ts)`,
+`ConversationEvent::now(kind)`, and the `ConfigDelta` constructors keep their
+current signatures and gain no ID argument.
+
+The mutation entry points that append to the stream generate the ID:
 
 ```rust
-impl ConversationEvent {
-    /// Explicit ID, explicit timestamp. Used by tests and fixtures.
-    pub fn new(id: EventId, kind: impl Into<EventKind>, ts: impl Into<DateTime<Utc>>) -> Self;
-
-    /// Random ID, explicit timestamp. Used by synthetic-event sites that
-    /// must preserve a related event's timestamp.
-    pub fn at(kind: impl Into<EventKind>, ts: impl Into<DateTime<Utc>>) -> Self {
-        Self::new(EventId::random(), kind, ts)
+impl ConversationStream {
+    fn wrap(&self, payload: EventPayload) -> InternalEvent {
+        InternalEvent { event_id: self.fresh_event_id(), payload }
     }
 
-    /// Random ID, current timestamp. Used by live event creation.
-    pub fn now(kind: impl Into<EventKind>) -> Self {
-        Self::at(kind, Utc::now())
-    }
+    /// A random `EventId` that does not collide with any entry already in the
+    /// stream. The stream knows the existing IDs, so this is where "unique
+    /// within its stream" is enforced.
+    fn fresh_event_id(&self) -> EventId { /* retry random() until unused */ }
 }
 ```
 
-`ConfigDelta` follows the same shape (`new(id, delta, ts)` / `at(delta, ts)` /
-`now(delta)`).
+`push`, `add_config_delta`, `extend`, and `start_turn` (which goes through
+`push`) all wrap their payload this way.
+Because generation happens where stream context exists, "unique within its
+stream" holds at insertion, not merely after a load-time pass.
+A fixture or test that needs a deterministic ID constructs the `InternalEvent`
+wrapper directly with a fixed `EventId`; live and synthetic insertion paths let
+the stream assign one.
+There is no thread-local RNG and no test/prod plumbing inside the event
+constructors.
 
-`at` is the production helper for synthetic stream entries that must keep a
-specific timestamp — for example, the `TurnStart` inserted by
-`normalize_turn_starts` (which uses the timestamp of the first chat request) or
-the synthetic `ToolCallResponse` inserted by `sanitize_orphaned_tool_calls`
-(which uses the original request's timestamp).
-Silently shifting these to "now" would change ordering semantics.
-
-`new` requires an explicit ID, which keeps tests deterministic without
-thread-local RNG state — fixtures pass a fixed `EventId` literal and snapshots
-stay stable across runs.
-
-This costs the most diff at call sites — every existing
-`ConversationEvent::new` and `ConfigDelta` constructor in the test suite gets an
-explicit ID.
-There is no thread-local RNG, no test/prod plumbing, no hidden non-determinism
-inside a constructor.
+Synthetic stream entries that must keep a specific timestamp (for example, a
+`TurnStart` that adopts the first chat request's time, or a synthetic
+`ToolCallResponse` that adopts its original request's time) keep setting it on
+the payload as they do today.
+Only the ID is stream-assigned.
+Silently shifting those timestamps to "now" would change ordering semantics.
 
 **Loaded entries with an ID present.** Kept as-is.
 
-**Loaded entries without an ID.** A fresh random `EventId` is generated at load
+**Loaded entries without an ID.** A fresh random `EventId` is assigned at load
 time and held in memory.
 Re-saving the stream persists the assigned IDs; from then on they behave like
 any other ID.
@@ -211,36 +259,53 @@ higher-level stream mutations (orphaned tool responses, orphaned inquiry
 responses, leading non-user events, turn-start normalization).
 
 ```txt
-collect ids; for each duplicate, regenerate the id on the later occurrence.
+collect ids; for each duplicate id, regenerate it on the later occurrence(s)
+so the file again has unique ids; record which ids were duplicated.
 ```
 
-The earliest occurrence keeps its ID, so existing references remain valid.
-A user who copy-pastes an entry in the JSON sees both copies in the file, but on
-the next load one of them gets a new identity.
+Repair restores the *uniqueness* invariant, but it cannot restore reference
+*intent*.
+A manual edit that duplicates an ID (a copy-paste, or a reorder that moves a
+copy ahead of the original) makes any reference to that ID inherently ambiguous:
+there is no way to know which occurrence a pre-existing reference meant.
+Regenerating the later occurrence keeps the file well-formed, but it does not
+make a stale reference correct, and keeping the earliest occurrence's ID does
+**not** by itself preserve reference validity in the reorder case.
+
+So a duplicated ID is treated as an ambiguous condition, not merely a missing
+one.
+Reference resolution (in the future overlay features that consume IDs) treats a
+reference to an ID that was duplicated at load as **unresolved**, the same as a
+reference to a deleted ID.
+This is what makes the Motivation's claim hold: a copy, reorder, or delete
+produces a *detectable* mismatch, never a silent positional rebind to the wrong
+entry.
 
 Repair logs a warning per regenerated ID but does not return a structured
 report.
 Surfacing repair to the user or to overlays is out of scope for this RFD; future
-overlay-specific RFDs that anchor by ID will define their own surfacing for
-orphaned references when needed.
+overlay-specific RFDs that anchor by ID define their own surfacing for ambiguous
+and orphaned references.
 
 Existing `sanitize` steps continue to work unchanged.
 Future overlay types that reference event IDs add a "drop dependent overlay"
-step:
+step over the IDs of *all* stream entries (every `InternalEvent`, regardless of
+payload kind):
 
 ```txt
-if overlay.anchor_id ∉ stream.event_ids() { drop overlay }
+if overlay.anchor_id was duplicated at load, or
+   overlay.anchor_id ∉ { id of every stream entry } { drop overlay }
 ```
 
-Per the Motivation, this is a *detectable* mismatch — the anchor either
-resolves or it doesn't — not a silent positional aliasing.
+This RFD does not add a public `event_ids()` accessor; there is no consumer yet.
+The ID set is an internal notion the repair pass already computes, and the
+public API can grow an accessor when a real consumer (compaction, sub-agents,
+plugin subscriptions, interactive editing) defines the shape it needs.
 
 ### Storage
 
-`events.json` gains an `event_id` field per stream entry.
-With 7-character IDs, that's ~12 bytes per entry including the JSON key. A
-10,000-entry conversation grows by ~120 KB.
-Negligible.
+`events.json` gains a short `event_id` key per stream entry.
+The on-disk growth is negligible even for the largest conversations.
 
 The on-disk format is forward-compatible: older readers ignore the unknown
 `event_id` field on stream entries.
@@ -249,19 +314,25 @@ assigned at load and persisted on the next save.
 
 ## Drawbacks
 
-- **Schema change touches every stream-entry constructor and many tests.** Every
-  existing `ConversationEvent::new` and `ConfigDelta` constructor call site
-  updates to pass an explicit `EventId`, or migrates to `at` / `now`.
-  Production code uses `at` or `now`; tests pass fixed IDs from helpers.
-  Mechanical but extensive — hundreds of call sites in
-  `jp_cli/src/cmd/conversation/{fork,grep,print}_tests.rs` and across
-  `jp_conversation` and `jp_llm`.
+- **The `InternalEvent` wrapper is a one-time structural change.**
+  `InternalEvent` becomes a struct with a flattened payload enum, and its
+  hand-written `Serialize` / `Deserialize` get rewritten to that shape while
+  preserving the `type` tag and the base64 encode/decode hooks.
+  The iteration views expose `event_id`.
+  Because the ID lives on the wrapper and is assigned at insertion, the event
+  constructors are unchanged, so the hundreds of `ConversationEvent::new` /
+  `ConfigDelta` call sites in tests do **not** need an explicit ID; fixtures
+  that assert on a specific ID construct the wrapper directly.
+  The serialized form is unchanged except for the added key, so the change is
+  mechanical.
+  The fiddly part is the custom serde, worth spiking first to confirm a
+  byte-for-byte round-trip against existing fixtures.
 - **Storage load gains a new pass.** Uniqueness enforcement runs on every load
   via `from_parts` / `from_legacy_events`.
-  Cheap (`HashSet` over entry count) but adds a load-time pass.
+  Cheap, but it is an added load-time pass.
 - **Manual-edit footgun for the duplicate case.** A user who copy-pastes an
   entry sees both copies in the file, but on the next load one of them gets a
-  new ID.
+  new ID, and any reference to the duplicated ID becomes unresolved.
   This is documented but not visible until reload.
 - **In-memory IDs for legacy entries are not stable across loads.** Loading a
   legacy file twice without saving in between produces two different random ID
@@ -269,15 +340,17 @@ assigned at load and persisted on the next save.
   Acceptable today because nothing consumes those IDs in the unsaved state; it
   would become a problem only if a future feature took a hard dependency on
   cross-load ID stability without first persisting.
-- **Field duplication between `ConversationEvent` and `ConfigDelta`.** Both
-  types now carry `event_id` and `timestamp`.
-  The duplication points at a latent shape — both are stream entries with
-  shared metadata wrapping a kind-specific payload — but lifting those fields
-  into a wrapper struct around `InternalEvent` would require removing
-  `timestamp` from `ConversationEvent`'s public type, and the timestamp is
-  conceptually inseparable from the event it stamps.
-  Living with the duplication is the right call for D24; consolidation is future
-  work.
+- **`timestamp` stays duplicated across payload variants.** The wrapper holds
+  `event_id`, so the identifier is declared once.
+  `timestamp`, by contrast, stays on each payload variant rather than moving to
+  the wrapper.
+  Lifting it would buy no new type-level guarantee (every variant already
+  carries a timestamp) and would re-introduce churn at every event constructor
+  and timestamp read site, the very churn the wrapper avoids for `event_id`.
+  The provenance also differs: `event_id` is identity the stream assigns, while
+  `timestamp` is reported by the event's producer.
+  Keeping `timestamp` on the payload is deliberate; revisit only if a third
+  field genuinely shared across all entries forces the wrapper to grow.
 
 ## Alternatives
 
@@ -306,19 +379,27 @@ Stream order is the array, not the ID.
 `jp_id` membership leaks an internal storage detail into the public ID format
 contract.
 
-**5. Auto-generate the ID inside `new` via a thread-local RNG.** Smaller diff
-than passing the ID explicitly, but introduces non-determinism into
-constructors.
-The "make tests deterministic" plumbing offsets the diff savings and hides the
-cost rather than removing it.
+**5. Generate the ID inside the event constructor (explicit argument or
+thread-local RNG).** An earlier shape put `event_id` on `ConversationEvent` /
+`ConfigDelta` and had the constructor supply it, either via an explicit argument
+(churn at every call site) or a thread-local RNG (non-determinism inside
+constructors, plus test plumbing to tame it).
+Assigning the ID on the `InternalEvent` wrapper at insertion is better than
+both: the constructors stay unchanged, there is no hidden RNG state, and
+generation happens where the stream's existing IDs are in scope, so uniqueness
+is enforceable at insertion.
 
-**6. Lift `event_id` and `timestamp` into a wrapper around `InternalEvent`.**
-Resolves the duplication noted in Drawbacks, but requires removing `timestamp`
-from `ConversationEvent` (a widely-consumed public type whose timestamp is part
-of its identity).
-The rip-up cost dominates the duplication cost.
-Re-evaluate if additional `InternalEvent` variants accumulate the same shared
-metadata.
+**6. Also lift `timestamp` onto the `InternalEvent` wrapper.** This design puts
+`event_id` on the wrapper; the open question is whether `timestamp` should move
+there too.
+It is not worth it now.
+With `event_id` on the wrapper, `timestamp` is the only field still repeated
+across variants, which is the N=1 situation that did not justify a wrapper
+before.
+Moving it adds no type-level guarantee (every variant already has a timestamp)
+and re-introduces constructor and read-site churn.
+The end state where both live on the wrapper may be right eventually; revisit
+when a concrete third shared field forces it.
 
 ## Non-Goals
 
@@ -348,17 +429,15 @@ metadata.
 
 ## Risks and Open Questions
 
-- **Repair cost on load.** ID-uniqueness repair adds a `HashSet` pass over
+- **Repair cost on load.** ID-uniqueness repair adds a uniqueness pass over
   stream entries on every load.
   Cheap but revisit if profiling shows it.
-- **Test fixture migration scope.** Hundreds of `ConversationEvent` and a
-  handful of `ConfigDelta` constructor call sites in tests need explicit ID
-  arguments.
-  The migration is mechanical (assign a fixed ID per call), but it is the bulk
-  of the diff.
-  A short helper for generating readable fixture IDs keeps call sites legible.
-- **Storage upper bound.** 10k-entry conversation grows by ~120 KB.
-  Acceptable.
+- **Fixture migration scope.** The event constructors are unchanged, so most
+  test call sites are untouched.
+  The churn is concentrated in the `InternalEvent` serde rewrite, the
+  iteration-view change, and the snapshots that gain an `event_id` key.
+  Fixtures that assert on a specific ID construct the wrapper directly; a short
+  helper for readable fixed IDs keeps those legible.
 
 ## Implementation Plan
 
@@ -369,63 +448,64 @@ metadata.
   Internal opaque ID, no `jp_id` membership.
 - Implement `EventId::random()` on top of `getrandom`, transparent string serde,
   `Display`/`Debug`, and a test-fixture helper for readable fixed IDs.
-- Tests: serde round-trip; deserialization of empty string treated as missing;
-  deserialization of non-format strings preserved as-is; two `random()` calls
-  produce distinct IDs.
+- Tests: serde round-trip; `EventId` deserialization rejects an empty string
+  (strict); non-format but non-empty strings are preserved as-is; two `random()`
+  calls produce distinct IDs.
 
 Independent.
 Mergeable on its own.
 
-### Phase 2 — `event_id` on stream entries
+### Phase 2 — `InternalEvent` wrapper and stream-assigned IDs
 
-- Add `event_id: EventId` to `ConversationEvent` and `ConfigDelta`.
-- Update constructors:
-  - `ConversationEvent::new(id, kind, ts)`, `ConversationEvent::at(kind, ts)`,
-    `ConversationEvent::now(kind)`.
-  - `ConfigDelta::new(id, delta, ts)`, `ConfigDelta::at(delta, ts)`,
-    `ConfigDelta::now(delta)`.
-- Update serde for both: serialize as `event_id`; on deserialize, accept missing
-  or empty fields and generate a fresh `random()` ID.
-- Update the `compat` deserializer to populate IDs for legacy entries.
-- Migrate every test fixture in the workspace to pass an explicit `EventId`, or
-  to use `at` / `now` where appropriate.
+- Make `InternalEvent` a struct: `event_id: EventId` plus a flattened
+  `EventPayload` enum (`Event` / `ConfigDelta` / `Compaction`).
+- Rewrite `InternalEvent`'s `Serialize` / `Deserialize` to the struct+flatten
+  shape, preserving the `type` tag and the base64 encode/decode hooks.
+  Confirm a byte-for-byte round-trip against existing fixtures, modulo the new
+  key.
+- Assign `event_id` on insertion: `push`, `add_config_delta`, `extend`, and
+  `start_turn` wrap their payload via a `fresh_event_id()` that avoids collision
+  with IDs already in the stream.
+- Expose `event_id` on the iteration views.
+- On deserialize, treat a missing or empty `event_id` as "assign a fresh ID at
+  load"; `EventId` itself stays strict.
+- Regenerate the snapshots and fixtures that gain an `event_id` key in this same
+  change, so the phase lands green.
+- Verify no test relies on positional references that stable IDs would break.
 
 Depends on Phase 1.
-Touches many files but mechanically.
+Touches the stream core and the iteration views; the serde rewrite is the fiddly
+part.
 
-### Phase 3 — Storage-layer repair
+### Phase 3 — Storage-layer uniqueness repair
 
-- Add `ensure_unique_event_ids` in `ConversationStream`.
-- Call it from `ConversationStream::from_parts` and `from_legacy_events` after
-  deserialization, before the stream is returned.
-  **Not** part of `ConversationStream::sanitize()`.
-- Test: stream with two entries sharing an explicit fixed ID — load-time repair
-  leaves the earlier entry's ID intact and regenerates the later one.
-- Test: legacy file with no `event_id` fields — entries get IDs assigned at
+- Add `ensure_unique_event_ids` in `ConversationStream`, recording which IDs
+  were duplicated.
+- Call it from `from_parts` and `from_legacy_events` after deserialization,
+  before the stream is returned.
+  **Not** part of `sanitize()`.
+- Test: a stream with two entries sharing an explicit fixed ID; repair
+  regenerates the later occurrence and the file again has unique IDs.
+- Test: a legacy file with no `event_id` fields; entries get IDs assigned at
   load.
+- Test: a live insertion path never exposes a duplicate ID; force a collision in
+  `fresh_event_id` and verify it retries.
 
 Depends on Phase 2.
 
-### Phase 4 — Snapshot regeneration
-
-- Regenerate any snapshot fixtures affected by the new `event_id` field across
-  `jp_conversation`, `jp_llm/tests/fixtures/**`, and `jp_md`.
-- Verify no test relies on positional references that IDs would break.
-
-Depends on Phases 1–3.
-
-### Phase 5 — Documentation
+### Phase 4 — Documentation
 
 - Update `jp conversation edit --events` help text with the duplicate-ID note
-  (using `event_id`).
+  (using `event_id`): a copy gets a new ID on the next load, and a reference to
+  a duplicated ID becomes unresolved.
 - Update the data model section of `docs/architecture/` if applicable.
 - Glossary entry in `docs/architecture/ubiquitous-language.md` for "Event ID."
 
-Independent of the others, can land alongside Phase 4.
+Can land alongside Phase 3.
 
-Future RFDs that want to reference entries by ID — compaction, sub-agents,
-plugin event subscriptions, interactive stream editing — migrate their
-reference layout in their own implementation work.
+Future RFDs that want to reference entries by ID (compaction, sub-agents, plugin
+event subscriptions, interactive stream editing) migrate their reference layout
+in their own implementation work.
 That is out of scope here.
 
 ## References

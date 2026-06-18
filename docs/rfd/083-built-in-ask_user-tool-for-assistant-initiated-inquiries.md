@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
-- **Requires**: [RFD 028], [RFD 034], [RFD 081], [RFD 082]
+- **Requires**: [RFD 081], [RFD 082]
 
 ## Summary
 

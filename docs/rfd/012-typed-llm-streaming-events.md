@@ -4,7 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-15
-- **Required by**: [RFD 043]
 
 ## Summary
 
@@ -398,5 +397,4 @@ Add equivalent helpers for `EventPart` if needed.
 - `crates/jp_llm/src/stream/aggregator/tool_call_request.rs` —
   `ToolCallRequestAggregator`
 
-[RFD 043]: 043-incremental-tool-call-argument-streaming.md
 [RFD 048]: 048-four-channel-output-model.md
