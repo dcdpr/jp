@@ -12,6 +12,8 @@ Consolidate JP's three independent editor-invocation paths onto a single
 interrupt-menu reply prompt with a richer inline editing widget that accepts
 short replies inline, supports multi-line input, and escalates to the configured
 editor on demand.
+A per-context opt-in (`reply_in_editor`) skips the inline step and opens the
+editor immediately, for users who prefer that.
 
 ## Motivation
 
@@ -81,12 +83,23 @@ After the editor closes (when invoked via `Ctrl+E`):
 - If the editor's output is non-empty, the inline reply prompt re-appears with
   the editor's output as the buffer; the user must press Enter to send.
 
+**Opt-in: straight to the editor.**
+Setting `interrupt.streaming.reply_in_editor = true` skips the inline widget for
+`r` and opens the configured editor immediately, seeded empty.
+A non-empty result is sent as-is; an empty result returns to the interrupt menu.
+This serves users who always want a full editor for replies and would rather not
+pass through the inline step.
+
 #### `s` (Stop & Reply) in the tool-interrupt menu
 
 Same flow as `r`, with one difference: an empty Enter or Esc does not return to
 the menu — it falls through to today's `DEFAULT_TOOL_CANCELLED_RESPONSE` canned
 message, which is delivered to the LLM.
 This preserves the existing "interrupt a tool with no explanation" shortcut.
+
+The `interrupt.tool_call.reply_in_editor` opt-in applies here too: when set, `s`
+opens the editor directly, and an empty editor result falls through to the
+canned message.
 
 #### `jp query` (initial prompt)
 
@@ -274,7 +287,15 @@ pub fn handle_streaming_interrupt(
     }
 }
 
-fn collect_reply(&self, message: &str) -> Option<String> {
+fn collect_reply(&self, message: &str, reply_in_editor: bool) -> Option<String> {
+    // Straight-to-editor opt-in: skip the inline widget and open the editor
+    // directly, seeded empty. A non-empty result is sent as-is.
+    if reply_in_editor {
+        let editor = self.editor.as_ref()?;
+        let edited = editor.edit("").ok()?;
+        return (!edited.trim().is_empty()).then_some(edited);
+    }
+
     let mut buffer = String::new();
     loop {
         match self.backend.inline_reply(message, &buffer).ok()? {
@@ -297,6 +318,12 @@ fn collect_reply(&self, message: &str) -> Option<String> {
 The tool-interrupt `s` flow uses the same `collect_reply` helper but substitutes
 `DEFAULT_TOOL_CANCELLED_RESPONSE` for `None`, preserving today's canned-message
 semantics.
+
+This sketch is the `action = prompt` path.
+The `[interrupt].*.action` config (shipped separately) wraps it: a non-`prompt`
+action skips the menu and runs directly, and a configured `reply` / `stop_reply`
+calls `collect_reply` directly.
+The `reply_in_editor` argument is read from the same per-context config struct.
 
 ### Empty-Enter policy
 
@@ -338,9 +365,12 @@ Two terms enter the glossary:
   duct-based tempfile dance is 50–80 LOC of real terminal-process plumbing
   (Tesler's Law: the complexity has to live somewhere; the right somewhere is
   here).
-- **Behavior change for the `r` flow.** Pressing `r` no longer goes straight to
-  the editor.
-  The user has not released JP yet and explicitly accepts this; flagged for
+- **Behavior change for the `r` flow.** By default `r` opens the inline reply
+  widget instead of the `inquire::Editor` "press `e`" two-step.
+  (The old flow never went *straight* to the editor either — it always showed
+  that intermediate prompt; `reply_in_editor` is what makes straight-to-editor
+  possible for the first time.)
+  JP is pre-release, so the default change is acceptable; flagged for
   completeness.
 
 ## Alternatives
@@ -397,6 +427,8 @@ Reimplementing those badly is a worse use of time than the dependency cost.
   editor configuration (e.g., a different editor for inline replies vs. the
   query prompt).
   One editor is configured; one editor is used.
+  (`reply_in_editor` controls *whether* a reply uses that editor, not *which*
+  editor — a separate axis, so it does not conflict with this non-goal.)
 - **Arrow-key UX inside `InlineSelect`** or other existing widgets.
   Out of scope.
 
@@ -428,6 +460,14 @@ Reimplementing those badly is a worse use of time than the dependency cost.
   The mock implementation is straightforward — script a vector of
   `ReplyOutcome` values — but verify it composes cleanly with the existing
   `MockEditorBackend` for full end-to-end tests of the loop.
+- **Cancel semantics when `reply` / `stop_reply` is a *configured* action.**
+  The `[interrupt].*.action` config (shipped separately) can make `reply` run
+  without ever showing the menu.
+  There is then no menu to return to on `Esc` or empty input, unlike the
+  menu-driven `r`.
+  The handler needs a defined fallback — likely `Resume` for streaming and the
+  canned message for tools.
+  Pin this down during implementation.
 
 ## Implementation Plan
 
@@ -473,8 +513,11 @@ Estimated diff: ~250 LOC.
   `interrupt/signals.rs`.
 - Rewrite `handle_streaming_interrupt` and `handle_tool_interrupt` as loops with
   the `collect_reply` helper.
-- Update existing handler tests; add tests for the `Cancelled → menu → submit`
-  and `OpenEditor → empty → menu` paths.
+- Read `reply_in_editor` from the existing `interrupt.{streaming,tool_call}`
+  config and pass it into `collect_reply`; resolve the configured-action cancel
+  fallback (see Risks).
+- Update existing handler tests; add tests for the `Cancelled → menu → submit`,
+  `OpenEditor → empty → menu`, and `reply_in_editor` straight-to-editor paths.
 
 Depends on Phases 1 and 2.
 Closes path C. Ships the new `r` UX.
@@ -506,6 +549,8 @@ Reviewable independently after Phase 3.
 - `crates/jp_cli/src/editor.rs` — current `editor::open()` and
   `editor::edit_query` (path A)
 - `crates/jp_config/src/editor.rs` — `EditorConfig::command()` and `path()`
+- `crates/jp_config/src/interrupt.rs` — the `interrupt.{streaming,tool_call}`
+  config; the `action` field ships separately, `reply_in_editor` is added here
 
 [RFD 045]: ../045-layered-interrupt-handler-stack.md
 [RFD 080]: ../080-editor-as-a-config-source.md
