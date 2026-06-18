@@ -1344,6 +1344,50 @@ rfd-promote NNN: _install-jp
     else
         sed "s/^- \*\*Status\*\*: Accepted/- **Status**: Implemented/" "$file" > "${file}.tmp"
         mv "${file}.tmp" "$file"
+
+        # Strip `Requires` on promotion to Implemented. By the promotion gate,
+        # every `Requires` target is already Implemented or Superseded, so the
+        # dependency is satisfied for good and the link serves no further
+        # purpose (see RFD 001). Drop the `Requires` line from this file, and
+        # drop the matching `Required by: RFD <this>` back-link from each
+        # former target.
+        this_n=$(basename "$file" | sed 's/^\([0-9]*\)-.*/\1/; s/^0*//')
+        this_n=${this_n:-0}
+        requires_line=$(sed -n 's/^- \*\*Requires\*\*: //p' "$file" | head -1)
+
+        sed '/^- \*\*Requires\*\*: /d' "$file" > "${file}.tmp"
+        mv "${file}.tmp" "$file"
+
+        if [ -n "$requires_line" ]; then
+            for dep in $(echo "$requires_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
+                if echo "$dep" | grep -qE '^D[0-9]+$'; then
+                    dep_file=$(ls "docs/rfd/drafts/${dep}-"*.md 2>/dev/null | head -1)
+                else
+                    dep_file=$(ls "docs/rfd/${dep}-"*.md 2>/dev/null | head -1)
+                fi
+                [ -z "$dep_file" ] && continue
+
+                awk -v num="$this_n" '
+                    BEGIN { search = "^- \\*\\*Required by\\*\\*: " }
+                    $0 ~ search {
+                        sub(search, "", $0)
+                        n = split($0, entries, /, /)
+                        new = ""
+                        for (i = 1; i <= n; i++) {
+                            if (entries[i] !~ ("RFD 0*" num "([^0-9]|$)")) {
+                                new = (new == "") ? entries[i] : new ", " entries[i]
+                            }
+                        }
+                        if (new != "") print "- **Required by**: " new
+                        next
+                    }
+                    { print }
+                ' "$dep_file" > "${dep_file}.tmp"
+                mv "${dep_file}.tmp" "$dep_file"
+                echo "  stripped Required by: RFD ${this_n} from ${dep_file}"
+            done
+        fi
+
         echo "${file}: Accepted -> Implemented"
     fi
 
