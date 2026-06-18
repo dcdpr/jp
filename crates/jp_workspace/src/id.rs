@@ -47,11 +47,20 @@ impl Id {
     }
 
     /// Store the globally unique workspace ID to the given root path.
+    ///
+    /// Writing is skipped when the target already holds this exact ID, so
+    /// repeated calls leave the file (and its mtime) untouched.
     pub fn store(&self, storage: &Utf8Path) -> io::Result<()> {
-        fs::write(
-            storage.join(ID_FILE),
-            format!("{ID_PREAMBLE}\n{}\n", self.0),
-        )
+        let path = storage.join(ID_FILE);
+        let contents = format!("{ID_PREAMBLE}\n{}\n", self.0);
+
+        if let Ok(existing) = fs::read_to_string(&path)
+            && existing == contents
+        {
+            return Ok(());
+        }
+
+        fs::write(path, contents)
     }
 }
 
@@ -127,3 +136,7 @@ fn generate_id_from_timestamp(ts: u128) -> Id {
 
     Id(String::from_utf8(result).expect("valid UTF-8"))
 }
+
+#[cfg(test)]
+#[path = "id_tests.rs"]
+mod tests;
