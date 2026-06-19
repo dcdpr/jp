@@ -7,6 +7,7 @@ fs_move_file.questions.move_dirty_source.answer = true
 type = "cmd"
 path = "rg"
 params.args = [
+    "--follow",
     "--sort-files",
     "--files",
 ]
