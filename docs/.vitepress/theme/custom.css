@@ -74,6 +74,22 @@
     background: color-mix(in srgb, #ef4444 25%, transparent);
     color: #fca5a5;
 }
+.rfd-badge--indev {
+    background: color-mix(in srgb, #14b8a6 20%, transparent);
+    color: #0d9488;
+}
+.dark .rfd-badge--indev {
+    background: color-mix(in srgb, #14b8a6 25%, transparent);
+    color: #5eead4;
+}
+.rfd-badge--draft {
+    background: color-mix(in srgb, #64748b 22%, transparent);
+    color: #475569;
+}
+.dark .rfd-badge--draft {
+    background: color-mix(in srgb, #64748b 28%, transparent);
+    color: #cbd5e1;
+}
 
 /* ── RFD link colors (status-coded) ───────────────────────────────── */
 

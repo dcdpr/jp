@@ -1196,6 +1196,7 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "docs@workspace:."
   dependencies:
+    sortablejs: "npm:^1.15.7"
     typescript: "npm:^5"
     vitepress: "npm:2.0.0-alpha.17"
     vue: "npm:^3.5.16"
@@ -2183,6 +2184,13 @@ __metadata:
     ip-address: "npm:^9.0.5"
     smart-buffer: "npm:^4.2.0"
   checksum: 10c0/00c3271e233ccf1fb83a3dd2060b94cc37817e0f797a93c560b9a7a86c4a0ec2961fb31263bdd24a3c28945e24868b5f063cd98744171d9e942c513454b50ae5
+  languageName: node
+  linkType: hard
+
+"sortablejs@npm:^1.15.7":
+  version: 1.15.7
+  resolution: "sortablejs@npm:1.15.7"
+  checksum: 10c0/6bfec9876bb66cb401377a52d5b4f832b8841ea55e3d290e4a885e129233558e91253f1e539a3a6374fb0a4575d6fb91567d6f46ebcb3613a808a6562dea4a76
   languageName: node
   linkType: hard
 
