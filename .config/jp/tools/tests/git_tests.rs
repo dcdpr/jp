@@ -1334,6 +1334,32 @@ async fn staged_diff_with_new_deleted_and_modified_paths() {
 }
 
 #[tokio::test]
+async fn staged_diff_with_non_utf8_bytes_is_not_swallowed() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+
+    // A file with a high byte (0xe9) but no NUL: git treats it as text and
+    // emits the raw byte in the diff, which is invalid UTF-8. The whole diff
+    // capture must survive that (lossily) rather than being discarded.
+    fs::write(root.join("latin1.txt"), b"caf\xe9\n").unwrap();
+    git(&root, &["add", "latin1.txt"]);
+
+    let content = run_ok(ctx(&root), tool("git_diff", &json!({"status": "staged"}))).await;
+
+    assert_ne!(
+        content, "No changes.",
+        "diff with non-UTF-8 bytes was swallowed as \"No changes.\""
+    );
+    assert!(
+        content.contains("latin1.txt"),
+        "missing latin1.txt in: {content}"
+    );
+}
+
+#[tokio::test]
 async fn diff_surfaces_git_errors_instead_of_swallowing_them() {
     if !has_git() {
         return;

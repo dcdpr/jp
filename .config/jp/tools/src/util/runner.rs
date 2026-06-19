@@ -212,9 +212,13 @@ impl ProcessRunner for DuctProcessRunner {
 
         let output = command.run()?;
 
+        // Lossy conversion is deliberate: git diff output for text files can
+        // contain stray non-UTF-8 bytes (e.g. a latin-1 source file). A strict
+        // `from_utf8().unwrap_or_default()` would discard the entire capture on
+        // the first invalid byte and silently report no output.
         Ok(ProcessOutput {
-            stdout: String::from_utf8(output.stdout).unwrap_or_default(),
-            stderr: String::from_utf8(output.stderr).unwrap_or_default(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             status: ExitCode::from(output.status),
         })
     }
