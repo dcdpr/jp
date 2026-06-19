@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-03
+- **Required by**: [RFD D54]
 
 ## Summary
 
@@ -206,8 +207,9 @@ impl ConversationStream {
     }
 
     /// A random `EventId` that does not collide with any entry already in the
-    /// stream. The stream knows the existing IDs, so this is where "unique
-    /// within its stream" is enforced.
+    /// stream.
+    /// The stream knows the existing IDs, so this is where "unique within its
+    /// stream" is enforced.
     fn fresh_event_id(&self) -> EventId { /* retry random() until unused */ }
 }
 ```
@@ -531,3 +533,4 @@ That is out of scope here.
 [RFD 072]: ../072-command-plugin-system.md
 [RFD D18]: D18-plugin-event-subscriptions-and-query-delegation.md
 [RFD D21]: D21-interactive-conversation-stream-editing.md
+[RFD D54]: D54-multi-participant-conversations.md
