@@ -77,6 +77,77 @@ export function buildEntries(dir, files, summaries, basePath) {
     return rfds
 }
 
+// Read the priority board state. This is human-curated source of truth (the
+// client's ordering plus the dev's in-development flags), kept deliberately
+// separate from the regenerable `rfd-summaries.json` cache: clearing the cache
+// must never lose the board. A missing file is an empty board.
+export function loadPriority(path) {
+    let raw
+    try {
+        raw = JSON.parse(readFileSync(path, 'utf-8'))
+    } catch {
+        return { order: [], inDevelopment: [] }
+    }
+    return {
+        order: Array.isArray(raw.order) ? raw.order.map(String) : [],
+        inDevelopment: Array.isArray(raw.in_development)
+            ? raw.in_development.map(String)
+            : [],
+    }
+}
+
+// Statuses that take an RFD off the priority board. The board is the active
+// backlog the client prioritizes (Discussion, Accepted); everything else is
+// done or dead.
+export const TERMINAL_STATUSES = new Set([
+    'Implemented',
+    'Superseded',
+    'Abandoned',
+])
+
+// Annotate each entry with its board position and in-development flag.
+// `priority` is the index in `order` (lower = higher priority) or `null` when
+// the RFD hasn't been placed yet. Status is left untouched so the view can drop
+// terminal RFDs itself.
+export function mergePriority(entries, priority) {
+    const rank = new Map(priority.order.map((num, i) => [num, i]))
+    const inDev = new Set(priority.inDevelopment)
+    for (const entry of entries) {
+        entry.priority = rank.has(entry.num) ? rank.get(entry.num) : null
+        entry.inDevelopment = inDev.has(entry.num)
+    }
+}
+
+// Attach each entry's hard ordering dependencies (Requires ∪ Extends) as an
+// array of RFD ids, read from the relationship graph. The board forbids placing
+// an RFD above one it depends on, mirroring the unified gate the build enforces.
+export function mergeDependencies(entries, graph) {
+    for (const entry of entries) {
+        const node = graph.get(entry.num)
+        entry.dependsOn = node
+            ? [...new Set([...node.requires, ...node.extends_])]
+            : []
+    }
+}
+
+// Reject board entries that don't match a known published RFD. Numbers are
+// never reused, so an unknown id is real corruption (a hand-edit typo, or a
+// stale id), not the expected churn of an RFD becoming Implemented. Terminal
+// ids lingering in `order` are tolerated: they fall off on the next save and
+// the view filters them out meanwhile.
+export function checkPriority(entries, priority) {
+    const known = new Set(entries.map(e => e.num))
+    const unknown = [...priority.order, ...priority.inDevelopment]
+        .filter(num => !known.has(num))
+
+    if (unknown.length === 0) return null
+
+    const ids = [...new Set(unknown)].sort().join(', ')
+    return `Unknown RFD ids in priority board: ${ids}.\n\n` +
+        `\`docs/rfd/priority.json\` references RFDs that don't exist. Fix the ` +
+        `ids or remove them (the board UI rewrites this file on save).`
+}
+
 // Each id (`NNN` or `DNN`) must map to exactly one file. Once drafts left the
 // website's validation pipeline it became possible to land two files sharing a
 // draft id; this guards both id spaces.

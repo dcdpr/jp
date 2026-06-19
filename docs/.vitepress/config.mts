@@ -64,6 +64,69 @@ const serveMarkdownAsUtf8 = {
     },
 }
 
+// Dev-only write endpoint for the RFD priority board (`/rfd/priority`).
+//
+// The board page is read-only in the production build. On the dev server it
+// POSTs the reordered list here, and this middleware persists it to
+// `docs/rfd/priority.json` in the working tree. The endpoint exists only on the
+// dev server, so the static build never carries a write path.
+const rfdPriorityWriter = {
+    name: 'rfd-priority-writer',
+    configureServer(server) {
+        server.middlewares.use('/__rfd-priority', (req, res, next) => {
+            if (req.method !== 'POST') return next()
+
+            let body = ''
+            let tooBig = false
+            req.on('data', (chunk) => {
+                body += chunk
+                if (body.length > 256 * 1024) {
+                    tooBig = true
+                    req.destroy()
+                }
+            })
+            req.on('end', () => {
+                if (tooBig) {
+                    res.statusCode = 413
+                    res.end('payload too large')
+                    return
+                }
+
+                let parsed
+                try {
+                    parsed = JSON.parse(body)
+                } catch {
+                    res.statusCode = 400
+                    res.end('invalid JSON')
+                    return
+                }
+
+                const isStrArray = (v) =>
+                    Array.isArray(v) && v.every((x) => typeof x === 'string')
+                if (!isStrArray(parsed.order) || !isStrArray(parsed.in_development)) {
+                    res.statusCode = 400
+                    res.end('expected { order: string[], in_development: string[] }')
+                    return
+                }
+
+                const out = { order: parsed.order, in_development: parsed.in_development }
+                const file = resolve(server.config.root, 'rfd/priority.json')
+                try {
+                    writeFileSync(file, JSON.stringify(out, null, 2) + '\n')
+                } catch (err) {
+                    res.statusCode = 500
+                    res.end(String(err))
+                    return
+                }
+
+                res.statusCode = 200
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ ok: true }))
+            })
+        })
+    },
+}
+
 // https://vitepress.dev/reference/site-config
 
 export default defineConfig({
@@ -131,7 +194,16 @@ export default defineConfig({
         }
     },
     vite: {
-        plugins: [serveMarkdownAsUtf8],
+        plugins: [serveMarkdownAsUtf8, rfdPriorityWriter],
+        // The priority board persists itself by writing `rfd/priority.json` via
+        // the dev middleware above. It isn't part of the module graph, so it
+        // must not trigger a dev-server reload — the board owns its in-memory
+        // state and a manual refresh re-reads the file.
+        server: {
+            watch: {
+                ignored: ['**/rfd/priority.json'],
+            },
+        },
     },
     lang: 'en-US',
     base: '/', // https://jp.computer

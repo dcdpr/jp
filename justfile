@@ -1165,6 +1165,16 @@ rfd-promote NNN: _install-jp
             "$file" > "$new_file"
         rm "$file"
 
+        # Carry the board position across renumbering: `priority.json` stores
+        # RFD ids, so rewrite the draft id to its new permanent number in both
+        # `order` and `in_development`.
+        priority_file="docs/rfd/priority.json"
+        if [ -f "$priority_file" ]; then
+            jq --arg old "$old_draft_id" --arg new "$num" \
+                '.order |= map(if . == $old then $new else . end) | .in_development |= map(if . == $old then $new else . end)' \
+                "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
+        fi
+
         # Update cross-references in other RFDs: replace `RFD DNN` with
         # `RFD NNN` in prose, `DNN-slug.md` with the correct relative
         # path to `NNN-slug.md` in link targets, and standalone short
@@ -1575,6 +1585,16 @@ rfd-list *CATEGORY:
 [group('docs')]
 develop-docs *FLAGS="--open": rfd-summaries
     just _docs "dev" {{FLAGS}}
+
+# Open the RFD priority board for drag-and-drop reordering.
+#
+# Starts the docs dev server and opens the board at `/rfd/priority`. Dragging
+# rows and toggling "in development" writes `docs/rfd/priority.json`; commit that
+# file to publish the new order. The board is read-only in the production build
+# — the write endpoint only exists on the dev server.
+[group('rfd')]
+rfd-manage: rfd-summaries
+    just _docs "dev" "--open" "/rfd/priority"
 
 # Build the statically built documentation.
 [group('docs')]

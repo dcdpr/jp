@@ -16,6 +16,7 @@ See [RFD 001] for the full process.
 - **Guide** — how-tos and reference material for contributors
 - **Process** — how the project operates: workflows, policies, values
 
+The active backlog in priority order lives on the [priorities] page.
 Proposals that haven't been assigned a permanent number yet live on the [draft
 RFDs] page.
 
@@ -28,3 +29,4 @@ import RfdIndex from '../.vitepress/theme/RfdIndex.vue'
 
 [RFD 001]: ./001-jp-rfd-process
 [draft RFDs]: ./drafts/
+[priorities]: ./priority
