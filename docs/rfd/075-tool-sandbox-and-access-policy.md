@@ -618,6 +618,17 @@ primary mechanism.
   A future RFD may explore detection heuristics or structured error reporting
   from tools.
 
+- **Sanitizing terminal escape sequences in tool output.** Tool results and
+  custom formatters can emit arbitrary ANSI control sequences (OSC 52 clipboard
+  writes, window-title changes, cursor movement) that reach the user's terminal.
+  This is a real tool trust-boundary concern, but it is a *terminal output*
+  problem, not a filesystem/network/subprocess one, so it is out of scope for
+  this sandbox.
+  It is handled by the capability-aware terminal theming work, whose render sink
+  strips non-SGR escapes from tool-sourced output by default; a complete
+  trust-boundary policy for tool-emitted escapes should land here in a future
+  revision once that sink exists.
+
 ## Risks and Open Questions
 
 1. **`sandbox-exec` removal timeline.** Apple has deprecated `sandbox-exec` but
