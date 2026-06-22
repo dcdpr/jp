@@ -300,7 +300,7 @@
     "summary": "Commands declare data needs upfront; startup eagerly loads and validates it, enabling infallible access during execution."
   },
   "075-tool-sandbox-and-access-policy.md": {
-    "hash": "afc94fbb7ef4a067dfefc860a5e435f327da304f495c4811f1deb575cae98a8f",
+    "hash": "1b18a513307a31bb5acf87698237c238db915abc42c38f2e3ba4b02592a50797",
     "summary": "Mandatory OS-level sandboxing for tool subprocesses using platform-native mechanisms, extending access policy with subprocess and environment controls."
   },
   "076-tool-access-grants.md": {
