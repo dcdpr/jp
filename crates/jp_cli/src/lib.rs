@@ -815,6 +815,7 @@ fn load_workspace(
 
         // TODO: Centralize this in a new `UserStorage` struct.
         Some(WorkspaceIdOrPath::Id(id)) => user_data_dir()?
+            .join("workspace")
             .read_dir()?
             .map(|dir| dir.ok().map(|dir| dir.path().clone()))
             .find_map(|path| {
@@ -852,8 +853,11 @@ fn load_workspace(
     let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
 
     let user_root = user_data_dir()?.join("workspace");
+    // The workspace directory name slugs a freshly created silo so users can
+    // recognize it; an existing silo is reused by ID regardless of its slug.
+    let slug = root.file_name();
     let fs = fs
-        .with_user_storage(&user_root, id.to_string())
+        .with_user_storage(&user_root, slug, id.to_string())
         .map_err(jp_workspace::Error::from)?;
 
     let fs = Arc::new(fs);

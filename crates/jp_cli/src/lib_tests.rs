@@ -457,7 +457,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     let fs_backend = Arc::new(
         FsStorageBackend::new(&storage)
             .unwrap()
-            .with_user_storage(&user_root, workspace.id().to_string())
+            .with_user_storage(&user_root, None, workspace.id().to_string())
             .unwrap(),
     );
     workspace = workspace.with_backend(fs_backend.clone());

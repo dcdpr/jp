@@ -918,7 +918,7 @@ fn test_conversation_fork() {
         let fs = Arc::new(
             FsStorageBackend::new(&storage)
                 .unwrap()
-                .with_user_storage(&user, "abc")
+                .with_user_storage(&user, None, "abc")
                 .unwrap(),
         );
         let workspace = Workspace::new(tmp.path()).with_backend(fs);
@@ -987,7 +987,7 @@ fn fork_targets_correct_source() {
     let fs = std::sync::Arc::new(
         FsStorageBackend::new(&storage)
             .unwrap()
-            .with_user_storage(&user, "abc")
+            .with_user_storage(&user, None, "abc")
             .unwrap(),
     );
     let workspace = Workspace::new(tmp.path()).with_backend(fs);
@@ -1119,7 +1119,7 @@ fn fork_inherits_local_only_projection() {
     let fs = Arc::new(
         FsStorageBackend::new(&storage)
             .unwrap()
-            .with_user_storage(&user, "abc")
+            .with_user_storage(&user, None, "abc")
             .unwrap(),
     );
     let workspace = Workspace::new(tmp.path()).with_backend(fs);

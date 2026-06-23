@@ -30,7 +30,7 @@ macro_rules! with_backends {
                 let $b: Arc<dyn BackendBundle> = Arc::new(
                     FsStorageBackend::new(dir.path())
                         .unwrap()
-                        .with_user_storage(dir.path(), "parity")
+                        .with_user_storage(dir.path(), None, "parity")
                         .unwrap(),
                 );
                 $body

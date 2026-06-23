@@ -366,7 +366,7 @@ fn with_user_storage_uses_workspace_id_path() {
 
     let storage = Storage::new(workspace.clone())
         .unwrap()
-        .with_user_storage(&user_root, "abc")
+        .with_user_storage(&user_root, None, "abc")
         .unwrap();
 
     let user_dir = user_root.join("abc");
@@ -382,43 +382,52 @@ fn with_user_storage_uses_workspace_id_path() {
 }
 
 #[test]
-fn migrates_legacy_named_user_dir_to_workspace_id() {
+fn reuses_existing_slugged_user_dir_in_place() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
     let user_root = tmp.path().join("user");
 
-    // A legacy `<name>-<id>` user dir with a conversation, a session mapping,
-    // and a stale `storage` symlink pointing at an unrelated path.
+    // An existing `<slug>-<id>` user dir with a conversation, a session
+    // mapping, and a stale `storage` symlink pointing at an unrelated path.
     let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
-    let legacy = user_root.join("main-abc");
-    write_conv_dir(&legacy.join(CONVERSATIONS_DIR), &id, "legacy events");
-    fs::create_dir_all(legacy.join("sessions")).unwrap();
-    fs::write(legacy.join("sessions").join("s.json"), "{}").unwrap();
+    let existing = user_root.join("main-abc");
+    write_conv_dir(&existing.join(CONVERSATIONS_DIR), &id, "events");
+    fs::create_dir_all(existing.join("sessions")).unwrap();
+    fs::write(existing.join("sessions").join("s.json"), "{}").unwrap();
     #[cfg(unix)]
-    std::os::unix::fs::symlink(tmp.path().join("old-workspace"), legacy.join("storage")).unwrap();
+    std::os::unix::fs::symlink(tmp.path().join("old-workspace"), existing.join("storage")).unwrap();
 
-    Storage::new(workspace.clone())
+    // No slug given: the silo is still located by ID suffix and reused as-is,
+    // never renamed to a bare `<id>` directory.
+    let storage = Storage::new(workspace.clone())
         .unwrap()
-        .with_user_storage(&user_root, "abc")
+        .with_user_storage(&user_root, None, "abc")
         .unwrap();
 
-    assert!(!legacy.exists(), "legacy directory is removed");
-    let user_dir = user_root.join("abc");
+    assert_eq!(
+        storage.user_storage_path(),
+        Some(existing.as_path()),
+        "the existing slugged directory is reused in place"
+    );
     assert!(
-        user_dir
+        !user_root.join("abc").exists(),
+        "no bare-id directory is created"
+    );
+    assert!(
+        existing
             .join(CONVERSATIONS_DIR)
             .join(id.to_dirname(None))
             .is_dir(),
-        "conversation carried over to the workspace-ID directory"
+        "conversation kept"
     );
     assert!(
-        user_dir.join("sessions").join("s.json").is_file(),
-        "session mapping carried over"
+        existing.join("sessions").join("s.json").is_file(),
+        "session mapping kept"
     );
 
     #[cfg(unix)]
     {
-        let link = user_dir.join("storage");
+        let link = existing.join("storage");
         assert!(link.is_symlink());
         assert_eq!(
             fs::read_link(&link).unwrap().as_path(),
@@ -429,13 +438,13 @@ fn migrates_legacy_named_user_dir_to_workspace_id() {
 }
 
 #[test]
-fn merges_legacy_dirs_keeping_newest_conversation() {
+fn merges_sibling_user_dirs_keeping_newest_conversation() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
     let user_root = tmp.path().join("user");
 
-    // The same conversation lives in two legacy dirs; the `feature-abc` copy is
-    // newer and must win the merge.
+    // The same conversation lives in two silos; the `feature-abc` copy is newer
+    // and must win the merge.
     let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
     let old = write_conv_dir(
         &user_root.join("main-abc").join(CONVERSATIONS_DIR),
@@ -450,23 +459,95 @@ fn merges_legacy_dirs_keeping_newest_conversation() {
     );
     set_mtime(&new.join(EVENTS_FILE), 2_000);
 
-    Storage::new(workspace)
+    // The slug selects `feature-abc` as the surviving silo; `main-abc` is
+    // folded in and removed.
+    let storage = Storage::new(workspace)
         .unwrap()
-        .with_user_storage(&user_root, "abc")
+        .with_user_storage(&user_root, Some("feature"), "abc")
         .unwrap();
 
-    assert!(!user_root.join("main-abc").exists());
-    assert!(!user_root.join("feature-abc").exists());
+    let survivor = user_root.join("feature-abc");
+    assert_eq!(storage.user_storage_path(), Some(survivor.as_path()));
+    assert!(
+        !user_root.join("main-abc").exists(),
+        "merged sibling removed"
+    );
 
-    let merged = user_root
-        .join("abc")
-        .join(CONVERSATIONS_DIR)
-        .join(id.to_dirname(None));
+    let merged = survivor.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
     assert_eq!(
         fs::read_to_string(merged.join(EVENTS_FILE)).unwrap(),
         "new",
         "the most recently modified copy wins"
     );
+}
+
+#[test]
+fn creates_slug_prefixed_dir_for_new_workspace() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let user_root = tmp.path().join("user");
+
+    let storage = Storage::new(workspace)
+        .unwrap()
+        .with_user_storage(&user_root, Some("my-project"), "abc")
+        .unwrap();
+
+    let dir = user_root.join("my-project-abc");
+    assert!(dir.is_dir(), "a new silo is named <slug>-<id>");
+    assert_eq!(storage.user_storage_path(), Some(dir.as_path()));
+}
+
+#[test]
+fn second_clone_reuses_silo_despite_different_slug() {
+    let tmp = tempdir().unwrap();
+    let user_root = tmp.path().join("user");
+
+    let first = Storage::new(tmp.path().join("clone-a"))
+        .unwrap()
+        .with_user_storage(&user_root, Some("clone-a"), "abc")
+        .unwrap();
+    let silo = user_root.join("clone-a-abc");
+    assert_eq!(first.user_storage_path(), Some(silo.as_path()));
+
+    // A second clone of the same workspace, in a directory with a different
+    // name, reuses the silo created by the first clone rather than minting a
+    // `clone-b-abc` of its own.
+    let second = Storage::new(tmp.path().join("clone-b"))
+        .unwrap()
+        .with_user_storage(&user_root, Some("clone-b"), "abc")
+        .unwrap();
+    assert_eq!(
+        second.user_storage_path(),
+        Some(silo.as_path()),
+        "the existing silo is reused, not renamed"
+    );
+    assert!(!user_root.join("clone-b-abc").exists());
+}
+
+#[test]
+fn picks_most_recently_modified_silo_without_slug_match() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("workspace");
+    let user_root = tmp.path().join("user");
+
+    let main = user_root.join("main-abc");
+    fs::create_dir_all(&main).unwrap();
+    fs::write(main.join("marker"), "a").unwrap();
+    set_mtime(&main.join("marker"), 1_000);
+
+    let feature = user_root.join("feature-abc");
+    fs::create_dir_all(&feature).unwrap();
+    fs::write(feature.join("marker"), "b").unwrap();
+    set_mtime(&feature.join("marker"), 2_000);
+
+    // The slug matches neither silo, so the most recently modified one wins.
+    let storage = Storage::new(workspace)
+        .unwrap()
+        .with_user_storage(&user_root, Some("unrelated"), "abc")
+        .unwrap();
+
+    assert_eq!(storage.user_storage_path(), Some(feature.as_path()));
+    assert!(!main.exists(), "the older sibling is merged in and removed");
 }
 
 #[test]
@@ -480,7 +561,7 @@ fn imports_workspace_conversations_into_user_local() {
 
     Storage::new(workspace)
         .unwrap()
-        .with_user_storage(&user_root, "abc")
+        .with_user_storage(&user_root, None, "abc")
         .unwrap();
 
     assert!(
@@ -506,7 +587,7 @@ fn imports_archived_workspace_conversations() {
 
     Storage::new(workspace)
         .unwrap()
-        .with_user_storage(&user_root, "abc")
+        .with_user_storage(&user_root, None, "abc")
         .unwrap();
 
     assert!(
@@ -530,7 +611,7 @@ fn import_runs_only_on_first_establishment() {
     // First run establishes the user-local store (no conversations yet).
     Storage::new(workspace.clone())
         .unwrap()
-        .with_user_storage(&user_root, "abc")
+        .with_user_storage(&user_root, None, "abc")
         .unwrap();
     assert!(user_root.join("abc").is_dir());
 
@@ -542,7 +623,7 @@ fn import_runs_only_on_first_establishment() {
     // first write.
     Storage::new(workspace)
         .unwrap()
-        .with_user_storage(&user_root, "abc")
+        .with_user_storage(&user_root, None, "abc")
         .unwrap();
 
     assert!(
@@ -613,7 +694,7 @@ fn dual_root_storage(tmp: &Utf8Path) -> (Storage, Utf8PathBuf, Utf8PathBuf) {
     let user_root = tmp.join("user");
     let storage = Storage::new(workspace.clone())
         .unwrap()
-        .with_user_storage(&user_root, "ws")
+        .with_user_storage(&user_root, None, "ws")
         .unwrap();
     (storage, workspace, user_root.join("ws"))
 }

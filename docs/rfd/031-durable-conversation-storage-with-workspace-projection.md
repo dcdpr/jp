@@ -99,23 +99,43 @@ storage; all conversations are workspace-only.
 ### Shared User-Local Storage
 
 Today, user-local storage is keyed by both the worktree directory name and
-workspace ID: `~/.local/share/jp/workspace/<name>-<id>/`.
+workspace ID: `~/.local/share/jp/workspace/<name>-<id>/`, looked up by exact
+name.
 This means each worktree gets its own user-local silo, and removing a worktree
 orphans its silo.
 
-This RFD changes the user-local path to be keyed by workspace ID only:
+This RFD keys user-local storage on the workspace ID, while keeping a
+human-recognizable directory name:
 
 ```
-~/.local/share/jp/workspace/<workspace-id>/conversations/
+~/.local/share/jp/workspace/<slug>-<id>/conversations/
 ```
 
-All worktrees for the same repository share a single user-local store.
-This aligns with [RFD 020], which already places session mappings and locks at
-`~/.local/share/jp/workspace/<workspace-id>/`.
+The silo is *located* by ID suffix, never by exact name: JP scans
+`~/.local/share/jp/workspace/` for a directory named `<id>` or ending in
+`-<id>`.
+Because a workspace ID is a fixed-length `[0-9a-z]` string (it never contains
+`-`), the suffix match is unambiguous.
+All worktrees and clones for the same repository therefore share the single silo
+that already exists, regardless of the directory each was cloned into.
+This aligns with [RFD 020], which already places session mappings and locks
+under the same per-workspace directory.
 
-The `with_user_storage` method on `Storage` drops the `name` parameter.
-The rename-on-mismatch logic in `with_user_storage` is replaced by a one-time
-migration that moves existing `<name>-<id>` directories to `<id>`.
+`<slug>` names a *newly created* silo only, so the user can recognize it among
+sibling directories.
+It is the workspace directory name (a clone into `~/code/my-project` yields
+`my-project-<id>`), is never validated, and may be absent — an absent or empty
+slug yields a bare `<id>` directory.
+Once a silo exists it is **never renamed**: a later clone with a different
+directory name reuses the existing silo as-is rather than re-slugging it.
+
+The `with_user_storage` method on `Storage` takes the optional slug alongside
+the ID.
+The rename-on-mismatch logic is replaced by a one-time migration that folds any
+sibling silos for the workspace into the chosen one.
+When several already exist (legacy `<name>-<id>` per-worktree directories), the
+silo matching the current slug wins, else the most recently modified; the winner
+is never renamed and the rest are merged in.
 
 The same migration imports existing workspace conversations into the shared
 user-local store.
@@ -367,8 +387,8 @@ This means a user can edit either copy between JP runs:
 - Edit `.jp/conversations/<id>/events.json` in the workspace (the common case —
   the file is right there in the project directory, visible in the editor's file
   tree).
-- Edit `~/.local/share/jp/workspace/<id>/conversations/<id>/events.json` in
-  user-local (less common, but works the same way).
+- Edit `~/.local/share/jp/workspace/<slug>-<id>/conversations/<id>/events.json`
+  in user-local (less common, but works the same way).
 
 In both cases, JP picks up the edit on the next run and propagates it to the
 other copy on persist.
@@ -557,10 +577,12 @@ adding durability.
 
 ### Migration of existing user-local directories
 
-Renaming `<name>-<id>` directories to `<id>` needs to handle the case where
-multiple worktrees have already created separate user-local directories (e.g.,
+Collapsing sibling silos into one needs to handle the case where multiple
+worktrees have already created separate user-local directories (e.g.,
 `main-otvo8` and `feature-a-otvo8`).
-The migration must merge their contents without losing conversations.
+JP picks one survivor — the slug match if present, else the most recently
+modified — and merges the others into it without renaming the survivor or
+losing conversations.
 If two directories contain a conversation with the same ID (unlikely but
 possible if both worktrees were used concurrently), the most recently modified
 copy should win.
@@ -616,12 +638,15 @@ same conversation the existing single-root loader would surface duplicate IDs.
 
 ### Phase 1: Shared User-Local Storage
 
-Change the user-local storage path from `<name>-<id>` to `<id>`.
-Add migration logic to merge existing per-worktree user-local directories.
+Locate the user-local silo by workspace-ID suffix and name a newly created one
+`<slug>-<id>` (slug optional; bare `<id>` when absent).
+Add migration logic to fold existing per-worktree user-local directories into
+the chosen silo, preferring the slug match else the most recently modified, and
+never renaming the survivor.
 Import existing workspace conversations (active and archive partitions) into
 user-local storage so pre-RFD workspace-only conversations become durable before
 dual-write is enabled.
-Update `with_user_storage` to drop the `name` parameter.
+Update `with_user_storage` to take the optional slug alongside the ID.
 
 Depends on: nothing.
 

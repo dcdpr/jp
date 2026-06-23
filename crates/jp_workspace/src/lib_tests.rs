@@ -471,7 +471,7 @@ fn test_persist_preserves_files_in_user_storage() {
 
     let fs = FsStorageBackend::new(&storage_path)
         .unwrap()
-        .with_user_storage(&user_root, "abc")
+        .with_user_storage(&user_root, None, "abc")
         .unwrap();
     let mut workspace = workspace_with_fs(&root, &fs);
 
@@ -780,7 +780,7 @@ fn test_unarchive_local_only_stays_out_of_workspace() {
 
     let fs = FsStorageBackend::new(&storage_path)
         .unwrap()
-        .with_user_storage(&user_root, "abc")
+        .with_user_storage(&user_root, None, "abc")
         .unwrap();
     let mut ws = workspace_with_fs(&root, &fs);
 

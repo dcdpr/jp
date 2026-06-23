@@ -63,18 +63,29 @@ impl Storage {
         Ok(Self { root, user: None })
     }
 
-    /// Configure user-local storage rooted at `root/<id>`.
+    /// Configure user-local storage for workspace `id` under `root`.
     ///
-    /// Before wiring up the directory, a one-time migration runs: any legacy
-    /// `<name>-<id>` directories are merged into `<id>`, and the workspace's
-    /// conversations are imported so a durable user-local copy exists.
-    /// The import is keyed on the workspace ID alone, so all worktrees of a
-    /// repository share a single user-local store.
-    pub fn with_user_storage(mut self, root: &Utf8Path, id: impl Into<String>) -> Result<Self> {
+    /// The silo is located by ID suffix, so every worktree and clone of a
+    /// workspace shares the single directory that already exists.
+    /// When none does, a new `<slug>-<id>` directory is created: `slug`
+    /// (typically the workspace directory name) is cosmetic, only ever names a
+    /// *new* silo, is never validated, and an absent or empty slug yields a
+    /// bare `<id>` directory.
+    ///
+    /// Before wiring up the directory, a one-time migration runs: any sibling
+    /// silos for this workspace are merged in, and on first setup the
+    /// workspace's conversations are imported so a durable user-local copy
+    /// exists.
+    pub fn with_user_storage(
+        mut self,
+        root: &Utf8Path,
+        slug: Option<&str>,
+        id: impl Into<String>,
+    ) -> Result<Self> {
         let id: String = id.into();
-        let path = root.join(&id);
+        let (path, first_run) = resolve_user_dir(root, slug, &id);
 
-        migrate_user_storage(root, &id, &path, &self.root)?;
+        migrate_user_storage(root, &id, &path, &self.root, first_run)?;
 
         if path.exists() {
             if !path.is_dir() {
@@ -570,25 +581,92 @@ impl Storage {
     }
 }
 
-/// Migrate user-local storage into the workspace-ID layout.
+/// Resolve the user-local silo directory for workspace `id`.
 ///
-/// Merges any legacy `<name>-<id>` directories under `user_root` into `target`
-/// (`user_root/<id>`).
+/// Silos are located by ID suffix (`<id>` or `<slug>-<id>`), never by exact
+/// name, so every worktree and clone of a workspace shares the one silo that
+/// already exists regardless of the directory it was cloned into.
+/// The returned flag is `true` when no silo exists yet and one must be created.
+///
+/// A new silo is named `<slug>-<id>` for human recognition; an absent or empty
+/// `slug` yields a bare `<id>` directory.
+/// The slug only ever names a *new* silo: an existing one is reused as-is and
+/// never renamed.
+///
+/// When several silos already exist (legacy per-worktree directories), the one
+/// whose name matches `<slug>-<id>` wins; otherwise the most recently modified
+/// silo does.
+fn resolve_user_dir(root: &Utf8Path, slug: Option<&str>, id: &str) -> (Utf8PathBuf, bool) {
+    if let Some(dir) = choose_canonical_user_dir(&matching_user_dirs(root, id), slug, id) {
+        return (dir, false);
+    }
+
+    let name = match slug.filter(|s| !s.is_empty()) {
+        Some(slug) => format!("{slug}-{id}"),
+        None => id.to_owned(),
+    };
+    (root.join(name), true)
+}
+
+/// List the user-local silo directories whose name resolves to workspace `id`.
+fn matching_user_dirs(root: &Utf8Path, id: &str) -> Vec<Utf8PathBuf> {
+    if !root.is_dir() {
+        return vec![];
+    }
+
+    let suffix = format!("-{id}");
+    dir_entries(root)
+        .filter(|entry| {
+            let name = entry.file_name();
+            name == id || name.ends_with(suffix.as_str())
+        })
+        .map(Utf8DirEntry::into_path)
+        .filter(|path| path.is_dir())
+        .collect()
+}
+
+/// Pick the canonical silo among existing matches, or `None` when there are
+/// none.
+///
+/// An exact `<slug>-<id>` match wins so a returning workspace keeps the
+/// directory it recognizes; otherwise the most recently modified silo does,
+/// breaking mtime ties by name for determinism.
+fn choose_canonical_user_dir(
+    dirs: &[Utf8PathBuf],
+    slug: Option<&str>,
+    id: &str,
+) -> Option<Utf8PathBuf> {
+    if let Some(slug) = slug.filter(|s| !s.is_empty()) {
+        let wanted = format!("{slug}-{id}");
+        if let Some(dir) = dirs.iter().find(|d| d.file_name() == Some(wanted.as_str())) {
+            return Some(dir.clone());
+        }
+    }
+
+    dirs.iter()
+        .map(|dir| (dir_mtime(dir), dir))
+        .max_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(b.1)))
+        .map(|(_, dir)| dir.clone())
+}
+
+/// Migrate user-local storage into the chosen silo.
+///
+/// Merges any sibling silos for this workspace into `target` (kept as-is, never
+/// renamed).
 /// On the first run for a workspace it also imports the workspace's
 /// conversations so they gain a durable user-local copy.
-/// The workspace-ID directory's existence marks the migration done: later runs
-/// skip the import, leaving conversations committed by other contributors to be
-/// imported lazily on first write rather than absorbed eagerly here.
+/// Later runs skip the import, leaving conversations committed by other
+/// contributors to be imported lazily on first write rather than absorbed
+/// eagerly here.
 /// Workspace copies are never deleted, so an interrupted run loses no data.
 fn migrate_user_storage(
     user_root: &Utf8Path,
     id: &str,
     target: &Utf8Path,
     workspace_root: &Utf8Path,
+    first_run: bool,
 ) -> Result<()> {
-    let first_run = !target.exists();
-
-    merge_legacy_user_dirs(user_root, id, target)?;
+    merge_sibling_user_dirs(user_root, id, target)?;
 
     if first_run {
         adopt_conversations(workspace_root, target, false)?;
@@ -597,36 +675,21 @@ fn migrate_user_storage(
     Ok(())
 }
 
-/// Merge legacy `<name>-<id>` user directories into `target`.
+/// Collapse every other silo for workspace `id` into `target`.
 ///
-/// When nothing exists at `target` yet, the first legacy directory is renamed
-/// straight into place, carrying its conversations, sessions, and locks in a
-/// single move.
-/// Any further directories are merged conversation-by-conversation (keeping the
-/// most recently modified copy on conflict), and their remaining entries are
-/// moved over only when `target` lacks them.
-fn merge_legacy_user_dirs(user_root: &Utf8Path, id: &str, target: &Utf8Path) -> Result<()> {
-    if !user_root.is_dir() {
-        return Ok(());
-    }
-
-    let suffix = format!("-{id}");
-    let legacy: Vec<Utf8PathBuf> = dir_entries(user_root)
-        .filter(|entry| {
-            let name = entry.file_name();
-            name != id && name.ends_with(suffix.as_str())
-        })
-        .map(Utf8DirEntry::into_path)
-        .filter(|path| path.is_dir())
-        .collect();
-
-    for dir in legacy {
-        if !target.exists() {
-            trace!(old = %dir, new = %target, "Moving legacy user storage directory.");
-            fs::rename(&dir, target)?;
+/// Sibling silos are matched by ID suffix, so legacy per-worktree directories
+/// (`<name>-<id>`) and bare `<id>` directories alike are folded in,
+/// conversation-by-conversation (the most recently modified copy wins on
+/// conflict).
+/// `target` itself is skipped and never renamed; once it has absorbed a
+/// sibling's conversations and residual entries, the empty sibling is removed.
+fn merge_sibling_user_dirs(user_root: &Utf8Path, id: &str, target: &Utf8Path) -> Result<()> {
+    for dir in matching_user_dirs(user_root, id) {
+        if dir == *target {
             continue;
         }
 
+        trace!(sibling = %dir, target = %target, "Merging sibling user storage directory.");
         adopt_conversations(&dir, target, true)?;
 
         // Move any remaining entries (e.g. `sessions`) the target lacks. The

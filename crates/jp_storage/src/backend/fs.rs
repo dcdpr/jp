@@ -46,14 +46,24 @@ impl FsStorageBackend {
         })
     }
 
-    /// Configure user-local storage rooted at `root/<id>`.
+    /// Configure user-local storage for workspace `id` under `root`.
     ///
-    /// Runs a one-time migration on first setup: legacy `<name>-<id>`
-    /// directories are merged into `<id>`, and the workspace's conversations
-    /// are imported so a durable user-local copy exists.
-    pub fn with_user_storage(self, root: &Utf8Path, id: impl Into<String>) -> Result<Self> {
+    /// The silo is located by ID suffix, so every worktree and clone of a
+    /// workspace shares one directory.
+    /// A new silo is named `<slug>-<id>` (or bare `<id>` when `slug` is absent
+    /// or empty); `slug` only ever names a new directory and never renames an
+    /// existing one.
+    /// Runs a one-time migration on first setup that merges sibling silos and
+    /// imports the workspace's conversations so a durable user-local copy
+    /// exists.
+    pub fn with_user_storage(
+        self,
+        root: &Utf8Path,
+        slug: Option<&str>,
+        id: impl Into<String>,
+    ) -> Result<Self> {
         Ok(Self {
-            storage: self.storage.with_user_storage(root, id)?,
+            storage: self.storage.with_user_storage(root, slug, id)?,
         })
     }
 
