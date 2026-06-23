@@ -1,4 +1,6 @@
-use jp_conversation::ConversationStream;
+use std::sync::Arc;
+
+use jp_conversation::{ConversationStream, Error as ConversationError};
 use jp_workspace::{ConversationHandle, ConversationLock};
 use tracing::debug;
 
@@ -47,6 +49,20 @@ pub(crate) struct Fork {
     #[arg(long, short = 'l')]
     last: Option<Option<usize>>,
 
+    /// Fork without inheriting any turns.
+    ///
+    /// The fork keeps the source conversation's full effective configuration
+    /// (base config plus every config delta) but starts with zero turns —
+    /// equivalent to a fresh conversation whose config matches the source's
+    /// current config.
+    /// Cannot be combined with the turn-selection or `--compact` flags.
+    #[arg(
+        short = 'N',
+        long,
+        conflicts_with_all = ["from", "until", "first", "last", "compact"]
+    )]
+    no_turns: bool,
+
     /// Compact the forked conversation.
     #[command(flatten)]
     compact: crate::cmd::compact_flag::CompactFlag,
@@ -63,7 +79,29 @@ impl Fork {
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         for source in handles {
+            // `--no-turns` folds the source's effective config (base + every
+            // delta) into a fresh base config; resolving it here lets the
+            // fallible `config()` propagate, keeping the closure infallible.
+            let collapsed = if self.no_turns {
+                Some(
+                    ctx.workspace
+                        .events(source)?
+                        .config()
+                        .map_err(ConversationError::from)?,
+                )
+            } else {
+                None
+            };
+
             let lock = fork_conversation(ctx, source, |events| {
+                if let Some(config) = &collapsed {
+                    // Discard every turn; the merged config becomes the new
+                    // base, making this fork identical to a conversation
+                    // started fresh with the source's current config.
+                    *events = ConversationStream::new(Arc::new(config.clone()))
+                        .with_created_at(events.created_at);
+                    return;
+                }
                 // `retain` invalidates compaction overlays from the earliest
                 // removed turn onward (overlays confined to the untouched prefix
                 // survive), so a time filter that strips whole turns *or* events
