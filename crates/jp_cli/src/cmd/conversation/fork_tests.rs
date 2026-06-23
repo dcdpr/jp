@@ -6,7 +6,7 @@ use std::{
 
 use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
-use jp_config::AppConfig;
+use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, ConversationStream,
     event::{ChatRequest, ChatResponse, TurnStart},
@@ -42,6 +42,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -86,6 +87,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -130,6 +132,64 @@ fn test_conversation_fork() {
                 assert_eq!(convs[0].2, convs[1].2);
             },
         }),
+        ("no turns keeps config but drops every turn", TestCase {
+            args: Fork {
+                target: PositionalIds::default(),
+                activate: false,
+                from: None,
+                until: None,
+                last: None,
+                first: None,
+                title: None,
+                compact: CompactFlag::default(),
+                no_turns: true,
+            },
+            setup: |ctx| {
+                let id = ConversationId::try_from(ctx.now()).unwrap();
+                ctx.workspace.create_conversation_with_id(
+                    id,
+                    Conversation::default().with_last_activated_at(ctx.now()),
+                    ctx.config(),
+                );
+
+                let h = ctx.workspace.acquire_conversation(&id).unwrap();
+                let lock = ctx.workspace.test_lock(h);
+                lock.as_mut().update_events(|e| {
+                    // A mid-conversation config change the fork must inherit,
+                    // folded into its base config.
+                    let mut partial = PartialAppConfig::empty();
+                    partial.style.code.color = Some(false);
+                    e.add_config_delta(partial);
+                    e.extend(vec![
+                        ConversationEvent::new(
+                            ChatRequest::from("foo"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                        ),
+                        ConversationEvent::new(
+                            ChatResponse::message("bar"),
+                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
+                        ),
+                    ]);
+                });
+                id
+            },
+            assert: |mut convs, _| {
+                assert_eq!(convs.len(), 2);
+                convs.sort_by_key(|v| v.0);
+                let source = &convs[0].2;
+                let fork = &convs[1].2;
+
+                // Source keeps its turns; the fork has none.
+                assert_eq!(source.iter().count(), 2);
+                assert!(fork.is_empty());
+                assert_eq!(fork.iter().count(), 0);
+
+                // The fork's effective config matches the source's, including
+                // the mid-conversation delta folded into its base config.
+                assert_eq!(fork.config().unwrap(), source.config().unwrap());
+                assert!(!fork.config().unwrap().style.code.color);
+            },
+        }),
         ("with activate", TestCase {
             args: Fork {
                 target: PositionalIds::default(),
@@ -140,6 +200,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -196,6 +257,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -251,6 +313,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -307,6 +370,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -386,6 +450,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -464,6 +529,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -510,6 +576,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -551,6 +618,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
                 first: Some(None),
                 title: None,
             },
@@ -629,6 +697,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: Some(Some(1)),
                 compact: CompactFlag::default(),
+                no_turns: false,
                 first: Some(Some(2)),
                 title: None,
             },
@@ -700,6 +769,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
                 first: Some(Some(10)),
                 title: None,
             },
@@ -746,6 +816,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
                 first: None,
                 title: Some("my custom title".to_owned()),
             },
@@ -780,6 +851,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                no_turns: false,
             },
             setup: |ctx| {
                 let id = ConversationId::try_from(ctx.now()).unwrap();
@@ -988,6 +1060,7 @@ fn fork_targets_correct_source() {
         last: None,
         first: None,
         compact: CompactFlag::default(),
+        no_turns: false,
         title: Some("forked-from-b".to_owned()),
     };
     let handle_b = ctx.workspace.acquire_conversation(&id_b).unwrap();

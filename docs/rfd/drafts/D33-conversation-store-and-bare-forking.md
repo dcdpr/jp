@@ -9,7 +9,7 @@
 ## Summary
 
 This RFD adds `conversation.store`, an untyped `IndexMap<String, JsonValue>` on
-`ConversationConfig`, and `jp conversation fork --bare`, a fork variant that
+`ConversationConfig`, and `jp conversation fork --no-turns`, a fork variant that
 copies config without conversation events.
 Together these enable tools to persist arbitrary data that travels with a
 conversation and orchestrated workflows to chain conversations where each phase
@@ -18,7 +18,7 @@ inherits accumulated state from its predecessor.
 Both features build on the config mutation mechanism from [RFD 078].
 The store is a config field — tools write to it via `access.config` grants and
 `outcome.config`.
-Bare forking copies the resolved config (including the store) into a fresh
+Turn-less forking copies the resolved config (including the store) into a fresh
 conversation.
 
 ## Motivation
@@ -36,13 +36,13 @@ tool-produced data that has no meaning to JP's core systems but travels with the
 conversation through the full config lifecycle (persistence, rollback, forking,
 CLI seeding).
 
-Bare forking addresses a related need: orchestrated workflows that span multiple
-conversations.
+Turn-less forking addresses a related need: orchestrated workflows that span
+multiple conversations.
 [RFD D05]'s RFD authoring pipeline runs explore, converge, and draft as separate
 conversations.
 Each phase needs the accumulated data from prior phases but a fresh message
 history.
-Regular forking copies both config and events; bare forking copies only config.
+Regular forking copies both config and events; `--no-turns` copies only config.
 
 ## Design
 
@@ -76,27 +76,48 @@ Tools access the store through `access.config` grants scoped to
 `conversation.store.*` or more specific paths like
 `conversation.store.rfd.decisions`.
 
-### Bare Forking
+### Orthogonal Fork Opt-Outs
 
-`jp conversation fork --bare` copies the conversation's resolved config
-(including `conversation.store`) without copying any conversation events.
+What this RFD originally bundled as a single `--bare` flag is decomposed into
+orthogonal opt-out flags, each suppressing one inherited aspect of a fork:
 
-Semantics:
+- `--no-turns`: copy the source's full effective config but no conversation
+  events — a fork with zero turns.
+- `--no-parent`: do not record parent-child lineage in the conversation tree.
+- `--no-title`: do not inherit the source's title.
 
-- The parent conversation's config layers are resolved into a single config.
-- That resolved config becomes the new conversation's `config_init.json`.
+The flags compose freely and apply to any fork: a regular fork can drop only
+parentage (`--no-parent`), and a turn-less fork keeps parentage unless
+`--no-parent` is also given.
+Bundling these under one flag conflated independent concerns — "no events", "no
+lineage", and "no title" are separate axes callers want to control separately.
+
+`--no-turns` carries the event-collapse semantics originally proposed for
+`--bare`:
+
+- The source conversation's config layers (base config plus every `ConfigDelta`)
+  are resolved into a single effective config.
+- That resolved config becomes the new conversation's base config.
 - No events are copied — the new conversation has zero turns.
-- The new conversation has no parent-child relationship in the conversation tree
-  (unlike a regular fork, which preserves lineage).
+
+The result is structurally identical to a conversation started fresh with the
+source's current effective config.
+
+`--no-parent` defers to conversation-tree lineage ([RFD 039]); it is a no-op
+until parentage is actually tracked.
+`--no-title` defers to [RFD 053], which owns the title lifecycle.
+A `--bare` convenience alias (implying `--no-turns --no-parent`) can be added
+later if the multi-phase workflows below want a single shorthand, but is not
+required.
 
 This enables orchestrated workflows where each phase starts fresh but inherits
 accumulated data:
 
 ```
 explore conversation (store accumulates research)
-  → fork --bare →
+  → fork --no-turns --no-parent →
 converge conversation (inherits research, accumulates decisions)
-  → fork --bare →
+  → fork --no-turns --no-parent →
 draft conversation (inherits research + decisions, produces RFD)
 ```
 
@@ -132,8 +153,8 @@ During the converge phase, the tool accumulates decisions:
 }
 ```
 
-After the converge conversation ends, `fork --bare` creates the draft
-conversation.
+After the converge conversation ends, `fork --no-turns --no-parent` creates the
+draft conversation.
 The draft conversation's tools can read `conversation.store.rfd.decisions` to
 see the locked decisions from the prior phase.
 
@@ -147,12 +168,11 @@ see the locked decisions from the prior phase.
   deltas.
   [RFD 066] addresses content-addressable blob storage for large values.
 
-- **Bare fork breaks lineage.** Unlike a regular fork, a bare fork has no
-  parent-child relationship.
-  The conversation tree cannot trace the relationship between a bare-forked
-  conversation and its source.
-  This is intentional (each phase is independent) but means `jp conversation
-  show` won't display the chain.
+- **Opting out of lineage hides the chain.** `--no-parent` (used by the pipeline
+  so each phase is independent) means the conversation tree cannot trace the
+  relationship between the fork and its source, so `jp conversation show` won't
+  display the chain.
+  This is opt-in, not implied by `--no-turns`.
 
 ## Alternatives
 
@@ -173,10 +193,10 @@ But for machine-readable state that tools consume programmatically, the
 config-based store is more integrated (rollback, forking, inspectability via `jp
 config show`).
 
-### Fork with event filtering instead of bare fork
+### Fork with event filtering instead of `--no-turns`
 
-Instead of `--bare`, add `--from=start --until=0` or similar to copy config with
-an empty event range.
+Instead of `--no-turns`, add `--from=start --until=0` or similar to copy config
+with an empty event range.
 
 Rejected because the existing `--from`/`--until` flags operate on turn
 boundaries within the event stream.
@@ -217,11 +237,16 @@ Verify CLI seeding, file defaults, rollback, and regular forking.
 Depends on: [RFD 078] Phase 1 (access.config grants, so tools can actually use
 the store).
 
-### Phase 2: `fork --bare`
+### Phase 2: `fork --no-turns` (implemented)
 
-Add `--bare` flag to `jp conversation fork`.
-Resolve parent config, write as new conversation's `config_init.json`, create
-empty event stream.
+Add `--no-turns` to `jp conversation fork`: resolve the source's effective
+config (base plus every `ConfigDelta`) into the new conversation's base config
+and create an empty event stream.
+Shipped ahead of the rest of this RFD — the flag exists on `jp conversation
+fork` today.
+
+`--no-parent` is deferred until conversation-tree lineage is tracked, and
+`--no-title` is deferred to [RFD 053].
 
 Can be merged independently of Phase 1.
 
@@ -238,6 +263,7 @@ Can be merged independently of Phase 1.
   values.
 
 [RFD 039]: ../039-conversation-trees.md
+[RFD 053]: ../053-auto-refresh-conversation-titles.md
 [RFD 064]: ../064-non-destructive-conversation-compaction.md
 [RFD 066]: ../066-content-addressable-blob-store.md
 [RFD 078]: ../078-tool-config-mutation.md
