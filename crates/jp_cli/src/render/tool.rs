@@ -10,7 +10,7 @@ use jp_config::{
     style::StyleConfig,
 };
 use jp_conversation::event::ToolCallResponse;
-use jp_llm::{CommandResult, run_tool_command};
+use jp_llm::{CommandResult, run_tool_command, tool::InvocationContext};
 use jp_md::format::Formatter;
 use jp_printer::Printer;
 use jp_term::osc::hyperlink;
@@ -70,6 +70,10 @@ pub struct ToolRenderer {
     config: StyleConfig,
     root: Utf8PathBuf,
 
+    /// Workspace and conversation identity, forwarded to custom argument
+    /// formatter commands.
+    invocation: InvocationContext,
+
     /// Markdown formatter used for syntax highlighting code blocks in tool
     /// results.
     formatter: Formatter,
@@ -93,6 +97,7 @@ impl ToolRenderer {
         config: StyleConfig,
         root: Utf8PathBuf,
         is_tty: bool,
+        invocation: InvocationContext,
     ) -> Self {
         let formatter = Formatter::new().theme(if printer.pretty_printing_enabled() {
             config.markdown.theme.as_deref()
@@ -104,6 +109,7 @@ impl ToolRenderer {
             printer,
             config,
             root,
+            invocation,
             formatter,
             pending: Vec::new(),
             line_active: false,
@@ -173,7 +179,7 @@ impl ToolRenderer {
         arguments: &Map<String, Value>,
         cmd: CommandConfig,
     ) -> RenderOutcome {
-        match format_args_custom(name, arguments, cmd, &self.root).await {
+        match format_args_custom(name, arguments, cmd, &self.root, &self.invocation).await {
             Ok(content) if !content.is_empty() => {
                 let styled_name = name.yellow().bold();
                 let _ = writeln!(self.printer.err_writer(), "Calling tool {styled_name}");
@@ -601,6 +607,7 @@ async fn format_args_custom(
     arguments: &Map<String, Value>,
     cmd: CommandConfig,
     root: &Utf8Path,
+    invocation: &InvocationContext,
 ) -> Result<String, String> {
     let ctx = serde_json::json!({
         "tool": {
@@ -610,6 +617,8 @@ async fn format_args_custom(
         "context": {
             "action": jp_tool::Action::FormatArguments,
             "root": root,
+            "workspace_id": &invocation.workspace_id,
+            "conversation_id": &invocation.conversation_id,
         },
     });
 

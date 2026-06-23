@@ -9,6 +9,8 @@ fn format_ctx(dir: &camino_tempfile::Utf8TempDir) -> Context {
         root: dir.path().to_path_buf(),
         action: Action::FormatArguments,
         access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
     }
 }
 
@@ -17,6 +19,8 @@ fn run_ctx(dir: &camino_tempfile::Utf8TempDir) -> Context {
         root: dir.path().to_path_buf(),
         action: Action::Run,
         access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
     }
 }
 

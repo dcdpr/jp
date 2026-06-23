@@ -27,6 +27,8 @@ fn setup() -> (Utf8TempDir, Context) {
         root: dir.path().to_owned(),
         action: Action::Run,
         access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
     };
     (dir, ctx)
 }

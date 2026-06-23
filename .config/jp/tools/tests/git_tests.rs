@@ -65,6 +65,8 @@ fn ctx(root: &Utf8Path) -> Context {
         root: root.to_owned(),
         action: Action::Run,
         access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
     }
 }
 

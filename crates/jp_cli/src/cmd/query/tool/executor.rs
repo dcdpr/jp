@@ -52,7 +52,7 @@ use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_llm::{
     ExecutionOutcome,
     tool::{
-        ToolDefinition,
+        InvocationContext, ToolDefinition,
         builtin::BuiltinExecutors,
         executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo},
     },
@@ -71,6 +71,7 @@ pub struct TerminalExecutorSource {
     builtin_executors: BuiltinExecutors,
     definitions: IndexMap<String, ToolDefinition>,
     approvals: Arc<ApprovalStore>,
+    invocation: InvocationContext,
 }
 
 impl TerminalExecutorSource {
@@ -79,6 +80,7 @@ impl TerminalExecutorSource {
         builtin_executors: BuiltinExecutors,
         definitions: &[ToolDefinition],
         approvals: Arc<ApprovalStore>,
+        invocation: InvocationContext,
     ) -> Self {
         let definitions = definitions
             .iter()
@@ -88,6 +90,7 @@ impl TerminalExecutorSource {
             builtin_executors,
             definitions,
             approvals,
+            invocation,
         }
     }
 }
@@ -106,6 +109,7 @@ impl ExecutorSource for TerminalExecutorSource {
             definition,
             Arc::new(self.builtin_executors.clone()),
             self.approvals.clone(),
+            self.invocation.clone(),
         )))
     }
 }
@@ -126,6 +130,7 @@ pub struct ToolExecutor {
     definition: ToolDefinition,
     builtin_executors: Arc<BuiltinExecutors>,
     approvals: Arc<ApprovalStore>,
+    invocation: InvocationContext,
 }
 
 impl ToolExecutor {
@@ -135,6 +140,7 @@ impl ToolExecutor {
         definition: ToolDefinition,
         builtin_executors: Arc<BuiltinExecutors>,
         approvals: Arc<ApprovalStore>,
+        invocation: InvocationContext,
     ) -> Self {
         Self {
             request,
@@ -142,6 +148,7 @@ impl ToolExecutor {
             definition,
             builtin_executors,
             approvals,
+            invocation,
         }
     }
 }
@@ -220,6 +227,7 @@ impl Executor for ToolExecutor {
                 cancellation_token,
                 &self.builtin_executors,
                 access.as_ref(),
+                &self.invocation,
             )
             .await;
 

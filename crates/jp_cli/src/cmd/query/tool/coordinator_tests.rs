@@ -14,6 +14,7 @@ fn empty_executor_source() -> Box<dyn jp_llm::tool::executor::ExecutorSource> {
         jp_llm::tool::builtin::BuiltinExecutors::new(),
         &[],
         std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
+        jp_llm::tool::InvocationContext::default(),
     ))
 }
 
@@ -353,6 +354,7 @@ async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
         style_config,
         Utf8PathBuf::from("/tmp"),
         false,
+        jp_llm::tool::InvocationContext::default(),
     );
 
     let mut args = Map::new();
@@ -417,6 +419,7 @@ async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
         style_config,
         Utf8PathBuf::from("/tmp"),
         false,
+        jp_llm::tool::InvocationContext::default(),
     );
 
     let result = coordinator
@@ -514,6 +517,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
         style_config,
         Utf8PathBuf::from("/tmp"),
         false,
+        jp_llm::tool::InvocationContext::default(),
     );
 
     let mut pre_edit_args = Map::new();

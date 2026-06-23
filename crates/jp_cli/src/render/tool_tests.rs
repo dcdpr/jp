@@ -78,7 +78,13 @@ fn create_renderer() -> (ToolRenderer, SharedBuffer, SharedBuffer) {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
     let mut config = AppConfig::new_test().style;
     config.tool_call.show = true;
-    let renderer = ToolRenderer::new(Arc::new(printer), config, "/tmp".into(), false);
+    let renderer = ToolRenderer::new(
+        Arc::new(printer),
+        config,
+        "/tmp".into(),
+        false,
+        jp_llm::tool::InvocationContext::default(),
+    );
     (renderer, err, out)
 }
 
@@ -90,7 +96,13 @@ fn create_renderer_with_show(show: bool) -> (ToolRenderer, SharedBuffer) {
     // stays off to keep `register` from spawning a timer task (sync tests have
     // no tokio runtime); `tick` is exercised by calling it directly.
     config.tool_call.preparing.show = false;
-    let renderer = ToolRenderer::new(Arc::new(printer), config, "/tmp".into(), true);
+    let renderer = ToolRenderer::new(
+        Arc::new(printer),
+        config,
+        "/tmp".into(),
+        true,
+        jp_llm::tool::InvocationContext::default(),
+    );
     (renderer, err)
 }
 
@@ -160,7 +172,13 @@ async fn test_render_custom_arguments_after_approval() {
     let root = Utf8TempDir::new().unwrap();
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let config = AppConfig::new_test().style;
-    let renderer = ToolRenderer::new(Arc::new(printer), config, root.path().to_owned(), false);
+    let renderer = ToolRenderer::new(
+        Arc::new(printer),
+        config,
+        root.path().to_owned(),
+        false,
+        jp_llm::tool::InvocationContext::default(),
+    );
 
     let mut args = Map::new();
     args.insert("host".into(), Value::String("myhost".into()));
@@ -313,7 +331,13 @@ fn test_completing_one_pending_tool_does_not_collide_with_header() {
     // Disable the animated suffix so `register` doesn't spawn a timer task
     // (this is a sync test with no tokio runtime).
     config.tool_call.preparing.show = false;
-    let mut renderer = ToolRenderer::new(Arc::new(printer), config, "/tmp".into(), true);
+    let mut renderer = ToolRenderer::new(
+        Arc::new(printer),
+        config,
+        "/tmp".into(),
+        true,
+        jp_llm::tool::InvocationContext::default(),
+    );
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
 
     renderer.register("id1", "fs_read_file", &tx);
@@ -388,7 +412,13 @@ fn test_tick_with_pending_tools() {
 #[test]
 fn test_show_false_suppresses_preparing_output() {
     let config = AppConfig::new_test().style;
-    let mut renderer = ToolRenderer::new(Arc::new(Printer::sink()), config, "/tmp".into(), false);
+    let mut renderer = ToolRenderer::new(
+        Arc::new(Printer::sink()),
+        config,
+        "/tmp".into(),
+        false,
+        jp_llm::tool::InvocationContext::default(),
+    );
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     renderer.register("id1", "tool_a", &tx);
 
@@ -400,7 +430,13 @@ fn test_show_false_suppresses_preparing_output() {
 #[test]
 fn test_tool_call_show_false_suppresses_output() {
     let config = AppConfig::new_test().style;
-    let renderer = ToolRenderer::new(Arc::new(Printer::sink()), config, "/tmp".into(), false);
+    let renderer = ToolRenderer::new(
+        Arc::new(Printer::sink()),
+        config,
+        "/tmp".into(),
+        false,
+        jp_llm::tool::InvocationContext::default(),
+    );
     let mut args = Map::new();
     args.insert("key".into(), Value::String("value".into()));
 
@@ -450,9 +486,15 @@ async fn test_format_custom_content_returns_raw_content() {
     let mut args = Map::new();
     args.insert("key".into(), Value::String("value".into()));
     let cmd = CommandConfigOrString::String("echo hello-world".into()).command();
-    let result = format_args_custom("my_tool", &args, cmd, root.path())
-        .await
-        .unwrap();
+    let result = format_args_custom(
+        "my_tool",
+        &args,
+        cmd,
+        root.path(),
+        &jp_llm::tool::InvocationContext::default(),
+    )
+    .await
+    .unwrap();
     assert_eq!(result, "hello-world");
 }
 

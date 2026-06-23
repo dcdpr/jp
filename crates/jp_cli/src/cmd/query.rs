@@ -91,7 +91,7 @@ use jp_inquire::prompt::TerminalPromptBackend;
 use jp_llm::{
     ToolError, provider,
     tool::{
-        ToolDefinition, ToolDocs,
+        InvocationContext, ToolDefinition, ToolDocs,
         builtin::{BuiltinExecutors, describe_tools::DescribeTools},
         tool_definitions,
     },
@@ -528,6 +528,11 @@ impl Query {
         // user messages, etc.) before sending the stream to the provider.
         lock.as_mut().update_events(ConversationStream::sanitize);
 
+        let invocation = InvocationContext {
+            workspace_id: ctx.workspace.id().to_string(),
+            conversation_id: lock.id().to_string(),
+        };
+
         let turn_result = self
             .handle_turn(
                 &cfg,
@@ -542,6 +547,7 @@ impl Query {
                 ctx.printer.clone(),
                 approvals,
                 chat_request,
+                invocation,
             )
             .await
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
@@ -784,6 +790,7 @@ impl Query {
         printer: Arc<Printer>,
         approvals: Arc<ApprovalStore>,
         chat_request: ChatRequest,
+        invocation: InvocationContext,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
@@ -801,7 +808,8 @@ impl Query {
             .collect();
         let builtin_executors =
             BuiltinExecutors::new().register("describe_tools", DescribeTools::new(docs_map));
-        let executor_source = TerminalExecutorSource::new(builtin_executors, tools, approvals);
+        let executor_source =
+            TerminalExecutorSource::new(builtin_executors, tools, approvals, invocation.clone());
         let tool_coordinator =
             ToolCoordinator::new(cfg.conversation.tools.clone(), Box::new(executor_source))
                 .with_interrupt(cfg.interrupt.tool_call.clone());
@@ -823,6 +831,7 @@ impl Query {
             prompt_backend,
             tool_coordinator,
             chat_request,
+            invocation,
         )
         .await
     }

@@ -4,6 +4,7 @@ use jp_config::{
     },
     style::{reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
+use jp_llm::tool::InvocationContext;
 use jp_workspace::ConversationHandle;
 
 use crate::{
@@ -171,6 +172,11 @@ impl Print {
         let assistant_name = cfg.assistant.name.clone();
         let model_id = Some(cfg.assistant.model.id.resolved().to_string());
 
+        let invocation = InvocationContext {
+            workspace_id: ctx.workspace.id().to_string(),
+            conversation_id: handle.id().to_string(),
+        };
+
         let mut renderer = TurnRenderer::new(
             ctx.printer.clone(),
             render_style,
@@ -180,6 +186,7 @@ impl Print {
             root,
             ctx.term.is_tty,
             source,
+            invocation,
         );
 
         let mut turns = events.iter_turns();

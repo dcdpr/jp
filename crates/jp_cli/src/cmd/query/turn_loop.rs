@@ -33,7 +33,7 @@ use jp_llm::{
     model::ModelDetails,
     provider::get_provider,
     query::ChatQuery,
-    tool::{ToolDefinition, executor::Executor},
+    tool::{InvocationContext, ToolDefinition, executor::Executor},
     with_idle_timeout,
 };
 use jp_printer::Printer;
@@ -159,6 +159,7 @@ pub(super) async fn run_turn_loop(
     prompt_backend: Arc<dyn PromptBackend>,
     mut tool_coordinator: ToolCoordinator,
     chat_request: ChatRequest,
+    invocation: InvocationContext,
 ) -> Result<(), Error> {
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request, is_tty);
@@ -182,6 +183,7 @@ pub(super) async fn run_turn_loop(
         cfg.style.clone(),
         root.to_path_buf(),
         is_tty,
+        invocation,
     );
 
     let inquiry_backend: Arc<dyn InquiryBackend> = build_inquiry_backend(

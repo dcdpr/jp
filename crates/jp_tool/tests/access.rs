@@ -9,6 +9,8 @@ fn ctx(root: Utf8PathBuf, access: Option<AccessPolicy>) -> Context {
         root,
         action: Action::Run,
         access,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
     }
 }
 
