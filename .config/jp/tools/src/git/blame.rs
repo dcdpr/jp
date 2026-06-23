@@ -112,6 +112,27 @@ fn git_blame_impl<R: ProcessRunner>(
         ));
     }
 
+    // `git blame` mishandles the `--end-of-options <rev> -- <path>` form: its
+    // argument DWIM treats the first token after the consumed options as the
+    // `--` position and reorders the path into the revision slot, so the path
+    // is then rejected as a bad revision. Resolve the revision to a full SHA
+    // up front instead. `git rev-parse` honors `--end-of-options` correctly,
+    // so an option-shaped value (e.g. `--contents=<file>`, which would let a
+    // caller read arbitrary files) still reaches it as a positional and fails
+    // resolution rather than executing. The resulting 40-char hex SHA can't be
+    // mistaken for an option, so the blame call needs no `--end-of-options`.
+    let resolved_rev = match revision {
+        Some(rev) => {
+            let rev_args = ["rev-parse", "--verify", "--end-of-options", rev];
+            let output = runner.run_with_env("git", &rev_args, root, env)?;
+            if !output.status.is_success() {
+                return error(format!("git rev-parse failed: {}", output.stderr.trim()));
+            }
+            Some(output.stdout.trim().to_string())
+        }
+        None => None,
+    };
+
     let range_arg = format!("-L{start_line},{end_line}");
     let mut args: Vec<&str> = vec!["blame", "--porcelain", &range_arg];
 
@@ -119,12 +140,7 @@ fn git_blame_impl<R: ProcessRunner>(
         args.push("-w");
     }
 
-    // `--end-of-options` marks `<rev>` as a positional argument so git
-    // can't reinterpret it as an option. `git blame --contents=<file>`
-    // in particular would let a caller read arbitrary files; we don't
-    // want any future option to become reachable either.
-    if let Some(rev) = revision {
-        args.push("--end-of-options");
+    if let Some(rev) = resolved_rev.as_deref() {
         args.push(rev);
     }
 

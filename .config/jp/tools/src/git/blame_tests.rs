@@ -347,27 +347,23 @@ fn rejects_inverted_range() {
 }
 
 #[test]
-fn option_like_revision_is_passed_as_positional() {
-    // `--end-of-options` must appear immediately before the revision so
-    // that an option-shaped value like `--contents=/etc/passwd` is
-    // forwarded to git as a positional (where it'll fail revision
-    // resolution) rather than being parsed by `git blame` as an option.
+fn option_like_revision_is_rejected_before_blame_runs() {
+    // An option-shaped revision must never reach `git blame` as an option.
+    // It's resolved through `git rev-parse --end-of-options`, where it's a
+    // positional and fails revision resolution. That failure short-circuits
+    // before blame is invoked, so no blame call happens at all.
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::builder()
         .expect("git")
         .args(&[
-            "blame",
-            "--porcelain",
-            "-L1,10",
+            "rev-parse",
+            "--verify",
             "--end-of-options",
             "--contents=/etc/passwd",
-            "--",
-            "src/foo.rs",
         ])
-        .returns_success(sample_porcelain());
+        .returns_error("fatal: bad revision '--contents=/etc/passwd'");
 
-    // The mock's drop check fails if the expected arg list didn't run.
-    let _outcome = git_blame_impl(
+    let outcome = git_blame_impl(
         dir.path(),
         "src/foo.rs",
         1,
@@ -378,6 +374,8 @@ fn option_like_revision_is_passed_as_positional() {
         &[],
     )
     .unwrap();
+
+    assert!(outcome.into_content().is_none(), "expected error outcome");
 }
 
 #[test]
@@ -418,16 +416,22 @@ fn basic_blame_call() {
 
 #[test]
 fn blame_with_revision_and_whitespace_flag() {
+    // An explicit revision is first resolved to a full SHA, then the SHA is
+    // passed positionally to blame with no `--end-of-options`. The rendered
+    // `<revision>` still shows the original user-supplied ref, not the SHA.
+    let resolved_sha = "1234567890123456789012345678901234567890";
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&["rev-parse", "--verify", "--end-of-options", "HEAD~3"])
+        .returns_success(format!("{resolved_sha}\n"))
         .expect("git")
         .args(&[
             "blame",
             "--porcelain",
             "-L42,44",
             "-w",
-            "--end-of-options",
-            "HEAD~3",
+            resolved_sha,
             "--",
             "src/foo.rs",
         ])

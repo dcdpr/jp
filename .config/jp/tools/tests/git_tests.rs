@@ -1642,3 +1642,96 @@ async fn stage_patch_multiple_files_single_call() {
     assert_eq!(staged_content(&root, "a.rs"), "new_a\n");
     assert_eq!(staged_content(&root, "b.rs"), "new_b\n");
 }
+
+#[tokio::test]
+async fn blame_working_tree() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    fs::write(root.join("blame.rs"), "fn one() {}\nfn two() {}\n").unwrap();
+    git(&root, &["add", "blame.rs"]);
+    git(&root, &["commit", "-m", "add blame.rs"]);
+
+    let content = run_ok(
+        ctx(&root),
+        tool(
+            "git_blame",
+            &json!({"path": "blame.rs", "start_line": 1, "end_line": 2}),
+        ),
+    )
+    .await;
+
+    assert!(content.contains("<git_blame>"));
+    assert!(content.contains("<revision>working tree</revision>"));
+    assert!(content.contains("fn one() {}"));
+    assert!(content.contains("fn two() {}"));
+}
+
+#[tokio::test]
+async fn blame_at_revision() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    fs::write(root.join("blame.rs"), "fn one() {}\nfn two() {}\n").unwrap();
+    git(&root, &["add", "blame.rs"]);
+    git(&root, &["commit", "-m", "add blame.rs"]);
+
+    // Regression: an explicit revision alongside a path used to fail with
+    // `fatal: bad revision '<path>'`, because `git blame` mishandles the
+    // `--end-of-options <rev> -- <path>` form and shuffled the path into the
+    // revision slot. The tool now resolves the revision to a SHA up front.
+    let content = run_ok(
+        ctx(&root),
+        tool(
+            "git_blame",
+            &json!({
+                "path": "blame.rs",
+                "start_line": 1,
+                "end_line": 2,
+                "revision": "HEAD",
+            }),
+        ),
+    )
+    .await;
+
+    assert!(content.contains("<git_blame>"));
+    // The original ref is preserved in the output, not the resolved SHA.
+    assert!(content.contains("<revision>HEAD</revision>"));
+    assert!(content.contains("fn one() {}"));
+    assert!(content.contains("fn two() {}"));
+}
+
+#[tokio::test]
+async fn blame_bad_revision_errors() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    fs::write(root.join("blame.rs"), "fn one() {}\n").unwrap();
+    git(&root, &["add", "blame.rs"]);
+    git(&root, &["commit", "-m", "add blame.rs"]);
+
+    let outcome = run_outcome(
+        ctx(&root),
+        tool(
+            "git_blame",
+            &json!({
+                "path": "blame.rs",
+                "start_line": 1,
+                "end_line": 1,
+                "revision": "nonexistent_ref_xyz",
+            }),
+        ),
+    )
+    .await;
+
+    assert!(
+        matches!(outcome, Outcome::Error { .. }),
+        "expected error for bad revision, got {outcome:?}"
+    );
+}
