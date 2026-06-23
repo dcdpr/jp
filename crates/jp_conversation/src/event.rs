@@ -400,6 +400,24 @@ pub enum EventKind {
 }
 
 impl EventKind {
+    /// Every `type` tag this build recognizes, one per variant, in the serde
+    /// `snake_case` representation.
+    ///
+    /// Adding an [`EventKind`] variant means adding its tag here too.
+    /// Without it, the conversation stream deserializer treats the variant as
+    /// an unknown (forward-compatible) event and never builds the typed value.
+    /// A debug assertion in the `InternalEvent` deserializer catches a
+    /// forgotten entry.
+    pub(crate) const TYPE_TAGS: &'static [&'static str] = &[
+        "turn_start",
+        "chat_request",
+        "chat_response",
+        "tool_call_request",
+        "tool_call_response",
+        "inquiry_request",
+        "inquiry_response",
+    ];
+
     /// Returns the name of the event kind.
     #[must_use]
     pub const fn as_str(&self) -> &str {
