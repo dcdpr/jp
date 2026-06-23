@@ -1536,6 +1536,64 @@ fn test_internal_event_compaction_roundtrip() {
     assert_eq!(result, compaction);
 }
 
+// --- unknown event kind (forward compat) tests ---
+
+#[test]
+fn test_internal_event_known_kind_deserializes_as_event() {
+    let event = InternalEvent::Event(Box::new(ConversationEvent::now(ChatRequest::from("hi"))));
+    let json = serde_json::to_value(&event).unwrap();
+
+    let internal: InternalEvent = serde_json::from_value(json).unwrap();
+    assert!(matches!(internal, InternalEvent::Event(_)));
+}
+
+#[test]
+fn test_internal_event_preserves_unknown_kind_verbatim() {
+    // An event written by a newer jp with a kind this build doesn't know.
+    let raw = serde_json::json!({
+        "type": "unknown_future_kind",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "summary": "a compacted summary",
+        "metadata": { "foo": "YmFy" }
+    });
+
+    let internal: InternalEvent = serde_json::from_value(raw.clone()).unwrap();
+    assert!(matches!(internal, InternalEvent::Unknown(_)));
+
+    // The payload round-trips byte-for-byte: no decode/re-encode is applied,
+    // so the newer jp reads back exactly what it wrote.
+    let serialized = serde_json::to_value(&internal).unwrap();
+    assert_eq!(serialized, raw);
+}
+
+#[test]
+fn test_from_parts_tolerates_unknown_event_kind() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let (base_config, mut events) = stream.to_parts().unwrap();
+
+    // A newer jp appended an event kind this build doesn't understand.
+    let unknown = serde_json::json!({
+        "type": "unknown_future_kind",
+        "timestamp": "2025-01-01 00:01:00.0",
+        "summary": "a compacted summary"
+    });
+    events.push(unknown.clone());
+
+    let result = ConversationStream::from_parts(base_config, events).unwrap();
+
+    // The unknown event is invisible to event iteration ...
+    assert_eq!(result.len(), 2); // TurnStart + ChatRequest
+
+    // ... but survives a save so the newer jp doesn't lose it.
+    let (_, round_tripped) = result.to_parts().unwrap();
+    assert!(
+        round_tripped.contains(&unknown),
+        "unknown event must round-trip through to_parts"
+    );
+}
+
 /// Characterization test: extending an empty stream from a source stream
 /// reproduces the source's observed iter sequence and serialized shape.
 ///

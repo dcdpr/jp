@@ -102,7 +102,10 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
         let turn = turn_indices[i];
 
         match event {
-            InternalEvent::ConfigDelta(_) => {
+            // Config deltas carry global state; unknown (forward-compat) events
+            // are opaque. Both pass through projection verbatim — the iterators
+            // skip unknown events, so they stay invisible to providers.
+            InternalEvent::ConfigDelta(_) | InternalEvent::Unknown(_) => {
                 projected.push(event);
             }
             // Compaction events are consumed by projection — they've been
@@ -171,8 +174,8 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
 /// This must match `IterTurns` exactly, because compaction ranges are created
 /// against `iter_turns()` indices but applied here.
 ///
-/// Non-event entries (`ConfigDelta`, `Compaction`) are invisible to turn
-/// iteration; they inherit the current turn index and do not open a turn.
+/// Non-event entries (`ConfigDelta`, `Compaction`, `Unknown`) are invisible to
+/// turn iteration; they inherit the current turn index and do not open a turn.
 ///
 /// [`IterTurns`]: super::IterTurns
 /// [`TurnStart`]: crate::event::TurnStart
@@ -193,7 +196,9 @@ pub(super) fn assign_turn_indices(events: &[InternalEvent]) -> Vec<usize> {
                 indices.push(turn);
                 current_has_event = true;
             }
-            InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => {
+            InternalEvent::ConfigDelta(_)
+            | InternalEvent::Compaction(_)
+            | InternalEvent::Unknown(_) => {
                 indices.push(turn);
             }
         }

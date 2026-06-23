@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
-use tracing::error;
+use tracing::{error, warn};
 
 mod projection;
 pub mod turn_iter;
@@ -47,6 +47,15 @@ enum InternalEvent {
     /// when building the LLM request.
     /// Does not modify or delete any existing events.
     Compaction(Compaction),
+    /// An event whose `type` tag this build does not recognize.
+    ///
+    /// Conversations are an append-only log that a newer `jp` may have written.
+    /// Rather than fail the entire stream load on an unknown event kind, the
+    /// raw JSON is retained verbatim so it round-trips losslessly on the next
+    /// save.
+    /// Unknown events are invisible to event iteration, config resolution, and
+    /// providers.
+    Unknown(Value),
 }
 
 impl Serialize for InternalEvent {
@@ -90,6 +99,7 @@ impl Serialize for InternalEvent {
                 }
                 .serialize(serializer)
             }
+            Self::Unknown(value) => value.serialize(serializer),
         }
     }
 }
@@ -118,7 +128,7 @@ impl InternalEvent {
     fn into_event(self) -> Option<ConversationEvent> {
         match self {
             Self::Event(event) => Some(*event),
-            Self::ConfigDelta(_) | Self::Compaction(_) => None,
+            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Unknown(_) => None,
         }
     }
 
@@ -127,7 +137,7 @@ impl InternalEvent {
     fn as_event(&self) -> Option<&ConversationEvent> {
         match self {
             Self::Event(event) => Some(event),
-            Self::ConfigDelta(_) | Self::Compaction(_) => None,
+            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Unknown(_) => None,
         }
     }
 
@@ -136,7 +146,7 @@ impl InternalEvent {
     #[must_use]
     const fn scope(&self) -> EventScope {
         match self {
-            Self::ConfigDelta(_) | Self::Compaction(_) => EventScope::Global,
+            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Unknown(_) => EventScope::Global,
             Self::Event(_) => EventScope::Turn,
         }
     }
@@ -319,7 +329,9 @@ impl ConversationStream {
         let mut partial = self.base_config.to_partial();
         let iter = self.events.iter().filter_map(|event| match event {
             InternalEvent::ConfigDelta(delta) => Some(delta.clone()),
-            InternalEvent::Event(_) | InternalEvent::Compaction(_) => None,
+            InternalEvent::Event(_) | InternalEvent::Compaction(_) | InternalEvent::Unknown(_) => {
+                None
+            }
         });
 
         for delta in iter {
@@ -743,7 +755,9 @@ impl ConversationStream {
                 return true;
             }
             match event {
-                InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => true,
+                InternalEvent::ConfigDelta(_)
+                | InternalEvent::Compaction(_)
+                | InternalEvent::Unknown(_) => true,
                 InternalEvent::Event(e) => e.is_turn_start(),
             }
         });
@@ -1255,7 +1269,7 @@ impl Iterator for IntoIter {
                         config: self.current_config.clone(),
                     });
                 }
-                InternalEvent::Compaction(_) => {}
+                InternalEvent::Compaction(_) | InternalEvent::Unknown(_) => {}
             }
         }
     }
@@ -1267,10 +1281,13 @@ impl DoubleEndedIterator for IntoIter {
             let event = self.inner_iter.next_back()?;
 
             match event {
-                InternalEvent::ConfigDelta(_) | InternalEvent::Compaction(_) => {
+                InternalEvent::ConfigDelta(_)
+                | InternalEvent::Compaction(_)
+                | InternalEvent::Unknown(_) => {
                     // A delta/compaction at the very end of the list affects
                     // nothing that follows it, and it doesn't affect previous
                     // items. We simply discard it.
+                    // event at the tail likewise yields no ConversationEvent.
                 }
                 InternalEvent::Event(event) => {
                     // Start with the state currently at the front of the line
@@ -1332,7 +1349,7 @@ impl<'a> Iterator for Iter<'a> {
                         config: self.front_config.clone(),
                     });
                 }
-                InternalEvent::Compaction(_) => {}
+                InternalEvent::Compaction(_) | InternalEvent::Unknown(_) => {}
             }
         }
 
@@ -1392,7 +1409,7 @@ impl<'a> Iterator for IterMut<'a> {
                         config: self.front_config.clone(),
                     });
                 }
-                InternalEvent::Compaction(_) => {}
+                InternalEvent::Compaction(_) | InternalEvent::Unknown(_) => {}
             }
         }
 
@@ -1712,6 +1729,24 @@ impl<'de> Deserialize<'de> for InternalEvent {
             return serde_json::from_value(value)
                 .map(Self::Compaction)
                 .map_err(serde::de::Error::custom);
+        }
+
+        // Conversations are an append-only log a newer `jp` may have written.
+        // An unrecognized event kind is preserved verbatim instead of failing
+        // the whole stream load, so it round-trips on the next save. Corrupt
+        // *known* events still fail loudly below.
+        if !EventKind::TYPE_TAGS.contains(&tag) {
+            #[cfg(debug_assertions)]
+            {
+                let mut probe = value.clone();
+                decode_event_value(&mut probe);
+                debug_assert!(
+                    serde_json::from_value::<ConversationEvent>(probe).is_err(),
+                    "event tag `{tag}` is missing from EventKind::TYPE_TAGS",
+                );
+            }
+            warn!(%tag, "Unknown conversation event kind; preserving raw event.");
+            return Ok(Self::Unknown(value));
         }
 
         // Decode base64-encoded storage fields before deserializing.
