@@ -74,6 +74,20 @@ const rfdPriorityWriter = {
     name: 'rfd-priority-writer',
     configureServer(server) {
         server.middlewares.use('/__rfd-priority', (req, res, next) => {
+            const file = resolve(server.config.root, 'rfd/priority.json')
+
+            // The board fetches this on mount to bypass the data loader's
+            // dev-lifetime cache, so a refresh reflects the saved file.
+            if (req.method === 'GET') {
+                res.setHeader('Content-Type', 'application/json')
+                try {
+                    res.end(readFileSync(file))
+                } catch {
+                    res.end('{"order":[],"backlog":[],"in_development":[]}')
+                }
+                return
+            }
+
             if (req.method !== 'POST') return next()
 
             let body = ''
@@ -103,14 +117,21 @@ const rfdPriorityWriter = {
 
                 const isStrArray = (v) =>
                     Array.isArray(v) && v.every((x) => typeof x === 'string')
-                if (!isStrArray(parsed.order) || !isStrArray(parsed.in_development)) {
+                if (
+                    !isStrArray(parsed.order) ||
+                    !isStrArray(parsed.backlog) ||
+                    !isStrArray(parsed.in_development)
+                ) {
                     res.statusCode = 400
-                    res.end('expected { order: string[], in_development: string[] }')
+                    res.end('expected { order, backlog, in_development } as string arrays')
                     return
                 }
 
-                const out = { order: parsed.order, in_development: parsed.in_development }
-                const file = resolve(server.config.root, 'rfd/priority.json')
+                const out = {
+                    order: parsed.order,
+                    backlog: parsed.backlog,
+                    in_development: parsed.in_development,
+                }
                 try {
                     writeFileSync(file, JSON.stringify(out, null, 2) + '\n')
                 } catch (err) {

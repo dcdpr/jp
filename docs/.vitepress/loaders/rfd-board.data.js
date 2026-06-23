@@ -20,6 +20,10 @@ const draftsDir = resolve(import.meta.dirname, '../../rfd/drafts')
 const cachePath = resolve(import.meta.dirname, '../rfd-summaries.json')
 const priorityPath = resolve(import.meta.dirname, '../../rfd/priority.json')
 
+// Transient divider token. It only ever lives in the rendered board, so the
+// cutoff line is draggable; it is never written back to priority.json.
+const CUTOFF = '--cutoff--'
+
 function loadSummaries() {
     try {
         return JSON.parse(readFileSync(cachePath, 'utf-8'))
@@ -55,6 +59,23 @@ export default {
         mergeDependencies(entries, graph)
         const error = checkPriority(entries, priority)
         if (error) throw new Error(error)
+
+        // UI-only divider between the prioritised list (`order`) and the
+        // backlog. The board splits the combined list back into `order` /
+        // `backlog` on save, so this is never persisted. The fractional rank
+        // drops it between the last `order` entry and the first `backlog` one.
+        entries.push({
+            num: CUTOFF,
+            slug: CUTOFF,
+            divider: true,
+            status: 'Cutoff',
+            title: '',
+            path: '',
+            summary: null,
+            dependsOn: [],
+            inDevelopment: false,
+            priority: priority.order.length - 0.5,
+        })
 
         return entries
     },

@@ -1166,13 +1166,15 @@ rfd-promote NNN: _install-jp
         rm "$file"
 
         # Carry the board position across renumbering: `priority.json` stores
-        # RFD ids, so rewrite the draft id to its new permanent number in both
-        # `order` and `in_development`.
+        # RFD ids, so rewrite the draft id to its new permanent number wherever
+        # it appears (`order`, `backlog`, or `in_development`).
         priority_file="docs/rfd/priority.json"
         if [ -f "$priority_file" ]; then
-            jq --arg old "$old_draft_id" --arg new "$num" \
-                '.order |= map(if . == $old then $new else . end) | .in_development |= map(if . == $old then $new else . end)' \
-                "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
+            jq --arg old "$old_draft_id" --arg new "$num" '
+                .order = ((.order // []) | map(if . == $old then $new else . end))
+                | .backlog = ((.backlog // []) | map(if . == $old then $new else . end))
+                | .in_development = ((.in_development // []) | map(if . == $old then $new else . end))
+            ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
         fi
 
         # Update cross-references in other RFDs: replace `RFD DNN` with
