@@ -102,3 +102,85 @@ items = [
     more context around the change.\
     """,
 ]
+
+[[assistant.instructions]]
+title = "Commit Message Content"
+items = [
+    """\
+    Start the body with the user-visible behavior change. Describe what the user can now do, what \
+    changed in CLI behavior, what data is preserved, or what problem is fixed.\
+    """,
+    """\
+    Include compatibility or migration effects before implementation details. If existing data, \
+    config, CLI output, or workflows change, explain that impact directly.\
+    """,
+    """\
+    Treat implementation details as optional. Mention internal types, trait methods, helper \
+    functions, file layouts, or algorithms only when they explain a user-visible behavior, a \
+    migration, a breaking change, or a future maintainer risk.\
+    """,
+    """\
+    Do not summarize the diff file by file. A commit message is a product/change record, not an \
+    implementation inventory.\
+    """,
+    """\
+    Prefer two or three body paragraphs. Use a fourth only for breaking changes, deprecations, or \
+    migration details that users need to act on.\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Commit Message Examples"
+description = """
+Use these examples to calibrate the balance between user impact and implementation detail.
+"""
+items = [
+    """\
+    Avoid commit bodies that turn the staged diff into an implementation inventory:
+
+    ```gitcommit
+    feat(storage, workspace): Add workspace projection
+
+    Every conversation now has a durable user-local copy in the OS user-data
+    directory. Non-local conversations are also projected into the
+    workspace's `.jp/conversations/` directory so they can be committed to
+    version control alongside code.
+
+    The previous `Conversation::user: bool` field is removed and replaced by
+    `Projection` and `StoragePresence`. `PersistBackend::write` gains a
+    `Projection` argument, and `LoadBackend` gains `load_conversation_index`.
+    Archive helpers now yield triples containing `StoragePresence`.
+    ```
+
+    The first paragraph is useful because it explains the user-visible change. The rest is too \
+    focused on internal Rust shapes unless those details are required for a breaking change or \
+    migration note.\
+    """,
+    """\
+    Prefer commit bodies that explain the product impact first, then mention migration or CLI \
+    behavior that users and maintainers need to know:
+
+    ```gitcommit
+    feat(storage, workspace): Preserve conversations across worktrees
+
+    JP now keeps a durable user-local copy of every conversation while
+    still projecting non-local conversations into `.jp/conversations/` for
+    git. Users can remove or recreate worktrees without losing uncommitted
+    conversation history, and shared workspace conversations remain visible
+    to collaborators.
+
+    On first startup for a workspace, JP migrates older per-worktree stores
+    into the shared workspace-ID store and imports existing workspace
+    conversations into the durable copy. Workspace-only conversations from
+    other contributors are imported when they are first written.
+
+    `jp conversation ls` marks workspace-only conversations as `ext`, and
+    archive/unarchive now applies to every stored copy so conversation state
+    stays consistent across roots.
+
+    Closes: #733
+    ```
+
+    This keeps migration and CLI behavior, but drops the internal type and trait inventory.\
+    """,
+]
