@@ -103,7 +103,7 @@ impl Storage {
             && fs::read_link(&link).is_ok_and(|target| target.as_path() != self.root.as_std_path())
         {
             trace!(link = %link, "Re-pointing user storage symlink to current workspace.");
-            fs::remove_file(&link)?;
+            remove_storage_symlink(&link)?;
         }
         if link.exists() {
             if !link.is_symlink() {
@@ -578,6 +578,22 @@ impl Storage {
                 }
             })
             .collect()
+    }
+}
+
+/// Remove a `storage` symlink without following it.
+///
+/// On Windows a directory symlink is a reparse-point directory and must be
+/// removed with `remove_dir`; `remove_file` returns "Access is denied".
+/// On Unix `remove_file` unlinks the symlink itself.
+fn remove_storage_symlink(link: &Utf8Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        fs::remove_dir(link)
+    }
+    #[cfg(not(windows))]
+    {
+        fs::remove_file(link)
     }
 }
 
