@@ -1,4 +1,4 @@
-use std::{str::FromStr as _, time::Duration};
+use std::{env, fs, path::PathBuf, str::FromStr as _, time::Duration};
 
 use chrono::{DateTime, Utc};
 use jp_config::conversation::compaction::{
@@ -11,6 +11,7 @@ use jp_conversation::{
     compaction::{extend_summary_range, resolve_range},
 };
 use jp_workspace::{ConversationHandle, ConversationMut};
+use tracing::warn;
 
 use crate::{
     cmd::{
@@ -84,8 +85,10 @@ pub(crate) struct Compact {
     ///
     /// When enabled, the compacted turns are replaced with a single
     /// LLM-generated summary.
+    /// Optionally accepts text passed to the summarizer as additional context,
+    /// e.g. `--summarize "focus on the architectural design"`.
     #[arg(short, long, conflicts_with = "compact")]
-    summarize: bool,
+    summarize: Option<Option<String>>,
 
     /// Preview what would change without applying.
     #[arg(long)]
@@ -124,7 +127,7 @@ impl Compact {
     /// deliberately excluded: they are applied at runtime as range overrides on
     /// the active rules, not as a rule of their own.
     fn has_policy_overrides(&self) -> bool {
-        self.reasoning || self.tools.is_some() || self.summarize
+        self.reasoning || self.tools.is_some() || self.summarize.is_some()
     }
 }
 
@@ -156,8 +159,11 @@ impl Compact {
                 rule.reasoning = Some(ReasoningMode::Strip);
             }
             rule.tool_calls = self.tools;
-            if self.summarize {
-                rule.summary = Some(PartialSummaryConfig::default());
+            if let Some(context) = &self.summarize {
+                rule.summary = Some(PartialSummaryConfig {
+                    context: context.clone(),
+                    ..PartialSummaryConfig::default()
+                });
             }
             explicit.push(rule);
         }
@@ -292,10 +298,12 @@ async fn build_compaction_for_range(
     cfg: &jp_config::AppConfig,
     rule: &CompactionRuleConfig,
     range: CompactionRange,
-    printer: &jp_printer::Printer,
+    printer: Option<&jp_printer::Printer>,
 ) -> crate::Result<Compaction> {
     let summary_text = if rule.summary.is_some() {
-        printer.println("Generating summary...");
+        if let Some(printer) = printer {
+            printer.println("Generating summary...");
+        }
         let text = super::summarize::generate_summary(
             events,
             range.from_turn,
@@ -328,7 +336,7 @@ pub(crate) async fn build_compaction_events(
     rules: &[CompactionRuleConfig],
     from_override: Bound,
     to_override: Bound,
-    printer: &jp_printer::Printer,
+    printer: Option<&jp_printer::Printer>,
 ) -> crate::Result<Vec<Compaction>> {
     // Two distinct baselines:
     //
@@ -360,20 +368,167 @@ pub(crate) async fn build_compaction_events(
     Ok(compactions)
 }
 
-/// Append compaction events to the conversation, announcing each one.
+/// Apply compaction events to the conversation stream.
 ///
-/// The reported turn range is inclusive; `(N total)` is its turn count.
-pub(crate) fn apply_compactions(
-    conv: &ConversationMut,
-    compactions: Vec<Compaction>,
-    printer: &jp_printer::Printer,
-) {
+/// Mutation only: callers that want to report the result render their own
+/// timeline (see [`timeline_lines`]).
+/// The `jp query --compact` path applies silently so compaction details don't
+/// clutter the query output.
+pub(crate) fn apply_compactions(conv: &ConversationMut, compactions: Vec<Compaction>) {
     for compaction in compactions {
-        let from = compaction.from_turn;
-        let to = compaction.to_turn;
-        let count = to - from + 1;
         conv.update_events(|stream| stream.add_compaction(compaction));
-        printer.println(format!("Compacted turns {from}..={to} ({count} total)."));
+    }
+}
+
+/// A compacted range plus a short label describing what was done to it.
+///
+/// `label` is `None` only for a (degenerate) compaction with no policy.
+struct TimelineSegment {
+    from: usize,
+    to: usize,
+    label: Option<String>,
+}
+
+/// Build timeline segments for the compactions about to be applied, spilling
+/// each summary to a temp file so the timeline can link to it.
+///
+/// `conv_id` prefixes the temp-file names so summaries from different
+/// conversations don't collide.
+fn segments_for_compactions(compactions: &[Compaction], conv_id: &str) -> Vec<TimelineSegment> {
+    compactions
+        .iter()
+        .map(|c| {
+            let label = match &c.summary {
+                Some(summary) => Some(
+                    match write_summary_file(conv_id, c.from_turn, c.to_turn, &summary.summary) {
+                        Some(path) => format!("summary: {}", path.display()),
+                        None => "summary".to_owned(),
+                    },
+                ),
+                None => mechanical_label(c),
+            };
+            TimelineSegment {
+                from: c.from_turn,
+                to: c.to_turn,
+                label,
+            }
+        })
+        .collect()
+}
+
+/// Describe a compaction's mechanical policies (reasoning / tool calls) for the
+/// timeline, e.g. `reasoning + tools`.
+///
+/// Summaries are labeled by the caller (which owns the temp-file path), so this
+/// covers only the non-summary policies.
+/// Returns `None` when the compaction carries no mechanical policy.
+fn mechanical_label(compaction: &Compaction) -> Option<String> {
+    let mut parts = Vec::new();
+    if compaction.reasoning.is_some() {
+        parts.push("reasoning");
+    }
+    if let Some(policy) = &compaction.tool_calls {
+        match policy {
+            ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            } => parts.push("tools"),
+            ToolCallPolicy::Strip {
+                request: true,
+                response: false,
+            } => parts.push("tool requests"),
+            ToolCallPolicy::Strip {
+                request: false,
+                response: true,
+            } => parts.push("tool responses"),
+            ToolCallPolicy::Strip {
+                request: false,
+                response: false,
+            } => {}
+            ToolCallPolicy::Omit => parts.push("tools omitted"),
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" + "))
+    }
+}
+
+/// Write a generated summary to a temp file so the timeline can link to it.
+///
+/// The summary is also stored durably in the conversation stream; this file is
+/// a convenience copy for immediate viewing.
+/// Returns `None` (and logs) when the write fails — a missing convenience file
+/// must not abort compaction.
+fn write_summary_file(conv_id: &str, from: usize, to: usize, summary: &str) -> Option<PathBuf> {
+    let path = env::temp_dir().join(format!("{conv_id}-summary-{from}-{to}.md"));
+    match fs::write(&path, summary) {
+        Ok(()) => Some(path),
+        Err(err) => {
+            warn!(%err, path = %path.display(), "Failed to write summary file.");
+            None
+        }
+    }
+}
+
+/// Build the interleaved kept/compacted timeline lines for one invocation.
+///
+/// Compactions are sorted by start turn; a kept line is emitted for each gap
+/// before, between, and after the compacted ranges.
+/// Overlapping ranges collapse naturally — a gap is printed only where no
+/// compaction covers it.
+/// `dry_run` switches the verbs from "Compacted"/"Kept" to "Would have
+/// compacted"/"Would have kept".
+fn timeline_lines(segments: &[TimelineSegment], last_turn: usize, dry_run: bool) -> Vec<String> {
+    let (compacted, kept) = if dry_run {
+        ("Would have compacted", "Would have kept")
+    } else {
+        ("Compacted", "Kept")
+    };
+
+    let mut ordered: Vec<&TimelineSegment> = segments.iter().collect();
+    ordered.sort_by_key(|s| s.from);
+
+    let mut lines = Vec::new();
+    // Highest turn covered by a compaction so far; `None` before the first.
+    let mut covered: Option<usize> = None;
+    for segment in ordered {
+        let next_kept = covered.map_or(0, |c| c + 1);
+        if segment.from > next_kept {
+            lines.push(kept_line(kept, next_kept, segment.from - 1));
+        }
+
+        let count = segment.to - segment.from + 1;
+        lines.push(match &segment.label {
+            Some(label) => format!(
+                "{compacted} turns {}..={} ({count} total, {label}).",
+                segment.from, segment.to,
+            ),
+            None => format!(
+                "{compacted} turns {}..={} ({count} total).",
+                segment.from, segment.to,
+            ),
+        });
+
+        covered = Some(covered.map_or(segment.to, |c| c.max(segment.to)));
+    }
+
+    let tail = covered.map_or(0, |c| c + 1);
+    if tail <= last_turn {
+        lines.push(kept_line(kept, tail, last_turn));
+    }
+
+    lines
+}
+
+/// Format a single kept line for the inclusive range `[from, to]`.
+fn kept_line(verb: &str, from: usize, to: usize) -> String {
+    if from == to {
+        format!("{verb} turn {from}.")
+    } else {
+        format!("{verb} turns {from}..={to}.")
     }
 }
 
@@ -512,45 +667,7 @@ impl Compact {
         let to_override = self.resolve_to(&events_snapshot);
 
         if self.dry_run {
-            // Preview using the same per-rule range resolution as the real run
-            // (minus the summarizer and the mutation) so the reported ranges
-            // match what would actually be applied: range resolution against the
-            // original snapshot for every rule, summary-overlap extension
-            // against the accumulating `overlap`.
-            let mut overlap = events_snapshot.clone();
-            let mut printed = false;
-            for rule in &rules {
-                let Some(range) = resolve_rule_range(
-                    &events_snapshot,
-                    &overlap,
-                    rule,
-                    from_override.clone(),
-                    to_override.clone(),
-                ) else {
-                    continue;
-                };
-                ctx.printer.println(format!(
-                    "Would compact turns {}..={}",
-                    range.from_turn, range.to_turn,
-                ));
-                // Mirror the real run's overlap accumulation so later summary
-                // rules preview the same (possibly extended) ranges. Only
-                // summaries affect overlap extension, so a placeholder summary is
-                // enough.
-                if rule.summary.is_some() {
-                    overlap.add_compaction(
-                        Compaction::new(range.from_turn, range.to_turn).with_summary(
-                            SummaryPolicy {
-                                summary: String::new(),
-                            },
-                        ),
-                    );
-                }
-                printed = true;
-            }
-            if !printed {
-                ctx.printer.println("Nothing to compact.");
-            }
+            Self::preview_compaction(ctx, &events_snapshot, &rules, &from_override, &to_override);
             return Ok(());
         }
 
@@ -560,7 +677,7 @@ impl Compact {
             &rules,
             from_override,
             to_override,
-            &ctx.printer,
+            Some(&ctx.printer),
         )
         .await?;
 
@@ -569,9 +686,76 @@ impl Compact {
             return Ok(());
         }
 
-        apply_compactions(&conv, compactions, &ctx.printer);
+        let last_turn = events_snapshot.turn_count().saturating_sub(1);
+        let segments = segments_for_compactions(&compactions, &conv.id().to_string());
+        apply_compactions(&conv, compactions);
+        for line in timeline_lines(&segments, last_turn, false) {
+            ctx.printer.println(line);
+        }
 
         Ok(())
+    }
+
+    /// Preview the compaction timeline without mutating the conversation.
+    ///
+    /// Resolves the same per-rule ranges as the real run (minus the summarizer
+    /// and the mutation), then prints the dry-run timeline.
+    /// Summary rules show a bare `summary` label since no text is generated in
+    /// a preview.
+    fn preview_compaction(
+        ctx: &Ctx,
+        events_snapshot: &ConversationStream,
+        rules: &[CompactionRuleConfig],
+        from_override: &Bound,
+        to_override: &Bound,
+    ) {
+        // Range resolution uses the original snapshot for every rule, while
+        // `overlap` accumulates this run's summaries so later summary rules
+        // preview the same (possibly extended) ranges as the real run.
+        let mut overlap = events_snapshot.clone();
+        let mut segments = Vec::new();
+        for rule in rules {
+            let Some(range) = resolve_rule_range(
+                events_snapshot,
+                &overlap,
+                rule,
+                from_override.clone(),
+                to_override.clone(),
+            ) else {
+                continue;
+            };
+            let label = if rule.summary.is_some() {
+                Some("summary".to_owned())
+            } else {
+                mechanical_label(&build_mechanical_compaction(
+                    range.from_turn,
+                    range.to_turn,
+                    rule,
+                ))
+            };
+            segments.push(TimelineSegment {
+                from: range.from_turn,
+                to: range.to_turn,
+                label,
+            });
+            if rule.summary.is_some() {
+                overlap.add_compaction(
+                    Compaction::new(range.from_turn, range.to_turn).with_summary(SummaryPolicy {
+                        summary: String::new(),
+                    }),
+                );
+            }
+        }
+
+        if segments.is_empty() {
+            ctx.printer.println("Nothing to compact.");
+            return;
+        }
+
+        let last_turn = events_snapshot.turn_count().saturating_sub(1);
+        for line in timeline_lines(&segments, last_turn, true) {
+            ctx.printer.println(line);
+        }
     }
 
     /// Resolve the `from` range override, preferring `--from` over

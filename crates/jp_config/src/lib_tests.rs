@@ -241,7 +241,7 @@ fn compaction_rule_unset_bounds_resolve_to_field_defaults() {
 
     let rule = &config.conversation.compaction.rules[0];
     assert_eq!(rule.keep_first, RuleBound::Turns(1));
-    assert_eq!(rule.keep_last, RuleBound::Turns(3));
+    assert_eq!(rule.keep_last, RuleBound::Turns(1));
 }
 
 #[test]
@@ -272,7 +272,7 @@ fn empty_config_preserves_default_compaction_rule() {
     assert_eq!(rules[0].reasoning, Some(ReasoningMode::Strip));
     assert_eq!(rules[0].tool_calls, Some(ToolCallsMode::Strip));
     assert_eq!(rules[0].keep_first, RuleBound::Turns(1));
-    assert_eq!(rules[0].keep_last, RuleBound::Turns(3));
+    assert_eq!(rules[0].keep_last, RuleBound::Turns(1));
 }
 
 #[test]
