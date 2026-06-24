@@ -26,6 +26,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Conversation Event](#conversation-event)
     - [Inquiry](#inquiry)
     - [Persona](#persona)
+    - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
     - [RFD](#rfd)
     - [Thread](#thread)
@@ -102,6 +103,22 @@ user — distinct from a regular chat message.
 Carried as `InquiryRequest` and `InquiryResponse` events within a conversation.
 Used for mid-turn clarification that should not appear in the main chat stream
 or be sent to the LLM provider as context.
+
+### Pinned Conversation
+
+A conversation the user has marked as important, so it stays prominent and is
+protected from casual removal.
+Pinning is a property of the conversation itself, not of any session or view: it
+persists with the conversation and means the same thing everywhere the
+conversation appears.
+Persisted as a `pinned_at` timestamp on the conversation metadata;
+`Conversation::is_pinned()` in `jp_conversation` is the predicate.
+
+**Not the same as** binding a session to a particular target.
+Pinning marks one conversation as important; it does not make a session "keep
+using" that conversation.
+Keeping a session attached to a chosen target is a separate, per-session
+concept, not conversation pinning.
 
 ### Provider
 
