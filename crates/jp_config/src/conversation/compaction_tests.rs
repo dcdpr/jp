@@ -80,7 +80,7 @@ fn rule_bound_deserializes_from_integer_and_string() {
 
 #[test]
 fn rule_config_deserializes_integer_bounds() {
-    // Mirrors the documented TOML: `keep_first = 1`, `keep_last = 3`.
+    // Two distinct explicit bounds, exercising integer deserialization.
     let rule: PartialCompactionRuleConfig =
         serde_json::from_value(serde_json::json!({ "keep_first": 1, "keep_last": 3 })).unwrap();
     assert_eq!(rule.keep_first, Some(RuleBound::Turns(1)));

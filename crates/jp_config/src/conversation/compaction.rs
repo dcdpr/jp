@@ -98,7 +98,7 @@ impl PartialConfigDelta for PartialCompactionConfig {
 impl FillDefaults for PartialCompactionConfig {
     fn fill_from(self, defaults: Self) -> Self {
         // `CompactionRuleConfig`'s per-field defaults (`keep_first = 1`,
-        // `keep_last = 3`) live in `default_values`, which the resolution path
+        // `keep_last = 1`) live in `default_values`, which the resolution path
         // (`from_partial_with_defaults`) never reaches for vec elements — it
         // fills the container, not each rule. Apply them per rule here so unset
         // bounds resolve to the documented defaults rather than
@@ -141,7 +141,7 @@ impl CompactionConfig {
     ///
     /// Rules built from CLI flags or the inline `--compact` DSL bypass the
     /// normal config-resolution path, which is the only place the per-rule
-    /// defaults (`keep_first = 1`, `keep_last = 3`) are applied.
+    /// defaults (`keep_first = 1`, `keep_last = 1`) are applied.
     /// Without this, an unset bound would resolve to `RuleBound::default()` (0)
     /// and compact the whole conversation.
     /// Applying the defaults here keeps inline rules consistent with
