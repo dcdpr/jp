@@ -447,7 +447,7 @@ Handles are created when a tool returns a non-terminal state and destroyed when:
 - The assistant or user sends `Abort`
 
 - The conversation turn ends (all remaining handles are aborted)
-  
+
   > [!TIP]
   > [RFD 037] extends turn-end behavior with configurable per-tool policies
   > (`inquire`, `await`, `abort`).
@@ -696,7 +696,7 @@ The conversion preserves backward compatibility — existing tools that output
 - **Parallel stateful tools.** Multiple handles can coexist, but this RFD does
   not address coordinating between them (e.g., synchronizing on multiple
   handles, piping output from one to another).
-  
+
   > [!TIP]
   > [RFD 037] introduces an `await` built-in tool for cross-handle
   > synchronization.

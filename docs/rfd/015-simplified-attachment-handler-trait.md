@@ -25,7 +25,7 @@ The current attachment system has two problems:
    But every handler's state is fully derivable from its URL list.
    The host already tracks attachment URLs in the conversation config —
    duplicating this in the handler adds complexity for no benefit.
-   
+
    Handlers were originally stateful to support eager loading: the `file`
    handler read and cached file contents when attachments were added, rather
    than at query time.
@@ -34,7 +34,7 @@ The current attachment system has two problems:
    However, this meant the LLM operated on stale content and was more prone to
    making errors when editing files.
    The caching benefit doesn't justify the correctness cost.
-   
+
    Eager loading may return as an opt-in feature, but it's not core to the
    handler model.
    Handlers can be stateless.
@@ -255,7 +255,7 @@ the URL list.
 - **Third-party extensibility.** This RFD focuses on simplifying the handler
   interface.
   Plugin support for third-party handlers is future work.
-  
+
   > [!TIP]
   > [RFD 016] introduces the plugin system.
   > [RFD 017] defines the Wasm attachment handler interface as the first

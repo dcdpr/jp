@@ -497,24 +497,24 @@ The full pipeline:
 1. **Structural validation.** JP deserializes `outcome.config` as
    `PartialAppConfig`.
    Serde catches:
-   
+
    - Unknown field paths that don't exist in the schema.
    - Type mismatches (e.g., string where number expected).
    - Invalid enum variants (e.g., `"provider": "bogus"` when `ProviderId` only
      accepts `anthropic | openai | ollama | ...`).
-   
+
    Partial types are intentionally permissive: missing fields on populated
    subtrees are NOT flagged here.
    `required` constraints apply to the fully-resolved config, not to partials.
    Required-field violations surface later, at re-resolve time.
-   
+
    For `outcome.unset`, JP parses each path per RFD 070's syntax and verifies
    the base path refers to a field that exists in the schema and has a type that
    supports unsetting (optional scalar, or vec for element-level unsets).
    Specific vec-element existence is NOT validated — element removal is
    idempotent per RFD 070 (filtering produces the same array if the element
    wasn't there).
-   
+
    Validation is limited to structural checks.
    JP does **not** validate semantic correctness (e.g., whether a specific model
    name is available from the provider, or whether an attachment file exists on
@@ -528,7 +528,7 @@ The full pipeline:
    JP walks the deserialized `PartialAppConfig` and enumerates every leaf
    assignment.
    For example, the JSON tree:
-   
+
    ```json
    {
      "assistant": {
@@ -544,7 +544,7 @@ The full pipeline:
      }
    }
    ```
-   
+
    produces the leaf set `{ assistant.model.id.provider,
    assistant.model.id.name, assistant.model.parameters.temperature }`.
    Each leaf must independently be covered by a rule with `write = true` or
@@ -552,13 +552,13 @@ The full pipeline:
    A rule granting `write` at a parent path (e.g., `assistant.model.id`) covers
    every leaf beneath it via the longest-prefix-match evaluation in [Evaluation:
    longest prefix match](#evaluation-longest-prefix-match).
-   
+
    `outcome.unset` paths are authorized directly (they are already concrete
    paths) and each must be covered by a rule with `delete = true`.
-   
+
    If any leaf write or unset path falls outside granted access, the entire
    delta is rejected with reason `unauthorized_paths`.
-   
+
    Apply chrome (step 3) and claim generation (step 4) operate on the same
    leaf-path set.
    The three layers — authorization, confirmation, claims — cannot diverge.
@@ -566,7 +566,7 @@ The full pipeline:
 3. **Apply chrome.** If any leaf path matched by the delta falls under a rule
    with `apply = "ask"`, JP displays a single prompt listing all proposed
    changes (both writes and removals):
-   
+
    ```
    ⟳ Configuration delta proposed by tool 'change_model':
    
@@ -575,11 +575,11 @@ The full pipeline:
    
    Apply delta? [Y/n/?]
    ```
-   
+
    Multi-field deltas are shown as a single batched prompt.
    Approve once, all changes (both writes and unsets) land atomically.
    Reject once, no changes land.
-   
+
    **Non-interactive behavior.** When the session has no interactive prompt path
    — no TTY, `--non-interactive`, or a detached query — and any matched leaf
    would require `apply = "ask"`, JP rejects the delta with reason
@@ -821,13 +821,13 @@ buffer is folded into a single `ConfigDelta` event:
 
 2. **Fold per-path** in call order.
    For each config path touched by any buffered entry:
-   
+
    - The last operation in call order determines the final state.
    - If the last op was a set (via `outcome.config`), the path ends up in the
      merged `PartialAppConfig` with that value.
    - If the last op was an unset (via `outcome.unset`), the path ends up in the
      merged `unsets` list.
-   
+
    This ensures `ConfigDelta.delta` and `ConfigDelta.unsets` never refer to the
    same path — a clean invariant.
 
@@ -946,7 +946,7 @@ The user sees chrome for:
   Batched across multi-field deltas.
 
 - **Invalid delta.** Brief informational chrome — no prompt, just notice:
-  
+
   ```
   ⚠ Tool 'change_model' proposed an invalid config change:
     assistant.model.id.provider = "bogus" (not a valid provider)
@@ -954,13 +954,13 @@ The user sees chrome for:
   ```
 
 - **User rejection.** The user already acted on the prompt; JP confirms:
-  
+
   ```
   Config delta rejected. Tool re-invoked.
   ```
 
 - **Retry exhaustion.** When the 3-retry limit is hit:
-  
+
   ```
   ⚠ Tool 'change_model' exceeded delta retry limit. Aborting tool call.
   ```
@@ -1111,18 +1111,18 @@ The outcome-based approach is simpler: the tool returns all its results (content
 ## Risks and Open Questions
 
 - **Dependency on RFD 070.** This RFD builds on multiple parts of RFD 070:
-  
+
   - The `unsets` field on `ConfigDelta` and its path syntax (including
     vec-element `path["json"]` format) for `outcome.unset` support.
   - The `claims` field on `ConfigDelta` for storing `claims[path] = None` on
     tool-generated deltas.
   - The `None` explicit-unclaim semantics in claim walk-back, which protects
     tool mutations from `-C`-driven reversion.
-  
+
   RFD 070 is Accepted but not yet implemented; this RFD's Phase 2 depends on RFD
   070's Phase 1 landing first.
   The concrete code touchpoints in RFD 070 that this RFD depends on are:
-  
+
   - The `ConfigDelta` struct in `crates/jp_conversation/src/stream.rs` —
     currently `{ timestamp, delta }`, needs `unsets` and `claims` fields.
   - `ConversationStream::add_config_delta()` — must accept and store the new

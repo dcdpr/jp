@@ -251,7 +251,7 @@ For each rule with `external = true`:
 
 4. If no entry exists and a terminal is available, inquire with the full effect
    visible:
-   
+
    ```
    Approve this target binding?
    
@@ -266,26 +266,26 @@ For each rule with `external = true`:
    
    Approve? [y/N]
    ```
-   
+
    On approval, store the entry.
    On rejection, drop the rule from the compiled policy.
 
 5. If an entry exists with a different `canonical_target`, re-prompt with both
    old and new targets visible:
-   
+
    ```
    Symlink `fork` retargeted:
      was: /Users/jean/code/forks/serde-yaml
      now: /etc/passwd
    Allow new target? [y/N]
    ```
-   
+
    On approval, replace the stored target.
    On rejection, drop the rule.
 
 6. If no terminal is available and no matching approval exists, the behaviour
    depends on rule origin:
-   
+
    - **Pre-existing rules** (hand-authored config, persisted from a prior
      session) are dropped silently with a warning.
      Users running JP non-interactively pre-seed the approval store by editing
@@ -526,7 +526,7 @@ The user does not need to think about this; the CLI handles it.
 
 4. For each in-scope tool `T` (post-mode-rules and tool-scope expansion), inject
    the mount rule into the conversation's config layer:
-   
+
    ```toml
    [[conversation.tools.<T>.access.fs]]
    path = "<NAME>"
@@ -534,7 +534,7 @@ The user does not need to think about this; the CLI handles it.
    read = true
    write = true                       # only when :rw
    ```
-   
+
    And, if `T`'s `access.fs` was previously empty, also inject the
    workspace-default rule (see [Default-deny
    preservation](#default-deny-preservation)).
@@ -786,7 +786,7 @@ Plain JSON behind a single read site keeps migration cost bounded.
 > **Current status (PR 727).** This first slice ships cooperative enforcement
 > for local filesystem tools.
 > What it does and does not cover:
-> 
+>
 > - Phase 1 (pre-canonical invariant): done.
 > - Phase 2 (`FsRule.external`, rule-path canonicalisation, approved-target
 >   boundary): done.
@@ -810,7 +810,7 @@ Plain JSON behind a single read site keeps migration cost bounded.
 > - Phase 4 (OS sandbox, [RFD 075]) and Phase 6 (Windows junction fallback) are
 >   not started; enforcement is cooperative only, and `net` / `env` rules are
 >   not yet modelled in config.
-> 
+>
 > Correctness guarantees in this slice: config validation rejects `access` on
 > tools whose finalised source is `builtin` or `mcp` ([RFD 076]); an `access`
 > config that fails to compile fails the tool invocation, and a declared policy

@@ -250,7 +250,7 @@ For every `Outcome::NeedsInput { question }`:
    when applicable.
 
 3. The coordinator checks for an automatic answer:
-   
+
    - **Cached answer** (`remembered_tool_answers` — a previous `Y`/`N` in this
      turn).
      Skipped for `AnswerType::Secret` questions; secret answers do not enter the
@@ -271,7 +271,7 @@ For every `Outcome::NeedsInput { question }`:
    routing-scope caveat).
 
 5. On a successful answer:
-   
+
    - Non-`Secret` answer type (from prompter or inquiry backend): record
      `InquiryResponse::Answered { id, answer }`.
    - `AnswerType::Secret` (from prompter only — the inquiry backend is
@@ -287,7 +287,7 @@ For every `Outcome::NeedsInput { question }`:
    Without this, every recorded `InquiryRequest` whose backend errored or whose
    user cancelled would land unpaired on disk.
    The `reason` is determined by the originating event:
-   
+
    | Originating event | `reason` | |
    ------------------------------------------------------ |
    ------------------------ | | `ExecutionEvent::PromptCancelled` (user Ctrl-C
@@ -300,7 +300,7 @@ For every `Outcome::NeedsInput { question }`:
    `AnswerType::Secret` and no TTY available | `NoPromptBackend` | |
    `AnswerType::Secret` and `target = "assistant"` | `AssistantRoutingDenied`
    |\` |
-   
+
    `InquiryError::Cancelled` returns `Err` from the inquiry backend today (see
    `crates/jp_cli/src/cmd/query/tool/inquiry.rs` around
    `cancellation_token.cancelled()`), but it is semantically a user-initiated

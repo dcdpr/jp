@@ -33,10 +33,10 @@ reasons:
 2. **Structured output.** The inquiry uses `output_config.format`, which causes
    Anthropic to inject an additional system prompt.
    From the [Anthropic docs][structured-docs]:
-   
+
    > Changing the output\_config.format parameter will invalidate any prompt
    > cache for that conversation thread.
-   
+
    Even with matching tools, the system-level cache misses because the injected
    system content differs.
 

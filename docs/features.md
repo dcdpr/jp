@@ -27,7 +27,7 @@ The editor to open is configurable via one of the following ways:
   to `JP_EDITOR`, `VISUAL`, `EDITOR`, in that order).
 
 - The `--edit` flag.
-  
+
   ```sh
   # Open the query in the default editor, even if an inline query is provided.
   jp query --edit "How high is the highest mountain in the world?"

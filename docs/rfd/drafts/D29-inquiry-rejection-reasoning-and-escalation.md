@@ -284,7 +284,7 @@ and the question target is `AssistantWithEscalation`:
 1. **Interactive mode (`is_tty`).** The coordinator routes the original question
    to the user via `spawn_user_prompt`, prefixed with the sub-agent's
    recommendation:
-   
+
    ```
    The assistant recommended rejecting this change:
    "<sub-agent's reason>"
@@ -292,7 +292,7 @@ and the question target is `AssistantWithEscalation`:
    Do you want to apply the following patch?
    <original patch>
    ```
-   
+
    The user sees the sub-agent's reasoning and makes the final call.
    If the user approves, the tool proceeds.
    If the user rejects, the tool fails with a user-rejection message (distinct
@@ -300,7 +300,7 @@ and the question target is `AssistantWithEscalation`:
 
 2. **Non-interactive mode.** Escalation follows the detached prompt policy ([RFD
    049]):
-   
+
    - `deny`: fail with the sub-agent's rejection (same as `Assistant`).
    - `defaults`: use the question's default value (`true` for `apply_changes`).
    - `auto`: fail (the sub-agent already said no; auto-approving over a

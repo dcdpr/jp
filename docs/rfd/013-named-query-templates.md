@@ -468,7 +468,7 @@ Can be merged independently.
   variables.
   This depends on the structured output infrastructure and needs real use cases
   to justify the added complexity.
-  
+
   > [!TIP]
   > [RFD 029] introduces the structured output infrastructure this feature
   > depends on.

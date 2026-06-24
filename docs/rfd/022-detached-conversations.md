@@ -7,15 +7,15 @@
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.
-> 
+>
 > Split and reorganised:
-> 
+>
 > - [RFD 023: Resumable Conversation Turns][RFD 023] — incomplete turn
 >   persistence and `--continue` — remains active.
 > - The detached execution and live re-attachment portions were superseded by
 >   [RFD 027: Client-Server Query Architecture][RFD 027], which unifies both
 >   under a single client-server model.
-> 
+>
 > The original text below is preserved for historical context.
 
 ## Summary

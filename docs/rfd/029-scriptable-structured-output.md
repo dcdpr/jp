@@ -133,7 +133,7 @@ What `--schema` should NOT imply:
 
 > [!TIP]
 > **Status: Implemented.**
-> 
+>
 > See [RFD 030] for the full syntax reference and `crates/jp_cli/src/schema.rs`
 > for the implementation.
 
@@ -154,7 +154,7 @@ Full JSON Schema is accepted as a passthrough when the DSL is insufficient.
 
 > [!TIP]
 > **Status: Implemented.**
-> 
+>
 > The `--stream` / `-s` and `--no-stream` / `-S` flags have been removed.
 > `-s` is now the short form of `--schema`.
 

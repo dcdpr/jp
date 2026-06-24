@@ -35,7 +35,7 @@ team information, skill guides — users currently have two options:
    about.
 
 > REVIEW:
-> 
+>
 > Attachments are also added to the system prompt, they are just a convenient
 > way to attach "something" that can be fetched using a handler (e.g.
 > `file://` or `https://`), and thus are mostly similar to "inline everything in
@@ -70,7 +70,7 @@ subjects = ".jp/kb/skills"
 ```
 
 > REVIEW:
-> 
+>
 > I wonder if we should move `kb` into the `assistant` section, to avoid
 > overwhelming the root level of the config.
 
@@ -843,7 +843,7 @@ wants to organize it for the assistant.
 
 - **Wasm execution.** The v1 implementation runs `jp_tool_learn` as native Rust.
   Migration to Wasm is deferred to a later phase.
-  
+
   > [!TIP]
   > [RFD 016] defines the Wasm plugin infrastructure that `learn` would migrate
   > to, with [RFD 017] covering the first capability interface built on it.

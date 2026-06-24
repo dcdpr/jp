@@ -221,7 +221,7 @@ modeled after the existing `describe_tools` entry:
 - `description`: a long-form description that establishes when to call
   `ask_user` and discourages reflexive use.
   Suggested wording:
-  
+
   > Ask the user a typed question (boolean, select, or text) and receive their
   > answer.
   > Use only when the conversation does not provide the information you need and
@@ -232,7 +232,7 @@ modeled after the existing `describe_tools` entry:
   > Do not use `ask_user` to collect secrets (passwords, API keys, SSH
   > passphrases): answers are returned to the model and persisted in the
   > conversation stream.
-  
+
   This long-form text is set as `description` rather than `summary` so that
   `ToolDocs::schema_description()` (which prefers `summary` and falls back to
   `description`) sends it to the provider in every request — the usage guard
@@ -244,9 +244,9 @@ modeled after the existing `describe_tools` entry:
   conditional-requiredness); cross-field constraints are enforced at runtime in
   `AskUser::execute` and surface as `Outcome::Error` to the LLM (see
   [Arguments](#arguments) above).
-  
+
   ## | Parameter | Type emitted | Required | Notes | | ------------- | ----------------------- | -------- |
-  
+
   | | `question` | `string` | yes | The question text.
   Must be single-line; runtime rejects newlines.
   | | `context` | `string` | no | Optional multi-line context rendered above the
@@ -451,7 +451,7 @@ sites for the routing paths and the static-answer validation.
 
 - The emit sites for 083's routing paths and static-answer validation, reusing
   082's variants where appropriate:
-  
+
   | Condition | Persisted reason | |
   ------------------------------------------------------ |
   ------------------------ | | `target = "user"`, no TTY, `exclusive = true` |
@@ -779,7 +779,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
    builder `Question::with_preamble` to `Question::with_context`), then add
    `exclusive: bool` and `persistence: AnswerReusePolicy` fields to
    `jp_tool::Question`:
-   
+
    - `exclusive`: `#[serde(default, skip_serializing_if = "is_false")]`.
      Existing serialized `Question` payloads deserialize as `exclusive: false`.
    - `persistence`: variants `None` and `Turn`, default `Turn`, with
@@ -796,7 +796,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
      `persistence: None`.
 
 2. Add the `prompt_label: Option<String>` field on `QuestionConfig`:
-   
+
    - Add the field to `QuestionConfig` and the matching optional field on
      `PartialQuestionConfig`.
    - Update the manual `PartialConfigDelta` and `ToPartial` impls for
@@ -818,7 +818,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
    defaults.
    The fix is generic; it applies to every entry returned by `builtins::all()`,
    not only `ask_user`.
-   
+
    Built-in configs are lower-priority defaults; user config under a built-in's
    namespace overlays *on top of* the built-in's defaults so single-field
    overrides (the common case) inherit the rest.
@@ -830,7 +830,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
    blocked.
    The reserved capability lives in the layering itself: built-in defaults
    always merge under, never replace.
-   
+
    A partial override of `source` does not implicitly clear the built-in's other
    structural fields: the user's executor still runs against the built-in's
    `parameters` schema, `questions`, `style`, and `run`/`result` defaults unless
@@ -840,7 +840,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
 
 4. Change `ToolPrompter::prompt_question` to take an optional pre-resolved
    prompt label alongside the question:
-   
+
    ```rust
    pub fn prompt_question(
        &self,
@@ -848,7 +848,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
        prompt_label: Option<&str>,
    ) -> Result<QuestionResult, Error>;
    ```
-   
+
    Label resolution stays in the coordinator: it reads
    `config.questions[question.id].prompt_label.as_deref()` and passes the result
    through.
@@ -862,7 +862,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
    AnswerReusePolicy::None`.
 
 5. Widen `jp_conversation::InquiryQuestion` with the persisted-side companions:
-   
+
    - Add `context: Option<String>`, `exclusive: bool`, and `persistence:
      InquiryAnswerReusePolicy` fields with default-preserving serde attributes.
      `context` is a brand-new field on the persisted type (no legacy `pre_amble`
@@ -882,7 +882,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
      fields set.
 
 6. Coordinator-side answer handling in `handle_tool_result`:
-   
+
    - **Static-answer validation.** At 082's static-answer short-circuit (where
      `QuestionConfig.answer` is applied as the resolved answer for a
      `NeedsInput` question), validate the configured value against the in-flight
@@ -908,7 +908,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
 7. Widen the `exclusive` routing checks in
    `ToolCoordinator::handle_tool_result`, and add the corresponding emit sites
    for 082's recording lifecycle:
-   
+
    - **Add `CancellationReason::InvalidStaticAnswer`** to 082's `Cancelled` enum
      in `jp_conversation::event::inquiry`. 082 documents the enum as open to
      extension; 083 adds this single variant for the static-answer validation

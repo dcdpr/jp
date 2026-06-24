@@ -7,12 +7,12 @@
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.
-> 
+>
 > Superseded by [RFD 027: Client-Server Query Architecture][RFD 027], which
 > makes live attachment the default execution model rather than an add-on.
 > The socket protocol and attach flow from this RFD are carried forward into RFD
 > 027.
-> 
+>
 > The original text below is preserved for historical context.
 
 ## Summary
@@ -63,7 +63,7 @@ If no process is running:
 
 - If the conversation has an incomplete turn (pending inquiry), the command
   suggests `--continue` instead:
-  
+
   ```sh
   $ jp conversation attach jp-c17528832001
   Error: No running process for jp-c17528832001.
@@ -74,7 +74,7 @@ If no process is running:
   ```
 
 - If the conversation is idle, the command errors:
-  
+
   ```sh
   $ jp conversation attach jp-c17528831000
   Error: No running process for jp-c17528831000.

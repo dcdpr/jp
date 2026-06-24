@@ -182,12 +182,12 @@ Two concrete changes outside `compat.rs`:
    accessed.
 
 2. `ConversationStream::from_parts` is split into two halves:
-   
+
    - A raw build that produces a stream with the recovered stored partial
      (post-Step-1) attached, no finalize.
    - A finalize step that takes a fallback partial and resolves the partial to
      an [`AppConfig`].
-   
+
    The lazy loader in `Workspace::events()` / `metadata()` runs the raw build
    via the existing `LoadBackend::load_conversation_stream`, then finalizes with
    `self.fallback_partial`.

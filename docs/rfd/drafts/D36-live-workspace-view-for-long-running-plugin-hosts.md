@@ -399,7 +399,7 @@ The hazard is exactly the bug class this RFD aims to eliminate.
   `// Invariant:` comments on the helper (not `// SAFETY:`, which is reserved
   for `unsafe` code by Rust convention).
   The invariants to spell out:
-  
+
   - Plugin message handling is serial; one handler runs at a time.
   - Plugin-held locks are not exposed across IPC messages.
   - Within a single handler, callers must not invoke `LiveWorkspace`
@@ -411,7 +411,7 @@ The hazard is exactly the bug class this RFD aims to eliminate.
     plugin-side `lock`/`unlock` protocol messages that span IPC boundaries,
     these invariants are broken and the design must be revisited (likely by
     adding dirty-state tracking on cells).
-  
+
   The serial loop covers the cross-message hazard automatically.
   The same-handler hazard is not enforced by Rust's borrow checker (a handler
   could hold a `ConversationLock` and still call `live.events(handle)`), so the

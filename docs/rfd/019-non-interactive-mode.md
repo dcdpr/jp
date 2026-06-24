@@ -7,15 +7,15 @@
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.
-> 
+>
 > Split into two focused RFDs:
-> 
+>
 > - [RFD 048: Four-Channel Output Model][RFD 048] — stdout/stderr/tty/log
 >   separation and Printer integration.
 > - [RFD 049: Non-Interactive Mode and Detached Prompt Policy][RFD 049] —
 >   `--non-interactive` flag, detached policies, `exclusive` property, prompt
 >   routing.
-> 
+>
 > The original text below is preserved for historical context.
 
 ## Summary
@@ -437,7 +437,7 @@ Both could coexist.
 - **Background execution and prompt queuing.** Running conversations as detached
   background processes, the `queue` detached policy, and attach IPC are future
   work that builds on the detached policy infrastructure established here.
-  
+
   > [!TIP]
   > [RFD 027] introduces a client-server query architecture that makes detached
   > background execution and live re-attachment the default execution model,

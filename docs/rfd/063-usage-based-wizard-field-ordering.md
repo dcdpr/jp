@@ -58,7 +58,7 @@ The ranking signal comes from two places in the `CliUsage` data ([RFD 062]):
    The wizard groups these by field path on the read side — parsing each raw
    value through `KvAssignment::from_str` to extract the key — and aggregates
    their counts.
-   
+
    For example, if `assistant.tool_choice=auto` has count 5 and
    `assistant.tool_choice=required` has count 2, the field
    `assistant.tool_choice` has an aggregate count of 7.
