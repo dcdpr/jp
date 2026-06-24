@@ -58,6 +58,8 @@ async fn test_fs_read_file() {
             root: tmp.path().to_path_buf(),
             action: Action::Run,
             access: None,
+            workspace_id: "test".into(),
+            conversation_id: "test".into(),
         };
         let result = fs_read_file(&ctx, "file.txt".to_owned(), start_line, end_line)
             .await
@@ -100,6 +102,8 @@ async fn reads_through_approved_external_mount() {
             ],
             ..AccessPolicy::default()
         }),
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
     };
 
     let result = fs_read_file(&ctx, "fork/lib.rs".to_owned(), None, None)
@@ -140,6 +144,8 @@ async fn read_through_internal_symlink_respects_deny_rule() {
             ],
             ..AccessPolicy::default()
         }),
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
     };
 
     // Direct read of the denied path is rejected.
@@ -179,6 +185,8 @@ async fn denies_in_workspace_path_with_no_matching_grant() {
             fs: vec![FsRule::new("fork").with_external(true).with_read(true)],
             ..AccessPolicy::default()
         }),
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
     };
 
     let result = fs_read_file(&ctx, "secret.txt".to_owned(), None, None)

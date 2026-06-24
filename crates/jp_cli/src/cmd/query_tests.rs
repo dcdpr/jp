@@ -16,7 +16,7 @@ use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{
     Provider,
     provider::mock::MockProvider,
-    tool::{builtin::BuiltinExecutors, executor::ExecutorSource},
+    tool::{InvocationContext, builtin::BuiltinExecutors, executor::ExecutorSource},
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_workspace::{ConversationHandle, Workspace};
@@ -76,6 +76,7 @@ fn empty_executor_source() -> Box<dyn ExecutorSource> {
         BuiltinExecutors::new(),
         &[],
         std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
+        InvocationContext::default(),
     ))
 }
 
@@ -140,6 +141,7 @@ async fn run_mock_turn(
         Arc::new(MockPromptBackend::new()),
         tool::ToolCoordinator::new(cfg.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from(prompt),
+        InvocationContext::default(),
     )
     .await
     .unwrap();

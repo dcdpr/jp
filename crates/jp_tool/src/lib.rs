@@ -221,6 +221,18 @@ pub struct Context {
     /// capabilities are available.
     #[serde(default)]
     pub access: Option<AccessPolicy>,
+
+    /// Globally-unique ID of the workspace this invocation belongs to.
+    ///
+    /// Tools that persist state can use it to scope that state to the
+    /// originating workspace.
+    pub workspace_id: String,
+
+    /// ID of the conversation this invocation belongs to.
+    ///
+    /// Combined with `workspace_id`, this lets a tool scope persisted state to
+    /// a single conversation.
+    pub conversation_id: String,
 }
 
 impl From<String> for Outcome {

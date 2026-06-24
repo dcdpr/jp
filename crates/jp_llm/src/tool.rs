@@ -578,6 +578,17 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
     }
 }
 
+/// Identity of the conversation an invocation belongs to.
+///
+/// Surfaced to local tools through the rendered template `context` (as
+/// `context.workspace_id` and `context.conversation_id`) so a tool can scope
+/// any state it persists to the originating workspace and conversation.
+#[derive(Debug, Clone, Default)]
+pub struct InvocationContext {
+    pub workspace_id: String,
+    pub conversation_id: String,
+}
+
 /// The definition of a tool.
 ///
 /// The definition source is either a [`ToolConfig`] for `local` tools, or a
@@ -649,6 +660,7 @@ impl ToolDefinition {
     ///     }
     /// }
     /// ```
+    #[expect(clippy::too_many_arguments)]
     pub async fn execute(
         &self,
         id: String,
@@ -660,6 +672,7 @@ impl ToolDefinition {
         cancellation_token: CancellationToken,
         builtin_executors: &builtin::BuiltinExecutors,
         access: Option<&jp_tool::AccessPolicy>,
+        invocation: &InvocationContext,
     ) -> Result<ExecutionOutcome, ToolError> {
         info!(tool = %self.name, arguments = ?arguments, "Executing tool.");
 
@@ -674,6 +687,7 @@ impl ToolDefinition {
                     root,
                     cancellation_token,
                     access,
+                    invocation,
                 )
                 .await
             }
@@ -710,6 +724,7 @@ impl ToolDefinition {
         root: &Utf8Path,
         cancellation_token: CancellationToken,
         access: Option<&jp_tool::AccessPolicy>,
+        invocation: &InvocationContext,
     ) -> Result<ExecutionOutcome, ToolError> {
         let name = tool.unwrap_or(&self.name);
 
@@ -739,6 +754,8 @@ impl ToolDefinition {
                 "action": Action::Run,
                 "root": root.as_str(),
                 "access": access,
+                "workspace_id": &invocation.workspace_id,
+                "conversation_id": &invocation.conversation_id,
             },
         });
 

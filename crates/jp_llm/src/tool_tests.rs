@@ -742,6 +742,73 @@ async fn test_run_tool_command_tojson_filter_on_scalar_still_works() {
     assert_eq!(stdout.trim_end(), "\"Hello\"");
 }
 
+/// Regression: the `run` path must surface the invocation's workspace and
+/// conversation IDs to the tool command via `context.workspace_id` and
+/// `context.conversation_id`.
+/// A non-empty `InvocationContext` pins the wiring so the fields can't be
+/// silently dropped or emptied.
+#[tokio::test]
+#[cfg(unix)]
+async fn test_execute_local_exposes_invocation_ids_in_context() {
+    use jp_config::{
+        AppConfig, Config,
+        conversation::tool::{PartialToolConfig, ToolConfig},
+    };
+
+    let partial: PartialToolConfig = serde_json::from_value(json!({
+        "source": "local",
+        "command": "echo {{context.workspace_id}}-{{context.conversation_id}}",
+    }))
+    .expect("valid partial tool config");
+    let tool = ToolConfig::from_partial(partial, vec![]).expect("resolved tool config");
+
+    let mut cfg = AppConfig::new_test();
+    cfg.conversation.tools.insert("echo_ids".to_owned(), tool);
+    let config = cfg
+        .conversation
+        .tools
+        .get("echo_ids")
+        .expect("tool present");
+
+    let definition = ToolDefinition {
+        name: "echo_ids".to_owned(),
+        docs: ToolDocs::default(),
+        parameters: IndexMap::new(),
+    };
+    let invocation = InvocationContext {
+        workspace_id: "ws-abc".to_owned(),
+        conversation_id: "conv-xyz".to_owned(),
+    };
+    let mcp_client = jp_mcp::Client::new(IndexMap::new());
+    let builtins = builtin::BuiltinExecutors::new();
+
+    let outcome = definition
+        .execute(
+            "call-1".to_owned(),
+            json!({}),
+            &IndexMap::new(),
+            &config,
+            &mcp_client,
+            Utf8Path::new("/tmp"),
+            CancellationToken::new(),
+            &builtins,
+            None,
+            &invocation,
+        )
+        .await
+        .expect("execution succeeds");
+
+    match outcome {
+        ExecutionOutcome::Completed {
+            result: Ok(out), ..
+        } => assert!(
+            out.contains("ws-abc-conv-xyz"),
+            "expected workspace/conversation IDs in tool output, got: {out:?}"
+        ),
+        other => panic!("expected completed success, got: {other:?}"),
+    }
+}
+
 mod merge_mcp_param {
     use indexmap::IndexMap;
     use jp_config::conversation::tool::{OneOrManyTypes, ToolParameterConfig};
