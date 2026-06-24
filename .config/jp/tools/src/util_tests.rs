@@ -19,6 +19,26 @@ fn test_one_or_many_one() {
 }
 
 #[test]
+fn test_one_or_many_stringified_json_array() {
+    // LLMs sometimes pass an array argument as a JSON-encoded string holding
+    // the array itself. We accept that and treat it as the list it represents.
+    let v: OneOrMany<String> =
+        serde_json::from_value(serde_json::json!(r#"["Phase 1", "Phase 2"]"#)).unwrap();
+
+    assert_eq!(
+        v,
+        OneOrMany::Many(vec!["Phase 1".to_owned(), "Phase 2".to_owned()])
+    );
+}
+
+#[test]
+fn test_one_or_many_plain_string_stays_one() {
+    let v: OneOrMany<String> = serde_json::from_value(serde_json::json!("just one")).unwrap();
+
+    assert_eq!(v, OneOrMany::One("just one".to_owned()));
+}
+
+#[test]
 fn test_one_or_many_many() {
     let mut v = OneOrMany::Many(vec![1, 2, 3]);
 
