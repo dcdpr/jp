@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use jp_conversation::{ConversationStream, Error as ConversationError};
+use jp_storage::backend::Projection;
 use jp_workspace::{ConversationHandle, ConversationLock};
 use tracing::debug;
 
@@ -184,10 +185,18 @@ pub(crate) fn fork_conversation(
     filter(&mut new_events);
     new_events.sanitize();
 
-    let lock = ctx.workspace.create_and_lock_conversation(
+    // Inherit the source's storage locality so forking a `--local` conversation
+    // doesn't project the fork into the workspace.
+    let projection = ctx
+        .workspace
+        .conversation_presence(&source.id())
+        .map_or(Projection::Projected, Projection::from);
+
+    let lock = ctx.workspace.create_and_lock_conversation_with_projection(
         new_conversation,
         new_events.base_config(),
         ctx.session.as_ref(),
+        projection,
     )?;
 
     lock.as_mut()

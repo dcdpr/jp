@@ -1,8 +1,8 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     fs,
     io::{self, BufReader},
-    time::Duration,
+    time::SystemTime,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -17,9 +17,10 @@ use serde_json::value::RawValue;
 use tracing::warn;
 
 use crate::{
-    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage,
+    ARCHIVE_DIR, BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage,
+    backend::{ConversationFilter, ConversationIndexEntry, StoragePresence},
     build_conversation_dir_prefix, dir_entries, find_conversation_dir_path,
-    load_conversation_id_from_entry, load_inflight_conversation_id, parse_datetime,
+    load_conversation_id_from_entry, parse_datetime,
 };
 
 type Result<T> = std::result::Result<T, LoadError>;
@@ -103,148 +104,156 @@ impl PartialEq for LoadErrorInner {
 }
 
 impl Storage {
-    /// Load all conversation ids.
+    /// Scan conversation index entries from both roots for the given partition.
+    ///
+    /// IDs are deduplicated across roots, and each entry's [`StoragePresence`]
+    /// records which roots hold the conversation.
+    /// Entries are sorted by ID.
     #[must_use]
-    pub fn load_all_conversation_ids(&self) -> Vec<ConversationId> {
-        let mut conversations = vec![];
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
+    pub fn load_conversation_index(
+        &self,
+        filter: ConversationFilter,
+    ) -> Vec<ConversationIndexEntry> {
+        let partition = |root: &Utf8Path| -> Utf8PathBuf {
+            let active = root.join(CONVERSATIONS_DIR);
+            if filter.archived {
+                active.join(ARCHIVE_DIR)
+            } else {
+                active
+            }
+        };
 
-            let path = root.join(CONVERSATIONS_DIR);
-            conversations.extend(scan_conversation_ids(&path));
-        }
+        let workspace_ids: HashSet<ConversationId> = scan_conversation_ids(&partition(&self.root))
+            .into_iter()
+            .collect();
+        let user_ids: HashSet<ConversationId> = self
+            .user
+            .as_deref()
+            .map(|user| {
+                scan_conversation_ids(&partition(user))
+                    .into_iter()
+                    .collect()
+            })
+            .unwrap_or_default();
 
-        conversations.sort();
-        conversations
+        let mut entries: Vec<ConversationIndexEntry> = workspace_ids
+            .union(&user_ids)
+            .map(|id| ConversationIndexEntry {
+                id: *id,
+                presence: presence_of(user_ids.contains(id), workspace_ids.contains(id)),
+            })
+            .collect();
+        entries.sort_by_key(|entry| entry.id);
+        entries
     }
 }
 
 /// Scan a single conversations directory for IDs.
 ///
-/// If any in-flight persist directories (`.old-*`, `.staging-*`) are found
-/// without a corresponding normal directory, retries briefly to let the atomic
-/// rename complete.
-/// This ensures every returned ID has a normal directory behind it, even when
-/// another process is mid-persist.
+/// Dot-prefixed entries (`.trash/`, leftover `.tmp`/`.staging-`/`.old-` dirs
+/// from older versions) are skipped by [`load_conversation_id_from_entry`].
 fn scan_conversation_ids(path: &Utf8Path) -> Vec<ConversationId> {
     let entries: Vec<_> = dir_entries(path).collect();
-
-    let normal: HashSet<_> = entries
+    entries
         .par_iter()
         .filter_map(load_conversation_id_from_entry)
-        .collect();
-
-    let missing_inflight: Vec<_> = entries
-        .par_iter()
-        .filter_map(load_inflight_conversation_id)
-        .filter(|id| !normal.contains(id))
-        .collect();
-
-    if missing_inflight.is_empty() {
-        return normal.into_iter().collect();
-    }
-
-    // Another process is mid-atomic-swap. Retry briefly — the rename gap
-    // is nanoseconds, so 10 × 1ms is extremely generous.
-    let mut ids: HashSet<_> = normal;
-    for _ in 0..10 {
-        std::thread::sleep(Duration::from_millis(1));
-
-        let found: Vec<_> = dir_entries(path)
-            .filter_map(|e| load_conversation_id_from_entry(&e))
-            .filter(|id| missing_inflight.contains(id) && !ids.contains(id))
-            .collect();
-
-        ids.extend(found.iter().copied());
-
-        if missing_inflight.iter().all(|id| ids.contains(id)) {
-            break;
-        }
-    }
-
-    ids.into_iter().collect()
+        .collect()
 }
 
 impl Storage {
     pub fn load_conversation_stream(&self, id: &ConversationId) -> Result<ConversationStream> {
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
+        let workspace_dir = find_conversation_dir_path(&self.root, id);
+        let user_dir = self
+            .user
+            .as_deref()
+            .and_then(|user| find_conversation_dir_path(user, id));
 
-            let Some(conv_dir) = find_conversation_dir_path(root, id) else {
-                continue;
-            };
+        // The stream (`base_config.json` + `events.json`) is one unit: load both
+        // files from whichever root has the newer combined mtime, with ties
+        // going to the durable user-local copy.
+        let Some(conv_dir) =
+            pick_newer(user_dir.as_deref(), workspace_dir.as_deref(), stream_mtime)
+        else {
+            return Err(LoadError::new(
+                build_conversation_dir_prefix(&self.root, id),
+                LoadErrorInner::MissingConversationStream(*id),
+            ));
+        };
 
-            let events_path = conv_dir.join(EVENTS_FILE);
-            if !events_path.is_file() {
-                continue;
-            }
-
-            let base_config_path = conv_dir.join(BASE_CONFIG_FILE);
-            if base_config_path.is_file() {
-                // New format: separate `base_config.json` and `events.json`.
-                let base_config = load_json(&base_config_path)?;
-                let events = load_json(&events_path)?;
-
-                return ConversationStream::from_parts(base_config, events)
-                    .map(|stream| stream.with_created_at(id.timestamp()))
-                    .map_err(|error| LoadError {
-                        path: conv_dir,
-                        error: LoadErrorInner::Stream(error),
-                    });
-            }
-
-            // Legacy format: base config packed as first element in events.json.
-            let events = load_json(&events_path)?;
-            match ConversationStream::from_legacy_events(events) {
-                Ok(Some(stream)) => return Ok(stream),
-                Ok(None) => {
-                    return Err(LoadError {
-                        path: conv_dir,
-                        error: LoadErrorInner::Stream(StreamError::FromEmptyIterator),
-                    });
-                }
-                Err(error) => {
-                    return Err(LoadError {
-                        path: conv_dir,
-                        error: LoadErrorInner::Stream(error),
-                    });
-                }
-            }
+        let events_path = conv_dir.join(EVENTS_FILE);
+        if !events_path.is_file() {
+            return Err(LoadError::new(
+                build_conversation_dir_prefix(&self.root, id),
+                LoadErrorInner::MissingConversationStream(*id),
+            ));
         }
 
-        let path = build_conversation_dir_prefix(&self.root, id);
+        let base_config_path = conv_dir.join(BASE_CONFIG_FILE);
+        if base_config_path.is_file() {
+            // Current format: separate `base_config.json` and `events.json`.
+            let base_config = load_json(&base_config_path)?;
+            let events = load_json(&events_path)?;
 
-        Err(LoadError {
-            path,
-            error: LoadErrorInner::MissingConversationStream(*id),
-        })
+            return ConversationStream::from_parts(base_config, events)
+                .map(|stream| stream.with_created_at(id.timestamp()))
+                .map_err(|error| {
+                    LoadError::new(conv_dir.to_owned(), LoadErrorInner::Stream(error))
+                });
+        }
+
+        // Legacy format: base config packed as first element in events.json.
+        let events = load_json(&events_path)?;
+        match ConversationStream::from_legacy_events(events) {
+            Ok(Some(stream)) => Ok(stream),
+            Ok(None) => Err(LoadError::new(
+                conv_dir.to_owned(),
+                LoadErrorInner::Stream(StreamError::FromEmptyIterator),
+            )),
+            Err(error) => Err(LoadError::new(
+                conv_dir.to_owned(),
+                LoadErrorInner::Stream(error),
+            )),
+        }
     }
 
     pub fn load_conversation_metadata(&self, id: &ConversationId) -> Result<Conversation> {
-        for root in [Some(&self.root), self.user.as_ref()] {
-            let Some(root) = root else {
-                continue;
-            };
+        let workspace_dir = find_conversation_dir_path(&self.root, id);
+        let user_dir = self
+            .user
+            .as_deref()
+            .and_then(|user| find_conversation_dir_path(user, id));
 
-            let Some(conv_dir) = find_conversation_dir_path(root, id) else {
-                continue;
-            };
+        // Metadata resolves on its own mtime, independently of the stream.
+        let meta_dir = pick_newer(user_dir.as_deref(), workspace_dir.as_deref(), |dir| {
+            file_mtime(&dir.join(METADATA_FILE))
+        });
+        let Some(meta_dir) = meta_dir else {
+            return Err(LoadError::new(
+                build_conversation_dir_prefix(&self.root, id),
+                LoadErrorInner::MissingConversationMetadata(*id),
+            ));
+        };
 
-            let is_user = Some(root) == self.user.as_ref();
-            match Self::load_conversation_metadata_at(&conv_dir, id, is_user) {
-                Err(error) if error.kind().is_missing() => {}
-                other => return other,
-            }
+        let meta_path = meta_dir.join(METADATA_FILE);
+        if !meta_path.is_file() {
+            return Err(LoadError::new(
+                build_conversation_dir_prefix(&self.root, id),
+                LoadErrorInner::MissingConversationMetadata(*id),
+            ));
         }
 
-        Err(LoadError {
-            path: build_conversation_dir_prefix(&self.root, id),
-            error: LoadErrorInner::MissingConversationMetadata(*id),
-        })
+        let mut conversation: Conversation = load_json(&meta_path)?;
+
+        // Event count and last activity describe the stream, so read them from
+        // the stream root (which may differ from the metadata root).
+        if let Some(stream_dir) =
+            pick_newer(user_dir.as_deref(), workspace_dir.as_deref(), stream_mtime)
+        {
+            (conversation.events_count, conversation.last_event_at) =
+                load_count_and_timestamp_events(stream_dir).unwrap_or((0, None));
+        }
+
+        Ok(conversation)
     }
 
     /// Load metadata for many conversations from a single directory scan.
@@ -262,17 +271,30 @@ impl Storage {
         &self,
         ids: &[ConversationId],
     ) -> Vec<(ConversationId, Result<Conversation>)> {
-        let mut dirs: HashMap<ConversationId, (Utf8PathBuf, bool)> = HashMap::new();
-        for (root, is_user) in [(Some(&self.root), false), (self.user.as_ref(), true)] {
+        // Resolve each id to the directory holding the newer `metadata.json`,
+        // mirroring the mtime resolution in `load_conversation_metadata`. The
+        // workspace root is enumerated first, so the user-local copy wins ties.
+        let mut dirs: HashMap<ConversationId, Utf8PathBuf> = HashMap::new();
+        for root in [Some(&self.root), self.user.as_ref()] {
             let Some(root) = root else {
                 continue;
             };
             for entry in dir_entries(root.join(CONVERSATIONS_DIR)) {
-                if let Some(id) = load_conversation_id_from_entry(&entry) {
-                    // The root (non-user) directory wins, matching the root
-                    // precedence in `load_conversation_metadata`.
-                    dirs.entry(id)
-                        .or_insert_with(|| (entry.into_path(), is_user));
+                let Some(id) = load_conversation_id_from_entry(&entry) else {
+                    continue;
+                };
+                let dir = entry.into_path();
+                match dirs.entry(id) {
+                    Entry::Vacant(slot) => {
+                        slot.insert(dir);
+                    }
+                    Entry::Occupied(mut slot) => {
+                        if file_mtime(&dir.join(METADATA_FILE))
+                            >= file_mtime(&slot.get().join(METADATA_FILE))
+                        {
+                            slot.insert(dir);
+                        }
+                    }
                 }
             }
         }
@@ -284,7 +306,7 @@ impl Storage {
                 // back to the rescanning loader, including the archive — this
                 // mirrors `FsStorageBackend::load_conversation_metadata`.
                 let result = match dirs.get(id) {
-                    Some((dir, is_user)) => Self::load_conversation_metadata_at(dir, id, *is_user),
+                    Some(dir) => Self::load_conversation_metadata_at(dir, id),
                     None => Err(LoadError {
                         path: build_conversation_dir_prefix(&self.root, id),
                         error: LoadErrorInner::MissingConversationMetadata(*id),
@@ -306,7 +328,6 @@ impl Storage {
     fn load_conversation_metadata_at(
         conv_dir: &Utf8Path,
         id: &ConversationId,
-        is_user: bool,
     ) -> Result<Conversation> {
         let path = conv_dir.join(METADATA_FILE);
         if !path.is_file() {
@@ -317,11 +338,57 @@ impl Storage {
         }
 
         let mut conversation: Conversation = load_json(&path)?;
-        conversation.user = is_user;
         (conversation.events_count, conversation.last_event_at) =
             load_count_and_timestamp_events(conv_dir).unwrap_or((0, None));
 
         Ok(conversation)
+    }
+}
+
+/// Modification time of a single file, or the epoch when it is absent or
+/// unreadable.
+fn file_mtime(path: &Utf8Path) -> SystemTime {
+    fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+/// Combined modification time of a conversation's stream files.
+///
+/// `base_config.json` is written once but independently user-editable, so the
+/// stream's freshness is the newer of the two files.
+/// Legacy conversations have no `base_config.json`, leaving just the
+/// `events.json` mtime.
+fn stream_mtime(conv_dir: &Utf8Path) -> SystemTime {
+    file_mtime(&conv_dir.join(EVENTS_FILE)).max(file_mtime(&conv_dir.join(BASE_CONFIG_FILE)))
+}
+
+/// Pick the directory with the newer mtime, preferring user-local on a tie.
+///
+/// With no evidence the workspace projection is newer, the durable user-local
+/// copy stays authoritative.
+fn pick_newer<'a>(
+    user_dir: Option<&'a Utf8Path>,
+    workspace_dir: Option<&'a Utf8Path>,
+    mtime: impl Fn(&Utf8Path) -> SystemTime,
+) -> Option<&'a Utf8Path> {
+    match (user_dir, workspace_dir) {
+        (Some(user), Some(workspace)) => Some(if mtime(user) >= mtime(workspace) {
+            user
+        } else {
+            workspace
+        }),
+        (Some(user), None) => Some(user),
+        (None, workspace) => workspace,
+    }
+}
+
+/// Classify a conversation's [`StoragePresence`] from root membership.
+fn presence_of(in_user: bool, in_workspace: bool) -> StoragePresence {
+    match (in_user, in_workspace) {
+        (true, true) => StoragePresence::Projected,
+        (true, false) => StoragePresence::UserLocalOnly,
+        _ => StoragePresence::WorkspaceOnly,
     }
 }
 

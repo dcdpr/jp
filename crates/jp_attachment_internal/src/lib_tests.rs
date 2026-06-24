@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use camino::Utf8PathBuf;
-use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
+use jp_storage::backend::{FsStorageBackend, PersistBackend as _, Projection};
 use jp_workspace::Workspace;
 use test_log::test;
 
@@ -367,7 +367,9 @@ fn resolve_loads_real_persisted_conversation() {
     let metadata = Conversation::default();
 
     let backend = FsStorageBackend::new(&storage).unwrap();
-    backend.write(&id, &metadata, &stream).unwrap();
+    backend
+        .write(&id, &metadata, &stream, Projection::Projected)
+        .unwrap();
 
     let workspace = workspace_with_backend(workspace_root, workspace_id, backend);
     let uri = Url::parse(&format!("jp://{id}")).unwrap();
@@ -409,7 +411,12 @@ fn resolve_raw_events_returns_selected_events_json() {
     let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
     let backend = FsStorageBackend::new(&storage).unwrap();
     backend
-        .write(&id, &Conversation::default(), &stream)
+        .write(
+            &id,
+            &Conversation::default(),
+            &stream,
+            Projection::Projected,
+        )
         .unwrap();
 
     let workspace = workspace_with_backend(workspace_root, workspace_id, backend);
@@ -452,7 +459,12 @@ fn resolve_raw_all_returns_metadata_and_base_config() {
     let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
     let backend = FsStorageBackend::new(&storage).unwrap();
     backend
-        .write(&id, &Conversation::default(), &stream)
+        .write(
+            &id,
+            &Conversation::default(),
+            &stream,
+            Projection::Projected,
+        )
         .unwrap();
 
     let workspace = workspace_with_backend(workspace_root, workspace_id, backend);
@@ -495,7 +507,12 @@ fn resolve_raw_with_selector_filters_events() {
     let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
     let backend = FsStorageBackend::new(&storage).unwrap();
     backend
-        .write(&id, &Conversation::default(), &stream)
+        .write(
+            &id,
+            &Conversation::default(),
+            &stream,
+            Projection::Projected,
+        )
         .unwrap();
 
     let workspace = workspace_with_backend(workspace_root, workspace_id, backend);

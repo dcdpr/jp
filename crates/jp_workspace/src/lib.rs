@@ -28,8 +28,9 @@ use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{
     backend::{
-        ConversationFilter, InMemoryStorageBackend, LoadBackend, LockBackend, NullPersistBackend,
-        PersistBackend, SessionBackend,
+        ConversationFilter, ConversationIndexEntry, InMemoryStorageBackend, LoadBackend,
+        LockBackend, NullPersistBackend, PersistBackend, Projection, SessionBackend,
+        StoragePresence,
     },
     lock::LockInfo,
 };
@@ -190,25 +191,31 @@ impl Workspace {
     /// [`sanitize`]: Self::sanitize
     pub fn load_conversation_index(&mut self) {
         trace!("Loading conversation index.");
-        let conversation_ids = self
+        let entries = self
             .loader
-            .load_conversation_ids(ConversationFilter::default());
+            .load_conversation_index(ConversationFilter::default());
 
-        debug!(count = conversation_ids.len(), "Loaded conversation index.");
+        debug!(count = entries.len(), "Loaded conversation index.");
 
-        let conversations = conversation_ids
+        let conversations = entries
             .iter()
-            .map(|id| (*id, OnceLock::new()))
+            .map(|entry| (entry.id, OnceLock::new()))
             .collect();
 
-        let events = conversation_ids
-            .into_iter()
-            .map(|id| (id, OnceLock::new()))
+        let events = entries
+            .iter()
+            .map(|entry| (entry.id, OnceLock::new()))
+            .collect();
+
+        let presence = entries
+            .iter()
+            .map(|entry| (entry.id, entry.presence))
             .collect();
 
         self.state = State {
             conversations,
             events,
+            presence,
         };
     }
 
@@ -305,6 +312,21 @@ impl Workspace {
         conversation: Conversation,
         config: Arc<AppConfig>,
     ) -> ConversationId {
+        self.create_conversation_with_projection(id, conversation, config, Projection::Projected)
+    }
+
+    /// Create a new conversation in memory with a specific ID and write
+    /// projection.
+    ///
+    /// The projection sets the conversation's initial storage presence and is
+    /// the write intent a lock later acquired on it carries.
+    pub fn create_conversation_with_projection(
+        &mut self,
+        id: ConversationId,
+        conversation: Conversation,
+        config: Arc<AppConfig>,
+        projection: Projection,
+    ) -> ConversationId {
         let _err = self
             .state
             .conversations
@@ -323,6 +345,10 @@ impl Workspace {
                 ConversationStream::new(config).with_created_at(id.timestamp()),
             )));
 
+        self.state
+            .presence
+            .insert(id, StoragePresence::from(projection));
+
         id
     }
 
@@ -338,7 +364,33 @@ impl Workspace {
         config: Arc<AppConfig>,
         session: Option<&Session>,
     ) -> Result<ConversationLock> {
-        let id = self.create_conversation(conversation, config);
+        self.create_and_lock_conversation_with_projection(
+            conversation,
+            config,
+            session,
+            Projection::Projected,
+        )
+    }
+
+    /// Create a new conversation with an explicit write projection and acquire
+    /// an exclusive lock on it.
+    ///
+    /// See [`create_and_lock_conversation`] for details.
+    ///
+    /// [`create_and_lock_conversation`]: Self::create_and_lock_conversation
+    pub fn create_and_lock_conversation_with_projection(
+        &mut self,
+        conversation: Conversation,
+        config: Arc<AppConfig>,
+        session: Option<&Session>,
+        projection: Projection,
+    ) -> Result<ConversationLock> {
+        let id = self.create_conversation_with_projection(
+            ConversationId::default(),
+            conversation,
+            config,
+            projection,
+        );
         self.lock_new_conversation(id, session)
     }
 
@@ -393,13 +445,24 @@ impl Workspace {
             .clone();
 
         let handle = ConversationHandle::new(id);
+        let projection = self.lock_projection(&id);
         Ok(ConversationLock::new(
             handle,
             metadata,
             events,
             Arc::clone(&self.persist),
             lock_guard,
+            projection,
         ))
+    }
+
+    /// Resolve the write projection for a conversation from its stored
+    /// presence.
+    ///
+    /// Defaults to [`Projection::Projected`] when no presence is recorded.
+    fn lock_projection(&self, id: &ConversationId) -> Projection {
+        self.conversation_presence(id)
+            .map_or(Projection::Projected, Projection::from)
     }
 
     /// Returns the globally unique ID of the workspace.
@@ -415,6 +478,16 @@ impl Workspace {
         }
 
         Ok(ConversationHandle::new(*id))
+    }
+
+    /// Returns which storage roots hold a conversation, if it is in the index.
+    ///
+    /// Derived from the cross-root index load (and a conversation's creation
+    /// intent).
+    /// Returns `None` for conversations not present in the active index.
+    #[must_use]
+    pub fn conversation_presence(&self, id: &ConversationId) -> Option<StoragePresence> {
+        self.state.presence.get(id).copied()
     }
 
     /// Get conversation metadata via a handle.
@@ -499,12 +572,14 @@ impl Workspace {
             .ok_or_else(|| Error::not_found("Conversation events", &id))?
             .clone();
 
+        let projection = self.lock_projection(&id);
         Ok(LockResult::Acquired(ConversationLock::new(
             handle,
             metadata,
             events,
             Arc::clone(&self.persist),
             lock_guard,
+            projection,
         )))
     }
 
@@ -534,6 +609,7 @@ impl Workspace {
 
         self.state.conversations.remove(&id);
         self.state.events.remove(&id);
+        self.state.presence.remove(&id);
     }
 
     /// Restore a conversation from the archive.
@@ -542,6 +618,15 @@ impl Workspace {
     /// the in-memory index.
     /// Returns a handle for the restored conversation.
     pub fn unarchive_conversation(&mut self, id: &ConversationId) -> Result<ConversationHandle> {
+        // Capture where the archived copy lives before moving it, so a private
+        // `--local` conversation isn't projected into the workspace on restore.
+        let presence = self
+            .loader
+            .load_conversation_index(ConversationFilter { archived: true })
+            .into_iter()
+            .find(|entry| entry.id == *id)
+            .map_or(StoragePresence::Projected, |entry| entry.presence);
+
         // Move out of .archive/ first, then clear archived_at through the
         // normal persist path. If the metadata write fails, the conversation
         // is active with a stale archived_at — cosmetic, not data loss.
@@ -563,12 +648,17 @@ impl Workspace {
             meta_arc.write().archived_at = None;
             let meta = meta_arc.read();
             let events = events_arc.read();
-            if let Err(e) = self.persist.write(id, &meta, &events) {
+            // Restore the conversation with the projection it had before
+            // archiving, so a `--local` copy stays out of the workspace.
+            let projection = Projection::from(presence);
+            if let Err(e) = self.persist.write(id, &meta, &events, projection) {
                 warn!(%id, %e, "Failed to clear archived_at after unarchive.");
             }
         } else {
             warn!(%id, "Failed to load conversation after unarchive.");
         }
+
+        self.state.presence.insert(*id, presence);
 
         Ok(handle)
     }
@@ -580,19 +670,21 @@ impl Workspace {
     /// index.
     pub fn archived_conversations(
         &self,
-    ) -> impl Iterator<Item = (ConversationId, Conversation)> + '_ {
-        let ids = self
+    ) -> impl Iterator<Item = (ConversationId, Conversation, StoragePresence)> + '_ {
+        let entries = self
             .loader
-            .load_conversation_ids(ConversationFilter { archived: true });
+            .load_conversation_index(ConversationFilter { archived: true });
 
-        ids.into_iter()
-            .filter_map(|id| match self.loader.load_conversation_metadata(&id) {
-                Ok(meta) => Some((id, meta)),
+        entries.into_iter().filter_map(|entry| {
+            let ConversationIndexEntry { id, presence } = entry;
+            match self.loader.load_conversation_metadata(&id) {
+                Ok(meta) => Some((id, meta, presence)),
                 Err(error) => {
                     warn!(%id, %error, "Failed to load archived conversation metadata.");
                     None
                 }
-            })
+            }
+        })
     }
 
     /// Remove a conversation, consuming its lock.
@@ -608,6 +700,7 @@ impl Workspace {
 
         self.state.conversations.remove(&id);
         self.state.events.remove(&id);
+        self.state.presence.remove(&id);
     }
 
     /// Read the lock holder info for a conversation.
@@ -675,12 +768,14 @@ impl Workspace {
             .expect("test_lock: events not found")
             .clone();
 
+        let projection = self.lock_projection(&id);
         ConversationLock::new(
             handle,
             metadata,
             events,
             Arc::clone(&self.persist),
             Box::new(NoopLockGuard),
+            projection,
         )
     }
 }

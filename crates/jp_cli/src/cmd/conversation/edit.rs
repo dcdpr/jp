@@ -1,11 +1,15 @@
-use std::{str::FromStr, time::Duration};
+use std::{fmt::Write as _, fs, str::FromStr, time::Duration};
 
+use camino::Utf8PathBuf;
 use chrono::Utc;
+use crossterm::style::Stylize as _;
+use duct::Expression;
+use inquire::Confirm;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, model::id::PartialModelIdOrAliasConfig,
 };
 use jp_conversation::{
-    ConversationEvent, ConversationStream,
+    ConversationEvent, ConversationId, ConversationStream,
     event::{ChatRequest, ChatResponse},
     thread::ThreadBuilder,
 };
@@ -17,6 +21,10 @@ use jp_llm::{
     title,
 };
 use jp_printer::PrinterWriter;
+use jp_storage::{
+    LoadError,
+    backend::{FsStorageBackend, LoadBackend, Projection},
+};
 use jp_workspace::ConversationHandle;
 
 use super::path::resolve_paths;
@@ -35,12 +43,13 @@ pub(crate) struct Edit {
     #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Toggle the conversation between user and workspace-scoped.
+    /// Toggle whether the conversation is kept local to your machine.
     ///
-    /// A user-scoped conversation is stored on your local machine and is not
-    /// part of the workspace storage.
-    /// This means, when using a VCS, user conversations are not stored in the
-    /// VCS, but are otherwise identical to workspace conversations.
+    /// Every conversation is stored durably on your machine.
+    /// A non-local conversation is additionally projected into the workspace's
+    /// `.jp/conversations/` directory so it can be committed to version
+    /// control; a local conversation is not, keeping it out of version control.
+    /// Without a value, toggles the current state.
     #[arg(long, group = "property")]
     local: Option<Option<bool>>,
 
@@ -96,7 +105,7 @@ impl Edit {
             return self.run_property_edit(ctx, handles).await;
         }
 
-        self.run_open_editor(ctx, handles)
+        self.run_open_editor(ctx, &handles)
     }
 
     /// Whether any metadata mutation flag is set.
@@ -110,31 +119,110 @@ impl Edit {
     }
 
     /// Open the conversation directory or specific files in `$EDITOR`.
-    fn run_open_editor(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+    ///
+    /// After the editor exits, the edited files are validated by loading them
+    /// back exactly as the next startup would.
+    /// A malformed edit is never committed: the parse error is printed, and the
+    /// user is asked whether to re-open the editor to fix it or discard the
+    /// edit (restoring the original files).
+    /// In non-interactive mode an invalid edit is discarded with an error
+    /// rather than prompting.
+    fn run_open_editor(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let config = ctx.config();
         let cmd = config.editor.command().ok_or(Error::MissingEditor)?;
 
         let fs = ctx
             .fs_backend
-            .as_deref()
+            .clone()
             .ok_or("no filesystem storage configured")?;
 
+        let ids: Vec<_> = handles.iter().map(ConversationHandle::id).collect();
         let mut paths = Vec::new();
-        for handle in handles {
-            let id = handle.id();
+        for id in &ids {
             paths.extend(resolve_paths(
-                fs,
-                &id,
+                &fs,
+                id,
                 self.events,
                 self.metadata,
                 self.base_config,
             )?);
         }
 
+        // Snapshot the pre-edit content so an edit that fails to load can be
+        // reverted, leaving the conversation untouched.
+        let snapshots: Vec<(Utf8PathBuf, Option<String>)> = paths
+            .iter()
+            .map(|path| (path.clone(), fs::read_to_string(path).ok()))
+            .collect();
+
+        loop {
+            Self::spawn_editor(&cmd, &paths)?;
+
+            let Err(error) = self.validate_edits(&fs, &ids) else {
+                break;
+            };
+
+            // The edit doesn't load back (e.g. malformed JSON). Show the error
+            // and let the user fix or discard it — never commit a broken edit.
+            let _ = writeln!(
+                ctx.printer.prompt_writer(),
+                "{}",
+                format!("The edited file could not be loaded back:\n\n{error}\n").red()
+            );
+
+            if ctx.term.is_tty
+                && Confirm::new("Re-open the editor to fix it?")
+                    .with_default(true)
+                    .prompt()
+                    .unwrap_or(false)
+            {
+                continue;
+            }
+
+            Self::restore_snapshots(&snapshots)?;
+            return Err(Error::Editor(
+                "the edit could not be loaded and was discarded; the conversation is unchanged"
+                    .to_owned(),
+            )
+            .into());
+        }
+
+        // A managed editor command edits the workspace copy of a projected
+        // conversation; re-sync the user-local copy so both roots stay
+        // consistent immediately rather than awaiting lazy reconciliation.
+        for id in &ids {
+            fs.sync_projection(id)?;
+        }
+
+        Ok(())
+    }
+
+    /// Validate edited files by loading them back exactly as the next startup
+    /// would, so a successful return means the edit will not be sanitized away.
+    fn validate_edits(
+        &self,
+        fs: &FsStorageBackend,
+        ids: &[ConversationId],
+    ) -> Result<(), LoadError> {
+        for id in ids {
+            if self.events || self.base_config {
+                fs.load_conversation_stream(id)?;
+            }
+            if self.metadata {
+                fs.load_conversation_metadata(id)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Spawn `$EDITOR` on the given files.
+    fn spawn_editor(cmd: &Expression, paths: &[Utf8PathBuf]) -> Output {
+        let args: Vec<String> = paths.iter().map(|p| p.as_str().to_owned()).collect();
         let output = cmd
+            .clone()
             .before_spawn(move |cmd| {
-                for path in &paths {
-                    cmd.arg(path.as_str());
+                for arg in &args {
+                    cmd.arg(arg);
                 }
                 Ok(())
             })
@@ -146,7 +234,18 @@ impl Edit {
                 Error::Editor(format!("Editor exited with error: {}", output.status)).into(),
             );
         }
+        Ok(())
+    }
 
+    /// Restore files to their pre-edit content, removing ones that were absent.
+    fn restore_snapshots(snapshots: &[(Utf8PathBuf, Option<String>)]) -> Output {
+        for (path, content) in snapshots {
+            match content {
+                Some(content) => fs::write(path, content.as_bytes())?,
+                None if path.exists() => fs::remove_file(path)?,
+                None => {}
+            }
+        }
         Ok(())
     }
 
@@ -159,9 +258,17 @@ impl Edit {
                 LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
             };
 
-            let conv = lock.into_mut();
-            if let Some(user) = self.local {
-                conv.update_metadata(|m| m.user = user.unwrap_or(!m.user));
+            let mut conv = lock.into_mut();
+            if let Some(local) = self.local {
+                let projection = match local {
+                    Some(true) => Projection::LocalOnly,
+                    Some(false) => Projection::Projected,
+                    None => match conv.projection() {
+                        Projection::LocalOnly => Projection::Projected,
+                        Projection::Projected => Projection::LocalOnly,
+                    },
+                };
+                conv.set_projection(projection);
             }
 
             if let Some(pinned) = self.pin {

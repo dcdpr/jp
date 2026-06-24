@@ -17,13 +17,51 @@ pub struct ConversationFilter {
     pub archived: bool,
 }
 
+/// Which storage roots hold a conversation, as observed at load time.
+///
+/// Recorded per conversation in the workspace index and used to derive the
+/// `local` indicator.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StoragePresence {
+    /// Durable user-local copy only; not projected into this workspace.
+    UserLocalOnly,
+    /// Durable user-local copy plus a workspace projection.
+    Projected,
+    /// Present only in the workspace, not yet imported into user-local.
+    WorkspaceOnly,
+}
+
+/// A conversation ID paired with where its data lives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConversationIndexEntry {
+    /// The conversation's ID.
+    pub id: ConversationId,
+
+    /// Which storage roots hold the conversation.
+    pub presence: StoragePresence,
+}
+
 /// Reads conversation data and indexes from a backing store.
 pub trait LoadBackend: Send + Sync + Debug {
-    /// Scan conversation IDs from the backing store.
+    /// Scan conversation index entries — ID plus [`StoragePresence`] — from
+    /// the backing store.
+    ///
+    /// Filesystem backends merge both storage roots and deduplicate by
+    /// conversation ID, so a projected conversation (present in both roots)
+    /// appears exactly once.
+    /// The `filter` controls which partition to scan.
+    fn load_conversation_index(&self, filter: ConversationFilter) -> Vec<ConversationIndexEntry>;
+
+    /// Scan conversation IDs from the backing store, deduplicated by ID.
     ///
     /// The `filter` controls which partition to scan.
     /// By default, only active (non-archived) conversations are returned.
-    fn load_conversation_ids(&self, filter: ConversationFilter) -> Vec<ConversationId>;
+    fn load_conversation_ids(&self, filter: ConversationFilter) -> Vec<ConversationId> {
+        self.load_conversation_index(filter)
+            .into_iter()
+            .map(|entry| entry.id)
+            .collect()
+    }
 
     /// Load a single conversation's metadata.
     fn load_conversation_metadata(

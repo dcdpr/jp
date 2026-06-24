@@ -12,7 +12,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_printer::{OutputFormat, Printer};
-use jp_storage::backend::FsStorageBackend;
+use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
@@ -918,7 +918,7 @@ fn test_conversation_fork() {
         let fs = Arc::new(
             FsStorageBackend::new(&storage)
                 .unwrap()
-                .with_user_storage(&user, "test", "abc")
+                .with_user_storage(&user, None, "abc")
                 .unwrap(),
         );
         let workspace = Workspace::new(tmp.path()).with_backend(fs);
@@ -987,7 +987,7 @@ fn fork_targets_correct_source() {
     let fs = std::sync::Arc::new(
         FsStorageBackend::new(&storage)
             .unwrap()
-            .with_user_storage(&user, "test", "abc")
+            .with_user_storage(&user, None, "abc")
             .unwrap(),
     );
     let workspace = Workspace::new(tmp.path()).with_backend(fs);
@@ -1105,4 +1105,48 @@ fn fork_targets_correct_source() {
         .map(|r| r.content.as_str())
         .collect();
     assert_eq!(a_requests, vec!["alpha question"]);
+}
+
+/// Regression test: forking a `--local` conversation must keep the fork
+/// local-only instead of projecting it into the workspace.
+#[test]
+fn fork_inherits_local_only_projection() {
+    let tmp = tempdir().unwrap();
+    let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
+    let config = AppConfig::new_test();
+    let storage = tmp.path().join(".jp");
+    let user = tmp.path().join("user");
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::new(tmp.path()).with_backend(fs);
+    let mut ctx = Ctx::new(
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        config,
+        None,
+        printer,
+    );
+
+    let id = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_projection(
+        id,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+        Projection::LocalOnly,
+    );
+
+    let source = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = fork_conversation(&mut ctx, &source, |_| {}).unwrap();
+
+    assert_eq!(
+        lock.projection(),
+        Projection::LocalOnly,
+        "a fork of a local-only conversation stays local-only"
+    );
 }

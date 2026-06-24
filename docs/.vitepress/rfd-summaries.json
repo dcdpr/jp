@@ -120,7 +120,7 @@
     "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
   },
   "031-durable-conversation-storage-with-workspace-projection.md": {
-    "hash": "e719f3801cce3c2c7ff0daf444f815402e7267514008c802c418c19ca626e03b",
+    "hash": "6d119e6d602bfbf3f566826788dbdf15a2d59c354ef11d2b38841e26217b417a",
     "summary": "Make user-local storage the durable source; workspace copies become optional projections for git visibility."
   },
   "032-grizzly-semantic-search.md": {

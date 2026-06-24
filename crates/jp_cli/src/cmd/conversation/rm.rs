@@ -3,6 +3,7 @@ use std::fmt::Write as _;
 use crossterm::style::Stylize as _;
 use inquire::Confirm;
 use jp_conversation::ConversationId;
+use jp_storage::backend::Projection;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
@@ -122,7 +123,7 @@ fn confirm_and_remove(
         .with_event_count(events.len())
         .with_title(conversation.title.as_ref())
         .with_last_activated_at(Some(conversation.last_activated_at))
-        .with_local_flag(conversation.user)
+        .with_local_flag(matches!(lock.projection(), Projection::LocalOnly))
         .with_active_conversation(active_id.unwrap_or(id))
         .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 

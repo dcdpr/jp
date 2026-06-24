@@ -28,7 +28,7 @@ fn setup() -> (Utf8TempDir, Workspace, Option<Arc<FsStorageBackend>>) {
     let fs = Arc::new(
         FsStorageBackend::new(&storage_path)
             .unwrap()
-            .with_user_storage(&user_root, "test-ws", "abc")
+            .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
     let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
@@ -416,7 +416,7 @@ fn cleanup_keeps_session_referencing_conversation_created_after_index_load() {
     let fs = Arc::new(
         FsStorageBackend::new(&storage_path)
             .unwrap()
-            .with_user_storage(&user_root, "test-ws", "abc")
+            .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
     let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
@@ -471,7 +471,7 @@ fn cleanup_keeps_env_session_with_live_conversations() {
     let fs = Arc::new(
         FsStorageBackend::new(&storage_path)
             .unwrap()
-            .with_user_storage(&user_root, "test-ws", "abc")
+            .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
     let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
@@ -573,7 +573,7 @@ fn cleanup_skips_pruning_locked_conversations() {
     let fs = Arc::new(
         FsStorageBackend::new(&storage_path)
             .unwrap()
-            .with_user_storage(&user_root, "test-ws", "abc")
+            .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
     let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
@@ -624,7 +624,7 @@ fn cleanup_prunes_dead_entries_from_session_history() {
     let fs = Arc::new(
         FsStorageBackend::new(&storage_path)
             .unwrap()
-            .with_user_storage(&user_root, "test-ws", "abc")
+            .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
     let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());

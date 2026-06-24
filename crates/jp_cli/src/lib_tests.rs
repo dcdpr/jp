@@ -454,11 +454,10 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
 
     let mut workspace = Workspace::new(root);
     let user_root = user_data_dir().unwrap().join("workspace");
-    let workspace_name = root.file_name().unwrap();
     let fs_backend = Arc::new(
         FsStorageBackend::new(&storage)
             .unwrap()
-            .with_user_storage(&user_root, workspace_name, workspace.id().to_string())
+            .with_user_storage(&user_root, None, workspace.id().to_string())
             .unwrap(),
     );
     workspace = workspace.with_backend(fs_backend.clone());

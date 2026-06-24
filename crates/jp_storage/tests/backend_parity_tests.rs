@@ -10,7 +10,7 @@ use chrono::{TimeZone as _, Utc};
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::backend::{
     ConversationFilter, FsStorageBackend, InMemoryStorageBackend, LoadBackend, LockBackend,
-    NullLockBackend, PersistBackend, SessionBackend,
+    NullLockBackend, PersistBackend, Projection, SessionBackend,
 };
 
 fn test_id(secs: i64) -> ConversationId {
@@ -30,7 +30,7 @@ macro_rules! with_backends {
                 let $b: Arc<dyn BackendBundle> = Arc::new(
                     FsStorageBackend::new(dir.path())
                         .unwrap()
-                        .with_user_storage(dir.path(), "test", "parity")
+                        .with_user_storage(dir.path(), None, "parity")
                         .unwrap(),
                 );
                 $body
@@ -57,7 +57,7 @@ with_backends!(write_then_load_metadata, |b| {
     };
     let events = ConversationStream::new_test();
 
-    b.write(&id, &meta, &events).unwrap();
+    b.write(&id, &meta, &events, Projection::Projected).unwrap();
 
     let loaded = b.load_conversation_metadata(&id).unwrap();
     assert_eq!(loaded.title.as_deref(), Some("hello"));
@@ -68,7 +68,7 @@ with_backends!(write_then_load_stream, |b| {
     let meta = Conversation::default();
     let events = ConversationStream::new_test();
 
-    b.write(&id, &meta, &events).unwrap();
+    b.write(&id, &meta, &events, Projection::Projected).unwrap();
 
     let loaded = b.load_conversation_stream(&id).unwrap();
     assert!(loaded.is_empty());
@@ -80,6 +80,7 @@ with_backends!(remove_then_load_fails, |b| {
         &id,
         &Conversation::default(),
         &ConversationStream::new_test(),
+        Projection::Projected,
     )
     .unwrap();
 
@@ -119,12 +120,14 @@ with_backends!(load_ids_returns_written, |b| {
         &id2,
         &Conversation::default(),
         &ConversationStream::new_test(),
+        Projection::Projected,
     )
     .unwrap();
     b.write(
         &id1,
         &Conversation::default(),
         &ConversationStream::new_test(),
+        Projection::Projected,
     )
     .unwrap();
 
@@ -140,6 +143,7 @@ with_backends!(archive_and_unarchive, |b| {
         &id,
         &Conversation::default(),
         &ConversationStream::new_test(),
+        Projection::Projected,
     )
     .unwrap();
 
@@ -200,6 +204,7 @@ with_backends!(archived_metadata_loadable_after_archive, |b| {
         &id,
         &Conversation::default(),
         &ConversationStream::new_test(),
+        Projection::Projected,
     )
     .unwrap();
 
@@ -216,6 +221,7 @@ with_backends!(load_expired_none_when_no_expiry, |b| {
         &id,
         &Conversation::default(),
         &ConversationStream::new_test(),
+        Projection::Projected,
     )
     .unwrap();
 
@@ -228,8 +234,13 @@ with_backends!(load_expired_returns_past, |b| {
     let past = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
     let meta = Conversation::default().with_ephemeral(Some(past));
 
-    b.write(&id, &meta, &ConversationStream::new_test())
-        .unwrap();
+    b.write(
+        &id,
+        &meta,
+        &ConversationStream::new_test(),
+        Projection::Projected,
+    )
+    .unwrap();
 
     let expired = b.load_expired_conversation_ids(Utc::now());
     assert_eq!(expired.len(), 1);
@@ -241,8 +252,13 @@ with_backends!(load_expired_skips_future, |b| {
     let future = Utc::now() + chrono::Duration::hours(1);
     let meta = Conversation::default().with_ephemeral(Some(future));
 
-    b.write(&id, &meta, &ConversationStream::new_test())
-        .unwrap();
+    b.write(
+        &id,
+        &meta,
+        &ConversationStream::new_test(),
+        Projection::Projected,
+    )
+    .unwrap();
 
     let expired = b.load_expired_conversation_ids(Utc::now());
     assert!(expired.is_empty());

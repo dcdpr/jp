@@ -277,8 +277,8 @@ fn source_ids(
     if sub_filter.archived {
         return workspace
             .archived_conversations()
-            .filter(|(_id, c)| !sub_filter.pinned || c.is_pinned())
-            .map(|(id, _)| id)
+            .filter(|(_id, c, _)| !sub_filter.pinned || c.is_pinned())
+            .map(|(id, _, _)| id)
             .collect();
     }
 

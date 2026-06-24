@@ -100,23 +100,43 @@ storage; all conversations are workspace-only.
 ### Shared User-Local Storage
 
 Today, user-local storage is keyed by both the worktree directory name and
-workspace ID: `~/.local/share/jp/workspace/<name>-<id>/`.
+workspace ID: `~/.local/share/jp/workspace/<name>-<id>/`, looked up by exact
+name.
 This means each worktree gets its own user-local silo, and removing a worktree
 orphans its silo.
 
-This RFD changes the user-local path to be keyed by workspace ID only:
+This RFD keys user-local storage on the workspace ID, while keeping a
+human-recognizable directory name:
 
 ```
-~/.local/share/jp/workspace/<workspace-id>/conversations/
+~/.local/share/jp/workspace/<slug>-<id>/conversations/
 ```
 
-All worktrees for the same repository share a single user-local store.
-This aligns with [RFD 020], which already places session mappings and locks at
-`~/.local/share/jp/workspace/<workspace-id>/`.
+The silo is *located* by ID suffix, never by exact name: JP scans
+`~/.local/share/jp/workspace/` for a directory named `<id>` or ending in
+`-<id>`.
+Because a workspace ID is a fixed-length `[0-9a-z]` string (it never contains
+`-`), the suffix match is unambiguous.
+All worktrees and clones for the same repository therefore share the single silo
+that already exists, regardless of the directory each was cloned into.
+This aligns with [RFD 020], which already places session mappings and locks
+under the same per-workspace directory.
 
-The `with_user_storage` method on `Storage` drops the `name` parameter.
-The rename-on-mismatch logic in `with_user_storage` is replaced by a one-time
-migration that moves existing `<name>-<id>` directories to `<id>`.
+`<slug>` names a *newly created* silo only, so the user can recognize it among
+sibling directories.
+It is the workspace directory name (a clone into `~/code/my-project` yields
+`my-project-<id>`), is never validated, and may be absent — an absent or empty
+slug yields a bare `<id>` directory.
+Once a silo exists it is **never renamed**: a later clone with a different
+directory name reuses the existing silo as-is rather than re-slugging it.
+
+The `with_user_storage` method on `Storage` takes the optional slug alongside
+the ID.
+The rename-on-mismatch logic is replaced by a one-time migration that folds any
+sibling silos for the workspace into the chosen one.
+When several already exist (legacy `<name>-<id>` per-worktree directories), the
+silo matching the current slug wins, else the most recently modified; the winner
+is never renamed and the rest are merged in.
 
 The same migration imports existing workspace conversations into the shared
 user-local store.
@@ -302,30 +322,16 @@ The rule keeps git-visible editing as the common path:
   conversation is imported.
 
 For the JP-managed editor commands (`jp conversation edit --events` /
-`--metadata` / `--base-config`), JP reloads the edited file after the editor
-exits and persists the conversation before the command returns, synchronizing
-the projected copy immediately — a command named `edit` should leave both
-copies consistent, not defer the sync.
+`--metadata` / `--base-config`), JP validates the edit after the editor exits by
+loading it back exactly as the next startup would.
+A valid edit is synchronized from the edited workspace copy to the durable
+user-local copy immediately — byte-for-byte, preserving the user's exact
+content — so both copies stay consistent rather than deferring the sync.
+An edit that fails to load is never committed: JP prints the error and asks
+whether to re-open the editor to fix it or discard the edit (restoring the
+original files); a non-interactive run discards it with an error.
 Manual edits made outside JP are reconciled lazily on the next load by the
 stream/metadata mtime rules below.
-
-### Conversation Origin
-
-When JP creates a conversation, it stores the worktree directory name as an
-`origin` field in the conversation metadata.
-This is purely informational — it has no behavioral impact — but provides
-context in `jp conversation ls` for identifying which worktree a conversation
-came from, especially when viewing conversations that were created in a worktree
-that no longer exists.
-
-```json
-{
-  "origin": "feature-a",
-  "last_activated_at": "2025-07-20T10:00:00.000Z"
-}
-```
-
-The `origin` field is set once at creation time and never updated.
 
 ### Manual Editing and Conflict Resolution
 
@@ -358,8 +364,10 @@ Whichever copy is newer in each unit is the version JP loads into memory.
 If the two mtimes are equal, user-local wins: with no evidence the workspace
 projection is newer, the durable copy stays authoritative.
 
-On persist, JP writes to both locations, bringing them back into sync.
-After a successful persist, both copies are identical with fresh mtimes.
+On persist, JP writes to both locations, bringing their content back into sync.
+The write is idempotent: a file is rewritten (and its mtime bumped) only when
+its serialized bytes differ, so after a successful persist both copies hold
+identical content, and unchanged files keep their existing mtimes.
 
 The full load-persist cycle:
 
@@ -380,8 +388,8 @@ This means a user can edit either copy between JP runs:
 - Edit `.jp/conversations/<id>/events.json` in the workspace (the common case —
   the file is right there in the project directory, visible in the editor's file
   tree).
-- Edit `~/.local/share/jp/workspace/<id>/conversations/<id>/events.json` in
-  user-local (less common, but works the same way).
+- Edit `~/.local/share/jp/workspace/<slug>-<id>/conversations/<id>/events.json`
+  in user-local (less common, but works the same way).
 
 In both cases, JP picks up the edit on the next run and propagates it to the
 other copy on persist.
@@ -413,9 +421,8 @@ This happens when another contributor commits a conversation to git and you pull
 it.
 
 These conversations have `StoragePresence::WorkspaceOnly`.
-They are shown in `jp conversation ls` with a distinct indicator (e.g., `origin:
-<their-worktree-name>` from the stored metadata, or simply the absence of a
-user-local copy).
+They are shown in `jp conversation ls` with a distinct indicator marking the
+absence of a user-local copy.
 
 A workspace-only conversation is **imported** into user-local (copied workspace
 → user-local) on the first operation that mutates it for continued use, after
@@ -571,16 +578,25 @@ adding durability.
 
 ### Migration of existing user-local directories
 
-Renaming `<name>-<id>` directories to `<id>` needs to handle the case where
-multiple worktrees have already created separate user-local directories (e.g.,
+Collapsing sibling silos into one needs to handle the case where multiple
+worktrees have already created separate user-local directories (e.g.,
 `main-otvo8` and `feature-a-otvo8`).
-The migration must merge their contents without losing conversations.
+JP picks one survivor — the slug match if present, else the most recently
+modified — and merges the others into it without renaming the survivor or
+losing conversations.
 If two directories contain a conversation with the same ID (unlikely but
 possible if both worktrees were used concurrently), the most recently modified
 copy should win.
-The workspace-to-user-local import is non-destructive and idempotent: it only
-copies conversations missing from user-local and never deletes the workspace
-copy, so an interrupted migration is safe to re-run.
+The workspace-to-user-local import is non-destructive — it only copies
+conversations missing from user-local and never deletes the workspace copy, so
+no data is ever lost.
+The eager import runs once, gated on the user-local `<id>` directory not yet
+existing.
+If it fails partway after creating that directory, a later startup skips the
+remaining eager import: the conversations it missed keep
+`StoragePresence::WorkspaceOnly` and are imported lazily on their first write —
+the same path conversations committed by other contributors take after
+migration.
 
 ### Workspace copy freshness
 
@@ -623,12 +639,15 @@ same conversation the existing single-root loader would surface duplicate IDs.
 
 ### Phase 1: Shared User-Local Storage
 
-Change the user-local storage path from `<name>-<id>` to `<id>`.
-Add migration logic to merge existing per-worktree user-local directories.
+Locate the user-local silo by workspace-ID suffix and name a newly created one
+`<slug>-<id>` (slug optional; bare `<id>` when absent).
+Add migration logic to fold existing per-worktree user-local directories into
+the chosen silo, preferring the slug match else the most recently modified, and
+never renaming the survivor.
 Import existing workspace conversations (active and archive partitions) into
 user-local storage so pre-RFD workspace-only conversations become durable before
 dual-write is enabled.
-Update `with_user_storage` to drop the `name` parameter.
+Update `with_user_storage` to take the optional slug alongside the ID.
 
 Depends on: nothing.
 
@@ -714,13 +733,6 @@ Depends on: the phases under test.
 
 Update `docs/architecture/ubiquitous-language.md` with a "Workspace Projection"
 entry when this RFD is implemented.
-
-### Independent: Conversation Origin Metadata
-
-Add the `origin` field to `Conversation`, populated from the worktree directory
-name at creation time, and surface it in `jp conversation ls` and `jp
-conversation show`.
-Independent of the storage changes; can land any time.
 
 ## References
 

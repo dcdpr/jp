@@ -25,6 +25,75 @@ fn workspace_with_fs(root: impl Into<Utf8PathBuf>, fs: &FsStorageBackend) -> Wor
 }
 
 #[test]
+fn conversation_presence_reflects_creation_intent() {
+    let mut ws = Workspace::new("root");
+    let config = Arc::new(AppConfig::new_test());
+
+    let projected = ConversationId::try_from(datetime!(2024-07-01 00:00:00 Z)).unwrap();
+    let local = ConversationId::try_from(datetime!(2024-07-02 00:00:00 Z)).unwrap();
+    let unknown = ConversationId::try_from(datetime!(2024-07-03 00:00:00 Z)).unwrap();
+
+    ws.create_conversation_with_id(projected, Conversation::default(), config.clone());
+    ws.create_conversation_with_projection(
+        local,
+        Conversation::default(),
+        config,
+        Projection::LocalOnly,
+    );
+
+    assert_eq!(
+        ws.conversation_presence(&projected),
+        Some(StoragePresence::Projected),
+        "a non-local conversation is projected"
+    );
+    assert_eq!(
+        ws.conversation_presence(&local),
+        Some(StoragePresence::UserLocalOnly),
+        "a --local conversation is user-local only"
+    );
+    assert_eq!(
+        ws.conversation_presence(&unknown),
+        None,
+        "an unknown conversation has no recorded presence"
+    );
+}
+
+#[test]
+fn lock_projection_follows_presence() {
+    let mut ws = Workspace::new("root");
+    let config = Arc::new(AppConfig::new_test());
+
+    let local_id = ConversationId::try_from(datetime!(2024-08-01 00:00:00 Z)).unwrap();
+    let projected_id = ConversationId::try_from(datetime!(2024-08-02 00:00:00 Z)).unwrap();
+
+    ws.create_conversation_with_projection(
+        local_id,
+        Conversation::default(),
+        config.clone(),
+        Projection::LocalOnly,
+    );
+    ws.create_conversation_with_projection(
+        projected_id,
+        Conversation::default(),
+        config,
+        Projection::Projected,
+    );
+
+    let handle = ws.acquire_conversation(&local_id).unwrap();
+    let LockResult::Acquired(local_lock) = ws.lock_conversation(handle, None).unwrap() else {
+        panic!("expected to acquire the lock");
+    };
+    assert_eq!(local_lock.projection(), Projection::LocalOnly);
+    drop(local_lock);
+
+    let handle = ws.acquire_conversation(&projected_id).unwrap();
+    let LockResult::Acquired(projected_lock) = ws.lock_conversation(handle, None).unwrap() else {
+        panic!("expected to acquire the lock");
+    };
+    assert_eq!(projected_lock.projection(), Projection::Projected);
+}
+
+#[test]
 fn test_workspace_find_root() {
     struct TestCase {
         workspace_dir: &'static str,
@@ -402,12 +471,16 @@ fn test_persist_preserves_files_in_user_storage() {
 
     let fs = FsStorageBackend::new(&storage_path)
         .unwrap()
-        .with_user_storage(&user_root, "test-ws", "abc")
+        .with_user_storage(&user_root, None, "abc")
         .unwrap();
     let mut workspace = workspace_with_fs(&root, &fs);
 
-    let conversation = Conversation::default().with_local(true);
-    workspace.create_conversation_with_id(id, conversation, config);
+    workspace.create_conversation_with_projection(
+        id,
+        Conversation::default(),
+        config,
+        Projection::LocalOnly,
+    );
 
     let conv_dir = fs.build_conversation_dir(&id, None, true);
     fs::create_dir_all(&conv_dir).unwrap();
@@ -693,6 +766,55 @@ fn test_unarchive_restores_to_index() {
     assert_eq!(ws.conversations().count(), 1);
 }
 
+/// Regression test: unarchiving a `--local` conversation must not create a
+/// workspace projection, which would leak a private conversation into VCS.
+#[test]
+fn test_unarchive_local_only_stays_out_of_workspace() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage_path = root.join("storage");
+    let user_root = tmp.path().join("user");
+
+    let config = Arc::new(AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2024-07-01 00:00:00 Z)).unwrap();
+
+    let fs = FsStorageBackend::new(&storage_path)
+        .unwrap()
+        .with_user_storage(&user_root, None, "abc")
+        .unwrap();
+    let mut ws = workspace_with_fs(&root, &fs);
+
+    ws.create_conversation_with_projection(
+        id,
+        Conversation::default(),
+        config,
+        Projection::LocalOnly,
+    );
+
+    // Persist the local-only conversation, then archive it.
+    let h = ws.acquire_conversation(&id).unwrap();
+    let mut conv = ws.test_lock(h).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+
+    let h = ws.acquire_conversation(&id).unwrap();
+    ws.archive_conversation(ws.test_lock(h).into_mut());
+
+    ws.unarchive_conversation(&id).unwrap();
+
+    let workspace_copy = fs.build_conversation_dir(&id, None, false);
+    assert!(
+        !workspace_copy.exists(),
+        "a local-only conversation must not be projected into the workspace on unarchive"
+    );
+    assert_eq!(
+        ws.conversation_presence(&id),
+        Some(StoragePresence::UserLocalOnly),
+        "an unarchived local-only conversation stays user-local"
+    );
+}
+
 #[test]
 fn test_unarchive_clears_archived_at() {
     let tmp = tempdir().unwrap();
@@ -774,8 +896,8 @@ fn test_archived_keyword_resolves_most_recently_archived() {
 
     let most_recent = archived
         .iter()
-        .max_by_key(|(_, c)| c.archived_at)
-        .map(|(id, _)| *id)
+        .max_by_key(|(_, c, _)| c.archived_at)
+        .map(|(id, _, _)| *id)
         .unwrap();
     assert_eq!(most_recent, id2);
 }

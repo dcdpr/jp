@@ -4,6 +4,7 @@ use std::{
 };
 
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use jp_storage::backend::StoragePresence;
 use parking_lot::RwLock;
 
 /// The entire in-memory workspace state.
@@ -24,4 +25,10 @@ pub(super) struct State {
 
     /// Event streams for all conversations.
     pub(super) events: HashMap<ConversationId, OnceLock<Arc<RwLock<ConversationStream>>>>,
+
+    /// Which storage roots hold each conversation.
+    ///
+    /// Populated from the cross-root index load and a conversation's creation
+    /// intent.
+    pub(super) presence: HashMap<ConversationId, StoragePresence>,
 }

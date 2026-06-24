@@ -98,3 +98,10 @@ fn display_width_ignores_osc8_hyperlinks() {
     let linked = hyperlink("jp://show-metadata/abc", "abc");
     assert_eq!(display_width(&linked), 3);
 }
+
+#[test]
+fn local_cell_marks_external_distinctly() {
+    assert_eq!(strip_str(local_cell(false, false)), "N");
+    assert_eq!(strip_str(local_cell(true, false)), "Y");
+    assert_eq!(strip_str(local_cell(false, true)), "ext");
+}

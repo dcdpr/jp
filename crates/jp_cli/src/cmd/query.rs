@@ -97,6 +97,7 @@ use jp_llm::{
     },
 };
 use jp_printer::Printer;
+use jp_storage::backend::Projection;
 use jp_task::task::TitleGeneratorTask;
 use jp_workspace::{ConversationHandle, ConversationLock, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
@@ -388,10 +389,7 @@ impl Query {
 
         let mut mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
 
-        let (conv_title, is_local) = {
-            let m = lock.metadata();
-            (m.title.clone(), m.user)
-        };
+        let conv_title = lock.metadata().title.clone();
 
         // Show conversation identity in the terminal title.
         if ctx.term.is_tty {
@@ -405,17 +403,20 @@ impl Query {
                     .root()
                     .join(cid.to_dirname(conv_title.as_deref()))
             },
-            |fs| fs.build_conversation_dir(&cid, conv_title.as_deref(), is_local),
+            // The query draft is a transient editor scratch file, so it is
+            // written to durable user-local storage (`user = true`) and never
+            // projected into the committed workspace tree.
+            |fs| fs.build_conversation_dir(&cid, conv_title.as_deref(), true),
         );
 
-        let (query_file, mut editor_provided_config, chat_request) = lock
+        let (query_from_editor, mut editor_provided_config, chat_request) = lock
             .as_mut()
             .update_events(|stream| self.build_conversation(stream, &cfg, &conversation_path))?;
 
         let Some(mut chat_request) = chat_request else {
             // Empty query, early exit. Auto-persist happens on lock drop.
-            if let Some(path) = query_file.as_deref() {
-                fs::remove_file(path)?;
+            if query_from_editor {
+                cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
             }
             ctx.printer.println("Query is empty, ignoring.");
             return Ok(());
@@ -441,7 +442,7 @@ impl Query {
         // forthcoming assistant response is visually clear. Render this
         // before any post-edit work (MCP init, attachments, tools) so that
         // failures in those stages don't swallow the user's message.
-        if query_file.is_some() {
+        if query_from_editor {
             let mut echo = TurnView::new(
                 ctx.printer.clone(),
                 cfg.style.clone(),
@@ -566,11 +567,12 @@ impl Query {
             }
         }
 
-        // Clean up the query file, unless we got an error.
-        if let Some(path) = query_file
-            && turn_result.is_ok()
-        {
-            fs::remove_file(path)?;
+        // Clean up the query file, unless we got an error. The conversation
+        // directory may have been renamed mid-turn (e.g. a heading-derived
+        // title), so re-resolve the live directories rather than trusting the
+        // path captured before the turn ran.
+        if query_from_editor && turn_result.is_ok() {
+            cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
         }
 
         turn_result
@@ -597,7 +599,7 @@ impl Query {
         stream: &mut ConversationStream,
         config: &AppConfig,
         conversation_root: &Utf8Path,
-    ) -> Result<(Option<Utf8PathBuf>, PartialAppConfig, Option<ChatRequest>)> {
+    ) -> Result<(bool, PartialAppConfig, Option<ChatRequest>)> {
         // If replaying, remove all events up-to-and-including the last
         // `ChatRequest` event, which we'll replay.
         //
@@ -650,7 +652,7 @@ impl Query {
             }
         }
 
-        let (query_file, editor_provided_config) = self.edit_message(
+        let (query_from_editor, editor_provided_config) = self.edit_message(
             &mut chat_request,
             stream,
             !piped.is_empty(),
@@ -677,7 +679,7 @@ impl Query {
         }
 
         Ok((
-            query_file,
+            query_from_editor,
             editor_provided_config,
             (!chat_request.is_empty()).then_some(chat_request),
         ))
@@ -688,9 +690,17 @@ impl Query {
         let cfg = ctx.config();
         let ws = &mut ctx.workspace;
 
-        let conversation = Conversation::default().with_local(self.is_local(&cfg.conversation));
-        let lock =
-            ws.create_and_lock_conversation(conversation, cfg.clone(), ctx.session.as_ref())?;
+        let projection = if self.is_local(&cfg.conversation) {
+            Projection::LocalOnly
+        } else {
+            Projection::Projected
+        };
+        let lock = ws.create_and_lock_conversation_with_projection(
+            Conversation::default(),
+            cfg.clone(),
+            ctx.session.as_ref(),
+            projection,
+        )?;
         let id = lock.id();
 
         if let Some(duration) = self.expires_in_duration() {
@@ -724,7 +734,7 @@ impl Query {
         piped: bool,
         config: &AppConfig,
         conversation_root: &Utf8Path,
-    ) -> Result<(Option<Utf8PathBuf>, PartialAppConfig)> {
+    ) -> Result<(bool, PartialAppConfig)> {
         // If there is no query provided, but the user explicitly requested not
         // to open the editor, we populate the query with a default message,
         // since most LLM providers do not support empty queries.
@@ -752,16 +762,16 @@ impl Query {
             && !self.force_edit()
             && !request.is_empty()
         {
-            return Ok((None, PartialAppConfig::empty()));
+            return Ok((false, PartialAppConfig::empty()));
         }
 
         let editor = match config.editor.command() {
-            None if !request.is_empty() => return Ok((None, PartialAppConfig::empty())),
+            None if !request.is_empty() => return Ok((false, PartialAppConfig::empty())),
             None => return Err(Error::MissingEditor),
             Some(cmd) => cmd,
         };
 
-        let (content, query_file, editor_provided_config) = editor::edit_query(
+        let (content, editor_provided_config) = editor::edit_query(
             config,
             conversation_root,
             stream,
@@ -771,7 +781,7 @@ impl Query {
         )?;
         request.content = content;
 
-        Ok((Some(query_file), editor_provided_config))
+        Ok((true, editor_provided_config))
     }
 
     /// Handle a single turn of conversation with the LLM.
@@ -1742,6 +1752,32 @@ fn load_approval_store(
         .as_deref()
         .map(ApprovalStore::load)
         .unwrap_or_default()
+}
+
+/// Remove the editor's query-message file from a conversation's user-local
+/// storage directory, tolerating its absence.
+///
+/// A title set mid-turn (e.g. from a leading markdown heading) renames the
+/// directory, so the path captured before the turn is stale; re-resolve the
+/// live directory instead.
+/// The draft is written to user-local storage and never projected into the
+/// workspace, so a single root is enough.
+/// Without a filesystem backend or user-local store there is nothing to
+/// resolve.
+fn cleanup_query_message_file(
+    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
+    id: &ConversationId,
+) {
+    let Some(dir) = fs_backend.and_then(|fs| fs.find_user_local_conversation_dir(id)) else {
+        return;
+    };
+
+    let path = dir.join(editor::QUERY_FILENAME);
+    match fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
+        Err(e) => warn!(path = %path, error = %e, "Failed to remove query message file."),
+    }
 }
 
 fn current_dir_utf8() -> BoxedResult<Utf8PathBuf> {

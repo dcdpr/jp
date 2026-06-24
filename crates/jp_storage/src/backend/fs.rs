@@ -15,8 +15,8 @@ use serde_json::Value;
 use tracing::{debug, error};
 
 use super::{
-    ConversationFilter, ConversationLockGuard, LoadBackend, LockBackend, PersistBackend,
-    SanitizeReport, SessionBackend, TrashedConversation,
+    ConversationFilter, ConversationIndexEntry, ConversationLockGuard, LoadBackend, LockBackend,
+    PersistBackend, Projection, SanitizeReport, SessionBackend, TrashedConversation,
 };
 use crate::{
     CONVERSATIONS_DIR, LoadError, Storage, dir_entries,
@@ -46,15 +46,24 @@ impl FsStorageBackend {
         })
     }
 
-    /// Configure user-local storage.
+    /// Configure user-local storage for workspace `id` under `root`.
+    ///
+    /// The silo is located by ID suffix, so every worktree and clone of a
+    /// workspace shares one directory.
+    /// A new silo is named `<slug>-<id>` (or bare `<id>` when `slug` is absent
+    /// or empty); `slug` only ever names a new directory and never renames an
+    /// existing one.
+    /// Runs a one-time migration on first setup that merges sibling silos and
+    /// imports the workspace's conversations so a durable user-local copy
+    /// exists.
     pub fn with_user_storage(
         self,
         root: &Utf8Path,
-        name: impl AsRef<str>,
+        slug: Option<&str>,
         id: impl Into<String>,
     ) -> Result<Self> {
         Ok(Self {
-            storage: self.storage.with_user_storage(root, name, id)?,
+            storage: self.storage.with_user_storage(root, slug, id)?,
         })
     }
 
@@ -142,6 +151,15 @@ impl FsStorageBackend {
         self.storage.find_conversation_dir(id)
     }
 
+    /// Find the conversation directory in the user-local store.
+    ///
+    /// Returns `None` when user-local storage is unconfigured, or when no
+    /// directory there matches the ID.
+    #[must_use]
+    pub fn find_user_local_conversation_dir(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
+        self.storage.find_user_local_conversation_dir(id)
+    }
+
     /// Path to a conversation's `events.json` file, if the directory exists.
     #[must_use]
     pub fn conversation_events_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
@@ -160,6 +178,14 @@ impl FsStorageBackend {
     pub fn conversation_base_config_path(&self, id: &ConversationId) -> Option<Utf8PathBuf> {
         self.storage.conversation_base_config_path(id)
     }
+
+    /// Synchronize a projected conversation's user-local copy from the
+    /// workspace copy after a managed editor command.
+    ///
+    /// A local-only conversation (no workspace copy) is left untouched.
+    pub fn sync_projection(&self, id: &ConversationId) -> Result<()> {
+        self.storage.sync_projection(id)
+    }
 }
 
 impl PersistBackend for FsStorageBackend {
@@ -168,8 +194,10 @@ impl PersistBackend for FsStorageBackend {
         id: &ConversationId,
         metadata: &Conversation,
         events: &ConversationStream,
+        projection: Projection,
     ) -> Result<()> {
-        self.storage.persist_conversation(id, metadata, events)
+        self.storage
+            .persist_conversation(id, metadata, events, projection)
     }
 
     fn remove(&self, id: &ConversationId) -> Result<()> {
@@ -186,12 +214,8 @@ impl PersistBackend for FsStorageBackend {
 }
 
 impl LoadBackend for FsStorageBackend {
-    fn load_conversation_ids(&self, filter: ConversationFilter) -> Vec<ConversationId> {
-        if filter.archived {
-            self.storage.load_archived_conversation_ids()
-        } else {
-            self.storage.load_all_conversation_ids()
-        }
+    fn load_conversation_index(&self, filter: ConversationFilter) -> Vec<ConversationIndexEntry> {
+        self.storage.load_conversation_index(filter)
     }
 
     fn load_conversation_metadata(
@@ -239,6 +263,10 @@ impl LoadBackend for FsStorageBackend {
                 .collect();
             expired.extend(ids);
         }
+        // A projected conversation is found in both roots; collapse the
+        // duplicates so callers remove it once.
+        expired.sort();
+        expired.dedup();
         expired
     }
 

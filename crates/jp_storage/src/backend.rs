@@ -19,9 +19,12 @@ mod persist;
 mod session;
 
 pub use fs::FsStorageBackend;
-pub use load::{ConversationFilter, LoadBackend, SanitizeReport, TrashedConversation};
+pub use load::{
+    ConversationFilter, ConversationIndexEntry, LoadBackend, SanitizeReport, StoragePresence,
+    TrashedConversation,
+};
 pub use lock::{ConversationLockGuard, LockBackend};
 pub use memory::InMemoryStorageBackend;
 pub use null::{NoopLockGuard, NullLockBackend, NullPersistBackend};
-pub use persist::PersistBackend;
+pub use persist::{PersistBackend, Projection};
 pub use session::SessionBackend;
