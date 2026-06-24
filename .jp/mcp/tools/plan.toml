@@ -1,0 +1,71 @@
+[conversation.tools.plan]
+enable = true # always enabled by default, could perhaps be done via a skill, but seems overkill
+run = "unattended"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Create and step through an ordered checklist while working a multi-step task."
+description = """
+A lightweight, ordered checklist you maintain while working through a multi-step
+task.
+
+A plan is a named list of tasks with a single in-progress marker: tasks before
+it are done, the marked task is in progress, and the rest are pending. Create
+the plan up front, then drive it forward as you finish each step. The full
+checklist is returned after every call so both you and the user can track
+progress.
+
+Create the whole list in one call — there is no per-task editing. Re-creating a
+plan with the same name replaces it. Plans are stored per conversation, so the
+same name can be advanced or rewound across messages within the conversation.
+
+Use a plan for genuinely multi-step work; a single obvious step does not need
+one.
+"""
+
+examples = """
+Create a plan (the first task starts in progress):
+```json
+{"action": "create", "name": "refactor-config", "tasks": ["Extract the loader", "Add tests", \
+"Update docs"]}
+```
+
+Finish the current task and start the next:
+```json
+{"action": "next", "name": "refactor-config"}
+```
+
+Re-open the previously completed task:
+```json
+{"action": "prev", "name": "refactor-config"}
+```
+"""
+
+[conversation.tools.plan.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.plan.parameters.action]
+type = "string"
+required = true
+summary = "The action to perform on the plan."
+enum = ["create", "next", "prev"]
+description = """
+- `create`: Create a new plan (or replace an existing one of the same name),
+  with the first task in progress.
+- `next`: Mark the in-progress task complete and start the next one.
+- `prev`: Re-open the previously completed task. Reversing past the first task
+  discards the plan.
+"""
+
+[conversation.tools.plan.parameters.name]
+type = "string"
+required = true
+summary = "Identifier for the plan. Reuse the same name across calls to advance or rewind it."
+description = "May contain only letters, digits, spaces, hyphens, and underscores."
+
+[conversation.tools.plan.parameters.tasks]
+type = "array"
+items.type = "string"
+required = false
+summary = "Ordered task descriptions. Required for the `create` action; ignored by `next` and `prev`."
