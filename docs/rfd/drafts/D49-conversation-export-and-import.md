@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-12
-- **Requires**: [RFD 031], [RFD D46]
+- **Requires**: [RFD 031], [RFD 087]
 
 ## Summary
 
@@ -143,9 +143,9 @@ resolved *after* the move can break.
 
 ### Interaction with workspace targeting
 
-`-w <id>` resolution follows [RFD D46]: a piped import is non-interactive (stdin
+`-w <id>` resolution follows [RFD 087]: a piped import is non-interactive (stdin
 carries data, not answers), so a workspace ID with multiple live checkouts is an
-error listing the roots, per D46's non-interactive rule.
+error listing the roots, per 087's non-interactive rule.
 Scripts that need determinism should pass a workspace path.
 Import never prompts on stdin; any future interaction goes through the terminal
 channels per [RFD 048].
@@ -237,7 +237,7 @@ user-local adoption of `ext` conversations.
   Validation-before-write requires buffering parsed envelopes; for v1 the
   conversation sizes involved make this acceptable.
 - **Sequencing.** This RFD is gated on [RFD 031] (write path, `Projection`,
-  `load_conversation_index`) and [RFD D46] (robust `-w <id>` resolution).
+  `load_conversation_index`) and [RFD 087] (robust `-w <id>` resolution).
   Both gates are enforced by the RFD dependency mechanism.
 
 ## Implementation Plan
@@ -254,7 +254,7 @@ Depends on [RFD 031] for `StoragePresence`.
 Stdin parsing, version check, collision check via `load_conversation_index`,
 writes via `PersistBackend::write` with the envelope's projection, unknown-tool
 warnings.
-Depends on Phase 1 for the format and [RFD D46] for `-w <id>` resolution.
+Depends on Phase 1 for the format and [RFD 087] for `-w <id>` resolution.
 
 ### Phase 3: Documentation and glossary
 
@@ -269,9 +269,9 @@ Can merge with Phase 2.
 - [RFD 048]: Four-Channel Output Model — why import never prompts on stdin.
 - [RFD 065]: Typed Resource Model for Attachments — why attachment content
   survives relocation.
-- [RFD D46]: Session-Scoped Active Workspace — `-w <id>` resolution semantics.
+- [RFD 087]: Session-Scoped Active Workspace — `-w <id>` resolution semantics.
 
 [RFD 031]: ../031-durable-conversation-storage-with-workspace-projection.md
 [RFD 048]: ../048-four-channel-output-model.md
 [RFD 065]: ../065-typed-resource-model-for-attachments.md
-[RFD D46]: D46-session-scoped-active-workspace.md
+[RFD 087]: ../087-session-scoped-active-workspace.md

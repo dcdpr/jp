@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-19
-- **Extended by**: [RFD 069]
+- **Extended by**: [RFD 069], [RFD 087]
 
 ## Summary
 
@@ -1156,3 +1156,4 @@ both platforms.
 [RFD 052]: 052-workspace-data-store-sanitization.md
 [RFD 061]: 061-interactive-config.md
 [RFD 069]: 069-guard-scoped-persistence-for-conversations.md
+[RFD 087]: 087-session-scoped-active-workspace.md

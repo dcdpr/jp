@@ -72,7 +72,7 @@ expression: v
           "value": [
             {
               "keep_first": "1",
-              "keep_last": "3",
+              "keep_last": "1",
               "reasoning": "strip",
               "tool_calls": "strip"
             }

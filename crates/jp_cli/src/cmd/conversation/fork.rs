@@ -137,7 +137,9 @@ impl Fork {
                     &rules,
                     super::compact::Bound::Default,
                     super::compact::Bound::Default,
-                    &ctx.printer,
+                    // Compaction during a fork is an implicit adjunct; only an
+                    // explicit `jp c compact` reports compaction details.
+                    None,
                 )
                 .await?;
                 for compaction in compactions {

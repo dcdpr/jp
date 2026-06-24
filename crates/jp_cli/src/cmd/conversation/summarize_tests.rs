@@ -42,12 +42,14 @@ fn collects_middle_range_when_range_from_is_nonzero() {
 
 #[test]
 fn collects_default_compaction_range() {
-    // Mirrors the default config: keep_first=1, keep_last=3.
-    // For a 5-turn stream this resolves to the single middle turn (1..=1).
+    // Mirrors the default config: keep_first=1, keep_last=1.
+    // For a 5-turn stream this keeps turn 0 and turn 4, compacting 1..=3.
     let stream = build_stream_with_turns(5);
-    let events = collect_range_events(&stream, 1, 1);
+    let events = collect_range_events(&stream, 1, 3);
 
-    assert_eq!(chat_request_texts(&events), vec!["turn 1"]);
+    assert_eq!(chat_request_texts(&events), vec![
+        "turn 1", "turn 2", "turn 3"
+    ]);
 }
 
 #[test]
