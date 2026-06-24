@@ -1,10 +1,11 @@
 # RFD 031: Durable Conversation Storage with Workspace Projection
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
-- **Required by**: [RFD 046]
+- **Required by**: [RFD 046], [RFD 087]
+- **Tracking Issue**: [\#788]
 
 ## Summary
 
@@ -743,3 +744,5 @@ Independent of the storage changes; can land any time.
 [RFD 069]: 069-guard-scoped-persistence-for-conversations.md
 [RFD 071]: 071-conversation-archiving.md
 [RFD 073]: 073-layered-storage-backend-for-workspaces.md
+[RFD 087]: 087-session-scoped-active-workspace.md
+[\#788]: https://github.com/dcdpr/jp/issues/788
