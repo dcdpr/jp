@@ -2,7 +2,8 @@ pub mod runner;
 pub mod xml;
 
 use jp_tool::Outcome;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
+use serde_json::Value;
 
 use crate::Tool;
 
@@ -53,11 +54,44 @@ pub fn unknown_tool(t: Tool) -> ToolResult {
     Err(format!("Unknown tool '{}'", t.name).into())
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 #[serde(untagged)]
 pub enum OneOrMany<T> {
     One(T),
     Many(Vec<T>),
+}
+
+impl<'de, T> Deserialize<'de> for OneOrMany<T>
+where
+    T: DeserializeOwned,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw<T> {
+            One(T),
+            Many(Vec<T>),
+        }
+
+        let value = Value::deserialize(deserializer)?;
+
+        // LLMs sometimes encode an array argument as a JSON string holding the
+        // array itself (e.g. `"[\"a\", \"b\"]"`). Treat that as the list it
+        // represents rather than a single element containing raw JSON text.
+        if let Value::String(s) = &value
+            && let Ok(items) = serde_json::from_str::<Vec<T>>(s)
+        {
+            return Ok(Self::Many(items));
+        }
+
+        match serde_json::from_value(value).map_err(serde::de::Error::custom)? {
+            Raw::One(v) => Ok(Self::One(v)),
+            Raw::Many(v) => Ok(Self::Many(v)),
+        }
+    }
 }
 
 impl<T> OneOrMany<T> {
