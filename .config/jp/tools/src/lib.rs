@@ -5,6 +5,7 @@ mod debug_jp;
 mod fs;
 mod git;
 mod github;
+mod plan;
 mod unix;
 mod util;
 mod web;
@@ -25,6 +26,7 @@ pub async fn run(ctx: Context, t: Tool) -> util::ToolResult {
         s if s.starts_with("web_") => web::run(ctx, t).await,
         s if s.starts_with("git_") => git::run(ctx, t).await,
         s if s.starts_with("unix_") => unix::run(ctx, t),
+        "plan" => plan::run(ctx, t),
         _ => util::unknown_tool(t),
     }
 }

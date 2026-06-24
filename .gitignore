@@ -1,5 +1,6 @@
 /.jp/**/QUERY_MESSAGE.md
 /.jp/conversations/.trash
+/.jp/mcp/state/
 
 # Rust specific
 **/target
