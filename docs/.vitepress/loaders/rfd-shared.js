@@ -77,19 +77,21 @@ export function buildEntries(dir, files, summaries, basePath) {
     return rfds
 }
 
-// Read the priority board state. This is human-curated source of truth (the
-// client's ordering plus the dev's in-development flags), kept deliberately
-// separate from the regenerable `rfd-summaries.json` cache: clearing the cache
-// must never lose the board. A missing file is an empty board.
+// Read the priority board state. This is human-curated source of truth: the
+// prioritised `order`, the unsorted `backlog` below the cutoff, and the dev's
+// in-development flags. Kept deliberately separate from the regenerable
+// `rfd-summaries.json` cache, so clearing the cache never loses the board. A
+// missing file is an empty board.
 export function loadPriority(path) {
     let raw
     try {
         raw = JSON.parse(readFileSync(path, 'utf-8'))
     } catch {
-        return { order: [], inDevelopment: [] }
+        return { order: [], backlog: [], inDevelopment: [] }
     }
     return {
         order: Array.isArray(raw.order) ? raw.order.map(String) : [],
+        backlog: Array.isArray(raw.backlog) ? raw.backlog.map(String) : [],
         inDevelopment: Array.isArray(raw.in_development)
             ? raw.in_development.map(String)
             : [],
@@ -106,11 +108,12 @@ export const TERMINAL_STATUSES = new Set([
 ])
 
 // Annotate each entry with its board position and in-development flag.
-// `priority` is the index in `order` (lower = higher priority) or `null` when
-// the RFD hasn't been placed yet. Status is left untouched so the view can drop
-// terminal RFDs itself.
+// `priority` is the index in the combined `order` + `backlog` list (lower =
+// higher priority) or `null` when the RFD hasn't been placed yet. Status is left
+// untouched so the view can drop terminal RFDs itself.
 export function mergePriority(entries, priority) {
-    const rank = new Map(priority.order.map((num, i) => [num, i]))
+    const combined = [...priority.order, ...(priority.backlog ?? [])]
+    const rank = new Map(combined.map((num, i) => [num, i]))
     const inDev = new Set(priority.inDevelopment)
     for (const entry of entries) {
         entry.priority = rank.has(entry.num) ? rank.get(entry.num) : null
@@ -137,8 +140,11 @@ export function mergeDependencies(entries, graph) {
 // the view filters them out meanwhile.
 export function checkPriority(entries, priority) {
     const known = new Set(entries.map(e => e.num))
-    const unknown = [...priority.order, ...priority.inDevelopment]
-        .filter(num => !known.has(num))
+    const unknown = [
+        ...priority.order,
+        ...(priority.backlog ?? []),
+        ...priority.inDevelopment,
+    ].filter(num => !known.has(num))
 
     if (unknown.length === 0) return null
 

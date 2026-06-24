@@ -69,6 +69,14 @@ const inDev = ref(new Set(
 
 const statusClass = status => 'rfd-badge--' + (status?.toLowerCase() ?? 'unknown')
 
+// Dev renders the whole list, including the draggable cutoff divider. The
+// production build shows only the prioritised rows above the divider.
+const visibleItems = computed(() => {
+    if (isDev) return items.value
+    const i = items.value.findIndex(e => e.divider)
+    return i === -1 ? items.value : items.value.slice(0, i)
+})
+
 // Dependencies of the hovered (or dragged) RFD, highlighted so its constraints
 // are visible. Set on hover and on drag start; hover updates are ignored while a
 // drag is in progress.
@@ -122,8 +130,16 @@ function firstViolation(order) {
 
 // --- Autosave ---
 async function save() {
+    // Split the combined list at the divider: above it is the prioritised
+    // `order`, below it is the `backlog`. The divider row itself is dropped, so
+    // priority.json only ever holds real RFD ids.
+    const rows = items.value
+    const cut = rows.findIndex(e => e.divider)
+    const above = cut === -1 ? rows : rows.slice(0, cut)
+    const below = cut === -1 ? [] : rows.slice(cut + 1)
     const body = {
-        order: items.value.map(e => e.num),
+        order: above.map(e => e.num),
+        backlog: below.map(e => e.num),
         in_development: [...inDev.value].sort(),
     }
     try {
@@ -144,6 +160,56 @@ function toggleDev(num) {
     if (next.has(num)) next.delete(num)
     else next.add(num)
     inDev.value = next
+    save()
+}
+
+// Briefly highlight a row after a jump, so it's clear where it landed.
+const flashNum = ref(null)
+let flashTimer = null
+function flash(num) {
+    flashNum.value = num
+    if (flashTimer) clearTimeout(flashTimer)
+    flashTimer = setTimeout(() => { flashNum.value = null }, 700)
+}
+
+// Jump a row to the top or bottom of its own section: the prioritised block
+// above the divider, or the backlog below it. Clamped so dependencies stay
+// above the row and dependents stay below it.
+function moveTo(rfd, edge) {
+    const list = items.value.slice()
+    const from = list.indexOf(rfd)
+    if (from === -1) return
+    const cut = list.findIndex(e => e.divider)
+    const inSorted = cut === -1 || from < cut
+
+    list.splice(from, 1)
+    const divider = list.findIndex(e => e.divider)
+    let lo, hi
+    if (divider === -1) { lo = 0; hi = list.length }
+    else if (inSorted) { lo = 0; hi = divider }
+    else { lo = divider + 1; hi = list.length }
+
+    // Dependencies must stay above the row, dependents below it.
+    const deps = new Set(depsOnBoard(rfd.num))
+    let maxDep = -1
+    let minDependent = list.length
+    list.forEach((e, i) => {
+        if (deps.has(e.num)) maxDep = Math.max(maxDep, i)
+        if (depsOnBoard(e.num).includes(rfd.num)) minDependent = Math.min(minDependent, i)
+    })
+
+    let target = edge === 'top' ? Math.max(lo, maxDep + 1) : Math.min(hi, minDependent)
+    target = Math.max(lo, Math.min(target, hi))
+    list.splice(target, 0, rfd)
+
+    const order = list.map(e => e.num)
+    if (order.join('|') === items.value.map(e => e.num).join('|')) return
+    if (firstViolation(order)) {
+        setNotice('Dependencies prevent moving it that far.', 'warn', 3000)
+        return
+    }
+    items.value = list
+    flash(rfd.num)
     save()
 }
 
@@ -224,8 +290,40 @@ function onEnd() {
     save()
 }
 
+// In dev the VitePress data loader caches its result for the server's lifetime,
+// so a refresh would otherwise show stale priorities. Fetch the file fresh on
+// mount and rebuild from it. Production has no endpoint and keeps the build-time
+// data (correct for the static site).
+function applyPriority(p) {
+    const divider = props.entries.find(e => e.divider)
+    if (!divider) return
+    const isActive = e => e && !e.divider && !TERMINAL.has(e.status)
+    const order = (p.order ?? []).map(n => byNum.get(n)).filter(isActive)
+    const placed = new Set(order.map(e => e.num))
+    const backlog = (p.backlog ?? [])
+        .map(n => byNum.get(n))
+        .filter(e => isActive(e) && !placed.has(e.num))
+    backlog.forEach(e => placed.add(e.num))
+    const rest = props.entries
+        .filter(e => isActive(e) && !placed.has(e.num))
+        .sort((a, b) => a.num.localeCompare(b.num))
+    items.value = [...order, divider, ...backlog, ...rest]
+    const dev = new Set(p.in_development ?? [])
+    inDev.value = new Set(
+        items.value.filter(e => !e.divider && dev.has(e.num)).map(e => e.num)
+    )
+}
+
+async function loadFreshPriority() {
+    try {
+        const res = await fetch('/__rfd-priority')
+        if (res.ok) applyPriority(await res.json())
+    } catch { /* keep the build-time data */ }
+}
+
 onMounted(() => {
     if (!isDev) return
+    loadFreshPriority()
     import('sortablejs').then(({ default: Sortable }) => {
         if (!listRef.value) return
         sortable = Sortable.create(listRef.value, {
@@ -236,9 +334,9 @@ onMounted(() => {
             delay: 150,
             delayOnTouchOnly: true,
             touchStartThreshold: 5,
-            // Drag from anywhere on the row, except the link and the dev toggle,
-            // which stay clickable.
-            filter: 'a, input, label',
+            // Drag from anywhere on the row, except the link, dev toggle, and
+            // jump buttons, which stay clickable.
+            filter: 'a, input, label, button',
             preventOnFilter: false,
             ghostClass: 'rfd-board-ghost',
             chosenClass: 'rfd-board-chosen',
@@ -270,32 +368,45 @@ onBeforeUnmount(() => {
 
     <ol ref="listRef" class="rfd-board-list" :class="{ 'is-editable': isDev }">
         <li
-            v-for="rfd in items"
+            v-for="rfd in visibleItems"
             :key="rfd.slug"
             :data-num="rfd.num"
             class="rfd-board-item"
             :class="{
                 'is-dev': inDev.has(rfd.num),
                 'is-required': requiredSet.has(rfd.num),
+                'is-flash': flashNum === rfd.num,
+                'rfd-board-cutoff': rfd.divider,
             }"
             @mouseenter="hover(rfd.num)"
             @mouseleave="unhover()"
         >
-            <span v-if="isDev" class="rfd-board-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
-            <div class="rfd-board-main">
-                <div class="rfd-board-titlerow">
-                    <span class="rfd-board-num">{{ rfd.num }}</span>
-                    <a :href="rfd.path" target="_blank" rel="noopener" class="rfd-board-title">{{ rfd.title }}</a>
-                    <span v-if="inDev.has(rfd.num)" class="rfd-badge rfd-badge--indev">in development</span>
-                    <span class="rfd-badge" :class="statusClass(rfd.status)">{{ rfd.status }}</span>
-                    <span v-if="dragNum && requiredSet.has(rfd.num)" class="rfd-badge rfd-board-reqpill">required by RFD {{ dragNum }}</span>
+            <template v-if="rfd.divider">
+                <span class="rfd-board-cutoff-line"></span>
+                <span class="rfd-board-cutoff-label">unsorted below</span>
+                <span class="rfd-board-cutoff-line"></span>
+            </template>
+            <template v-else>
+                <span v-if="isDev" class="rfd-board-handle" aria-hidden="true" title="Drag to reorder">⠿</span>
+                <div class="rfd-board-main">
+                    <div class="rfd-board-titlerow">
+                        <span class="rfd-board-num">{{ rfd.num }}</span>
+                        <a :href="rfd.path" target="_blank" rel="noopener" class="rfd-board-title">{{ rfd.title }}</a>
+                        <span v-if="inDev.has(rfd.num)" class="rfd-badge rfd-badge--indev">in development</span>
+                        <span class="rfd-badge" :class="statusClass(rfd.status)">{{ rfd.status }}</span>
+                        <span v-if="dragNum && requiredSet.has(rfd.num)" class="rfd-badge rfd-board-reqpill">required by RFD {{ dragNum }}</span>
+                    </div>
+                    <div v-if="rfd.summary" class="rfd-board-summary">{{ rfd.summary }}</div>
                 </div>
-                <div v-if="rfd.summary" class="rfd-board-summary">{{ rfd.summary }}</div>
-            </div>
-            <label v-if="isDev && rfd.status !== 'Draft'" class="rfd-board-devtoggle" title="Mark as in development">
-                <input type="checkbox" :checked="inDev.has(rfd.num)" @change="toggleDev(rfd.num)" />
-                dev
-            </label>
+                <label v-if="isDev && rfd.status !== 'Draft'" class="rfd-board-devtoggle" title="Mark as in development">
+                    <input type="checkbox" :checked="inDev.has(rfd.num)" @change="toggleDev(rfd.num)" />
+                    dev
+                </label>
+                <span v-if="isDev" class="rfd-board-jump">
+                    <button class="rfd-board-jump-btn" title="Move to top of section" @click="moveTo(rfd, 'top')">▲</button>
+                    <button class="rfd-board-jump-btn" title="Move to bottom of section" @click="moveTo(rfd, 'bottom')">▼</button>
+                </span>
+            </template>
         </li>
     </ol>
 </div>
@@ -326,6 +437,7 @@ onBeforeUnmount(() => {
 .rfd-board-list.is-editable .rfd-board-item { cursor: grab; }
 .rfd-board-list.is-editable .rfd-board-item:active { cursor: grabbing; }
 .rfd-board-item {
+    position: relative;
     display: flex;
     align-items: flex-start;
     gap: 0.6rem;
@@ -344,6 +456,26 @@ onBeforeUnmount(() => {
 .rfd-board-item.is-required {
     background-color: color-mix(in srgb, var(--vp-c-brand-1) 10%, var(--vp-c-bg-soft));
 }
+.rfd-board-item.rfd-board-cutoff {
+    border: none;
+    background: none;
+    padding: 0.15rem 0.75rem;
+    margin: 0.5rem 0;
+    align-items: center;
+    gap: 0.5rem;
+}
+.rfd-board-cutoff-line {
+    flex: 1;
+    height: 0;
+    border-top: 1px dashed var(--vp-c-divider);
+}
+.rfd-board-cutoff-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--vp-c-text-3);
+    white-space: nowrap;
+}
 .rfd-board-handle {
     align-self: stretch;
     display: flex;
@@ -361,6 +493,48 @@ onBeforeUnmount(() => {
 .rfd-board-handle:active { cursor: grabbing; }
 .rfd-board-item.is-dev .rfd-board-handle { color: #0d9488; }
 .rfd-board-item.is-required .rfd-board-handle { color: var(--vp-c-brand-1); }
+/* One-click jumps to the top/bottom of the row's section. Positioned in the
+   margin to the left of the row, outside its box, revealed on hover.
+   `padding-right` bridges the gap to the row so the hover stays contiguous as
+   the cursor moves onto the arrows. */
+.rfd-board-jump {
+    position: absolute;
+    right: 100%;
+    top: 0;
+    bottom: 0;
+    /* Wide box for an easy hover target; the arrows stay right-aligned so they
+       sit close to the row, with padding-right as the gap. */
+    width: 2.5rem;
+    padding-right: 0.4rem;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    gap: 1px;
+    opacity: 0;
+    transition: opacity 0.12s;
+}
+.rfd-board-item:hover .rfd-board-jump,
+.rfd-board-jump:hover {
+    opacity: 1;
+}
+.rfd-board-jump-btn {
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0;
+    line-height: 1;
+    font-size: 0.7rem;
+    color: var(--vp-c-text-3);
+    cursor: pointer;
+}
+.rfd-board-jump-btn:hover { color: var(--vp-c-brand-1); }
+@keyframes rfd-board-flash {
+    from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--vp-c-brand-1) 60%, transparent); }
+    to { box-shadow: 0 0 0 3px transparent; }
+}
+.rfd-board-item.is-flash { animation: rfd-board-flash 0.7s ease; }
 .rfd-board-reqpill {
     background: color-mix(in srgb, var(--vp-c-brand-1) 20%, transparent);
     color: var(--vp-c-brand-1);
