@@ -39,59 +39,59 @@ The final result is the **base partial** for the invocation.
 Source order (earlier sources are merged first; later sources override):
 
 1. **User-global config**
-   
+
    - Linux: `~/.config/jp/config.{ext}` (respects `$XDG_CONFIG_HOME`)
    - macOS: `~/Library/Application Support/jp/config.{ext}`
    - Windows: `%APPDATA%\jp\config\config.{ext}`
-   
+
    The containing directory can be overridden via the `JP_GLOBAL_CONFIG_DIR` env
    var (tilde-expanded); `config.{ext}` is then loaded from that directory
    instead of the platform default.
-   
+
    File extensions are tried in order; if no `config.{ext}` exists in the
    directory, JP silently proceeds without a user-global config.
-   
+
    Shared across all workspaces on the machine.
    Typical use: personal defaults, default model, preferred providers.
-   
+
    The same directory also serves as the user-global search root for deferred
    loading (see [Implicit loading vs. deferred
    loading](#implicit-loading-vs-deferred-loading)), so overriding the env var
    affects both mechanisms consistently.
 
 2. **Workspace config**
-   
+
    `<workspace-root>/.jp/config.{ext}`
-   
+
    Commonly committed to version control alongside the project.
    Typical use: team-shared defaults, project-specific tools, code instructions.
 
 3. **CWD overrides**
-   
+
    `<cwd>/.jp.{ext}`, searched recursively from the current working directory up
    to the workspace root.
    Each directory's file is merged; **deeper directories override shallower
    ones**.
-   
+
    Typical use: subdirectory-scoped overrides in a monorepo.
    For example, the workspace might have `.jp.toml` at the repository root with
    broadly applicable settings, and a sub-directory like `backend/.jp.toml` with
    backend-specific overrides.
    Running `jp` from within `backend/` applies both, with `backend/.jp.toml`
    taking precedence over the root file.
-   
+
    Note the different file naming: CWD config is `.jp.{ext}` (a dotfile at the
    directory level), not `.jp/config.{ext}`.
 
 4. **User-workspace config**
-   
+
    `<user-data-dir>/workspace/<workspace-name>-<workspace-id>/config.{ext}`,
    where `<user-data-dir>` is the platform's user data directory:
-   
+
    - Linux: `~/.local/share/jp/` (respects `$XDG_DATA_HOME`)
    - macOS: `~/Library/Application Support/jp/`
    - Windows: `%LOCALAPPDATA%\jp\data\`
-   
+
    Per-workspace, per-user, not committed.
    Typical use: personal overrides a user wants applied only to a specific
    workspace without modifying the shared workspace config.

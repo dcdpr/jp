@@ -306,7 +306,7 @@ jp dev rfd D32 draft
 
 - **Behavior**: the assistant follows a two-stage confirmation process for each
   section:
-  
+
   1. **State intent.** The assistant announces which section it will write next,
      describes its plan (what points it will cover, how it will frame them, what
      it is deliberately excluding), and waits for approval.
@@ -450,7 +450,7 @@ Two operations in sequence:
 
 1. **Plan extraction.** Spawns a `jp` conversation with structured output.
    The RFD's Implementation Plan section is parsed into a JSON array of phases:
-   
+
    ```json
    [
      {
@@ -467,7 +467,7 @@ Two operations in sequence:
      }
    ]
    ```
-   
+
    The schema constrains the output.
    The model reads the RFD and extracts whatever phases the author defined in
    the Implementation Plan section.

@@ -240,7 +240,7 @@ Depends on [RFD 056] (group configuration defaults).
 
 4. Update accessor methods to resolve through the full chain.
    Overrides take priority over tool config:
-   
+
    ```rust
    pub fn run(&self) -> RunMode {
        // Overrides win over tool config

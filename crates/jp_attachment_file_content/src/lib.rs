@@ -296,7 +296,7 @@ fn build_attachment(path: &Utf8Path, cwd: &Utf8Path) -> Option<Attachment> {
 ///
 /// - A file URI is \*almost always absolute, but there's also a way to make it
 ///   relative:
-///   
+///
 ///   - <file:path/to/file.txt> -\> absolute
 ///   - <file:/path/to/file.txt> -\> absolute
 ///   - <file://path/to/file.txt> -\> relative (host is `path`)

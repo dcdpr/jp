@@ -7,13 +7,13 @@
 
 > [!IMPORTANT]
 > This RFD is **Abandoned**.
-> 
+>
 > Superseded by [RFD 027: Client-Server Query Architecture][RFD 027], which
 > unifies detached execution, live attachment, and foreground queries under a
 > single client-server model.
 > The process registry and `queue` policy from this RFD are carried forward into
 > RFD 027 (the `queue` policy is renamed to `defer`).
-> 
+>
 > The original text below is preserved for historical context.
 
 ## Summary

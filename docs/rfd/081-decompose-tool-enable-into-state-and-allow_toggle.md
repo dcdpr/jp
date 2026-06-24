@@ -313,14 +313,14 @@ Both produce the same filled `Enable` for the same `(tool, defaults)` pair.
 
 1. **Final-config seam** — for consumers operating on a built `AppConfig`
    (`tool_definitions()`, `Ctx::configure_active_mcp_servers`):
-   
+
    ```rust
    impl ToolConfigWithDefaults {
        pub fn effective_enable(&self) -> Enable;
        pub fn is_enabled(&self) -> bool;
    }
    ```
-   
+
    Both run the per-field fallback above against the stored `EnableConfig`s in
    `self.tool` and `self.defaults`.
    `is_enabled()` is the convenience wrapper for `effective_enable().state` and
@@ -329,13 +329,13 @@ Both produce the same filled `Enable` for the same `(tool, defaults)` pair.
 2. **Partial-config seam** — for CLI directive consumers operating on
    `PartialAppConfig` *before* `from_partial_with_defaults` runs
    (`apply_enable_tools`, `apply_tool_use`):
-   
+
    ```rust
    impl PartialEnableConfig {
        pub fn effective(&self, defaults: &PartialEnableConfig) -> Enable;
    }
    ```
-   
+
    The CLI path reads the per-tool partial at
    `partial.conversation.tools.tools.<name>.enable` and the defaults partial at
    `partial.conversation.tools.defaults.enable`, then calls `effective` to

@@ -55,7 +55,7 @@ Grammar and formatting matter less than clarity of thought.
 > explication, and explicit questions without any attempted answers are all
 > acceptable.
 > The minimum length for a note is one sentence."
-> 
+>
 > — [RFC 3], Steve Crocker, 1969
 
 ### Opinionated with options

@@ -225,7 +225,7 @@ pub struct ConfigDelta {
   This ordering gives revert deltas Replace-equivalent semantics for custom
   merge types without needing per-type handling (see [Revert semantics for
   custom merge types](#revert-semantics-for-custom-merge-types)).
-  
+
   Implementation: add an `unset(path: &str)` method to `PartialAppConfig` (and
   nested partial types) that mirrors the existing `AssignKeyValue` dispatch but
   sets the target field to `None` instead of assigning a value.
@@ -241,7 +241,7 @@ pub struct ConfigDelta {
 
 - **`claims`**: field path → list of `"HASH:LABEL"` entries.
   Three states distinguish:
-  
+
   - **Field absent from the map** — no provenance (this delta didn't claim the
     field).
   - **Field present with an empty `Vec`** — explicitly unclaimed, reserved for
@@ -590,7 +590,7 @@ JSON-object `-C` is just a fan-out into multiple kv reverts.
 #### File-based revert: `-C <source>`
 
 1. **Compute the target identity set.**
-   
+
    - Resolve `<source>` via `config_load_paths` across roots ([RFD 035]) to one
      or more candidate paths (existing or not).
    - For each candidate, compute every applicable identity hash:
@@ -609,13 +609,13 @@ JSON-object `-C` is just a fan-out into multiple kv reverts.
 
 2. **Determine field scope from the current claims state** (built per [Current
    claims state](#current-claims-state), including env unclaims).
-   
+
    Scope is `{field | claims_state[field] has any identity in target_set}`.
    Purely claim-history driven — the source's current file contents are never
    consulted for scope.
-   
+
    Claims state entries:
-   
+
    - **Non-empty `Vec`** with any entry whose hash is in the target set →
      **target owns it**, include in scope.
    - **Non-empty `Vec`** with no entry in the target set → **another source

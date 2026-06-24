@@ -275,7 +275,7 @@ At render time, the effective style for each element is composed in this order:
 
 3. **User overrides.** Values set in the `MarkdownStyleSheet` passed via
    `Formatter::style_sheet(...)`.
-   
+
    `Inherit` overrides (both `ColorOverride::Inherit` and `Intensity::Inherit`)
    are an explicit short-circuit: they bypass steps 1 and 2 for the affected
    field, suppressing the theme-derived default and the renderer baseline

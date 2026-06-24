@@ -261,14 +261,14 @@ The task performs the following steps inside `run()`:
 2. For each conversation, load metadata via
    `LoadBackend::load_conversation_metadata` to get `title`,
    `title_generated_at_turn`, `last_activated_at`, and `turn_count`.
-   
+
    `load_conversation_metadata` already calls the lightweight
    `load_count_and_timestamp_events` to populate `events_count` and
    `last_event_at` from `events.json`.
    This function is extended to also deserialize the `type` field and count
    `turn_start` events, populating a new `turn_count` field on `Conversation`.
    The extension adds one field to the internal `RawEvent` struct:
-   
+
    ```rust
    #[derive(serde::Deserialize)]
    struct RawEvent {
@@ -277,7 +277,7 @@ The task performs the following steps inside `run()`:
        event_type: Box<serde_json::value::RawValue>,
    }
    ```
-   
+
    A `turn_start` event is counted when `event_type.get()` equals
    `"\"turn_start\""`.
    This avoids a second pass over `events.json`.
@@ -285,7 +285,7 @@ The task performs the following steps inside `run()`:
 3. Skip the active conversation (it is being actively worked on).
 
 4. Compute eligibility:
-   
+
    - `title_generated_at_turn = Some(n)`: stale when `turn_count >= n +
      turn_interval`.
    - `title_generated_at_turn = None` and `title = None`: eligible with baseline
@@ -299,7 +299,7 @@ The task performs the following steps inside `run()`:
 6. Take up to `batch_size` candidates.
 
 7. For each candidate, in order:
-   
+
    1. Check `CancellationToken`.
       If cancelled, return immediately with the results accumulated so far (see
       [Cancellation](#cancellation) below).

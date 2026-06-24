@@ -1738,12 +1738,12 @@ fmt-ci: (_rustup_component "rustfmt") _install_ci_matchers
 # Check Rust doc-comment formatting on CI.
 [group('ci')]
 fmt-comments-ci: _install-comfort _install_ci_matchers
-    comfort --check --workspace --language rust
+    comfort --check --workspace --language rust --format-markdown --reference-links
 
 # Check standalone Markdown formatting on CI.
 [group('ci')]
 fmt-markdown-ci: _install-comfort _install_ci_matchers
-    comfort --check --workspace --language markdown
+    comfort --check --workspace --language markdown --format-markdown --reference-links
 
 # Test the code on CI.
 [group('ci')]

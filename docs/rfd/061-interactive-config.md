@@ -274,12 +274,12 @@ The equivalent command normalizes wizard assignments to the simplest CLI form:
    The wizard reverses this: given a field path, it looks up whether a
    `CliRecord` mapping exists for the current command and emits the
    corresponding flag.
-   
+
    For example, `assistant.model.id` → `--model`, and
    `assistant.model.parameters.reasoning` → `--reasoning`.
-   
+
    Fields without a dedicated flag fall back to `--cfg KEY=VALUE` syntax.
-   
+
    Short-form flags (e.g.
    `-m`) are never shown, to improve flag readability.
 

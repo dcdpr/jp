@@ -164,7 +164,7 @@ examples for `uvx`, `npx`, and `docker run`.
 
 - **The user's actual problem is one step removed from this RFD.** Version
   pinning isn't directly addressed by `verify`; it's redirected to `arguments`
-  
+
   - ecosystem-native syntax.
     A reader who came in expecting "pin my kagimcp version" needs to be told
     that the answer is `arguments = ["kagimcp@X.Y"]`, not anything inside
