@@ -124,8 +124,15 @@ pub struct SearchMatch {
 
     /// A short excerpt centered on the first match.
     ///
-    /// `None` only when the note has no content at all.
+    /// `None` only when the note has no content at all, or when the note is
+    /// archived (archived notes never render their content).
     pub snippet: Option<Snippet>,
+
+    /// Whether the note is archived.
+    ///
+    /// Archived notes stay discoverable but have their `snippet` and
+    /// `line_hits` suppressed.
+    pub is_archived: bool,
 }
 
 /// A short text excerpt with the line it came from.
@@ -146,8 +153,15 @@ impl SearchMatch {
     /// passing `line_hits` (or a range around them) via its `lines` parameter.
     #[must_use]
     pub fn to_xml(&self) -> String {
+        let archived_attr = if self.is_archived {
+            " archived=\"true\""
+        } else {
+            ""
+        };
+
         let mut out = format!(
-            "<match note-id=\"{}\" title=\"{}\" tags=\"{}\" updated-at=\"{}\" total-hits=\"{}\">",
+            "<match note-id=\"{}\" title=\"{}\" tags=\"{}\" updated-at=\"{}\" \
+             total-hits=\"{}\"{archived_attr}>",
             xml_escape(&self.note_id),
             xml_escape(&self.title),
             xml_escape(&self.tags.join(" ")),
@@ -256,23 +270,8 @@ fn execute_fts(conn: &Connection, cte: &str, params: &SearchParams) -> Result<Ve
         .into_iter()
         .map(|r| {
             let content = r.content.unwrap_or_default();
-            let (line_hits, total_hits, snippet) = extract_hits_and_snippet(
-                &content,
-                &params.queries,
-                params.max_line_hits,
-                params.snippet_chars,
-            );
-
             let m = meta.get(&r.note_id);
-            SearchMatch {
-                note_id: r.note_id,
-                title: r.title,
-                tags: m.map(|m| m.tags.clone()).unwrap_or_default(),
-                updated_at: m.and_then(|m| m.updated_at.clone()),
-                line_hits,
-                total_hits,
-                snippet,
-            }
+            build_match(r.note_id, r.title, &content, m, params)
         })
         .collect())
 }
@@ -452,23 +451,8 @@ fn execute_like(conn: &Connection, cte: &str, params: &SearchParams) -> Result<V
     let mut matches = vec![];
     for note in scored_notes {
         let content = note.content.unwrap_or_default();
-        let (line_hits, total_hits, snippet) = extract_hits_and_snippet(
-            &content,
-            &params.queries,
-            params.max_line_hits,
-            params.snippet_chars,
-        );
-
         let m = meta.get(&note.id);
-        matches.push(SearchMatch {
-            note_id: note.id,
-            title: note.title,
-            tags: m.map(|m| m.tags.clone()).unwrap_or_default(),
-            updated_at: m.and_then(|m| m.updated_at.clone()),
-            line_hits,
-            total_hits,
-            snippet,
-        });
+        matches.push(build_match(note.id, note.title, &content, m, params));
     }
 
     // Secondary sort: within the same SQL score tier, notes with more
@@ -477,6 +461,43 @@ fn execute_like(conn: &Connection, cte: &str, params: &SearchParams) -> Result<V
     matches.sort_by_key(|m| std::cmp::Reverse(m.total_hits));
 
     Ok(matches)
+}
+
+/// Build a `SearchMatch`, suppressing content for archived notes.
+///
+/// Archived notes stay discoverable (id, title, tags, total hit count) but
+/// never render their snippet or line numbers: some are large logs that would
+/// flood the caller's context window.
+fn build_match(
+    note_id: String,
+    title: String,
+    content: &str,
+    meta: Option<&NoteMeta>,
+    params: &SearchParams,
+) -> SearchMatch {
+    let (mut line_hits, total_hits, mut snippet) = extract_hits_and_snippet(
+        content,
+        &params.queries,
+        params.max_line_hits,
+        params.snippet_chars,
+    );
+
+    let is_archived = meta.is_some_and(|m| m.is_archived);
+    if is_archived {
+        line_hits = vec![];
+        snippet = None;
+    }
+
+    SearchMatch {
+        note_id,
+        title,
+        tags: meta.map(|m| m.tags.clone()).unwrap_or_default(),
+        updated_at: meta.and_then(|m| m.updated_at.clone()),
+        line_hits,
+        total_hits,
+        snippet,
+        is_archived,
+    }
 }
 
 /// Find matching lines and produce a snippet showing the best match.
@@ -590,6 +611,7 @@ fn make_snippet(line: &str, match_byte_pos: usize, max_chars: usize) -> String {
 struct NoteMeta {
     tags: Vec<String>,
     updated_at: Option<String>,
+    is_archived: bool,
 }
 
 /// Fetch tags and `updated_at` for a batch of note IDs in one query.
@@ -616,7 +638,7 @@ fn fetch_metadata(
 
     let sql = format!(
         "{cte}
-         SELECT n.id, n.updated_at, t.name
+         SELECT n.id, n.updated_at, n.is_archived, t.name
          FROM notes n
          LEFT JOIN note_tags nt ON nt.note_id = n.id
          LEFT JOIN tags t ON t.id = nt.tag_id
@@ -631,15 +653,17 @@ fn fetch_metadata(
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, Option<String>>(1)?,
-            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<i64>>(2)?,
+            row.get::<_, Option<String>>(3)?,
         ))
     })?;
 
     for row in rows {
-        let (id, updated_at, tag) = row?;
+        let (id, updated_at, is_archived, tag) = row?;
         let entry = out.entry(id).or_insert(NoteMeta {
             tags: vec![],
             updated_at,
+            is_archived: is_archived.unwrap_or(0) != 0,
         });
         if let Some(t) = tag {
             entry.tags.push(t);

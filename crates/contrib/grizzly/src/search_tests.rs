@@ -71,6 +71,43 @@ fn search_excludes_trashed() {
 }
 
 #[test]
+fn search_includes_archived_but_suppresses_content() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search(&db, vec!["archivedterm"]);
+
+    assert_eq!(results.len(), 1);
+    let m = &results[0];
+    assert_eq!(m.note_id, "note-5");
+    assert!(m.is_archived);
+    // The note stays discoverable: title and the true hit count are reported.
+    assert_eq!(m.title, "Archived Note");
+    assert_eq!(m.total_hits, 2);
+    // But none of its content is rendered.
+    assert!(m.line_hits.is_empty());
+    assert!(m.snippet.is_none());
+}
+
+#[test]
+fn archived_xml_marks_archived_and_omits_content() {
+    let m = SearchMatch {
+        note_id: "arch-1".into(),
+        title: "Archived".into(),
+        tags: vec![],
+        updated_at: None,
+        line_hits: vec![],
+        total_hits: 3,
+        snippet: None,
+        is_archived: true,
+    };
+
+    let xml = m.to_xml();
+    assert!(xml.contains(r#"archived="true""#));
+    assert!(xml.contains(r#"total-hits="3""#));
+    assert!(!xml.contains("<snippet"));
+    assert!(!xml.contains("<hits>"));
+}
+
+#[test]
 fn title_exact_match_ranks_first() {
     let db = BearDb::in_memory().unwrap();
     // "Shopping List" is both a title and appears nowhere else.
@@ -127,6 +164,7 @@ fn title_in_xml_output() {
             line: 1,
             text: "first line".into(),
         }),
+        is_archived: false,
     };
 
     let xml = m.to_xml();
@@ -149,6 +187,7 @@ fn title_xml_escaping() {
         line_hits: vec![],
         total_hits: 0,
         snippet: None,
+        is_archived: false,
     };
 
     let xml = m.to_xml();
@@ -168,6 +207,7 @@ fn xml_lists_all_line_hits() {
             line: 10,
             text: "line ten".into(),
         }),
+        is_archived: false,
     };
 
     let xml = m.to_xml();

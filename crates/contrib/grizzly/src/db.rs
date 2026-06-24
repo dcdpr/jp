@@ -164,7 +164,8 @@ pub(crate) mod tests {
                 (1, 'note-1', 'Getting Things Done', 'A productivity method by David Allen.' || char(10) || 'It focuses on capturing tasks.', 0, 0, 0, 0),
                 (2, 'note-2', 'Pomodoro Technique', 'Work in 25-minute intervals.' || char(10) || 'Take short breaks between pomodoros.', 0, 0, 0, 0),
                 (3, 'note-3', 'Shopping List', 'Eggs' || char(10) || 'Milk' || char(10) || 'Bread', 0, 0, 0, 0),
-                (4, 'note-4', 'Trashed Note', 'This is trashed', 0, 0, 1, 0);
+                (4, 'note-4', 'Trashed Note', 'This is trashed', 0, 0, 1, 0),
+                (5, 'note-5', 'Archived Note', 'archivedterm appears here' || char(10) || 'and archivedterm again', 0, 0, 0, 1);
 
             CREATE TABLE ZSFNOTETAG (
                 Z_PK INTEGER PRIMARY KEY,
