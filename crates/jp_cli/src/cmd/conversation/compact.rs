@@ -387,6 +387,11 @@ struct TimelineSegment {
     from: usize,
     to: usize,
     label: Option<String>,
+    /// Whether this range was already compacted before this invocation.
+    ///
+    /// Existing compactions are reported factually ("Compacted") even under
+    /// `--dry-run`, since they pre-date the previewed run.
+    existing: bool,
 }
 
 /// Build timeline segments for the compactions about to be applied, spilling
@@ -411,7 +416,25 @@ fn segments_for_compactions(compactions: &[Compaction], conv_id: &str) -> Vec<Ti
                 from: c.from_turn,
                 to: c.to_turn,
                 label,
+                existing: false,
             }
+        })
+        .collect()
+}
+
+/// Build timeline segments for compactions already present at invocation start.
+///
+/// Without these, the turns they cover would be reported as kept even though
+/// the projected conversation still compacts them (most visibly with `--from
+/// last`, which starts the new range after the existing compactions).
+fn existing_segments(snapshot: &ConversationStream) -> Vec<TimelineSegment> {
+    snapshot
+        .compactions()
+        .map(|c| TimelineSegment {
+            from: c.from_turn,
+            to: c.to_turn,
+            label: Some("already compacted".to_owned()),
+            existing: true,
         })
         .collect()
 }
@@ -480,13 +503,10 @@ fn write_summary_file(conv_id: &str, from: usize, to: usize, summary: &str) -> O
 /// Overlapping ranges collapse naturally — a gap is printed only where no
 /// compaction covers it.
 /// `dry_run` switches the verbs from "Compacted"/"Kept" to "Would have
-/// compacted"/"Would have kept".
+/// compacted"/"Would have kept", except for segments already compacted before
+/// this run, which always read "Compacted".
 fn timeline_lines(segments: &[TimelineSegment], last_turn: usize, dry_run: bool) -> Vec<String> {
-    let (compacted, kept) = if dry_run {
-        ("Would have compacted", "Would have kept")
-    } else {
-        ("Compacted", "Kept")
-    };
+    let kept = if dry_run { "Would have kept" } else { "Kept" };
 
     let mut ordered: Vec<&TimelineSegment> = segments.iter().collect();
     ordered.sort_by_key(|s| s.from);
@@ -499,6 +519,14 @@ fn timeline_lines(segments: &[TimelineSegment], last_turn: usize, dry_run: bool)
         if segment.from > next_kept {
             lines.push(kept_line(kept, next_kept, segment.from - 1));
         }
+
+        // Pre-existing compactions are factual even under `--dry-run`; only this
+        // run's new compactions are hypothetical.
+        let compacted = if dry_run && !segment.existing {
+            "Would have compacted"
+        } else {
+            "Compacted"
+        };
 
         let count = segment.to - segment.from + 1;
         lines.push(match &segment.label {
@@ -687,7 +715,13 @@ impl Compact {
         }
 
         let last_turn = events_snapshot.turn_count().saturating_sub(1);
-        let segments = segments_for_compactions(&compactions, &conv.id().to_string());
+        // Carry the pre-existing compactions so their turns aren't reported as
+        // kept; the projected conversation still compacts them.
+        let mut segments = existing_segments(&events_snapshot);
+        segments.extend(segments_for_compactions(
+            &compactions,
+            &conv.id().to_string(),
+        ));
         apply_compactions(&conv, compactions);
         for line in timeline_lines(&segments, last_turn, false) {
             ctx.printer.println(line);
@@ -713,7 +747,7 @@ impl Compact {
         // `overlap` accumulates this run's summaries so later summary rules
         // preview the same (possibly extended) ranges as the real run.
         let mut overlap = events_snapshot.clone();
-        let mut segments = Vec::new();
+        let mut new_segments = Vec::new();
         for rule in rules {
             let Some(range) = resolve_rule_range(
                 events_snapshot,
@@ -733,10 +767,11 @@ impl Compact {
                     rule,
                 ))
             };
-            segments.push(TimelineSegment {
+            new_segments.push(TimelineSegment {
                 from: range.from_turn,
                 to: range.to_turn,
                 label,
+                existing: false,
             });
             if rule.summary.is_some() {
                 overlap.add_compaction(
@@ -747,10 +782,15 @@ impl Compact {
             }
         }
 
-        if segments.is_empty() {
+        if new_segments.is_empty() {
             ctx.printer.println("Nothing to compact.");
             return;
         }
+
+        // Prepend the pre-existing compactions so already-compacted turns aren't
+        // previewed as kept; the projected conversation still compacts them.
+        let mut segments = existing_segments(events_snapshot);
+        segments.extend(new_segments);
 
         let last_turn = events_snapshot.turn_count().saturating_sub(1);
         for line in timeline_lines(&segments, last_turn, true) {

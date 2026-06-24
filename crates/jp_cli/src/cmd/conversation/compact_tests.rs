@@ -13,8 +13,8 @@ use jp_printer::Printer;
 use serde_json::{Map, Value};
 
 use super::{
-    Bound, Compact, TimelineSegment, build_compaction_events, segments_for_compactions,
-    timeline_lines,
+    Bound, Compact, TimelineSegment, build_compaction_events, existing_segments,
+    segments_for_compactions, timeline_lines,
 };
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
@@ -341,6 +341,7 @@ fn timeline_keeps_genesis_and_trailing_turns() {
         from: 1,
         to: 7,
         label: None,
+        existing: false,
     }];
     let lines = timeline_lines(&segments, 8, false);
     assert_eq!(lines, vec![
@@ -358,11 +359,13 @@ fn timeline_interleaves_gaps_between_compactions() {
             from: 1,
             to: 3,
             label: None,
+            existing: false,
         },
         TimelineSegment {
             from: 6,
             to: 8,
             label: None,
+            existing: false,
         },
     ];
     let lines = timeline_lines(&segments, 10, false);
@@ -384,11 +387,13 @@ fn timeline_sorts_by_start_turn_regardless_of_generation_order() {
             from: 6,
             to: 8,
             label: None,
+            existing: false,
         },
         TimelineSegment {
             from: 1,
             to: 3,
             label: None,
+            existing: false,
         },
     ];
     let lines = timeline_lines(&segments, 8, false);
@@ -409,11 +414,13 @@ fn timeline_collapses_overlapping_ranges() {
             from: 1,
             to: 5,
             label: None,
+            existing: false,
         },
         TimelineSegment {
             from: 3,
             to: 8,
             label: None,
+            existing: false,
         },
     ];
     let lines = timeline_lines(&segments, 10, false);
@@ -431,6 +438,7 @@ fn timeline_labels_describe_compaction_type() {
         from: 1,
         to: 3,
         label: Some("reasoning + tools".to_owned()),
+        existing: false,
     }];
     let lines = timeline_lines(&segments, 4, false);
     assert_eq!(lines, vec![
@@ -446,6 +454,7 @@ fn timeline_dry_run_uses_conditional_verbs() {
         from: 1,
         to: 3,
         label: None,
+        existing: false,
     }];
     let lines = timeline_lines(&segments, 4, true);
     assert_eq!(lines, vec![
@@ -468,4 +477,60 @@ fn segment_label_reflects_mechanical_policies() {
     let segments = segments_for_compactions(std::slice::from_ref(&compaction), "test-conv");
     assert_eq!(segments.len(), 1);
     assert_eq!(segments[0].label.as_deref(), Some("reasoning + tools"));
+}
+
+#[test]
+fn timeline_reports_pre_existing_compactions_not_as_kept() {
+    // Regression: a prior run compacted turns 1..=5; a new run (e.g. `--from
+    // last`) compacts 6..=8. The already-compacted range must read as compacted,
+    // not kept, since the projected conversation still compacts it.
+    let mut snapshot = ConversationStream::new_test();
+    for i in 0..10 {
+        snapshot.start_turn(format!("turn {i}"));
+    }
+    snapshot.add_compaction(Compaction::new(1, 5));
+
+    let mut segments = existing_segments(&snapshot);
+    segments.push(TimelineSegment {
+        from: 6,
+        to: 8,
+        label: None,
+        existing: false,
+    });
+
+    let lines = timeline_lines(&segments, 9, false);
+    assert_eq!(lines, vec![
+        "Kept turn 0.".to_owned(),
+        "Compacted turns 1..=5 (5 total, already compacted).".to_owned(),
+        "Compacted turns 6..=8 (3 total).".to_owned(),
+        "Kept turn 9.".to_owned(),
+    ]);
+}
+
+#[test]
+fn timeline_dry_run_keeps_pre_existing_compactions_factual() {
+    // Under `--dry-run`, the new range is hypothetical ("Would have compacted"),
+    // but a pre-existing compaction is a fact that predates this run, so it stays
+    // "Compacted".
+    let mut snapshot = ConversationStream::new_test();
+    for i in 0..10 {
+        snapshot.start_turn(format!("turn {i}"));
+    }
+    snapshot.add_compaction(Compaction::new(1, 5));
+
+    let mut segments = existing_segments(&snapshot);
+    segments.push(TimelineSegment {
+        from: 6,
+        to: 8,
+        label: None,
+        existing: false,
+    });
+
+    let lines = timeline_lines(&segments, 9, true);
+    assert_eq!(lines, vec![
+        "Would have kept turn 0.".to_owned(),
+        "Compacted turns 1..=5 (5 total, already compacted).".to_owned(),
+        "Would have compacted turns 6..=8 (3 total).".to_owned(),
+        "Would have kept turn 9.".to_owned(),
+    ]);
 }

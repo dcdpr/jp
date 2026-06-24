@@ -47,7 +47,9 @@ fn collects_default_compaction_range() {
     let stream = build_stream_with_turns(5);
     let events = collect_range_events(&stream, 1, 3);
 
-    assert_eq!(chat_request_texts(&events), vec!["turn 1", "turn 2", "turn 3"]);
+    assert_eq!(chat_request_texts(&events), vec![
+        "turn 1", "turn 2", "turn 3"
+    ]);
 }
 
 #[test]
