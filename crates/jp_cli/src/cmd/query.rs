@@ -383,7 +383,7 @@ impl Query {
 
         // Compact the conversation before querying, if requested.
         if self.compact.should_compact() {
-            self.apply_pre_query_compaction(&lock, &cfg, ctx).await?;
+            self.apply_pre_query_compaction(&lock, &cfg).await?;
         }
 
         let mut mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
@@ -882,7 +882,6 @@ impl Query {
         &self,
         lock: &ConversationLock,
         cfg: &AppConfig,
-        ctx: &Ctx,
     ) -> Result<()> {
         let events = lock.events().clone();
 
@@ -899,11 +898,13 @@ impl Query {
             &rules,
             super::conversation::compact::Bound::Default,
             super::conversation::compact::Bound::Default,
-            &ctx.printer,
+            // `--compact` on a query is a quick adjunct; apply it silently so
+            // compaction details don't clutter the query output.
+            None,
         )
         .await?;
 
-        super::conversation::compact::apply_compactions(&lock.as_mut(), compactions, &ctx.printer);
+        super::conversation::compact::apply_compactions(&lock.as_mut(), compactions);
 
         Ok(())
     }

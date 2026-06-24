@@ -27,8 +27,8 @@ pub struct CompactionConfig {
     /// Compaction rules applied in order.
     /// Each rule produces one compaction event.
     ///
-    /// The built-in default (strip reasoning + tools, keep last 3) is used when
-    /// no rules are configured.
+    /// The built-in default (strip reasoning + tools, keep first 1, last 1) is
+    /// used when no rules are configured.
     /// It is discarded as soon as any user-defined rule is present.
     #[setting(
         nested,
@@ -39,7 +39,7 @@ pub struct CompactionConfig {
     pub rules: Vec<CompactionRuleConfig>,
 }
 
-/// Built-in default rules: strip reasoning + tool calls, keep first 1, last 3.
+/// Built-in default rules: strip reasoning + tool calls, keep first 1, last 1.
 ///
 /// Uses `discard_when_merged: true` so these defaults are dropped the moment
 /// any user-defined rule appears.
@@ -98,7 +98,7 @@ impl PartialConfigDelta for PartialCompactionConfig {
 impl FillDefaults for PartialCompactionConfig {
     fn fill_from(self, defaults: Self) -> Self {
         // `CompactionRuleConfig`'s per-field defaults (`keep_first = 1`,
-        // `keep_last = 3`) live in `default_values`, which the resolution path
+        // `keep_last = 1`) live in `default_values`, which the resolution path
         // (`from_partial_with_defaults`) never reaches for vec elements — it
         // fills the container, not each rule. Apply them per rule here so unset
         // bounds resolve to the documented defaults rather than
@@ -141,7 +141,7 @@ impl CompactionConfig {
     ///
     /// Rules built from CLI flags or the inline `--compact` DSL bypass the
     /// normal config-resolution path, which is the only place the per-rule
-    /// defaults (`keep_first = 1`, `keep_last = 3`) are applied.
+    /// defaults (`keep_first = 1`, `keep_last = 1`) are applied.
     /// Without this, an unset bound would resolve to `RuleBound::default()` (0)
     /// and compact the whole conversation.
     /// Applying the defaults here keeps inline rules consistent with
@@ -186,7 +186,7 @@ pub struct CompactionRuleConfig {
     /// Accepts a positive integer (turn count) or a duration string (e.g.
     /// `"3h"` — preserve turns from the last 3 hours).
     ///
-    /// Defaults to 3 (keep last 3 turns).
+    /// Defaults to 1 (keep the final turn).
     #[setting(default = default_keep_last)]
     pub keep_last: RuleBound,
 
@@ -211,10 +211,10 @@ const fn default_keep_first(_: &()) -> schematic::TransformResult<Option<RuleBou
     Ok(Some(RuleBound::Turns(1)))
 }
 
-/// Default `keep_last`: preserve the last 3 turns.
+/// Default `keep_last`: preserve the final turn.
 #[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
 const fn default_keep_last(_: &()) -> schematic::TransformResult<Option<RuleBound>> {
-    Ok(Some(RuleBound::Turns(3)))
+    Ok(Some(RuleBound::Turns(1)))
 }
 
 impl FromStr for PartialCompactionRuleConfig {
@@ -292,6 +292,15 @@ pub struct SummaryConfig {
     /// If not set, a default prompt is used that preserves key decisions, file
     /// paths, error resolutions, and current task state.
     pub instructions: Option<String>,
+
+    /// Extra context passed to the summarizer for this summary.
+    ///
+    /// Added on top of the summarization request as supplementary guidance (for
+    /// example, "focus on the architectural decisions").
+    /// Unlike `instructions`, which replaces the summarizer's system prompt,
+    /// this is additive — the default behavior is preserved.
+    /// If unset, no extra context is sent.
+    pub context: Option<String>,
 }
 
 impl AssignKeyValue for PartialSummaryConfig {
@@ -300,6 +309,7 @@ impl AssignKeyValue for PartialSummaryConfig {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("model") => self.model.assign(kv)?,
             "instructions" => self.instructions = kv.try_some_string()?,
+            "context" => self.context = kv.try_some_string()?,
             _ => return missing_key(&kv),
         }
 
@@ -312,6 +322,7 @@ impl PartialConfigDelta for PartialSummaryConfig {
         Self {
             model: delta_opt_partial(self.model.as_ref(), next.model),
             instructions: delta_opt(self.instructions.as_ref(), next.instructions),
+            context: delta_opt(self.context.as_ref(), next.context),
         }
     }
 }
@@ -321,6 +332,7 @@ impl FillDefaults for PartialSummaryConfig {
         Self {
             model: fill::fill_opt(self.model, defaults.model),
             instructions: self.instructions.or(defaults.instructions),
+            context: self.context.or(defaults.context),
         }
     }
 }
@@ -330,6 +342,7 @@ impl ToPartial for SummaryConfig {
         Self::Partial {
             model: partial_opt_config(self.model.as_ref(), None),
             instructions: partial_opts(self.instructions.as_ref(), None),
+            context: partial_opts(self.context.as_ref(), None),
         }
     }
 }

@@ -74,8 +74,21 @@ pub async fn generate_summary(
         .with_system_prompt(instructions.to_owned())
         .build()?;
 
+    // Extra context is supplementary guidance for this one summary, so it rides
+    // on the user turn rather than replacing the (cache-friendly) system prompt.
+    let context = summary_cfg
+        .and_then(|c| c.context.as_deref())
+        .map(str::trim)
+        .filter(|c| !c.is_empty());
+    let user_message = match context {
+        Some(context) => {
+            format!("Summarize the conversation above.\n\nAdditional context: {context}")
+        }
+        None => "Summarize the conversation above.".to_owned(),
+    };
+
     let mut thread_events = thread.events.clone();
-    thread_events.start_turn(ChatRequest::from("Summarize the conversation above."));
+    thread_events.start_turn(ChatRequest::from(user_message));
 
     let query = jp_llm::query::ChatQuery {
         thread: jp_conversation::thread::Thread {

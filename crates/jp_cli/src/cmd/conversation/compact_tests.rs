@@ -6,13 +6,16 @@ use jp_config::{
     conversation::compaction::{CompactionRuleConfig, ReasoningMode, RuleBound, ToolCallsMode},
 };
 use jp_conversation::{
-    ConversationStream, RangeBound, ToolCallPolicy,
+    Compaction, ConversationStream, RangeBound, ReasoningPolicy, ToolCallPolicy,
     event::{ToolCallRequest, ToolCallResponse},
 };
 use jp_printer::Printer;
 use serde_json::{Map, Value};
 
-use super::{Bound, Compact, build_compaction_events};
+use super::{
+    Bound, Compact, TimelineSegment, build_compaction_events, existing_segments,
+    segments_for_compactions, timeline_lines,
+};
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
 fn parse_compact(args: &[&str]) -> Compact {
@@ -143,7 +146,7 @@ fn tool_calls_mode_maps_to_policy() {
                 std::slice::from_ref(&rule),
                 Bound::Default,
                 Bound::Default,
-                &Printer::sink(),
+                Some(&Printer::sink()),
             ))
             .unwrap();
         assert_eq!(compactions.len(), 1, "non-empty range, mode {mode:?}");
@@ -175,7 +178,7 @@ fn keep_last_duration_covering_whole_conversation_compacts_nothing() {
             std::slice::from_ref(&rule),
             Bound::Default,
             Bound::Default,
-            &Printer::sink(),
+            Some(&Printer::sink()),
         ))
         .unwrap();
     assert!(
@@ -219,7 +222,7 @@ fn from_last_resolves_against_original_stream_for_every_rule() {
             &rules,
             Bound::At(RangeBound::AfterLastCompaction),
             Bound::Default,
-            &Printer::sink(),
+            Some(&Printer::sink()),
         ))
         .unwrap();
 
@@ -278,7 +281,7 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
             &rules,
             Bound::Default,
             Bound::Default,
-            &Printer::sink(),
+            Some(&Printer::sink()),
         ))
         .unwrap();
 
@@ -316,4 +319,218 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
             assert!(!req.arguments.is_empty(), "turn {t} args untouched");
         }
     }
+}
+
+#[test]
+fn summarize_flag_distinguishes_absent_bare_and_valued() {
+    // The three states the `Option<Option<String>>` encoding exists to separate.
+    assert_eq!(parse_compact(&[]).summarize, None);
+    assert_eq!(parse_compact(&["--summarize"]).summarize, Some(None));
+    assert_eq!(parse_compact(&["-s"]).summarize, Some(None));
+    assert_eq!(
+        parse_compact(&["-s", "focus on the architectural design"]).summarize,
+        Some(Some("focus on the architectural design".to_owned())),
+    );
+}
+
+#[test]
+fn timeline_keeps_genesis_and_trailing_turns() {
+    // The default `-s` case from a 9-turn conversation (indices 0..=8):
+    // keep_first=1 and keep_last=1 leave turn 0 and turn 8, compacting 1..=7.
+    let segments = vec![TimelineSegment {
+        from: 1,
+        to: 7,
+        label: None,
+        existing: false,
+    }];
+    let lines = timeline_lines(&segments, 8, false);
+    assert_eq!(lines, vec![
+        "Kept turn 0.".to_owned(),
+        "Compacted turns 1..=7 (7 total).".to_owned(),
+        "Kept turn 8.".to_owned(),
+    ]);
+}
+
+#[test]
+fn timeline_interleaves_gaps_between_compactions() {
+    // Two non-contiguous compactions leave an interior gap and a trailing gap.
+    let segments = vec![
+        TimelineSegment {
+            from: 1,
+            to: 3,
+            label: None,
+            existing: false,
+        },
+        TimelineSegment {
+            from: 6,
+            to: 8,
+            label: None,
+            existing: false,
+        },
+    ];
+    let lines = timeline_lines(&segments, 10, false);
+    assert_eq!(lines, vec![
+        "Kept turn 0.".to_owned(),
+        "Compacted turns 1..=3 (3 total).".to_owned(),
+        "Kept turns 4..=5.".to_owned(),
+        "Compacted turns 6..=8 (3 total).".to_owned(),
+        "Kept turns 9..=10.".to_owned(),
+    ]);
+}
+
+#[test]
+fn timeline_sorts_by_start_turn_regardless_of_generation_order() {
+    // Rules can emit ranges out of turn order; the timeline still reads in
+    // conversation order.
+    let segments = vec![
+        TimelineSegment {
+            from: 6,
+            to: 8,
+            label: None,
+            existing: false,
+        },
+        TimelineSegment {
+            from: 1,
+            to: 3,
+            label: None,
+            existing: false,
+        },
+    ];
+    let lines = timeline_lines(&segments, 8, false);
+    assert_eq!(lines, vec![
+        "Kept turn 0.".to_owned(),
+        "Compacted turns 1..=3 (3 total).".to_owned(),
+        "Kept turns 4..=5.".to_owned(),
+        "Compacted turns 6..=8 (3 total).".to_owned(),
+    ]);
+}
+
+#[test]
+fn timeline_collapses_overlapping_ranges() {
+    // Overlapping ranges must not produce a spurious or negative gap between
+    // them; the gap is only printed where no compaction covers a turn.
+    let segments = vec![
+        TimelineSegment {
+            from: 1,
+            to: 5,
+            label: None,
+            existing: false,
+        },
+        TimelineSegment {
+            from: 3,
+            to: 8,
+            label: None,
+            existing: false,
+        },
+    ];
+    let lines = timeline_lines(&segments, 10, false);
+    assert_eq!(lines, vec![
+        "Kept turn 0.".to_owned(),
+        "Compacted turns 1..=5 (5 total).".to_owned(),
+        "Compacted turns 3..=8 (6 total).".to_owned(),
+        "Kept turns 9..=10.".to_owned(),
+    ]);
+}
+
+#[test]
+fn timeline_labels_describe_compaction_type() {
+    let segments = vec![TimelineSegment {
+        from: 1,
+        to: 3,
+        label: Some("reasoning + tools".to_owned()),
+        existing: false,
+    }];
+    let lines = timeline_lines(&segments, 4, false);
+    assert_eq!(lines, vec![
+        "Kept turn 0.".to_owned(),
+        "Compacted turns 1..=3 (3 total, reasoning + tools).".to_owned(),
+        "Kept turn 4.".to_owned(),
+    ]);
+}
+
+#[test]
+fn timeline_dry_run_uses_conditional_verbs() {
+    let segments = vec![TimelineSegment {
+        from: 1,
+        to: 3,
+        label: None,
+        existing: false,
+    }];
+    let lines = timeline_lines(&segments, 4, true);
+    assert_eq!(lines, vec![
+        "Would have kept turn 0.".to_owned(),
+        "Would have compacted turns 1..=3 (3 total).".to_owned(),
+        "Would have kept turn 4.".to_owned(),
+    ]);
+}
+
+#[test]
+fn segment_label_reflects_mechanical_policies() {
+    // The label distinguishes the kind of compaction; here, reasoning stripping
+    // combined with full tool-call stripping.
+    let compaction = Compaction::new(1, 3)
+        .with_reasoning(ReasoningPolicy::Strip)
+        .with_tool_calls(ToolCallPolicy::Strip {
+            request: true,
+            response: true,
+        });
+    let segments = segments_for_compactions(std::slice::from_ref(&compaction), "test-conv");
+    assert_eq!(segments.len(), 1);
+    assert_eq!(segments[0].label.as_deref(), Some("reasoning + tools"));
+}
+
+#[test]
+fn timeline_reports_pre_existing_compactions_not_as_kept() {
+    // Regression: a prior run compacted turns 1..=5; a new run (e.g. `--from
+    // last`) compacts 6..=8. The already-compacted range must read as compacted,
+    // not kept, since the projected conversation still compacts it.
+    let mut snapshot = ConversationStream::new_test();
+    for i in 0..10 {
+        snapshot.start_turn(format!("turn {i}"));
+    }
+    snapshot.add_compaction(Compaction::new(1, 5));
+
+    let mut segments = existing_segments(&snapshot);
+    segments.push(TimelineSegment {
+        from: 6,
+        to: 8,
+        label: None,
+        existing: false,
+    });
+
+    let lines = timeline_lines(&segments, 9, false);
+    assert_eq!(lines, vec![
+        "Kept turn 0.".to_owned(),
+        "Compacted turns 1..=5 (5 total, already compacted).".to_owned(),
+        "Compacted turns 6..=8 (3 total).".to_owned(),
+        "Kept turn 9.".to_owned(),
+    ]);
+}
+
+#[test]
+fn timeline_dry_run_keeps_pre_existing_compactions_factual() {
+    // Under `--dry-run`, the new range is hypothetical ("Would have compacted"),
+    // but a pre-existing compaction is a fact that predates this run, so it stays
+    // "Compacted".
+    let mut snapshot = ConversationStream::new_test();
+    for i in 0..10 {
+        snapshot.start_turn(format!("turn {i}"));
+    }
+    snapshot.add_compaction(Compaction::new(1, 5));
+
+    let mut segments = existing_segments(&snapshot);
+    segments.push(TimelineSegment {
+        from: 6,
+        to: 8,
+        label: None,
+        existing: false,
+    });
+
+    let lines = timeline_lines(&segments, 9, true);
+    assert_eq!(lines, vec![
+        "Would have kept turn 0.".to_owned(),
+        "Compacted turns 1..=5 (5 total, already compacted).".to_owned(),
+        "Would have compacted turns 6..=8 (3 total).".to_owned(),
+        "Would have kept turn 9.".to_owned(),
+    ]);
 }
