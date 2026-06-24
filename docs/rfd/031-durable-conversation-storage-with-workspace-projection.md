@@ -1,10 +1,11 @@
 # RFD 031: Durable Conversation Storage with Workspace Projection
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
-- **Required by**: [RFD 046]
+- **Required by**: [RFD 046], [RFD 087](087-session-scoped-active-workspace.md)
+- **Tracking Issue**: [#788](https://github.com/dcdpr/jp/issues/788)
 
 ## Summary
 
