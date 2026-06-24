@@ -498,6 +498,30 @@ async fn test_format_custom_content_returns_raw_content() {
     assert_eq!(result, "hello-world");
 }
 
+/// Regression: the `format_arguments` path must surface the invocation's
+/// workspace and conversation IDs to a custom formatter command via
+/// `context.workspace_id` and `context.conversation_id`.
+/// A non-empty `InvocationContext` pins the wiring — the other tests pass the
+/// empty default, which would still pass if the fields were dropped or wired to
+/// empty strings.
+#[tokio::test]
+async fn test_format_args_custom_exposes_invocation_ids() {
+    let root = Utf8TempDir::new().unwrap();
+    let args = Map::new();
+    let cmd = CommandConfigOrString::String(
+        "echo {{context.workspace_id}}/{{context.conversation_id}}".into(),
+    )
+    .command();
+    let invocation = jp_llm::tool::InvocationContext {
+        workspace_id: "ws-abc".into(),
+        conversation_id: "conv-xyz".into(),
+    };
+    let result = format_args_custom("my_tool", &args, cmd, root.path(), &invocation)
+        .await
+        .unwrap();
+    assert_eq!(result, "ws-abc/conv-xyz");
+}
+
 #[test]
 fn test_format_args_hides_empty_object_value() {
     let mut args = Map::new();
