@@ -120,7 +120,7 @@
     "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
   },
   "031-durable-conversation-storage-with-workspace-projection.md": {
-    "hash": "6d119e6d602bfbf3f566826788dbdf15a2d59c354ef11d2b38841e26217b417a",
+    "hash": "9d5821998f199d9718dabfbda85de41e40bf8f5d6e521370710eec728d02bac1",
     "summary": "Make user-local storage the durable source; workspace copies become optional projections for git visibility."
   },
   "032-grizzly-semantic-search.md": {
@@ -248,7 +248,7 @@
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
   },
   "064-non-destructive-conversation-compaction.md": {
-    "hash": "1e22178034930e96ee44ac469ac58dacfba73bf7bb2d33925dd87f1f59ee312b",
+    "hash": "3cd56aee44cb9becf11a1e62f95710266656a93fae1e13b803316887f0297b70",
     "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {
@@ -344,7 +344,7 @@
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
-    "hash": "69960490290bf5d5570b1b2d96693ac765d1d8335cd524e546f2069d51cf6bca",
+    "hash": "a8a09d777444d5c9ea9bb650b128285624dea7ce8ae448a5bac309a599e79f4c",
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   }
 }

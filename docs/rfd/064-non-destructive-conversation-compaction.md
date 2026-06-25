@@ -1,6 +1,6 @@
 # RFD 064: Non-Destructive Conversation Compaction
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
