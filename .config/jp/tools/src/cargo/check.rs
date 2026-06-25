@@ -82,6 +82,7 @@ fn comfort_check<R: ProcessRunner>(
         "--list-changed",
         "--format-markdown",
         "--reference-links",
+        "--prune-reference-links",
         "--language",
         "rust",
     ];

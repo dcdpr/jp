@@ -112,4 +112,3 @@ cargo run -p bookworm -- index /tmp/regex/...
 The default output path is `./index.sqlite`.
 
 [docs.rs]: https://docs.rs
-[mcp]: https://modelcontextprotocol.io

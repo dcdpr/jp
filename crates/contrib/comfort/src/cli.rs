@@ -144,6 +144,14 @@ pub struct Cli {
     #[arg(long)]
     pub reference_links: bool,
 
+    /// Remove reference-link definitions that nothing points at.
+    /// A `[label]: url` is dropped when no `[label]`, `[label][]`, or
+    /// `[text][label]` (link or image) resolves to it; surrounding content is
+    /// untouched.
+    /// Independent of `--reference-links` — enable either, both, or neither.
+    #[arg(long)]
+    pub prune_reference_links: bool,
+
     /// Maximum line width for reflow.
     /// Long sentences wrap at word boundaries within sembr blocks.
     /// `0` disables width wrapping.

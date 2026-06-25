@@ -1047,6 +1047,7 @@ fn canonical_preserves_user_chosen_labels_with_reference_links_flag() {
         max_width: 80,
         canonical: true,
         reference_links: true,
+        prune_reference_links: false,
     };
     let out = format_markdown_with(body, &opts);
     assert!(
@@ -1118,6 +1119,16 @@ fn ref_opts(max_width: usize) -> FormatOptions {
         max_width,
         canonical: false,
         reference_links: true,
+        prune_reference_links: false,
+    }
+}
+
+fn prune_opts(max_width: usize) -> FormatOptions {
+    FormatOptions {
+        max_width,
+        canonical: false,
+        reference_links: false,
+        prune_reference_links: true,
     }
 }
 
@@ -1294,6 +1305,7 @@ fn reference_links_composes_with_canonical_mode() {
         max_width: 80,
         canonical: true,
         reference_links: true,
+        prune_reference_links: false,
     };
     let out = format_markdown_with(body, &opts);
     // Canonical: `*` → `-`.
@@ -1507,6 +1519,211 @@ fn reference_links_skips_definitions_inside_fenced_code() {
     assert!(
         example_pos < fence_close,
         "fake definition extracted out of fence: {out}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Multi-line reference definitions (destination or title wrapped onto a
+// following line)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reference_links_extracts_definition_with_url_on_next_line() {
+    // A long URL wrapped onto the line after `[label]:` is one definition.
+    // The line scan used to take `[docs]:` (empty url) as not-a-def and strand
+    // the URL line in the body; span grouping recognises the whole thing.
+    let body = indoc! {"
+        See [docs] for more.
+
+        [docs]:
+        https://example.com/some/very/long/path/to/a/resource
+    "};
+    let out = format_markdown_with(body, &ref_opts(80));
+    assert!(
+        out.contains("[docs]: https://example.com/some/very/long/path/to/a/resource"),
+        "multi-line definition not consolidated onto one line: {out:?}"
+    );
+    // The URL must appear exactly once — not stranded as a separate content
+    // line in addition to the consolidated definition.
+    assert_eq!(
+        out.matches("https://example.com/some/very/long/path/to/a/resource")
+            .count(),
+        1,
+        "URL appears more than once (stranded continuation line): {out:?}"
+    );
+}
+
+#[test]
+fn reference_links_extracts_definition_with_title_on_next_line() {
+    let body = indoc! {r#"
+        See [docs] for more.
+
+        [docs]: https://example.com
+        "Docs Title"
+    "#};
+    let out = format_markdown_with(body, &ref_opts(80));
+    assert!(
+        out.contains(r#"[docs]: https://example.com "Docs Title""#),
+        "title on the following line was not folded into the definition: {out:?}"
+    );
+    assert_eq!(
+        out.matches("Docs Title").count(),
+        1,
+        "title text appears more than once (stranded continuation line): {out:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `--prune-reference-links` (orphaned reference-definition removal)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn prune_removes_orphaned_definition_and_keeps_referenced_one() {
+    let body = indoc! {"
+        See [used] for details.
+
+        [used]: https://example.com/used
+        [orphan]: https://example.com/orphan
+    "};
+    let out = format_markdown_with(body, &prune_opts(80));
+    assert!(
+        out.contains("[used]: https://example.com/used"),
+        "referenced definition was removed: {out:?}"
+    );
+    assert!(
+        !out.contains("orphan"),
+        "orphaned definition was not removed: {out:?}"
+    );
+}
+
+#[test]
+fn prune_without_orphans_is_a_noop() {
+    let body = indoc! {"
+        See [used] for details.
+
+        [used]: https://example.com/used
+    "};
+    let out = format_markdown_with(body, &prune_opts(80));
+    assert!(out.contains("[used]: https://example.com/used"), "{out:?}");
+}
+
+#[test]
+fn prune_removes_multiline_orphan_completely() {
+    // The corruption case: a title on the following line. Removing the orphan
+    // must take its continuation line with it, not strand `"Dangling"`.
+    let body = indoc! {r#"
+        Some prose with no references.
+
+        [orphan]: https://example.com/orphan
+        "Dangling"
+    "#};
+    let out = format_markdown_with(body, &prune_opts(80));
+    assert!(
+        !out.contains("orphan"),
+        "orphan definition line was not removed: {out:?}"
+    );
+    assert!(
+        !out.contains("Dangling"),
+        "orphan's continuation line was stranded: {out:?}"
+    );
+}
+
+#[test]
+fn prune_keeps_definition_referenced_by_full_form() {
+    let body = indoc! {"
+        See [the docs][docs] for details.
+
+        [docs]: https://example.com/docs
+    "};
+    let out = format_markdown_with(body, &prune_opts(80));
+    assert!(
+        out.contains("[docs]: https://example.com/docs"),
+        "full-form-referenced definition was removed: {out:?}"
+    );
+}
+
+#[test]
+fn prune_keeps_definition_referenced_by_image() {
+    let body = indoc! {"
+        ![a diagram][diagram] illustrates it.
+
+        [diagram]: https://example.com/d.png
+    "};
+    let out = format_markdown_with(body, &prune_opts(80));
+    assert!(
+        out.contains("[diagram]: https://example.com/d.png"),
+        "image-referenced definition was removed: {out:?}"
+    );
+}
+
+#[test]
+fn prune_leaves_footnote_definitions_alone() {
+    let body = indoc! {"
+        A claim.[^note]
+
+        [^note]: The supporting detail.
+    "};
+    let out = format_markdown_with(body, &prune_opts(80));
+    assert!(
+        out.contains("[^note]: The supporting detail."),
+        "footnote definition was incorrectly pruned: {out:?}"
+    );
+}
+
+#[test]
+fn prune_keeps_intra_doc_reference_with_definition_in_rust_doc() {
+    // A Rust doc comment whose intra-doc link has a real reference definition
+    // must keep that definition when the link cites it.
+    let src = indoc! {r"
+        /// See [`Foo`] for the type.
+        ///
+        /// [`Foo`]: crate::Foo
+        pub fn bar() {}
+    "};
+    let opts = prune_opts(80);
+    let out = format_rust_source_with(src, &opts);
+    assert!(
+        out.contains("[`Foo`]: crate::Foo"),
+        "intra-doc definition with a live reference was pruned: {out:?}"
+    );
+}
+
+#[test]
+fn prune_is_idempotent() {
+    let body = indoc! {"
+        See [used] for details.
+
+        [used]: https://example.com/used
+        [orphan]: https://example.com/orphan
+    "};
+    let once = format_markdown_with(body, &prune_opts(80));
+    let twice = format_markdown_with(&once, &prune_opts(80));
+    assert_eq!(once, twice, "prune must be idempotent");
+}
+
+#[test]
+fn prune_composes_with_reference_links() {
+    // Both flags: prune drops the orphan, reference-links consolidates the
+    // survivors at the bottom.
+    let body = indoc! {"
+        See [docs](https://example.com/docs) for details.
+
+        [orphan]: https://example.com/orphan
+    "};
+    let opts = FormatOptions {
+        max_width: 80,
+        canonical: false,
+        reference_links: true,
+        prune_reference_links: true,
+    };
+    let out = format_markdown_with(body, &opts);
+    assert!(
+        out.contains("[docs]: https://example.com/docs"),
+        "converted inline link's definition missing: {out:?}"
+    );
+    assert!(
+        !out.contains("orphan"),
+        "orphan survived the combined pass: {out:?}"
     );
 }
 

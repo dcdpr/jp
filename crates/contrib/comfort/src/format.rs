@@ -34,7 +34,11 @@
 //! [`TaskItem`]: NodeValue::TaskItem
 //! [`sentence`]: crate::sentence
 
-use std::{collections::HashMap, ops::Range, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+    sync::Arc,
+};
 
 use comrak::{
     Arena, Options, ResolvedReference,
@@ -59,6 +63,9 @@ pub struct FormatOptions {
     /// `--reference-links`: convert inline links to reference style and
     /// consolidate definitions at the bottom of each body.
     pub reference_links: bool,
+    /// `--prune-reference-links`: remove reference definitions that no link or
+    /// image resolves to.
+    pub prune_reference_links: bool,
 }
 
 /// Reformat every `///` and `//!` block in `source`, returning the new text.
@@ -146,6 +153,9 @@ pub fn format_markdown_with(body: &str, opts: &FormatOptions) -> String {
     } else {
         body.to_owned()
     };
+    if opts.prune_reference_links {
+        text = prune_unused_reference_definitions(&text);
+    }
     if opts.reference_links {
         text = extract_reference_links(&text);
     }
@@ -623,6 +633,109 @@ fn extract_reference_links(text: &str) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// `--prune-reference-links`: drop reference definitions that nothing cites.
+// ---------------------------------------------------------------------------
+
+/// Remove reference-link definitions in `text` that no link or image points at.
+///
+/// A definition is kept when some reference-form link or image (`[label]`,
+/// `[label][]`, `[text][label]`) resolves to it.
+/// Removal is in place: only the orphaned definition lines are spliced out and
+/// every other byte is preserved.
+/// A definition whose use comfort can't see (e.g. a cross-file reference) is
+/// left alone — the pass never deletes on a guess.
+fn prune_unused_reference_definitions(text: &str) -> String {
+    if text.is_empty() {
+        return String::new();
+    }
+
+    let arena = Arena::new();
+    let options = comrak_options();
+    let root = comrak::parse_document(&arena, text, &options);
+    let line_starts = line_start_offsets(text);
+
+    let mut referenced: HashSet<String> = HashSet::new();
+    collect_referenced_labels(root, text, &line_starts, text.len(), &mut referenced);
+
+    let mut excluded: Vec<Range<usize>> = Vec::new();
+    collect_excluded_ranges_for_refdefs(root, text, &line_starts, &mut excluded);
+
+    let lines: Vec<&str> = text.split('\n').collect();
+    let spans = collect_reference_definition_spans(&lines, &line_starts, text.len(), &excluded);
+
+    let mut removals: Vec<Range<usize>> = spans
+        .iter()
+        .filter(|s| !referenced.contains(&normalize_label(&s.def.label)))
+        .map(|s| s.byte_range.clone())
+        .collect();
+    if removals.is_empty() {
+        return text.to_owned();
+    }
+    removals.sort_by_key(|r| r.start);
+
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for r in removals {
+        out.push_str(&text[cursor..r.start]);
+        cursor = r.end;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
+/// Walk the AST collecting the normalized labels of every reference-form link
+/// and image that resolved to a definition.
+/// Inline links/images (`[text](url)`) and autolinks reference no definition
+/// and contribute nothing.
+fn collect_referenced_labels<'a>(
+    node: &'a AstNode<'a>,
+    text: &str,
+    line_starts: &[usize],
+    body_len: usize,
+    out: &mut HashSet<String>,
+) {
+    let data = node.data();
+    if matches!(data.value, NodeValue::Link(_) | NodeValue::Image(_)) {
+        if let Some(range) = sourcepos_to_byte_range(line_starts, body_len, &data.sourcepos) {
+            // Images carry a leading `!`; the bracket structure after it is
+            // identical to a link's.
+            let slice_full = &text[range];
+            let slice = slice_full.strip_prefix('!').unwrap_or(slice_full);
+            if is_reference_form_link(slice)
+                && let Some(label) = reference_link_label(slice)
+            {
+                out.insert(normalize_label(&label));
+            }
+        }
+        return;
+    }
+    for child in node.children() {
+        collect_referenced_labels(child, text, line_starts, body_len, out);
+    }
+}
+
+/// Extract the reference label a reference-form link or image points at.
+/// `[text][label]` → `label`; collapsed `[label][]` and shortcut `[label]` →
+/// `label`.
+/// Returns `None` when `slice` isn't bracket-formed.
+fn reference_link_label(slice: &str) -> Option<String> {
+    let bytes = slice.as_bytes();
+    if bytes.first() != Some(&b'[') {
+        return None;
+    }
+    let first_close = match_close_bracket(bytes, 0)?;
+    if bytes.get(first_close + 1) == Some(&b'[')
+        && let Some(second_close) = match_close_bracket(bytes, first_close + 1)
+    {
+        let second = &slice[first_close + 2..second_close];
+        if !second.trim().is_empty() {
+            return Some(second.to_owned());
+        }
+    }
+    Some(slice[1..first_close].to_owned())
+}
+
 /// A single CommonMark reference-link definition.
 /// `title` is empty when the definition has no title; otherwise it's the
 /// unescaped title text (matching how comrak hands us inline-link titles).
@@ -834,13 +947,15 @@ fn parse_inline_link_text(slice: &str) -> Option<String> {
     None
 }
 
-/// Find pre-existing reference definitions in `text` (lines of the form
-/// `[label]: url`) at the document level, returning the text with those lines
-/// removed and a list of the extracted `(label, url)` pairs.
+/// Find pre-existing reference definitions in `text`, returning the text with
+/// those definitions removed and the list of parsed definitions.
 ///
-/// Lines inside fenced code blocks and HTML blocks are skipped, identified via
-/// comrak's AST so we don't false-match content that just happens to look like
-/// a definition.
+/// Definitions may span multiple lines (a destination or title wrapped onto a
+/// following line); each is recognised as a whole via
+/// [`collect_reference_definition_spans`].
+/// Lines inside fenced code blocks, HTML blocks, and paragraphs are skipped,
+/// identified via comrak's AST so we don't false-match content that merely
+/// looks like a definition.
 fn extract_existing_reference_definitions(text: &str) -> (String, Vec<LinkDef>) {
     let arena = Arena::new();
     let options = comrak_options();
@@ -850,26 +965,102 @@ fn extract_existing_reference_definitions(text: &str) -> (String, Vec<LinkDef>) 
     let mut excluded: Vec<Range<usize>> = Vec::new();
     collect_excluded_ranges_for_refdefs(root, text, &line_starts, &mut excluded);
 
-    let mut content_lines: Vec<&str> = Vec::new();
-    let mut defs: Vec<LinkDef> = Vec::new();
-    let mut byte_pos = 0_usize;
+    let lines: Vec<&str> = text.split('\n').collect();
+    let spans = collect_reference_definition_spans(&lines, &line_starts, text.len(), &excluded);
 
-    for line in text.split('\n') {
-        let line_start = byte_pos;
-        let line_end = byte_pos + line.len();
-        let in_excluded = excluded
-            .iter()
-            .any(|r| line_start >= r.start && line_end <= r.end);
-        if !in_excluded && let Some(def) = parse_reference_definition_line(line) {
-            defs.push(def);
-        } else {
-            content_lines.push(line);
+    let mut removed = vec![false; lines.len()];
+    let mut defs: Vec<LinkDef> = Vec::with_capacity(spans.len());
+    for span in spans {
+        for k in span.line_range.clone() {
+            removed[k] = true;
         }
-        // Advance past line and its trailing `\n` (if any).
-        byte_pos = line_end + 1;
+        defs.push(span.def);
     }
 
+    let content_lines: Vec<&str> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(k, line)| (!removed[k]).then_some(*line))
+        .collect();
+
     (content_lines.join("\n"), defs)
+}
+
+/// A reference definition occupying one or more consecutive source lines.
+struct RefDefSpan {
+    /// Half-open range of line indices the definition occupies.
+    line_range: Range<usize>,
+    /// Byte range covering those lines, including the trailing newline of the
+    /// last line when present, so splicing it out leaves no blank line behind.
+    byte_range: Range<usize>,
+    /// The verbatim source text of the span (newlines preserved).
+    text: String,
+    /// The parsed definition.
+    def: LinkDef,
+}
+
+/// Group a line stream into reference-definition spans.
+///
+/// A span begins at a line [`looks_like_definition_start`] accepts and extends
+/// across the following lines until a blank line, an excluded line
+/// (code/HTML/paragraph), the next definition start, or end of input — i.e.
+/// the continuation lines carrying a destination or title that wrapped onto
+/// their own line.
+/// The whole span is parsed as one unit, so a definition whose URL or title
+/// sits on a later line is recognised correctly.
+///
+/// Spans whose joined text fails to parse as a definition are dropped.
+fn collect_reference_definition_spans(
+    lines: &[&str],
+    line_starts: &[usize],
+    text_len: usize,
+    excluded: &[Range<usize>],
+) -> Vec<RefDefSpan> {
+    let is_excluded = |i: usize| {
+        let start = line_starts[i];
+        let end = start + lines[i].len();
+        excluded.iter().any(|r| start >= r.start && end <= r.end)
+    };
+
+    let mut spans = Vec::new();
+    let mut i = 0;
+    while i < lines.len() {
+        if is_excluded(i) || !looks_like_definition_start(lines[i]) {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        let mut end = i;
+        let mut j = i + 1;
+        while j < lines.len()
+            && !is_excluded(j)
+            && !lines[j].trim().is_empty()
+            && !looks_like_definition_start(lines[j])
+        {
+            end = j;
+            j += 1;
+        }
+        let text = lines[start..=end].join("\n");
+        if let Some(def) = parse_reference_definition(&text) {
+            let byte_start = line_starts[start];
+            let last_end = line_starts[end] + lines[end].len();
+            let byte_end = if last_end < text_len {
+                last_end + 1
+            } else {
+                last_end
+            };
+            spans.push(RefDefSpan {
+                line_range: start..end + 1,
+                byte_range: byte_start..byte_end,
+                text,
+                def,
+            });
+            i = end + 1;
+        } else {
+            i += 1;
+        }
+    }
+    spans
 }
 
 /// Walk the AST for block ranges where a `[label]: url` shape must NOT be
@@ -905,17 +1096,21 @@ fn collect_excluded_ranges_for_refdefs<'a>(
     }
 }
 
-/// Parse a single line as a CommonMark-ish reference definition `[label]: url
-/// "title"`.
+/// Parse a reference definition `[label]: url "title"` from `span`.
+///
+/// `span` may be one line or several joined with newlines: CommonMark allows a
+/// line ending at each whitespace separator between label, destination, and
+/// title.
+/// The newlines are folded to spaces before tokenizing, so a URL or title that
+/// wrapped onto a later line parses the same as the single-line form.
+/// A multi-line title's internal break collapses to a single space.
+///
 /// Title is optional and may be enclosed in `"..."`, `'...'`, or `(...)`.
 /// Backslash escapes inside the title are unescaped (CommonMark semantics) so
 /// the stored value matches how comrak gives us inline-link titles.
-/// Returns `None` for lines that don't match the reference-definition shape.
-///
-/// Multi-line titles (where the title sits on the line after the URL) are
-/// **not** supported here; this matches the rest of the pipeline, which only
-/// extracts same-line definitions.
-fn parse_reference_definition_line(line: &str) -> Option<LinkDef> {
+/// Returns `None` when `span` doesn't match the reference-definition shape.
+fn parse_reference_definition(span: &str) -> Option<LinkDef> {
+    let line = span.replace('\n', " ");
     let trimmed = line.trim_start();
     let indent = line.len() - trimmed.len();
     // CommonMark allows up to 3 spaces of indentation.
@@ -996,6 +1191,54 @@ fn parse_reference_definition_line(line: &str) -> Option<LinkDef> {
         url,
         title,
     })
+}
+
+/// True if `line` begins a reference definition: up to three spaces of indent,
+/// then `[label]:`.
+/// Used to segment the line stream into spans before handing each to
+/// [`parse_reference_definition`].
+/// Footnote definitions (`[^name]:`) are excluded — the footnotes extension
+/// handles those.
+fn looks_like_definition_start(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    let indent = line.len() - trimmed.len();
+    if indent > 3 || !trimmed.starts_with('[') {
+        return false;
+    }
+    let Some(close) = match_close_bracket(trimmed.as_bytes(), 0) else {
+        return false;
+    };
+    let label = &trimmed[1..close];
+    if label.is_empty() || label.starts_with('^') {
+        return false;
+    }
+    trimmed[close + 1..].starts_with(':')
+}
+
+/// Byte index of the `]` matching the `[` at `open`, honoring nested brackets
+/// and backslash escapes.
+/// `None` if the bracket is unbalanced.
+fn match_close_bracket(bytes: &[u8], open: usize) -> Option<usize> {
+    let mut depth = 0_i32;
+    let mut i = open;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\\' => {
+                i += 2;
+                continue;
+            }
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Parse a CommonMark reference-definition title.
@@ -1089,27 +1332,13 @@ fn protect_reference_form_links(text: &str) -> LinkProtection {
     let mut excluded: Vec<Range<usize>> = Vec::new();
     collect_excluded_ranges_for_refdefs(root, text, &line_starts, &mut excluded);
 
-    let mut definitions: Vec<String> = Vec::new();
-    let mut definition_ranges: Vec<Range<usize>> = Vec::new();
-    let mut byte_pos = 0_usize;
-    for line in text.split('\n') {
-        let line_start = byte_pos;
-        let line_end = byte_pos + line.len();
-        let in_excluded = excluded
-            .iter()
-            .any(|r| line_start >= r.start && line_end <= r.end);
-        if !in_excluded && parse_reference_definition_line(line).is_some() {
-            // Include the trailing newline (if any) so the line and its
-            // separator are both removed cleanly.
-            let range_end = if line_end < text.len() {
-                line_end + 1
-            } else {
-                line_end
-            };
-            definition_ranges.push(line_start..range_end);
-            definitions.push(line.to_owned());
-        }
-        byte_pos = line_end + 1;
+    let lines: Vec<&str> = text.split('\n').collect();
+    let spans = collect_reference_definition_spans(&lines, &line_starts, text.len(), &excluded);
+    let mut definitions: Vec<String> = Vec::with_capacity(spans.len());
+    let mut definition_ranges: Vec<Range<usize>> = Vec::with_capacity(spans.len());
+    for span in spans {
+        definition_ranges.push(span.byte_range);
+        definitions.push(span.text);
     }
 
     // Build the sentinel-substituted text.
