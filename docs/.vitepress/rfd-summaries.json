@@ -72,7 +72,7 @@
     "summary": "Abandoned RFD split into RFD 048 and RFD 049; preserved for historical context on non-interactive mode design."
   },
   "020-parallel-conversations.md": {
-    "hash": "f614f3ba53ce0530b04a1ac96d5f6cbd02e4ef0c5eb521cfe1afe63cc4330afe",
+    "hash": "cfe467a1a84c8e81008dbf61d14162ee425ddf6a2437397aaf34432e64fc3386",
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
