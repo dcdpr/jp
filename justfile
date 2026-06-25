@@ -1926,8 +1926,9 @@ _resolve-conversation TITLE:
 
 # Internal: look up a Bear note (or notes) by tag.
 #
-# Resolves `bear://search/?tag=TAG` against the local Bear database. Outputs
-# one of:
+# Resolves `bear://search/?tag=TAG` against the local Bear database. Archived
+# notes are excluded: they're kept for reference, not for feeding into a
+# session. Outputs one of:
 #
 #   FOUND <bear-uri>   - at least one note matched; caller should attach URI
 #   EDIT               - no notes matched; caller should add `--edit`
@@ -1941,7 +1942,7 @@ _bear-note TAG:
     #!/usr/bin/env sh
     set -eu
 
-    uri="bear://search/?tag={{TAG}}"
+    uri="bear://search/?tag={{TAG}}&exclude_archived=true"
     if jp attachment print "$uri" 2>/dev/null | grep -q .; then
         echo "FOUND $uri"
         exit 0

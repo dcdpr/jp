@@ -53,6 +53,7 @@ fn test_uri_to_query() {
             Ok(Query::Search {
                 query: "tag #1".to_string(),
                 tags: vec![],
+                exclude_archived: false,
             }),
         ),
         (
@@ -60,6 +61,7 @@ fn test_uri_to_query() {
             Ok(Query::Search {
                 query: "tag #1".to_string(),
                 tags: vec!["tag #2".to_string()],
+                exclude_archived: false,
             }),
         ),
         (
@@ -67,6 +69,23 @@ fn test_uri_to_query() {
             Ok(Query::Search {
                 query: "tag #1".to_string(),
                 tags: vec!["tag #2".to_string(), "tag #3".to_string()],
+                exclude_archived: false,
+            }),
+        ),
+        (
+            "bear://search/?tag=foo&exclude_archived=true",
+            Ok(Query::Search {
+                query: String::new(),
+                tags: vec!["foo".to_string()],
+                exclude_archived: true,
+            }),
+        ),
+        (
+            "bear://search/?tag=foo&exclude_archived=false",
+            Ok(Query::Search {
+                query: String::new(),
+                tags: vec!["foo".to_string()],
+                exclude_archived: false,
             }),
         ),
         (
@@ -80,4 +99,17 @@ fn test_uri_to_query() {
         let query = uri_to_query(&uri).map_err(|e| e.to_string());
         assert_eq!(query, expected);
     }
+}
+
+#[test]
+fn test_exclude_archived_round_trips() {
+    let handler = BearNotes::default();
+    let query = Query::Search {
+        query: String::new(),
+        tags: vec!["rfd/D46/review".to_string()],
+        exclude_archived: true,
+    };
+
+    let uri = handler.query_to_uri(&query).unwrap();
+    assert_eq!(uri_to_query(&uri).unwrap(), query);
 }
