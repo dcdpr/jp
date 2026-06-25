@@ -72,7 +72,7 @@
     "summary": "Abandoned RFD split into RFD 048 and RFD 049; preserved for historical context on non-interactive mode design."
   },
   "020-parallel-conversations.md": {
-    "hash": "ea43d8f3a09eb1fd4a259aa15154f3f396d814f637fef3218204bc8598dad9c0",
+    "hash": "cfe467a1a84c8e81008dbf61d14162ee425ddf6a2437397aaf34432e64fc3386",
     "summary": "Replace global active conversation with per-session tracking and add conversation locks for parallel terminal work."
   },
   "021-printer-live-redirection.md": {
@@ -344,7 +344,7 @@
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
-    "hash": "d16cb77e515f817bf3067bc180777a11b75356729614311631f2994d6619f770",
+    "hash": "69960490290bf5d5570b1b2d96693ac765d1d8335cd524e546f2069d51cf6bca",
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   }
 }

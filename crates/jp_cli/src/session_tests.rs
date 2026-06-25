@@ -66,8 +66,15 @@ fn from_platform_returns_hwnd_on_windows() {
     };
 
     assert_eq!(session.source, SessionSource::Hwnd);
-    // The ID should be a non-empty string representation of the HWND.
-    assert!(!session.id.as_str().is_empty());
+    // The ID must be a decimal `isize`, the representation
+    // `jp_workspace`'s `hwnd_liveness` parses back for stale detection. A
+    // debug-formatted pointer (`0x..`) is non-empty but would never parse,
+    // silently disabling HWND stale detection (see RFD 020).
+    assert!(
+        session.id.as_str().parse::<isize>().is_ok(),
+        "HWND session id must be a decimal isize, got {:?}",
+        session.id.as_str()
+    );
 }
 
 #[test]

@@ -90,6 +90,9 @@ The rest of this section describes how that resolution works.
   shares the same numeric value, and two different env vars (`$JP_SESSION`,
   `$TMUX_PANE`) holding the same value get distinct files.
   Hashing the opaque env value also keeps unsafe characters out of the filename.
+  This is the same source-encoding scheme [RFD 020]'s per-workspace session
+  store now uses (`Session::storage_key`); this RFD reuses that one encoder
+  rather than defining a second so the two stores stay consistent.
   The blast radius of a collision at this layer is which workspace a command
   runs against, so the keys are kept disjoint by construction.
   Two tabs that deliberately set the same `$JP_SESSION` still share a record
