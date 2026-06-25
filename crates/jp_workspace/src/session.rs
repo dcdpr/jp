@@ -307,7 +307,7 @@ impl Session {
     /// Build an `Hwnd` session from a Windows console window handle.
     ///
     /// Owns the handle-to-id encoding so it stays the inverse of
-    /// [`SessionId::as_hwnd`], which stale detection uses to decode it.
+    /// `SessionId::as_hwnd`, which stale detection uses to decode it.
     #[must_use]
     pub fn hwnd(handle: isize) -> Self {
         Self {
