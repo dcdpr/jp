@@ -367,6 +367,44 @@ impl Printer {
     }
 }
 
+/// Stderr-only view over a [`Printer`].
+///
+/// Chrome renderers (tool call UI, progress, status indicators) write
+/// exclusively to the error stream.
+/// Handing them an `ErrChannel` rather than the full [`Printer`] turns that
+/// convention into a compile-time guarantee: there is no path from here to
+/// stdout.
+#[derive(Debug, Clone)]
+pub struct ErrChannel {
+    /// The underlying printer, exposed only through its error stream.
+    printer: Arc<Printer>,
+}
+
+impl ErrChannel {
+    /// Wrap a printer, exposing only its error (stderr) stream.
+    #[must_use]
+    pub const fn new(printer: Arc<Printer>) -> Self {
+        Self { printer }
+    }
+
+    /// A writer over the error (stderr) stream.
+    #[must_use]
+    pub fn writer(&self) -> PrinterWriter<'_> {
+        self.printer.err_writer()
+    }
+
+    /// Whether pretty printing (ANSI colors, unicode, highlighting) is enabled.
+    #[must_use]
+    pub fn pretty_printing_enabled(&self) -> bool {
+        self.printer.pretty_printing_enabled()
+    }
+
+    /// Block until all currently queued print tasks are finished.
+    pub fn flush(&self) {
+        self.printer.flush();
+    }
+}
+
 /// A writer wrapper for [`Printer`] that implements [`fmt::Write`].
 #[derive(Debug, Clone, Copy)]
 pub struct PrinterWriter<'a> {

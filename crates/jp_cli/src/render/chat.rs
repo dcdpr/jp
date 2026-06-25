@@ -509,6 +509,17 @@ impl ChatRenderer {
         }
     }
 
+    /// Whether reasoning content is suppressed by the current display config.
+    ///
+    /// Hidden reasoning renders nothing, so callers coordinating inter-block
+    /// spacing can tell that a reasoning chunk won't supply any visible output.
+    pub(crate) fn reasoning_hidden(&self) -> bool {
+        matches!(
+            self.config.reasoning.display,
+            ReasoningDisplayConfig::Hidden
+        )
+    }
+
     /// Transition renderer state to tool call mode.
     pub fn transition_to_tool_call(&mut self) {
         self.last_content_kind = Some(ContentKind::ToolCall);
