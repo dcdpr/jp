@@ -6,7 +6,8 @@
 //! Tasks before the cursor are done, the task at the cursor is in progress, and
 //! tasks after it are pending.
 //! The assistant drives the cursor forward (`next`) to complete the current
-//! task and start the next, or backward (`prev`) to re-open the previous one.
+//! task and start the next, or backward (`prev`) to re-open the previous one,
+//! optionally moving several steps at once with `count`.
 //! Reversing past the first task discards the plan entirely.
 //!
 //! Plans are persisted per conversation under
@@ -37,11 +38,9 @@ struct Plan {
 }
 
 impl Plan {
-    /// Render the plan as a markdown checklist for the assistant.
-    fn render(&self) -> String {
-        let total = self.tasks.len();
-        let done = self.current.min(total);
-        let mut out = format!("Plan \"{}\" ({done}/{total} complete)\n\n", self.name);
+    /// Render the task list as a markdown checklist.
+    fn checklist(&self) -> String {
+        let mut out = String::new();
         for (index, task) in self.tasks.iter().enumerate() {
             let marker = match index.cmp(&self.current) {
                 Ordering::Less => "x",
@@ -52,6 +51,28 @@ impl Plan {
         }
         out
     }
+
+    /// Number of completed tasks, capped at the task count.
+    fn done(&self) -> usize {
+        self.current.min(self.tasks.len())
+    }
+}
+
+/// Build the tool output: a one-line `header` followed by the checklist.
+fn render_block(header: &str, plan: &Plan) -> String {
+    format!("{header}\n\n{}", plan.checklist())
+}
+
+/// One-line header for a `next`/`prev` step, e.g. `Advancing plan "x" by 2
+/// steps (3/5 complete)`.
+/// The "by N steps" suffix is dropped for single-step moves.
+fn step_header(verb: &str, name: &str, moved: usize, done: usize, total: usize) -> String {
+    let by = if moved > 1 {
+        format!(" by {moved} steps")
+    } else {
+        String::new()
+    };
+    format!("{verb} plan \"{name}\"{by} ({done}/{total} complete)")
 }
 
 #[expect(
@@ -66,10 +87,11 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
         return error(message);
     }
 
-    // Display-only rendering of the tool call; never touches the filesystem.
-    if ctx.action.is_format_arguments() {
-        return Ok(format_call(&action, &name).into());
-    }
+    let count = match t.opt::<usize>("count")? {
+        Some(0) => return error("The \"count\" argument must be at least 1."),
+        Some(n) => n,
+        None => 1,
+    };
 
     let dir = plans_dir(&ctx.root, &ctx.conversation_id);
 
@@ -80,8 +102,8 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
             };
             create(&dir, &name, tasks)
         }
-        "next" => advance(&dir, &name),
-        "prev" => retreat(&dir, &name),
+        "next" => advance(&dir, &name, count),
+        "prev" => retreat(&dir, &name, count),
         other => error(format!(
             "Unknown action \"{other}\". Valid actions are \"create\", \"next\", and \"prev\"."
         )),
@@ -105,41 +127,66 @@ fn create(dir: &Utf8Path, name: &str, tasks: Vec<String>) -> ToolResult {
         current: 0,
     };
     save(dir, &plan)?;
-    Ok(plan.render().into())
+    Ok(render_block(&format!("Creating plan \"{name}\""), &plan).into())
 }
 
-/// Complete the in-progress task and start the next one.
-fn advance(dir: &Utf8Path, name: &str) -> ToolResult {
+/// Complete the in-progress task(s) and start the next one.
+fn advance(dir: &Utf8Path, name: &str, count: usize) -> ToolResult {
     let Some(mut plan) = load(dir, name)? else {
         return error(format!(
             "No plan named \"{name}\" exists. Create one first with the \"create\" action."
         ));
     };
 
-    if plan.current >= plan.tasks.len() {
-        return Ok(format!("{}\nAll tasks are already complete.", plan.render()).into());
+    let total = plan.tasks.len();
+    if plan.current >= total {
+        let header = format!("Advancing plan \"{name}\" ({total}/{total} complete)");
+        return Ok(format!(
+            "{}\nAll tasks are already complete.",
+            render_block(&header, &plan)
+        )
+        .into());
     }
 
-    plan.current += 1;
+    let previous = plan.current;
+    plan.current = (plan.current + count).min(total);
     save(dir, &plan)?;
-    Ok(plan.render().into())
+
+    let header = step_header(
+        "Advancing",
+        name,
+        plan.current - previous,
+        plan.done(),
+        total,
+    );
+    Ok(render_block(&header, &plan).into())
 }
 
-/// Re-open the most recently completed task.
+/// Re-open the most recently completed task(s).
 /// Reversing past the first task discards the plan.
-fn retreat(dir: &Utf8Path, name: &str) -> ToolResult {
+fn retreat(dir: &Utf8Path, name: &str, count: usize) -> ToolResult {
     let Some(mut plan) = load(dir, name)? else {
         return error(format!("No plan named \"{name}\" exists. Nothing to undo."));
     };
 
-    if plan.current == 0 {
+    if count > plan.current {
         std::fs::remove_file(path_for(dir, name))?;
         return Ok(format!("Plan \"{name}\" discarded.").into());
     }
 
-    plan.current -= 1;
+    let previous = plan.current;
+    plan.current -= count;
     save(dir, &plan)?;
-    Ok(plan.render().into())
+
+    let total = plan.tasks.len();
+    let header = step_header(
+        "Reverting",
+        name,
+        previous - plan.current,
+        plan.done(),
+        total,
+    );
+    Ok(render_block(&header, &plan).into())
 }
 
 /// Resolve the per-conversation directory that holds this conversation's plans,
@@ -193,16 +240,6 @@ fn validate_name(name: &str) -> Result<(), String> {
     }
 
     Ok(())
-}
-
-/// One-line description of the call for the argument-formatting display path.
-fn format_call(action: &str, name: &str) -> String {
-    match action {
-        "create" => format!("Creating plan \"{name}\""),
-        "next" => format!("Advancing plan \"{name}\""),
-        "prev" => format!("Reverting plan \"{name}\""),
-        other => format!("Plan \"{name}\" ({other})"),
-    }
 }
 
 #[cfg(test)]
