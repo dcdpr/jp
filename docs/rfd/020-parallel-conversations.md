@@ -159,6 +159,17 @@ data directory:
 Where `<session-key>` is the `$JP_SESSION` value or the session leader PID
 (e.g., `12057`).
 
+> [!TIP]
+> Keying the filename on the bare value alone was later found to collide: two
+> env-sourced sessions sharing a value but using different variables (e.g.
+> `$JP_SESSION=1234` and `$TMUX_PANE=1234`), or an `Env` value matching a
+> session-leader PID, resolved to the same `1234.json`.
+> The fix encodes the full session *source* into the filename (`getsid-<pid>`,
+> `hwnd-<handle>`, `env-<KEY>-<hash(value)>`) and stores the session value
+> inside the mapping so cleanup no longer parses the filename.
+> Legacy bare-value files are read via a fallback and migrated to the new name
+> during stale-file cleanup.
+
 The mapping file contains:
 
 ```json

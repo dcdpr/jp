@@ -3,7 +3,7 @@ use std::sync::Arc;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use datetime_literal::datetime;
 use jp_conversation::ConversationId;
-use jp_storage::backend::{FsStorageBackend, LockBackend};
+use jp_storage::backend::{FsStorageBackend, LockBackend, SessionBackend};
 use test_log::test;
 
 use super::*;
@@ -160,7 +160,7 @@ fn load_returns_none_when_missing() {
 
 #[test]
 fn previous_conversation_id_with_single_entry() {
-    let mut mapping = SessionMapping::new(SessionSource::Getsid);
+    let mut mapping = SessionMapping::new(SessionId::new("12345").unwrap(), SessionSource::Getsid);
     let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
     mapping.activate(id, datetime!(2025-07-19 14:00:00 Z));
 
@@ -221,9 +221,34 @@ fn no_user_storage_returns_error_on_write() {
 
 #[test]
 fn env_source_liveness_is_unknown() {
+    let id = SessionId::new("anything").unwrap();
     let source = SessionSource::env("JP_SESSION");
     assert!(matches!(
-        is_session_process_liveness(&source, "anything"),
+        is_session_process_liveness(&id, &source),
+        Liveness::Unknown
+    ));
+}
+
+/// The platform handle survives the id encode/decode round-trip.
+/// This is the regression guard for the encode-as-A / decode-as-B bug: it runs
+/// on every platform's CI, not only the one whose syscall path is exercised.
+#[test]
+fn getsid_id_roundtrips_to_pid() {
+    assert_eq!(Session::getsid(12345).id.as_pid(), Some(12345));
+}
+
+#[test]
+fn hwnd_id_roundtrips_to_handle() {
+    assert_eq!(Session::hwnd(0xBEEF).id.as_hwnd(), Some(0xBEEF));
+}
+
+#[test]
+fn non_numeric_id_does_not_decode_to_a_handle() {
+    let id = SessionId::new("not-a-handle").unwrap();
+    assert_eq!(id.as_pid(), None);
+    assert_eq!(id.as_hwnd(), None);
+    assert!(matches!(
+        is_session_process_liveness(&id, &SessionSource::Getsid),
         Liveness::Unknown
     ));
 }
@@ -231,21 +256,15 @@ fn env_source_liveness_is_unknown() {
 #[cfg(unix)]
 #[test]
 fn getsid_with_own_pid_is_alive() {
-    let pid = std::process::id().to_string();
-    assert!(matches!(pid_liveness(&pid), Liveness::Alive));
+    let pid = std::process::id().cast_signed();
+    assert!(matches!(pid_liveness(pid), Liveness::Alive));
 }
 
 #[cfg(unix)]
 #[test]
 fn getsid_with_nonexistent_pid_is_dead() {
     // PID 2_000_000_000 is extremely unlikely to exist.
-    assert!(matches!(pid_liveness("2000000000"), Liveness::Dead));
-}
-
-#[cfg(unix)]
-#[test]
-fn getsid_with_unparseable_key_is_unknown() {
-    assert!(matches!(pid_liveness("not-a-pid"), Liveness::Unknown));
+    assert!(matches!(pid_liveness(2_000_000_000), Liveness::Dead));
 }
 
 #[cfg(windows)]
@@ -255,8 +274,11 @@ fn hwnd_with_own_console_is_alive() {
     // It should be reported as alive.
     let hwnd = unsafe { windows_sys::Win32::System::Console::GetConsoleWindow() };
     if !hwnd.is_null() {
-        let key = format!("{}", hwnd as isize);
-        assert!(matches!(hwnd_liveness(&key), Liveness::Alive));
+        // Round-trip through the real encode (Session::hwnd) and decode
+        // (SessionId::as_hwnd) so a format mismatch fails here, not silently.
+        let session = Session::hwnd(hwnd as isize);
+        let handle = session.id.as_hwnd().expect("hwnd id must decode");
+        assert!(matches!(hwnd_liveness(handle), Liveness::Alive));
     }
     // If hwnd is null (no console, e.g. GUI-only CI), skip silently.
 }
@@ -265,13 +287,7 @@ fn hwnd_with_own_console_is_alive() {
 #[test]
 fn hwnd_with_nonexistent_handle_is_dead() {
     // 0xDEAD is extremely unlikely to be a valid window handle.
-    assert!(matches!(hwnd_liveness("57005"), Liveness::Dead));
-}
-
-#[cfg(windows)]
-#[test]
-fn hwnd_with_unparseable_key_is_unknown() {
-    assert!(matches!(hwnd_liveness("not-a-handle"), Liveness::Unknown));
+    assert!(matches!(hwnd_liveness(0xDEAD), Liveness::Dead));
 }
 
 #[cfg(unix)]
@@ -657,4 +673,274 @@ fn cleanup_prunes_dead_entries_from_session_history() {
     let mapping = ws.load_session_mapping(&session).unwrap();
     assert_eq!(mapping.history.len(), 1);
     assert_eq!(mapping.active_conversation_id(), Some(live_id));
+}
+
+#[test]
+fn storage_key_distinguishes_env_vars_with_same_value() {
+    let jp = Session {
+        id: SessionId::new("1234").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let tmux = Session {
+        id: SessionId::new("1234").unwrap(),
+        source: SessionSource::env("TMUX_PANE"),
+    };
+
+    assert_ne!(jp.storage_key(), tmux.storage_key());
+}
+
+#[test]
+fn storage_key_distinguishes_getsid_from_env_with_same_value() {
+    let getsid = Session {
+        id: SessionId::new("1234").unwrap(),
+        source: SessionSource::Getsid,
+    };
+    let env = Session {
+        id: SessionId::new("1234").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+
+    assert_eq!(getsid.storage_key(), "getsid-1234");
+    assert_ne!(getsid.storage_key(), env.storage_key());
+}
+
+/// Regression test for the bug this fix resolves: two env-sourced sessions with
+/// the same value but different variables used to collide on one file.
+#[test]
+fn env_sessions_with_same_value_do_not_collide() {
+    let (_tmp, mut ws, _fs) = setup();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+
+    let jp = Session {
+        id: SessionId::new("1234").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let tmux = Session {
+        id: SessionId::new("1234").unwrap(),
+        source: SessionSource::env("TMUX_PANE"),
+    };
+
+    let id1 = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let id2 = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(
+        id1,
+        jp_conversation::Conversation::default(),
+        config.clone(),
+    );
+    ws.create_conversation_with_id(id2, jp_conversation::Conversation::default(), config);
+
+    ws.record_session_activation(&jp, id1, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.record_session_activation(&tmux, id2, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+
+    // Each session keeps its own active conversation; no overwrite.
+    assert_eq!(ws.session_active_conversation(&jp), Some(id1));
+    assert_eq!(ws.session_active_conversation(&tmux), Some(id2));
+}
+
+/// A pre-fix file keyed on the bare value (no `id`, no source prefix) is still
+/// readable, and a subsequent write updates that same file rather than forking
+/// a duplicate.
+#[test]
+fn legacy_bare_value_file_is_read_via_fallback() {
+    let (_tmp, mut ws, fs) = setup();
+    let fs = fs.unwrap();
+    let session = Session {
+        id: SessionId::new("99887").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+    ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
+
+    // Write a legacy-format mapping: keyed on the bare value, no `id` field.
+    let legacy = serde_json::json!({
+        "history": [{ "id": id, "activated_at": "2025-07-19T14:00:00Z" }],
+        "source": { "type": "env", "key": "JP_SESSION" }
+    });
+    fs.save_session("99887", &legacy).unwrap();
+
+    // Resolves via the bare-value fallback even though storage_key is prefixed.
+    assert_eq!(ws.session_active_conversation(&session), Some(id));
+
+    // A write lands on the existing legacy file, so there is still one file.
+    ws.record_session_activation(&session, id, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+    assert_eq!(fs.list_session_files().len(), 1);
+}
+
+/// Cleanup migrates a surviving legacy file to its source-prefixed name and
+/// removes the old file.
+#[test]
+fn cleanup_migrates_legacy_filename_to_source_prefixed_key() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, "test-ws", "abc")
+            .unwrap(),
+    );
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    ws.disable_persistence();
+
+    let session = Session {
+        id: SessionId::new("ci-123").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+
+    // Conversation on disk so the Env existence heuristic keeps the mapping.
+    fs.write_test_conversation(&id, &jp_conversation::Conversation::default());
+
+    let legacy = serde_json::json!({
+        "history": [{ "id": id, "activated_at": "2025-07-19T14:00:00Z" }],
+        "source": { "type": "env", "key": "JP_SESSION" }
+    });
+    fs.save_session("ci-123", &legacy).unwrap();
+
+    ws.cleanup_stale_files(Some(&fs));
+
+    let files = fs.list_session_files();
+    assert_eq!(files.len(), 1, "legacy file migrated, not duplicated");
+    assert_eq!(files[0].file_stem().unwrap(), session.storage_key());
+    // The conversation is on disk but not in the in-memory index, so verify via
+    // the raw mapping (which the migrated file still resolves to).
+    let mapping = ws.load_session_mapping(&session).unwrap();
+    assert_eq!(mapping.active_conversation_id(), Some(id));
+}
+
+/// A legacy bare-value file written by one source must not be adopted by a
+/// different source that happens to share the value — otherwise the pre-fix
+/// collision survives the upgrade for the first mismatched session.
+#[test]
+fn legacy_fallback_ignores_mapping_with_mismatched_source() {
+    let (_tmp, mut ws, fs) = setup();
+    let fs = fs.unwrap();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
+
+    // Pre-upgrade collision file: keyed on the bare value `1234`, source
+    // `JP_SESSION`.
+    let legacy = serde_json::json!({
+        "history": [{ "id": id, "activated_at": "2025-07-19T14:00:00Z" }],
+        "source": { "type": "env", "key": "JP_SESSION" }
+    });
+    fs.save_session("1234", &legacy).unwrap();
+
+    // A different env var with the same value must NOT inherit that history.
+    let tmux = Session {
+        id: SessionId::new("1234").unwrap(),
+        source: SessionSource::env("TMUX_PANE"),
+    };
+    assert_eq!(ws.session_active_conversation(&tmux), None);
+
+    // The matching source still resolves the legacy file via the fallback.
+    let jp = Session {
+        id: SessionId::new("1234").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    assert_eq!(ws.session_active_conversation(&jp), Some(id));
+}
+
+#[test]
+fn storage_key_neutralizes_path_traversal_in_env_key() {
+    let session = Session {
+        id: SessionId::new("1234").unwrap(),
+        source: SessionSource::env("../../etc/passwd"),
+    };
+
+    let key = session.storage_key();
+    assert!(
+        !key.contains('/'),
+        "key must not contain path separators: {key}"
+    );
+    assert!(!key.contains(".."), "key must not contain `..`: {key}");
+}
+
+#[test]
+fn storage_key_neutralizes_path_traversal_in_getsid_id() {
+    // A tampered or externally constructed mapping can carry an arbitrary id;
+    // the Getsid/Hwnd arms interpolate it, so it must be sanitized too.
+    let session = Session {
+        id: SessionId::new("x/../../outside").unwrap(),
+        source: SessionSource::Getsid,
+    };
+
+    let key = session.storage_key();
+    assert!(
+        !key.contains('/'),
+        "key must not contain path separators: {key}"
+    );
+    assert!(!key.contains(".."), "key must not contain `..`: {key}");
+}
+
+/// `storage_key` is not injective — two distinct env sources can sanitize to
+/// the same key.
+/// The primary read must reject a mapping whose stored source does not match,
+/// just like the legacy fallback does.
+#[test]
+fn primary_read_ignores_mapping_from_aliased_source() {
+    let (_tmp, mut ws, _fs) = setup();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
+
+    // `A_B` and `A-B` sanitize to the same key segment with the same value.
+    let stored = Session {
+        id: SessionId::new("v").unwrap(),
+        source: SessionSource::env("A_B"),
+    };
+    let alias = Session {
+        id: SessionId::new("v").unwrap(),
+        source: SessionSource::env("A-B"),
+    };
+    assert_eq!(
+        stored.storage_key(),
+        alias.storage_key(),
+        "precondition: the two sources alias to one key"
+    );
+
+    ws.record_session_activation(&stored, id, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+
+    // The aliasing source must not adopt the stored session's history.
+    assert_eq!(ws.session_active_conversation(&alias), None);
+    // The owning source still resolves it.
+    assert_eq!(ws.session_active_conversation(&stored), Some(id));
+}
+
+/// An env *value* containing path components must not escape `sessions/` on the
+/// legacy compat probe (read) or on the subsequent write.
+#[test]
+fn unsafe_env_value_does_not_escape_on_read_or_write() {
+    let (_tmp, mut ws, fs) = setup();
+    let fs = fs.unwrap();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(id, jp_conversation::Conversation::default(), config);
+
+    let session = Session {
+        id: SessionId::new("x/../../outside").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+
+    // The legacy probe is skipped for the unsafe value, so this resolves cleanly
+    // to None rather than statting an escaped path.
+    assert_eq!(ws.session_active_conversation(&session), None);
+
+    // The write lands on the hashed, source-prefixed key: a single safe segment.
+    ws.record_session_activation(&session, id, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    let files = fs.list_session_files();
+    assert_eq!(files.len(), 1);
+    let stem = files[0].file_stem().unwrap();
+    assert!(
+        !stem.contains('/') && !stem.contains(".."),
+        "unsafe stem: {stem}"
+    );
 }

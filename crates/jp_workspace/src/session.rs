@@ -75,11 +75,22 @@
 //! directory:
 //!
 //! ```txt
-//! ~/.local/share/jp/workspace/<workspace-id>/sessions/<session-key>.json
+//! ~/.local/share/jp/workspace/<workspace-id>/sessions/<storage-key>.json
 //! ```
 //!
-//! The `<session-key>` is the [`SessionId`] value (PID string, HWND string, or
-//! `$JP_SESSION` value).
+//! The `<storage-key>` encodes the full [`Session`] identity — both the value
+//! and its [`SessionSource`] — via [`Session::storage_key`]:
+//!
+//! ```txt
+//! getsid-<pid>.json
+//! hwnd-<handle>.json
+//! env-<KEY>-<hash(value)>.json
+//! ```
+//!
+//! Encoding the source keeps two sessions that share a value but differ in
+//! source from aliasing one file (e.g.
+//! `$JP_SESSION=1234` and `$TMUX_PANE=1234`, or an `Env` value that matches a
+//! session-leader PID).
 //! The file contains a `SessionMapping` with the session's conversation
 //! history.
 //!
@@ -103,6 +114,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// An opaque session identity.
 ///
@@ -125,10 +137,27 @@ impl SessionId {
         Some(Self(value))
     }
 
-    /// The raw string value, used as the session mapping filename.
+    /// The raw string value.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// Decode this id as a Unix session-leader PID.
+    ///
+    /// Inverse of the encoding [`Session::getsid`] applies.
+    /// Returns `None` if the id is not a decimal `i32` (an `Env`-sourced value,
+    /// or a corrupt file).
+    pub(crate) fn as_pid(&self) -> Option<i32> {
+        self.0.parse().ok()
+    }
+
+    /// Decode this id as a Windows console window handle.
+    ///
+    /// Inverse of the encoding [`Session::hwnd`] applies.
+    /// Returns `None` if the id is not a decimal `isize`.
+    pub(crate) fn as_hwnd(&self) -> Option<isize> {
+        self.0.parse().ok()
     }
 }
 
@@ -185,6 +214,56 @@ impl fmt::Display for SessionSource {
     }
 }
 
+/// Encode a session identity into its filesystem-safe storage key.
+///
+/// Shared by [`Session::storage_key`] and session-store cleanup, which rebuilds
+/// the key from a stored mapping.
+/// RFD 087's user-global workspace session store reuses this same scheme.
+pub(crate) fn session_storage_key(id: &SessionId, source: &SessionSource) -> String {
+    // Every interpolated segment is sanitized: the id and the env key both reach
+    // this function from deserialized mappings as well as from a live session,
+    // and `SessionId::new` / `SessionSource::env` accept arbitrary strings, so
+    // neither can be trusted to be a bare value. Sanitizing keeps a `/` or `..`
+    // from escaping the `sessions/` directory when the result becomes a
+    // filename. The env *value* is hashed, which is path-safe on its own.
+    match source {
+        SessionSource::Getsid => format!("getsid-{}", sanitize_path_segment(id.as_str())),
+        SessionSource::Hwnd => format!("hwnd-{}", sanitize_path_segment(id.as_str())),
+        SessionSource::Env { key } => {
+            let key = sanitize_path_segment(key);
+            let digest = format!("{:x}", Sha256::digest(id.as_str().as_bytes()));
+            format!("env-{key}-{}", &digest[..16])
+        }
+    }
+}
+
+/// Whether `segment` is a single path component safe to use as a filename.
+///
+/// Rejects empty strings, `.` / `..`, and anything containing a path separator,
+/// so an untrusted value can't escape its directory when used directly as a
+/// filename (e.g. the legacy bare-value session-store probe).
+pub(crate) fn is_safe_path_segment(segment: &str) -> bool {
+    !segment.is_empty() && segment != "." && segment != ".." && !segment.contains(['/', '\\'])
+}
+
+/// Replace any character that isn't a safe filename character with `_`.
+///
+/// Env var names are conventionally `[A-Za-z0-9_]`, so real keys pass through
+/// unchanged; this only neutralizes path separators and `..` from a tampered or
+/// externally constructed source before it is formatted into a path.
+fn sanitize_path_segment(segment: &str) -> String {
+    segment
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// A resolved session identity, combining the ID with its provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Session {
@@ -196,20 +275,43 @@ pub struct Session {
 }
 
 impl Session {
-    /// Create a new `Session` from a `SessionId` using the `Getsid` source.
+    /// Filesystem-safe key encoding the full session identity.
+    ///
+    /// The session source is part of the key, so two sessions that share a
+    /// value but differ in source never collide on one file:
+    ///
+    /// - `getsid-<pid>`
+    /// - `hwnd-<handle>`
+    /// - `env-<KEY>-<hash(value)>`
+    ///
+    /// The opaque `Env` value is hashed, which both disambiguates distinct
+    /// variables holding the same value and keeps unsafe characters out of the
+    /// filename.
     #[must_use]
-    pub fn getsid(id: SessionId) -> Self {
+    pub fn storage_key(&self) -> String {
+        session_storage_key(&self.id, &self.source)
+    }
+
+    /// Build a `Getsid` session from a Unix session-leader PID.
+    ///
+    /// Owns the PID-to-id encoding so it stays the inverse of
+    /// `SessionId::as_pid`, which stale detection uses to decode it.
+    #[must_use]
+    pub fn getsid(pid: i32) -> Self {
         Self {
-            id,
+            id: SessionId(pid.to_string()),
             source: SessionSource::Getsid,
         }
     }
 
-    /// Create a new `Session` from a `SessionId` using the `Hwnd` source.
+    /// Build an `Hwnd` session from a Windows console window handle.
+    ///
+    /// Owns the handle-to-id encoding so it stays the inverse of
+    /// [`SessionId::as_hwnd`], which stale detection uses to decode it.
     #[must_use]
-    pub fn hwnd(id: SessionId) -> Self {
+    pub fn hwnd(handle: isize) -> Self {
         Self {
-            id,
+            id: SessionId(handle.to_string()),
             source: SessionSource::Hwnd,
         }
     }

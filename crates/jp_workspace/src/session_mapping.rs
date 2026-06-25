@@ -10,16 +10,18 @@
 
 use std::{collections::HashSet, fs};
 
+use camino::Utf8Path;
 use chrono::{DateTime, Utc};
 use jp_conversation::ConversationId;
 use jp_storage::backend::{ConversationFilter, FsStorageBackend};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tracing::{debug, warn};
 
 use super::Workspace;
 use crate::{
     conversation_lock::ConversationLock,
-    session::{Session, SessionSource},
+    session::{Session, SessionId, SessionSource, is_safe_path_segment, session_storage_key},
 };
 
 /// A session's conversation history, persisted to disk.
@@ -31,6 +33,14 @@ use crate::{
 pub(crate) struct SessionMapping {
     /// Conversation activation history, most recent first.
     pub history: Vec<SessionHistoryEntry>,
+
+    /// The session identity value.
+    ///
+    /// Recorded so the mapping is self-describing: cleanup checks process
+    /// liveness from `id` + `source` without parsing the filename.
+    /// Files written before this field existed backfill it from their
+    /// (bare-value) filename on load.
+    pub id: SessionId,
 
     /// How the session identity was determined.
     pub source: SessionSource,
@@ -47,10 +57,11 @@ pub(crate) struct SessionHistoryEntry {
 }
 
 impl SessionMapping {
-    /// Create a new empty mapping for the given session source.
-    pub fn new(source: SessionSource) -> Self {
+    /// Create a new empty mapping for the given session.
+    pub fn new(id: SessionId, source: SessionSource) -> Self {
         Self {
             history: vec![],
+            id,
             source,
         }
     }
@@ -130,7 +141,7 @@ impl Workspace {
             .into_iter()
             .filter_map(|key| {
                 let value = self.sessions.load_session(&key).ok()??;
-                let mapping: SessionMapping = serde_json::from_value(value).ok()?;
+                let mapping = mapping_from_value(value, &key)?;
                 mapping.active_conversation_id()
             })
             .collect()
@@ -157,14 +168,20 @@ impl Workspace {
         id: ConversationId,
         now: DateTime<Utc>,
     ) -> crate::error::Result<()> {
-        let mut mapping = self
-            .load_session_mapping(session)
-            .unwrap_or_else(|| SessionMapping::new(session.source.clone()));
+        let (key, mut mapping) = self.load_session_entry(session).unwrap_or_else(|| {
+            (
+                session.storage_key(),
+                SessionMapping::new(session.id.clone(), session.source.clone()),
+            )
+        });
 
         mapping.activate(id, now);
 
         let value = serde_json::to_value(&mapping).map_err(jp_storage::Error::from)?;
-        self.sessions.save_session(session.id.as_str(), &value)?;
+        // Write to the key the mapping already lives at, so reads and writes
+        // within an invocation stay on one file; cleanup owns migrating a
+        // legacy bare-value file to its source-prefixed name.
+        self.sessions.save_session(&key, &value)?;
         Ok(())
     }
 
@@ -233,103 +250,144 @@ impl Workspace {
 
         // Use filesystem-specific file listing for path-based removal.
         for path in fs.list_session_files() {
-            let session_key = path.file_stem().unwrap_or_default();
-            let Ok(Some(value)) = self.sessions.load_session(session_key) else {
-                continue;
-            };
-            let Ok(mapping) = serde_json::from_value::<SessionMapping>(value) else {
-                continue;
-            };
+            self.cleanup_session_file(&path, &conversation_ids);
+        }
+    }
 
-            // Sources that support liveness checking (Getsid, Hwnd) are
-            // authoritative: if the process is alive the session is valid,
-            // regardless of whether we can see its conversations right now
-            // (another process may be mid-persist, or the conversation was
-            // created after our index loaded). Only delete when the process is
-            // confirmed dead.
-            //
-            // For Env sources we can't check liveness, so we fall back to the
-            // conversation-existence heuristic.
-            let liveness = is_session_process_liveness(&mapping.source, session_key);
+    /// Evaluate a single session mapping file: remove it if stale, prune dead
+    /// history entries, and migrate a legacy bare-value filename to its
+    /// source-prefixed key.
+    fn cleanup_session_file(&self, path: &Utf8Path, conversation_ids: &HashSet<ConversationId>) {
+        let session_key = path.file_stem().unwrap_or_default();
+        let Ok(Some(value)) = self.sessions.load_session(session_key) else {
+            return;
+        };
+        let Some(mapping) = mapping_from_value(value, session_key) else {
+            return;
+        };
 
-            let should_remove = match liveness {
-                Liveness::Alive => false,
-                Liveness::Dead => {
-                    debug!(
-                        path = path.to_string(),
-                        source = mapping.source.to_string(),
-                        "Removing stale session mapping (process dead)."
-                    );
-                    true
-                }
-                Liveness::Unknown => {
-                    let has_live = mapping.history.iter().any(|entry| {
-                        conversation_ids.contains(&entry.id)
-                            || self.locker.lock_info(&entry.id.to_string()).is_some()
-                    });
+        // Sources that support liveness checking (Getsid, Hwnd) are
+        // authoritative: if the process is alive the session is valid,
+        // regardless of whether we can see its conversations right now (another
+        // process may be mid-persist, or the conversation was created after our
+        // index loaded). Only delete when the process is confirmed dead.
+        //
+        // For Env sources we can't check liveness, so we fall back to the
+        // conversation-existence heuristic. The liveness value is decoded from
+        // the mapping's id, not the filename, so the source-prefixed naming
+        // below doesn't disturb it.
+        let liveness = is_session_process_liveness(&mapping.id, &mapping.source);
 
-                    if !has_live {
-                        debug!(
-                            path = path.to_string(),
-                            "Removing stale session mapping (no live conversations)."
-                        );
-                    }
-                    !has_live
-                }
-            };
-
-            if should_remove {
-                drop(fs::remove_file(&path));
-                continue;
-            }
-
-            // Prune individual history entries that reference deleted
-            // conversations. An entry is safe to remove when the conversation
-            // is absent from disk AND no other process holds its write lock
-            // (which would indicate a mid-persist race).
-            let original_count = mapping.history.len();
-            let pruned: Vec<_> = mapping
-                .history
-                .iter()
-                .filter(|entry| {
-                    if conversation_ids.contains(&entry.id) {
-                        return true;
-                    }
-                    // Not on disk — check if another process holds the lock. If
-                    // locked, keep the entry (mid-persist). If unlocked (or no
-                    // lock file), the conversation is genuinely gone.
-                    self.locker.lock_info(&entry.id.to_string()).is_some()
-                })
-                .cloned()
-                .collect();
-
-            if pruned.len() < original_count {
-                let removed = original_count - pruned.len();
+        let should_remove = match liveness {
+            Liveness::Alive => false,
+            Liveness::Dead => {
                 debug!(
                     path = path.to_string(),
-                    removed, "Pruned dead entries from session history."
+                    source = mapping.source.to_string(),
+                    "Removing stale session mapping (process dead)."
                 );
+                true
+            }
+            Liveness::Unknown => {
+                let has_live = mapping.history.iter().any(|entry| {
+                    conversation_ids.contains(&entry.id)
+                        || self.locker.lock_info(&entry.id.to_string()).is_some()
+                });
 
-                let pruned_mapping = SessionMapping {
-                    history: pruned,
-                    source: mapping.source,
-                };
-
-                let Ok(pruned_value) = serde_json::to_value(&pruned_mapping) else {
-                    warn!(
+                if !has_live {
+                    debug!(
                         path = path.to_string(),
-                        "Failed to serialize pruned session mapping."
-                    );
-                    continue;
-                };
-                if let Err(error) = self.sessions.save_session(session_key, &pruned_value) {
-                    warn!(
-                        path = path.to_string(),
-                        error = error.to_string(),
-                        "Failed to rewrite session mapping after pruning."
+                        "Removing stale session mapping (no live conversations)."
                     );
                 }
+                !has_live
             }
+        };
+
+        if should_remove {
+            drop(fs::remove_file(path));
+            return;
+        }
+
+        // A legacy bare-value file is migrated to its source-prefixed key.
+        let desired_key = session_storage_key(&mapping.id, &mapping.source);
+        let needs_migration = session_key != desired_key;
+
+        // A file already present at the destination means this legacy file is a
+        // leftover from a partial migration; drop it rather than clobbering the
+        // current file with stale history.
+        if needs_migration && matches!(self.sessions.load_session(&desired_key), Ok(Some(_))) {
+            debug!(
+                path = path.to_string(),
+                "Removing duplicate legacy session mapping."
+            );
+            drop(fs::remove_file(path));
+            return;
+        }
+
+        // Prune individual history entries that reference deleted conversations.
+        // An entry is safe to remove when the conversation is absent from disk
+        // AND no other process holds its write lock (which would indicate a
+        // mid-persist race).
+        let original_count = mapping.history.len();
+        let pruned: Vec<_> = mapping
+            .history
+            .iter()
+            .filter(|entry| {
+                if conversation_ids.contains(&entry.id) {
+                    return true;
+                }
+                // Not on disk — check if another process holds the lock. If
+                // locked, keep the entry (mid-persist). If unlocked (or no lock
+                // file), the conversation is genuinely gone.
+                self.locker.lock_info(&entry.id.to_string()).is_some()
+            })
+            .cloned()
+            .collect();
+
+        let pruned_changed = pruned.len() < original_count;
+        if pruned_changed {
+            debug!(
+                path = path.to_string(),
+                removed = original_count - pruned.len(),
+                "Pruned dead entries from session history."
+            );
+        }
+
+        // Nothing to write unless an entry was pruned or the file needs to move
+        // to its source-prefixed name.
+        if !pruned_changed && !needs_migration {
+            return;
+        }
+
+        let updated = SessionMapping {
+            history: pruned,
+            id: mapping.id,
+            source: mapping.source,
+        };
+        let Ok(updated_value) = serde_json::to_value(&updated) else {
+            warn!(
+                path = path.to_string(),
+                "Failed to serialize session mapping."
+            );
+            return;
+        };
+        if let Err(error) = self.sessions.save_session(&desired_key, &updated_value) {
+            warn!(
+                path = path.to_string(),
+                error = error.to_string(),
+                "Failed to rewrite session mapping."
+            );
+            return;
+        }
+
+        if needs_migration {
+            debug!(
+                path = path.to_string(),
+                key = desired_key,
+                "Migrated session mapping to source-prefixed key."
+            );
+            drop(fs::remove_file(path));
         }
     }
 
@@ -338,25 +396,66 @@ impl Workspace {
     /// Returns `None` if no mapping exists for the session, or if the mapping
     /// cannot be parsed.
     fn load_session_mapping(&self, session: &Session) -> Option<SessionMapping> {
-        match self.sessions.load_session(session.id.as_str()) {
-            Ok(Some(value)) => match serde_json::from_value(value) {
-                Ok(mapping) => {
-                    debug!(session = session.id.as_str(), "Loaded session mapping.");
-                    Some(mapping)
+        self.load_session_entry(session).map(|(_, mapping)| mapping)
+    }
+
+    /// Load the session mapping together with the storage key it lives at.
+    ///
+    /// Resolves the source-prefixed key first, then falls back to the legacy
+    /// bare-value key for files written before the source was encoded into the
+    /// filename.
+    /// The returned key is where a subsequent write should land so it updates
+    /// the existing file rather than forking a duplicate.
+    fn load_session_entry(&self, session: &Session) -> Option<(String, SessionMapping)> {
+        let key = session.storage_key();
+        if let Some(mapping) = self.read_matching_mapping(&key, session) {
+            return Some((key, mapping));
+        }
+
+        // Legacy fallback for files written before the source was encoded into
+        // the filename. The bare value was the filename, so only probe it when
+        // it is a safe single path segment — an env value like `x/../../outside`
+        // must not be interpreted as path components on this compat read.
+        let legacy_key = session.id.as_str();
+        if legacy_key != key
+            && is_safe_path_segment(legacy_key)
+            && let Some(mapping) = self.read_matching_mapping(legacy_key, session)
+        {
+            debug!(legacy = legacy_key, "Loaded legacy session mapping.");
+            return Some((legacy_key.to_owned(), mapping));
+        }
+
+        None
+    }
+
+    /// Read the mapping at `key`, returning it only when its stored identity
+    /// matches `session`.
+    ///
+    /// `storage_key` is not guaranteed injective — sanitized env keys can
+    /// alias (`env("A-B")` and `env("A_B")`), a pre-fix bare-value file is
+    /// shared across sources, and hashes can (astronomically) collide.
+    /// So the stored `id` + `source` is the authority for ownership, never the
+    /// filename; this stops one session from adopting another's history through
+    /// a key clash.
+    fn read_matching_mapping(&self, key: &str, session: &Session) -> Option<SessionMapping> {
+        let mapping = self.read_session_mapping(key)?;
+        (mapping.id == session.id && mapping.source == session.source).then_some(mapping)
+    }
+
+    /// Read and parse the session mapping stored under `key`.
+    fn read_session_mapping(&self, key: &str) -> Option<SessionMapping> {
+        match self.sessions.load_session(key) {
+            Ok(Some(value)) => {
+                let mapping = mapping_from_value(value, key);
+                if mapping.is_none() {
+                    warn!(session = key, "Failed to parse session mapping, ignoring.");
                 }
-                Err(error) => {
-                    warn!(
-                        session = session.id.as_str(),
-                        error = error.to_string(),
-                        "Failed to parse session mapping, ignoring."
-                    );
-                    None
-                }
-            },
+                mapping
+            }
             Ok(None) => None,
             Err(error) => {
                 warn!(
-                    session = session.id.as_str(),
+                    session = key,
                     error = error.to_string(),
                     "Failed to read session mapping, ignoring."
                 );
@@ -364,6 +463,21 @@ impl Workspace {
             }
         }
     }
+}
+
+/// Deserialize a session mapping, backfilling `id` for the legacy on-disk
+/// layout that stored the session value only in the filename.
+///
+/// `fallback_id` is the key the value was loaded under; for a legacy file that
+/// key is the bare session value, which is exactly the missing `id`.
+fn mapping_from_value(mut value: Value, fallback_id: &str) -> Option<SessionMapping> {
+    if let Some(object) = value.as_object_mut() {
+        object
+            .entry("id")
+            .or_insert_with(|| Value::String(fallback_id.to_owned()));
+    }
+
+    serde_json::from_value(value).ok()
 }
 
 /// Result of checking whether the session's originating process is still alive.
@@ -380,10 +494,15 @@ enum Liveness {
 }
 
 /// Determine whether the process that created a session mapping is still alive.
-fn is_session_process_liveness(source: &SessionSource, session_key: &str) -> Liveness {
+///
+/// The id is decoded into the typed handle via `SessionId::as_pid` /
+/// [`SessionId::as_hwnd`] — the inverse of the encoding in [`Session::getsid`]
+/// / [`Session::hwnd`].
+/// A non-decodable id (or `Env` source) yields `Unknown`.
+fn is_session_process_liveness(id: &SessionId, source: &SessionSource) -> Liveness {
     match source {
-        SessionSource::Getsid => pid_liveness(session_key),
-        SessionSource::Hwnd => hwnd_liveness(session_key),
+        SessionSource::Getsid => id.as_pid().map_or(Liveness::Unknown, pid_liveness),
+        SessionSource::Hwnd => id.as_hwnd().map_or(Liveness::Unknown, hwnd_liveness),
         SessionSource::Env { .. } => Liveness::Unknown,
     }
 }
@@ -393,11 +512,7 @@ fn is_session_process_liveness(source: &SessionSource, session_key: &str) -> Liv
 /// See:
 /// <https://man7.org/linux/man-pages/man2/kill.2.html#:~:text=sig%20is%200>
 #[cfg(unix)]
-fn pid_liveness(session_key: &str) -> Liveness {
-    let Ok(pid) = session_key.parse::<i32>() else {
-        return Liveness::Unknown;
-    };
-
+fn pid_liveness(pid: i32) -> Liveness {
     // kill(pid, 0) checks if a process exists without sending a signal. Returns
     // 0 if the process exists (and we have permission to signal it), or -1 with
     // ESRCH if it doesn't exist.
@@ -420,7 +535,7 @@ fn pid_liveness(session_key: &str) -> Liveness {
 }
 
 #[cfg(not(unix))]
-fn pid_liveness(_session_key: &str) -> Liveness {
+fn pid_liveness(_pid: i32) -> Liveness {
     Liveness::Unknown
 }
 
@@ -429,18 +544,14 @@ fn pid_liveness(_session_key: &str) -> Liveness {
 /// See:
 /// <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-iswindow>
 #[cfg(windows)]
-fn hwnd_liveness(session_key: &str) -> Liveness {
+fn hwnd_liveness(handle: isize) -> Liveness {
     use windows_sys::Win32::UI::WindowsAndMessaging::IsWindow;
-
-    let Ok(hwnd) = session_key.parse::<isize>() else {
-        return Liveness::Unknown;
-    };
 
     // IsWindow returns nonzero if the handle is a valid window.
     //
     // SAFETY: IsWindow is safe to call with any handle value — it just checks
     // validity.
-    if unsafe { IsWindow(hwnd as *mut core::ffi::c_void) } == 0 {
+    if unsafe { IsWindow(handle as *mut core::ffi::c_void) } == 0 {
         Liveness::Dead
     } else {
         Liveness::Alive
@@ -448,7 +559,7 @@ fn hwnd_liveness(session_key: &str) -> Liveness {
 }
 
 #[cfg(not(windows))]
-fn hwnd_liveness(_session_key: &str) -> Liveness {
+fn hwnd_liveness(_handle: isize) -> Liveness {
     Liveness::Unknown
 }
 

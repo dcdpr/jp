@@ -84,8 +84,9 @@ fn from_platform() -> Option<Session> {
         return None;
     }
 
-    let id = SessionId::new(sid.to_string())?;
-    Some(Session::getsid(id))
+    // jp_workspace owns the PID-to-id encoding (and its decode for stale
+    // detection); we only supply the raw handle.
+    Some(Session::getsid(sid))
 }
 
 /// Platform-specific automatic session detection.
@@ -101,8 +102,9 @@ fn from_platform() -> Option<Session> {
         return None;
     }
 
-    let id = SessionId::new(format!("{hwnd:?}"))?;
-    Some(Session::hwnd(id))
+    // jp_workspace owns the handle-to-id encoding (and its decode for stale
+    // detection); we only supply the raw handle.
+    Some(Session::hwnd(hwnd as isize))
 }
 
 /// Platform-specific automatic session detection.
