@@ -17,7 +17,7 @@ use jp_config::{
 };
 use jp_conversation::{EventKind, stream::turn_iter::Turn};
 use jp_llm::tool::InvocationContext;
-use jp_printer::Printer;
+use jp_printer::{ErrChannel, Printer};
 use tracing::warn;
 
 use super::{ToolRenderer, TurnView, metadata::get_rendered_arguments};
@@ -71,14 +71,15 @@ impl TurnRenderer {
         source: ConfigSource,
         invocation: InvocationContext,
     ) -> Self {
-        let view = TurnView::new(printer.clone(), style.clone(), assistant_name, model_id);
+        let mut view = TurnView::new(printer.clone(), style.clone(), assistant_name, model_id);
         let tool = ToolRenderer::new(
-            printer.clone(),
+            ErrChannel::new(printer.clone()),
             style,
             root.clone(),
             is_tty,
             invocation.clone(),
         );
+        view.set_tool_separator(tool.separator_flag());
         Self {
             printer,
             root,
@@ -191,12 +192,13 @@ impl TurnRenderer {
             model_id,
         );
         self.tool = ToolRenderer::new(
-            self.printer.clone(),
+            ErrChannel::new(self.printer.clone()),
             style,
             self.root.clone(),
             self.is_tty,
             self.invocation.clone(),
         );
+        self.view.set_tool_separator(self.tool.separator_flag());
         self.tools_config = config.conversation.tools;
     }
 }

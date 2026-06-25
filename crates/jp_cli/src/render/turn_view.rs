@@ -13,7 +13,10 @@
 //!
 //! [`TurnRenderer`]: super::TurnRenderer
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use jp_config::style::StyleConfig;
 use jp_conversation::event::{ChatRequest, ChatResponse};
@@ -49,6 +52,14 @@ pub(crate) struct TurnView {
     /// Reset by [`Self::begin_turn`] and [`Self::render_user_request`]; set by
     /// [`Self::ensure_assistant_header`] on first use.
     assistant_header_rendered: bool,
+
+    /// Shared with the [`ToolRenderer`] (wired via
+    /// [`Self::set_tool_separator`]): the flag a tool result or custom argument
+    /// block raises to owe a blank-line separator before the next tool call.
+    /// Visible assistant content clears it, since it supplies its own spacing.
+    ///
+    /// [`ToolRenderer`]: super::ToolRenderer
+    tool_separator: Arc<AtomicBool>,
 }
 
 impl TurnView {
@@ -64,7 +75,15 @@ impl TurnView {
             assistant_name,
             model_id,
             assistant_header_rendered: false,
+            tool_separator: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Wire this view's tool-separator flag to a [`ToolRenderer`].
+    ///
+    /// [`ToolRenderer`]: super::ToolRenderer
+    pub(crate) fn set_tool_separator(&mut self, flag: Arc<AtomicBool>) {
+        self.tool_separator = flag;
     }
 
     /// Mark the start of a new turn.
@@ -84,6 +103,7 @@ impl TurnView {
         // Close any open structured fence before the user header so the
         // boundary marker isn't rendered inside a `json` block.
         self.structured.flush();
+        self.tool_separator.store(false, Ordering::Relaxed);
         let label = req.author.as_deref().unwrap_or(DEFAULT_USER_LABEL);
         self.chat.render_role_header(label, None);
         self.chat.render_request(&req.content);
@@ -100,6 +120,20 @@ impl TurnView {
     /// flushes the chat buffer first.
     pub fn render_chat_response(&mut self, resp: &ChatResponse) {
         self.ensure_assistant_header();
+
+        // Visible assistant content supplies its own spacing, so a preceding
+        // tool block no longer owes a separator before the next tool call.
+        // Reasoning that doesn't supply its own separation (Hidden renders
+        // nothing; Timer erases its line; Progress leaves an unterminated
+        // `reasoning...` line) must not clear that debt.
+        let clears_debt = match resp {
+            ChatResponse::Reasoning { .. } => self.chat.reasoning_supplies_separation(),
+            _ => true,
+        };
+        if clears_debt {
+            self.tool_separator.store(false, Ordering::Relaxed);
+        }
+
         if resp.is_structured() {
             self.chat.flush();
             self.structured.render_chunk(resp);
@@ -200,3 +234,7 @@ impl TurnView {
         self.assistant_header_rendered = true;
     }
 }
+
+#[cfg(test)]
+#[path = "turn_view_tests.rs"]
+mod tests;

@@ -1,4 +1,14 @@
-use std::{env, fmt::Write as _, fs, sync::Arc, time, time::Duration};
+use std::{
+    env,
+    fmt::Write as _,
+    fs,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time,
+    time::Duration,
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use crossterm::style::Stylize as _;
@@ -12,7 +22,7 @@ use jp_config::{
 use jp_conversation::event::ToolCallResponse;
 use jp_llm::{CommandResult, run_tool_command, tool::InvocationContext};
 use jp_md::format::Formatter;
-use jp_printer::Printer;
+use jp_printer::ErrChannel;
 use jp_term::osc::hyperlink;
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::Sender;
@@ -66,7 +76,7 @@ pub enum RenderOutcome {
 /// [`render_tool_call`]: Self::render_tool_call
 /// [`tick`]: Self::tick
 pub struct ToolRenderer {
-    printer: Arc<Printer>,
+    channel: ErrChannel,
     config: StyleConfig,
     root: Utf8PathBuf,
 
@@ -89,24 +99,35 @@ pub struct ToolRenderer {
 
     /// Cancellation token for the tick timer task.
     timer_token: Option<CancellationToken>,
+
+    /// Whether the last rendered tool output (custom arguments or a result)
+    /// owes a blank-line separator before the next tool call header.
+    ///
+    /// Shared with the [`TurnView`] so visible assistant content can cancel the
+    /// debt: when text or reasoning renders after a tool result, it supplies
+    /// its own spacing and the next tool header must not add a second blank
+    /// line.
+    ///
+    /// [`TurnView`]: super::TurnView
+    separator: Arc<AtomicBool>,
 }
 
 impl ToolRenderer {
     pub fn new(
-        printer: Arc<Printer>,
+        channel: ErrChannel,
         config: StyleConfig,
         root: Utf8PathBuf,
         is_tty: bool,
         invocation: InvocationContext,
     ) -> Self {
-        let formatter = Formatter::new().theme(if printer.pretty_printing_enabled() {
+        let formatter = Formatter::new().theme(if channel.pretty_printing_enabled() {
             config.markdown.theme.as_deref()
         } else {
             None
         });
 
         Self {
-            printer,
+            channel,
             config,
             root,
             invocation,
@@ -115,6 +136,23 @@ impl ToolRenderer {
             line_active: false,
             is_tty,
             timer_token: None,
+            separator: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Handle to the shared owed-separator flag, for wiring to the
+    /// [`TurnView`].
+    ///
+    /// [`TurnView`]: super::TurnView
+    pub(crate) fn separator_flag(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.separator)
+    }
+
+    /// Emit the blank-line separator owed by a preceding tool result or custom
+    /// argument block, if any, then clear the debt.
+    fn emit_separator(&self) {
+        if self.separator.swap(false, Ordering::Relaxed) {
+            let _ = writeln!(self.channel.writer());
         }
     }
 
@@ -128,13 +166,11 @@ impl ToolRenderer {
         arguments: &Map<String, Value>,
         style: &ParametersStyle,
     ) {
+        self.emit_separator();
         let styled_name = name.yellow().bold();
         let args = format_args(arguments, style);
 
-        let _ = writeln!(
-            self.printer.err_writer(),
-            "Calling tool {styled_name}{args}"
-        );
+        let _ = writeln!(self.channel.writer(), "Calling tool {styled_name}{args}");
     }
 
     /// Renders a tool call with all styles, printing header and arguments
@@ -181,8 +217,9 @@ impl ToolRenderer {
     ) -> RenderOutcome {
         match format_args_custom(name, arguments, cmd, &self.root, &self.invocation).await {
             Ok(content) if !content.is_empty() => {
+                self.emit_separator();
                 let styled_name = name.yellow().bold();
-                let _ = writeln!(self.printer.err_writer(), "Calling tool {styled_name}");
+                let _ = writeln!(self.channel.writer(), "Calling tool {styled_name}");
                 self.render_formatted_arguments(&content);
                 RenderOutcome::Rendered {
                     content: Some(content),
@@ -190,8 +227,9 @@ impl ToolRenderer {
             }
             Ok(_) => {
                 // Custom formatter returned empty — just show the header.
+                self.emit_separator();
                 let styled_name = name.yellow().bold();
-                let _ = writeln!(self.printer.err_writer(), "Calling tool {styled_name}");
+                let _ = writeln!(self.channel.writer(), "Calling tool {styled_name}");
                 RenderOutcome::Rendered { content: None }
             }
             Err(error) => {
@@ -208,22 +246,20 @@ impl ToolRenderer {
     ///
     /// [`render_approved`]: Self::render_approved
     pub fn render_formatted_arguments(&self, content: &str) {
-        let _ = writeln!(self.printer.err_writer(), "\n{content}");
-        if !content.ends_with("\n\n") {
-            let _ = writeln!(self.printer.err_writer());
-        }
+        let _ = writeln!(self.channel.writer(), "\n{}", content.trim());
+        self.separator.store(true, Ordering::Relaxed);
     }
 
     /// Renders elapsed time for a long-running tool.
     pub fn render_progress(&self, elapsed: Duration) {
         let secs = elapsed.as_secs_f64();
-        let _ = write!(self.printer.err_writer(), "\r\x1b[K⏱ Running… {secs:.1}s");
+        let _ = write!(self.channel.writer(), "\r\x1b[K⏱ Running… {secs:.1}s");
     }
 
     /// Clears the current progress line.
     pub fn clear_progress(&self) {
         // Carriage return + ANSI escape to clear to end of line
-        let _ = write!(self.printer.err_writer(), "\r\x1b[K");
+        let _ = write!(self.channel.writer(), "\r\x1b[K");
     }
 
     /// Returns the progress configuration.
@@ -323,7 +359,8 @@ impl ToolRenderer {
         };
 
         // Render intro header
-        if !matches!(inline_results, InlineResults::Off) && max_lines > 0 {
+        let wrote_inline = !matches!(inline_results, InlineResults::Off) && max_lines > 0;
+        if wrote_inline {
             let lang = ext.as_ref().filter(|e| !e.is_empty());
             let mut code_state = lang.map(|lang| self.formatter.begin_code_block(lang));
             let mut output = "\n".to_owned();
@@ -358,19 +395,24 @@ impl ToolRenderer {
                 output.push_str(&format!(" _(truncated to {max_lines} lines)_"));
             }
 
-            let _ = write!(self.printer.err_writer(), "{output}");
+            if !output.ends_with('\n') {
+                output.push('\n');
+            }
+
+            let _ = write!(self.channel.writer(), "{output}");
         }
 
         // Render file links
-        match results_file_link {
-            LinkStyle::Off => {}
+        let wrote_link = match results_file_link {
+            LinkStyle::Off => false,
             LinkStyle::Full => {
-                let _ = writeln!(self.printer.err_writer(), "see: {}\n", path.display());
+                let _ = writeln!(self.channel.writer(), "see: {}", path.display());
+                true
             }
             LinkStyle::Osc8 => {
                 let _ = writeln!(
-                    self.printer.err_writer(),
-                    "[{}] [{}]\n",
+                    self.channel.writer(),
+                    "[{}] [{}]",
                     hyperlink(
                         format!("file://{}", path.display()),
                         "open in editor".red().to_string()
@@ -380,7 +422,18 @@ impl ToolRenderer {
                         "copy to clipboard".red().to_string()
                     )
                 );
+                true
             }
+        };
+
+        // A rendered result owes a blank-line separator before the next tool
+        // call header, but only when it actually produced visible output: an
+        // empty result with no file link writes nothing, so it must not push a
+        // stray blank line ahead of the next header. The debt is emitted lazily
+        // so it survives the streaming temp line, and is dropped by visible
+        // assistant content that follows.
+        if wrote_inline || wrote_link {
+            self.separator.store(true, Ordering::Relaxed);
         }
     }
 
@@ -428,7 +481,7 @@ impl ToolRenderer {
         // header would overwrite it, producing a glued "…toolCalling tool…"
         // line. Remaining tools get a fresh temp line on the next tick.
         if self.line_active {
-            let _ = write!(self.printer.err_writer(), "\r\x1b[K");
+            let _ = write!(self.channel.writer(), "\r\x1b[K");
             self.line_active = false;
         }
     }
@@ -444,7 +497,7 @@ impl ToolRenderer {
         let content = self.temp_line_content();
         let secs = elapsed.as_secs_f64();
         let _ = write!(
-            self.printer.err_writer(),
+            self.channel.writer(),
             "\r\x1b[K{content} (receiving arguments… {secs:.1}s)",
         );
         // The tick now owns the temp line, so a later `complete` knows to clear
@@ -466,7 +519,7 @@ impl ToolRenderer {
         if !self.line_active {
             return;
         }
-        let _ = write!(self.printer.err_writer(), "\r\x1b[K");
+        let _ = write!(self.channel.writer(), "\r\x1b[K");
     }
 
     /// Clears the temp line and all pending state.
@@ -475,7 +528,7 @@ impl ToolRenderer {
         self.stop_timer();
 
         if self.line_active {
-            let _ = write!(self.printer.err_writer(), "\r\x1b[K");
+            let _ = write!(self.channel.writer(), "\r\x1b[K");
             self.line_active = false;
         }
 
@@ -509,13 +562,19 @@ impl ToolRenderer {
     }
 
     fn write_temp_line(&self) {
+        // The streaming temp line is the first thing to appear after a
+        // preceding tool result or custom argument block, so it pays the owed
+        // separator. The permanent header that replaces it later finds the debt
+        // already cleared, and the blank line above survives the in-place
+        // `complete`/header rewrite.
+        self.emit_separator();
         let content = self.temp_line_content();
-        let _ = write!(self.printer.err_writer(), "{content}");
+        let _ = write!(self.channel.writer(), "{content}");
     }
 
     fn rewrite_temp_line(&self) {
         let content = self.temp_line_content();
-        let _ = write!(self.printer.err_writer(), "\r{content}\x1b[K");
+        let _ = write!(self.channel.writer(), "\r{content}\x1b[K");
     }
 
     fn ensure_timer(&mut self, tick_tx: &Sender<Duration>) {

@@ -1,7 +1,0 @@
----
-source: crates/jp_cli/src/render/tool_tests.rs
-expression: output
----
-line1
-line2
- _(truncated to 2 lines)_
