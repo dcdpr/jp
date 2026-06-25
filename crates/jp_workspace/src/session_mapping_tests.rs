@@ -781,7 +781,7 @@ fn cleanup_migrates_legacy_filename_to_source_prefixed_key() {
     let fs = Arc::new(
         FsStorageBackend::new(&storage_path)
             .unwrap()
-            .with_user_storage(&user_root, "test-ws", "abc")
+            .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
     let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
