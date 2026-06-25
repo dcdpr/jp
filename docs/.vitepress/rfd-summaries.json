@@ -120,7 +120,7 @@
     "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
   },
   "031-durable-conversation-storage-with-workspace-projection.md": {
-    "hash": "6d119e6d602bfbf3f566826788dbdf15a2d59c354ef11d2b38841e26217b417a",
+    "hash": "ffad02f50c7c21bee0883ed33408e3e6c09e319814db24d8cbfd450709c65f9c",
     "summary": "Make user-local storage the durable source; workspace copies become optional projections for git visibility."
   },
   "032-grizzly-semantic-search.md": {
@@ -176,7 +176,7 @@
     "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
   },
   "046-nested-workspace-projection.md": {
-    "hash": "7317e1ff522e68dce4e458a87bdbb961cb939c8dd81e8a8d8247201faa96e8f2",
+    "hash": "e978f901538d37189f49511bbf03719351f4116e587946da320cb369563fefbb",
     "summary": "Nested workspace directories project conversation trees visually; user-local storage stays flat for durability."
   },
   "047-editor-and-path-access-for-conversations.md": {
@@ -248,7 +248,7 @@
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
   },
   "064-non-destructive-conversation-compaction.md": {
-    "hash": "1e22178034930e96ee44ac469ac58dacfba73bf7bb2d33925dd87f1f59ee312b",
+    "hash": "3cd56aee44cb9becf11a1e62f95710266656a93fae1e13b803316887f0297b70",
     "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {
@@ -344,7 +344,7 @@
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
-    "hash": "69960490290bf5d5570b1b2d96693ac765d1d8335cd524e546f2069d51cf6bca",
+    "hash": "9501443d3fca0de19dab38f696f2865266e420fc3e455755697276f0e1444fee",
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   }
 }
