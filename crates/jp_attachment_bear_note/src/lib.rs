@@ -27,14 +27,20 @@ impl BearNotes {
     fn query_to_uri(&self, query: &Query) -> Result<Url, Box<dyn Error + Send + Sync>> {
         let (host, path, query_pairs) = match query {
             Query::Get(path) => ("get", path, vec![]),
-            Query::Search { query, tags } => (
-                "search",
+            Query::Search {
                 query,
-                tags.clone()
+                tags,
+                exclude_archived,
+            } => {
+                let mut pairs: Vec<(String, String)> = tags
                     .iter()
                     .map(|t| ("tag".to_owned(), t.to_owned()))
-                    .collect::<Vec<_>>(),
-            ),
+                    .collect();
+                if *exclude_archived {
+                    pairs.push(("exclude_archived".to_owned(), "true".to_owned()));
+                }
+                ("search", query, pairs)
+            }
         };
 
         let query_pairs = query_pairs
@@ -64,7 +70,16 @@ enum Query {
     Get(String),
 
     /// Search for a note by its title or content, optionally filtering by tags.
-    Search { query: String, tags: Vec<String> },
+    Search {
+        query: String,
+        tags: Vec<String>,
+
+        /// Drop archived notes from the results instead of attaching their full
+        /// content.
+        /// Archived notes still match; they're just not returned.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        exclude_archived: bool,
+    },
 }
 
 /// A note from the Bear note-taking app, formatted for attachment XML output.
@@ -179,12 +194,21 @@ fn uri_to_query(uri: &Url) -> Result<Query, Box<dyn Error + Send + Sync>> {
             .map(Query::Get)?,
         Some("get") => Query::Get(path),
         Some("search") => {
-            let tags = query_pairs
-                .into_iter()
-                .filter_map(|(k, v)| if k == "tag" { Some(v) } else { None })
-                .collect();
+            let mut tags = vec![];
+            let mut exclude_archived = false;
+            for (k, v) in query_pairs {
+                match k.as_str() {
+                    "tag" => tags.push(v),
+                    "exclude_archived" => exclude_archived = v != "false" && v != "0",
+                    _ => {}
+                }
+            }
 
-            Query::Search { query: path, tags }
+            Query::Search {
+                query: path,
+                tags,
+                exclude_archived,
+            }
         }
         // Shorthand: `bear:NOTE_ID`. Truly opaque form (no `//`, no
         // leading `/`) — the path holds the note id directly. Gated on
@@ -207,7 +231,11 @@ fn get_notes(query: &Query, db: &BearDb) -> Result<Vec<Note>, Box<dyn Error + Se
             .map(Note::from)
             .collect(),
 
-        Query::Search { query, tags } => {
+        Query::Search {
+            query,
+            tags,
+            exclude_archived,
+        } => {
             let matches = db
                 .search(&SearchParams {
                     queries: vec![query.clone()],
@@ -216,8 +244,14 @@ fn get_notes(query: &Query, db: &BearDb) -> Result<Vec<Note>, Box<dyn Error + Se
                 })
                 .map_err(|e| e.to_string())?;
 
-            // For each matched note, fetch the full note
-            let ids: Vec<_> = matches.iter().map(|m| m.note_id.as_str()).collect();
+            // Archived notes match like any other. When excluded, drop them
+            // before fetching content so their (often large) bodies never
+            // reach the assistant.
+            let ids: Vec<_> = matches
+                .iter()
+                .filter(|m| !*exclude_archived || !m.is_archived)
+                .map(|m| m.note_id.as_str())
+                .collect();
             db.get_notes(&ids)
                 .map_err(|e| e.to_string())?
                 .into_iter()

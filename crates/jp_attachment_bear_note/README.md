@@ -36,6 +36,13 @@ Fetch a list of notes tagged with a specific tag:
 jp attachment add "bear://search/?tag=project/my-project"
 ```
 
+Exclude archived notes from a search. Archived notes still match, but their
+content is left out of the attachment:
+
+```sh
+jp attachment add "bear://search/?tag=project/my-project&exclude_archived=true"
+```
+
 List all added URIs:
 
 ```sh
