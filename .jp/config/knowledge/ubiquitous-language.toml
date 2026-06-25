@@ -1,0 +1,144 @@
+[[assistant.system_prompt_sections]]
+tag = "Ubiquitous Language: What It Is"
+content = """\
+The ubiquitous language is JP's shared domain vocabulary: the exact terms used \
+across code, documentation, commits, RFDs, CLI help, and error messages. Its \
+value is that one word means one concept everywhere, so contributors (human or \
+AI) reason about the system without re-deriving what each concept means each \
+time.
+
+The canonical glossary lives at `docs/architecture/ubiquitous-language.md`, \
+with a per-cluster directory under `docs/architecture/ubiquitous-language/` \
+being filled in incrementally. Consult it before introducing a term, and \
+update it when the vocabulary shifts.
+
+The code is authoritative. When documentation and code disagree on what a term \
+means or what it is called, the code wins — update the docs and the glossary to \
+match. Do not paper over the drift with aliases, `as` casts, or inline notes \
+explaining the mismatch.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "Ubiquitous Language: Using Terms"
+content = """\
+- **Use the exact existing term.** When the code calls something a `Turn`, do \
+  not call it a "message", "round", or "exchange" in prose, a commit, or a \
+  comment. Before introducing a term for a concept, grep the codebase and \
+  check the glossary for how it is already named, and match it.
+
+- **Names are contracts.** Renaming a type, field, or concept propagates \
+  through code, serialized formats, tests, docs, CLI output, and user scripts. \
+  Do not rename in passing. If a name is wrong, rename it as its own \
+  deliberate change, and do it thoroughly.
+
+- **Introduce new terms explicitly.** When a genuinely new concept appears, \
+  name it, add it to the glossary, and use it consistently from that point \
+  on. Do not leave it as "that thing we do after a tool call".
+
+- **User-facing and internal names can differ, but drift is a warning.** CLI \
+  flags, config keys, and error messages are part of the user-facing \
+  language. Internal type names may differ — but when the outer and inner \
+  names for the same concept diverge without reason, the model is fuzzy, not \
+  feature-rich.
+
+- **One word, one concept.** If a common word is already taken (e.g. \
+  "pinned" for a conversation), do not reuse it for a mechanically different \
+  concept just because it fits loosely. Reusing a term forces every reader to \
+  disambiguate which meaning applies, every time — that is the drift the \
+  glossary exists to prevent. Pick a distinct word.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "Ubiquitous Language: Writing a Glossary Entry"
+content = """\
+A glossary entry names a *domain concept*, not a feature. Write the meaning \
+that stays true regardless of which command surfaces the concept or how that \
+command currently behaves.
+
+An entry has a fixed shape:
+
+- **Define the concept** in one or two sentences — what it *is*, in terms a \
+  reader can carry into code, prose, and conversation.
+
+- **Name the implementing type** and crate (e.g. "`Turn<'a>` in \
+  `jp_conversation::stream::turn_iter`"). One pointer, not an inventory.
+
+- **Add "Not the same as"** when a sibling concept is easy to confuse with \
+  this one, and state the distinction in a single line.
+
+- **State scope** when the term is easy to over-read — name what it does \
+  *not* cover.
+
+Keep usage and mechanics OUT of the entry:
+
+- **No CLI-flag or command-behavior enumerations.** "Toggled with `--pin`", \
+  "prompts for confirmation by default", "sorts first in `ls`" are feature \
+  documentation, not concept definitions. They drift the moment behavior \
+  changes and silently falsify the glossary — exactly what the glossary \
+  exists to prevent.
+
+- **No history references.** "Used to be called", "previously", "renamed \
+  from". The glossary describes what a term means now.
+
+- **No forward references to unbuilt concepts.** The glossary documents the \
+  current system; the code is authoritative. A term for an unimplemented \
+  design belongs in its RFD until it lands, not in the glossary.
+
+- **Match the shape of the existing entries** (Turn, Thread, Attachment): \
+  concept, implementing type, "not the same as". If a new entry runs longer \
+  than those, it is probably documenting a feature, not defining a term — cut \
+  it back.
+"""
+
+[[assistant.instructions]]
+title = "Ubiquitous Language: Glossary Entry Examples"
+description = """\
+Concrete contrasts for writing a glossary entry. The "bad" version is a real \
+draft produced in this project and corrected.\
+"""
+items = [
+    """\
+    **Define the concept, not the commands that touch it.** The meaning must \
+    survive a change to any single command's behavior.\
+    """,
+    """\
+    **Name one implementing type, not an inventory of flags and subcommands.**\
+    """,
+    """\
+    **Disambiguate confusable siblings with "Not the same as".** State the \
+    distinction in one line rather than describing both at length.\
+    """,
+    """\
+    **Don't forward-reference a term that has no code yet.** An aspirational \
+    term belongs in its RFD until it lands.\
+    """,
+]
+
+[[assistant.instructions.examples]]
+good = """\
+### Pinned Conversation
+
+A conversation the user has marked as important, so it stays prominent and is
+protected from casual removal. Pinning is a property of the conversation
+itself, not of any session or view. Persisted as a `pinned_at` timestamp on the
+conversation metadata; `Conversation::is_pinned()` in `jp_conversation` is the
+predicate.
+
+**Not the same as** binding a session to a particular target.\
+"""
+bad = """\
+### Pinned Conversation
+
+A conversation flagged to take precedence in listings and guarded against
+accidental archiving. Pinned conversations sort above non-pinned ones in
+`jp conversation ls` and the picker, and archiving one prompts for confirmation
+by default. Toggled with `jp conversation edit --pin`, targeted with the
+`pinned` / `p` / `+pinned` / `?pinned` keywords.\
+"""
+reason = """\
+The bad version defines the term by its current CLI mechanics — sort order, \
+the archive prompt, flag and keyword names. Each of those can change, and when \
+it does the glossary silently lies. The good version states what pinning *is* \
+(a durable importance mark on the conversation), names the predicate, and \
+distinguishes the confusable sibling in one line.\
+"""

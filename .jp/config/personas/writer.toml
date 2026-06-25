@@ -1,6 +1,7 @@
 inherit = false
 
 extends = [
+    "../knowledge/ubiquitous-language.toml",
     "../skill/writing.toml",
     "../skill/project-discourse.toml",
 ]
