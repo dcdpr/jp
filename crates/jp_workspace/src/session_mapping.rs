@@ -496,8 +496,8 @@ enum Liveness {
 /// Determine whether the process that created a session mapping is still alive.
 ///
 /// The id is decoded into the typed handle via `SessionId::as_pid` /
-/// [`SessionId::as_hwnd`] — the inverse of the encoding in [`Session::getsid`]
-/// / [`Session::hwnd`].
+/// `SessionId::as_hwnd` — the inverse of the encoding in [`Session::getsid`] /
+/// [`Session::hwnd`].
 /// A non-decodable id (or `Env` source) yields `Unknown`.
 fn is_session_process_liveness(id: &SessionId, source: &SessionSource) -> Liveness {
     match source {
