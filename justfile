@@ -1045,7 +1045,7 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
 #
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
-rfd-promote NNN: _install-jp
+rfd-promote NNN: _install-jp _install-comfort
     #!/usr/bin/env sh
     set -eu
 
@@ -1129,6 +1129,10 @@ rfd-promote NNN: _install-jp
         fi
     fi
 
+    # Resolved path of the promoted file, after any rename. Used by the
+    # closing `comfort` pass.
+    final_file="$file"
+
     # --- Draft -> Discussion: assign permanent number, rename file ---
     if [ "$current" = "Draft" ]; then
         basename_f=$(basename "$file")
@@ -1151,6 +1155,7 @@ rfd-promote NNN: _install-jp
         num=$(printf "%03d" "$next_num")
         new_basename="${num}-${slug}.md"
         new_file="docs/rfd/${new_basename}"
+        final_file="$new_file"
 
         # Rewrite heading and status. Also strip one `../` level from markdown
         # link targets: the file moves from `docs/rfd/drafts/` up to
@@ -1400,8 +1405,53 @@ rfd-promote NNN: _install-jp
             done
         fi
 
+        # Mirror of the strip above, in the other direction. Any RFD still in
+        # flight that lists this one under `Requires` now points at an
+        # Implemented dependency, which the docs build rejects (see
+        # `checkRequiresOnImplemented`). Drop this file's `Required by` line and
+        # the matching `Requires: RFD <this>` entry from each dependent.
+        required_by_line=$(sed -n 's/^- \*\*Required by\*\*: //p' "$file" | head -1)
+
+        sed '/^- \*\*Required by\*\*: /d' "$file" > "${file}.tmp"
+        mv "${file}.tmp" "$file"
+
+        if [ -n "$required_by_line" ]; then
+            for dependent in $(echo "$required_by_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
+                if echo "$dependent" | grep -qE '^D[0-9]+$'; then
+                    dep_file=$(ls "docs/rfd/drafts/${dependent}-"*.md 2>/dev/null | head -1)
+                else
+                    dep_file=$(ls "docs/rfd/${dependent}-"*.md 2>/dev/null | head -1)
+                fi
+                [ -z "$dep_file" ] && continue
+
+                awk -v num="$this_n" '
+                    BEGIN { search = "^- \\*\\*Requires\\*\\*: " }
+                    $0 ~ search {
+                        sub(search, "", $0)
+                        n = split($0, entries, /, /)
+                        new = ""
+                        for (i = 1; i <= n; i++) {
+                            if (entries[i] !~ ("RFD 0*" num "([^0-9]|$)")) {
+                                new = (new == "") ? entries[i] : new ", " entries[i]
+                            }
+                        }
+                        if (new != "") print "- **Requires**: " new
+                        next
+                    }
+                    { print }
+                ' "$dep_file" > "${dep_file}.tmp"
+                mv "${dep_file}.tmp" "$dep_file"
+                echo "  stripped Requires: RFD ${this_n} from ${dep_file}"
+            done
+        fi
+
         echo "${file}: Accepted -> Implemented"
     fi
+
+    # Reflow the promoted file: wrap prose with semantic line breaks and
+    # consolidate reference-style link definitions at the bottom, matching the
+    # markdown formatting CI enforces (`fmt-markdown-ci`).
+    comfort --language markdown --format-markdown --reference-links "$final_file"
 
 # Mark an RFD as abandoned with the given reason.
 [group('rfd')]

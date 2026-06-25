@@ -4,7 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
-- **Required by**: [RFD 046], [RFD 087]
 - **Tracking Issue**: [\#788]
 
 ## Summary

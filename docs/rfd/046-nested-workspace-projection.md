@@ -5,7 +5,6 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-16
 - **Extends**: [RFD 039]
-- **Requires**: [RFD 031]
 
 ## Summary
 
