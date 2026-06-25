@@ -36,7 +36,7 @@ use jp_llm::{
     tool::{InvocationContext, ToolDefinition, executor::Executor},
     with_idle_timeout,
 };
-use jp_printer::Printer;
+use jp_printer::{ErrChannel, Printer};
 use jp_workspace::{ConversationLock, ConversationMut};
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream, errors::BroadcastStreamRecvError};
@@ -175,16 +175,19 @@ pub(super) async fn run_turn_loop(
         Some(cfg.assistant.model.id.resolved().to_string()),
     );
     let mut tool_renderer = ToolRenderer::new(
-        if cfg.style.tool_call.show && !printer.format().is_json() {
+        ErrChannel::new(if cfg.style.tool_call.show && !printer.format().is_json() {
             printer.clone()
         } else {
             Printer::sink().into()
-        },
+        }),
         cfg.style.clone(),
         root.to_path_buf(),
         is_tty,
         invocation,
     );
+    // Share the owed-separator flag so visible assistant content rendered by
+    // the coordinator can cancel a blank line owed by a preceding tool result.
+    turn_coordinator.set_tool_separator(tool_renderer.separator_flag());
 
     let inquiry_backend: Arc<dyn InquiryBackend> = build_inquiry_backend(
         cfg,

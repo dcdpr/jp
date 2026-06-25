@@ -3,7 +3,7 @@ use camino::Utf8PathBuf;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
 use jp_editor::MockEditorBackend;
 use jp_inquire::prompt::MockPromptBackend;
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{ErrChannel, OutputFormat, Printer};
 use schematic::Config as _;
 
 use super::{super::executor::TerminalExecutorSource, *};
@@ -350,7 +350,7 @@ async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
     let printer = Arc::new(printer);
     let style_config = jp_config::AppConfig::new_test().style;
     let tool_renderer = ToolRenderer::new(
-        printer.clone(),
+        ErrChannel::new(printer.clone()),
         style_config,
         Utf8PathBuf::from("/tmp"),
         false,
@@ -415,7 +415,7 @@ async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
     let printer = Arc::new(printer);
     let style_config = jp_config::AppConfig::new_test().style;
     let tool_renderer = ToolRenderer::new(
-        printer.clone(),
+        ErrChannel::new(printer.clone()),
         style_config,
         Utf8PathBuf::from("/tmp"),
         false,
@@ -513,7 +513,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
     let printer = Arc::new(printer);
     let style_config = jp_config::AppConfig::new_test().style;
     let tool_renderer = ToolRenderer::new(
-        printer.clone(),
+        ErrChannel::new(printer.clone()),
         style_config,
         Utf8PathBuf::from("/tmp"),
         false,

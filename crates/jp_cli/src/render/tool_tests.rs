@@ -6,7 +6,7 @@ use jp_config::{
     conversation::tool::{CommandConfigOrString, style::ParametersStyle},
 };
 use jp_conversation::event::ToolCallResponse;
-use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_printer::{ErrChannel, OutputFormat, Printer, SharedBuffer};
 use serde_json::{Map, Value};
 
 use super::*;
@@ -79,7 +79,7 @@ fn create_renderer() -> (ToolRenderer, SharedBuffer, SharedBuffer) {
     let mut config = AppConfig::new_test().style;
     config.tool_call.show = true;
     let renderer = ToolRenderer::new(
-        Arc::new(printer),
+        ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
         false,
@@ -97,7 +97,7 @@ fn create_renderer_with_show(show: bool) -> (ToolRenderer, SharedBuffer) {
     // no tokio runtime); `tick` is exercised by calling it directly.
     config.tool_call.preparing.show = false;
     let renderer = ToolRenderer::new(
-        Arc::new(printer),
+        ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
         true,
@@ -114,7 +114,7 @@ fn render_and_capture(
 ) -> String {
     let (renderer, err, _) = create_renderer();
     renderer.render_tool_call(tool_name, arguments, style);
-    renderer.printer.flush();
+    renderer.channel.flush();
     strip_ansi(&err.lock())
 }
 
@@ -173,7 +173,7 @@ async fn test_render_custom_arguments_after_approval() {
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let config = AppConfig::new_test().style;
     let renderer = ToolRenderer::new(
-        Arc::new(printer),
+        ErrChannel::new(Arc::new(printer)),
         config,
         root.path().to_owned(),
         false,
@@ -189,9 +189,59 @@ async fn test_render_custom_arguments_after_approval() {
     assert!(matches!(outcome, RenderOutcome::Rendered {
         content: Some(_)
     }));
-    renderer.printer.flush();
+    renderer.channel.flush();
     let output = strip_ansi(&err.lock());
-    insta::assert_snapshot!(output);
+    // Explicit assertion rather than a snapshot: the spacing contract is the
+    // point here, and `insta` normalizes away leading/trailing blank lines, so
+    // a snapshot can't actually guard it. The header is followed by a blank
+    // line, the custom output, and the trailing newline the lazy separator
+    // later turns into the blank line before the next header.
+    assert_eq!(output, "Calling tool ssh_run\n\ncustom-output\n");
+}
+
+#[test]
+fn test_consecutive_plain_headers_are_grouped() {
+    // Plain (non-custom) headers carry no owed separator, so a batch of tool
+    // calls renders as a tight group without blank lines between them.
+    let (renderer, err, _) = create_renderer();
+    let args = Map::new();
+    renderer.render_tool_call("foo", &args, &ParametersStyle::FunctionCall);
+    renderer.render_tool_call("bar", &args, &ParametersStyle::FunctionCall);
+    renderer.channel.flush();
+    assert_eq!(
+        strip_ansi(&err.lock()),
+        "Calling tool foo\nCalling tool bar\n"
+    );
+}
+
+#[test]
+fn test_custom_arguments_separate_following_header() {
+    // Custom argument output owes a blank-line separator before the next tool
+    // call header.
+    let (renderer, err, _) = create_renderer();
+    let args = Map::new();
+    renderer.render_formatted_arguments("plan output");
+    renderer.render_tool_call("foo", &args, &ParametersStyle::FunctionCall);
+    renderer.channel.flush();
+    assert_eq!(
+        strip_ansi(&err.lock()),
+        "\nplan output\n\nCalling tool foo\n"
+    );
+}
+
+#[test]
+fn test_result_separates_following_header() {
+    // A rendered result owes a blank-line separator before the next tool call.
+    let (renderer, err, _) = create_renderer();
+    let args = Map::new();
+    let response = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok("done".into()),
+    };
+    renderer.render_result(&response, &InlineResults::Full, &LinkStyle::Off);
+    renderer.render_tool_call("foo", &args, &ParametersStyle::FunctionCall);
+    renderer.channel.flush();
+    assert_eq!(strip_ansi(&err.lock()), "\ndone\n\nCalling tool foo\n");
 }
 
 #[test]
@@ -202,7 +252,7 @@ fn test_render_result_basic() {
         result: Ok("Hello, world!".into()),
     };
     renderer.render_result(&response, &InlineResults::Full, &LinkStyle::Off);
-    renderer.printer.flush();
+    renderer.channel.flush();
     let output = strip_ansi(&out.lock());
     insta::assert_snapshot!(output);
 }
@@ -215,7 +265,7 @@ fn test_render_result_off() {
         result: Ok("This should not appear".into()),
     };
     renderer.render_result(&response, &InlineResults::Off, &LinkStyle::Off);
-    renderer.printer.flush();
+    renderer.channel.flush();
     assert!(out.lock().is_empty());
 }
 
@@ -231,16 +281,36 @@ fn test_render_result_truncated() {
         &InlineResults::Truncate(TruncateLines { lines: 2 }),
         &LinkStyle::Off,
     );
-    renderer.printer.flush();
+    renderer.channel.flush();
     let output = strip_ansi(&out.lock());
-    insta::assert_snapshot!(output);
+    // Explicit assertion rather than a snapshot, for the same reason as
+    // `test_render_custom_arguments_after_approval`: the leading blank line and
+    // the trailing newline after the truncation marker are part of the
+    // contract, and `insta` would trim both before comparing.
+    assert_eq!(output, "\nline1\nline2\n _(truncated to 2 lines)_\n");
+}
+
+#[test]
+fn test_empty_result_does_not_separate_following_header() {
+    // An empty result writes nothing, so it owes no separator: the next tool
+    // header must land directly under it rather than below a stray blank line.
+    let (renderer, err, _) = create_renderer();
+    let args = Map::new();
+    let response = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok(String::new()),
+    };
+    renderer.render_result(&response, &InlineResults::Full, &LinkStyle::Off);
+    renderer.render_tool_call("foo", &args, &ParametersStyle::FunctionCall);
+    renderer.channel.flush();
+    assert_eq!(strip_ansi(&err.lock()), "Calling tool foo\n");
 }
 
 #[test]
 fn test_progress() {
     let (renderer, out, _) = create_renderer();
     renderer.render_progress(Duration::from_secs(5));
-    renderer.printer.flush();
+    renderer.channel.flush();
     let output = strip_ansi(&out.lock());
     insta::assert_snapshot!(output, @"⏱ Running… 5.0s");
 }
@@ -249,7 +319,7 @@ fn test_progress() {
 fn test_clear_progress() {
     let (renderer, out, _) = create_renderer();
     renderer.clear_progress();
-    renderer.printer.flush();
+    renderer.channel.flush();
     // Raw output is \r\x1b[K which strips to empty after ANSI removal
     assert!(strip_ansi(&out.lock()).is_empty());
 }
@@ -259,7 +329,7 @@ fn test_register_single_tool() {
     let (mut renderer, out) = create_renderer_with_show(true);
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     renderer.register("id1", "fs_read_file", &tx);
-    renderer.printer.flush();
+    renderer.channel.flush();
     let output = strip_ansi(&out.lock());
     assert!(output.contains("Calling tool"), "output: {output:?}");
     assert!(output.contains("fs_read_file"), "output: {output:?}");
@@ -275,9 +345,32 @@ fn test_register_multiple_tools_uses_plural() {
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     renderer.register("id1", "fs_read_file", &tx);
     renderer.register("id2", "cargo_check", &tx);
-    renderer.printer.flush();
+    renderer.channel.flush();
     let output = strip_ansi(&out.lock());
     assert!(output.contains("Calling tools"), "output: {output:?}");
+}
+
+#[test]
+fn test_temp_line_separated_from_previous_tool_output() {
+    // While arguments stream, the temp line is the first thing rendered after a
+    // preceding result or custom-argument block. It must carry the owed
+    // blank-line separator so it isn't glued to that output on a TTY.
+    let (mut renderer, err) = create_renderer_with_show(true);
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+    renderer.render_formatted_arguments("plan output");
+    renderer.register("id1", "fs_read_file", &tx);
+    renderer.channel.flush();
+
+    let lines = visible_lines(&strip_ansi(&err.lock()));
+    let idx = lines
+        .iter()
+        .position(|l| l == "plan output")
+        .unwrap_or_else(|| panic!("plan output present: {lines:?}"));
+    assert_eq!(lines[idx + 1], "", "blank line before temp line: {lines:?}");
+    assert!(
+        lines[idx + 2].contains("Calling tool"),
+        "temp line follows the blank: {lines:?}"
+    );
 }
 
 #[test]
@@ -310,7 +403,7 @@ fn test_complete_does_not_render_permanent_line() {
     let (mut renderer, out) = create_renderer_with_show(true);
     renderer.complete("id1");
     assert!(!renderer.has_pending());
-    renderer.printer.flush();
+    renderer.channel.flush();
     let output = strip_ansi(&out.lock());
     assert!(
         !output.contains("Calling tool"),
@@ -332,7 +425,7 @@ fn test_completing_one_pending_tool_does_not_collide_with_header() {
     // (this is a sync test with no tokio runtime).
     config.tool_call.preparing.show = false;
     let mut renderer = ToolRenderer::new(
-        Arc::new(printer),
+        ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
         true,
@@ -348,7 +441,7 @@ fn test_completing_one_pending_tool_does_not_collide_with_header() {
     args.insert("path".into(), Value::String("/a".into()));
     renderer.render_tool_call("fs_read_file", &args, &ParametersStyle::FunctionCall);
 
-    renderer.printer.flush();
+    renderer.channel.flush();
     let visible = visible_lines(&err.lock());
     for line in &visible {
         assert!(
@@ -389,7 +482,7 @@ fn test_reset_clears_visible_temp_line() {
     renderer.register("id1", "fs_read_file", &tx);
     renderer.reset();
 
-    renderer.printer.flush();
+    renderer.channel.flush();
     let visible = visible_lines(&err.lock());
     assert!(
         visible.iter().all(|l| !l.contains("Calling tool")),
@@ -403,7 +496,7 @@ fn test_tick_with_pending_tools() {
     let (tx, _rx) = tokio::sync::mpsc::channel(1);
     renderer.register("id1", "fs_read_file", &tx);
     renderer.tick(Duration::from_millis(1500));
-    renderer.printer.flush();
+    renderer.channel.flush();
     let output = strip_ansi(&out.lock());
     assert!(output.contains("receiving arguments"), "output: {output:?}");
     assert!(output.contains("1.5s"), "output: {output:?}");
@@ -413,7 +506,7 @@ fn test_tick_with_pending_tools() {
 fn test_show_false_suppresses_preparing_output() {
     let config = AppConfig::new_test().style;
     let mut renderer = ToolRenderer::new(
-        Arc::new(Printer::sink()),
+        ErrChannel::new(Arc::new(Printer::sink())),
         config,
         "/tmp".into(),
         false,
@@ -431,7 +524,7 @@ fn test_show_false_suppresses_preparing_output() {
 fn test_tool_call_show_false_suppresses_output() {
     let config = AppConfig::new_test().style;
     let renderer = ToolRenderer::new(
-        Arc::new(Printer::sink()),
+        ErrChannel::new(Arc::new(Printer::sink())),
         config,
         "/tmp".into(),
         false,

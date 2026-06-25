@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, atomic::AtomicBool};
 
 use jp_config::style::StyleConfig;
 use jp_conversation::{
@@ -420,6 +420,12 @@ impl TurnCoordinator {
     /// gets a blank line separator.
     pub fn transition_to_tool_call(&mut self) {
         self.view.enter_tool_call(false);
+    }
+
+    /// Wire the view's tool-separator flag to the turn's `ToolRenderer` so
+    /// visible assistant content can cancel a separator owed by a tool result.
+    pub fn set_tool_separator(&mut self, flag: Arc<AtomicBool>) {
+        self.view.set_tool_separator(flag);
     }
 
     /// Force transition to Complete phase.

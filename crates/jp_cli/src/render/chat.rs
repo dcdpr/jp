@@ -509,6 +509,25 @@ impl ChatRenderer {
         }
     }
 
+    /// Whether the configured reasoning display supplies its own separation
+    /// before following content.
+    ///
+    /// `Static`, `Full`, and `Truncate` leave terminated visible output, so a
+    /// following tool header is cleanly separated from them.
+    /// `Hidden` renders nothing, `Timer` writes a stderr line it erases again
+    /// on completion, and `Progress` writes `reasoning...` plus dots with no
+    /// trailing newline — none of these separate the next header, so a caller
+    /// coordinating inter-block spacing must keep the owed separator across
+    /// them.
+    pub(crate) fn reasoning_supplies_separation(&self) -> bool {
+        !matches!(
+            self.config.reasoning.display,
+            ReasoningDisplayConfig::Hidden
+                | ReasoningDisplayConfig::Timer
+                | ReasoningDisplayConfig::Progress
+        )
+    }
+
     /// Transition renderer state to tool call mode.
     pub fn transition_to_tool_call(&mut self) {
         self.last_content_kind = Some(ContentKind::ToolCall);
