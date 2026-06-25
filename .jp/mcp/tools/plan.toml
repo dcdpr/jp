@@ -34,6 +34,11 @@ Finish the current task and start the next:
 {"action": "next", "name": "refactor-config"}
 ```
 
+Skip ahead several tasks at once:
+```json
+{"action": "next", "name": "refactor-config", "count": 2}
+```
+
 Re-open the previously completed task:
 ```json
 {"action": "prev", "name": "refactor-config"}
@@ -41,7 +46,7 @@ Re-open the previously completed task:
 """
 
 [conversation.tools.plan.style]
-parameters = "just serve-tools {{context}} {{tool}}"
+parameters = "off"
 inline_results = "full"
 results_file_link = "off"
 
@@ -69,3 +74,8 @@ type = "array"
 items.type = "string"
 required = false
 summary = "Ordered task descriptions. Required for the `create` action; ignored by `next` and `prev`."
+
+[conversation.tools.plan.parameters.count]
+type = "integer"
+required = false
+summary = "How many steps to advance (`next`) or rewind (`prev`). Defaults to 1. Ignored by `create`."
