@@ -45,6 +45,21 @@ fn hidden_reasoning_preserves_tool_separator_debt() {
 }
 
 #[test]
+fn progress_reasoning_preserves_tool_separator_debt() {
+    // `tool result -> progress reasoning -> next tool`: Progress writes
+    // `reasoning...` and dots with no trailing newline, so it can't separate
+    // the next tool header. The owed blank line must survive the chunk; the
+    // lazily emitted separator then terminates the dots line rather than the
+    // header gluing onto it as `reasoning...Calling tool ...`.
+    let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Progress);
+    view.render_chat_response(&ChatResponse::reasoning("thinking"));
+    assert!(
+        flag.load(Ordering::Relaxed),
+        "progress reasoning supplies no separation and must not clear the debt"
+    );
+}
+
+#[test]
 fn visible_reasoning_clears_tool_separator_debt() {
     // `Full` reasoning renders persistent text, which supplies its own spacing,
     // so the owed separator is dropped to avoid a double blank line.

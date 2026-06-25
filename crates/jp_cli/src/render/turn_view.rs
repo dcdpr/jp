@@ -123,11 +123,11 @@ impl TurnView {
 
         // Visible assistant content supplies its own spacing, so a preceding
         // tool block no longer owes a separator before the next tool call.
-        // Reasoning that leaves no persistent output (Hidden renders nothing;
-        // Timer erases its own line) supplies no spacing and must not clear the
-        // debt.
+        // Reasoning that doesn't supply its own separation (Hidden renders
+        // nothing; Timer erases its line; Progress leaves an unterminated
+        // `reasoning...` line) must not clear that debt.
         let clears_debt = match resp {
-            ChatResponse::Reasoning { .. } => self.chat.reasoning_leaves_persistent_output(),
+            ChatResponse::Reasoning { .. } => self.chat.reasoning_supplies_separation(),
             _ => true,
         };
         if clears_debt {
