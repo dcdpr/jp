@@ -6,7 +6,7 @@
 - **Date**: 2026-06-01
 - **Extends**: [RFD 020]
 - **Requires**: [RFD 031]
-- **Tracking Issue**: [#793](https://github.com/dcdpr/jp/issues/793)
+- **Tracking Issue**: [\#793]
 
 ## Summary
 
@@ -660,3 +660,4 @@ Depends on: Phase 3.
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 065]: 065-typed-resource-model-for-attachments.md
+[\#793]: https://github.com/dcdpr/jp/issues/793
