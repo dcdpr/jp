@@ -359,7 +359,8 @@ impl ToolRenderer {
         };
 
         // Render intro header
-        if !matches!(inline_results, InlineResults::Off) && max_lines > 0 {
+        let wrote_inline = !matches!(inline_results, InlineResults::Off) && max_lines > 0;
+        if wrote_inline {
             let lang = ext.as_ref().filter(|e| !e.is_empty());
             let mut code_state = lang.map(|lang| self.formatter.begin_code_block(lang));
             let mut output = "\n".to_owned();
@@ -402,10 +403,11 @@ impl ToolRenderer {
         }
 
         // Render file links
-        match results_file_link {
-            LinkStyle::Off => {}
+        let wrote_link = match results_file_link {
+            LinkStyle::Off => false,
             LinkStyle::Full => {
                 let _ = writeln!(self.channel.writer(), "see: {}", path.display());
+                true
             }
             LinkStyle::Osc8 => {
                 let _ = writeln!(
@@ -420,13 +422,19 @@ impl ToolRenderer {
                         "copy to clipboard".red().to_string()
                     )
                 );
+                true
             }
-        }
+        };
 
         // A rendered result owes a blank-line separator before the next tool
-        // call header. It is emitted lazily so it survives the streaming temp
-        // line, and is dropped by visible assistant content that follows.
-        self.separator.store(true, Ordering::Relaxed);
+        // call header, but only when it actually produced visible output: an
+        // empty result with no file link writes nothing, so it must not push a
+        // stray blank line ahead of the next header. The debt is emitted lazily
+        // so it survives the streaming temp line, and is dropped by visible
+        // assistant content that follows.
+        if wrote_inline || wrote_link {
+            self.separator.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Registers a new tool call (name known, arguments pending).

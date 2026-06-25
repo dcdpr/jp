@@ -509,14 +509,18 @@ impl ChatRenderer {
         }
     }
 
-    /// Whether reasoning content is suppressed by the current display config.
+    /// Whether the configured reasoning display leaves persistent visible
+    /// output.
     ///
-    /// Hidden reasoning renders nothing, so callers coordinating inter-block
-    /// spacing can tell that a reasoning chunk won't supply any visible output.
-    pub(crate) fn reasoning_hidden(&self) -> bool {
-        matches!(
+    /// `Hidden` renders nothing and `Timer` writes a stderr line it erases
+    /// again on completion; both leave no lasting output.
+    /// Callers coordinating inter-block spacing use this to tell whether a
+    /// reasoning chunk supplies any separation of its own.
+    /// Every other mode renders persistent text.
+    pub(crate) fn reasoning_leaves_persistent_output(&self) -> bool {
+        !matches!(
             self.config.reasoning.display,
-            ReasoningDisplayConfig::Hidden
+            ReasoningDisplayConfig::Hidden | ReasoningDisplayConfig::Timer
         )
     }
 

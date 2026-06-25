@@ -191,7 +191,12 @@ async fn test_render_custom_arguments_after_approval() {
     }));
     renderer.channel.flush();
     let output = strip_ansi(&err.lock());
-    insta::assert_snapshot!(output);
+    // Explicit assertion rather than a snapshot: the spacing contract is the
+    // point here, and `insta` normalizes away leading/trailing blank lines, so
+    // a snapshot can't actually guard it. The header is followed by a blank
+    // line, the custom output, and the trailing newline the lazy separator
+    // later turns into the blank line before the next header.
+    assert_eq!(output, "Calling tool ssh_run\n\ncustom-output\n");
 }
 
 #[test]
@@ -278,7 +283,27 @@ fn test_render_result_truncated() {
     );
     renderer.channel.flush();
     let output = strip_ansi(&out.lock());
-    insta::assert_snapshot!(output);
+    // Explicit assertion rather than a snapshot, for the same reason as
+    // `test_render_custom_arguments_after_approval`: the leading blank line and
+    // the trailing newline after the truncation marker are part of the
+    // contract, and `insta` would trim both before comparing.
+    assert_eq!(output, "\nline1\nline2\n _(truncated to 2 lines)_\n");
+}
+
+#[test]
+fn test_empty_result_does_not_separate_following_header() {
+    // An empty result writes nothing, so it owes no separator: the next tool
+    // header must land directly under it rather than below a stray blank line.
+    let (renderer, err, _) = create_renderer();
+    let args = Map::new();
+    let response = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok(String::new()),
+    };
+    renderer.render_result(&response, &InlineResults::Full, &LinkStyle::Off);
+    renderer.render_tool_call("foo", &args, &ParametersStyle::FunctionCall);
+    renderer.channel.flush();
+    assert_eq!(strip_ansi(&err.lock()), "Calling tool foo\n");
 }
 
 #[test]

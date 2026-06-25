@@ -123,10 +123,14 @@ impl TurnView {
 
         // Visible assistant content supplies its own spacing, so a preceding
         // tool block no longer owes a separator before the next tool call.
-        // Hidden reasoning renders nothing, so it must not clear that debt.
-        let hidden_reasoning =
-            matches!(resp, ChatResponse::Reasoning { .. }) && self.chat.reasoning_hidden();
-        if !hidden_reasoning {
+        // Reasoning that leaves no persistent output (Hidden renders nothing;
+        // Timer erases its own line) supplies no spacing and must not clear the
+        // debt.
+        let clears_debt = match resp {
+            ChatResponse::Reasoning { .. } => self.chat.reasoning_leaves_persistent_output(),
+            _ => true,
+        };
+        if clears_debt {
             self.tool_separator.store(false, Ordering::Relaxed);
         }
 
@@ -230,3 +234,7 @@ impl TurnView {
         self.assistant_header_rendered = true;
     }
 }
+
+#[cfg(test)]
+#[path = "turn_view_tests.rs"]
+mod tests;
