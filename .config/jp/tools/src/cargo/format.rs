@@ -53,6 +53,7 @@ fn cargo_format_impl<R: ProcessRunner>(
         "--list-changed",
         "--format-markdown",
         "--reference-links",
+        "--prune-reference-links",
         "--language",
         "rust",
     ];

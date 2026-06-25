@@ -35,6 +35,7 @@ pub fn run(cli: &Cli, invocation: Invocation) -> Result<(), Error> {
         max_width: cli.max_width,
         canonical: cli.format_markdown,
         reference_links: cli.reference_links,
+        prune_reference_links: cli.prune_reference_links,
     };
     let workspace_mode = cli.workspace || !cli.packages.is_empty() || !cli.exclude.is_empty();
     if workspace_mode {

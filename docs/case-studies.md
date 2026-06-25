@@ -198,7 +198,6 @@ This alternative approach would be useful if you have a need for a more formal
 [attachment-feature]: ./features.md#attachments
 [attachments]: ./features/attachments.md
 [command attachments]: ./features.md#command-attachments
-[config-reasoning]: ./configuration.md#reasoning
 [context]: ./features/contexts.md
 [custom-context]: ./features.md#custom-context
 [disable-tool-use]: ./features.md#tool-use

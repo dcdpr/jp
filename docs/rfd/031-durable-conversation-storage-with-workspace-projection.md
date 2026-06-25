@@ -750,10 +750,8 @@ entry when this RFD is implemented.
 
 [RFD 020]: 020-parallel-conversations.md
 [RFD 039]: 039-conversation-trees.md
-[RFD 046]: 046-nested-workspace-projection.md
 [RFD 053]: 053-auto-refresh-conversation-titles.md
 [RFD 069]: 069-guard-scoped-persistence-for-conversations.md
 [RFD 071]: 071-conversation-archiving.md
 [RFD 073]: 073-layered-storage-backend-for-workspaces.md
-[RFD 087]: 087-session-scoped-active-workspace.md
 [\#788]: https://github.com/dcdpr/jp/issues/788
