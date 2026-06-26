@@ -1,0 +1,109 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "What is the capital of France?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "thought": true,
+          "text": "The user wants a capital city."
+        },
+        {
+          "text": "Paris."
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "text": "Read my notes file."
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "functionCall": {
+            "id": "call_1",
+            "name": "read_file",
+            "args": {}
+          },
+          "thoughtSignature": "skip_thought_signature_validator"
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "functionResponse": {
+            "id": "call_1",
+            "name": "read_file",
+            "response": {
+              "content": "- buy milk\n- call dentist"
+            }
+          }
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "Your notes mention milk and the dentist."
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "text": "And the capital of Germany?"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "Berlin."
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "text": "And of Italy?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "NONE",
+      "allowedFunctionNames": []
+    }
+  },
+  "generationConfig": {
+    "maxOutputTokens": 64000,
+    "thinkingConfig": {
+      "includeThoughts": false,
+      "thinkingBudget": 512,
+      "thinkingLevel": null
+    }
+  }
+}

@@ -87,7 +87,7 @@ impl Provider for Llamacpp {
             "Starting Llamacpp chat completion stream."
         );
 
-        let (body, is_structured) = build_request(model, query)?;
+        let (body, is_structured) = create_request(model, query)?;
 
         trace!(
             body = serde_json::to_string(&body).unwrap_or_default(),
@@ -402,11 +402,31 @@ fn drain_extractor(extractor: &mut ReasoningExtractor, is_structured: bool) -> V
     events
 }
 
+#[cfg(test)]
+impl Llamacpp {
+    /// Build the llama.cpp wire request for `query` and serialize it to JSON
+    /// without sending.
+    /// Test-only seam for snapshotting request construction (notably compaction
+    /// projection) across providers.
+    #[expect(
+        clippy::unused_self,
+        reason = "uniform per-provider seam; only some providers read instance state"
+    )]
+    pub(crate) fn request_value(
+        &self,
+        model: &ModelDetails,
+        query: ChatQuery,
+    ) -> Result<serde_json::Value, Error> {
+        let (request, _) = create_request(model, query)?;
+        Ok(request)
+    }
+}
+
 /// Build the JSON request body for the llama.cpp `/v1/chat/completions`
 /// endpoint.
 ///
 /// Returns `(body, is_structured)`.
-fn build_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool), Error> {
+fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool), Error> {
     let ChatQuery {
         thread,
         tools,

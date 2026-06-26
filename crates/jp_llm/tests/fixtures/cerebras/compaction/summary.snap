@@ -1,0 +1,23 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "model": "gpt-oss-120b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "[Summary of previous conversation]"
+    },
+    {
+      "role": "assistant",
+      "content": "Earlier: the user asked about France's capital and had their notes read."
+    },
+    {
+      "role": "user",
+      "content": "And of Italy?"
+    }
+  ],
+  "stream": true,
+  "reasoning_format": "parsed"
+}

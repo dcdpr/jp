@@ -214,6 +214,26 @@ fn map_event(
     events
 }
 
+#[cfg(test)]
+impl Ollama {
+    /// Build the Ollama wire request for `query` and serialize it to JSON
+    /// without sending.
+    /// Test-only seam for snapshotting request construction (notably compaction
+    /// projection) across providers.
+    #[expect(
+        clippy::unused_self,
+        reason = "uniform per-provider seam; only some providers read instance state"
+    )]
+    pub(crate) fn request_value(
+        &self,
+        model: &ModelDetails,
+        query: ChatQuery,
+    ) -> Result<serde_json::Value> {
+        let (request, _) = create_request(model, query)?;
+        Ok(serde_json::to_value(request)?)
+    }
+}
+
 #[expect(clippy::too_many_lines)]
 fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessageRequest, bool)> {
     let ChatQuery {

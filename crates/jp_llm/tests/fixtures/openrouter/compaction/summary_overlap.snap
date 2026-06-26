@@ -1,0 +1,58 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "model": "openai/gpt-5-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "[Summary of previous conversation]"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Summary A: France's capital and the start of the notes lookup."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "[Summary of previous conversation]"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Summary B: the notes lookup and Germany's capital."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "And of Italy?"
+        }
+      ]
+    }
+  ],
+  "reasoning": {
+    "exclude": true,
+    "effort": "minimal"
+  }
+}

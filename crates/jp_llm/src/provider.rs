@@ -65,6 +65,39 @@ pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dy
     Ok(provider)
 }
 
+/// Build the provider-native chat request for `query` and serialize it to JSON,
+/// without sending it.
+///
+/// Test-only seam for snapshotting request construction across providers,
+/// notably the effect of conversation compaction on each provider's message
+/// serialization.
+/// Each arm runs the same builder the live path uses, so the snapshot reflects
+/// what would go on the wire.
+#[cfg(test)]
+pub(crate) fn build_request_value(
+    id: ProviderId,
+    config: &LlmProviderConfig,
+    model: &ModelDetails,
+    query: ChatQuery,
+) -> Result<serde_json::Value> {
+    match id {
+        ProviderId::Anthropic => {
+            Anthropic::try_from(&config.anthropic)?.request_value(model, query)
+        }
+        ProviderId::Cerebras => Cerebras::try_from(&config.cerebras)?.request_value(model, query),
+        ProviderId::Google => Google::try_from(&config.google)?.request_value(model, query),
+        ProviderId::Llamacpp => Llamacpp::try_from(&config.llamacpp)?.request_value(model, query),
+        ProviderId::Ollama => Ollama::try_from(&config.ollama)?.request_value(model, query),
+        ProviderId::Openai => Openai::try_from(&config.openai)?.request_value(model, query),
+        ProviderId::Openrouter => {
+            Openrouter::try_from(&config.openrouter)?.request_value(model, query)
+        }
+        ProviderId::Test | ProviderId::Deepseek | ProviderId::Xai => {
+            unreachable!("{id:?} is not part of the request snapshot suite")
+        }
+    }
+}
+
 /// Serialize a value to a temporary JSON file and return its path as a string.
 ///
 /// Used by `trace!` fields to avoid dumping massive request payloads into the
@@ -89,3 +122,7 @@ pub(crate) fn trace_to_tmpfile(prefix: &str, value: &impl serde::Serialize) -> S
 #[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "provider/compaction_request_tests.rs"]
+mod compaction_request_tests;

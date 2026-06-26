@@ -1,0 +1,40 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "model": "openai/gpt-5-mini",
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "[Summary of previous conversation]"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Earlier: the user asked about France's capital and had their notes read."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "And of Italy?"
+        }
+      ]
+    }
+  ],
+  "reasoning": {
+    "exclude": true,
+    "effort": "minimal"
+  }
+}

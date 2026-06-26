@@ -1,0 +1,42 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "model": "qwen3.5:9b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "[Summary of previous conversation]",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "assistant",
+      "content": "Summary A: France's capital and the start of the notes lookup.",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "user",
+      "content": "[Summary of previous conversation]",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "assistant",
+      "content": "Summary B: the notes lookup and Germany's capital.",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "user",
+      "content": "And of Italy?",
+      "tool_calls": [],
+      "thinking": null
+    }
+  ],
+  "options": {},
+  "stream": false,
+  "think": false
+}

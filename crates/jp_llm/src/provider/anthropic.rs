@@ -900,6 +900,22 @@ fn resolve_cache_control(policy: CachePolicy) -> Option<types::CacheControl> {
     })
 }
 
+#[cfg(test)]
+impl Anthropic {
+    /// Build the Anthropic wire request for `query` and serialize it to JSON
+    /// without sending.
+    /// Test-only seam for snapshotting request construction (notably compaction
+    /// projection) across providers.
+    pub(crate) fn request_value(
+        &self,
+        model: &ModelDetails,
+        query: ChatQuery,
+    ) -> Result<serde_json::Value> {
+        let (request, ..) = create_request(model, query, true, &self.beta)?;
+        Ok(serde_json::to_value(request)?)
+    }
+}
+
 #[expect(clippy::too_many_lines)]
 fn create_request(
     model: &ModelDetails,

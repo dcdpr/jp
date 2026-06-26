@@ -118,7 +118,7 @@ impl Provider for Openrouter {
             "Starting OpenRouter chat completion stream."
         );
 
-        let (request, is_structured) = build_request(query, model)?;
+        let (request, is_structured) = create_request(model, query)?;
         let mut state = AggregationState {
             tool_call_indices: Vec::new(),
             aggregating_reasoning: false,
@@ -445,12 +445,32 @@ fn map_event(
     events
 }
 
-/// Build request for Openrouter API.
+#[cfg(test)]
+impl Openrouter {
+    /// Build the OpenRouter wire request for `query` and serialize it to JSON
+    /// without sending.
+    /// Test-only seam for snapshotting request construction (notably compaction
+    /// projection) across providers.
+    #[expect(
+        clippy::unused_self,
+        reason = "uniform per-provider seam; only some providers read instance state"
+    )]
+    pub(crate) fn request_value(
+        &self,
+        model: &ModelDetails,
+        query: ChatQuery,
+    ) -> Result<serde_json::Value> {
+        let (request, _) = create_request(model, query)?;
+        Ok(serde_json::to_value(request)?)
+    }
+}
+
+/// Create the request for the OpenRouter API.
 ///
 /// Returns the request and whether structured output is active.
-fn build_request(
-    query: ChatQuery,
+fn create_request(
     model: &ModelDetails,
+    query: ChatQuery,
 ) -> Result<(request::ChatCompletion, bool)> {
     let ChatQuery {
         thread,

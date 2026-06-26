@@ -1,0 +1,89 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "model": "gpt-5-mini",
+  "input": [
+    {
+      "type": "message",
+      "role": "system",
+      "content": []
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": "What is the capital of France?"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "<think>\nThe user wants a capital city.\n</think>\n\n"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "Paris."
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": "Read my notes file."
+    },
+    {
+      "type": "function_call",
+      "arguments": "{\"path\":\"notes.md\"}",
+      "call_id": "call_1",
+      "id": null,
+      "name": "read_file",
+      "status": null
+    },
+    {
+      "type": "function_call_output",
+      "id": null,
+      "status": null,
+      "call_id": "call_1",
+      "output": "[compacted] read_file: success"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "Your notes mention milk and the dentist."
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": "And the capital of Germany?"
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": "Berlin."
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": "And of Italy?"
+    }
+  ],
+  "include": null,
+  "instructions": null,
+  "max_output_tokens": null,
+  "metadata": null,
+  "parallel_tool_calls": null,
+  "previous_response_id": null,
+  "reasoning": {
+    "effort": "minimal",
+    "summary": "auto"
+  },
+  "service_tier": null,
+  "store": false,
+  "stream": null,
+  "temperature": null,
+  "text": null,
+  "tool_choice": "auto",
+  "tools": [],
+  "top_p": null,
+  "truncation": "auto",
+  "user": null
+}
