@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-24
+- **Required by**: [RFD 088]
 
 ## Summary
 
@@ -671,3 +672,4 @@ Depends on Phases 2–4.
 
 [RFD 026]: 026-agent-loop-extraction.md
 [RFD 027]: 027-client-server-query-architecture.md
+[RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
