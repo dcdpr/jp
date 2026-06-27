@@ -434,15 +434,13 @@ impl Query {
             chat_request.schema = schema.as_object().cloned();
         }
 
-        // If the query was composed in an editor, the user has lost sight
-        // of what they wrote by the time the editor closes. Echo it back
-        // through the same role-aware rendering machinery used by replay
-        // and live streaming — a labeled user header followed by the
-        // request body — so the boundary between user input and the
-        // forthcoming assistant response is visually clear. Render this
-        // before any post-edit work (MCP init, attachments, tools) so that
-        // failures in those stages don't swallow the user's message.
-        if query_from_editor {
+        // Echo the request back through the same role-aware rendering
+        // machinery used by replay and live streaming — a labeled user header
+        // followed by the request body — so the boundary between user input
+        // and the forthcoming assistant response is visually clear. Render
+        // this before any post-edit work (MCP init, attachments, tools) so
+        // that failures in those stages don't swallow the user's message.
+        if self.should_echo_request(query_from_editor) {
             let mut echo = TurnView::new(
                 ctx.printer.clone(),
                 cfg.style.clone(),
@@ -844,6 +842,17 @@ impl Query {
             invocation,
         )
         .await
+    }
+
+    /// Whether the chat request should be echoed to the terminal before the
+    /// turn starts.
+    ///
+    /// Echo when the user can't already see what's being sent: a query composed
+    /// in an editor (the editor took over the screen) or a `--replay` (the
+    /// message is pulled from history, not typed on the command line).
+    /// A plain inline query needs no echo — the user just typed it.
+    fn should_echo_request(&self, query_from_editor: bool) -> bool {
+        query_from_editor || self.replay
     }
 
     /// Returns `true` if editing is explicitly disabled.

@@ -930,6 +930,23 @@ fn no_title_does_not_persist_into_partial_config() {
 }
 
 #[test]
+fn echo_request_when_from_editor_or_replay() {
+    // Editor-composed query: the editor took over the screen, so echo.
+    assert!(Query::default().should_echo_request(true));
+
+    // Plain inline query, no editor: the user already sees their input.
+    assert!(!Query::default().should_echo_request(false));
+
+    // Replay without an editor: the message comes from history and isn't
+    // otherwise visible on the terminal, so it must be echoed.
+    let replay = Query {
+        replay: true,
+        ..Default::default()
+    };
+    assert!(replay.should_echo_request(false));
+}
+
+#[test]
 fn blockquote_prefixes_each_line() {
     assert_eq!(blockquote("hello"), "> hello");
     assert_eq!(blockquote("a\nb"), "> a\n> b");
