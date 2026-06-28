@@ -1,4 +1,4 @@
-use jp_config::{AppConfig, types::color::Color};
+use jp_config::{AppConfig, style::typewriter::DelayDuration, types::color::Color};
 use jp_printer::{OutputFormat, SharedBuffer};
 
 use super::*;
@@ -731,4 +731,393 @@ fn test_no_blank_line_for_consecutive_messages_without_tool_calls() {
     let output = out.lock().clone();
     // No extra blank line between consecutive messages.
     assert_eq!(output, "First paragraph\n\nSecond paragraph\n\n");
+}
+
+/// Latency shape a streamed paragraph must exhibit, asserted alongside
+/// byte-identity (which alone would pass a paragraph that never streams).
+#[derive(Clone, Copy)]
+enum Latency {
+    /// Word-wrapped prose with an unambiguous lead: at least one committed line
+    /// is printed before the terminator.
+    Streams,
+    /// Nothing is printed before the first source newline: an unbreakable run
+    /// or non-wrapping paragraph the renderer cannot commit, or a single-line
+    /// ambiguous-lead paragraph the buffer does not classify until its newline.
+    Holds,
+}
+
+struct StreamingFixture {
+    name: &'static str,
+    /// The streaming part, fed before the terminator.
+    body: &'static str,
+    /// Everything fed after `body`: the terminator and any trailing blocks.
+    rest: &'static str,
+    wrap_width: usize,
+    reasoning: bool,
+    latency: Latency,
+}
+
+fn streaming_config(fx: &StreamingFixture) -> AppConfig {
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = fx.wrap_width;
+    // Disable typewriter pacing: per-character feeding stays fast and output is
+    // deterministic. Pacing only affects timing, never the emitted bytes.
+    config.style.typewriter.text_delay = DelayDuration::instant();
+    config.style.typewriter.code_delay = DelayDuration::instant();
+    if fx.reasoning {
+        config.style.reasoning.display = ReasoningDisplayConfig::Full;
+        config.style.reasoning.background = Some(Color::Ansi256(236));
+    } else {
+        config.style.reasoning.background = None;
+    }
+    config
+}
+
+/// Feed `text` one character at a time, maximally fragmenting inline constructs
+/// across input chunks.
+fn feed_chars(renderer: &mut ChatRenderer, reasoning: bool, text: &str) {
+    for ch in text.chars() {
+        let piece = ch.to_string();
+        if reasoning {
+            renderer.render_response(&ChatResponse::Reasoning { reasoning: piece });
+        } else {
+            renderer.render_response(&ChatResponse::Message { message: piece });
+        }
+    }
+}
+
+/// Render `body + rest` in a single push.
+/// With the terminator present the buffer emits a `Block`, never a
+/// `ParagraphChunk`, so this is the non-streaming reference output.
+fn render_whole(fx: &StreamingFixture) -> String {
+    let (mut r, out, _e) = create_renderer_with_config(streaming_config(fx));
+    let full = format!("{}{}", fx.body, fx.rest);
+    if fx.reasoning {
+        r.render_response(&ChatResponse::Reasoning { reasoning: full });
+    } else {
+        r.render_response(&ChatResponse::Message { message: full });
+    }
+    r.flush();
+    r.printer.flush();
+    out.lock().clone()
+}
+
+#[test]
+#[expect(clippy::too_many_lines, reason = "flat fixture table")]
+fn test_streaming_byte_identity_corpus() {
+    let fixtures = [
+        StreamingFixture {
+            name: "plain_wrap",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Streams,
+            rest: "\n\n",
+            body: "This is a generously long paragraph of ordinary prose that comfortably crosses \
+                   the streaming threshold and then keeps right on going so the renderer commits \
+                   several wrapped lines well before the terminator ever arrives.",
+        },
+        StreamingFixture {
+            name: "no_wrap",
+            wrap_width: 0,
+            reasoning: false,
+            latency: Latency::Holds,
+            rest: "\n\n",
+            body: "This is a generously long paragraph of ordinary prose that comfortably crosses \
+                   the streaming threshold but renders with wrapping disabled, so no visual line \
+                   is ever committed before the terminator.",
+        },
+        StreamingFixture {
+            name: "inline_code",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Streams,
+            rest: "\n\n",
+            body: "Here is a fair amount of leading prose to cross the threshold and then an \
+                   `inline code span` followed by a good deal more trailing prose so the lines \
+                   keep wrapping along.",
+        },
+        StreamingFixture {
+            name: "strong",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Streams,
+            rest: "\n\n",
+            body: "Here is a fair amount of leading prose to cross the threshold and then a \
+                   **strongly emphasized phrase** followed by a good deal more trailing prose so \
+                   the lines keep wrapping.",
+        },
+        StreamingFixture {
+            name: "link",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Streams,
+            rest: "\n\n",
+            body: "Here is a fair amount of leading prose to cross the threshold and then a \
+                   [labelled link](https://example.com/path) followed by a good deal more \
+                   trailing prose to keep going.",
+        },
+        StreamingFixture {
+            name: "image",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Streams,
+            rest: "\n\n",
+            body: "Here is a fair amount of leading prose to cross the threshold and then an \
+                   ![image alt](https://example.com/i.png) followed by a good deal more trailing \
+                   prose to keep going.",
+        },
+        StreamingFixture {
+            name: "superscript",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Streams,
+            rest: "\n\n",
+            body: "Here is a fair amount of leading prose to cross the threshold and then a \
+                   superscript such as x^2^ sitting mid sentence followed by more trailing prose \
+                   to keep wrapping.",
+        },
+        StreamingFixture {
+            name: "subscript",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Streams,
+            rest: "\n\n",
+            body: "Here is a fair amount of leading prose to cross the threshold and then a \
+                   subscript such as H~2~O sitting mid sentence followed by more trailing prose \
+                   to keep wrapping.",
+        },
+        StreamingFixture {
+            name: "orphaned_fence",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Streams,
+            rest: "\n\n```\n\n",
+            body: "Let me very carefully re-read the entire file from top to bottom before making \
+                   any edit at all, here is exactly the command snippet that I am about to run \
+                   for you:```rust",
+        },
+        StreamingFixture {
+            name: "reasoning_bg",
+            wrap_width: 40,
+            reasoning: true,
+            latency: Latency::Streams,
+            rest: "\n\n",
+            body: "Let me reason at some length about this particular problem in one long \
+                   paragraph that runs well past the streaming threshold so the renderer must \
+                   commit it line by line.",
+        },
+        StreamingFixture {
+            name: "unbreakable_token",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Holds,
+            rest: "\n\n",
+            body: "Supercalifragilisticexpialidocioussupercalifragilisticexpialidocioussupercalif\
+                   ragilisticexpialidocioussupercalifragilisticexpialidociousextrapaddinghere",
+        },
+        StreamingFixture {
+            name: "long_url",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Holds,
+            rest: "\n\n",
+            body: "https://example.com/a/very/long/path/that/just/keeps/going/segment/after/segme\
+                   nt/with/no/spaces/at/all/until/it/passes/both/the/threshold/and/the/width",
+        },
+        StreamingFixture {
+            name: "lead_bracket",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Holds,
+            rest: "\n\n",
+            body: "[some-label] followed by a good amount of ordinary prose text that continues \
+                   well past the streaming threshold on a single line so it is never classified \
+                   early.",
+        },
+        StreamingFixture {
+            name: "lead_angle",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Holds,
+            rest: "\n\n",
+            body: "<3 is the little symbol that opens this single long line of prose which then \
+                   runs on well past the streaming threshold without ever wrapping or streaming \
+                   early.",
+        },
+        StreamingFixture {
+            name: "lead_digit",
+            wrap_width: 40,
+            reasoning: false,
+            latency: Latency::Holds,
+            rest: "\n\n",
+            body: "100 distinct reasons are spread across this single long line of prose that runs \
+                   on well past the streaming threshold so the buffer simply waits for its \
+                   newline.",
+        },
+        StreamingFixture {
+            name: "table_wide_later_row",
+            wrap_width: 80,
+            reasoning: false,
+            latency: Latency::Holds,
+            rest: "\n\n",
+            // A GFM table is not prefix-stable: the wide cell on the fifth row
+            // re-pads the columns of the header and earlier rows. It must stay
+            // on the whole-block path, never streaming, or byte-identity breaks.
+            body: concat!(
+                "| Name | Value |\n",
+                "| ---- | ----- |\n",
+                "| a | 1 |\n",
+                "| bb | 22 |\n",
+                "| a very wide cell that widens this column well beyond the header | 333 |\n",
+                "| c | 4 |",
+            ),
+        },
+    ];
+
+    for fx in &fixtures {
+        let whole = render_whole(fx);
+
+        let (mut streamed, out, _e) = create_renderer_with_config(streaming_config(fx));
+        feed_chars(&mut streamed, fx.reasoning, fx.body);
+        streamed.printer.flush();
+        let before_terminator = out.lock().clone();
+        match fx.latency {
+            Latency::Streams => assert!(
+                !before_terminator.is_empty(),
+                "{}: expected committed output before the terminator, got nothing",
+                fx.name
+            ),
+            Latency::Holds => assert!(
+                before_terminator.is_empty(),
+                "{}: expected nothing before the first source newline, got: {before_terminator:?}",
+                fx.name
+            ),
+        }
+
+        feed_chars(&mut streamed, fx.reasoning, fx.rest);
+        streamed.flush();
+        streamed.printer.flush();
+
+        assert_eq!(*out.lock(), whole, "byte-identity failed for {}", fx.name);
+    }
+}
+
+#[test]
+fn test_streaming_ambiguous_lead_streams_after_first_newline() {
+    // An ambiguous block-start lead (`[`) is not classified as a paragraph
+    // until its first source newline: nothing streams before that newline, but
+    // the paragraph streams normally afterward. This pins the precise boundary
+    // of the documented limitation — it is the first newline, not a wholesale
+    // failure to stream.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.background = None;
+    config.style.markdown.wrap_width = 40;
+    config.style.typewriter.text_delay = DelayDuration::instant();
+    config.style.typewriter.code_delay = DelayDuration::instant();
+
+    let first_line = "[ref] this opening line begins with an ambiguous bracket lead and runs long \
+                      enough to comfortably exceed the streaming threshold all by itself here";
+    let rest = "and this continues the very same paragraph across a second line of prose that \
+                itself wraps several times before the paragraph finally ends.";
+
+    let (mut r, out, _e) = create_renderer_with_config(config.clone());
+
+    feed_chars(&mut r, false, first_line);
+    r.printer.flush();
+    let before_newline = out.lock().clone();
+    assert!(
+        before_newline.is_empty(),
+        "nothing should stream before the first source newline, got: {before_newline:?}"
+    );
+
+    feed_chars(&mut r, false, &format!("\n{rest}"));
+    r.printer.flush();
+    let after_newline = out.lock().clone();
+    assert!(
+        !after_newline.is_empty(),
+        "the paragraph should stream after its first source newline"
+    );
+
+    feed_chars(&mut r, false, "\n\n");
+    r.flush();
+    r.printer.flush();
+    let streamed = out.lock().clone();
+
+    let (mut w, out_w, _e) = create_renderer_with_config(config);
+    w.render_response(&ChatResponse::Message {
+        message: format!("{first_line}\n{rest}\n\n"),
+    });
+    w.flush();
+    w.printer.flush();
+
+    assert_eq!(streamed, *out_w.lock());
+}
+
+#[test]
+fn test_streaming_byte_identity_documents() {
+    // Whole multi-block documents: long paragraphs (which stream) interspersed
+    // with headings, lists, and fenced code (which do not). Streaming a document
+    // character by character must produce the same bytes as rendering it whole.
+    let documents = [
+        (
+            "heading_para_list_para",
+            concat!(
+                "# Section Heading\n",
+                "\n",
+                "This is the first long paragraph of the document and it runs comfortably ",
+                "past the streaming threshold so it streams as chunks while it is fed in.\n",
+                "\n",
+                "- first list item\n",
+                "- second list item\n",
+                "- third list item\n",
+                "\n",
+                "And here is a second long paragraph that also exceeds the threshold so it ",
+                "likewise streams in pieces rather than waiting for its terminator to arrive.\n",
+                "\n",
+            ),
+        ),
+        (
+            "para_code_para",
+            concat!(
+                "Here is a long introductory paragraph that comfortably exceeds the streaming ",
+                "threshold and therefore streams in chunks before the fenced code block below.\n",
+                "\n",
+                "```rust\n",
+                "fn main() {\n",
+                "    println!(\"hello\");\n",
+                "}\n",
+                "```\n",
+                "\n",
+                "And a closing long paragraph after the code block that also exceeds the ",
+                "threshold so it streams in pieces just like the introduction did up above.\n",
+                "\n",
+            ),
+        ),
+    ];
+
+    for (name, doc) in documents {
+        let mut config = AppConfig::new_test();
+        config.style.reasoning.background = None;
+        config.style.markdown.wrap_width = 40;
+        config.style.typewriter.text_delay = DelayDuration::instant();
+        config.style.typewriter.code_delay = DelayDuration::instant();
+
+        let (mut whole, out_whole, _e) = create_renderer_with_config(config.clone());
+        whole.render_response(&ChatResponse::Message {
+            message: doc.to_string(),
+        });
+        whole.flush();
+        whole.printer.flush();
+
+        let (mut streamed, out_streamed, _e) = create_renderer_with_config(config);
+        feed_chars(&mut streamed, false, doc);
+        streamed.flush();
+        streamed.printer.flush();
+
+        assert_eq!(
+            *out_streamed.lock(),
+            *out_whole.lock(),
+            "byte-identity failed for document {name}"
+        );
+    }
 }

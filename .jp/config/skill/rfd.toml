@@ -139,8 +139,8 @@ content = """\
 to describe..."
 - Be direct. No hedging: "it seems", "probably", "it might be worth \
 considering."
-- Keep it short. If an RFD exceeds ~2000 words, suggest splitting into \
-smaller proposals.
+- Keep it short. Only write words that carry their own weight, more \
+non-relevant words can hide the significance of relevant words.
 - Use concrete examples. A code snippet or data flow diagram is worth a \
 paragraph of abstraction.\
 """

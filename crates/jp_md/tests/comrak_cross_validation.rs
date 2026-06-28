@@ -49,8 +49,12 @@ fn canonicalize(text: &str) -> String {
 }
 
 /// Collect all events for a document pushed as a single chunk.
+///
+/// Streaming is disabled: this suite asserts that segment-wise parsing equals
+/// whole-document parsing, an equality `ParagraphChunk`s intentionally break.
 fn whole_document_events(text: &str) -> Vec<Event> {
-    let mut buffer = Buffer::from(text);
+    let mut buffer = Buffer::new().with_streaming_paragraphs(false);
+    buffer.push(text);
     let mut events: Vec<Event> = buffer.by_ref().collect();
     events.extend(buffer.flush_events());
     events
@@ -58,7 +62,7 @@ fn whole_document_events(text: &str) -> Vec<Event> {
 
 /// Collect all events for a document pushed one character at a time.
 fn char_chunked_events(text: &str) -> Vec<Event> {
-    let mut buffer = Buffer::new();
+    let mut buffer = Buffer::new().with_streaming_paragraphs(false);
     let mut events = Vec::new();
     for (start, c) in text.char_indices() {
         buffer.push(&text[start..start + c.len_utf8()]);
@@ -89,6 +93,9 @@ fn reassemble(events: &[Event]) -> String {
                 out.push_str(fence);
                 out.push('\n');
             }
+            // Streaming is disabled in this suite, so `ParagraphChunk` never
+            // appears; the arm satisfies the `#[non_exhaustive]` enum.
+            _ => {}
         }
     }
     out

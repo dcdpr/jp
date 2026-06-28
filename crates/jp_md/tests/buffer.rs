@@ -19,7 +19,10 @@ fn test_buffer_chunks() {
         let name = path.file_stem().unwrap().to_string_lossy();
         let content = fs::read_to_string(&path).expect("Failed to read file");
 
-        let mut buffer = Buffer::new();
+        // Streaming is disabled: this snapshot characterizes the buffer's
+        // non-streaming block segmentation; `ParagraphChunk`s would change the
+        // event sequence for long paragraphs.
+        let mut buffer = Buffer::new().with_streaming_paragraphs(false);
         buffer.push(&content);
 
         let mut chunks = Vec::new();

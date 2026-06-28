@@ -2,6 +2,16 @@ use std::fmt::Write as _;
 
 use super::*;
 
+/// A buffer with paragraph streaming disabled.
+///
+/// Most tests below assert event equality between chunked and whole input — a
+/// property streaming intentionally breaks by emitting `ParagraphChunk`s mid
+/// paragraph.
+/// Streaming behavior has its own tests at the end of this file.
+fn non_streaming() -> Buffer {
+    Buffer::new().with_streaming_paragraphs(false)
+}
+
 struct TestCase<'a> {
     in_out: Vec<(&'a str, Vec<Event>)>,
     flushed: Option<&'a str>,
@@ -9,7 +19,7 @@ struct TestCase<'a> {
 
 impl TestCase<'_> {
     fn run(self, name: &str) {
-        let mut buf = Buffer::new();
+        let mut buf = non_streaming();
 
         for (input, expected) in self.in_out {
             buf.push(input);
@@ -313,7 +323,7 @@ fn test_buffer_nested_fenced_code() {
     let input =
         "```markdown\nfoo bar\n\n```rust\nfn main() {}\n```\n\nbaz\n\n```\n\nregular paragraph\n\n";
 
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -346,7 +356,7 @@ fn test_buffer_nested_fenced_code() {
 fn test_buffer_flush_closes_fence_without_trailing_newline() {
     // A closing fence that is the last line of the stream with no trailing
     // newline must still be recognized as a close, not dumped as text.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("```sh\necho hi\n```");
 
     let streamed: Vec<Event> = buf.by_ref().collect();
@@ -367,7 +377,7 @@ fn test_buffer_flush_closes_fence_without_trailing_newline() {
 fn test_buffer_flush_synthesizes_close_for_unterminated_fence() {
     // A fenced block that never closes is balanced with a synthetic closing
     // fence at flush, so consumers can match the opening fence.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("```rust\nlet x = 1;\n");
 
     let streamed: Vec<Event> = buf.by_ref().collect();
@@ -389,7 +399,7 @@ fn test_buffer_flush_emits_partial_last_code_line_then_close() {
     // The final code line lacks a trailing newline and there is no closing
     // fence: end-of-region completes the line, then a synthetic close
     // balances the block.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("```sh\necho hi");
 
     let streamed: Vec<Event> = buf.by_ref().collect();
@@ -415,7 +425,7 @@ fn test_buffer_flush_events_renumbers_partial_list_items() {
     // complete item as its own `Block` (with renumbering), and emits
     // the final partial line as a `Flush`.
     let input = "5. First\n7. Second\n9. Third without trailing newline";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -453,7 +463,7 @@ fn test_buffer_flush_events_resets_state() {
     // content-kind transition (reasoning ↔ message ↔ tool call, role
     // headers, user echos), not only at process teardown — so a stale
     // state here corrupts the next chunk's parsing.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("1. one\n2. two\n");
 
     // First item flushes normally via `next()`.
@@ -479,7 +489,7 @@ fn test_buffer_flush_events_resets_state_empty_buffer_path() {
     // The empty-buffer fast path also needs the reset: a caller may
     // consume the last block, then call `flush_events` again as a
     // "wipe the slate" no-op before pushing fresh content.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("- item\n");
     // Buffer enters `InList` but doesn't flush yet (no sibling marker
     // arrived). `next()` consumes nothing.
@@ -510,7 +520,7 @@ fn test_buffer_partial_list_flush_renders_correctly_end_to_end() {
     use crate::format::{Formatter, TerminalOptions};
 
     let input = "5. First\n7. Second\n9. Third without trailing newline";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let f = Formatter::with_width(0);
     let mut rendered = String::new();
@@ -557,7 +567,7 @@ fn test_buffer_flush_event_preserves_continuation_paragraph_indent() {
     // The continuation paragraph keeps its `content_column` indent,
     // which comrak then recognises as a loose-list continuation.
     let input = "1. Item one\n\n   continuation paragraph without trailing newline";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -578,7 +588,7 @@ fn test_buffer_continuation_paragraph_renders_at_content_column() {
     use crate::format::{Formatter, TerminalOptions};
 
     let input = "1. Item one\n\n   continuation paragraph without trailing newline";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let f = Formatter::with_width(0);
     let mut rendered = String::new();
@@ -631,7 +641,7 @@ fn test_buffer_triple_nested_lists_stream_at_each_level() {
     // indent, and ordered markers are renumbered per-level.
     let input = "1. Top\n   1. Mid one\n      1. Inner one\n      9. Inner two\n   3. Mid two\n2. \
                  Top two\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -667,7 +677,7 @@ fn test_buffer_triple_nested_lists_stream_at_each_level() {
 fn test_buffer_mixed_bullet_and_ordered_nesting() {
     // Mixed bullet outer, ordered inner.
     let input = "- Outer one\n  1. Inner one\n  5. Inner two\n- Outer two\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -696,7 +706,7 @@ fn test_buffer_ordered_outer_bullet_inner_nesting() {
     // Ordered outer, bullet inner. Bullets don't renumber; just
     // indent at the outer's content_column.
     let input = "1. Outer one\n   - Inner a\n   - Inner b\n2. Outer two\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -729,7 +739,7 @@ fn test_buffer_triple_nested_pop_does_not_emit_empty_block() {
     // = content_column }`. Now `scan == 0` pops back to the parent
     // without emitting anything.
     let input = "- Item B\n  - Nested B.1\n    - Deeply nested\n- Item C\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -766,7 +776,7 @@ fn test_buffer_mixed_marker_at_same_column_starts_new_list() {
     // the bullet into the ordered list and bumped `items_flushed`,
     // causing the subsequent `2. Two\n` to renumber to `3.`.
     let input = "1. One\n- Bullet\n2. Two\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -793,7 +803,7 @@ fn test_buffer_different_ordered_delimiter_starts_new_list() {
     // `1.` and `2)` are different list types per CommonMark §5.2 —
     // they share `is_ordered` but use different delimiters.
     let input = "1. One\n2) Two\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -811,7 +821,7 @@ fn test_buffer_different_ordered_delimiter_starts_new_list() {
 fn test_buffer_different_bullet_char_starts_new_list() {
     // `-`, `*`, `+` are distinct bullet kinds per CommonMark §5.2.
     let input = "- One\n* Two\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -837,7 +847,7 @@ fn test_buffer_two_blank_lines_terminate_list() {
     // lines also remain in the buffer (then consumed by the AtBoundary
     // trim before the paragraph is processed).
     let input = "1. Item\n\n\nparagraph at column 0\n\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -864,7 +874,7 @@ fn test_buffer_unindented_paragraph_after_nested_list_terminates_outer() {
     // initialises `prev_blank` from any leading blank consumed at
     // entry to `handle_in_list`.
     let input = "- Outer\n  - Inner\n\nparagraph\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let mut events: Vec<Event> = buf.by_ref().collect();
     events.extend(buf.flush_events());
@@ -892,7 +902,7 @@ fn test_buffer_unindented_paragraph_after_nested_list_with_following_block() {
     // exercises the path where `handle_in_list` pops to `AtBoundary`
     // and `handle_buffering_paragraph` collects the paragraph.
     let input = "- Outer\n  - Inner\n\nparagraph at column 0\n\n# Heading\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let mut events: Vec<Event> = buf.by_ref().collect();
     events.extend(buf.flush_events());
@@ -940,7 +950,7 @@ fn test_buffer_terminated_list_renders_blank_before_next_block() {
 
     let f = Formatter::with_width(0);
     for (input, last_item, next_line) in cases {
-        let mut buf = Buffer::new();
+        let mut buf = non_streaming();
         buf.push(input);
         let mut events: Vec<Event> = buf.by_ref().collect();
         events.extend(buf.flush_events());
@@ -978,7 +988,7 @@ fn test_buffer_unindented_paragraph_after_nested_list_renders_at_column_0() {
     use crate::format::{Formatter, TerminalOptions};
 
     let input = "- Outer\n  - Inner\n\nparagraph\n\n# Heading\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let mut events: Vec<Event> = buf.by_ref().collect();
     events.extend(buf.flush_events());
@@ -1019,7 +1029,7 @@ fn test_buffer_indented_paragraph_after_nested_list_stays_continuation() {
     // The outer's continuation Flush sits at the outer item's
     // `content_column` of 2.
     let input = "- Outer\n  - Inner\n\n  Continuation of outer\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let mut events: Vec<Event> = buf.by_ref().collect();
     events.extend(buf.flush_events());
@@ -1046,7 +1056,7 @@ fn test_buffer_block_interrupter_inside_list_terminates() {
     // at <=3 indent terminates the list, even without a preceding
     // blank line.
     let input = "1. Item\n# Header that interrupts\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -1066,7 +1076,7 @@ fn test_buffer_lazy_continuation_inside_list_item() {
     // than content_column, NOT preceded by a blank line, is part of
     // the current item's paragraph.
     let input = "1. First line of item\nlazy continuation\n2. Next item\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -1088,7 +1098,7 @@ fn test_buffer_nested_list_streams_with_renumbering() {
     // visual indent. Ordered markers are renumbered relative to the
     // nested list's start number, so `1, 7, 99` renders as `1, 2, 3`.
     let input = "1. Outer\n   1. Sub one\n   7. Sub two\n   99. Sub three\n2. Next outer\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -1123,7 +1133,7 @@ fn test_buffer_fence_in_list_streams_with_indent() {
     // its `indent`. Item content emitted around it uses the same indent
     // logic as the rest of the list.
     let input = "1. Here's code:\n\n   ```rust\n   fn main() {}\n   ```\n\n2. Next item.\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -1164,7 +1174,7 @@ fn test_buffer_fence_in_two_digit_item_closes() {
     // `InFencedCode` state forever. The check is now relative to the
     // stored fence indent (`indent_len - indent < 4`), so this closes.
     let input = "10. Outer\n\n    ```rust\n    fn main() {}\n    ```\n\n11. Next\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -1201,7 +1211,7 @@ fn test_buffer_fence_in_list_allows_extra_close_indent() {
     // fence here sits at column 3; the closer at column 6 (three
     // extra spaces) must still close it.
     let input = "1. item\n\n   ```rust\n   fn x() {}\n      ```\n";
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -1223,7 +1233,7 @@ fn test_buffer_loose_list_with_indented_nested_content_not_split() {
     let input = "10. **Outer item** \u{2014}\n\n    1. Sub one\n    7. Sub two\n    99. Sub \
                  three\n\n    End of item 10.\n\n11. **Next outer**\n";
 
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push(input);
     let events: Vec<Event> = buf.by_ref().collect();
 
@@ -1260,7 +1270,7 @@ fn test_buffer_list_streams_incrementally() {
     // Bug: lists buffered entirely until a blank line, causing streaming
     // to stall for the duration of list generation. Now the buffer
     // flushes at each new top-level item boundary.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
 
     // Stream in a 4-item list, one line at a time.
     buf.push("1. First item\n");
@@ -1294,7 +1304,7 @@ fn test_buffer_list_streams_incrementally() {
 #[test]
 fn test_buffer_list_multiline_items_not_split() {
     // List items with continuation lines should not be split.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("1. First item that\n   continues here\n");
     buf.push("2. Second item\n\n");
 
@@ -1316,7 +1326,7 @@ fn test_buffer_list_multiline_items_not_split() {
 
 #[test]
 fn test_buffer_unordered_list_streams() {
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("- Alpha\n- Beta\n- Gamma\n\n");
 
     // Items stream at each sibling marker. The last item stays buffered
@@ -1452,7 +1462,7 @@ fn test_buffer_misc() {
 
 #[test]
 fn test_fmt_write() {
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     let _ = writeln!(buf, "# Hello");
     let _ = writeln!(buf, "This is a paragraph.");
     let _ = writeln!(buf, "It has two lines.");
@@ -1574,7 +1584,7 @@ fn test_is_atx_header() {
 #[test]
 fn test_flush_events_mid_list_segments() {
     // Same-kind siblings: both segments renumbered against the list start.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("1. one\n5. two\n9. three");
     let streamed: Vec<Event> = buf.by_ref().collect();
     assert_eq!(streamed, vec![Event::block("1. one\n")]);
@@ -1585,7 +1595,7 @@ fn test_flush_events_mid_list_segments() {
 
     // Mixed delimiter in the tail: `9) three` is not a sibling of the `.`
     // list. It still marks a segment boundary, but must not be renumbered.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("1. one\n5. two\n9) three");
     let streamed: Vec<Event> = buf.by_ref().collect();
     assert_eq!(streamed, vec![Event::block("1. one\n")]);
@@ -1595,7 +1605,7 @@ fn test_flush_events_mid_list_segments() {
     ]);
 
     // Bullet list with an ordered tail: no renumbering anywhere.
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("- one\n- two\n1. three");
     let streamed: Vec<Event> = buf.by_ref().collect();
     assert_eq!(streamed, vec![Event::block("- one\n")]);
@@ -1614,7 +1624,7 @@ fn test_flush_events_mid_list_segments() {
 /// silently dropped by the end-of-flush state reset.
 #[test]
 fn test_flush_events_keeps_content_after_closing_fence() {
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("```rust\n");
     // Open the fence so the buffer is left in `InFencedCode`.
     let opening: Vec<Event> = buf.by_ref().collect();
@@ -1661,11 +1671,12 @@ fn test_paragraph_interrupt_waits_for_complete_line() {
     ];
 
     for (name, whole, chunks) in cases {
-        let mut whole_buf = Buffer::from(whole);
+        let mut whole_buf = non_streaming();
+        whole_buf.push(whole);
         let mut expected: Vec<Event> = whole_buf.by_ref().collect();
         expected.extend(whole_buf.flush_events());
 
-        let mut chunked_buf = Buffer::new();
+        let mut chunked_buf = non_streaming();
         let mut actual = Vec::new();
         for chunk in chunks {
             chunked_buf.push(chunk);
@@ -1687,7 +1698,7 @@ fn test_buffer_atx_header_validation() {
     ];
 
     for (input, expected) in invalid {
-        let mut buf = Buffer::new();
+        let mut buf = non_streaming();
         buf.push(input);
         let actual: Vec<Event> = buf.by_ref().collect();
         assert_eq!(actual, expected, "Failed for input: {input:?}");
@@ -1702,7 +1713,7 @@ fn test_buffer_atx_header_validation() {
     ];
 
     for (input, expected) in valid {
-        let mut buf = Buffer::new();
+        let mut buf = non_streaming();
         buf.push(input);
         let actual: Vec<Event> = buf.by_ref().collect();
         assert_eq!(actual, expected, "Failed for input: {input:?}");
@@ -1712,7 +1723,7 @@ fn test_buffer_atx_header_validation() {
 #[test]
 fn test_tabs_in_block_detection() {
     // Tab at column 0 = 4 spaces → indented code, not header
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("\t# Not Header\n\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, Vec::<Event>::new());
@@ -1722,19 +1733,19 @@ fn test_tabs_in_block_detection() {
     }]);
 
     // 3 spaces before # = valid header
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("   # Valid\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, vec![Event::block("   # Valid\n")]);
 
     // Tab after # = valid header
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("#\tFoo\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, vec![Event::block("#\tFoo\n")]);
 
     // Tab at column 0 before thematic break = indented code
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("\t***\n\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, Vec::<Event>::new());
@@ -1744,13 +1755,13 @@ fn test_tabs_in_block_detection() {
     }]);
 
     // 3 spaces before *** = valid thematic break
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("   ***\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, vec![Event::block("   ***\n")]);
 
     // Mixed tabs and spaces in thematic break
-    let mut buf = Buffer::new();
+    let mut buf = non_streaming();
     buf.push("*\t*\t*\t\n");
     let actual: Vec<Event> = buf.by_ref().collect();
     assert_eq!(actual, vec![Event::block("*\t*\t*\t\n")]);
@@ -1785,4 +1796,248 @@ fn test_buffer_event_display() {
     for (event, expected) in cases {
         assert_eq!(event.to_string(), expected);
     }
+}
+
+/// Concatenate the `content` of every `ParagraphChunk` in `events`.
+fn streamed_paragraph(events: &[Event]) -> String {
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::ParagraphChunk { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn test_streaming_short_paragraph_emits_single_block() {
+    // A paragraph under the streaming threshold buffers whole and emits a
+    // single Block, even with streaming enabled.
+    let mut buf = Buffer::new();
+    buf.push("Short paragraph.\n\n");
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(events, vec![Event::block("Short paragraph.\n\n")]);
+}
+
+#[test]
+fn test_streaming_long_paragraph_chunks_sum_to_block() {
+    // A long paragraph (over the threshold) streams as `ParagraphChunk`s whose
+    // concatenated content equals the `Block` a non-streaming buffer emits.
+    let body = "This is a sufficiently long paragraph of plain prose that comfortably exceeds the \
+                streaming threshold so the buffer commits it incrementally as it arrives.";
+    assert!(body.len() > SETEXT_STREAM_THRESHOLD);
+    let input = format!("{body}\n\n");
+
+    let mut reference = non_streaming();
+    reference.push(&input);
+    let block_content = match reference.by_ref().next() {
+        Some(Event::Block { content, .. }) => content,
+        other => panic!("expected a single Block, got {other:?}"),
+    };
+
+    let mut buf = Buffer::new();
+    buf.push(body);
+    let mut events: Vec<Event> = buf.by_ref().collect();
+    buf.push("\n\n");
+    events.extend(buf.by_ref());
+    events.extend(buf.flush_events());
+
+    assert!(
+        events
+            .iter()
+            .all(|e| matches!(e, Event::ParagraphChunk { .. })),
+        "every event should be a ParagraphChunk: {events:#?}"
+    );
+    let terminal = events
+        .iter()
+        .filter(|e| matches!(e, Event::ParagraphChunk { last: true, .. }))
+        .count();
+    assert_eq!(terminal, 1, "exactly one terminal chunk: {events:#?}");
+    assert_eq!(streamed_paragraph(&events), block_content);
+}
+
+#[test]
+fn test_streaming_disabled_emits_single_block_for_long_paragraph() {
+    // Opting out restores whole-paragraph buffering for long paragraphs too.
+    let body = "This is a sufficiently long paragraph of plain prose that comfortably exceeds the \
+                streaming threshold so the buffer commits it incrementally as it arrives.";
+    assert!(body.len() > SETEXT_STREAM_THRESHOLD);
+    let input = format!("{body}\n\n");
+
+    let mut buf = non_streaming();
+    buf.push(&input);
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(events, vec![Event::block(input)]);
+}
+
+#[test]
+fn test_streaming_short_setext_still_renders_as_heading() {
+    // A short setext heading stays under the threshold, so it buffers whole and
+    // renders as a heading exactly as before.
+    let mut buf = Buffer::new();
+    buf.push("Title\n===\n");
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(events, vec![Event::block("Title\n===\n")]);
+}
+
+#[test]
+fn test_streaming_over_threshold_setext_does_not_become_heading() {
+    // A paragraph that has begun streaming can no longer become a setext
+    // heading: the underline splits off as a fresh block. This is the one
+    // documented byte-difference from non-streaming rendering.
+    let body = "A long enough first line of prose that crosses the streaming threshold so the \
+                paragraph has already begun streaming before any underline shows up at the end \
+                here.";
+    assert!(body.len() > SETEXT_STREAM_THRESHOLD);
+
+    let mut buf = Buffer::new();
+    buf.push(body);
+    let mut events: Vec<Event> = buf.by_ref().collect();
+    buf.push("\n===\n");
+    events.extend(buf.by_ref());
+    events.extend(buf.flush_events());
+
+    // The streamed paragraph closes before the underline (no `===` merged in).
+    let para = streamed_paragraph(&events);
+    assert_eq!(para, format!("{body}\n"));
+
+    // The underline survives as its own block, never folded into a heading.
+    let tail: String = events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Flush { content, .. } | Event::Block { content, .. } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tail, "===\n");
+}
+
+#[test]
+fn test_streaming_paragraph_interrupted_by_header() {
+    // A block interrupter after streamed prose ends the paragraph before the
+    // interrupter, which is then emitted as its own block — identical content
+    // to non-streaming, just delivered as chunks.
+    let body = "Long prose line that exceeds the configured streaming threshold so the paragraph \
+                streams well before the interrupting header line shows up at the very end here.";
+    assert!(body.len() > SETEXT_STREAM_THRESHOLD);
+
+    let mut buf = Buffer::new();
+    buf.push(body);
+    let mut events: Vec<Event> = buf.by_ref().collect();
+    buf.push("\n# Heading\n");
+    events.extend(buf.by_ref());
+    events.extend(buf.flush_events());
+
+    assert_eq!(streamed_paragraph(&events), format!("{body}\n"));
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::Block { content, .. } if content == "# Heading\n")),
+        "header should be emitted as its own block: {events:#?}"
+    );
+}
+
+#[test]
+fn test_streaming_holds_open_inline_then_flush_emits_tail() {
+    // The inline ground-state scan holds an open construct, so the committed
+    // chunk stops before it; the held remainder is emitted at flush.
+    let head = "This long sentence of plain prose is engineered to exceed the streaming threshold \
+                all on its own before any emphasis marker appears anywhere in it, ok. ";
+    assert!(head.len() > SETEXT_STREAM_THRESHOLD);
+    let input = format!("{head}**still open");
+
+    let mut buf = Buffer::new();
+    buf.push(&input);
+    let streamed: Vec<Event> = buf.by_ref().collect();
+    assert_eq!(streamed, vec![Event::paragraph_chunk(head, false)]);
+
+    let flushed = buf.flush_events();
+    assert_eq!(flushed, vec![Event::paragraph_chunk("**still open", true)]);
+}
+
+#[test]
+fn test_last_inline_ground_state() {
+    // Plain text is fully at ground state.
+    assert_eq!(last_inline_ground_state("hello world", 11), 11);
+    // Open emphasis holds from the opener; closing restores ground state.
+    assert_eq!(last_inline_ground_state("hello **world", 13), 6);
+    assert_eq!(last_inline_ground_state("hello **world**", 15), 15);
+    // Open code span holds; a matched close restores ground state.
+    assert_eq!(last_inline_ground_state("see `code", 9), 4);
+    assert_eq!(last_inline_ground_state("see `code`", 10), 10);
+    // Underscores inside a word are literal, not emphasis.
+    assert_eq!(last_inline_ground_state("call foo_bar now", 16), 16);
+    // A link in flight holds from the opening bracket until `)` closes it.
+    assert_eq!(last_inline_ground_state("see [label](url", 15), 4);
+    assert_eq!(last_inline_ground_state("see [label](url)", 16), 16);
+    // `<` that could open a tag is held; a closed angle is ground again.
+    assert_eq!(last_inline_ground_state("a <tag", 6), 2);
+    assert_eq!(last_inline_ground_state("a <tag>", 7), 7);
+    // A literal `<` (whitespace after) is left as content.
+    assert_eq!(last_inline_ground_state("a < b", 5), 5);
+}
+
+#[test]
+fn test_streaming_table_stays_whole_block() {
+    // A GFM table (pipe header + delimiter row) is not prefix-stable — a later
+    // wide cell re-pads earlier rows — so even past the streaming threshold the
+    // buffer keeps it on the whole-block path: a single Block, never a
+    // ParagraphChunk.
+    let table = concat!(
+        "| Name | Value |\n",
+        "| ---- | ----- |\n",
+        "| a | 1 |\n",
+        "| bb | 22 |\n",
+        "| a very wide cell that widens this column well beyond the header | 333 |\n",
+        "| c | 4 |\n",
+    );
+    assert!(table.len() > SETEXT_STREAM_THRESHOLD);
+
+    // Feed the whole table (no terminator yet), one character at a time.
+    let mut buf = Buffer::new();
+    let mut events: Vec<Event> = Vec::new();
+    for ch in table.chars() {
+        buf.push(&ch.to_string());
+        events.extend(buf.by_ref());
+    }
+    assert!(
+        events.is_empty(),
+        "a table must not stream; got: {events:#?}"
+    );
+
+    // The blank-line terminator flushes the whole table as one Block.
+    buf.push("\n");
+    events.extend(buf.by_ref());
+    assert_eq!(events, vec![Event::block(format!("{table}\n"))]);
+}
+
+#[test]
+fn test_streaming_mid_line_pipe_streams_but_leading_pipe_holds() {
+    // A mid-line pipe is ordinary prose and must still stream (the common
+    // single-sentence case): only a first line whose first non-space character
+    // is a pipe is treated as a potential table header and withheld.
+    let prose = "This long single sentence of prose contains a | pipe partway through it and must \
+                 still stream incrementally past the threshold like any other prose line.";
+    assert!(prose.len() > SETEXT_STREAM_THRESHOLD);
+    let mut buf = Buffer::new();
+    buf.push(prose);
+    let events: Vec<Event> = buf.by_ref().collect();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, Event::ParagraphChunk { .. })),
+        "mid-line pipe prose should stream; got: {events:#?}"
+    );
+
+    // A line that begins with a pipe is a potential table header and is held
+    // (no newline wait needed — the decision is on the first character).
+    let leading = "| this line begins with a pipe and is long enough to cross the streaming \
+                   threshold, so without the guard it would stream as a paragraph chunk.";
+    assert!(leading.len() > SETEXT_STREAM_THRESHOLD);
+    let mut buf = Buffer::new();
+    buf.push(leading);
+    assert!(
+        buf.by_ref().next().is_none(),
+        "a pipe-leading line should hold (it could be a table header)"
+    );
 }

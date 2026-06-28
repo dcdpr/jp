@@ -2,7 +2,9 @@ use jp_md::buffer::Buffer;
 use proptest::prelude::*;
 
 fn run_fuzz_test(original: &str, chunks: Vec<&str>) {
-    let mut buffer = Buffer::new();
+    // Streaming is disabled: this fuzz harness asserts chunked input yields the
+    // same events as whole input, a property `ParagraphChunk`s break by design.
+    let mut buffer = Buffer::new().with_streaming_paragraphs(false);
     let mut output = Vec::new();
 
     for chunk in chunks {
@@ -18,7 +20,8 @@ fn run_fuzz_test(original: &str, chunks: Vec<&str>) {
     // 2. Run chunks through buffer -> actual
     // 3. Assert equality
 
-    let mut expected_buffer = Buffer::from(original);
+    let mut expected_buffer = Buffer::new().with_streaming_paragraphs(false);
+    expected_buffer.push(original);
     let mut expected = Vec::new();
     for event in &mut expected_buffer {
         expected.push(event);

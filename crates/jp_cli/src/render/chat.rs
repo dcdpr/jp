@@ -89,6 +89,16 @@ pub struct ChatRenderer {
     reasoning_separator_pending: bool,
     /// Post-processing fixups for LLM quirks in the event stream.
     fixups: Fixups,
+    /// Accumulated source of the top-level paragraph currently streaming.
+    ///
+    /// Empty when no paragraph is mid-stream.
+    /// The renderer re-renders this whole buffer on each
+    /// [`Event::ParagraphChunk`] and prints only the newly committed delta, so
+    /// streamed output is byte-identical to rendering the finished paragraph in
+    /// one shot.
+    para_source: String,
+    /// Bytes of `para_source`'s render already printed (the stable prefix).
+    para_emitted: usize,
 }
 
 impl ChatRenderer {
@@ -111,6 +121,8 @@ impl ChatRenderer {
             reasoning_timer: None,
             reasoning_separator_pending: false,
             fixups: Fixups::llm_quirks(),
+            para_source: String::new(),
+            para_emitted: 0,
         }
     }
 
@@ -365,6 +377,13 @@ impl ChatRenderer {
                 self.print_code(&rendered, indent);
                 self.code_block = None;
             }
+            Event::ParagraphChunk {
+                content,
+                indent,
+                last,
+            } => self.handle_paragraph_chunk(&content, indent, last),
+            // Required by the `#[non_exhaustive]` enum; no other variants exist.
+            _ => {}
         }
     }
 
@@ -422,6 +441,69 @@ impl ChatRenderer {
 
         if is_reasoning {
             self.reasoning_separator_pending = true;
+        }
+    }
+
+    /// Render a streamed slice of a top-level paragraph.
+    ///
+    /// Accumulates the paragraph's source, re-renders the whole paragraph with
+    /// the same options [`print_block`] uses, and prints only the newly
+    /// committed prefix delta — holding the in-progress visual line until a
+    /// later chunk (or `last`) commits it.
+    /// The concatenation of all deltas equals the one-shot block render, so
+    /// streamed output is byte-identical to non-streaming.
+    ///
+    /// [`print_block`]: Self::print_block
+    fn handle_paragraph_chunk(&mut self, content: &str, indent: usize, last: bool) {
+        let is_reasoning = self.last_content_kind == Some(ContentKind::Reasoning);
+
+        // First chunk of this paragraph: a reasoning paragraph consumes the
+        // deferred separator shaded, exactly as `print_block` does for a Block.
+        if self.para_source.is_empty() && is_reasoning {
+            self.emit_pending_reasoning_separator(true);
+        }
+
+        self.para_source.push_str(content);
+
+        let mut opts = self.terminal_options(indent);
+        // Intermediate chunks suppress the trailing separator (it sits past the
+        // held in-progress line anyway); the final chunk suppresses it only for
+        // reasoning, exactly as `print_block` does. A paragraph is never a tight
+        // list, so `force_trailing_separator` stays false.
+        opts.suppress_trailing_separator = is_reasoning || !last;
+        opts.force_trailing_separator = false;
+
+        let rendered = self
+            .formatter
+            .format_terminal_with(&self.para_source, &opts)
+            .unwrap_or_else(|_| self.para_source.clone());
+
+        // Cut at the last committed newline, holding the in-progress visual
+        // line. `format_terminal_with` always finalizes with a trailing newline,
+        // so the last line of a non-final render is never a real wrap commit;
+        // drop it before searching. At `last` the whole render is committed.
+        let cut = if last {
+            rendered.len()
+        } else {
+            match rendered.trim_end_matches('\n').rfind('\n') {
+                Some(i) => i + 1,
+                None => 0,
+            }
+        };
+
+        if cut > self.para_emitted {
+            let delta = rendered[self.para_emitted..cut].to_string();
+            let delay = self.config.typewriter.text_delay;
+            self.printer.print(delta.typewriter(delay.into()));
+            self.para_emitted = cut;
+        }
+
+        if last {
+            if is_reasoning {
+                self.reasoning_separator_pending = true;
+            }
+            self.para_source.clear();
+            self.para_emitted = 0;
         }
     }
 
@@ -557,6 +639,10 @@ impl ChatRenderer {
         self.reasoning_chars_count = 0;
         self.code_block = None;
         self.fixups = Fixups::llm_quirks();
+        // Drop any held in-progress paragraph line; the buffered source was
+        // captured by the event builder, so it is safe to discard.
+        self.para_source.clear();
+        self.para_emitted = 0;
     }
 }
 

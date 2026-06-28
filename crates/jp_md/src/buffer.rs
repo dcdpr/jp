@@ -1,5 +1,33 @@
-//! A markdown buffer that produces valid blocks of markdown from chunks of
-//! text.
+//! A markdown buffer that splits a stream of text chunks into renderable
+//! blocks.
+//!
+//! [`Buffer`] is the entry point: push text with [`Buffer::push`], pull
+//! [`Event`]s through the [`Iterator`] impl, and drain the tail with
+//! [`Buffer::flush_events`].
+//! Each event is one block — a paragraph, header, list item, fenced-code line,
+//! and so on — ready for the renderer.
+//!
+//! # Streaming paragraphs
+//!
+//! Top-level paragraphs stream incrementally, on by default.
+//! Once a paragraph grows past an internal threshold the buffer emits its
+//! leading prose as [`Event::ParagraphChunk`]s rather than waiting for the
+//! terminator, so a long single-line paragraph (common in assistant output)
+//! renders as it arrives instead of stalling until it ends.
+//! Concatenating a paragraph's chunks yields exactly the [`Event::Block`] that
+//! non-streaming buffering emits, so a consumer that re-renders the accumulated
+//! source produces byte-identical output.
+//!
+//! GFM tables do not stream: their column widths depend on later rows, so a
+//! table is kept whole, detected by the leading pipe on its header row.
+//!
+//! [`Buffer::with_streaming_paragraphs`] turns streaming off, restoring
+//! whole-paragraph [`Event::Block`]s.
+//! Streamed output is byte-identical to that mode except for two edge cases,
+//! neither produced by assistant output: an over-threshold setext heading
+//! streams as prose instead of becoming a heading, and a table header without a
+//! leading pipe (legal per the GFM spec but unexemplified there) is not
+//! detected, so it streams and may render with mis-padded columns.
 
 use std::fmt;
 
@@ -22,6 +50,13 @@ const TYPE4_START_TAG: &str = "<!";
 /// Type 5 start tag.
 const TYPE5_START_TAG: &str = "<![CDATA[";
 
+/// Minimum buffered source bytes before a top-level paragraph begins streaming.
+///
+/// Below this a paragraph buffers whole, so a short setext underline can still
+/// turn it into a heading; above it the paragraph is too long to be a realistic
+/// heading and streams as prose.
+const SETEXT_STREAM_THRESHOLD: usize = 128;
+
 /// An event yielded by the buffer.
 ///
 /// Every event carries an `indent` field giving the visual column at which the
@@ -30,6 +65,7 @@ const TYPE5_START_TAG: &str = "<![CDATA[";
 /// containers (list items, fenced code inside list items) at their correct
 /// visual indent.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Event {
     /// A complete block of markdown (e.g., a paragraph, a header, a list item).
     Block {
@@ -37,6 +73,31 @@ pub enum Event {
         content: String,
         /// Visual indent (in spaces) the renderer should apply.
         indent: usize,
+    },
+
+    /// A streamed slice of a top-level paragraph's source.
+    ///
+    /// Emitted, instead of a single [`Block`], while a top-level paragraph is
+    /// buffered past the streaming threshold, so its leading text can render
+    /// before the paragraph terminates.
+    /// The consumer accumulates each chunk's `content` and re-renders the
+    /// growing paragraph; concatenating every chunk of one paragraph yields
+    /// exactly the `Block` content that non-streaming buffering would emit.
+    ///
+    /// [`Block`]: Self::Block
+    ParagraphChunk {
+        /// New paragraph source since the previous chunk (a delta, never
+        /// cumulative).
+        /// A non-terminal chunk (`last == false`) never ends inside an open
+        /// inline construct; the terminal chunk (`last == true`) carries
+        /// whatever source remains at the region boundary and may.
+        content: String,
+        /// Visual indent (in spaces) the renderer should apply.
+        /// Always `0`: chunks come only from top-level paragraphs.
+        indent: usize,
+        /// Whether this chunk closes the paragraph for rendering — either a
+        /// real terminator was seen or the content region ended.
+        last: bool,
     },
 
     /// The start of a fenced code block.
@@ -117,6 +178,16 @@ impl Event {
             indent: 0,
         }
     }
+
+    /// Construct a [`Event::ParagraphChunk`] with no indent.
+    #[must_use]
+    pub fn paragraph_chunk(content: impl Into<String>, last: bool) -> Self {
+        Self::ParagraphChunk {
+            content: content.into(),
+            indent: 0,
+            last,
+        }
+    }
 }
 
 impl fmt::Display for Event {
@@ -138,7 +209,8 @@ impl fmt::Display for Event {
             Self::Block { content: s, .. }
             | Self::FencedCodeLine { content: s, .. }
             | Self::FencedCodeEnd { fence: s, .. }
-            | Self::Flush { content: s, .. } => {
+            | Self::Flush { content: s, .. }
+            | Self::ParagraphChunk { content: s, .. } => {
                 write!(f, "{s}")
             }
         }
@@ -162,6 +234,18 @@ pub struct Buffer {
     /// When the inner state closes, the parent is popped back as the active
     /// state.
     parents: Vec<State>,
+
+    /// Whether top-level paragraphs stream incrementally as
+    /// [`Event::ParagraphChunk`]s rather than buffering to a single
+    /// [`Event::Block`].
+    streaming: bool,
+
+    /// Bytes of the current top-level paragraph already emitted as
+    /// [`Event::ParagraphChunk`]s.
+    ///
+    /// Indexes into `data`, which is not drained while a paragraph streams.
+    /// `0` whenever no paragraph is mid-stream.
+    para_emitted: usize,
 }
 
 impl Buffer {
@@ -172,7 +256,28 @@ impl Buffer {
             data: String::new(),
             state: State::AtBoundary,
             parents: Vec::new(),
+            streaming: true,
+            para_emitted: 0,
         }
+    }
+
+    /// Toggle incremental streaming of top-level paragraphs.
+    ///
+    /// Streaming is enabled by default.
+    /// With it disabled the buffer emits each paragraph as a single
+    /// [`Event::Block`] once a terminator is seen, never an
+    /// [`Event::ParagraphChunk`].
+    ///
+    /// Streamed output is byte-identical to whole-paragraph buffering except
+    /// for two edge cases, neither produced by assistant output: an
+    /// over-threshold setext heading streams as prose instead of becoming a
+    /// heading, and a GFM table whose header lacks a leading pipe is not
+    /// detected and may stream with mis-padded columns.
+    /// Disable streaming to render either exactly.
+    #[must_use]
+    pub const fn with_streaming_paragraphs(mut self, on: bool) -> Self {
+        self.streaming = on;
+        self
     }
 
     /// State to return to when the current state's block closes.
@@ -218,13 +323,20 @@ impl Buffer {
         // directly with its untouched buffer.
         let raw = std::mem::take(&mut self.data);
         if !raw.is_empty() {
-            if let State::InList(list) = self.state {
-                events.extend(Self::flush_list_events(&raw, list));
-            } else {
-                events.push(Event::Flush {
+            match self.state {
+                State::InList(list) => events.extend(Self::flush_list_events(&raw, list)),
+                // A paragraph that began streaming closes its region with a
+                // terminal `ParagraphChunk` carrying the remaining source, not
+                // a `Flush` (which the consumer would re-render as a fresh
+                // standalone block).
+                State::BufferingParagraph if self.streaming && self.para_emitted > 0 => {
+                    let content = raw[self.para_emitted..].to_string();
+                    events.push(Event::paragraph_chunk(content, true));
+                }
+                _ => events.push(Event::Flush {
                     content: raw,
                     indent: self.current_indent(),
-                });
+                }),
             }
         }
 
@@ -238,6 +350,7 @@ impl Buffer {
         // empty-buffer fast path.
         self.state = State::AtBoundary;
         self.parents.clear();
+        self.para_emitted = 0;
 
         events
     }
@@ -365,6 +478,28 @@ impl Buffer {
         }
     }
 
+    /// Whether the buffered partial first line can only be a paragraph.
+    ///
+    /// True when the line has fewer than 4 spaces of indent (otherwise it could
+    /// be indented code) and its first non-space byte cannot begin any block
+    /// starter: header `#`, thematic break / bullet `- * _ +`, fence `` ` `` or
+    /// `~`, ordered-list digit, HTML `<`, link reference `[`, or table `|`.
+    /// Lets streaming enter `BufferingParagraph` before the first newline so a
+    /// single-line paragraph streams instead of stalling until the line ends.
+    fn starts_unambiguous_paragraph(&self) -> bool {
+        let (indent, content) = get_indent(&self.data);
+        if indent >= 4 {
+            return false;
+        }
+        content.bytes().next().is_some_and(|b| {
+            !b.is_ascii_digit()
+                && !matches!(
+                    b,
+                    b'#' | b'-' | b'*' | b'_' | b'+' | b'`' | b'~' | b'<' | b'[' | b'|'
+                )
+        })
+    }
+
     /// Handles the `AtBoundary` state: we are at a block boundary.
     /// We inspect the start of the buffer to decide what block we're in.
     fn handle_at_boundary(&mut self) -> (Option<Event>, State) {
@@ -388,6 +523,14 @@ impl Buffer {
 
         // We need at least one full line to decide what block it is.
         let Some(first_line_end) = self.data.find('\n') else {
+            // No complete line yet. With streaming on, a partial first line
+            // that cannot be the prefix of any block starter is unambiguously
+            // a paragraph: enter `BufferingParagraph` now so its prose can
+            // stream before the line ends. Otherwise wait for the newline, as
+            // a partial prefix can still resolve to a header, fence, list, etc.
+            if self.streaming && self.starts_unambiguous_paragraph() {
+                return (None, State::BufferingParagraph);
+            }
             return (None, State::AtBoundary);
         };
 
@@ -474,8 +617,11 @@ impl Buffer {
     /// Handles `BufferingParagraph`: we're in a paragraph-like block.
     /// We need to find its terminator.
     fn handle_buffering_paragraph(&mut self) -> (Option<Event>, State) {
-        let mut terminator_pos: Option<usize> = None;
-        let mut flush_len: usize = 0;
+        let mut flush_len: Option<usize> = None;
+        // For a setext underline terminator, the byte offset just before the
+        // underline. A paragraph already streaming splits here (as prose)
+        // rather than merging the underline into a heading.
+        let mut setext_split: Option<usize> = None;
 
         // Iterate over all newlines in the buffer to find a terminator.
         for (idx, _) in self.data.match_indices('\n') {
@@ -487,8 +633,7 @@ impl Buffer {
                 .get(line_after_start..)
                 .is_some_and(|s| s.starts_with('\n'))
             {
-                terminator_pos = Some(idx);
-                flush_len = line_after_start + 1;
+                flush_len = Some(line_after_start + 1);
                 break;
             }
 
@@ -508,26 +653,98 @@ impl Buffer {
             // context. The underline terminates the paragraph and is included
             // in the flushed block.
             if is_setext_underline(next_line_content) {
-                terminator_pos = Some(idx);
-                flush_len = line_after_start + next_line_end + 1;
+                flush_len = Some(line_after_start + next_line_end + 1);
+                setext_split = Some(line_after_start);
                 break;
             }
 
             // Interruption by a new block (HTML blocks and < 4 indent code
             // blocks can interrupt)
             if next_line_indent < 4 && is_block_starter(next_line_content) {
-                terminator_pos = Some(idx);
-                flush_len = line_after_start;
+                flush_len = Some(line_after_start);
                 break;
             }
         }
 
-        if terminator_pos.is_some() {
-            let block: String = self.data.drain(..flush_len).collect();
-            (Some(Event::block(block)), State::AtBoundary)
-        } else {
-            (None, State::BufferingParagraph)
+        if let Some(flush_len) = flush_len {
+            return self.flush_paragraph(flush_len, setext_split);
         }
+
+        // No terminator yet. Once the paragraph is too long to be a short
+        // setext heading, stream the largest inline-safe prefix of its
+        // not-yet-emitted source — unless the block is a GFM table (a pipe-led
+        // header), whose column widths make its rendering prefix-unstable.
+        if self.streaming && self.data.len() >= SETEXT_STREAM_THRESHOLD && !self.is_table() {
+            // Commit only confirmed paragraph lines: never past the last
+            // newline, since the in-progress line could still become a block
+            // starter. The sole exception is the first line, which is the
+            // whole buffer when no newline has arrived yet and which
+            // `handle_at_boundary` already classified as a paragraph.
+            let block_safe = self.data.rfind('\n').map_or(self.data.len(), |p| p + 1);
+            let cut = last_inline_ground_state(&self.data, block_safe);
+            if cut > self.para_emitted {
+                let content = self.data[self.para_emitted..cut].to_string();
+                self.para_emitted = cut;
+                return (
+                    Some(Event::paragraph_chunk(content, false)),
+                    State::BufferingParagraph,
+                );
+            }
+        }
+
+        (None, State::BufferingParagraph)
+    }
+
+    /// Whether this block is a GFM table, which must never stream.
+    ///
+    /// Table rendering is not prefix-stable: a later wide cell re-pads the
+    /// header, separator, and earlier rows, so a streamed table would commit
+    /// rows that a subsequent row invalidates.
+    /// In practice — and in every example in the GFM spec — a table's header
+    /// row (the block's first line) begins with a pipe, so a first line whose
+    /// first non-space character is `|` is treated as a table.
+    /// The check is on the first character, so it never waits for a newline:
+    /// ordinary prose with a *mid-line* pipe still streams.
+    ///
+    /// A pipeless header (`abc | def` with no leading pipe) is permitted by the
+    /// spec but absent from its examples and from assistant output; streaming
+    /// such a table is a documented limitation.
+    fn is_table(&self) -> bool {
+        let first_line = self.data.split('\n').next().unwrap_or("");
+        get_indent(first_line).1.starts_with('|')
+    }
+
+    /// Emit a terminated paragraph.
+    ///
+    /// When nothing has streamed yet this is a single [`Event::Block`] holding
+    /// the paragraph and its terminator (today's behavior).
+    /// When the paragraph is mid-stream it is a terminal
+    /// [`Event::ParagraphChunk`] carrying the remaining source.
+    ///
+    /// `flush_len` is the byte count the block path drains.
+    /// `setext_split`, when set, is the offset before a setext underline: a
+    /// mid-stream paragraph drains only up to there and leaves the underline to
+    /// re-parse as a fresh block, so streamed prose is never retroactively
+    /// turned into a heading.
+    fn flush_paragraph(
+        &mut self,
+        flush_len: usize,
+        setext_split: Option<usize>,
+    ) -> (Option<Event>, State) {
+        if self.streaming && self.para_emitted > 0 {
+            let drain_to = setext_split.unwrap_or(flush_len);
+            let content = self.data[self.para_emitted..drain_to].to_string();
+            self.data.drain(..drain_to);
+            self.para_emitted = 0;
+            return (
+                Some(Event::paragraph_chunk(content, true)),
+                State::AtBoundary,
+            );
+        }
+
+        let block: String = self.data.drain(..flush_len).collect();
+        self.para_emitted = 0;
+        (Some(Event::block(block)), State::AtBoundary)
     }
 
     /// Handles `InList`: we're inside a list, buffering the current item.
@@ -1478,6 +1695,147 @@ fn is_setext_underline(line: &str) -> bool {
         return false;
     }
     s.chars().all(|c| c == '=') || s.chars().all(|c| c == '-')
+}
+
+/// Largest byte offset `<= limit` at which `s[..offset]` is at inline ground
+/// state: every inline construct opened inside it is also closed inside it.
+///
+/// Paragraph streaming uses this to avoid committing a chunk that ends inside
+/// an open inline construct, whose later close could reflow earlier (already
+/// emitted) output.
+/// The scan is deliberately one-sided — it pushes on every *potential* opener
+/// and pops only on a confident match — so it may over-hold (return a smaller
+/// offset, costing a little latency) but never under-holds.
+/// The enabled extensions are tracked: `` ` `` (code), `*` `_` `~` `^`
+/// (emphasis / strikethrough / sub- and superscript), `[` `]` (links / images,
+/// with `](`, `][` and end-of-buffer lookahead), and `<` (autolink / raw HTML).
+fn last_inline_ground_state(s: &str, limit: usize) -> usize {
+    let bytes = s.as_bytes();
+    let limit = limit.min(bytes.len());
+
+    // Open emphasis / bracket / angle markers. Ground state requires this empty
+    // and no open code span.
+    let mut stack: Vec<u8> = Vec::new();
+    // Backtick run length of the open code span, if any.
+    let mut code_span: Option<usize> = None;
+    let mut last_ground = 0;
+    let mut i = 0;
+
+    while i < limit {
+        let b = bytes[i];
+
+        // Inside a code span nothing else applies; only a backtick run of the
+        // same length closes it.
+        if let Some(open_len) = code_span {
+            if b == b'`' {
+                let run = ascii_run(bytes, i, b'`', limit);
+                if run == open_len {
+                    code_span = None;
+                }
+                i += run;
+            } else {
+                i += char_width(s, i);
+            }
+            if code_span.is_none() && stack.is_empty() {
+                last_ground = i;
+            }
+            continue;
+        }
+
+        match b {
+            b'`' => {
+                let run = ascii_run(bytes, i, b'`', limit);
+                code_span = Some(run);
+                i += run;
+            }
+            // Hold a `<` only when it could begin an autolink or HTML tag; a
+            // literal `<` (e.g. "a < b") is left as content.
+            b'<' => {
+                if bytes
+                    .get(i + 1)
+                    .is_some_and(|&n| n.is_ascii_alphabetic() || matches!(n, b'/' | b'!' | b'?'))
+                {
+                    stack.push(b'<');
+                }
+                i += 1;
+            }
+            b'>' => {
+                if stack.last() == Some(&b'<') {
+                    stack.pop();
+                }
+                i += 1;
+            }
+            b'[' => {
+                stack.push(b'[');
+                i += 1;
+            }
+            b']' => {
+                if stack.last() == Some(&b'[') {
+                    match bytes.get(i + 1) {
+                        // `](` opens a link destination: swap the bracket for a
+                        // paren that closes on `)`.
+                        Some(b'(') => {
+                            stack.pop();
+                            stack.push(b'(');
+                        }
+                        // `][` (a reference) or `]` at the buffer edge stay
+                        // ambiguous: keep holding until the next byte resolves
+                        // them.
+                        Some(b'[') | None => {}
+                        // Plain `]` closes the bracket.
+                        _ => {
+                            stack.pop();
+                        }
+                    }
+                }
+                i += 1;
+            }
+            b')' => {
+                if stack.last() == Some(&b'(') {
+                    stack.pop();
+                }
+                i += 1;
+            }
+            b'*' | b'_' | b'~' | b'^' => {
+                let run = ascii_run(bytes, i, b, limit);
+                let prev = i.checked_sub(1).map(|p| bytes[p]);
+                let next = bytes.get(i + run).copied();
+                // `_` cannot open or close intra-word, so "foo_bar" is literal;
+                // the others may.
+                let open_ok = b != b'_' || prev.is_none_or(|p| !p.is_ascii_alphanumeric());
+                let close_ok = b != b'_' || next.is_none_or(|n| !n.is_ascii_alphanumeric());
+                let can_open = open_ok && next.is_none_or(|n| !n.is_ascii_whitespace());
+                let can_close = close_ok && prev.is_some_and(|p| !p.is_ascii_whitespace());
+                if can_close && stack.last() == Some(&b) {
+                    stack.pop();
+                } else if can_open {
+                    stack.push(b);
+                }
+                i += run;
+            }
+            _ => i += char_width(s, i),
+        }
+
+        if code_span.is_none() && stack.is_empty() {
+            last_ground = i;
+        }
+    }
+
+    last_ground
+}
+
+/// Count consecutive `ch` bytes in `bytes[start..limit]`.
+fn ascii_run(bytes: &[u8], start: usize, ch: u8, limit: usize) -> usize {
+    let mut n = 0;
+    while start + n < limit && bytes[start + n] == ch {
+        n += 1;
+    }
+    n
+}
+
+/// Byte width of the UTF-8 character beginning at `s[i]` (at least 1).
+fn char_width(s: &str, i: usize) -> usize {
+    s[i..].chars().next().map_or(1, char::len_utf8)
 }
 
 #[cfg(test)]
