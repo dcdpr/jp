@@ -106,8 +106,9 @@ impl clap::Args for CompactFlag {
                      `r` / `reasoning`: strip reasoning blocks\n- `s` / `summarize`: generate an \
                      LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips \
                      both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, \
-                     `strip-responses`/`sres`, `omit`/`o`\n\nRange: FROM..TO, single number, or \
-                     .. for all\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20",
+                     `strip-responses`/`sres`, `omit`/`o`\n\nRange: FROM..TO (1-based, inclusive \
+                     on both ends, so 1..5 is turns 1-5), single number, or .. for \
+                     all\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -165,10 +166,10 @@ pub(crate) struct CompactSpec {
     pub range: Option<DslRange>,
 }
 
-/// A parsed DSL range, Python-slice style.
+/// A parsed DSL range (`FROM..TO`), inclusive on both ends.
 ///
-/// Each bound is an absolute turn index (positive in the DSL) or a from-end
-/// offset (negative).
+/// Each bound is a 1-based absolute turn index (positive in the DSL) or a
+/// from-end offset (negative).
 /// `None` means that end is open (the start or the end of the conversation).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct DslRange {
@@ -193,9 +194,10 @@ impl CompactSpec {
         }
 
         if let Some(range) = &self.range {
-            // Open ends map to start / end: `Absolute(0)` is turn 0, `FromEnd(0)`
+            // Open ends map to the conversation start / end: `Turns(0)` keeps
+            // nothing at the front (compact from the first turn), `FromEnd(0)`
             // is the last turn.
-            rule.keep_first = Some(range.from.clone().unwrap_or(RuleBound::Absolute(0)));
+            rule.keep_first = Some(range.from.clone().unwrap_or(RuleBound::Turns(0)));
             rule.keep_last = Some(range.to.clone().unwrap_or(RuleBound::FromEnd(0)));
         }
 
@@ -263,8 +265,8 @@ impl FromStr for CompactSpec {
     }
 }
 
-/// Parse one DSL range bound: a positive integer is an absolute turn index, a
-/// negative integer is an offset from the end.
+/// Parse one DSL range bound: a positive integer is a 1-based absolute turn
+/// index, a negative integer is an offset from the end.
 fn parse_dsl_bound(s: &str) -> Result<RuleBound, String> {
     if let Some(rest) = s.strip_prefix('-') {
         let n = rest
@@ -272,14 +274,18 @@ fn parse_dsl_bound(s: &str) -> Result<RuleBound, String> {
             .map_err(|_| format!("invalid bound '-{rest}'"))?;
         Ok(RuleBound::FromEnd(n))
     } else {
-        let n = s.parse().map_err(|_| format!("invalid bound '{s}'"))?;
+        let n: usize = s.parse().map_err(|_| format!("invalid bound '{s}'"))?;
+        if n == 0 {
+            return Err("turn indices are 1-based; `0` is not a valid turn".to_owned());
+        }
         Ok(RuleBound::Absolute(n))
     }
 }
 
 fn parse_dsl_range(s: &str) -> Result<DslRange, String> {
     // Explicit range: FROM..TO (either side may be empty). Both ends are
-    // Python-slice style: positive = absolute turn, negative = from the end.
+    // inclusive: a positive bound is a 1-based absolute turn, a negative bound
+    // counts from the end.
     if let Some((left, right)) = s.split_once("..") {
         let from = if left.is_empty() {
             None

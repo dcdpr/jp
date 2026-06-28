@@ -937,8 +937,8 @@ impl Query {
             &events,
             cfg,
             &rules,
-            super::conversation::compact::Bound::Default,
-            super::conversation::compact::Bound::Default,
+            crate::cmd::turn_range::Bound::Default,
+            crate::cmd::turn_range::Bound::Default,
             // `--compact` on a query is a quick adjunct; apply it silently so
             // compaction details don't clutter the query output.
             None,
