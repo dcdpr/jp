@@ -3,7 +3,11 @@ enable = false
 run = "unattended"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Read the contents of a file in the project's local filesystem."
+summary = """
+Read the contents of a file in the project's local filesystem. Do not use it to
+show file contents to the user; they will not see the result. Call
+`describe_tools` for examples.
+"""
 description = """
 You can use `fs_grep_files` to search for specific patterns in the file
 contents, before reading the entire contents of a specific file using this tool.
@@ -19,6 +23,14 @@ Read a specific line range:
 ```json
 {"path": "crates/jp_llm/src/tool.rs", "start_line": 100, "end_line": 150}
 ```
+
+Do NOT use this tool to show file contents to the user. They only see that the
+tool was called, not its output. To show file contents, write your own
+quotation block. For example, this shows the user nothing:
+
+> I can see the culprit. In .jp/config.toml the tool is defined as:
+>
+> Calling tool fs_read_file(path: ".jp/config.toml", start_line: 240, end_line: 246)
 """
 
 [conversation.tools.fs_read_file.style]
