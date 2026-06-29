@@ -79,6 +79,33 @@ fn rule_bound_deserializes_from_integer_and_string() {
 }
 
 #[test]
+fn rule_bound_after_last_compaction_is_canonical_with_alias() {
+    // `last-compaction` is canonical; `last` is a deprecated input alias.
+    // Serialization always emits the canonical form.
+    assert_eq!(
+        "last-compaction".parse::<RuleBound>().unwrap(),
+        RuleBound::AfterLastCompaction
+    );
+    assert_eq!(
+        "last".parse::<RuleBound>().unwrap(),
+        RuleBound::AfterLastCompaction
+    );
+    assert_eq!(
+        RuleBound::AfterLastCompaction.to_string(),
+        "last-compaction"
+    );
+}
+
+#[test]
+fn rule_bound_absolute_is_one_based_and_rejects_zero() {
+    // `@N` is a 1-based absolute position; `@0` is invalid input, not an alias
+    // for the first turn.
+    assert_eq!("@1".parse::<RuleBound>().unwrap(), RuleBound::Absolute(1));
+    assert_eq!("@5".parse::<RuleBound>().unwrap(), RuleBound::Absolute(5));
+    assert!("@0".parse::<RuleBound>().is_err());
+}
+
+#[test]
 fn rule_config_deserializes_integer_bounds() {
     // Two distinct explicit bounds, exercising integer deserialization.
     let rule: PartialCompactionRuleConfig =
