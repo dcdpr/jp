@@ -64,7 +64,7 @@ run *ARGS:
 # Install the `jp` binary from your local checkout.
 [group('build')]
 [group('main')]
-install:
+install $JP_NO_INSTALL="":
     @just quiet_flag="" _install-jp
 
 [group('jp')]

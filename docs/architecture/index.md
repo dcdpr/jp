@@ -32,6 +32,11 @@ This section describes the technical architecture of JP.
   Defines the core terms (Workspace, Conversation, Turn, Thread, Attachment,
   Inquiry, Provider, Backend, etc.) and the distinctions between them.
 
+- [Indexing and Counting Conventions] - How turn positions are numbered: 1-based
+  on the user-facing side (CLI and config), 0-based for stored and internal
+  state, translated once at the boundary.
+
+[Indexing and Counting Conventions]: indexing-conventions.md
 [JP Query Architecture]: architecture.md
 [Knowledge Base]: knowledge-base.md
 [Query Stream Pipeline]: query-stream-pipeline.md

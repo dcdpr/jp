@@ -9,6 +9,7 @@ pub(crate) mod plugin;
 mod query;
 pub(crate) mod target;
 pub(crate) mod time;
+pub(crate) mod turn_range;
 
 use std::{fmt, num::NonZeroU8};
 
@@ -22,7 +23,6 @@ use crate::{Ctx, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Subcommand)]
 #[command(disable_help_subcommand = true, allow_external_subcommands = true)]
-#[expect(clippy::large_enum_variant)]
 pub(crate) enum Commands {
     /// Initialize a new workspace.
     Init(init::Init),

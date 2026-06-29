@@ -359,7 +359,7 @@ impl ToPartial for SummaryConfig {
 pub enum RuleBound {
     /// A number of turns to preserve (relative; the stable config form).
     Turns(usize),
-    /// An absolute, 0-based turn index.
+    /// An absolute, 1-based turn index (the first turn is `1`).
     /// Written `@N` as a string.
     Absolute(usize),
     /// An offset from the end (`FromEnd(3)` = three turns before the last).
@@ -368,7 +368,7 @@ pub enum RuleBound {
     /// Preserve turns within this duration, e.g. `"5h"`, `"2days"`.
     Duration(std::time::Duration),
     /// Start after the most recent compaction's `to_turn`.
-    /// Only meaningful for `keep_first` (used via `from = "last"`).
+    /// Only meaningful for `keep_first` (used via `from = "last-compaction"`).
     AfterLastCompaction,
 }
 
@@ -376,15 +376,19 @@ impl FromStr for RuleBound {
     type Err = BoxedError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("last") {
+        // `last-compaction` is canonical; `last` is a deprecated alias.
+        if s.eq_ignore_ascii_case("last-compaction") || s.eq_ignore_ascii_case("last") {
             return Ok(Self::AfterLastCompaction);
         }
 
         if let Some(rest) = s.strip_prefix('@') {
-            return rest
+            let n: usize = rest
                 .parse()
-                .map(Self::Absolute)
-                .map_err(|_| format!("invalid absolute turn `{s}`").into());
+                .map_err(|_| format!("invalid absolute turn `{s}`"))?;
+            if n == 0 {
+                return Err("absolute turns are 1-based; `@0` is not a valid turn".into());
+            }
+            return Ok(Self::Absolute(n));
         }
 
         if let Some(rest) = s.strip_prefix('-') {
@@ -411,7 +415,7 @@ impl fmt::Display for RuleBound {
             Self::Absolute(n) => write!(f, "@{n}"),
             Self::FromEnd(n) => write!(f, "-{n}"),
             Self::Duration(d) => write!(f, "{}", humantime::format_duration(*d)),
-            Self::AfterLastCompaction => write!(f, "last"),
+            Self::AfterLastCompaction => write!(f, "last-compaction"),
         }
     }
 }
@@ -430,7 +434,8 @@ impl<'de> Deserialize<'de> for RuleBound {
             type Value = RuleBound;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a turn count, a duration string like `5h`, or `last`")
+                formatter
+                    .write_str("a turn count, a duration string like `5h`, or `last-compaction`")
             }
 
             fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<RuleBound, E> {
