@@ -60,11 +60,16 @@ impl Commands {
         self,
         ctx: &mut Ctx,
         handles: Vec<jp_workspace::ConversationHandle>,
+        start_new: bool,
     ) -> Output {
+        debug_assert!(
+            !start_new || matches!(self, Commands::Query(_)),
+            "only `query` resolves the picker's start-new choice"
+        );
         match self {
             Commands::Query(args) => {
                 debug_assert!(handles.len() < 2, "Query commands use 0 or 1 handle");
-                Box::pin(args.run(ctx, handles.into_iter().next())).await
+                Box::pin(args.run(ctx, handles.into_iter().next(), start_new)).await
             }
             Commands::Config(args) => args.run(ctx, handles).await,
             Commands::Conversation(args) => args.run(ctx, handles).await,
@@ -413,6 +418,12 @@ impl From<crate::error::Error> for Error {
                     disable_persistence: false,
                 };
             }
+            NewConflictsWithTarget => [(
+                "message",
+                "Cannot start a new conversation together with --fork, --replay, or --id"
+                    .to_owned(),
+            )]
+            .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()

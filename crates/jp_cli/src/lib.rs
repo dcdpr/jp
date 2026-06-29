@@ -389,7 +389,7 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
-fn run_inner(mut cli: Cli, format: OutputFormat) -> Result<()> {
+fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let printer = Printer::terminal(format);
 
     // `jp init` is a special case that doesn't need the full startup pipeline.
@@ -428,12 +428,6 @@ fn run_inner(mut cli: Cli, format: OutputFormat) -> Result<()> {
         session.as_ref(),
         fs_backend.as_deref(),
     )?;
-
-    // The interactive picker offered a "start a new conversation" item and the
-    // user chose it; treat the run as if `--new` had been passed.
-    if start_new && let Commands::Query(query) = &mut cli.command {
-        query.mark_start_new();
-    }
     let config = Arc::new(config);
     let runtime = build_runtime(cli.root.threads, "jp-worker")?;
     let mut ctx = Ctx::new(
@@ -448,7 +442,9 @@ fn run_inner(mut cli: Cli, format: OutputFormat) -> Result<()> {
     let rt = ctx.handle().clone();
 
     // Run the requested command.
-    let output = rt.block_on(cli.command.run(&mut ctx, handles));
+    // `start_new` carries the interactive picker's "start a new conversation"
+    // choice through to the query command, which honors it at lock time.
+    let output = rt.block_on(cli.command.run(&mut ctx, handles, start_new));
 
     if let Err(error) = output.as_ref()
         && error.disable_persistence

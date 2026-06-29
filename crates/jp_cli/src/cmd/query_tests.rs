@@ -25,7 +25,11 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 use super::*;
-use crate::{KeyValueOrPath, config_pipeline::ConfigPipeline};
+use crate::{
+    KeyValueOrPath,
+    cmd::target::{ConversationTarget, PickerFilter},
+    config_pipeline::ConfigPipeline,
+};
 
 fn make_partial_with_tools() -> PartialAppConfig {
     let mut partial = PartialAppConfig::default();
@@ -966,6 +970,20 @@ fn picker_new_item_gated_by_new_incompatible_flags() {
         ..Default::default()
     };
     assert!(!replay.allows_new_from_picker());
+}
+
+#[test]
+fn picker_new_item_gated_by_bare_id_flag() {
+    // Bare `jp query --id` parses to an empty value (`FlagIds` sets
+    // `default_missing_value = ""`), which becomes the interactive picker.
+    // Since `--new` conflicts with the `id` arg, the picker must not offer the
+    // synthetic "new" item: choosing it would drop the target and manufacture a
+    // `--new --id` state clap rejects at parse time.
+    let bare_id = Query {
+        target: FlagIds::from_targets(vec![ConversationTarget::Picker(PickerFilter::default())]),
+        ..Default::default()
+    };
+    assert!(!bare_id.allows_new_from_picker());
 }
 
 #[test]

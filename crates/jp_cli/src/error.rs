@@ -132,6 +132,9 @@ pub(crate) enum Error {
     #[error("No conversation targeted")]
     NoConversationTarget,
 
+    #[error("Cannot start a new conversation together with --fork, --replay, or --id")]
+    NewConflictsWithTarget,
+
     /// The user requested conversation target help.
     #[error("target help")]
     TargetHelp { session: bool, multi: bool },
