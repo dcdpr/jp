@@ -9,6 +9,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use camino::Utf8PathBuf;
+use chrono::Utc;
 use jp_config::{
     AppConfig, PartialAppConfig,
     conversation::tool::{ToolConfigWithDefaults, ToolsConfig, style::ParametersStyle},
@@ -100,6 +101,8 @@ impl TurnRenderer {
         {
             self.reconfigure(partial);
         }
+
+        self.view.set_turn_detail(turn_detail(turn));
 
         for event_with_cfg in turn {
             match &event_with_cfg.event.kind {
@@ -201,6 +204,24 @@ impl TurnRenderer {
         self.view.set_tool_separator(self.tool.separator_flag());
         self.tools_config = config.conversation.tools;
     }
+}
+
+/// Build the dimmed right-aligned header detail for a turn: its 1-based number
+/// and how long ago it started, e.g. `turn 2, 12 minutes ago`.
+///
+/// The timestamp comes from the turn's `TurnStart` marker, falling back to the
+/// turn's first event when the marker is absent (the implicit leading turn of a
+/// legacy stream).
+fn turn_detail(turn: &Turn<'_>) -> Option<String> {
+    let started_at = turn
+        .iter()
+        .find(|e| e.event.is_turn_start())
+        .or_else(|| turn.iter().next())
+        .map(|e| e.event.timestamp)?;
+
+    let elapsed = (Utc::now() - started_at).abs().to_std().unwrap_or_default();
+    let ago = timeago::Formatter::new().convert(elapsed);
+    Some(format!("turn {}, {ago}", turn.index() + 1))
 }
 
 /// Render a partial model id as a display string, treating a fully-empty id as

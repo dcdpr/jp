@@ -150,6 +150,8 @@ impl ChatRenderer {
     /// Draws a single line with the label embedded near the left and an
     /// optional dimmed suffix appended after it, with `─` characters filling
     /// the remaining width.
+    /// An optional `detail` is appended dimmed at the right edge, after the
+    /// fill — e.g. `── alice ──…── turn 2, 12 minutes ago ──`.
     /// Used by [`TurnRenderer`] to mark which participant is speaking next —
     /// e.g. `── alice ──…` before a user turn, `── jp
     /// (anthropic/claude-opus-4-8) ──…` before an assistant turn.
@@ -158,11 +160,17 @@ impl ChatRenderer {
     /// boundaries from any HR markdown the assistant itself emits.
     ///
     /// [`TurnRenderer`]: super::TurnRenderer
-    pub fn render_role_header(&mut self, label: &str, suffix: Option<&str>) {
+    pub fn render_role_header(&mut self, label: &str, suffix: Option<&str>, detail: Option<&str>) {
         self.flush();
 
         let pretty = self.printer.pretty_printing_enabled();
-        let line = build_role_header_line(label, suffix, self.config.markdown.wrap_width, pretty);
+        let line = build_role_header_line(
+            label,
+            suffix,
+            detail,
+            self.config.markdown.wrap_width,
+            pretty,
+        );
 
         self.printer.println("");
         self.printer.println(&line);
@@ -554,18 +562,29 @@ impl ChatRenderer {
 
 /// Build a labeled horizontal rule used as a role-boundary marker.
 ///
-/// Layout: `── <label> [(<suffix>)] ──…` filling `width` columns.
-/// In `pretty` mode, the label is bold and the optional suffix is dimmed.
+/// Layout: `── <label> [(<suffix>)] ──… [<detail> ──]` filling `width`
+/// columns.
+/// In `pretty` mode, the label is bold and the optional suffix and detail are
+/// dimmed.
 /// Plain mode emits the same characters without ANSI styling so it survives
 /// ANSI-stripping pipes (e.g.
 /// `jp c print | grep`).
-fn build_role_header_line(label: &str, suffix: Option<&str>, width: usize, pretty: bool) -> String {
+fn build_role_header_line(
+    label: &str,
+    suffix: Option<&str>,
+    detail: Option<&str>,
+    width: usize,
+    pretty: bool,
+) -> String {
     let suffix_part = suffix.map(|s| format!(" ({s})")).unwrap_or_default();
+    let detail_part = detail.map(|d| format!(" {d} ──")).unwrap_or_default();
 
     // Compute fill against the unstyled width so ANSI escapes don't throw
     // off the column count.
-    let unstyled = format!("── {label}{suffix_part} ");
-    let fill = width.saturating_sub(unstyled.chars().count()).max(3);
+    let left = format!("── {label}{suffix_part} ");
+    let fill = width
+        .saturating_sub(left.chars().count() + detail_part.chars().count())
+        .max(3);
     let dashes = "─".repeat(fill);
 
     if pretty {
@@ -575,9 +594,12 @@ fn build_role_header_line(label: &str, suffix: Option<&str>, width: usize, prett
         } else {
             String::new()
         };
-        format!("── {label_styled}{suffix_styled} {dashes}")
+        let detail_styled = detail
+            .map(|d| format!(" {} ──", d.dim()))
+            .unwrap_or_default();
+        format!("── {label_styled}{suffix_styled} {dashes}{detail_styled}")
     } else {
-        format!("{unstyled}{dashes}")
+        format!("{left}{dashes}{detail_part}")
     }
 }
 

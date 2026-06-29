@@ -450,6 +450,62 @@ fn turn_separators_between_turns() {
 }
 
 #[test]
+fn turn_header_shows_turn_number_and_relative_time() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("First question"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::message("First answer.\n\n"), ts(0, 0, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Second question"), ts(0, 1, 1)),
+        ConversationEvent::new(ChatResponse::message("Second answer.\n\n"), ts(0, 1, 2)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    let lines: Vec<&str> = output.lines().collect();
+
+    // The first (user) header of each turn carries the 1-based turn number and
+    // a relative timestamp.
+    let user_headers: Vec<&&str> = lines
+        .iter()
+        .filter(|l| l.contains("\u{2500}\u{2500} user"))
+        .collect();
+    assert_eq!(
+        user_headers.len(),
+        2,
+        "expected one user header per turn, got: {output:?}"
+    );
+    assert!(
+        user_headers[0].contains("turn 1,") && user_headers[0].contains("ago"),
+        "first turn header should show `turn 1` and a relative time, got: {output:?}"
+    );
+    assert!(
+        user_headers[1].contains("turn 2,") && user_headers[1].contains("ago"),
+        "second turn header should show `turn 2` and a relative time, got: {output:?}"
+    );
+
+    // The assistant header within a turn is not the first shown header, so it
+    // carries no turn detail.
+    for line in lines.iter().filter(|l| l.contains("\u{2500}\u{2500} jp")) {
+        assert!(
+            !line.contains("turn "),
+            "only the first shown header in a turn carries the detail, got: {line:?}"
+        );
+    }
+}
+
+#[test]
 fn prints_conversation_by_id() {
     let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![ConversationEvent::new(
         ChatRequest::from("active conversation content"),

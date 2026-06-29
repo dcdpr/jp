@@ -53,6 +53,15 @@ pub(crate) struct TurnView {
     /// [`Self::ensure_assistant_header`] on first use.
     assistant_header_rendered: bool,
 
+    /// Dimmed detail (e.g.
+    /// `turn 2, 12 minutes ago`) to append to the first role header rendered in
+    /// the current turn.
+    /// Taken by whichever header — user or assistant — renders first; later
+    /// headers in the same turn render without it.
+    /// Set per turn by replay via [`Self::set_turn_detail`]; left `None` by the
+    /// live query path.
+    pending_turn_detail: Option<String>,
+
     /// Shared with the [`ToolRenderer`] (wired via
     /// [`Self::set_tool_separator`]): the flag a tool result or custom argument
     /// block raises to owe a blank-line separator before the next tool call.
@@ -75,6 +84,7 @@ impl TurnView {
             assistant_name,
             model_id,
             assistant_header_rendered: false,
+            pending_turn_detail: None,
             tool_separator: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -84,6 +94,16 @@ impl TurnView {
     /// [`ToolRenderer`]: super::ToolRenderer
     pub(crate) fn set_tool_separator(&mut self, flag: Arc<AtomicBool>) {
         self.tool_separator = flag;
+    }
+
+    /// Set the dimmed detail attached to the first role header of the upcoming
+    /// turn (e.g.
+    /// `turn 2, 12 minutes ago`).
+    ///
+    /// Consumed by whichever header — user or assistant — renders first;
+    /// later headers in the same turn render without it.
+    pub(crate) fn set_turn_detail(&mut self, detail: Option<String>) {
+        self.pending_turn_detail = detail;
     }
 
     /// Mark the start of a new turn.
@@ -105,7 +125,8 @@ impl TurnView {
         self.structured.flush();
         self.tool_separator.store(false, Ordering::Relaxed);
         let label = req.author.as_deref().unwrap_or(DEFAULT_USER_LABEL);
-        self.chat.render_role_header(label, None);
+        let detail = self.pending_turn_detail.take();
+        self.chat.render_role_header(label, None, detail.as_deref());
         self.chat.render_request(&req.content);
         self.assistant_header_rendered = false;
     }
@@ -229,8 +250,9 @@ impl TurnView {
             .assistant_name
             .as_deref()
             .unwrap_or(DEFAULT_ASSISTANT_LABEL);
+        let detail = self.pending_turn_detail.take();
         self.chat
-            .render_role_header(label, self.model_id.as_deref());
+            .render_role_header(label, self.model_id.as_deref(), detail.as_deref());
         self.assistant_header_rendered = true;
     }
 }
