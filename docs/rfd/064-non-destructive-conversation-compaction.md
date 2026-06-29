@@ -135,9 +135,20 @@ Range bounds accept several formats:
 | `last`           | `--from last` | Turn of the most recent compaction   |
 |                  |               | event, or start if none.             |
 
-`--from` requires a value (use `--from last` for the most recent compaction).
+`--from` requires a value (use `--from last-compaction` for the most recent
+compaction).
 All bounds are **resolved to absolute turn indices at creation time** and stored
 as integers.
+
+> [!NOTE]
+> Turn positions on the CLI are now **1-based**: `--from 1` is the first turn
+> and `--to -1` is the last.
+> The stored indices remain 0-based.
+> The two `5`/`-3` examples above describe the original 0-based behavior; see
+> [Indexing and Counting Conventions] for the current rule.
+>
+> The `last` keyword is now spelled `last-compaction` (with `last` kept as a
+> deprecated alias) and is accepted only for `--from`.
 
 `--reset` removes all `InternalEvent::Compaction` variants from the stream,
 restoring the raw event history.

@@ -135,8 +135,8 @@ impl Fork {
                     &events_snapshot,
                     &cfg,
                     &rules,
-                    super::compact::Bound::Default,
-                    super::compact::Bound::Default,
+                    crate::cmd::turn_range::Bound::Default,
+                    crate::cmd::turn_range::Bound::Default,
                     // Compaction during a fork is an implicit adjunct; only an
                     // explicit `jp c compact` reports compaction details.
                     None,

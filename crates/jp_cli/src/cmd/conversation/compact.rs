@@ -1,6 +1,6 @@
-use std::{env, fs, path::PathBuf, str::FromStr as _, time::Duration};
+use std::{env, fs, path::PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use jp_config::conversation::compaction::{
     CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
     ReasoningMode, RuleBound, ToolCallsMode,
@@ -18,6 +18,7 @@ use crate::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
+        turn_range::{Bound, TurnRange},
     },
     ctx::Ctx,
 };
@@ -32,7 +33,7 @@ pub(crate) struct Compact {
     /// Accepts a turn count (e.g.
     /// `2`) or a duration (e.g.
     /// `5h`).
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["from", "first", "last", "turn"])]
     keep_first: Option<RuleBound>,
 
     /// Preserve the last N turns (or turns within a duration).
@@ -40,23 +41,18 @@ pub(crate) struct Compact {
     /// Accepts a turn count (e.g.
     /// `3`) or a duration (e.g.
     /// `2h`).
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["to", "first", "last", "turn"])]
     keep_last: Option<RuleBound>,
 
-    /// Start compacting from a specific turn or time.
+    /// Which turns to compact.
     ///
-    /// Accepts an absolute turn index, a duration (e.g.
-    /// `5h`), or `last` to start after the most recent compaction.
-    /// Overrides `--keep-first`.
-    #[arg(long, value_parser = parse_bound, conflicts_with = "keep_first")]
-    from: Option<CliRangeBound>,
-
-    /// Stop compacting at a specific turn or time.
-    ///
-    /// Accepts an absolute turn index or a duration.
-    /// Overrides `--keep-last`.
-    #[arg(long, value_parser = parse_bound, conflicts_with = "keep_last")]
-    to: Option<CliRangeBound>,
+    /// `--from`/`--to` bound the compacted range directly (overriding
+    /// `--keep-first`/`--keep-last`); `--first N`/`--last N` compact the first
+    /// or last N turns; `--turn N` compacts a single turn, or `--turn A..B` an
+    /// inclusive range (e.g.
+    /// `1..5` is turns 1-5).
+    #[command(flatten)]
+    range: TurnRange,
 
     /// Strip reasoning (thinking) blocks from the compacted range.
     #[arg(short, long, conflicts_with = "compact")]
@@ -103,8 +99,8 @@ pub(crate) struct Compact {
     #[arg(
         long,
         conflicts_with_all = [
-            "keep_first", "keep_last", "from", "to", "reasoning", "tools",
-            "summarize", "compact",
+            "keep_first", "keep_last", "from", "to", "first", "last", "turn",
+            "reasoning", "tools", "summarize", "compact",
         ],
     )]
     reset: bool,
@@ -179,38 +175,6 @@ impl Compact {
     }
 }
 
-/// A CLI range bound before time-based resolution.
-#[derive(Debug, Clone)]
-enum CliRangeBound {
-    /// Already resolved to a `RangeBound`.
-    Resolved(RangeBound),
-    /// Duration ago — needs the stream to find the turn.
-    Duration(DateTime<Utc>),
-}
-
-fn parse_bound(s: &str) -> Result<CliRangeBound, String> {
-    if s.eq_ignore_ascii_case("last") {
-        return Ok(CliRangeBound::Resolved(RangeBound::AfterLastCompaction));
-    }
-
-    // Negative integer → FromEnd.
-    if let Some(rest) = s.strip_prefix('-')
-        && let Ok(n) = rest.parse::<usize>()
-    {
-        return Ok(CliRangeBound::Resolved(RangeBound::FromEnd(n)));
-    }
-
-    // Positive integer → Absolute.
-    if let Ok(n) = s.parse::<usize>() {
-        return Ok(CliRangeBound::Resolved(RangeBound::Absolute(n)));
-    }
-
-    // Duration string → resolve to DateTime.
-    humantime::Duration::from_str(s)
-        .map(|d| CliRangeBound::Duration(Utc::now() - Duration::from(d)))
-        .map_err(|e| format!("invalid range bound `{s}`: {e}"))
-}
-
 fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
     s.parse().map_err(|_| {
         "expected one of: strip (s), strip-requests (sreq), strip-responses (sres), omit (o)"
@@ -218,31 +182,13 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
     })
 }
 
-/// The resolution of one range bound (`from` or `to`) against a stream.
-///
-/// Separates "no bound configured for this side" (use the side's default) from
-/// "this bound selects no turns" (so the whole compaction is a no-op), which a
-/// plain `Option<RangeBound>` conflated — e.g. `keep_last = "30d"` covering
-/// the entire conversation must preserve everything, not fall back to the
-/// default `keep_last` and compact through the end.
-#[derive(Debug, Clone)]
-pub(crate) enum Bound {
-    /// No bound configured; the range defaults to the start (`from`) or end
-    /// (`to`) of the conversation.
-    Default,
-    /// The bound resolves to a concrete `RangeBound`.
-    At(RangeBound),
-    /// The bound falls outside the conversation such that nothing is compacted.
-    Empty,
-}
-
 /// Resolve the turn range a single rule would compact.
 ///
 /// `range_stream` is the baseline for resolving bounds, including
-/// `AfterLastCompaction` (`--from last`): it must be the stream as it existed
-/// at the start of the invocation, so every rule resolves "last" against the
-/// same compactions and a rule generated earlier in the same invocation doesn't
-/// shift the baseline for a later one.
+/// `AfterLastCompaction` (`--from last-compaction`): it must be the stream as
+/// it existed at the start of the invocation, so every rule resolves it against
+/// the same compactions and a rule generated earlier in the same invocation
+/// doesn't shift the baseline for a later one.
 ///
 /// `overlap_stream` is consulted only to extend summary ranges over partially
 /// overlapping summaries; it accumulates the compactions generated so far in
@@ -341,7 +287,8 @@ pub(crate) async fn build_compaction_events(
     // Two distinct baselines:
     //
     // - Range resolution uses the original `events` for every rule, so
-    //   `AfterLastCompaction` (`--from last` / `keep_first = "last"`) resolves
+    //   `AfterLastCompaction` (`--from last-compaction` / `keep_first =
+    //   "last-compaction"`) resolves
     //   against the compactions present at invocation start and applies
     //   uniformly, rather than each rule starting after the previous rule's
     //   freshly generated compaction.
@@ -529,14 +476,17 @@ fn timeline_lines(segments: &[TimelineSegment], last_turn: usize, dry_run: bool)
         };
 
         let count = segment.to - segment.from + 1;
+        // Stored indices are 0-based; turn numbers shown to the user are 1-based.
         lines.push(match &segment.label {
             Some(label) => format!(
-                "{compacted} turns {}..={} ({count} total, {label}).",
-                segment.from, segment.to,
+                "{compacted} turns {}..{} ({count} total, {label}).",
+                segment.from + 1,
+                segment.to + 1,
             ),
             None => format!(
-                "{compacted} turns {}..={} ({count} total).",
-                segment.from, segment.to,
+                "{compacted} turns {}..{} ({count} total).",
+                segment.from + 1,
+                segment.to + 1,
             ),
         });
 
@@ -553,10 +503,11 @@ fn timeline_lines(segments: &[TimelineSegment], last_turn: usize, dry_run: bool)
 
 /// Format a single kept line for the inclusive range `[from, to]`.
 fn kept_line(verb: &str, from: usize, to: usize) -> String {
+    // Stored indices are 0-based; turn numbers shown to the user are 1-based.
     if from == to {
-        format!("{verb} turn {from}.")
+        format!("{verb} turn {}.", from + 1)
     } else {
-        format!("{verb} turns {from}..={to}.")
+        format!("{verb} turns {}..{}.", from + 1, to + 1)
     }
 }
 
@@ -564,7 +515,9 @@ fn kept_line(verb: &str, from: usize, to: usize) -> String {
 fn keep_first_to_bound(bound: &RuleBound, events: &ConversationStream) -> Bound {
     match bound {
         // "Keep first N" means compaction starts at turn N.
-        RuleBound::Turns(n) | RuleBound::Absolute(n) => Bound::At(RangeBound::Absolute(*n)),
+        RuleBound::Turns(n) => Bound::At(RangeBound::Absolute(*n)),
+        // `Absolute` is the 1-based user value; the stream is 0-based.
+        RuleBound::Absolute(n) => Bound::At(RangeBound::Absolute(n.saturating_sub(1))),
         RuleBound::FromEnd(n) => Bound::At(RangeBound::FromEnd(*n)),
         RuleBound::Duration(d) => {
             // Preserve the opening `d` window: start compacting at the first
@@ -590,7 +543,8 @@ fn keep_last_to_bound(bound: &RuleBound, events: &ConversationStream) -> Bound {
     match bound {
         // "Keep last N" means compaction stops N turns before the end.
         RuleBound::Turns(n) | RuleBound::FromEnd(n) => Bound::At(RangeBound::FromEnd(*n)),
-        RuleBound::Absolute(n) => Bound::At(RangeBound::Absolute(*n)),
+        // `Absolute` is the 1-based user value; the stream is 0-based.
+        RuleBound::Absolute(n) => Bound::At(RangeBound::Absolute(n.saturating_sub(1))),
         RuleBound::Duration(d) => {
             // Compact turns older than the last `d` window. A window covering
             // the whole conversation preserves everything → nothing to compact.
@@ -680,6 +634,19 @@ impl Compact {
                 }
             }
             return Ok(());
+        }
+
+        // `--last 0` explicitly selects no turns.
+        if self.range.is_empty() {
+            ctx.printer.println("Nothing to compact.");
+            return Ok(());
+        }
+
+        // `--turn` names specific turns; an out-of-range endpoint is an error
+        // rather than an empty/clamped range (matching `print`).
+        let count = events_snapshot.turn_count();
+        if let Some(n) = self.range.turn_out_of_range(count) {
+            return Err(format!("turn {n} out of range (conversation has {count} turns)").into());
         }
 
         // The effective rules combine the configured rules with any policy
@@ -798,63 +765,34 @@ impl Compact {
         }
     }
 
-    /// Resolve the `from` range override, preferring `--from` over
-    /// `--keep-first`.
-    /// Returns [`Bound::Default`] when neither is set.
+    /// Resolve the `from` range override.
+    ///
+    /// The shared selector (`--from`/`--last`/`--turn`) takes precedence; when
+    /// none is set it falls back to `--keep-first`, and to [`Bound::Default`]
+    /// when that is also unset.
     fn resolve_from(&self, events: &ConversationStream) -> Bound {
-        if let Some(bound) = self.from.as_ref() {
-            return resolve_cli_from(bound, events);
-        }
-        match &self.keep_first {
-            Some(bound) => keep_first_to_bound(bound, events),
-            None => Bound::Default,
+        match self.range.resolve_from(events) {
+            Bound::Default => match &self.keep_first {
+                Some(bound) => keep_first_to_bound(bound, events),
+                None => Bound::Default,
+            },
+            other => other,
         }
     }
 
-    /// Resolve the `to` range override, preferring `--to` over `--keep-last`.
-    /// Returns [`Bound::Default`] when neither is set.
+    /// Resolve the `to` range override.
+    ///
+    /// The shared selector (`--to`/`--turn`) takes precedence; when none is set
+    /// it falls back to `--keep-last`, and to [`Bound::Default`] when that is
+    /// also unset.
     fn resolve_to(&self, events: &ConversationStream) -> Bound {
-        if let Some(bound) = self.to.as_ref() {
-            return resolve_cli_to(bound, events);
+        match self.range.resolve_to(events) {
+            Bound::Default => match &self.keep_last {
+                Some(bound) => keep_last_to_bound(bound, events),
+                None => Bound::Default,
+            },
+            other => other,
         }
-        match &self.keep_last {
-            Some(bound) => keep_last_to_bound(bound, events),
-            None => Bound::Default,
-        }
-    }
-}
-
-/// Resolve a `--from <duration>` cutoff: compaction starts at the first turn
-/// after the cutoff.
-/// No turn after the cutoff (an old conversation) means nothing to compact; a
-/// cutoff before the conversation starts compacts from the beginning.
-fn resolve_cli_from(bound: &CliRangeBound, events: &ConversationStream) -> Bound {
-    match bound {
-        CliRangeBound::Resolved(b) => Bound::At(b.clone()),
-        CliRangeBound::Duration(dt) => match events.turn_at_time(*dt) {
-            Some(turn) => {
-                let from = turn.index() + 1;
-                if from >= events.turn_count() {
-                    Bound::Empty
-                } else {
-                    Bound::At(RangeBound::Absolute(from))
-                }
-            }
-            None => Bound::At(RangeBound::Absolute(0)),
-        },
-    }
-}
-
-/// Resolve a `--to <duration>` cutoff: compaction stops at (and includes) the
-/// turn active at the cutoff.
-/// A cutoff preceding the conversation means nothing to compact.
-fn resolve_cli_to(bound: &CliRangeBound, events: &ConversationStream) -> Bound {
-    match bound {
-        CliRangeBound::Resolved(b) => Bound::At(b.clone()),
-        CliRangeBound::Duration(dt) => match events.turn_at_time(*dt) {
-            Some(turn) => Bound::At(RangeBound::Absolute(turn.index())),
-            None => Bound::Empty,
-        },
     }
 }
 
