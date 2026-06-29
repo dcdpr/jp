@@ -473,7 +473,7 @@ async fn src_resource_handler(uri: &CrateUri) -> Result<Vec<Content>, Error> {
     Ok(vec![Content::embedded_text(uri.to_string(), src)])
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl rmcp::ServerHandler for BookwormService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
