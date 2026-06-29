@@ -53,6 +53,10 @@ pub struct TurnRenderer {
     tool: ToolRenderer,
     tools_config: ToolsConfig,
 
+    /// When set, only the user's own messages are rendered; assistant messages,
+    /// reasoning, and tool calls are skipped.
+    user_only: bool,
+
     /// Maps tool call IDs to tool names, populated as `ToolCallRequest` events
     /// are encountered so that `ToolCallResponse` can look up the name without
     /// needing access to the full conversation stream.
@@ -89,8 +93,15 @@ impl TurnRenderer {
             view,
             tool,
             tools_config,
+            user_only: false,
             tool_names: HashMap::new(),
         }
+    }
+
+    /// Restrict rendering to the user's own messages, skipping assistant
+    /// messages, reasoning, and tool calls.
+    pub fn set_user_only(&mut self, user_only: bool) {
+        self.user_only = user_only;
     }
 
     /// Render all events in a turn.
@@ -102,6 +113,15 @@ impl TurnRenderer {
         }
 
         for event_with_cfg in turn {
+            if self.user_only
+                && !matches!(
+                    event_with_cfg.event.kind,
+                    EventKind::TurnStart(_) | EventKind::ChatRequest(_)
+                )
+            {
+                continue;
+            }
+
             match &event_with_cfg.event.kind {
                 EventKind::TurnStart(_) => {
                     self.view.begin_turn();

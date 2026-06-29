@@ -1121,6 +1121,78 @@ fn style_chat_hides_reasoning_and_tool_calls() {
 }
 
 #[test]
+fn style_user_shows_only_user_messages() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+
+    let (mut ctx, id, out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Explain Rust"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me think deeply about this...\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("src/main.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("fn main() {}".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(
+            ChatResponse::message("Rust is a systems language.\n\n"),
+            ts(0, 0, 5),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: Some(PrintStyle::User),
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    let chrome = strip_ansi(&err.lock());
+
+    // The user message is the only visible content.
+    assert!(
+        output.contains("Explain Rust"),
+        "user message should show, got: {output}"
+    );
+    assert!(
+        !output.contains("Rust is a systems language."),
+        "assistant message should be hidden in user mode, got: {output}"
+    );
+    assert!(
+        !output.contains("think deeply"),
+        "reasoning should be hidden in user mode, got: {output}"
+    );
+    assert!(
+        !chrome.contains("Calling tool"),
+        "tool calls should be hidden in user mode, got: {chrome}"
+    );
+    assert!(
+        !chrome.contains("fn main()"),
+        "tool results should be hidden in user mode, got: {chrome}"
+    );
+}
+
+#[test]
 fn role_header_renders_user_label_from_author() {
     let mut req = ChatRequest::from("hello");
     req.author = Some("alice".into());
