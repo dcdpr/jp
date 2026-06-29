@@ -190,9 +190,13 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 'r' => match self.collect_reply("Reply:", config.reply_in_editor, printer) {
                     ReplyResult::Reply(text) => return InterruptAction::Reply(text),
                     // Backing out of a menu-driven reply re-shows the menu (the
-                    // loop iterates); a configured (menu-less) reply resumes.
+                    // loop iterates).
                     ReplyResult::Back if menu => {}
-                    ReplyResult::Back => return InterruptAction::Resume,
+                    // A configured (menu-less) reply has no menu to return to,
+                    // so it mirrors the `'c'` branch: keep polling a live
+                    // stream, otherwise continue from the partial response.
+                    ReplyResult::Back if stream_alive => return InterruptAction::Resume,
+                    ReplyResult::Back => return InterruptAction::Continue,
                 },
                 _ => unreachable!("unexpected interrupt choice"),
             }
@@ -305,11 +309,13 @@ impl<P: PromptBackend> InterruptHandler<P> {
                         _ => return ReplyResult::Back,
                     }
                 }
-                Ok(ReplyOutcome::Submit(text)) if !text.is_empty() => {
+                Ok(ReplyOutcome::Submit(text)) if !text.trim().is_empty() => {
                     return ReplyResult::Reply(text);
                 }
-                // An empty submission, a `Ctrl+C` cancel, or a prompt error all
-                // back out.
+                // A blank (empty or whitespace-only) submission, a `Ctrl+C`
+                // cancel, or a prompt error all back out. Whitespace is treated
+                // as blank so the tool path falls through to its canned
+                // rejection rather than sending a blank-looking reply.
                 Ok(ReplyOutcome::Submit(_) | ReplyOutcome::Cancelled) | Err(_) => {
                     return ReplyResult::Back;
                 }

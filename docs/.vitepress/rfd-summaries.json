@@ -172,7 +172,7 @@
     "summary": "Redesign `jp init` to generate schema-driven config with interactive model/mode selection and curated commented fields."
   },
   "045-layered-interrupt-handler-stack.md": {
-    "hash": "15419eb7ab5a46ba0403e3fa03648d88a4fbe36a5f9c7a54bc41e4ba9baf6c7f",
+    "hash": "ce58880ce8a186dbf3d45d5f7401b2e46033826636e288848050853c27323625",
     "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
   },
   "046-nested-workspace-projection.md": {
@@ -348,8 +348,8 @@
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
-    "hash": "ed23d4b3ef9ce5d00d623166c48e3b63b0dd13511aa1405a4f3958b9613affff",
-    "summary": "Consolidate editor invocation paths; add inline reply widget with editor escape."
+    "hash": "7e58c0d53068e84f559e97b5282c30fe64773150abe5efd811e08843327e1b66",
+    "summary": "Unify editor invocation through EditorBackend trait; add vendored reedline-based InlineReply widget for interrupt menu replies."
   },
   "089-streaming-paragraph-rendering.md": {
     "hash": "4a1e571acfd0db31efce7efa36dfc985dc6cd93e672fa4ca1f45936dd2a809c7",

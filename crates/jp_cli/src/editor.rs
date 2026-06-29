@@ -362,3 +362,7 @@ fn build_history_text(history: &ConversationStream) -> String {
     text.extend(messages);
     text
 }
+
+#[cfg(test)]
+#[path = "editor_tests.rs"]
+mod tests;

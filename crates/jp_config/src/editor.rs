@@ -17,9 +17,15 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct EditorConfig {
-    /// The command to use for editing text.
+    /// The command to open the editor.
     ///
     /// If unset, falls back to `envs`.
+    ///
+    /// Runs through the shell, so quoting, pipes, and `&&` work.
+    /// The file(s) being edited are appended as arguments, so `cmd = "code
+    /// --wait"` opens `code --wait <file>`.
+    /// To place the file elsewhere, reference `"$@"` yourself, e.g. `cmd =
+    /// 'my-wrapper "$@" --flag'`.
     pub cmd: Option<String>,
 
     /// The environment variables to use for editing text.
@@ -169,32 +175,66 @@ impl ToPartial for InlineEditorConfig {
 }
 
 impl EditorConfig {
-    /// The command to use for editing text.
+    /// Build the editor command, with the edited path(s) appended by the
+    /// caller.
     ///
-    /// If no command is configured, and no configured environment variables are
-    /// set, returns `None`.
+    /// Returns `None` when neither `cmd` is set nor any configured environment
+    /// variable resolves to an installed program.
     ///
-    /// Env-var values are split with [`shlex::split`] so `JP_EDITOR="code -w"`
-    /// correctly runs `code` with `-w` as an argument.
-    /// Values with unbalanced quoting are skipped.
-    /// The `cmd` field uses full shell-mode parsing (via
-    /// `duct_sh::sh_dangerous`) for backwards compatibility with shell
-    /// metacharacters like `&&` and `|`.
+    /// The returned expression expects the path(s) being edited to be appended
+    /// as trailing arguments (e.g. via `duct`'s `before_spawn`):
+    ///
+    /// - `cmd` runs through the shell (so `&&`, `|`, and quoting work) and
+    ///   forwards the appended path(s) via `"$@"`.
+    ///   A `cmd` that already references `$@`/`$*` controls placement itself,
+    ///   so nothing is appended.
+    /// - Env-var values are split with [`shlex::split`] so `JP_EDITOR="code
+    ///   -w"` runs `code` with `-w`, then the path(s) as further arguments.
+    ///   Values with unbalanced quoting are skipped.
     #[must_use]
     pub fn command(&self) -> Option<Expression> {
-        self.cmd.clone().map(duct_sh::sh_dangerous).or_else(|| {
-            self.envs.iter().find_map(|v| {
-                let value = env::var(v).ok()?;
-                let mut parts = shlex::split(&value)?.into_iter();
-                let program = parts.next()?;
-                if which::which(&program).is_err() {
-                    return None;
-                }
-                let args: Vec<String> = parts.collect();
-                Some(duct::cmd(program, args))
+        self.cmd
+            .clone()
+            .filter(|cmd| !cmd.trim().is_empty())
+            .map(|cmd| shell_command(&cmd))
+            .or_else(|| {
+                self.envs.iter().find_map(|v| {
+                    let value = env::var(v).ok()?;
+                    let mut parts = shlex::split(&value)?.into_iter();
+                    let program = parts.next()?;
+                    if which::which(&program).is_err() {
+                        return None;
+                    }
+                    let args: Vec<String> = parts.collect();
+                    Some(duct::cmd(program, args))
+                })
             })
-        })
     }
+}
+
+/// Build a shell expression for `cmd` that forwards the caller's appended
+/// path(s) to the editor command.
+///
+/// `sh -c <script>` assigns the first trailing operand to `$0`, so the script
+/// sets an explicit `$0` (`jp-editor`) and forwards the appended path(s)
+/// through `"$@"`.
+/// A `cmd` that already references its arguments (`$@`/`$*`) is left untouched.
+#[cfg(unix)]
+fn shell_command(cmd: &str) -> Expression {
+    let script = if cmd.contains("$@") || cmd.contains("$*") {
+        cmd.to_owned()
+    } else {
+        format!(r#"{cmd} "$@""#)
+    };
+
+    duct::cmd("/bin/sh", ["-c", script.as_str(), "jp-editor"])
+}
+
+/// On non-unix platforms, fall back to the platform shell without argument
+/// forwarding; `cmd` is expected to reference the path itself.
+#[cfg(not(unix))]
+fn shell_command(cmd: &str) -> Expression {
+    duct_sh::sh_dangerous(cmd)
 }
 
 #[cfg(test)]

@@ -55,8 +55,8 @@ The interrupt-menu reply UX is also weak independently of the bug.
 Today's `r` flow goes straight into `inquire::Editor`'s "press `e` to edit,
 `Enter` to submit" two-step prompt, which forces the editor for every reply,
 however short.
-A first-class inline editor — with a rich editing experience and a `Ctrl+X
-Ctrl+E` escape hatch (readline's `edit-and-execute-command` binding) — covers
+A first-class inline editor — with a rich editing experience and a `Ctrl+X`
+escape hatch (inspired by readline's `edit-and-execute-command`) — covers
 both short replies and long ones without forcing a process-spawn for the trivial
 case.
 
@@ -79,13 +79,13 @@ When the user presses `Ctrl+C` during streaming and chooses `r`:
    kitty, Ghostty, WezTerm, foot) or **Alt+Enter** (portable fallback) insert a
    newline.
    The fallback is advertised in the help line.
-5. **Ctrl+X Ctrl+E** opens the configured editor seeded with the current buffer
+5. **Ctrl+X** opens the configured editor seeded with the current buffer
    contents.
 6. **Ctrl+C** returns the user to the interrupt menu without sending anything.
    A second **Ctrl+C** at the menu escalates to graceful shutdown (see [RFD
    045]).
 
-After the editor closes (when invoked via `Ctrl+X Ctrl+E`):
+After the editor closes (when invoked via `Ctrl+X`):
 
 - If the editor's output is empty, control returns to the interrupt menu.
 - If the editor's output is non-empty, the inline reply prompt re-appears with
@@ -124,16 +124,16 @@ each gated on a configured editor at its own menu/prompt site:
 option), and the coordinator's `can_prompt` check for `ResultMode::Edit`.
 After this RFD all three become `InlineReply` widgets seeded with the current
 text — the JSON arguments, the skip-reason placeholder, the tool result — with
-`Ctrl+X Ctrl+E` escaping to the configured editor on demand.
+`Ctrl+X` escaping to the configured editor on demand.
 
 Because `InlineReply` needs only a tty, the permission-menu options `r` ("Skip
 and reply") and `e` ("Edit arguments") are no longer gated on a configured
-editor; they appear whenever a prompt can be shown, and only the `Ctrl+X Ctrl+E`
+editor; they appear whenever a prompt can be shown, and only the `Ctrl+X`
 escape requires `editor.command`.
 The result-delivery confirmation is un-gated the same way: "Edit result first"
 (`e`) appears whenever a tty is present, and `ResultMode::Edit` prompts on any
 tty rather than requiring an editor.
-In every case `Ctrl+X Ctrl+E` with no editor configured is a no-op — the inline
+In every case `Ctrl+X` with no editor configured is a no-op — the inline
 widget stays open.
 The `JP_EDITOR="subl -w"` arg-drop bug closes as a side effect of routing that
 escape through `EditorConfig::command()`.
@@ -143,7 +143,7 @@ caller re-seeds the `InlineReply` buffer with the user's text and re-prompts,
 surfacing the error in the prompt line — no process re-spawn, edits preserved,
 and the old "Re-open editor?
 y/n" confirmation step drops out.
-`Ctrl+X Ctrl+E` still escapes to the full editor for a large rewrite, and its
+`Ctrl+X` still escapes to the full editor for a large rewrite, and its
 result re-validates through the same loop.
 An emptied buffer abandons the edit and falls back to the Ask prompt with the
 arguments unchanged — it never submits empty JSON or runs the tool with cleared
@@ -314,7 +314,7 @@ pub enum ReplyOutcome {
     /// The caller decides what this means — return to a menu, use a fallback,
     /// or escalate.
     Cancelled,
-    /// User pressed Ctrl+X Ctrl+E.
+    /// User pressed Ctrl+X.
     /// Caller opens the editor seeded with `current_text`.
     OpenEditor { current_text: String },
 }
@@ -333,7 +333,7 @@ Custom bindings layered on top:
 | Enter         | submit (default) | reedline default                                             |
 | Shift+Enter   | newline          | `EditCommand::InsertNewline` (kitty protocol; incl. Ghostty) |
 | Alt+Enter     | newline          | same edit command (portable fallback)                        |
-| Ctrl+X Ctrl+E | open editor      | custom `ReedlineEvent` that returns `OpenEditor`             |
+| Ctrl+X        | open editor      | custom `ReedlineEvent` that returns `OpenEditor`             |
 | Ctrl+C        | cancel           | reedline `Signal::CtrlC`, surfaced as `Cancelled`            |
 
 `Ctrl+C` is the single, mode-independent cancel: in raw mode it arrives as byte
@@ -570,7 +570,7 @@ edit_mode = "emacs" # "emacs" | "vi"
   In non-interactive / no-tty mode there is no prompt, so the key has no effect.
 - **`editor.inline.edit_mode`** — selects reedline's edit mode for the inline
   widget: the *editing style* of the inline buffer, orthogonal to which external
-  editor `Ctrl+X Ctrl+E` opens (that is `editor.command`).
+  editor `Ctrl+X` opens (that is `editor.command`).
 
 **Cancel / empty behavior matrix.** Defined for every context, including the
 menu-less configured-action paths, so nothing is left to implementation:
@@ -600,7 +600,7 @@ Two terms enter the glossary:
   editor, with `edit_text` (string in/out) and `edit_file` (path-based) methods.
   Each frontend (terminal, web, native, mock) is one implementation.
 - **InlineReply** — the `jp_inquire` widget for short replies in interrupt
-  menus; supports inline typing with a `Ctrl+X Ctrl+E` escape to the
+  menus; supports inline typing with a `Ctrl+X` escape to the
   `EditorBackend`.
 
 ## Drawbacks
@@ -724,7 +724,7 @@ renders through `Printer`'s tty writer.
   The mock implementation is straightforward — script a vector of
   `ReplyOutcome` values — but verify it composes cleanly with the existing
   `MockEditorBackend` for full end-to-end tests of the loop.
-- **Edit-mode keymap coverage.** The custom bindings (`Ctrl+X Ctrl+E`, newline,
+- **Edit-mode keymap coverage.** The custom bindings (`Ctrl+X`, newline,
   `Ctrl+C`) must be registered into both the emacs and vi keymaps, and the vi
   normal-mode path tested.
   (The cancel-semantics question for menu-less configured actions is resolved in
@@ -780,7 +780,7 @@ Estimated diff: ~250 LOC.
 - Add `inline_reply` to `PromptBackend` and update `TerminalPromptBackend` and
   `MockPromptBackend` (with `with_reply_outcomes`).
 - Migrate the `ToolPrompter` argument, skip-reasoning, and result edits to
-  `InlineReply` (seeded text + `Ctrl+X Ctrl+E` escape).
+  `InlineReply` (seeded text + `Ctrl+X` escape).
   Un-gate all three editor-dependence points so only the escape needs
   `editor.command`: `permission_options` (`r`/`e`), the `e` option in
   `prompt_result_confirmation`, and the `prompter.has_editor()` term in

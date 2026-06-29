@@ -219,6 +219,20 @@ fn tool_interrupt_stop_cancel_uses_canned_response() {
 }
 
 #[test]
+fn tool_interrupt_stop_whitespace_uses_canned_response() {
+    // A whitespace-only reply is treated as blank and falls through to the
+    // canned message, rather than sending a blank-looking tool response.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['s'])
+        .with_reply_outcomes([ReplyOutcome::Submit("   \n\t ".into())]);
+    let action =
+        handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
+    assert!(
+        matches!(action, InterruptAction::ToolCancelled { response } if response.contains("intentionally rejected"))
+    );
+}
+
+#[test]
 fn tool_interrupt_restart() {
     let handler = handler(MockPromptBackend::new().with_inline_responses(['r']));
     let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
@@ -302,6 +316,20 @@ fn configured_streaming_reply_cancel_resumes() {
         true,
     );
     assert_eq!(action, InterruptAction::Resume);
+}
+
+#[test]
+fn configured_streaming_reply_cancel_continues_when_stream_dead() {
+    // A menu-less `reply` that backs out has no menu to return to. With the
+    // stream already finished it must continue from the partial response rather
+    // than resuming a stream that no longer exists.
+    let backend = MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Cancelled]);
+    let action = handler(backend).handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Reply),
+        &make_printer(),
+        false,
+    );
+    assert_eq!(action, InterruptAction::Continue);
 }
 
 #[test]

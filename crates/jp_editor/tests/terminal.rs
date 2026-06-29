@@ -23,6 +23,25 @@ fn edit_text_passes_path_and_saves_edited_content() {
     assert_eq!(content, "edited\n");
 }
 
+/// A preset argument on the command (as the env-var branch builds, e.g. `code
+/// --wait`) is preserved, and the edited path is appended *after* it.
+/// The script copies the preset (`$1`) into the appended path (`$2`), so a
+/// successful read-back proves both reached the editor in order.
+#[test]
+fn edit_text_preserves_preset_args_and_appends_path() {
+    let backend = TerminalEditorBackend::new(duct::cmd("sh", [
+        "-c",
+        r#"printf '%s' "$1" > "$2""#,
+        "sh",
+        "PRESET",
+    ]));
+
+    let (outcome, content) = backend.edit_text("seed").unwrap();
+
+    assert_eq!(outcome, EditOutcome::Saved);
+    assert_eq!(content, "PRESET");
+}
+
 /// A non-zero editor exit maps to `Cancelled`, matching git's commit-message
 /// convention.
 #[test]
