@@ -6,7 +6,9 @@
 
 use comfy_table::Row;
 use jp_printer::{OutputFormat, Printer};
-use jp_term::table::{details, details_json, details_markdown, list, list_json, list_markdown};
+use jp_term::table::{
+    DetailRow, details, details_json, details_markdown, list, list_json, list_markdown,
+};
 use serde_json::{Value, to_string, to_string_pretty};
 
 /// Print a list table (header + rows) in the format dictated by the printer.
@@ -38,7 +40,7 @@ pub fn print_table(printer: &Printer, header: Row, rows: Vec<Row>, footer: bool)
 /// - `TextPretty` → borderless aligned table with optional title
 /// - `Text` → pipe-delimited markdown table with optional title
 /// - `Json` / `JsonPretty` → JSON object
-pub fn print_details(printer: &Printer, title: Option<&str>, rows: Vec<Row>) {
+pub fn print_details(printer: &Printer, title: Option<&str>, rows: Vec<DetailRow>) {
     let output = match printer.format() {
         OutputFormat::TextPretty => details(title, rows),
         OutputFormat::Text => details_markdown(title, rows),

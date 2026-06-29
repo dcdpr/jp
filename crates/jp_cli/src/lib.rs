@@ -35,7 +35,6 @@ use clap::{
     builder::{BoolValueParser, TypedValueParser as _},
 };
 use cmd::Commands;
-use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::Stylize as _;
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
@@ -50,7 +49,7 @@ use jp_config::{
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
-use jp_term::table::{details, details_markdown};
+use jp_term::table::{DetailRow, details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
 use relative_path::RelativePath;
 use serde_json::Value;
@@ -619,19 +618,14 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
     } = error;
 
     if !format.is_json() {
-        let rows: Vec<Row> = metadata
+        let rows: Vec<DetailRow> = metadata
             .into_iter()
             .map(|(k, v)| {
-                let mut row = Row::new();
-                row.add_cell(Cell::new(k).set_alignment(CellAlignment::Right))
-                    .add_cell(
-                        Cell::new(match v {
-                            Value::String(s) => s,
-                            v => format!("{v:#}"),
-                        })
-                        .set_alignment(CellAlignment::Left),
-                    );
-                row
+                let value = match v {
+                    Value::String(s) => s,
+                    v => format!("{v:#}"),
+                };
+                DetailRow::scalar(k, value)
             })
             .collect();
 

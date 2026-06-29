@@ -42,14 +42,10 @@ fn markdown_list_table() {
 
 #[test]
 fn markdown_details_with_title() {
-    let mut r1 = Row::new();
-    r1.add_cell(Cell::new("key1"));
-    r1.add_cell(Cell::new("val1"));
-    let mut r2 = Row::new();
-    r2.add_cell(Cell::new("longer-key"));
-    r2.add_cell(Cell::new("v2"));
-
-    let output = details_markdown(Some("Info"), vec![r1, r2]);
+    let output = details_markdown(Some("Info"), vec![
+        DetailRow::scalar("key1", "val1"),
+        DetailRow::scalar("longer-key", "v2"),
+    ]);
     assert_eq!(
         output,
         "Info
@@ -61,16 +57,85 @@ fn markdown_details_with_title() {
 
 #[test]
 fn markdown_details_no_title() {
-    let mut r = Row::new();
-    r.add_cell(Cell::new("a"));
-    r.add_cell(Cell::new("b"));
-
-    let output = details_markdown(None, vec![r]);
+    let output = details_markdown(None, vec![DetailRow::scalar("a", "b")]);
     assert_eq!(
         output,
         "| a | b |
 "
     );
+}
+
+#[test]
+fn pretty_details_list_puts_label_above_bulleted_items() {
+    let output = details(None, vec![DetailRow::list("Attachments", vec![
+        DetailItem::plain("a://x"),
+        DetailItem::plain("b://y"),
+    ])]);
+
+    let lines: Vec<&str> = output.lines().collect();
+    // Label sits on its own line; items are bulleted beneath it.
+    assert!(
+        lines[0].trim_end().ends_with("Attachments"),
+        "got: {output}"
+    );
+    assert!(!lines[0].contains("a://x"), "got: {output}");
+    assert!(output.contains("- a://x"), "got: {output}");
+    assert!(output.contains("- b://y"), "got: {output}");
+}
+
+#[test]
+fn markdown_details_list_expands_to_one_row_per_item() {
+    let output = details_markdown(None, vec![DetailRow::list("Attachments", vec![
+        DetailItem::plain("a://x"),
+        DetailItem::plain("b://y"),
+    ])]);
+
+    let lines: Vec<&str> = output.lines().collect();
+    assert_eq!(lines.len(), 2, "got: {output}");
+    assert!(lines[0].contains("Attachments"), "got: {output}");
+    assert!(lines[0].contains("a://x"), "got: {output}");
+    // Continuation row carries a blank label, not a repeated one.
+    assert!(!lines[1].contains("Attachments"), "got: {output}");
+    assert!(lines[1].contains("b://y"), "got: {output}");
+}
+
+#[test]
+fn json_details_list_of_plain_items_is_string_array() {
+    let json = details_json(None, vec![DetailRow::list("Attachments", vec![
+        DetailItem::plain("a://x"),
+        DetailItem::plain("b://y"),
+    ])]);
+
+    assert_eq!(
+        json["details"]["Attachments"],
+        serde_json::json!(["a://x", "b://y"])
+    );
+}
+
+#[test]
+fn list_item_text_and_json_forms_can_differ() {
+    let item = DetailItem::new(
+        "cmd (Desc): cmd://x",
+        serde_json::json!({ "scheme": "cmd", "url": "cmd://x" }),
+    );
+    let rows = vec![DetailRow::list("Attachments", vec![item])];
+
+    // Pretty uses the text form.
+    assert!(
+        details(None, rows.clone()).contains("- cmd (Desc): cmd://x"),
+        "text form should drive the pretty view"
+    );
+
+    // JSON uses the structured form.
+    let json = details_json(None, rows);
+    assert_eq!(json["details"]["Attachments"][0]["scheme"], "cmd");
+    assert_eq!(json["details"]["Attachments"][0]["url"], "cmd://x");
+}
+
+#[test]
+fn json_details_bare_row_uses_value_as_key() {
+    let json = details_json(None, vec![DetailRow::bare("a://x")]);
+    assert_eq!(json["details"]["a://x"], "");
 }
 
 #[test]
@@ -86,22 +151,17 @@ fn json_list() {
 
 #[test]
 fn json_details() {
-    let mut r = Row::new();
-    r.add_cell(Cell::new("ID"));
-    r.add_cell(Cell::new("jp-c123"));
-
-    let json = details_json(Some("title"), vec![r]);
+    let json = details_json(Some("title"), vec![DetailRow::scalar("ID", "jp-c123")]);
     assert_eq!(json["title"], "title");
     assert_eq!(json["details"]["ID"], "jp-c123");
 }
 
 #[test]
 fn json_details_strips_ansi() {
-    let mut r = Row::new();
-    r.add_cell(Cell::new("\x1b[1mKey\x1b[0m"));
-    r.add_cell(Cell::new("\x1b[32mVal\x1b[0m"));
-
-    let json = details_json(None, vec![r]);
+    let json = details_json(None, vec![DetailRow::scalar(
+        "\x1b[1mKey\x1b[0m",
+        "\x1b[32mVal\x1b[0m",
+    )]);
     assert_eq!(json["details"]["Key"], "Val");
 }
 

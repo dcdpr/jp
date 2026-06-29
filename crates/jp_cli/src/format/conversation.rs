@@ -1,9 +1,9 @@
 use std::fmt;
 
 use chrono::{DateTime, Utc};
-use comfy_table::{Cell, CellAlignment, Row, Table};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
+use jp_term::table::{DetailItem, DetailRow, details};
 
 use super::datetime::DateTimeFmt;
 
@@ -43,6 +43,9 @@ pub struct DetailsFmt {
     /// Display the timestamp of conversation expiration.
     pub expires_at: Option<DateTime<Utc>>,
 
+    /// Attachments associated with the conversation.
+    pub attachments: Vec<DetailItem>,
+
     /// Pretty-print the output.
     pub pretty: bool,
 }
@@ -62,6 +65,7 @@ impl DetailsFmt {
             last_message_at: None,
             last_activated_at: None,
             expires_at: None,
+            attachments: vec![],
             pretty: true,
         }
     }
@@ -93,6 +97,12 @@ impl DetailsFmt {
     #[must_use]
     pub fn with_expires_at(mut self, expires_at: Option<DateTime<Utc>>) -> Self {
         self.expires_at = expires_at;
+        self
+    }
+
+    #[must_use]
+    pub fn with_attachments(mut self, attachments: Vec<DetailItem>) -> Self {
+        self.attachments = attachments;
         self
     }
 
@@ -141,111 +151,95 @@ impl DetailsFmt {
 
     /// Return rows for a table displaying the conversation details.
     #[must_use]
-    pub fn rows(&self) -> Vec<Row> {
-        let mut map = vec![];
+    pub fn rows(&self) -> Vec<DetailRow> {
+        let mut rows = vec![];
 
-        map.push(("ID".to_owned(), self.id.to_string()));
+        rows.push(self.scalar("ID", self.id.to_string()));
         if let Some(name) = self.assistant_name.clone() {
-            map.push(("Assistant".to_owned(), name));
+            rows.push(self.scalar("Assistant", name));
         }
 
         if self.message_count > 0 {
-            map.push(("Events".to_owned(), self.message_count.to_string()));
+            rows.push(self.scalar("Events", self.message_count.to_string()));
         }
 
         if self.turn_count > 0 {
-            map.push(("Turns".to_owned(), self.turn_count.to_string()));
+            rows.push(self.scalar("Turns", self.turn_count.to_string()));
         }
 
         if let Some(last_message_at) = self.last_message_at {
-            map.push((
-                "Latest Message".to_owned(),
+            rows.push(self.scalar(
+                "Latest Message",
                 DateTimeFmt::new(last_message_at).to_string(),
             ));
         }
 
         if let Some(active) = self.active_conversation {
-            map.push((
-                "Last Activated".to_owned(),
-                if active == self.id && self.pretty {
-                    "Currently Active".green().bold().to_string()
-                } else if active == self.id {
-                    "Currently Active".to_owned()
-                } else if let Some(last_activated_at) = self.last_activated_at {
-                    DateTimeFmt::new(last_activated_at).to_string()
-                } else {
-                    "Unknown".to_owned()
-                },
-            ));
+            let value = if active == self.id && self.pretty {
+                "Currently Active".green().bold().to_string()
+            } else if active == self.id {
+                "Currently Active".to_owned()
+            } else if let Some(last_activated_at) = self.last_activated_at {
+                DateTimeFmt::new(last_activated_at).to_string()
+            } else {
+                "Unknown".to_owned()
+            };
+            rows.push(self.scalar("Last Activated", value));
         }
 
         if let Some(expires_at) = self.expires_at {
-            map.push((
-                "Expires In".to_owned(),
-                if expires_at < Utc::now() {
-                    "On Deactivation".to_string()
-                } else {
-                    DateTimeFmt::new(expires_at).to_string()
-                },
-            ));
+            let value = if expires_at < Utc::now() {
+                "On Deactivation".to_string()
+            } else {
+                DateTimeFmt::new(expires_at).to_string()
+            };
+            rows.push(self.scalar("Expires In", value));
         }
 
         if let Some(pinned) = self.pinned {
-            map.push((
-                "Pinned".to_owned(),
-                if pinned {
-                    "Yes".bold().blue().to_string()
-                } else {
-                    "No".to_string()
-                },
-            ));
+            let value = if pinned {
+                "Yes".bold().blue().to_string()
+            } else {
+                "No".to_string()
+            };
+            rows.push(self.scalar("Pinned", value));
         }
 
         if let Some(local) = self.local {
-            map.push((
-                "Local".to_owned(),
-                if local {
-                    "Yes".bold().yellow().to_string()
-                } else {
-                    "No".to_string()
-                },
+            let value = if local {
+                "Yes".bold().yellow().to_string()
+            } else {
+                "No".to_string()
+            };
+            rows.push(self.scalar("Local", value));
+        }
+
+        if !self.attachments.is_empty() {
+            rows.push(DetailRow::list(
+                self.styled_label("Attachments"),
+                self.attachments.clone(),
             ));
         }
 
-        let mut rows = vec![];
-        for (key, value) in map {
-            let mut row = Row::new();
-            row.add_cell(
-                Cell::new(if self.pretty {
-                    key.bold().to_string()
-                } else {
-                    key
-                })
-                .set_alignment(CellAlignment::Right),
-            );
-            row.add_cell(Cell::new(value).set_alignment(CellAlignment::Left));
-            rows.push(row);
-        }
-
         rows
+    }
+
+    /// Bold the label when pretty-printing is enabled.
+    fn styled_label(&self, label: &str) -> String {
+        if self.pretty {
+            label.bold().to_string()
+        } else {
+            label.to_owned()
+        }
+    }
+
+    fn scalar(&self, label: &str, value: String) -> DetailRow {
+        DetailRow::scalar(self.styled_label(label), value)
     }
 }
 
 impl fmt::Display for DetailsFmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let rows = self.rows();
-        let mut buf = String::new();
-
-        if let Some(title) = self.title() {
-            buf.push_str(title);
-            buf.push_str("\n\n");
-        }
-
-        let mut table = Table::new();
-        table.load_preset(comfy_table::presets::NOTHING);
-        table.add_rows(rows);
-        buf.push_str(&table.trim_fmt());
-
-        write!(f, "{buf}")
+        write!(f, "{}", details(self.title(), self.rows()))
     }
 }

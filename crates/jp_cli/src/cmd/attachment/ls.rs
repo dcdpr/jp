@@ -1,4 +1,4 @@
-use comfy_table::{Cell, Row};
+use jp_term::table::DetailRow;
 
 use crate::{cmd::Output, ctx::Ctx, output::print_details};
 
@@ -19,9 +19,7 @@ impl Ls {
 
         let mut rows = vec![];
         for uri in uris {
-            let mut row = Row::new();
-            row.add_cell(Cell::new(uri.to_url()?));
-            rows.push(row);
+            rows.push(DetailRow::bare(uri.to_url()?));
         }
 
         print_details(&ctx.printer, title.as_deref(), rows);
