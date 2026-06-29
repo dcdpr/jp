@@ -1,6 +1,6 @@
 # RFD 088: Unified Editor Service and Inline Reply Widget
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-08
@@ -169,14 +169,15 @@ pub trait EditorBackend: Send + Sync {
     fn edit_text(&self, content: &str) -> Result<(EditOutcome, String), EditorError>;
 
     /// Open the user's editor on the requested path(s) and block until editing
-    /// is done. The edited content is read back from disk by the caller.
+    /// is done.
+    /// The edited content is read back from disk by the caller.
     fn edit_file(&self, req: EditRequest<'_>) -> Result<EditOutcome, EditorError>;
 }
 
-/// Frontend-agnostic request data for `edit_file`. Backend-specific context
-/// (a web session, a native window handle, …) lives in the backend's own
-/// fields, set at construction — *not* here — so `EditorBackend` stays
-/// object-safe behind `Arc<dyn EditorBackend>`.
+/// Frontend-agnostic request data for `edit_file`.
+/// Backend-specific context (a web session, a native window handle, …) lives
+/// in the backend's own fields, set at construction — *not* here — so
+/// `EditorBackend` stays object-safe behind `Arc<dyn EditorBackend>`.
 pub struct EditRequest<'a> {
     pub paths: &'a [Utf8PathBuf],
     /// Working directory for a spawned editor; frontends that don't spawn a
@@ -186,9 +187,11 @@ pub struct EditRequest<'a> {
 
 /// The interaction outcome — the part only the backend can know.
 pub enum EditOutcome {
-    /// User saved and closed (terminal editor exited 0; explicit save in a GUI).
+    /// User saved and closed (terminal editor exited 0; explicit save in a
+    /// GUI).
     Saved,
-    /// User aborted (terminal editor exited non-zero; explicit cancel in a GUI).
+    /// User aborted (terminal editor exited non-zero; explicit cancel in a
+    /// GUI).
     Cancelled,
 }
 ```
@@ -307,11 +310,12 @@ pub enum ReplyOutcome {
     /// User pressed Enter on a non-empty buffer (or empty, where the caller's
     /// policy permits it).
     Submit(String),
-    /// User cancelled the prompt with `Ctrl+C`. The caller decides what this
-    /// means — return to a menu, use a fallback, or escalate.
+    /// User cancelled the prompt with `Ctrl+C`.
+    /// The caller decides what this means — return to a menu, use a fallback,
+    /// or escalate.
     Cancelled,
-    /// User pressed Ctrl+X Ctrl+E. Caller opens the editor seeded with
-    /// `current_text`.
+    /// User pressed Ctrl+X Ctrl+E.
+    /// Caller opens the editor seeded with `current_text`.
     OpenEditor { current_text: String },
 }
 ```
@@ -547,13 +551,13 @@ Two keys are added under `interrupt.{streaming,tool_call}` and one under
 
 ```toml
 [interrupt.streaming]
-reply_in_editor = false   # r opens the editor directly, skipping the widget
+reply_in_editor = false # r opens the editor directly, skipping the widget
 
 [interrupt.tool_call]
-reply_in_editor = false   # s opens the editor directly, skipping the widget
+reply_in_editor = false # s opens the editor directly, skipping the widget
 
 [editor.inline]
-edit_mode = "emacs"        # "emacs" | "vi"
+edit_mode = "emacs" # "emacs" | "vi"
 ```
 
 - **`reply_in_editor`** — defaults to `false`.

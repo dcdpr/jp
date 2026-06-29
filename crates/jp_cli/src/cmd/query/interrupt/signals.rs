@@ -8,9 +8,12 @@
 //! 2. Delegates state transitions to the `TurnCoordinator` state machine
 //! 3. Returns a `LoopAction` for the caller to handle control flow
 
+use std::sync::Arc;
+
 use jp_config::interrupt::{StreamingInterruptConfig, ToolInterruptConfig};
 use jp_conversation::ConversationStream;
-use jp_inquire::prompt::PromptBackend;
+use jp_editor::EditorBackend;
+use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
 use jp_llm::event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction};
 use jp_printer::Printer;
 use tokio_util::sync::CancellationToken;
@@ -51,6 +54,8 @@ pub fn handle_streaming_signal(
     conversation_stream: &mut ConversationStream,
     printer: &Printer,
     backend: &dyn PromptBackend,
+    editor: Option<Arc<dyn EditorBackend>>,
+    edit_mode: ReplyEditMode,
     config: &StreamingInterruptConfig,
     llm_stream_finished: bool,
 ) -> LoopAction<()> {
@@ -73,11 +78,8 @@ pub fn handle_streaming_signal(
             turn_coordinator.flush_renderer();
             printer.flush_instant();
 
-            let action = InterruptHandler::with_backend(backend).handle_streaming_interrupt(
-                config,
-                &mut printer.prompt_writer(),
-                !llm_stream_finished,
-            );
+            let action = InterruptHandler::with_backend(backend, editor, edit_mode)
+                .handle_streaming_interrupt(config, printer, !llm_stream_finished);
 
             // `Resume` means "keep waiting for the current stream." The state
             // machine is a no-op for it, and we must NOT break the inner loop:
@@ -227,6 +229,8 @@ pub fn handle_tool_signal(
     is_prompting: bool,
     printer: &Printer,
     backend: &dyn PromptBackend,
+    editor: Option<Arc<dyn EditorBackend>>,
+    edit_mode: ReplyEditMode,
     config: &ToolInterruptConfig,
 ) -> ToolSignalResult {
     match signal {
@@ -247,8 +251,8 @@ pub fn handle_tool_signal(
                 return ToolSignalResult::Continue;
             }
 
-            let action = InterruptHandler::with_backend(backend)
-                .handle_tool_interrupt(config, &mut printer.prompt_writer());
+            let action = InterruptHandler::with_backend(backend, editor, edit_mode)
+                .handle_tool_interrupt(config, printer);
 
             // Notify the state machine (reserved for future state transitions).
             turn_coordinator.handle_tool_interrupt(&action);

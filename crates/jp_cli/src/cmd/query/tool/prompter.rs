@@ -12,12 +12,11 @@
 
 use std::{io::Write as _, sync::Arc};
 
-use camino::Utf8PathBuf;
 use crossterm::style::Stylize as _;
 use jp_config::conversation::tool::{RunMode, ToolSource};
 use jp_conversation::event::{InquiryId, SelectOption};
-use jp_editor::{EditorBackend, TerminalEditorBackend};
-use jp_inquire::{InlineOption, prompt::PromptBackend};
+use jp_editor::{EditOutcome, EditorBackend};
+use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBackend};
 use jp_llm::tool::executor::PermissionInfo;
 use jp_printer::Printer;
 use jp_tool::AnswerType;
@@ -75,7 +74,17 @@ enum EditResult {
     /// User emptied the content (signals fallback to Ask).
     Emptied,
 
-    /// User cancelled the edit (e.g., JSON error + declined retry).
+    /// User cancelled the edit (`Ctrl+C`).
+    Cancelled,
+}
+
+/// Outcome of an inline edit (the reply widget plus the `Ctrl+X` editor
+/// escape).
+enum InlineEditResult {
+    /// User pressed Enter; carries the buffer (possibly empty).
+    Submitted(String),
+
+    /// User cancelled with `Ctrl+C`.
     Cancelled,
 }
 
@@ -87,12 +96,15 @@ enum EditResult {
 /// Uses type-erased backends (`Arc<dyn ...>`) to allow runtime injection of
 /// mock backends for testing.
 pub struct ToolPrompter {
-    /// Editor backend for edit modes.
-    /// If `None`, edit mode falls back to Ask.
+    /// Editor backend for the `Ctrl+X` escape from the inline editor.
+    /// `None` when no editor is configured; the inline widget still works.
     editor: Option<Arc<dyn EditorBackend>>,
 
     /// Prompt backend for interactive prompts.
     prompt_backend: Arc<dyn PromptBackend>,
+
+    /// Editing style for the inline reply widget used by the edit prompts.
+    edit_mode: ReplyEditMode,
 
     printer: Arc<Printer>,
 }
@@ -104,15 +116,14 @@ impl ToolPrompter {
     /// using the real editor backend.
     pub fn with_prompt_backend(
         printer: Arc<Printer>,
-        editor_path: Option<Utf8PathBuf>,
+        editor: Option<Arc<dyn EditorBackend>>,
         prompt_backend: Arc<dyn PromptBackend>,
+        edit_mode: ReplyEditMode,
     ) -> Self {
-        let editor = editor_path
-            .map(|path| Arc::new(TerminalEditorBackend { path }) as Arc<dyn EditorBackend>);
-
         Self {
             editor,
             prompt_backend,
+            edit_mode,
             printer,
         }
     }
@@ -127,21 +138,7 @@ impl ToolPrompter {
         Self {
             editor,
             prompt_backend,
-            printer,
-        }
-    }
-
-    /// Creates a prompter with a custom editor backend.
-    #[cfg(test)]
-    pub fn with_editor_backend(
-        printer: Arc<Printer>,
-        backend: impl EditorBackend + 'static,
-    ) -> Self {
-        use jp_inquire::prompt::TerminalPromptBackend;
-
-        Self {
-            editor: Some(Arc::new(backend)),
-            prompt_backend: Arc::new(TerminalPromptBackend),
+            edit_mode: ReplyEditMode::Emacs,
             printer,
         }
     }
@@ -151,7 +148,7 @@ impl ToolPrompter {
     /// Based on the `run_mode`, this may:
     ///
     /// - Show an interactive prompt (Ask)
-    /// - Open an editor for arguments (Edit)
+    /// - Edit the arguments inline (Edit)
     /// - Return immediately (Unattended)
     ///
     /// # Returns
@@ -183,23 +180,20 @@ impl ToolPrompter {
 
     /// Builds the select options for the permission prompt.
     ///
-    /// The available options depend on whether an editor is configured.
     /// Returns `SelectOption`s that can be rendered as an inline select.
-    fn permission_options(&self) -> Vec<SelectOption> {
-        let mut opts = vec![
+    fn permission_options() -> Vec<SelectOption> {
+        // `r` (skip & reply) and `e` (edit arguments) drive the inline reply
+        // widget, which needs only a tty — they no longer require a configured
+        // editor (the `Ctrl+X` escape does, but it is a no-op without one).
+        vec![
             SelectOption::new("y", "Run tool"),
             SelectOption::new("Y", "Run tool, remember for this turn"),
             SelectOption::new("n", "Skip running tool"),
             SelectOption::new("N", "Skip running tool, remember for this turn"),
             SelectOption::new("p", "Print arguments as JSON"),
-        ];
-
-        if self.editor.is_some() {
-            opts.push(SelectOption::new("r", "Skip and reply"));
-            opts.push(SelectOption::new("e", "Edit arguments"));
-        }
-
-        opts
+            SelectOption::new("r", "Skip and reply"),
+            SelectOption::new("e", "Edit arguments"),
+        ]
     }
 
     /// Shows the interactive permission prompt.
@@ -214,7 +208,7 @@ impl ToolPrompter {
         loop {
             let question = build_permission_question(tool_name, tool_source);
 
-            let inline_options = select_options_to_inline(&self.permission_options());
+            let inline_options = select_options_to_inline(&Self::permission_options());
 
             let mut writer = self.printer.prompt_writer();
 
@@ -295,21 +289,17 @@ impl ToolPrompter {
         }
     }
 
-    /// Opens an editor for the user to modify tool arguments.
+    /// Edits the tool arguments inline before running.
     ///
-    /// If no editor is configured, falls back to Ask mode.
     /// If the user empties the content, falls back to Ask mode.
-    /// If JSON parsing fails, prompts to retry or fail.
+    /// Invalid JSON re-prompts the inline editor with the error in the prompt
+    /// line.
     fn prompt_edit(
         &self,
         tool_name: &str,
         tool_source: &ToolSource,
         arguments: Value,
     ) -> Result<PermissionResult, Error> {
-        let Some(_) = &self.editor else {
-            return self.prompt_ask(tool_name, tool_source, arguments);
-        };
-
         match self.try_edit_arguments(&arguments)? {
             EditResult::Edited(edited) => Ok(PermissionResult::Run {
                 arguments: edited,
@@ -323,98 +313,109 @@ impl ToolPrompter {
         }
     }
 
-    /// Attempts to edit arguments in an editor.
+    /// Edit JSON arguments inline, re-prompting on parse errors.
     ///
-    /// Returns the edit result without any async recursion.
+    /// The buffer is seeded with the pretty-printed arguments.
+    /// `Ctrl+X` escapes to the configured editor; an emptied buffer abandons
+    /// the edit (fall back to Ask), and a cancel abandons it as cancelled.
     fn try_edit_arguments(&self, arguments: &Value) -> Result<EditResult, Error> {
-        let Some(editor) = &self.editor else {
-            return Err(Error::Editor("No editor configured".to_string()));
-        };
-
-        let mut json = serde_json::to_string_pretty(arguments)
+        let mut text = serde_json::to_string_pretty(arguments)
             .map_err(|e| Error::Editor(format!("Failed to serialize arguments: {e}")))?;
+        let mut message = "Edit arguments".to_owned();
 
         loop {
-            json = editor
-                .edit(&json)
-                .map_err(|error| Error::Editor(error.to_string()))?;
-
-            if json.trim().is_empty() {
-                return Ok(EditResult::Emptied);
-            }
-
-            match serde_json::from_str::<Value>(&json) {
-                Ok(edited) => return Ok(EditResult::Edited(edited)),
-                Err(e) => {
-                    let mut writer = self.printer.prompt_writer();
-                    drop(writeln!(writer, "JSON parsing error: {e}"));
-
-                    let options = vec![
-                        InlineOption::new('y', "Open editor to fix arguments"),
-                        InlineOption::new('n', "Cancel edit"),
-                    ];
-
-                    let retry = self
-                        .prompt_backend
-                        .inline_select("Re-open editor?", options, Some('n'), &mut writer)
-                        .unwrap_or('n');
-
-                    if retry == 'n' {
-                        return Ok(EditResult::Cancelled);
+            match self.inline_edit(&message, &text)? {
+                InlineEditResult::Cancelled => return Ok(EditResult::Cancelled),
+                InlineEditResult::Submitted(edited) => {
+                    if edited.trim().is_empty() {
+                        return Ok(EditResult::Emptied);
+                    }
+                    match serde_json::from_str::<Value>(&edited) {
+                        Ok(value) => return Ok(EditResult::Edited(value)),
+                        Err(e) => {
+                            // Re-seed with the user's text and surface the error
+                            // in the prompt line — no process re-spawn.
+                            text = edited;
+                            message = format!("Invalid JSON: {e}");
+                        }
                     }
                 }
             }
         }
     }
 
-    /// Opens an editor for the user to provide reasoning for skipping tool
-    /// execution.
+    /// Collect a free-text reason for skipping a tool.
     ///
-    /// The editor is pre-populated with a placeholder prompt.
-    /// If the user empties the content or leaves only the placeholder, a
-    /// default reason is returned.
+    /// The buffer is seeded with `placeholder`.
+    /// Submitting it unchanged, an empty buffer, or a cancel all yield `None`
+    /// (skip with no reason).
     fn edit_text(&self, placeholder: &str) -> Result<Option<String>, Error> {
-        let Some(editor) = &self.editor else {
-            return Err(Error::Editor("No editor configured".to_string()));
-        };
-
-        let content = editor
-            .edit(placeholder)
-            .map_err(|error| Error::Editor(error.to_string()))?;
-
-        let trimmed = content.trim();
-        if trimmed.is_empty() || trimmed == placeholder {
-            Ok(None)
-        } else {
-            Ok(Some(content))
+        match self.inline_edit("Reason for skipping (optional)", placeholder)? {
+            InlineEditResult::Cancelled => Ok(None),
+            InlineEditResult::Submitted(content) => {
+                let trimmed = content.trim();
+                if trimmed.is_empty() || trimmed == placeholder {
+                    Ok(None)
+                } else {
+                    Ok(Some(content))
+                }
+            }
         }
     }
 
-    /// Opens an editor for the user to modify tool result before delivery to
-    /// LLM.
+    /// Edit a tool result inline before delivery to the LLM.
     ///
     /// # Returns
     ///
-    /// - `Some(edited_result)` if user edited and saved
-    /// - `None` if user emptied content (caller should fall back to Ask)
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if no editor is configured or the editor fails.
+    /// - `Some(edited_result)` if the user submitted non-empty text.
+    /// - `None` if the user emptied the content or cancelled (caller falls back
+    ///   to Ask).
     pub fn edit_result(&self, result: &str) -> Result<Option<String>, Error> {
-        let Some(editor) = &self.editor else {
-            return Err(Error::Editor("No editor configured".to_string()));
-        };
-
-        let content = editor
-            .edit(result)
-            .map_err(|error| Error::Editor(error.to_string()))?;
-
-        if content.trim().is_empty() {
-            return Ok(None);
+        match self.inline_edit("Edit result before delivery", result)? {
+            InlineEditResult::Cancelled => Ok(None),
+            InlineEditResult::Submitted(content) => {
+                if content.trim().is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(content))
+                }
+            }
         }
+    }
 
-        Ok(Some(content))
+    /// Run the inline reply widget seeded with `seed`, handling the `Ctrl+X`
+    /// editor escape internally (re-seeding the widget with the editor's
+    /// output).
+    ///
+    /// Returns when the user submits or cancels.
+    /// With no editor configured the escape is a no-op and the widget stays
+    /// open.
+    fn inline_edit(&self, message: &str, seed: &str) -> Result<InlineEditResult, Error> {
+        let mut text = seed.to_owned();
+        loop {
+            let output = self.printer.owned_prompt_writer();
+            match self
+                .prompt_backend
+                .inline_reply(message, &text, self.edit_mode, output)
+                .map_err(|error| Error::Editor(error.to_string()))?
+            {
+                ReplyOutcome::Submit(content) => return Ok(InlineEditResult::Submitted(content)),
+                ReplyOutcome::Cancelled => return Ok(InlineEditResult::Cancelled),
+                ReplyOutcome::OpenEditor { current_text } => {
+                    text = current_text;
+                    if let Some(editor) = &self.editor {
+                        match editor
+                            .edit_text(&text)
+                            .map_err(|error| Error::Editor(error.to_string()))?
+                        {
+                            (EditOutcome::Saved, edited) => text = edited,
+                            // Editor cancelled: keep the buffer and re-prompt.
+                            (EditOutcome::Cancelled, _) => {}
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Prompts the user for confirmation before delivering tool result to LLM.
@@ -428,18 +429,13 @@ impl ToolPrompter {
 
         let question = format!("Deliver {} result to assistant?", tool_name.yellow().bold());
 
-        let options = if self.editor.is_some() {
-            vec![
-                InlineOption::new('y', "Deliver result"),
-                InlineOption::new('n', "Skip delivery"),
-                InlineOption::new('e', "Edit result first"),
-            ]
-        } else {
-            vec![
-                InlineOption::new('y', "Deliver result"),
-                InlineOption::new('n', "Skip delivery"),
-            ]
-        };
+        // "Edit result first" uses the inline widget (any tty); it no longer
+        // requires a configured editor.
+        let options = vec![
+            InlineOption::new('y', "Deliver result"),
+            InlineOption::new('n', "Skip delivery"),
+            InlineOption::new('e', "Edit result first"),
+        ];
 
         match self
             .prompt_backend
@@ -455,11 +451,6 @@ impl ToolPrompter {
                 Ok(false)
             }
         }
-    }
-
-    /// Returns whether an editor is configured.
-    pub fn has_editor(&self) -> bool {
-        self.editor.is_some()
     }
 
     /// Prompts the user for a tool-specific question.

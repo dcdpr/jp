@@ -3,7 +3,7 @@ use std::{collections::VecDeque, io::Write};
 use inquire::InquireError;
 use parking_lot::Mutex;
 
-use crate::{InlineOption, inline_select::InlineSelect};
+use crate::{InlineOption, InlineReply, ReplyEditMode, ReplyOutcome, inline_select::InlineSelect};
 
 /// Backend trait for interactive prompts.
 ///
@@ -23,10 +23,18 @@ pub trait PromptBackend: Send + Sync {
         writer: &mut dyn Write,
     ) -> Result<char, InquireError>;
 
-    /// Display a text input prompt.
+    /// Display an inline reply prompt: a rich, multi-line editable buffer with
+    /// a `Ctrl+X` escape to the external editor.
     ///
-    /// Returns the entered text, or empty string on error.
-    fn text_input(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError>;
+    /// `output` is the owned stream the widget renders to (the caller's
+    /// `/dev/tty` target).
+    fn inline_reply(
+        &self,
+        message: &str,
+        initial_text: &str,
+        edit_mode: ReplyEditMode,
+        output: Box<dyn Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError>;
 
     /// Display a single-line text input prompt.
     fn text(
@@ -58,8 +66,14 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
         (*self).inline_select(message, options, default, writer)
     }
 
-    fn text_input(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
-        (*self).text_input(message, writer)
+    fn inline_reply(
+        &self,
+        message: &str,
+        initial_text: &str,
+        edit_mode: ReplyEditMode,
+        output: Box<dyn Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError> {
+        (*self).inline_reply(message, initial_text, edit_mode, output)
     }
 
     fn text(
@@ -101,8 +115,18 @@ impl PromptBackend for TerminalPromptBackend {
         prompt.prompt(writer)
     }
 
-    fn text_input(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
-        inquire::Editor::new(message).prompt_with_writer(writer)
+    fn inline_reply(
+        &self,
+        message: &str,
+        initial_text: &str,
+        edit_mode: ReplyEditMode,
+        output: Box<dyn Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError> {
+        InlineReply::new(message)
+            .with_initial_text(initial_text)
+            .with_edit_mode(edit_mode)
+            .with_help_message("Enter to send · Alt+Enter for newline · Ctrl+X to edit in $EDITOR")
+            .prompt(output)
     }
 
     fn text(
@@ -135,13 +159,14 @@ impl PromptBackend for TerminalPromptBackend {
 
 /// Mock prompt backend for testing.
 ///
-/// Pre-load responses that will be returned by `inline_select` and
-/// `text_input`.
+/// Pre-load the responses returned by the prompt methods (`inline_select`,
+/// `inline_reply`, `text`, `select`).
 ///
 /// Uses `Mutex` instead of `RefCell` to satisfy `Send + Sync` bounds.
 #[derive(Debug, Default)]
 pub struct MockPromptBackend {
     inline_responses: Mutex<VecDeque<char>>,
+    reply_outcomes: Mutex<VecDeque<ReplyOutcome>>,
     text_responses: Mutex<VecDeque<String>>,
     select_responses: Mutex<VecDeque<String>>,
 }
@@ -155,6 +180,17 @@ impl MockPromptBackend {
     #[must_use]
     pub fn with_inline_responses(self, responses: impl IntoIterator<Item = char>) -> Self {
         *self.inline_responses.lock() = responses.into_iter().collect();
+        self
+    }
+
+    /// Script the outcomes returned by `inline_reply`, in order.
+    ///
+    /// Lets a test drive a whole reply flow, including editor escapes, e.g.
+    /// `[ReplyOutcome::OpenEditor { .. },
+    /// ReplyOutcome::Submit("done".into())]`.
+    #[must_use]
+    pub fn with_reply_outcomes(self, outcomes: impl IntoIterator<Item = ReplyOutcome>) -> Self {
+        *self.reply_outcomes.lock() = outcomes.into_iter().collect();
         self
     }
 
@@ -192,8 +228,14 @@ impl PromptBackend for MockPromptBackend {
             .ok_or(InquireError::OperationCanceled)
     }
 
-    fn text_input(&self, _message: &str, _writer: &mut dyn Write) -> Result<String, InquireError> {
-        self.text_responses
+    fn inline_reply(
+        &self,
+        _message: &str,
+        _initial_text: &str,
+        _edit_mode: ReplyEditMode,
+        _output: Box<dyn Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError> {
+        self.reply_outcomes
             .lock()
             .pop_front()
             .ok_or(InquireError::OperationCanceled)

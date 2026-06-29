@@ -2110,6 +2110,11 @@ _rfd-resolve NNN:
 #      context (separated by `\n\n Here is additional context: `).
 #   4. ARGS is empty: use MSG alone.
 #
+# In every shape the free-text message is placed after a `--` so `jp query`
+# treats it as the positional query, never as flags. Without this guard, a
+# preceding option (e.g. `--edit`) word-split next to the message would swallow
+# its first token as the option's value.
+#
 # Prints the resulting `args` string to stdout with no trailing newline.
 # Callers use it as: `args=$(just _shape-args "$msg" "$@")`.
 [no-exit-message]
@@ -2130,9 +2135,9 @@ _shape-args MSG *ARGS:
     elif starts_with "-" "$@" && ! contains "-- " "$@"; then
         args="$* -- $msg"
     elif [ -n "$args" ]; then
-        args="$msg\n\n Here is additional context: $args"
+        args="-- $msg\n\n Here is additional context: $args"
     else
-        args="$msg"
+        args="-- $msg"
     fi
 
     printf '%s' "$args"

@@ -124,7 +124,7 @@ use crate::{
         lock::{LockRequest, acquire_lock},
     },
     ctx::IntoPartialAppConfig,
-    editor::{self, Editor},
+    editor,
     error::{Error, Result},
     output::print_json,
     parser::AttachmentUrlOrPath,
@@ -211,20 +211,16 @@ pub(crate) struct Query {
     #[arg(short = 'a', long = "attachment", alias = "attach")]
     attachments: Vec<AttachmentUrlOrPath>,
 
-    /// Whether and how to edit the query.
+    /// Open an editor to compose the query.
     ///
-    /// Setting this flag to `true`, omitting it, or using it as a boolean flag
-    /// (e.g.
-    /// `--edit`) will use the default editor configured elsewhere, or return an
-    /// error if no editor is configured and one is required.
+    /// Forces the editor open even when a query is provided inline (or piped on
+    /// stdin).
+    /// Use `--no-edit` (`-E`) to suppress it.
     ///
-    /// If set to `false`, the editor will be disabled (similar to `--no-edit`),
-    /// which might result in an error if the editor is required.
-    ///
-    /// If set to any other value, it will be used as the command to open the
-    /// editor.
+    /// To change which editor is used, set `editor.cmd` in your config (or pass
+    /// `--cfg editor.cmd=...`).
     #[arg(short = 'e', long = "edit", conflicts_with = "no_edit")]
-    edit: Option<Option<Editor>>,
+    edit: bool,
 
     /// Do not edit the query.
     ///
@@ -771,10 +767,10 @@ impl Query {
             return Ok((false, PartialAppConfig::empty()));
         }
 
-        let editor = match config.editor.command() {
+        let backend = match editor::build_editor_backend(&config.editor) {
             None if !request.is_empty() => return Ok((false, PartialAppConfig::empty())),
             None => return Err(Error::MissingEditor),
-            Some(cmd) => cmd,
+            Some(backend) => backend,
         };
 
         let (content, editor_provided_config) = editor::edit_query(
@@ -782,7 +778,7 @@ impl Query {
             conversation_root,
             stream,
             request.as_str(),
-            editor,
+            backend.as_ref(),
             None,
         )?;
         request.content = content;
@@ -871,17 +867,17 @@ impl Query {
     /// This can be used for example when requesting a tool call without needing
     /// additional context to be provided.
     fn force_no_edit(&self) -> bool {
-        self.no_edit || matches!(self.edit, Some(Some(Editor::Disabled)))
+        self.no_edit
     }
 
     /// Returns `true` if editing is explicitly enabled.
     ///
-    /// This means the `--edit` flag was provided (but not `--edit=false`), or
+    /// This means the `--edit` flag was provided (and not `--no-edit`), or
     /// `--quote` was provided (which implies editing).
     /// In either case the editor should be opened, regardless of whether a
     /// query is provided as an argument.
     fn force_edit(&self) -> bool {
-        !self.force_no_edit() && (self.edit.is_some() || self.quote)
+        !self.force_no_edit() && (self.edit || self.quote)
     }
 
     #[must_use]
@@ -1258,8 +1254,8 @@ impl IntoPartialAppConfig for Query {
             local: _,
             no_local: _,
             attachments,
-            edit,
-            no_edit,
+            edit: _,
+            no_edit: _,
             quote: _,
             tool_use,
             no_tool_use,
@@ -1280,7 +1276,6 @@ impl IntoPartialAppConfig for Query {
         } = &self;
 
         apply_model(&mut partial, model.as_deref(), merged_config);
-        apply_editor(&mut partial, edit.as_ref().map(|v| v.as_ref()), *no_edit);
 
         // Inject builtin tool configs before tool-enable processing.
         for (name, config) in tool::builtins::all() {
@@ -1389,22 +1384,6 @@ fn apply_model(partial: &mut PartialAppConfig, model: Option<&str>, _: Option<&P
     let Some(id) = model else { return };
 
     partial.assistant.model.id = id.into();
-}
-
-/// Apply the CLI editor configuration to the partial configuration.
-fn apply_editor(partial: &mut PartialAppConfig, editor: Option<Option<&Editor>>, no_edit: bool) {
-    let Some(Some(editor)) = editor else {
-        return;
-    };
-
-    match (no_edit, editor) {
-        (true, _) | (_, Editor::Disabled) => {
-            partial.editor.cmd = None;
-            partial.editor.envs = None;
-        }
-        (_, Editor::Default) => {}
-        (_, Editor::Command(cmd)) => partial.editor.cmd = Some(cmd.clone()),
-    }
 }
 
 fn apply_enable_tools(

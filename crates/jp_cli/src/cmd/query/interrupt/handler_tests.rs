@@ -1,4 +1,7 @@
-use jp_inquire::prompt::MockPromptBackend;
+use std::sync::Arc;
+
+use jp_editor::MockEditorBackend;
+use jp_inquire::{ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
 use jp_printer::{OutputFormat, Printer};
 
 use super::*;
@@ -8,185 +11,231 @@ fn make_printer() -> Printer {
     printer
 }
 
-/// Streaming config with the given action.
+/// Streaming config with the given action and no straight-to-editor opt-in.
 fn streaming(action: StreamingInterruptAction) -> StreamingInterruptConfig {
-    StreamingInterruptConfig { action }
+    StreamingInterruptConfig {
+        action,
+        reply_in_editor: false,
+    }
 }
 
-/// Tool config with the given action.
+/// Tool config with the given action and no straight-to-editor opt-in.
 fn tool(action: ToolInterruptAction) -> ToolInterruptConfig {
-    ToolInterruptConfig { action }
+    ToolInterruptConfig {
+        action,
+        reply_in_editor: false,
+    }
+}
+
+/// Build a handler with no editor configured (emacs inline editing).
+fn handler(backend: MockPromptBackend) -> InterruptHandler<MockPromptBackend> {
+    InterruptHandler::with_backend(backend, None, ReplyEditMode::Emacs)
+}
+
+/// Build a handler with a (mock) editor for the reply escape hatch.
+fn handler_with_editor(
+    backend: MockPromptBackend,
+    editor: MockEditorBackend,
+) -> InterruptHandler<MockPromptBackend> {
+    InterruptHandler::with_backend(backend, Some(Arc::new(editor)), ReplyEditMode::Emacs)
 }
 
 #[test]
-fn test_streaming_interrupt_stop() {
-    let backend = MockPromptBackend::new().with_inline_responses(['s']);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
+fn streaming_interrupt_stop() {
+    let handler = handler(MockPromptBackend::new().with_inline_responses(['s']));
     let action = handler.handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Prompt),
-        &mut writer,
+        &make_printer(),
         true,
     );
     assert_eq!(action, InterruptAction::Stop);
 }
 
 #[test]
-fn test_streaming_interrupt_abort() {
-    let backend = MockPromptBackend::new().with_inline_responses(['a']);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
+fn streaming_interrupt_abort() {
+    let handler = handler(MockPromptBackend::new().with_inline_responses(['a']));
     let action = handler.handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Prompt),
-        &mut writer,
+        &make_printer(),
         true,
     );
     assert_eq!(action, InterruptAction::Abort);
 }
 
 #[test]
-fn test_streaming_interrupt_reply() {
+fn streaming_interrupt_reply_submits() {
     let backend = MockPromptBackend::new()
         .with_inline_responses(['r'])
-        .with_text_responses(["my reply message"]);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_streaming_interrupt(
+        .with_reply_outcomes([ReplyOutcome::Submit("my reply message".into())]);
+    let action = handler(backend).handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Prompt),
-        &mut writer,
+        &make_printer(),
         true,
     );
     assert_eq!(action, InterruptAction::Reply("my reply message".into()));
 }
 
 #[test]
-fn test_streaming_interrupt_reply_empty_on_cancel() {
-    // No text response - simulates user canceling the text input
-    let backend = MockPromptBackend::new().with_inline_responses(['r']);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_streaming_interrupt(
+fn streaming_interrupt_reply_cancel_returns_to_menu() {
+    // `r` → cancel the reply → back to the menu → `s` → Stop.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r', 's'])
+        .with_reply_outcomes([ReplyOutcome::Cancelled]);
+    let action = handler(backend).handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Prompt),
-        &mut writer,
-        true,
-    );
-    assert_eq!(action, InterruptAction::Reply(String::new()));
-}
-
-#[test]
-fn test_streaming_interrupt_continue_stream_alive() {
-    let backend = MockPromptBackend::new().with_inline_responses(['c']);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_streaming_interrupt(
-        &streaming(StreamingInterruptAction::Prompt),
-        &mut writer,
-        true,
-    );
-    assert_eq!(action, InterruptAction::Resume);
-}
-
-#[test]
-fn test_streaming_interrupt_continue_stream_dead() {
-    let backend = MockPromptBackend::new().with_inline_responses(['c']);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_streaming_interrupt(
-        &streaming(StreamingInterruptAction::Prompt),
-        &mut writer,
-        false,
-    );
-    assert_eq!(action, InterruptAction::Continue);
-}
-
-#[test]
-fn test_streaming_interrupt_defaults_to_stop_on_error() {
-    // No responses - will error and default to Stop
-    let backend = MockPromptBackend::new();
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_streaming_interrupt(
-        &streaming(StreamingInterruptAction::Prompt),
-        &mut writer,
+        &make_printer(),
         true,
     );
     assert_eq!(action, InterruptAction::Stop);
 }
 
 #[test]
-fn test_tool_interrupt_stop_with_custom_response() {
+fn streaming_interrupt_reply_empty_returns_to_menu_then_submits() {
+    // `r` → empty submit → back to menu → `r` → submit "second try".
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r', 'r'])
+        .with_reply_outcomes([
+            ReplyOutcome::Submit(String::new()),
+            ReplyOutcome::Submit("second try".into()),
+        ]);
+    let action = handler(backend).handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Prompt),
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Reply("second try".into()));
+}
+
+#[test]
+fn streaming_interrupt_open_editor_re_seeds_then_submits() {
+    // `r` → Ctrl+X → editor returns text → re-seeded inline prompt → submit.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([
+            ReplyOutcome::OpenEditor {
+                current_text: "draft".into(),
+            },
+            ReplyOutcome::Submit("from the editor, edited inline".into()),
+        ]);
+    let editor = MockEditorBackend::always("from the editor");
+    let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Prompt),
+        &make_printer(),
+        true,
+    );
+    assert_eq!(
+        action,
+        InterruptAction::Reply("from the editor, edited inline".into())
+    );
+}
+
+#[test]
+fn streaming_interrupt_open_editor_empty_returns_to_menu() {
+    // `r` → Ctrl+X → editor emptied → back to menu → `s` → Stop.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r', 's'])
+        .with_reply_outcomes([ReplyOutcome::OpenEditor {
+            current_text: String::new(),
+        }]);
+    let editor = MockEditorBackend::empty();
+    let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Prompt),
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Stop);
+}
+
+#[test]
+fn streaming_interrupt_continue_stream_alive() {
+    let handler = handler(MockPromptBackend::new().with_inline_responses(['c']));
+    let action = handler.handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Prompt),
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Resume);
+}
+
+#[test]
+fn streaming_interrupt_continue_stream_dead() {
+    let handler = handler(MockPromptBackend::new().with_inline_responses(['c']));
+    let action = handler.handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Prompt),
+        &make_printer(),
+        false,
+    );
+    assert_eq!(action, InterruptAction::Continue);
+}
+
+#[test]
+fn streaming_interrupt_defaults_to_stop_on_error() {
+    // No responses: the menu errors and falls back to Stop.
+    let action = handler(MockPromptBackend::new()).handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Prompt),
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Stop);
+}
+
+#[test]
+fn tool_interrupt_stop_with_custom_response() {
     let backend = MockPromptBackend::new()
         .with_inline_responses(['s'])
-        .with_text_responses(["don't run this tool"]);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &mut writer);
+        .with_reply_outcomes([ReplyOutcome::Submit("don't run this tool".into())]);
+    let action =
+        handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
     assert_eq!(action, InterruptAction::ToolCancelled {
         response: "don't run this tool".into()
     });
 }
 
 #[test]
-fn test_tool_interrupt_stop_empty_uses_canned_response() {
-    // No text response — simulates user pressing Enter on empty input
-    let backend = MockPromptBackend::new().with_inline_responses(['s']);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &mut writer);
+fn tool_interrupt_stop_empty_uses_canned_response() {
+    // An empty reply falls through to the canned rejection message.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['s'])
+        .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
+    let action =
+        handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
     assert!(
         matches!(action, InterruptAction::ToolCancelled { response } if response.contains("intentionally rejected"))
     );
 }
 
 #[test]
-fn test_tool_interrupt_restart() {
-    let backend = MockPromptBackend::new().with_inline_responses(['r']);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
+fn tool_interrupt_stop_cancel_uses_canned_response() {
+    // A cancelled reply also falls through to the canned message (the
+    // "interrupt a tool with no explanation" shortcut).
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['s'])
+        .with_reply_outcomes([ReplyOutcome::Cancelled]);
+    let action =
+        handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
+    assert!(
+        matches!(action, InterruptAction::ToolCancelled { response } if response.contains("intentionally rejected"))
+    );
+}
 
-    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &mut writer);
+#[test]
+fn tool_interrupt_restart() {
+    let handler = handler(MockPromptBackend::new().with_inline_responses(['r']));
+    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
     assert_eq!(action, InterruptAction::RestartTool);
 }
 
 #[test]
-fn test_tool_interrupt_continue() {
-    let backend = MockPromptBackend::new().with_inline_responses(['c']);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &mut writer);
+fn tool_interrupt_continue() {
+    let handler = handler(MockPromptBackend::new().with_inline_responses(['c']));
+    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
     assert_eq!(action, InterruptAction::Resume);
 }
 
 #[test]
-fn test_tool_interrupt_defaults_to_continue_on_error() {
-    // No responses - will error and default to Continue
-    let backend = MockPromptBackend::new();
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &mut writer);
+fn tool_interrupt_defaults_to_continue_on_error() {
+    let action = handler(MockPromptBackend::new())
+        .handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
     assert_eq!(action, InterruptAction::Resume);
 }
 
@@ -195,13 +244,9 @@ fn test_tool_interrupt_defaults_to_continue_on_error() {
 
 #[test]
 fn configured_streaming_stop_skips_menu() {
-    let handler = InterruptHandler::with_backend(MockPromptBackend::new());
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_streaming_interrupt(
+    let action = handler(MockPromptBackend::new()).handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Stop),
-        &mut writer,
+        &make_printer(),
         true,
     );
     assert_eq!(action, InterruptAction::Stop);
@@ -209,13 +254,9 @@ fn configured_streaming_stop_skips_menu() {
 
 #[test]
 fn configured_streaming_abort_skips_menu() {
-    let handler = InterruptHandler::with_backend(MockPromptBackend::new());
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_streaming_interrupt(
+    let action = handler(MockPromptBackend::new()).handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Abort),
-        &mut writer,
+        &make_printer(),
         true,
     );
     assert_eq!(action, InterruptAction::Abort);
@@ -223,20 +264,16 @@ fn configured_streaming_abort_skips_menu() {
 
 #[test]
 fn configured_streaming_continue_tracks_stream_liveness() {
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let alive = InterruptHandler::with_backend(MockPromptBackend::new())
-        .handle_streaming_interrupt(
-            &streaming(StreamingInterruptAction::Continue),
-            &mut writer,
-            true,
-        );
+    let alive = handler(MockPromptBackend::new()).handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Continue),
+        &make_printer(),
+        true,
+    );
     assert_eq!(alive, InterruptAction::Resume);
 
-    let dead = InterruptHandler::with_backend(MockPromptBackend::new()).handle_streaming_interrupt(
+    let dead = handler(MockPromptBackend::new()).handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Continue),
-        &mut writer,
+        &make_printer(),
         false,
     );
     assert_eq!(dead, InterruptAction::Continue);
@@ -244,38 +281,96 @@ fn configured_streaming_continue_tracks_stream_liveness() {
 
 #[test]
 fn configured_streaming_reply_uses_inline_prompt() {
-    let backend = MockPromptBackend::new().with_text_responses(["changed my mind"]);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_streaming_interrupt(
+    // A menu-less `reply` collects through the inline widget; backing out
+    // resumes rather than returning to a (non-existent) menu.
+    let backend = MockPromptBackend::new()
+        .with_reply_outcomes([ReplyOutcome::Submit("changed my mind".into())]);
+    let action = handler(backend).handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Reply),
-        &mut writer,
+        &make_printer(),
         true,
     );
     assert_eq!(action, InterruptAction::Reply("changed my mind".into()));
 }
 
 #[test]
-fn configured_tool_restart_skips_menu() {
-    let handler = InterruptHandler::with_backend(MockPromptBackend::new());
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
+fn configured_streaming_reply_cancel_resumes() {
+    let backend = MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Cancelled]);
+    let action = handler(backend).handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Reply),
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Resume);
+}
 
-    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Restart), &mut writer);
+#[test]
+fn configured_tool_restart_skips_menu() {
+    let action = handler(MockPromptBackend::new())
+        .handle_tool_interrupt(&tool(ToolInterruptAction::Restart), &make_printer());
     assert_eq!(action, InterruptAction::RestartTool);
 }
 
 #[test]
 fn configured_tool_stop_reply_uses_inline_prompt() {
-    let backend = MockPromptBackend::new().with_text_responses(["use ripgrep"]);
-    let handler = InterruptHandler::with_backend(backend);
-    let printer = make_printer();
-    let mut writer = printer.out_writer();
-
-    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::StopReply), &mut writer);
+    let backend =
+        MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Submit("use ripgrep".into())]);
+    let action = handler(backend)
+        .handle_tool_interrupt(&tool(ToolInterruptAction::StopReply), &make_printer());
     assert_eq!(action, InterruptAction::ToolCancelled {
         response: "use ripgrep".into()
     });
+}
+
+#[test]
+fn reply_in_editor_opens_editor_directly() {
+    // With `reply_in_editor`, `r` skips the inline widget and sends the editor
+    // result directly. No reply outcomes are scripted on the prompt backend.
+    let backend = MockPromptBackend::new().with_inline_responses(['r']);
+    let editor = MockEditorBackend::always("written in the editor");
+    let config = StreamingInterruptConfig {
+        action: StreamingInterruptAction::Prompt,
+        reply_in_editor: true,
+    };
+    let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
+        &config,
+        &make_printer(),
+        true,
+    );
+    assert_eq!(
+        action,
+        InterruptAction::Reply("written in the editor".into())
+    );
+}
+
+#[test]
+fn reply_in_editor_empty_returns_to_menu() {
+    // `reply_in_editor` with an empty editor result returns to the menu.
+    let backend = MockPromptBackend::new().with_inline_responses(['r', 's']);
+    let editor = MockEditorBackend::empty();
+    let config = StreamingInterruptConfig {
+        action: StreamingInterruptAction::Prompt,
+        reply_in_editor: true,
+    };
+    let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
+        &config,
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Stop);
+}
+
+#[test]
+fn reply_in_editor_without_editor_falls_back_to_inline() {
+    // `reply_in_editor` is set but no editor configured: fall back to the
+    // inline widget rather than doing nothing.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([ReplyOutcome::Submit("typed inline".into())]);
+    let config = StreamingInterruptConfig {
+        action: StreamingInterruptAction::Prompt,
+        reply_in_editor: true,
+    };
+    let action = handler(backend).handle_streaming_interrupt(&config, &make_printer(), true);
+    assert_eq!(action, InterruptAction::Reply("typed inline".into()));
 }

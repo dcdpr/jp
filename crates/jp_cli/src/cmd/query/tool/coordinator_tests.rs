@@ -1,8 +1,7 @@
 use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
-use jp_editor::MockEditorBackend;
-use jp_inquire::prompt::MockPromptBackend;
+use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
 use jp_printer::{ErrChannel, OutputFormat, Printer};
 use schematic::Config as _;
 
@@ -535,16 +534,15 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
         },
     });
 
-    // The editor returns post-edit args `path: src/bar.rs`. The prompt
-    // backend picks `e` so the prompter routes through the editor.
+    // The prompt backend picks `e` (edit arguments) and supplies the post-edit
+    // JSON through the inline reply widget.
     let post_edit = serde_json::json!({"path": "src/bar.rs"});
-    let editor = MockEditorBackend::json(&post_edit);
-    let prompt_backend = MockPromptBackend::new().with_inline_responses(['e']);
-    let prompter = ToolPrompter::with_backends(
-        printer.clone(),
-        Some(Arc::new(editor)),
-        Arc::new(prompt_backend),
-    );
+    let prompt_backend = MockPromptBackend::new()
+        .with_inline_responses(['e'])
+        .with_reply_outcomes([ReplyOutcome::Submit(
+            serde_json::to_string(&post_edit).unwrap(),
+        )]);
+    let prompter = ToolPrompter::with_backends(printer.clone(), None, Arc::new(prompt_backend));
 
     let mut turn_state = TurnState::default();
 

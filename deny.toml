@@ -34,5 +34,6 @@ allow-git = [
     "https://github.com/JeanMertz/httpmock?branch=tweaks",
     "https://github.com/JeanMertz/inquire?branch=submit-on-valid-parse",
     "https://github.com/JeanMertz/openai-responses-rs",
+    "https://github.com/JeanMertz/reedline?branch=changes",
     "https://github.com/JeanMertz/saphyr?branch=jean/fix-valid-literal-block-scalar-check",
 ]

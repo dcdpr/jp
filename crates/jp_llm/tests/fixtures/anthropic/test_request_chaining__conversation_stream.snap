@@ -141,10 +141,12 @@ expression: v
     },
     "interrupt": {
       "streaming": {
-        "action": "prompt"
+        "action": "prompt",
+        "reply_in_editor": false
       },
       "tool_call": {
-        "action": "prompt"
+        "action": "prompt",
+        "reply_in_editor": false
       }
     },
     "editor": {
@@ -152,7 +154,10 @@ expression: v
         "JP_EDITOR",
         "VISUAL",
         "EDITOR"
-      ]
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
     },
     "providers": {
       "llm": {

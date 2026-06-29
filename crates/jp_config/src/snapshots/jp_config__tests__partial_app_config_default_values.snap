@@ -284,9 +284,15 @@ Ok(
             interrupt: PartialInterruptConfig {
                 streaming: PartialStreamingInterruptConfig {
                     action: None,
+                    reply_in_editor: Some(
+                        false,
+                    ),
                 },
                 tool_call: PartialToolInterruptConfig {
                     action: None,
+                    reply_in_editor: Some(
+                        false,
+                    ),
                 },
             },
             editor: PartialEditorConfig {
@@ -298,6 +304,9 @@ Ok(
                         "EDITOR",
                     ],
                 ),
+                inline: PartialInlineEditorConfig {
+                    edit_mode: None,
+                },
             },
             template: PartialTemplateConfig {
                 values: {},

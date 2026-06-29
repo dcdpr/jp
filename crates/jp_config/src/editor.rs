@@ -2,9 +2,9 @@
 
 use std::env;
 
-use camino::Utf8PathBuf;
 use duct::Expression;
-use schematic::Config;
+use schematic::{Config, ConfigEnum};
+use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
@@ -45,6 +45,43 @@ pub struct EditorConfig {
         merge = schematic::merge::append_vec,
     )]
     pub envs: Vec<String>,
+
+    /// Settings for the inline reply widget.
+    ///
+    /// Lives at `editor.inline.*`.
+    #[setting(nested)]
+    pub inline: InlineEditorConfig,
+}
+
+/// Inline reply widget configuration.
+///
+/// Settings for the inline editor JP shows for short replies (for example after
+/// `Ctrl+C` during a query).
+/// Independent of which external editor `cmd`/`envs` opens.
+#[derive(Debug, Clone, PartialEq, Default, Config)]
+#[config(rename_all = "snake_case")]
+pub struct InlineEditorConfig {
+    /// Editing style of the inline reply buffer.
+    ///
+    /// - `emacs`: Emacs-style keybindings (default).
+    /// - `vi`: Vi-style modal editing (insert/normal modes).
+    ///
+    /// Controls only the inline buffer's editing style; it is independent of
+    /// which external editor opens when you escape to `$EDITOR`.
+    #[setting(default)]
+    pub edit_mode: InlineEditMode,
+}
+
+/// Editing style for the inline reply widget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum InlineEditMode {
+    /// Emacs-style keybindings.
+    #[default]
+    Emacs,
+
+    /// Vi-style modal editing (insert/normal modes).
+    Vi,
 }
 
 impl AssignKeyValue for PartialEditorConfig {
@@ -53,6 +90,7 @@ impl AssignKeyValue for PartialEditorConfig {
             "" => kv.try_merge_object(self)?,
             "cmd" => self.cmd = kv.try_some_string()?,
             _ if kv.p("envs") => kv.try_some_vec_of_strings(&mut self.envs)?,
+            _ if kv.p("inline") => self.inline.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -65,6 +103,7 @@ impl PartialConfigDelta for PartialEditorConfig {
         Self {
             cmd: delta_opt(self.cmd.as_ref(), next.cmd),
             envs: delta_opt_vec(self.envs.as_ref(), next.envs),
+            inline: self.inline.delta(next.inline),
         }
     }
 }
@@ -74,6 +113,7 @@ impl FillDefaults for PartialEditorConfig {
         Self {
             cmd: self.cmd.or(defaults.cmd),
             envs: self.envs.or(defaults.envs),
+            inline: self.inline.fill_from(defaults.inline),
         }
     }
 }
@@ -85,6 +125,45 @@ impl ToPartial for EditorConfig {
         Self::Partial {
             cmd: partial_opts(self.cmd.as_ref(), defaults.cmd),
             envs: partial_opt(&self.envs, defaults.envs),
+            inline: self.inline.to_partial(),
+        }
+    }
+}
+
+impl AssignKeyValue for PartialInlineEditorConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
+            "edit_mode" => self.edit_mode = kv.try_some_from_str()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialInlineEditorConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            edit_mode: delta_opt(self.edit_mode.as_ref(), next.edit_mode),
+        }
+    }
+}
+
+impl FillDefaults for PartialInlineEditorConfig {
+    fn fill_from(self, defaults: Self) -> Self {
+        Self {
+            edit_mode: self.edit_mode.or(defaults.edit_mode),
+        }
+    }
+}
+
+impl ToPartial for InlineEditorConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            edit_mode: partial_opt(&self.edit_mode, defaults.edit_mode),
         }
     }
 }
@@ -113,22 +192,6 @@ impl EditorConfig {
                 }
                 let args: Vec<String> = parts.collect();
                 Some(duct::cmd(program, args))
-            })
-        })
-    }
-
-    /// Return the path to the editor, if any.
-    ///
-    /// For env-var fallback, the first shlex token is taken as the binary; any
-    /// additional arguments are dropped (use [`Self::command`] when the caller
-    /// can invoke the program with arguments).
-    #[must_use]
-    pub fn path(&self) -> Option<Utf8PathBuf> {
-        self.cmd.as_ref().map(Utf8PathBuf::from).or_else(|| {
-            self.envs.iter().find_map(|v| {
-                let value = env::var(v).ok()?;
-                let program = shlex::split(&value)?.into_iter().next()?;
-                which::which(&program).ok().and_then(|p| p.try_into().ok())
             })
         })
     }

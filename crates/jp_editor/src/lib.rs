@@ -1,34 +1,150 @@
-use std::sync::Mutex;
+//! Editor invocation backends.
+//!
+//! [`EditorBackend`] is the frontend seam for running the user's configured
+//! editor.
+//! It offers two shapes of edit: [`edit_text`] for ephemeral
+//! string-in/string-out editing, and [`edit_file`] for opening the editor on
+//! caller-owned paths.
+//!
+//! [`TerminalEditorBackend`] spawns the editor as a local process from a
+//! [`duct::Expression`], so it honours every flag the user attached to their
+//! editor command.
+//! [`MockEditorBackend`] scripts edited text for tests without spawning
+//! anything.
+//!
+//! [`edit_file`]: EditorBackend::edit_file
+//! [`edit_text`]: EditorBackend::edit_text
 
-use camino::Utf8PathBuf;
-use open_editor::{Editor, EditorCallBuilder, errors::OpenEditorError};
+use std::{fs, sync::Mutex};
+
+use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::NamedUtf8TempFile;
+use duct::Expression;
 use serde::Serialize;
 
-/// Backend for opening an editor to modify text.
+/// Backend for invoking the user's configured editor.
 ///
-/// This trait abstracts the editor interaction, allowing tests to mock the
-/// editor without actually opening an external process.
+/// Each frontend (terminal, web, native, mock) provides one implementation.
 pub trait EditorBackend: Send + Sync {
-    /// Opens an editor with the given content and returns the modified content.
-    fn edit(&self, content: &str) -> Result<String, OpenEditorError>;
+    /// Edit `content` in the editor and return the edited text.
+    ///
+    /// On [`EditOutcome::Cancelled`] the returned string is meaningless and
+    /// callers should ignore it.
+    fn edit_text(&self, content: &str) -> Result<(EditOutcome, String), EditorError>;
+
+    /// Open the editor on the requested path(s) and block until it exits.
+    ///
+    /// The edited content is read back from disk by the caller.
+    fn edit_file(&self, req: EditRequest<'_>) -> Result<EditOutcome, EditorError>;
 }
 
-/// Terminal editor implementation using the `open-editor` crate.
+/// Frontend-agnostic request data for [`EditorBackend::edit_file`].
+pub struct EditRequest<'a> {
+    /// The path(s) to open in the editor.
+    pub paths: &'a [Utf8PathBuf],
+
+    /// Working directory for a spawned editor.
+    ///
+    /// Frontends that don't spawn a local process ignore it.
+    pub cwd: Option<&'a Utf8Path>,
+}
+
+/// The interaction outcome of an editor session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditOutcome {
+    /// The user saved and closed (terminal editor exited zero).
+    Saved,
+
+    /// The user aborted (terminal editor exited non-zero).
+    Cancelled,
+}
+
+/// An error from invoking the editor.
+#[derive(Debug, thiserror::Error)]
+pub enum EditorError {
+    /// The editor process could not be spawned (e.g. the binary was not found).
+    #[error("failed to spawn editor")]
+    Spawn(#[source] std::io::Error),
+
+    /// Reading or writing the file being edited failed.
+    #[error("editor file I/O failed")]
+    Io(#[source] std::io::Error),
+}
+
+/// Terminal editor backend: spawns the editor as a local process.
+///
+/// The path(s) being edited are appended as trailing arguments to the
+/// configured command, preserving any flags the user attached (e.g.
+/// `code --wait`).
 pub struct TerminalEditorBackend {
-    pub path: Utf8PathBuf,
+    cmd: Expression,
+}
+
+impl TerminalEditorBackend {
+    /// Create a backend that runs `cmd`, appending the edited path(s) as
+    /// trailing arguments.
+    #[must_use]
+    pub fn new(cmd: Expression) -> Self {
+        Self { cmd }
+    }
+
+    /// Spawn the editor on `paths`, mapping the exit status to an
+    /// [`EditOutcome`].
+    fn run(
+        &self,
+        paths: &[Utf8PathBuf],
+        cwd: Option<&Utf8Path>,
+    ) -> Result<EditOutcome, EditorError> {
+        let args: Vec<String> = paths.iter().map(|p| p.as_str().to_owned()).collect();
+        let cwd = cwd.map(ToOwned::to_owned);
+
+        let output = self
+            .cmd
+            .clone()
+            .before_spawn(move |cmd| {
+                for arg in &args {
+                    cmd.arg(arg);
+                }
+                if let Some(cwd) = &cwd {
+                    cmd.current_dir(cwd);
+                }
+                Ok(())
+            })
+            .unchecked()
+            .run()
+            .map_err(EditorError::Spawn)?;
+
+        Ok(if output.status.success() {
+            EditOutcome::Saved
+        } else {
+            EditOutcome::Cancelled
+        })
+    }
 }
 
 impl EditorBackend for TerminalEditorBackend {
-    fn edit(&self, content: &str) -> Result<String, OpenEditorError> {
-        EditorCallBuilder::new()
-            .with_editor(Editor::from_bin_path(self.path.as_std_path().into()))
-            .edit_string(content)
+    fn edit_text(&self, content: &str) -> Result<(EditOutcome, String), EditorError> {
+        let tmp = NamedUtf8TempFile::new().map_err(EditorError::Io)?;
+        let path = tmp.path().to_owned();
+        fs::write(&path, content).map_err(EditorError::Io)?;
+
+        let outcome = self.run(std::slice::from_ref(&path), None)?;
+        let edited = fs::read_to_string(&path).map_err(EditorError::Io)?;
+
+        Ok((outcome, edited))
+    }
+
+    fn edit_file(&self, req: EditRequest<'_>) -> Result<EditOutcome, EditorError> {
+        self.run(req.paths, req.cwd)
     }
 }
 
 /// Mock editor backend for testing.
 ///
-/// Returns pre-configured responses without opening an actual editor.
+/// Scripts the text returned by [`edit_text`] without spawning a process.
+/// Every interaction reports [`EditOutcome::Saved`].
+///
+/// [`edit_text`]: EditorBackend::edit_text
 pub struct MockEditorBackend {
     responses: Mutex<Vec<String>>,
 }
@@ -36,7 +152,7 @@ pub struct MockEditorBackend {
 impl MockEditorBackend {
     /// Creates a mock that returns the given responses in sequence.
     ///
-    /// Each call to `edit()` consumes one response.
+    /// Each call to `edit_text` consumes one response.
     /// If all responses are exhausted, subsequent calls return an empty string.
     #[must_use]
     pub fn with_responses(responses: impl IntoIterator<Item = impl Into<String>>) -> Self {
@@ -74,14 +190,20 @@ impl MockEditorBackend {
 }
 
 impl EditorBackend for MockEditorBackend {
-    fn edit(&self, _content: &str) -> Result<String, OpenEditorError> {
+    fn edit_text(&self, _content: &str) -> Result<(EditOutcome, String), EditorError> {
         let mut responses = self.responses.lock().unwrap();
-        if responses.is_empty() {
+        let text = if responses.is_empty() {
             // If no more responses, return empty (simulates user clearing
-            // content)
-            Ok(String::new())
+            // content).
+            String::new()
         } else {
-            Ok(responses.remove(0))
-        }
+            responses.remove(0)
+        };
+
+        Ok((EditOutcome::Saved, text))
+    }
+
+    fn edit_file(&self, _req: EditRequest<'_>) -> Result<EditOutcome, EditorError> {
+        Ok(EditOutcome::Saved)
     }
 }

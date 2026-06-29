@@ -51,6 +51,17 @@ pub struct StreamingInterruptConfig {
     ///   so far is kept as context.
     #[setting(default)]
     pub action: StreamingInterruptAction,
+
+    /// Open the editor directly for a reply, skipping the inline widget.
+    ///
+    /// Defaults to `false`.
+    /// When `true`, the `reply` path opens the configured editor immediately
+    /// instead of the inline reply prompt; a non-empty saved result is sent, an
+    /// empty or cancelled result returns to the menu.
+    /// Falls back to the inline widget when no editor is configured, and has no
+    /// effect in non-interactive (no-tty) mode.
+    #[setting(default = false)]
+    pub reply_in_editor: bool,
 }
 
 /// Ctrl-C behavior while tools are executing.
@@ -66,6 +77,17 @@ pub struct ToolInterruptConfig {
     ///   assistant in their place.
     #[setting(default)]
     pub action: ToolInterruptAction,
+
+    /// Open the editor directly for a reply, skipping the inline widget.
+    ///
+    /// Defaults to `false`.
+    /// When `true`, the `stop_reply` path opens the configured editor
+    /// immediately instead of the inline reply prompt; a non-empty saved result
+    /// is sent, an empty result falls through to the canned rejection notice.
+    /// Falls back to the inline widget when no editor is configured, and has no
+    /// effect in non-interactive (no-tty) mode.
+    #[setting(default = false)]
+    pub reply_in_editor: bool,
 }
 
 /// What Ctrl-C does while the assistant is generating content.
@@ -130,6 +152,7 @@ impl AssignKeyValue for PartialStreamingInterruptConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "action" => self.action = kv.try_some_from_str()?,
+            "reply_in_editor" => self.reply_in_editor = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -142,6 +165,7 @@ impl AssignKeyValue for PartialToolInterruptConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "action" => self.action = kv.try_some_from_str()?,
+            "reply_in_editor" => self.reply_in_editor = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -162,6 +186,7 @@ impl PartialConfigDelta for PartialStreamingInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             action: delta_opt(self.action.as_ref(), next.action),
+            reply_in_editor: delta_opt(self.reply_in_editor.as_ref(), next.reply_in_editor),
         }
     }
 }
@@ -170,6 +195,7 @@ impl PartialConfigDelta for PartialToolInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             action: delta_opt(self.action.as_ref(), next.action),
+            reply_in_editor: delta_opt(self.reply_in_editor.as_ref(), next.reply_in_editor),
         }
     }
 }
@@ -187,6 +213,7 @@ impl FillDefaults for PartialStreamingInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             action: self.action.or(defaults.action),
+            reply_in_editor: self.reply_in_editor.or(defaults.reply_in_editor),
         }
     }
 }
@@ -195,6 +222,7 @@ impl FillDefaults for PartialToolInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             action: self.action.or(defaults.action),
+            reply_in_editor: self.reply_in_editor.or(defaults.reply_in_editor),
         }
     }
 }
@@ -214,6 +242,7 @@ impl ToPartial for StreamingInterruptConfig {
 
         Self::Partial {
             action: partial_opt(&self.action, defaults.action),
+            reply_in_editor: partial_opt(&self.reply_in_editor, defaults.reply_in_editor),
         }
     }
 }
@@ -224,6 +253,7 @@ impl ToPartial for ToolInterruptConfig {
 
         Self::Partial {
             action: partial_opt(&self.action, defaults.action),
+            reply_in_editor: partial_opt(&self.reply_in_editor, defaults.reply_in_editor),
         }
     }
 }

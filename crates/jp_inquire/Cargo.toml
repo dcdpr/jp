@@ -12,8 +12,10 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-inquire = { workspace = true, features = ["crossterm", "editor"] }
+crossterm = { workspace = true }
+inquire = { workspace = true, features = ["crossterm"] }
 parking_lot = { workspace = true }
+reedline = { workspace = true }
 
 [lints]
 workspace = true

@@ -3,7 +3,6 @@ use std::{fmt::Write as _, fs, str::FromStr, time::Duration};
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use crossterm::style::Stylize as _;
-use duct::Expression;
 use inquire::Confirm;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, model::id::PartialModelIdOrAliasConfig,
@@ -13,6 +12,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
     thread::ThreadBuilder,
 };
+use jp_editor::{EditOutcome, EditRequest};
 use jp_llm::{
     event::Event,
     event_builder::EventBuilder,
@@ -35,6 +35,7 @@ use crate::{
         lock::{LockOutcome, LockRequest, acquire_lock},
     },
     ctx::Ctx,
+    editor::build_editor_backend,
     error::Error,
 };
 
@@ -129,7 +130,7 @@ impl Edit {
     /// rather than prompting.
     fn run_open_editor(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let config = ctx.config();
-        let cmd = config.editor.command().ok_or(Error::MissingEditor)?;
+        let editor = build_editor_backend(&config.editor).ok_or(Error::MissingEditor)?;
 
         let fs = ctx
             .fs_backend
@@ -156,7 +157,22 @@ impl Edit {
             .collect();
 
         loop {
-            Self::spawn_editor(&cmd, &paths)?;
+            let outcome = editor
+                .edit_file(EditRequest {
+                    paths: &paths,
+                    cwd: None,
+                })
+                .map_err(|error| Error::Editor(error.to_string()))?;
+
+            if outcome == EditOutcome::Cancelled {
+                // The editor aborted (non-zero exit). Discard any partial edits
+                // and leave the conversation unchanged.
+                Self::restore_snapshots(&snapshots)?;
+                return Err(Error::Editor(
+                    "the editor was cancelled; the conversation is unchanged".to_owned(),
+                )
+                .into());
+            }
 
             let Err(error) = self.validate_edits(&fs, &ids) else {
                 break;
@@ -211,28 +227,6 @@ impl Edit {
             if self.metadata {
                 fs.load_conversation_metadata(id)?;
             }
-        }
-        Ok(())
-    }
-
-    /// Spawn `$EDITOR` on the given files.
-    fn spawn_editor(cmd: &Expression, paths: &[Utf8PathBuf]) -> Output {
-        let args: Vec<String> = paths.iter().map(|p| p.as_str().to_owned()).collect();
-        let output = cmd
-            .clone()
-            .before_spawn(move |cmd| {
-                for arg in &args {
-                    cmd.arg(arg);
-                }
-                Ok(())
-            })
-            .unchecked()
-            .run()?;
-
-        if !output.status.success() {
-            return Err(
-                Error::Editor(format!("Editor exited with error: {}", output.status)).into(),
-            );
         }
         Ok(())
     }

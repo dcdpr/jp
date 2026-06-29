@@ -89,7 +89,6 @@ libc = { version = "0.2", default-features = false }
 linkme = { version = "0.3", default-features = false }
 minijinja = { version = "2", default-features = false }
 ollama-rs = { version = "0.3", default-features = false }
-open-editor = { version = "1", default-features = false }
 openai_responses = { version = "0.1", default-features = false }
 parking_lot = { version = "0.12", default-features = false, features = ["arc_lock"] }
 paste = { version = "1", default-features = false }
@@ -101,6 +100,7 @@ quick-xml = { version = "0.39", default-features = false }
 quote = { version = "1", default-features = false }
 ra-ap-rustc_lexer = { version = "0.167", default-features = false }
 rayon = { version = "1", default-features = false }
+reedline = { git = "https://github.com/JeanMertz/reedline", branch = "changes", default-features = false } # fork: adds `Reedline::with_output` + `/dev/tty` cursor/escape routing (RFD 088)
 reflink-copy = { version = "0.1", default-features = false }
 regex = { version = "1", default-features = false }
 relative-path = { version = "2", default-features = false }

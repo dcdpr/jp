@@ -81,6 +81,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.19.0"
 
+[[audits.itertools]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.13.0"
+
 [[audits.libbz2-rs-sys]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"

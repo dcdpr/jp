@@ -24,6 +24,8 @@ In disagreements between code and docs, the code is authoritative.
     - [CommandConfig](#commandconfig)
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
+    - [EditorBackend](#editorbackend)
+    - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
     - [Persona](#persona)
     - [Pinned Conversation](#pinned-conversation)
@@ -96,6 +98,29 @@ The variants are `TurnStart`, `ChatRequest`, `ChatResponse`, `ToolCallRequest`,
 Not every event is sent to LLM providers.
 `EventKind::is_provider_visible()` filters the stream down to the chat and
 tool-call events; turn markers and inquiries are internal.
+
+### EditorBackend
+
+The frontend seam for invoking the user's configured editor.
+Exposes `edit_text` (string in, edited string out) and `edit_file` (open the
+editor on caller-owned paths), covering both editing shapes a frontend offers.
+Each frontend is one implementation: `TerminalEditorBackend` spawns the editor
+as a local process via `EditorConfig::command()`, and `MockEditorBackend` scripts
+outcomes for tests.
+Defined as the `EditorBackend` trait in `jp_editor`; call sites obtain one
+through `build_editor_backend` in `jp_cli`.
+
+### InlineReply
+
+The `jp_inquire` widget for short replies: the interrupt-menu reply (`r` while
+streaming, `s` while tools run) and the tool argument / result / skip-reason
+edits.
+It renders on the `/dev/tty` prompt writer and accepts inline typing, with a
+`Ctrl+X` escape to the configured editor (the `EditorBackend`) for longer edits.
+Submitting produces a `ReplyOutcome`; the call site decides what an empty
+submission or a `Ctrl+C` cancel means.
+Built on the vendored reedline at `crates/contrib/reedline`; the inline buffer's
+editing style is set by `editor.inline.edit_mode`.
 
 ### Inquiry
 

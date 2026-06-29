@@ -6,5 +6,5 @@
 pub(crate) mod handler;
 pub(crate) mod signals;
 
-pub(crate) use handler::InterruptAction;
+pub(crate) use handler::{InterruptAction, reply_edit_mode};
 pub(crate) use signals::{LoopAction, handle_llm_event, handle_streaming_signal};
