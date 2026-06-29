@@ -886,6 +886,14 @@ impl Query {
         self.new_conversation
     }
 
+    /// Force this query to start a new conversation.
+    ///
+    /// Set when the interactive picker's "start a new conversation" item is
+    /// chosen, so the run behaves as if `--new` was passed.
+    pub(crate) fn mark_start_new(&mut self) {
+        self.new_conversation = true;
+    }
+
     #[must_use]
     fn expires_in_duration(&self) -> Option<Duration> {
         self.expires_in?

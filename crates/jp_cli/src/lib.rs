@@ -389,7 +389,7 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
-fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
+fn run_inner(mut cli: Cli, format: OutputFormat) -> Result<()> {
     let printer = Printer::terminal(format);
 
     // `jp init` is a special case that doesn't need the full startup pipeline.
@@ -420,7 +420,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     workspace.load_conversation_index();
 
     let base = load_base_partial(fs_backend.as_deref())?;
-    let (config, handles) = resolve_config(
+    let (config, handles, start_new) = resolve_config(
         &cli.command,
         base,
         &cli.globals.config,
@@ -428,6 +428,12 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         session.as_ref(),
         fs_backend.as_deref(),
     )?;
+
+    // The interactive picker offered a "start a new conversation" item and the
+    // user chose it; treat the run as if `--new` had been passed.
+    if start_new && let Commands::Query(query) = &mut cli.command {
+        query.mark_start_new();
+    }
     let config = Arc::new(config);
     let runtime = build_runtime(cli.root.threads, "jp-worker")?;
     let mut ctx = Ctx::new(
@@ -686,7 +692,7 @@ pub(crate) fn resolve_config(
     workspace: &mut Workspace,
     session: Option<&jp_workspace::session::Session>,
     fs: Option<&FsStorageBackend>,
-) -> Result<(AppConfig, Vec<jp_workspace::ConversationHandle>)> {
+) -> Result<(AppConfig, Vec<jp_workspace::ConversationHandle>, bool)> {
     let pipeline = ConfigPipeline::new(base, cfg_overrides, Some(workspace), fs)?;
 
     // Extract default_id — a loading-time concern consumed here, not
@@ -698,7 +704,14 @@ pub(crate) fn resolve_config(
         .unwrap_or_default();
 
     let request = command.conversation_load_request();
-    let handles = resolve_request(&request, workspace, session, default_id)?;
+    let outcome = resolve_request(
+        &request,
+        workspace,
+        session,
+        default_id,
+        command.allows_new_from_picker(),
+    )?;
+    let handles = outcome.handles;
 
     // Phase 2: per-conversation layer.
     let config_handle = request.config_conversation.and_then(|idx| handles.get(idx));
@@ -730,7 +743,7 @@ pub(crate) fn resolve_config(
     partial.conversation.default_id.take();
 
     let config = build(partial)?;
-    Ok((config, handles))
+    Ok((config, handles, outcome.start_new))
 }
 
 /// Load the base partial config from files and environment variables.

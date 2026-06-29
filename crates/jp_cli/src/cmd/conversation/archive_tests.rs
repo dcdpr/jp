@@ -64,8 +64,10 @@ fn no_target_resolves_to_session_active_conversation() {
         &ws,
         Some(&session),
         DefaultConversationId::Ask,
+        false,
     )
-    .unwrap();
+    .unwrap()
+    .handles;
 
     assert_eq!(handles.len(), 1);
     assert_eq!(handles[0].id(), id);
@@ -89,8 +91,10 @@ fn explicit_target_resolves_to_that_conversation() {
         &ws,
         Some(&session),
         DefaultConversationId::Ask,
+        false,
     )
-    .unwrap();
+    .unwrap()
+    .handles;
 
     assert_eq!(handles.len(), 1);
     assert_eq!(handles[0].id(), id);

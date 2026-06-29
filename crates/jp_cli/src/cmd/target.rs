@@ -174,34 +174,56 @@ impl ConversationLoadRequest {
     }
 }
 
+/// The outcome of resolving a [`ConversationLoadRequest`].
+#[derive(Default)]
+pub(crate) struct ResolveOutcome {
+    /// The resolved conversation handles.
+    pub handles: Vec<ConversationHandle>,
+
+    /// The interactive picker's "start a new conversation" item was chosen.
+    ///
+    /// Only ever `true` for commands that opt in via `allow_picker_new`.
+    /// The caller turns this into a fresh conversation (equivalent to `--new`).
+    pub start_new: bool,
+}
+
 /// Resolve a [`ConversationLoadRequest`] into concrete handles.
 ///
 /// This is the single resolution entry point called by `run_inner`.
 ///
 /// `default_id` is the configured fallback from `conversation.default_id`,
 /// consulted when no session mapping exists and no explicit `--id` is given.
+///
+/// `allow_picker_new` lets the interactive picker offer a "start a new
+/// conversation" item; when chosen, [`ResolveOutcome::start_new`] is set and no
+/// handles are returned.
 pub(crate) fn resolve_request(
     request: &ConversationLoadRequest,
     workspace: &Workspace,
     session: Option<&Session>,
     default_id: DefaultConversationId,
-) -> Result<Vec<ConversationHandle>> {
+    allow_picker_new: bool,
+) -> Result<ResolveOutcome> {
     let Some(targets) = &request.targets else {
-        return Ok(vec![]);
+        return Ok(ResolveOutcome::default());
     };
 
-    let ids = resolve_targets(
+    let (ids, start_new) = resolve_targets(
         targets,
         workspace,
         session,
         default_id,
         request.multi,
         request.session,
+        allow_picker_new,
     )?;
 
-    ids.iter()
+    let handles = ids
+        .iter()
         .map(|id| workspace.acquire_conversation(id).map_err(Into::into))
-        .collect()
+        .collect::<Result<Vec<_>>>()?;
+
+    Ok(ResolveOutcome { handles, start_new })
 }
 
 /// A parsed conversation target from a CLI argument.
@@ -547,10 +569,10 @@ fn resolve_targets(
     default_id: DefaultConversationId,
     multi: bool,
     supports_session: bool,
-) -> Result<Vec<ConversationId>> {
+    allow_new: bool,
+) -> Result<(Vec<ConversationId>, bool)> {
     if targets.is_empty() {
-        let id = resolve_from_session_or_picker(workspace, session, default_id)?;
-        return Ok(vec![id]);
+        return resolve_from_session_or_picker(workspace, session, default_id, allow_new);
     }
 
     let all_ids = targets
@@ -570,11 +592,11 @@ fn resolve_targets(
 
     // When all targets are literal IDs, resolve all of them.
     if all_ids {
-        return targets
+        let ids = targets
             .iter()
             .flat_map(|t| t.resolve(workspace, session).into_iter().flatten())
-            .map(Ok)
-            .collect();
+            .collect::<Vec<_>>();
+        return Ok((ids, false));
     }
 
     // Otherwise treat the list as a fallback chain: try each target in order,
@@ -598,19 +620,20 @@ fn resolve_targets(
                 // Archived picker draws from the archive partition.
                 if filter.archived {
                     return if multi {
-                        resolve_archived_multi_picker(workspace, filter)
+                        resolve_archived_multi_picker(workspace, filter).map(|ids| (ids, false))
                     } else {
-                        resolve_archived_picker(workspace, filter).map(|id| vec![id])
+                        resolve_archived_picker(workspace, filter).map(|id| (vec![id], false))
                     };
                 }
 
-                return if multi {
-                    resolve_multi_picker(workspace, session, filter)
-                } else {
-                    resolve_picker(workspace, session, filter).map(|id| vec![id])
-                };
+                if multi {
+                    return resolve_multi_picker(workspace, session, filter)
+                        .map(|ids| (ids, false));
+                }
+
+                return resolve_single_picker(workspace, session, filter, allow_new);
             }
-            Ok(v) => return Ok(v),
+            Ok(v) => return Ok((v, false)),
             Err(e) => last_err = Some(e),
         }
     }
@@ -623,17 +646,44 @@ fn resolve_from_session_or_picker(
     workspace: &Workspace,
     session: Option<&Session>,
     default_id: DefaultConversationId,
-) -> Result<ConversationId> {
+    allow_new: bool,
+) -> Result<(Vec<ConversationId>, bool)> {
     if let Some(id) = session.and_then(|s| workspace.session_active_conversation(s)) {
-        return Ok(id);
+        return Ok((vec![id], false));
     }
 
     // Try the configured default before falling through to the picker.
     if let Some(id) = resolve_default_id(default_id, workspace, session) {
-        return Ok(id);
+        return Ok((vec![id], false));
     }
 
-    resolve_picker(workspace, session, &PickerFilter::default())
+    resolve_single_picker(workspace, session, &PickerFilter::default(), allow_new)
+}
+
+/// Single-select picker dispatch, optionally offering "start a new
+/// conversation".
+///
+/// Returns `(vec![], true)` when the user chooses to start fresh, and
+/// `(vec![id], false)` for an existing conversation.
+fn resolve_single_picker(
+    workspace: &Workspace,
+    session: Option<&Session>,
+    filter: &PickerFilter,
+    allow_new: bool,
+) -> Result<(Vec<ConversationId>, bool)> {
+    if !allow_new {
+        return resolve_picker(workspace, session, filter).map(|id| (vec![id], false));
+    }
+
+    if !io::stdin().is_terminal() {
+        return Err(Error::NoConversationTarget);
+    }
+
+    match pick_conversation(workspace, session, filter, true) {
+        Some(PickSelection::Existing(id)) => Ok((vec![id], false)),
+        Some(PickSelection::New) => Ok((vec![], true)),
+        None => Err(Error::NoConversationTarget),
+    }
 }
 
 /// Resolve the `conversation.default_id` config value to a concrete ID.
@@ -668,7 +718,9 @@ pub(crate) fn resolve_picker(
         return Err(Error::NoConversationTarget);
     }
 
-    pick_conversation(workspace, session, filter).ok_or(Error::NoConversationTarget)
+    pick_conversation(workspace, session, filter, false)
+        .and_then(PickSelection::existing)
+        .ok_or(Error::NoConversationTarget)
 }
 
 fn resolve_multi_picker(
@@ -794,18 +846,51 @@ fn format_picker_label(row: &PickerRow, time_width: usize) -> String {
     }
 }
 
+/// Label for the synthetic "start a new conversation" picker item.
+///
+/// Chosen so it can never collide with a conversation row, whose label always
+/// begins with the conversation ID (`jp-c…`).
+const NEW_CONVERSATION_LABEL: &str = "+ Start a new conversation";
+
+/// The result of an interactive single-select conversation picker.
+enum PickSelection {
+    /// An existing conversation was chosen.
+    Existing(ConversationId),
+
+    /// The "start a new conversation" item was chosen.
+    New,
+}
+
+impl PickSelection {
+    /// The chosen conversation ID, or `None` for the "start new" item.
+    fn existing(self) -> Option<ConversationId> {
+        match self {
+            Self::Existing(id) => Some(id),
+            Self::New => None,
+        }
+    }
+}
+
 /// Single-select interactive conversation picker.
+///
+/// When `allow_new` is set, a "start a new conversation" item is offered as the
+/// first entry, so pressing Enter immediately selects it.
 fn pick_conversation(
     workspace: &Workspace,
     session: Option<&Session>,
     filter: &PickerFilter,
-) -> Option<ConversationId> {
+    allow_new: bool,
+) -> Option<PickSelection> {
     let items = build_picker_items(workspace, session, filter);
-    if items.is_empty() {
+    if items.is_empty() && !allow_new {
         return None;
     }
 
-    let labels: Vec<String> = items.iter().map(|(_, l)| l.clone()).collect();
+    let mut labels: Vec<String> = items.iter().map(|(_, l)| l.clone()).collect();
+    if allow_new {
+        labels.insert(0, NEW_CONVERSATION_LABEL.to_owned());
+    }
+
     let mut writer = io::stderr();
     let mut prompt = inquire::Select::new("Select a conversation", labels);
     if let Some(query) = &filter.query {
@@ -813,10 +898,14 @@ fn pick_conversation(
     }
     let selected = prompt.prompt_with_writer(&mut writer).ok()?;
 
+    if allow_new && selected == NEW_CONVERSATION_LABEL {
+        return Some(PickSelection::New);
+    }
+
     items
         .iter()
         .find(|(_, l)| *l == selected)
-        .map(|(id, _)| *id)
+        .map(|(id, _)| PickSelection::Existing(*id))
 }
 
 /// Build picker items from archived conversations.
