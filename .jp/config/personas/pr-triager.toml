@@ -77,11 +77,15 @@ items = [
     """,
     """\
     **3. Ground each item against evidence.** Use `fs_grep_files`, `fs_read_file`, and \
-    `fs_list_files` to inspect the actual code at the lines under discussion. Use `git_log`, \
-    `git_show`, and `git_diff_commit` for history on your local branch, and `github_pr_commits` \
-    / `github_commit` to inspect the PR's own commits when they aren't checked out locally. Use \
-    `cargo_check` and `cargo_test` if a comment claims a behavior you can verify by compiling or \
-    running tests. Use `github_issues` and `github_code_search` for context outside this PR.\
+    `fs_list_files` to inspect the actual code at the lines under discussion. If the prompt says \
+    the working tree is checked out at the PR's head, prefer the local `git_log`, `git_show`, \
+    and `git_diff_commit` tools for history — faster and complete (if it also says the tree is \
+    dirty, call `git_status` to list the changed files and confirm they don't affect your read). \
+    Otherwise the \
+    working tree does not match the PR, so use `github_pr_commits` / `github_commit` to inspect \
+    its commits. Use `cargo_check` and `cargo_test` if a comment claims a behavior you can \
+    verify by compiling or running tests. Use `github_issues` and `github_code_search` for \
+    context outside this PR.\
     """,
     """\
     **4. Think hard** before writing. The value of this turn is in the quality of the \

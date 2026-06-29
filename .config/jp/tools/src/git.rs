@@ -19,6 +19,7 @@ mod log;
 mod show;
 mod stage_patch;
 mod stage_patch_lines;
+mod status;
 mod unstage;
 
 use add_intent::git_add_intent;
@@ -32,6 +33,7 @@ use log::git_log;
 use show::git_show;
 use stage_patch::git_stage_patch;
 use stage_patch_lines::git_stage_patch_lines;
+use status::git_status;
 use unstage::git_unstage;
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
@@ -70,6 +72,8 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         }
 
         "show" => git_show(ctx.root, t.req("revision")?, opts).await,
+
+        "status" => git_status(ctx.root, opts).await,
 
         "blame" => {
             git_blame(
