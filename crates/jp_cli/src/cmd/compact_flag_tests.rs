@@ -156,6 +156,9 @@ fn parse_errors() {
     assert!("s:abc".parse::<CompactSpec>().is_err());
     // Non-numeric bound
     assert!("s:5..x".parse::<CompactSpec>().is_err());
+    // Absolute bounds are 1-based; `0` is invalid.
+    assert!("s:0..".parse::<CompactSpec>().is_err());
+    assert!("s:0..5".parse::<CompactSpec>().is_err());
     // Unknown tool mode
     assert!("t=nope".parse::<CompactSpec>().is_err());
     // Boolean policies reject values
@@ -170,8 +173,9 @@ fn to_partial_rule_with_range() {
     assert_eq!(rule.reasoning, Some(ReasoningMode::Strip));
     assert_eq!(rule.tool_calls, Some(ToolCallsMode::Strip));
     assert!(rule.summary.is_none());
-    // Open start maps to absolute turn 0; `-3` keeps the last 3.
-    assert_eq!(rule.keep_first, Some(RuleBound::Absolute(0)));
+    // Open start maps to keep-first 0 (compact from the first turn); `-3` keeps
+    // the last 3.
+    assert_eq!(rule.keep_first, Some(RuleBound::Turns(0)));
     assert_eq!(rule.keep_last, Some(RuleBound::FromEnd(3)));
 }
 

@@ -4,11 +4,16 @@ use jp_config::{
     },
     style::{reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
+use jp_conversation::compaction::resolve_range;
 use jp_llm::tool::InvocationContext;
 use jp_workspace::ConversationHandle;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    cmd::{
+        ConversationLoadRequest, Output,
+        conversation_id::PositionalIds,
+        turn_range::{Bound, TurnRange},
+    },
     ctx::Ctx,
     render::{ConfigSource, TurnRenderer},
 };
@@ -54,15 +59,11 @@ pub(crate) struct Print {
     #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Print only the last N turns.
-    /// Without a value, prints the last turn.
-    #[arg(long, num_args = 0..=1, default_missing_value = "1", conflicts_with = "turn")]
-    last: Option<usize>,
-
-    /// Print a specific turn by number (1-based).
-    /// Stable across new turns.
-    #[arg(long, conflicts_with = "last")]
-    turn: Option<usize>,
+    /// Which turns to print.
+    ///
+    /// Without any selector, prints the whole conversation.
+    #[command(flatten)]
+    range: TurnRange,
 
     /// Use the current workspace config instead of the per-turn config.
     ///
@@ -114,19 +115,11 @@ impl Print {
     }
 
     pub(crate) fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
-        let selection = match self.turn {
-            Some(n) => TurnSelection::Index(n),
-            None => match self.last {
-                Some(n) => TurnSelection::Last(n),
-                None => TurnSelection::All,
-            },
-        };
-
         for handle in handles {
             Self::print_conversation(
                 ctx,
                 handle,
-                &selection,
+                &self.range,
                 self.current_config,
                 self.style,
                 self.compacted,
@@ -140,7 +133,7 @@ impl Print {
     fn print_conversation(
         ctx: &mut Ctx,
         handle: &ConversationHandle,
-        selection: &TurnSelection,
+        range: &TurnRange,
         current_config: bool,
         print_style: Option<PrintStyle>,
         compacted: bool,
@@ -197,30 +190,45 @@ impl Print {
         );
         renderer.set_user_only(user_only);
 
-        let mut turns = events.iter_turns();
-        let count = turns.len();
+        let count = events.turn_count();
 
-        match selection {
-            TurnSelection::All => {
-                for turn in turns {
-                    renderer.render_turn(&turn);
-                }
+        // `--last 0` explicitly selects nothing.
+        if range.is_empty() {
+            renderer.flush();
+            return Ok(());
+        }
+
+        // `--turn` names specific turns; an out-of-range endpoint is an error.
+        if let Some(n) = range.turn_out_of_range(count) {
+            return Err(format!("turn {n} out of range (conversation has {count} turns)").into());
+        }
+
+        let from = match range.resolve_from(&events) {
+            Bound::Empty => {
+                renderer.flush();
+                return Ok(());
             }
-            TurnSelection::Last(n) => {
-                let skip = count.saturating_sub(*n);
-                for turn in turns.skip(skip) {
-                    renderer.render_turn(&turn);
-                }
+            Bound::Default => None,
+            Bound::At(b) => Some(b),
+        };
+        let to = match range.resolve_to(&events) {
+            Bound::Empty => {
+                renderer.flush();
+                return Ok(());
             }
-            TurnSelection::Index(n) => {
-                if *n == 0 || *n > count {
-                    return Err(
-                        format!("turn {n} out of range (conversation has {count} turns)").into(),
-                    );
-                }
-                if let Some(turn) = turns.nth(n - 1) {
-                    renderer.render_turn(&turn);
-                }
+            Bound::Default => None,
+            Bound::At(b) => Some(b),
+        };
+
+        // A `from > to` or otherwise empty range selects nothing.
+        let Some(selected) = resolve_range(&events, from, to) else {
+            renderer.flush();
+            return Ok(());
+        };
+
+        for turn in events.iter_turns() {
+            if (selected.from_turn..=selected.to_turn).contains(&turn.index()) {
+                renderer.render_turn(&turn);
             }
         }
 
@@ -246,16 +254,6 @@ fn apply_style_preset(
     for (_name, tool) in tools_config.iter_mut() {
         tool.style = Some(tool_style.clone());
     }
-}
-
-/// How to select which turns to print.
-enum TurnSelection {
-    /// Print all turns.
-    All,
-    /// Print the last N turns.
-    Last(usize),
-    /// Print a specific turn by 1-based index.
-    Index(usize),
 }
 
 #[cfg(test)]
