@@ -1,0 +1,72 @@
+---
+source: crates/jp_md/tests/buffer.rs
+description: "Source: doc-nested"
+---
+[
+    Block {
+        content: "# Configuration Guide\n",
+        indent: 0,
+    },
+    Block {
+        content: "The settings below are applied in order, with later layers overriding earlier\nones. Most projects only need the first two.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "1. **Defaults.** The built-in values, used when nothing else is set.\n",
+        indent: 0,
+    },
+    Block {
+        content: "2. **Workspace config.** Read from the workspace root:\n\n",
+        indent: 0,
+    },
+    FencedCodeStart {
+        language: "toml",
+        fence_type: Backtick,
+        fence_length: 3,
+        indent: 3,
+    },
+    FencedCodeLine {
+        content: "[model]\n",
+        indent: 3,
+    },
+    FencedCodeLine {
+        content: "provider = \"anthropic\"\n",
+        indent: 3,
+    },
+    FencedCodeLine {
+        content: "alias = \"sonnet\"\n",
+        indent: 3,
+    },
+    FencedCodeEnd {
+        fence: "```",
+        indent: 3,
+    },
+    Block {
+        content: "3. **Environment.** Any `JP_CFG_*` variable wins over the file.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "A few notes on precedence and nesting:\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Lists nest by indentation.\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Two spaces per level is the convention used throughout this guide.\n",
+        indent: 2,
+    },
+    Block {
+        content: "- Deeper items continue to render at their own visual column.\n",
+        indent: 2,
+    },
+    Block {
+        content: "- A blank line between items makes the surrounding list loose.\n\n",
+        indent: 0,
+    },
+    Flush {
+        content: "That is the whole model; everything else is a special case of it.\n",
+        indent: 0,
+    },
+]

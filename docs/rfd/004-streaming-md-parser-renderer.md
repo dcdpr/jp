@@ -4,7 +4,7 @@
 - **Category**: Decision
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-19
-- **Extended by**: [RFD 084]
+- **Extended by**: [RFD 084], [RFD 089]
 
 ## Summary
 
@@ -100,6 +100,7 @@ wrong styling over making the user wait.
 - [pulldown-cmark]
 
 [RFD 084]: 084-configurable-markdown-element-coloring.md
+[RFD 089]: 089-streaming-paragraph-rendering.md
 [comrak]: https://github.com/kivikakk/comrak
 [comrak#743]: https://github.com/kivikakk/comrak/pull/743
 [pulldown-cmark]: https://github.com/pulldown-cmark/pulldown-cmark

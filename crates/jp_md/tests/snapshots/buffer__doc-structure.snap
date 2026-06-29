@@ -1,0 +1,38 @@
+---
+source: crates/jp_md/tests/buffer.rs
+description: "Source: doc-structure"
+---
+[
+    Block {
+        content: "Overview\n========\n",
+        indent: 0,
+    },
+    Block {
+        content: "This document uses setext headings instead of ATX ones, which some authors\nprefer for top-level titles. Everything else is ordinary flowing prose.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "Details\n-------\n",
+        indent: 0,
+    },
+    Block {
+        content: "A thematic break can separate two passages of prose without introducing a\nheading between them:\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "---\n",
+        indent: 0,
+    },
+    Block {
+        content: "After the break the prose simply continues. A block quote carries a short aside\nwithout interrupting the surrounding flow:\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "> Treat the figures in the previous section as directional. They were gathered\n> on one machine over a handful of runs and have not been independently\n> reproduced yet.\n\n",
+        indent: 0,
+    },
+    Flush {
+        content: "That is all the structure this particular note needs to make its point.\n",
+        indent: 0,
+    },
+]

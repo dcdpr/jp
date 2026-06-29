@@ -5,7 +5,23 @@
 //! They handle LLM-specific quirks that don't belong in the core markdown
 //! parsing logic.
 //!
+//! # Streaming constraint
+//!
+//! A fixup must not retroactively rewrite a block's already-emitted bytes based
+//! on later content.
+//! With paragraph streaming on, a top-level paragraph's prose is emitted as
+//! [`Event::ParagraphChunk`]s and rendered before the paragraph ends, so
+//! anything a fixup would change after the fact has already been printed.
+//! The current fixups satisfy this because they only rewrite *following* fence
+//! events: [`OrphanedFenceFixup`] derives its embedded-fence flag from the
+//! accumulated paragraph and acts on the *next* bare fence, and
+//! [`FenceEscalationFixup`] touches only fenced-code events.
+//! A future fixup that repairs paragraph prose from whole-paragraph context
+//! must run in the buffer before streaming, or opt the affected paragraph out
+//! of streaming.
+//!
 //! [`Buffer`]: super::Buffer
+//! [`Event::ParagraphChunk`]: super::Event::ParagraphChunk
 
 use super::Event;
 
@@ -90,6 +106,17 @@ pub struct OrphanedFenceFixup {
     /// All `FencedCodeLine` events become `Block` events, and `FencedCodeEnd`
     /// is suppressed.
     suppressing: bool,
+    /// Source of the streamed paragraph in flight.
+    ///
+    /// The embedded-fence check is per *line*, but the inline scanner commits
+    /// the prose before an embedded fence in an earlier chunk and holds the
+    /// fence run into a later one, so a per-chunk check would see the fence at
+    /// a chunk's start and mistake it for a proper (line-leading) fence.
+    /// The flag is therefore computed over the whole accumulated paragraph at
+    /// the terminal chunk.
+    paragraph_buf: String,
+    /// Whether a streamed paragraph is mid-flight.
+    in_paragraph: bool,
 }
 
 impl Default for OrphanedFenceFixup {
@@ -105,6 +132,8 @@ impl OrphanedFenceFixup {
         Self {
             prev_had_embedded_fence: false,
             suppressing: false,
+            paragraph_buf: String::new(),
+            in_paragraph: false,
         }
     }
 }
@@ -127,6 +156,26 @@ impl EventFixup for OrphanedFenceFixup {
         match &event {
             Event::Block { content, .. } => {
                 self.prev_had_embedded_fence = has_embedded_fence(content);
+                Some(event)
+            }
+            // A streamed paragraph stands in for a `Block`: accumulate its
+            // source and compute the embedded-fence flag over the whole
+            // paragraph at the terminal chunk, so the flag is ready for the
+            // block that follows. A per-chunk check would miss a fence the
+            // scanner pushed to a chunk's start (the prose before it committed
+            // earlier), seeing it as a line-leading fence.
+            Event::ParagraphChunk { content, last, .. } => {
+                if !self.in_paragraph {
+                    self.paragraph_buf.clear();
+                    self.prev_had_embedded_fence = false;
+                    self.in_paragraph = true;
+                }
+                self.paragraph_buf.push_str(content);
+                if *last {
+                    self.prev_had_embedded_fence = has_embedded_fence(&self.paragraph_buf);
+                    self.paragraph_buf.clear();
+                    self.in_paragraph = false;
+                }
                 Some(event)
             }
             Event::FencedCodeStart {

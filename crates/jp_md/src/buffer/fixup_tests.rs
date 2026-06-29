@@ -179,3 +179,91 @@ fn bare_fence_after_normal_paragraph_not_suppressed() {
         "Bare fence after normal paragraph should open a code block.\nEvents: {events:#?}"
     );
 }
+
+#[test]
+fn paragraph_chunk_embedded_fence_flag_accumulates_then_suppresses() {
+    // A streamed top-level paragraph ending in an embedded fence sets the
+    // embedded-fence flag from its chunks, so the following bare fence is
+    // treated as an orphaned close (converted to a Block, not a code block).
+    let mut fixup = OrphanedFenceFixup::new();
+
+    for chunk in [
+        Event::paragraph_chunk("Here is some code: ", false),
+        Event::paragraph_chunk("look:```rust", false),
+        Event::paragraph_chunk("\n", true),
+    ] {
+        assert!(matches!(
+            fixup.process(chunk),
+            Some(Event::ParagraphChunk { .. })
+        ));
+    }
+
+    let converted = fixup.process(Event::FencedCodeStart {
+        language: String::new(),
+        fence_type: FenceType::Backtick,
+        fence_length: 3,
+        indent: 0,
+    });
+    assert!(
+        matches!(converted, Some(Event::Block { .. })),
+        "orphaned fence after a streamed paragraph should convert to a Block, got: {converted:?}"
+    );
+}
+
+#[test]
+fn paragraph_chunk_without_embedded_fence_leaves_following_fence() {
+    // A streamed paragraph with no embedded fence must NOT suppress a real
+    // following code block.
+    let mut fixup = OrphanedFenceFixup::new();
+    for chunk in [
+        Event::paragraph_chunk("Just some prose with no fence ", false),
+        Event::paragraph_chunk("at all here.\n", true),
+    ] {
+        assert!(matches!(
+            fixup.process(chunk),
+            Some(Event::ParagraphChunk { .. })
+        ));
+    }
+
+    let next = fixup.process(Event::FencedCodeStart {
+        language: String::new(),
+        fence_type: FenceType::Backtick,
+        fence_length: 3,
+        indent: 0,
+    });
+    assert!(
+        matches!(next, Some(Event::FencedCodeStart { .. })),
+        "a real code block after a fence-free paragraph must be preserved, got: {next:?}"
+    );
+}
+
+#[test]
+fn paragraph_chunk_embedded_fence_split_before_fence_still_detected() {
+    // The inline scanner holds an embedded fence run intact, committing the
+    // prose before it in an earlier chunk and landing the fence at the START of
+    // a later chunk. A per-chunk line check would skip a chunk beginning with
+    // backticks; the fixup must detect the fence over the whole accumulated
+    // paragraph so the following bare fence is still suppressed.
+    let mut fixup = OrphanedFenceFixup::new();
+    for chunk in [
+        Event::paragraph_chunk("Let me run this command for you now: ", false),
+        Event::paragraph_chunk("```rust", false),
+        Event::paragraph_chunk("\n", true),
+    ] {
+        assert!(matches!(
+            fixup.process(chunk),
+            Some(Event::ParagraphChunk { .. })
+        ));
+    }
+
+    let converted = fixup.process(Event::FencedCodeStart {
+        language: String::new(),
+        fence_type: FenceType::Backtick,
+        fence_length: 3,
+        indent: 0,
+    });
+    assert!(
+        matches!(converted, Some(Event::Block { .. })),
+        "an embedded fence split before the backticks must still be detected, got: {converted:?}"
+    );
+}

@@ -537,9 +537,15 @@ The name explicitly reflects this limitation.
 
 **Components:**
 
-1. **Buffer** (`jp_md::buffer::Buffer`): Accumulates raw string chunks until a
-   valid markdown block is formed.
-   Emits blocks as soon as possible.
+1. **Buffer** (`jp_md::buffer::Buffer`): Accumulates raw string chunks and emits
+   each markdown block as soon as it is complete.
+   To avoid stalling on long blocks it also streams *within* them: fenced code
+   line-by-line, lists item-by-item, and top-level paragraphs incrementally (as
+   `Event::ParagraphChunk`s), so output appears as it arrives rather than only
+   at block boundaries.
+   Paragraph streaming is on by default and is byte-identical to whole-paragraph
+   rendering apart from one case (an over-threshold setext heading renders as
+   prose).
 
 2. **Formatter** (`jp_md::format::Formatter`): Applies terminal formatting (ANSI
    codes for bold, italic, code, etc.) to markdown blocks.
@@ -1492,8 +1498,10 @@ Every chunk flows through TWO parallel paths:
          Terminal                     Disk
 ```
 
-**Key insight:** The Render Path uses `jp_md::buffer::Buffer` which buffers only
-enough to form valid markdown blocks.
+**Key insight:** The Render Path uses `jp_md::buffer::Buffer`, which buffers
+only enough to emit each markdown block — and streams *within* long blocks
+(fenced code, lists, and top-level paragraphs) so output is not held until a
+block boundary.
 The Event Builder buffers until `Flush` arrives.
 These are independent — rendering doesn't wait for flush.
 

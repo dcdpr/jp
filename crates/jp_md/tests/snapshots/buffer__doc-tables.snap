@@ -1,0 +1,38 @@
+---
+source: crates/jp_md/tests/buffer.rs
+description: "Source: doc-tables"
+---
+[
+    Block {
+        content: "# Release Notes\n",
+        indent: 0,
+    },
+    Block {
+        content: "This release focuses on performance and a few long-requested features. The\nsections below summarize what changed and how to migrate, with a couple of\ntables to make the numbers easy to scan at a glance.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "## Benchmarks\n",
+        indent: 0,
+    },
+    Block {
+        content: "The table below compares the previous release to the current one across a few\nrepresentative workloads. Numbers are median wall-clock times over ten runs.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "| Workload         | Before (ms) | After (ms) | Change |\n| ---------------- | ----------: | ---------: | :----: |\n| cold start       |         420 |        180 |  -57%  |\n| warm query       |          95 |         88 |   -7%  |\n| large attachment |        1200 |        640 |  -47%  |\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "As the numbers show, cold start improved the most. Warm queries were already\nfast, so the change there is comfortably within the run-to-run noise.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "## Alignment\n",
+        indent: 0,
+    },
+    Flush {
+        content: "Markdown tables support per-column alignment, which we use above: the change\ncolumn is centered while the two timing columns are right-aligned so the digits\nline up and longer-running workloads are easy to pick out.\n",
+        indent: 0,
+    },
+]

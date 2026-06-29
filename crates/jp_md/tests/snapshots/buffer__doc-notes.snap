@@ -1,0 +1,50 @@
+---
+source: crates/jp_md/tests/buffer.rs
+description: "Source: doc-notes"
+---
+[
+    Block {
+        content: "# Meeting Notes: 2024-03-14\n",
+        indent: 0,
+    },
+    Block {
+        content: "We covered three topics today. The highlights and action items are below, and\nthe full recording is linked at the end for anyone who could not attend.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "## Decisions\n",
+        indent: 0,
+    },
+    Block {
+        content: "1. Ship the new parser behind a feature flag for one release.\n",
+        indent: 0,
+    },
+    Block {
+        content: "2. Keep the old code path until telemetry confirms parity.\n",
+        indent: 0,
+    },
+    Block {
+        content: "3. Revisit the rollout plan at the end of the month.\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "## Open Questions\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Do we need a migration for existing on-disk caches?\n",
+        indent: 0,
+    },
+    Block {
+        content: "- Who owns the follow-up benchmark run, and by when?\n\n",
+        indent: 0,
+    },
+    Block {
+        content: "> **Note:** the benchmark numbers discussed in the call are preliminary and were\n> collected on a single machine, so treat them as directional rather than\n> precise figures we can quote externally.\n\n",
+        indent: 0,
+    },
+    Flush {
+        content: "See the [recording](https://example.com/rec) for the full discussion, and reply\non the thread if anything here misrepresents what was decided.\n",
+        indent: 0,
+    },
+]

@@ -8,7 +8,7 @@
     "summary": "LLMs are tools; you own your output and bear responsibility for its quality regardless of how it was produced."
   },
   "004-streaming-md-parser-renderer.md": {
-    "hash": "317df7b048d2ed88267aacafd2df82c0fc753574186b5502235334dca86cbbb1",
+    "hash": "49ccd6774a6823b6c62b9677bf21ab730c44933dbf4465bd25c2b5e3c2ebe235",
     "summary": "Buffer segments streaming markdown blocks; TerminalRenderer applies ANSI-aware terminal formatting; comrak chosen over pulldown-cmark."
   },
   "005-first-class-inquiry-events.md": {
@@ -350,5 +350,9 @@
   "088-unified-editor-service-and-inline-reply-widget.md": {
     "hash": "ed23d4b3ef9ce5d00d623166c48e3b63b0dd13511aa1405a4f3958b9613affff",
     "summary": "Consolidate editor invocation paths; add inline reply widget with editor escape."
+  },
+  "089-streaming-paragraph-rendering.md": {
+    "hash": "4a1e571acfd0db31efce7efa36dfc985dc6cd93e672fa4ca1f45936dd2a809c7",
+    "summary": "Stream paragraphs incrementally while guaranteeing byte-identical output to non-streaming, with four guards managing block-start ambiguity, setext reinterpretation, inline spans, and wrap-in-progress stability."
   }
 }
