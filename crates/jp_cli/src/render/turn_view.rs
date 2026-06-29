@@ -56,8 +56,8 @@ pub(crate) struct TurnView {
     /// Dimmed detail (e.g.
     /// `turn 2, 12 minutes ago`) to append to the first role header rendered in
     /// the current turn.
-    /// Taken by whichever header — user or assistant — renders first; later
-    /// headers in the same turn render without it.
+    /// Consumed by [`Self::emit_role_header`], which every header path routes
+    /// through, so the first header in a turn takes it and later ones don't.
     /// Set per turn by replay via [`Self::set_turn_detail`]; left `None` by the
     /// live query path.
     pending_turn_detail: Option<String>,
@@ -125,8 +125,7 @@ impl TurnView {
         self.structured.flush();
         self.tool_separator.store(false, Ordering::Relaxed);
         let label = req.author.as_deref().unwrap_or(DEFAULT_USER_LABEL);
-        let detail = self.pending_turn_detail.take();
-        self.chat.render_role_header(label, None, detail.as_deref());
+        self.emit_role_header(label, None);
         self.chat.render_request(&req.content);
         self.assistant_header_rendered = false;
     }
@@ -242,17 +241,32 @@ impl TurnView {
         self.model_id = model_id;
     }
 
+    /// Emit a role-boundary header, attaching the pending turn detail to it.
+    ///
+    /// The single place that consumes `pending_turn_detail`: the first header
+    /// rendered in a turn takes the detail, every later header renders without
+    /// it.
+    /// Both the user and assistant header paths route through here so the
+    /// "first header wins" rule lives in one spot instead of being
+    /// re-implemented at each call site.
+    fn emit_role_header(&mut self, label: &str, suffix: Option<&str>) {
+        let detail = self.pending_turn_detail.take();
+        self.chat
+            .render_role_header(label, suffix, detail.as_deref());
+    }
+
     fn ensure_assistant_header(&mut self) {
         if self.assistant_header_rendered {
             return;
         }
+        // Cloned into owned locals so the `&mut self` call to `emit_role_header`
+        // doesn't overlap with shared borrows of these fields.
         let label = self
             .assistant_name
-            .as_deref()
-            .unwrap_or(DEFAULT_ASSISTANT_LABEL);
-        let detail = self.pending_turn_detail.take();
-        self.chat
-            .render_role_header(label, self.model_id.as_deref(), detail.as_deref());
+            .clone()
+            .unwrap_or_else(|| DEFAULT_ASSISTANT_LABEL.to_owned());
+        let suffix = self.model_id.clone();
+        self.emit_role_header(&label, suffix.as_deref());
         self.assistant_header_rendered = true;
     }
 }

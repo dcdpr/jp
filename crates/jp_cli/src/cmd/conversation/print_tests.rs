@@ -506,6 +506,41 @@ fn turn_header_shows_turn_number_and_relative_time() {
 }
 
 #[test]
+fn turn_header_detail_on_assistant_first_turn() {
+    // A turn whose first shown event is an assistant response (no user request)
+    // must still carry the detail on the assistant header. This pins the
+    // `ensure_assistant_header` consumption path, which
+    // `turn_header_shows_turn_number_and_relative_time` (user-first) does not.
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![ConversationEvent::new(
+        ChatResponse::message("Answer only.\n\n"),
+        ts(0, 0, 0),
+    )]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        last: None,
+        turn: None,
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    let jp_headers: Vec<&str> = output
+        .lines()
+        .filter(|l| l.contains("\u{2500}\u{2500} jp"))
+        .collect();
+    assert_eq!(jp_headers.len(), 1, "got: {output:?}");
+    assert!(
+        jp_headers[0].contains("turn 1,") && jp_headers[0].contains("ago"),
+        "assistant header opening the turn should carry the detail, got: {output:?}"
+    );
+}
+
+#[test]
 fn prints_conversation_by_id() {
     let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![ConversationEvent::new(
         ChatRequest::from("active conversation content"),

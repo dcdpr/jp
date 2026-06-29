@@ -219,7 +219,10 @@ fn turn_detail(turn: &Turn<'_>) -> Option<String> {
         .or_else(|| turn.iter().next())
         .map(|e| e.event.timestamp)?;
 
-    let elapsed = (Utc::now() - started_at).abs().to_std().unwrap_or_default();
+    // A negative duration (a `TurnStart` ahead of now, from clock skew or
+    // imported data) fails `to_std` and falls back to zero, which `timeago`
+    // renders as "now" rather than a misleading "... ago".
+    let elapsed = (Utc::now() - started_at).to_std().unwrap_or_default();
     let ago = timeago::Formatter::new().convert(elapsed);
     Some(format!("turn {}, {ago}", turn.index() + 1))
 }
