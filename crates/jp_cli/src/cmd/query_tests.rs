@@ -25,7 +25,11 @@ use serde_json::Value;
 use tokio::sync::broadcast;
 
 use super::*;
-use crate::{KeyValueOrPath, config_pipeline::ConfigPipeline};
+use crate::{
+    KeyValueOrPath,
+    cmd::target::{ConversationTarget, PickerFilter},
+    config_pipeline::ConfigPipeline,
+};
 
 fn make_partial_with_tools() -> PartialAppConfig {
     let mut partial = PartialAppConfig::default();
@@ -944,6 +948,42 @@ fn echo_request_when_from_editor_or_replay() {
         ..Default::default()
     };
     assert!(replay.should_echo_request(false));
+}
+
+#[test]
+fn picker_new_item_gated_by_new_incompatible_flags() {
+    // The picker may only offer "start a new conversation" when `--new` would
+    // itself be a legal flag. `--fork` and `--replay` both conflict with
+    // `--new` (and still reach the picker), so choosing the item would
+    // otherwise silently drop the fork/replay request and manufacture a state
+    // clap rejects at parse time.
+    assert!(Query::default().allows_new_from_picker());
+
+    let fork = Query {
+        fork: Some(None),
+        ..Default::default()
+    };
+    assert!(!fork.allows_new_from_picker());
+
+    let replay = Query {
+        replay: true,
+        ..Default::default()
+    };
+    assert!(!replay.allows_new_from_picker());
+}
+
+#[test]
+fn picker_new_item_gated_by_bare_id_flag() {
+    // Bare `jp query --id` parses to an empty value (`FlagIds` sets
+    // `default_missing_value = ""`), which becomes the interactive picker.
+    // Since `--new` conflicts with the `id` arg, the picker must not offer the
+    // synthetic "new" item: choosing it would drop the target and manufacture a
+    // `--new --id` state clap rejects at parse time.
+    let bare_id = Query {
+        target: FlagIds::from_targets(vec![ConversationTarget::Picker(PickerFilter::default())]),
+        ..Default::default()
+    };
+    assert!(!bare_id.allows_new_from_picker());
 }
 
 #[test]

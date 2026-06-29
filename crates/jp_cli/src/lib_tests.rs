@@ -565,7 +565,7 @@ fn resolve_config_consumes_default_id() {
     base.conversation.default_id = Some(DefaultConversationId::LastActivated);
 
     let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
-    let (config, _handles) = resolve_config(
+    let (config, _handles, _start_new) = resolve_config(
         &cli.command,
         base,
         &cli.globals.config,

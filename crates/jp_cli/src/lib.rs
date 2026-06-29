@@ -420,7 +420,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     workspace.load_conversation_index();
 
     let base = load_base_partial(fs_backend.as_deref())?;
-    let (config, handles) = resolve_config(
+    let (config, handles, start_new) = resolve_config(
         &cli.command,
         base,
         &cli.globals.config,
@@ -442,7 +442,9 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let rt = ctx.handle().clone();
 
     // Run the requested command.
-    let output = rt.block_on(cli.command.run(&mut ctx, handles));
+    // `start_new` carries the interactive picker's "start a new conversation"
+    // choice through to the query command, which honors it at lock time.
+    let output = rt.block_on(cli.command.run(&mut ctx, handles, start_new));
 
     if let Err(error) = output.as_ref()
         && error.disable_persistence
@@ -686,7 +688,7 @@ pub(crate) fn resolve_config(
     workspace: &mut Workspace,
     session: Option<&jp_workspace::session::Session>,
     fs: Option<&FsStorageBackend>,
-) -> Result<(AppConfig, Vec<jp_workspace::ConversationHandle>)> {
+) -> Result<(AppConfig, Vec<jp_workspace::ConversationHandle>, bool)> {
     let pipeline = ConfigPipeline::new(base, cfg_overrides, Some(workspace), fs)?;
 
     // Extract default_id — a loading-time concern consumed here, not
@@ -698,7 +700,14 @@ pub(crate) fn resolve_config(
         .unwrap_or_default();
 
     let request = command.conversation_load_request();
-    let handles = resolve_request(&request, workspace, session, default_id)?;
+    let outcome = resolve_request(
+        &request,
+        workspace,
+        session,
+        default_id,
+        command.allows_new_from_picker(),
+    )?;
+    let handles = outcome.handles;
 
     // Phase 2: per-conversation layer.
     let config_handle = request.config_conversation.and_then(|idx| handles.get(idx));
@@ -730,7 +739,7 @@ pub(crate) fn resolve_config(
     partial.conversation.default_id.take();
 
     let config = build(partial)?;
-    Ok((config, handles))
+    Ok((config, handles, outcome.start_new))
 }
 
 /// Load the base partial config from files and environment variables.

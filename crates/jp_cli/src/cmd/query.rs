@@ -106,8 +106,10 @@ use tracing::{debug, trace, warn};
 use turn_loop::run_turn_loop;
 
 use super::{
-    ConversationLoadRequest, Output, attachment::load_conversation_attachments,
-    conversation_id::FlagIds, lock::LockOutcome,
+    ConversationLoadRequest, Output,
+    attachment::load_conversation_attachments,
+    conversation_id::{ConversationIds, FlagIds},
+    lock::LockOutcome,
 };
 use crate::{
     Ctx, PATH_STRING_PREFIX,
@@ -345,7 +347,12 @@ pub(crate) struct Query {
 
 impl Query {
     #[expect(clippy::too_many_lines)]
-    pub(crate) async fn run(self, ctx: &mut Ctx, handle: Option<ConversationHandle>) -> Output {
+    pub(crate) async fn run(
+        self,
+        ctx: &mut Ctx,
+        handle: Option<ConversationHandle>,
+        start_new: bool,
+    ) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
         let now = ctx.now();
@@ -353,11 +360,12 @@ impl Query {
 
         // Resolve the target conversation and acquire an exclusive lock.
         //
-        // Three paths:
+        // Paths:
         // 1. --new: create a fresh conversation (already locked).
-        // 2. --fork/--id/session: resolve an existing conversation, lock it.
-        // 3. Lock contention: user picks "new" or "fork" from the prompt.
-        let lock = self.acquire_lock(ctx, handle).await?;
+        // 2. picker "start new": `start_new` is set, create a fresh conversation.
+        // 3. --fork/--id/session: resolve an existing conversation, lock it.
+        // 4. Lock contention: user picks "new" or "fork" from the prompt.
+        let lock = self.acquire_lock(ctx, handle, start_new).await?;
 
         // Create symlinks and seed approvals for any `--mount` flags before the
         // turn runs, so tools can reach the mounted paths.
@@ -886,6 +894,20 @@ impl Query {
         self.new_conversation
     }
 
+    /// Whether the conversation picker may offer a "start a new conversation"
+    /// item for this invocation.
+    ///
+    /// Returns `false` when any flag incompatible with `--new` is present, so
+    /// that choosing the item can never produce a combination clap would have
+    /// rejected.
+    /// `--new` conflicts with `--fork`, `--replay`, and `--id`.
+    /// A non-empty `target` means `--id` was given — including bare `--id`,
+    /// which parses to an empty value and lands on the picker — so it gates
+    /// the item just like the other two.
+    pub(crate) fn allows_new_from_picker(&self) -> bool {
+        self.fork.is_none() && !self.replay && self.target.ids().is_empty()
+    }
+
     #[must_use]
     fn expires_in_duration(&self) -> Option<Duration> {
         self.expires_in?
@@ -932,9 +954,20 @@ impl Query {
         &self,
         ctx: &mut Ctx,
         handle: Option<ConversationHandle>,
+        start_new: bool,
     ) -> Result<ConversationLock> {
         // Handle --new: create a fresh conversation.
         if self.is_new() {
+            return self.create_new_conversation(ctx);
+        }
+
+        // Handle the picker's "start a new conversation" choice. It carries no
+        // target, so any flag that needs one is unsatisfiable; refuse loudly
+        // rather than silently dropping it. The same predicate gates the offer.
+        if start_new {
+            if !self.allows_new_from_picker() {
+                return Err(Error::NewConflictsWithTarget);
+            }
             return self.create_new_conversation(ctx);
         }
 
