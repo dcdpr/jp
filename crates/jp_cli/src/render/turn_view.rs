@@ -53,6 +53,15 @@ pub(crate) struct TurnView {
     /// [`Self::ensure_assistant_header`] on first use.
     assistant_header_rendered: bool,
 
+    /// Dimmed detail (e.g.
+    /// `turn 2, 12 minutes ago`) to append to the first role header rendered in
+    /// the current turn.
+    /// Consumed by [`Self::emit_role_header`], which every header path routes
+    /// through, so the first header in a turn takes it and later ones don't.
+    /// Set per turn by replay via [`Self::set_turn_detail`]; left `None` by the
+    /// live query path.
+    pending_turn_detail: Option<String>,
+
     /// Shared with the [`ToolRenderer`] (wired via
     /// [`Self::set_tool_separator`]): the flag a tool result or custom argument
     /// block raises to owe a blank-line separator before the next tool call.
@@ -75,6 +84,7 @@ impl TurnView {
             assistant_name,
             model_id,
             assistant_header_rendered: false,
+            pending_turn_detail: None,
             tool_separator: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -84,6 +94,16 @@ impl TurnView {
     /// [`ToolRenderer`]: super::ToolRenderer
     pub(crate) fn set_tool_separator(&mut self, flag: Arc<AtomicBool>) {
         self.tool_separator = flag;
+    }
+
+    /// Set the dimmed detail attached to the first role header of the upcoming
+    /// turn (e.g.
+    /// `turn 2, 12 minutes ago`).
+    ///
+    /// Consumed by whichever header — user or assistant — renders first;
+    /// later headers in the same turn render without it.
+    pub(crate) fn set_turn_detail(&mut self, detail: Option<String>) {
+        self.pending_turn_detail = detail;
     }
 
     /// Mark the start of a new turn.
@@ -105,7 +125,7 @@ impl TurnView {
         self.structured.flush();
         self.tool_separator.store(false, Ordering::Relaxed);
         let label = req.author.as_deref().unwrap_or(DEFAULT_USER_LABEL);
-        self.chat.render_role_header(label, None);
+        self.emit_role_header(label, None);
         self.chat.render_request(&req.content);
         self.assistant_header_rendered = false;
     }
@@ -221,16 +241,32 @@ impl TurnView {
         self.model_id = model_id;
     }
 
+    /// Emit a role-boundary header, attaching the pending turn detail to it.
+    ///
+    /// The single place that consumes `pending_turn_detail`: the first header
+    /// rendered in a turn takes the detail, every later header renders without
+    /// it.
+    /// Both the user and assistant header paths route through here so the
+    /// "first header wins" rule lives in one spot instead of being
+    /// re-implemented at each call site.
+    fn emit_role_header(&mut self, label: &str, suffix: Option<&str>) {
+        let detail = self.pending_turn_detail.take();
+        self.chat
+            .render_role_header(label, suffix, detail.as_deref());
+    }
+
     fn ensure_assistant_header(&mut self) {
         if self.assistant_header_rendered {
             return;
         }
+        // Cloned into owned locals so the `&mut self` call to `emit_role_header`
+        // doesn't overlap with shared borrows of these fields.
         let label = self
             .assistant_name
-            .as_deref()
-            .unwrap_or(DEFAULT_ASSISTANT_LABEL);
-        self.chat
-            .render_role_header(label, self.model_id.as_deref());
+            .clone()
+            .unwrap_or_else(|| DEFAULT_ASSISTANT_LABEL.to_owned());
+        let suffix = self.model_id.clone();
+        self.emit_role_header(&label, suffix.as_deref());
         self.assistant_header_rendered = true;
     }
 }
