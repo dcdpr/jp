@@ -11,6 +11,7 @@ use tracing::{error, warn};
 mod projection;
 pub mod turn_iter;
 pub mod turn_mut;
+pub use projection::TurnOrigin;
 pub use turn_iter::{IterTurns, Turn};
 pub use turn_mut::TurnMut;
 
@@ -437,14 +438,17 @@ impl ConversationStream {
     /// After this call, the stream's conversation events represent what the LLM
     /// should see.
     ///
-    /// This is a no-op when no compaction events are present.
+    /// Returns one [`TurnOrigin`] per resulting turn, in turn order, mapping
+    /// each projected turn back to the raw turn number(s) it represents.
+    /// When no compaction events are present the events are left unchanged and
+    /// every turn maps to its own index.
     ///
     /// This method is called by [`Thread::into_parts()`] before provider
     /// visibility filtering.
     ///
     /// [`Thread::into_parts()`]: crate::thread::Thread::into_parts
-    pub fn apply_projection(&mut self) {
-        projection::apply(&mut self.events);
+    pub fn apply_projection(&mut self) -> Vec<TurnOrigin> {
+        projection::apply(&mut self.events)
     }
 
     /// Start a new turn with the given chat request.

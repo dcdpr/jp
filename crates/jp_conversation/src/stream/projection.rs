@@ -16,6 +16,46 @@ use crate::{
     event::{ChatRequest, ChatResponse, ConversationEvent, TurnStart},
 };
 
+/// Which raw conversation turn(s) a projected turn stands for.
+///
+/// Turn numbering from [`IterTurns`] is positional, which matches the raw
+/// stream but shifts once projection collapses a summarized range into one
+/// synthetic turn.
+/// [`apply`] returns one `TurnOrigin` per resulting turn so callers can display
+/// the original (pre-projection) turn numbers.
+///
+/// [`IterTurns`]: super::IterTurns
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnOrigin {
+    /// A turn carried through projection unchanged, at this 0-based raw turn
+    /// index.
+    Kept(usize),
+    /// A synthetic summary turn replacing the raw turns `from..=to` (0-based,
+    /// inclusive).
+    Summary {
+        /// First raw turn the summary replaces.
+        from: usize,
+        /// Last raw turn the summary replaces.
+        to: usize,
+    },
+}
+
+impl TurnOrigin {
+    /// Whether this projected turn represents any raw turn in `from..=to`
+    /// (0-based, inclusive).
+    ///
+    /// Lets a selection resolved against raw turn numbers pick the projected
+    /// turns to render, including a summary turn that stands in for part of the
+    /// range.
+    #[must_use]
+    pub const fn overlaps(&self, from: usize, to: usize) -> bool {
+        match *self {
+            Self::Kept(index) => from <= index && index <= to,
+            Self::Summary { from: f, to: t } => f <= to && from <= t,
+        }
+    }
+}
+
 /// Resolved compaction policies for a single turn.
 struct TurnPolicy {
     /// Summary covering this turn.
@@ -62,8 +102,11 @@ struct ResolvedSummary {
 ///   content with a status line.
 /// - **Tool call omit**: removes tool call request/response pairs.
 ///
+/// Returns one [`TurnOrigin`] per resulting turn, in turn order, mapping each
+/// projected turn back to the raw turn number(s) it represents.
+///
 /// [`Compaction`]: crate::Compaction
-pub(super) fn apply(events: &mut Vec<InternalEvent>) {
+pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
     let compactions: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
@@ -73,7 +116,12 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
         .collect();
 
     if compactions.is_empty() {
-        return;
+        // Nothing collapses, so every turn maps to itself.
+        let event_origins: Vec<TurnOrigin> = assign_turn_indices(events)
+            .into_iter()
+            .map(TurnOrigin::Kept)
+            .collect();
+        return collect_turn_origins(events, &event_origins);
     }
 
     let turn_indices = assign_turn_indices(events);
@@ -96,6 +144,9 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
         .collect();
 
     let mut projected = Vec::with_capacity(events.len());
+    // Raw origin of each projected event, kept in lockstep with `projected` so
+    // turn numbering can recover the pre-projection turn numbers.
+    let mut event_origins: Vec<TurnOrigin> = Vec::with_capacity(events.len());
     let mut summaries_injected: HashSet<usize> = HashSet::new();
 
     for (i, event) in std::mem::take(events).into_iter().enumerate() {
@@ -107,6 +158,7 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
             // skip unknown events, so they stay invisible to providers.
             InternalEvent::ConfigDelta(_) | InternalEvent::Unknown(_) => {
                 projected.push(event);
+                event_origins.push(TurnOrigin::Kept(turn));
             }
             // Compaction events are consumed by projection — they've been
             // applied and should not survive into the projected stream.
@@ -114,13 +166,32 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
             InternalEvent::Event(conv_event) => {
                 let Some(policy) = policies.get(turn) else {
                     projected.push(InternalEvent::Event(conv_event));
+                    event_origins.push(TurnOrigin::Kept(turn));
                     continue;
                 };
 
                 // Summary takes precedence over all per-type policies.
                 if let Some(summary) = &policy.summary {
                     if inject_at_turn.contains(&turn) && summaries_injected.insert(turn) {
-                        inject_summary(&mut projected, &summary.text, conv_event.timestamp);
+                        // The injected summary stands in for the contiguous run
+                        // of raw turns that resolve to this same summary — that
+                        // is what visually collapses into one turn. Display the
+                        // run, not the compaction's declared range, which a
+                        // newer fully-contained summary can split in two.
+                        let mut run_to = turn;
+                        while run_to + 1 < policies.len()
+                            && policies[run_to + 1].summary.as_ref() == Some(summary)
+                        {
+                            run_to += 1;
+                        }
+                        inject_summary(
+                            &mut projected,
+                            &mut event_origins,
+                            &summary.text,
+                            conv_event.timestamp,
+                            turn,
+                            run_to,
+                        );
                     }
                     // Drop the original event — it's covered by the summary.
                     continue;
@@ -157,11 +228,36 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) {
                 }
 
                 projected.push(InternalEvent::Event(Box::new(event)));
+                event_origins.push(TurnOrigin::Kept(turn));
             }
         }
     }
 
     *events = projected;
+    collect_turn_origins(events, &event_origins)
+}
+
+/// Group projected events into turns (matching [`IterTurns`]) and return each
+/// turn's [`TurnOrigin`], read from the event that opens the turn.
+///
+/// `event_origins` must be in lockstep with `events`.
+///
+/// [`IterTurns`]: super::IterTurns
+fn collect_turn_origins(events: &[InternalEvent], event_origins: &[TurnOrigin]) -> Vec<TurnOrigin> {
+    let mut origins = Vec::new();
+    let mut current_has_event = false;
+    for (i, event) in events.iter().enumerate() {
+        let Some(conv_event) = event.as_event() else {
+            continue;
+        };
+        // A turn opens at the first event and at every later `TurnStart`,
+        // mirroring `IterTurns`' boundary rule exactly.
+        if !current_has_event || conv_event.is_turn_start() {
+            origins.push(event_origins[i]);
+        }
+        current_has_event = true;
+    }
+    origins
 }
 
 /// Assign a 0-based turn index to each event position.
@@ -270,18 +366,33 @@ fn resolve_policies(max_turn: usize, compactions: &[crate::Compaction]) -> Vec<T
 /// a distinct turn rather than folding it into the preceding one.
 /// The `TurnStart` is not provider-visible, so it is filtered out before the
 /// LLM request is built.
-fn inject_summary(events: &mut Vec<InternalEvent>, summary: &str, timestamp: DateTime<Utc>) {
+///
+/// `from`/`to` are the raw turn range this summary replaces; every injected
+/// event records it as its [`TurnOrigin`] so the run stays in lockstep with
+/// `events`.
+fn inject_summary(
+    events: &mut Vec<InternalEvent>,
+    origins: &mut Vec<TurnOrigin>,
+    summary: &str,
+    timestamp: DateTime<Utc>,
+    from: usize,
+    to: usize,
+) {
+    let origin = TurnOrigin::Summary { from, to };
     events.push(InternalEvent::Event(Box::new(ConversationEvent::new(
         TurnStart, timestamp,
     ))));
+    origins.push(origin);
     events.push(InternalEvent::Event(Box::new(ConversationEvent::new(
         ChatRequest::from("[Summary of previous conversation]"),
         timestamp,
     ))));
+    origins.push(origin);
     events.push(InternalEvent::Event(Box::new(ConversationEvent::new(
         ChatResponse::message(summary),
         timestamp,
     ))));
+    origins.push(origin);
 }
 
 /// Blank a tool call request's arguments.

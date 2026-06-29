@@ -4,7 +4,7 @@ use jp_config::{
     },
     style::{reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
-use jp_conversation::compaction::resolve_range;
+use jp_conversation::{compaction::resolve_range, stream::TurnOrigin};
 use jp_llm::tool::InvocationContext;
 use jp_workspace::ConversationHandle;
 
@@ -140,9 +140,12 @@ impl Print {
     ) -> Output {
         let mut events = ctx.workspace.events(handle)?.clone();
 
-        if compacted {
-            events.apply_projection();
-        }
+        // Selection and the numbers shown in headers both use the raw
+        // (pre-projection) turn numbering, so a turn number means the same
+        // thing whether or not the view is compacted, and matches what
+        // `compact` accepts. Capture the raw count before projection collapses
+        // any turns.
+        let raw_count = events.turn_count();
         let cfg = ctx.config();
 
         let root = ctx
@@ -190,17 +193,17 @@ impl Print {
         );
         renderer.set_user_only(user_only);
 
-        let count = events.turn_count();
-
-        // `--last 0` explicitly selects nothing.
+        // `--last 0` / `--first 0` explicitly selects nothing.
         if range.is_empty() {
             renderer.flush();
             return Ok(());
         }
 
         // `--turn` names specific turns; an out-of-range endpoint is an error.
-        if let Some(n) = range.turn_out_of_range(count) {
-            return Err(format!("turn {n} out of range (conversation has {count} turns)").into());
+        if let Some(n) = range.turn_out_of_range(raw_count) {
+            return Err(
+                format!("turn {n} out of range (conversation has {raw_count} turns)").into(),
+            );
         }
 
         let from = match range.resolve_from(&events) {
@@ -220,15 +223,30 @@ impl Print {
             Bound::At(b) => Some(b),
         };
 
-        // A `from > to` or otherwise empty range selects nothing.
+        // The selected raw 0-based turn range. A `from > to` or otherwise empty
+        // range selects nothing. Resolved against the raw stream, before
+        // projection, so it lines up with the header numbers.
         let Some(selected) = resolve_range(&events, from, to) else {
             renderer.flush();
             return Ok(());
         };
 
-        for turn in events.iter_turns() {
-            if (selected.from_turn..=selected.to_turn).contains(&turn.index()) {
-                renderer.render_turn(&turn);
+        // Project for rendering when compacted; `origins` maps each rendered
+        // turn back to the raw turn number(s) it represents for the header.
+        let origins: Vec<TurnOrigin> = if compacted {
+            events.apply_projection()
+        } else {
+            (0..raw_count).map(TurnOrigin::Kept).collect()
+        };
+        debug_assert_eq!(
+            events.turn_count(),
+            origins.len(),
+            "turn origins must align with iter_turns()"
+        );
+
+        for (turn, origin) in events.iter_turns().zip(&origins) {
+            if origin.overlaps(selected.from_turn, selected.to_turn) {
+                renderer.render_turn(&turn, *origin);
             }
         }
 

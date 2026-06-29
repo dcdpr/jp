@@ -8,6 +8,7 @@ use crate::{
     Compaction, ConversationEvent, ConversationStream, EventKind, ReasoningPolicy, SummaryPolicy,
     ToolCallPolicy,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse, TurnStart},
+    stream::TurnOrigin,
 };
 
 // ---------------------------------------------------------------------------
@@ -89,6 +90,23 @@ fn two_turn_stream() -> ConversationStream {
     stream
 }
 
+/// Build a stream of `count` single-message turns (`q0`/`m0`, `q1`/`m1`, ...).
+fn message_turns(count: usize) -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    for t in 0..count {
+        stream.push(ConversationEvent::new(TurnStart, ts(0)));
+        stream.push(ConversationEvent::new(
+            ChatRequest::from(format!("q{t}")),
+            ts(0),
+        ));
+        stream.push(ConversationEvent::new(
+            ChatResponse::message(format!("m{t}")),
+            ts(0),
+        ));
+    }
+    stream
+}
+
 /// Collect only provider-visible events from the stream (what providers see).
 fn visible_events(stream: &ConversationStream) -> Vec<&EventKind> {
     stream
@@ -110,6 +128,100 @@ fn no_compaction_is_noop() {
     stream.apply_projection();
 
     assert_eq!(stream.len(), len_before);
+}
+
+// ---------------------------------------------------------------------------
+// Turn origins (raw turn numbering through projection)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn no_compaction_returns_kept_origins() {
+    let mut stream = two_turn_stream();
+
+    let origins = stream.apply_projection();
+
+    assert_eq!(origins, vec![TurnOrigin::Kept(0), TurnOrigin::Kept(1)]);
+}
+
+#[test]
+fn summary_origins_preserve_raw_turn_numbers() {
+    // Six turns; summarize the middle four (raw turns 1..=4). The turn after
+    // the summary must keep its raw number (5) rather than shifting down, so
+    // `jp conversation compact --from` numbers stay valid in the printed view.
+    let mut stream = message_turns(6);
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        from_turn: 1,
+        to_turn: 4,
+        summary: Some(SummaryPolicy {
+            summary: "middle turns".into(),
+        }),
+        reasoning: None,
+        tool_calls: None,
+    });
+
+    let origins = stream.apply_projection();
+
+    assert_eq!(origins, vec![
+        TurnOrigin::Kept(0),
+        TurnOrigin::Summary { from: 1, to: 4 },
+        TurnOrigin::Kept(5),
+    ]);
+}
+
+#[test]
+fn mechanical_compaction_keeps_one_to_one_origins() {
+    // Stripping reasoning/tool calls does not collapse turns, so numbering is
+    // unchanged.
+    let mut stream = two_turn_stream();
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        from_turn: 0,
+        to_turn: 1,
+        summary: None,
+        reasoning: Some(ReasoningPolicy::Strip),
+        tool_calls: None,
+    });
+
+    let origins = stream.apply_projection();
+
+    assert_eq!(origins, vec![TurnOrigin::Kept(0), TurnOrigin::Kept(1)]);
+}
+
+#[test]
+fn contained_summary_origins_reflect_actual_runs() {
+    // OUTER over turns 0..=3, then a newer INNER over 1..=2 splits it. Each
+    // injected summary turn reports the contiguous run it actually collapses,
+    // not OUTER's declared 0..=3 range.
+    let mut stream = message_turns(4);
+    stream.add_compaction(Compaction {
+        timestamp: ts(1),
+        from_turn: 0,
+        to_turn: 3,
+        summary: Some(SummaryPolicy {
+            summary: "OUTER".into(),
+        }),
+        reasoning: None,
+        tool_calls: None,
+    });
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        from_turn: 1,
+        to_turn: 2,
+        summary: Some(SummaryPolicy {
+            summary: "INNER".into(),
+        }),
+        reasoning: None,
+        tool_calls: None,
+    });
+
+    let origins = stream.apply_projection();
+
+    assert_eq!(origins, vec![
+        TurnOrigin::Summary { from: 0, to: 0 },
+        TurnOrigin::Summary { from: 1, to: 2 },
+        TurnOrigin::Summary { from: 3, to: 3 },
+    ]);
 }
 
 // ---------------------------------------------------------------------------
