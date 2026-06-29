@@ -75,6 +75,8 @@ pub(crate) struct Print {
 
     /// Output style preset.
     ///
+    /// - `user`: Show only user messages.
+    ///   Hides assistant messages, reasoning, and tool calls entirely.
     /// - `chat`: Show only user and assistant messages.
     ///   Hides reasoning and tool calls entirely.
     /// - `brief`: Hide reasoning, tool arguments, and tool results.
@@ -93,6 +95,9 @@ pub(crate) struct Print {
 /// Output style presets for `jp conversation print`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum PrintStyle {
+    /// Show only user messages; hide assistant messages, reasoning, and tool
+    /// calls entirely.
+    User,
     /// Show only user and assistant messages; hide reasoning and tool calls
     /// entirely.
     Chat,
@@ -169,6 +174,8 @@ impl Print {
             apply_style_preset(preset, &mut render_style, &mut tools_config);
         }
 
+        let user_only = matches!(print_style, Some(PrintStyle::User));
+
         let assistant_name = cfg.assistant.name.clone();
         let model_id = Some(cfg.assistant.model.id.resolved().to_string());
 
@@ -188,6 +195,7 @@ impl Print {
             source,
             invocation,
         );
+        renderer.set_user_only(user_only);
 
         let mut turns = events.iter_turns();
         let count = turns.len();
@@ -228,7 +236,7 @@ fn apply_style_preset(
     tools_config: &mut jp_config::conversation::tool::ToolsConfig,
 ) {
     let (reasoning_display, tool_style) = match preset {
-        PrintStyle::Chat => (ReasoningDisplayConfig::Hidden, CHAT_TOOL_STYLE),
+        PrintStyle::User | PrintStyle::Chat => (ReasoningDisplayConfig::Hidden, CHAT_TOOL_STYLE),
         PrintStyle::Brief => (ReasoningDisplayConfig::Hidden, BRIEF_TOOL_STYLE),
         PrintStyle::Full => (ReasoningDisplayConfig::Full, FULL_TOOL_STYLE),
     };
