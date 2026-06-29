@@ -69,11 +69,15 @@ items = [
     with a reply, or leave them alone.\
     """,
     """\
-    **2. Read for context, not just the diff.** When a hunk is too narrow to judge, use \
-    `github_read_file` (with `start_line` / `end_line` for any non-trivial file) to fetch the \
-    surrounding code at the PR's branch, or `github_pr_commits` / `github_commit` to inspect \
-    the PR's individual commits. (The local `git_log` / `git_diff_commit` tools only see \
-    commits already on your checked-out branch, not the PR's.)\
+    **2. Read for context, not just the diff.** When a hunk is too narrow to judge, read the \
+    surrounding code. If the prompt says the working tree is checked out at the PR's head, \
+    prefer the local `fs_*` and `git_*` tools — they are faster and complete (if it also says \
+    the tree is dirty, call `git_status` to list the changed files and confirm they don't affect \
+    your read). \
+    Otherwise the working tree does not match the PR, so use `github_read_file` (with \
+    `start_line` / `end_line`) to read code at the PR's branch and `github_pr_commits` / \
+    `github_commit` for its commits; the local `git_log` / `git_diff_commit` tools only see \
+    commits already on your checked-out branch.\
     """,
     """\
     **3. Cross-reference.** Use `github_issues` and `github_code_search` to find related work \

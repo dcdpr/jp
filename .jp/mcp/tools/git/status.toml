@@ -1,0 +1,23 @@
+[conversation.tools.git_status]
+enable = "explicit"
+run = "unattended"
+style.inline_results = "full"
+style.parameters = "function_call"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Show the working tree status: modified, staged, and untracked files."
+description = """
+Lists every path with uncommitted changes in the working tree, including \
+untracked files (which `git_diff` does not show). Untracked directories are \
+expanded to individual files; a very large untracked listing is truncated. \
+Reports, per file, whether the change is staged, unstaged, or the file is \
+untracked. Use `git_diff` or `git_diff_file` to see the actual content changes.
+"""
+
+examples = """
+Show the current working tree status:
+```json
+{}
+```
+"""

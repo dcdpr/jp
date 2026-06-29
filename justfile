@@ -144,7 +144,7 @@ rfd-this *ARGS: _install-jp
 # submit it from the GitHub UI.
 [group('jp')]
 [positional-arguments]
-pr-review NNN *ARGS: _install-jp
+pr-review NNN *ARGS: _install-jp _install-tools
     #!/usr/bin/env sh
     set -eu
 
@@ -164,6 +164,20 @@ pr-review NNN *ARGS: _install-jp
     it as a draft."
 
     args=$(just _shape-args "$msg" "$@")
+
+    # Tell the reviewer whether the working tree holds this PR's code, so it
+    # prefers the local fs_*/git_* tools over the slower github_* ones.
+    state=$(just _pr-checkout-state {{NNN}})
+    case "$state" in
+        "LOCAL "*) args="$args\n\nThe working tree is checked out at this PR's head \
+        (${state#LOCAL }) and clean. Prefer the local fs_* and git_* tools over github_* for \
+        reading files and history; they are faster and complete." ;;
+        "DIRTY "*) args="$args\n\nThe working tree is checked out at this PR's head \
+        (${state#DIRTY }) but has uncommitted local modifications. You may use the local fs_* \
+        and git_* tools; first call git_status to see which files differ (including untracked), \
+        then confirm none of those changes affect what you're reviewing before trusting a local \
+        read." ;;
+    esac
 
     title="pr-review:{{NNN}}"
 
@@ -207,7 +221,7 @@ pr-review NNN *ARGS: _install-jp
 # useful when the conversation has gone off the rails.
 [group('jp')]
 [positional-arguments]
-pr-triage NNN *ARGS: _install-jp
+pr-triage NNN *ARGS: _install-jp _install-tools
     #!/usr/bin/env sh
     set -eu
 
@@ -228,6 +242,46 @@ pr-triage NNN *ARGS: _install-jp
     plain markdown only."
 
     args=$(just _shape-args "$msg" "$@")
+
+    # Tell the triager whether the working tree holds this PR's code, so it
+    # prefers the local fs_*/git_* tools over the slower github_* ones.
+    state=$(just _pr-checkout-state {{NNN}})
+    case "$state" in
+        "LOCAL "*) args="$args\n\nThe working tree is checked out at this PR's head \
+        (${state#LOCAL }) and clean. Prefer the local fs_* and git_* tools over github_* for \
+        reading files and history; they are faster and complete." ;;
+        "DIRTY "*) args="$args\n\nThe working tree is checked out at this PR's head \
+        (${state#DIRTY }) but has uncommitted local modifications. You may use the local fs_* \
+        and git_* tools; first call git_status to see which files differ (including untracked), \
+        then confirm none of those changes affect what you're triaging before trusting a local \
+        read." ;;
+    esac
+
+    # On the PR's branch, the implementation conversation is probably in this
+    # session. Offer to triage there — picking from session-bound conversations
+    # — instead of a fresh, context-free one. `jp query` with no target then
+    # runs in whatever conversation the picker activates.
+    case "$state" in
+        "LOCAL "*|"DIRTY "*)
+            if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+                printf "You're on PR #{{NNN}}'s branch.\n" > /dev/tty
+                printf "  Triage in a [p]icked conversation / [n]ew triage conversation / [q]uit: " > /dev/tty
+                IFS= read -r ans < /dev/tty
+            else
+                ans=n
+            fi
+            case "$ans" in
+                p|P)
+                    jp conversation use '?session'
+                    jp query --cfg=personas/pr-triager \
+                        --attach "gh:pull/{{NNN}}/diff" \
+                        --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
+                        $args
+                    exit 0 ;;
+                q|Q) exit 0 ;;
+                *) ;;
+            esac ;;
+    esac
 
     title="pr-triage:{{NNN}}"
 
@@ -1864,6 +1918,18 @@ _install-jp *args:
     fi
     cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
 
+# Build and install the `jp-tools` binary that `serve-tools` runs for local MCP
+# tools. Recipes that invoke local tools (e.g. `git_status`) depend on this so a
+# stale binary doesn't return `Unknown tool` for a tool added in the checkout.
+_install-tools *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -n "${JP_NO_INSTALL:-}" ]; then
+        echo "Skipping jp-tools rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path .config/jp/tools --debug {{args}}
+
 @_install-comfort *args:
     cargo install {{quiet_flag}} --locked --path crates/contrib/comfort {{args}}
 
@@ -1923,6 +1989,39 @@ _resolve-conversation TITLE:
         q|Q)    echo "QUIT" ;;
         *)      echo "Unknown choice '$choice'; aborting." >&2; exit 1 ;;
     esac
+
+# Internal: report whether the working tree holds the given PR's code.
+#
+# Resolves the PR head sha from refs/pull/N/head on the dcdpr/jp remote (no gh
+# needed) and compares it to local HEAD. Outputs one of:
+#
+#   LOCAL <sha>   - HEAD is the PR head and the tree is clean
+#   DIRTY <sha>   - HEAD is the PR head but the tree has uncommitted changes
+#   REMOTE        - tree doesn't match the PR, or the head can't be resolved
+#
+# Callers inject the result into the prompt so the assistant knows whether to
+# prefer the local fs_*/git_* tools over the slower github_* ones.
+[no-exit-message]
+[private]
+_pr-checkout-state NNN:
+    #!/usr/bin/env sh
+    set -eu
+
+    remote=$(git remote -v 2>/dev/null | awk '/dcdpr\/jp/ {print $1; exit}')
+    remote=${remote:-origin}
+
+    head_sha=$(git ls-remote "$remote" "refs/pull/{{NNN}}/head" 2>/dev/null \
+        | awk '{print $1; exit}')
+
+    [ -n "$head_sha" ] || { echo "REMOTE"; exit 0; }
+    [ "$head_sha" = "$(git rev-parse HEAD 2>/dev/null || true)" ] \
+        || { echo "REMOTE"; exit 0; }
+
+    if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+        echo "DIRTY $head_sha"
+    else
+        echo "LOCAL $head_sha"
+    fi
 
 # Internal: look up a Bear note (or notes) by tag.
 #

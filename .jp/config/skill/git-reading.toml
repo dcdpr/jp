@@ -12,6 +12,8 @@ use `git_diff_file` for that.
 - git_diff_file: Working-tree analog of `git_diff_commit`. Show the full staged or unstaged \
 diff for explicitly listed files. Requires `status` and `paths`. Supports `pattern` to grep \
 within large diffs and `start_line` / `end_line` to page through large diffs in chunks.
+- git_status: Show the working tree status — which files are modified, staged, or untracked \
+(untracked files do not appear in `git_diff`).
 - git_log: Search the commit history. Supports filtering by message text, file paths, date range, \
 and result count.
 - git_show: Show commit details (message and changed file stats). Does NOT include actual diff \
@@ -28,6 +30,7 @@ Use these tools in a drill-down workflow:
 `git_diff_commit` to view the actual diff for specific files.
 - For the working tree: `git_diff` for the overview, `git_diff_file` to drill into a file \
 whose diff was truncated.
+- For working-tree state: `git_status` to list modified / staged / untracked files.
 - For line history: `git_blame` to find which commit introduced a line, then `git_show` or \
 `git_diff_commit` on the blamed (or `previous`) hash to see why.
 """
@@ -35,6 +38,7 @@ whose diff was truncated.
 [conversation.tools]
 git_diff = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 git_diff_file = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+git_status = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_log = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_show = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 git_diff_commit = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
