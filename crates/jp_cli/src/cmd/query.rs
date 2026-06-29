@@ -894,6 +894,18 @@ impl Query {
         self.new_conversation = true;
     }
 
+    /// Whether the conversation picker may offer a "start a new conversation"
+    /// item for this invocation.
+    ///
+    /// Returns `false` when a flag incompatible with `--new` is set, so that
+    /// choosing the item can never produce a combination clap would have
+    /// rejected.
+    /// `--fork` and `--replay` both conflict with `--new` and still reach the
+    /// picker; `--id` cannot, as it supplies an explicit target.
+    pub(crate) fn allows_new_from_picker(&self) -> bool {
+        self.fork.is_none() && !self.replay
+    }
+
     #[must_use]
     fn expires_in_duration(&self) -> Option<Duration> {
         self.expires_in?

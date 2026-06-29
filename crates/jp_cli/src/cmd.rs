@@ -100,7 +100,10 @@ impl Commands {
     /// Whether the interactive conversation picker should offer a "start a new
     /// conversation" item for this command.
     pub(crate) fn allows_new_from_picker(&self) -> bool {
-        matches!(self, Commands::Query(_))
+        match self {
+            Commands::Query(args) => args.allows_new_from_picker(),
+            _ => false,
+        }
     }
 
     pub(crate) fn name(&self) -> &'static str {

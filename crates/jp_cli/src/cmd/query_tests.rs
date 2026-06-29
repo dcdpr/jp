@@ -947,6 +947,28 @@ fn echo_request_when_from_editor_or_replay() {
 }
 
 #[test]
+fn picker_new_item_gated_by_new_incompatible_flags() {
+    // The picker may only offer "start a new conversation" when `--new` would
+    // itself be a legal flag. `--fork` and `--replay` both conflict with
+    // `--new` (and still reach the picker), so choosing the item would
+    // otherwise silently drop the fork/replay request and manufacture a state
+    // clap rejects at parse time.
+    assert!(Query::default().allows_new_from_picker());
+
+    let fork = Query {
+        fork: Some(None),
+        ..Default::default()
+    };
+    assert!(!fork.allows_new_from_picker());
+
+    let replay = Query {
+        replay: true,
+        ..Default::default()
+    };
+    assert!(!replay.allows_new_from_picker());
+}
+
+#[test]
 fn blockquote_prefixes_each_line() {
     assert_eq!(blockquote("hello"), "> hello");
     assert_eq!(blockquote("a\nb"), "> a\n> b");
