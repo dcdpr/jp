@@ -261,7 +261,7 @@ fn urlencoded(s: &str) -> String {
     out
 }
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl rmcp::ServerHandler for GrizzlyService {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
