@@ -382,8 +382,10 @@ impl ChatRenderer {
                 indent,
                 last,
             } => self.handle_paragraph_chunk(&content, indent, last),
-            // Required by the `#[non_exhaustive]` enum; no other variants exist.
-            _ => {}
+            // Every `Event` variant is handled above; this arm exists only
+            // because `Event` is `#[non_exhaustive]`. Fail loudly if a future
+            // variant reaches here rather than silently dropping its output.
+            other => unreachable!("unhandled buffer event: {other:?}"),
         }
     }
 
@@ -403,6 +405,28 @@ impl ChatRenderer {
         self.printer.print(content.typewriter(delay.into()));
     }
 
+    /// Format `source` with the reasoning-aware terminal options for the
+    /// current content kind.
+    ///
+    /// Shared by `print_block` and `handle_paragraph_chunk` so the options
+    /// derivation and the `format_terminal_with` call have one home; the two
+    /// callers differ only in their emission strategy (a whole block vs. a
+    /// stable streamed delta) and in the separator flags they pass here.
+    fn format_styled(
+        &self,
+        source: &str,
+        indent: usize,
+        suppress_trailing: bool,
+        force_trailing: bool,
+    ) -> String {
+        let mut opts = self.terminal_options(indent);
+        opts.suppress_trailing_separator = suppress_trailing;
+        opts.force_trailing_separator = force_trailing;
+        self.formatter
+            .format_terminal_with(source, &opts)
+            .unwrap_or_else(|_| source.to_string())
+    }
+
     fn print_block(&mut self, block: &str, indent: usize, terminal: bool) {
         // Skip whitespace-only blocks. These can appear when the LLM emits
         // blank text content blocks (e.g. "\n\n" between interleaved thinking
@@ -420,21 +444,12 @@ impl ChatRenderer {
             self.emit_pending_reasoning_separator(true);
         }
 
-        let mut opts = self.terminal_options(indent);
-        // Defer a reasoning block's trailing separator. Whether the gap that
-        // follows is shaded depends on whether more reasoning or other content
-        // comes next, which isn't known until the next event arrives.
-        opts.suppress_trailing_separator = is_reasoning;
-        // A terminal (flushed) message block ends its region, so a tight list
-        // here is complete and should keep its trailing separator. Reasoning
-        // defers its separator via `suppress_trailing_separator` above, so it
-        // never forces.
-        opts.force_trailing_separator = terminal && !is_reasoning;
-
-        let formatted = self
-            .formatter
-            .format_terminal_with(block, &opts)
-            .unwrap_or_else(|_| block.to_string());
+        // Defer a reasoning block's trailing separator (its shading depends on
+        // what follows, unknown until the next event). A terminal (flushed)
+        // message block ends its region, so a tight list here keeps its trailing
+        // separator; reasoning never forces, since it defers via
+        // `suppress_trailing_separator`.
+        let formatted = self.format_styled(block, indent, is_reasoning, terminal && !is_reasoning);
 
         let delay = self.config.typewriter.text_delay;
         self.printer.print(formatted.typewriter(delay.into()));
@@ -465,18 +480,11 @@ impl ChatRenderer {
 
         self.para_source.push_str(content);
 
-        let mut opts = self.terminal_options(indent);
         // Intermediate chunks suppress the trailing separator (it sits past the
         // held in-progress line anyway); the final chunk suppresses it only for
         // reasoning, exactly as `print_block` does. A paragraph is never a tight
         // list, so `force_trailing_separator` stays false.
-        opts.suppress_trailing_separator = is_reasoning || !last;
-        opts.force_trailing_separator = false;
-
-        let rendered = self
-            .formatter
-            .format_terminal_with(&self.para_source, &opts)
-            .unwrap_or_else(|_| self.para_source.clone());
+        let rendered = self.format_styled(&self.para_source, indent, is_reasoning || !last, false);
 
         // Cut at the last committed newline, holding the in-progress visual
         // line. `format_terminal_with` always finalizes with a trailing newline,

@@ -93,9 +93,10 @@ fn reassemble(events: &[Event]) -> String {
                 out.push_str(fence);
                 out.push('\n');
             }
-            // Streaming is disabled in this suite, so `ParagraphChunk` never
-            // appears; the arm satisfies the `#[non_exhaustive]` enum.
-            _ => {}
+            // Streaming is disabled in this suite, so a `ParagraphChunk` must
+            // never reach here; fail loudly if one does (and satisfy the
+            // `#[non_exhaustive]` enum).
+            other => panic!("unexpected streaming event in non-streaming reassembly: {other:?}"),
         }
     }
     out
