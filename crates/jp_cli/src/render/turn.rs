@@ -16,7 +16,10 @@ use jp_config::{
     model::id::PartialModelIdOrAliasConfig,
     style::{StyleConfig, typewriter::DelayDuration},
 };
-use jp_conversation::{EventKind, stream::turn_iter::Turn};
+use jp_conversation::{
+    EventKind,
+    stream::{TurnOrigin, turn_iter::Turn},
+};
 use jp_llm::tool::InvocationContext;
 use jp_printer::{ErrChannel, Printer};
 use tracing::warn;
@@ -106,14 +109,20 @@ impl TurnRenderer {
     }
 
     /// Render all events in a turn.
-    pub fn render_turn(&mut self, turn: &Turn<'_>) {
+    ///
+    /// `origin` maps the turn back to the raw conversation turn number(s) it
+    /// represents, used for the header.
+    /// For a non-projected stream it is [`TurnOrigin::Kept`] of the turn's own
+    /// index; for a compacted view a summary turn carries the range it
+    /// replaced.
+    pub fn render_turn(&mut self, turn: &Turn<'_>, origin: TurnOrigin) {
         if matches!(self.source, ConfigSource::PerTurn)
             && let Some(partial) = turn.iter().next().map(|e| &e.config)
         {
             self.reconfigure(partial);
         }
 
-        self.view.set_turn_detail(turn_detail(turn));
+        self.view.set_turn_detail(turn_detail(turn, origin));
 
         for event_with_cfg in turn {
             if self.user_only
@@ -226,13 +235,18 @@ impl TurnRenderer {
     }
 }
 
-/// Build the dimmed right-aligned header detail for a turn: its 1-based number
-/// and how long ago it started, e.g. `turn 2, 12 minutes ago`.
+/// Build the dimmed right-aligned header detail for a turn: its raw turn
+/// number(s) and how long ago it started, e.g. `turn 2, 12 minutes ago` or, for
+/// a compaction summary spanning several turns, `turns 2–5, 12 minutes ago`.
+///
+/// The number comes from `origin` (the raw turn number `jp conversation
+/// compact` accepts), not the turn's position in the iterator, so it stays
+/// stable whether or not the view is compacted.
 ///
 /// The timestamp comes from the turn's `TurnStart` marker, falling back to the
 /// turn's first event when the marker is absent (the implicit leading turn of a
 /// legacy stream).
-fn turn_detail(turn: &Turn<'_>) -> Option<String> {
+fn turn_detail(turn: &Turn<'_>, origin: TurnOrigin) -> Option<String> {
     let started_at = turn
         .iter()
         .find(|e| e.event.is_turn_start())
@@ -244,7 +258,14 @@ fn turn_detail(turn: &Turn<'_>) -> Option<String> {
     // renders as "now" rather than a misleading "... ago".
     let elapsed = (Utc::now() - started_at).to_std().unwrap_or_default();
     let ago = timeago::Formatter::new().convert(elapsed);
-    Some(format!("turn {}, {ago}", turn.index() + 1))
+
+    let number = match origin {
+        TurnOrigin::Kept(index) => format!("turn {}", index + 1),
+        TurnOrigin::Summary { from, to } if from == to => format!("turn {}", from + 1),
+        TurnOrigin::Summary { from, to } => format!("turns {}\u{2013}{}", from + 1, to + 1),
+    };
+
+    Some(format!("{number}, {ago}"))
 }
 
 /// Render a partial model id as a display string, treating a fully-empty id as
@@ -258,3 +279,7 @@ fn render_model_id(id: &PartialModelIdOrAliasConfig) -> Option<String> {
     let s = id.to_string();
     if s.is_empty() { None } else { Some(s) }
 }
+
+#[cfg(test)]
+#[path = "turn_tests.rs"]
+mod tests;
