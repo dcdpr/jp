@@ -185,10 +185,12 @@ fn reject_access_on_non_local_tools(tools: &ToolsConfig) -> Result<(), ConfigErr
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolsDefaultsConfig {
-    /// Whether the tool is enabled, and which directives may change that.
+    /// Default tool enablement, and which directives may change it.
     ///
-    /// A bool shorthand or a `{ state, allow_toggle }` table; see
-    /// [`EnableConfig`].
+    /// Applies to every tool that doesn't set its own `enable`.
+    /// Accepts a bool (`true`/`false`), a legacy string (`"on"`, `"off"`,
+    /// `"explicit"`, `"always"`), or a `{ state, allow_toggle }` table.
+    /// When unset, tools fall back to enabled and freely toggleable.
     #[setting(nested)]
     pub enable: Option<EnableConfig>,
 
@@ -303,8 +305,10 @@ pub struct ToolConfig {
 
     /// Whether the tool is enabled, and which directives may change that.
     ///
-    /// A bool shorthand or a `{ state, allow_toggle }` table; see
-    /// [`EnableConfig`].
+    /// Accepts a bool (`true`/`false`), a legacy string (`"on"`, `"off"`,
+    /// `"explicit"`, `"always"`), or a `{ state, allow_toggle }` table.
+    /// When unset, inherits from `[conversation.tools.'*']`, then falls back to
+    /// enabled and freely toggleable.
     #[setting(nested)]
     pub enable: Option<EnableConfig>,
 
