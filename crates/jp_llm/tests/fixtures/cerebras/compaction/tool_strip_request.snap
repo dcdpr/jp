@@ -1,0 +1,58 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "model": "gpt-oss-120b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the capital of France?"
+    },
+    {
+      "role": "assistant",
+      "reasoning": "The user wants a capital city.",
+      "content": "Paris."
+    },
+    {
+      "role": "user",
+      "content": "Read my notes file."
+    },
+    {
+      "role": "assistant",
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "read_file",
+            "arguments": "{}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_1",
+      "content": "- buy milk\n- call dentist"
+    },
+    {
+      "role": "assistant",
+      "content": "Your notes mention milk and the dentist."
+    },
+    {
+      "role": "user",
+      "content": "And the capital of Germany?"
+    },
+    {
+      "role": "assistant",
+      "content": "Berlin."
+    },
+    {
+      "role": "user",
+      "content": "And of Italy?"
+    }
+  ],
+  "stream": true,
+  "reasoning_format": "parsed"
+}

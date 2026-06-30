@@ -2331,6 +2331,7 @@ dependencies = [
  "gemini_client_rs",
  "indexmap",
  "infer",
+ "insta",
  "jp_attachment",
  "jp_config",
  "jp_conversation",

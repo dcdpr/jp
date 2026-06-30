@@ -1,0 +1,45 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "[Summary of previous conversation]"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "Earlier: the user asked about France's capital and had their notes read."
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "And of Italy?"
+        }
+      ]
+    }
+  ],
+  "model": "claude-haiku-4-5",
+  "max_tokens": 64000,
+  "thinking": {
+    "type": "disabled"
+  },
+  "stream": true,
+  "cache_control": {
+    "type": "ephemeral",
+    "ttl": "5m"
+  }
+}

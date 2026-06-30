@@ -55,6 +55,7 @@ assert_matches = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 eventsource-stream = { workspace = true }
 infer = { workspace = true, features = ["std"] }
+insta = { workspace = true, features = ["json"] }
 jp_test = { workspace = true }
 paste = { workspace = true }
 test-log = { workspace = true }

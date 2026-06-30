@@ -1,0 +1,62 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "contents": [
+    {
+      "parts": [
+        {
+          "text": "[Summary of previous conversation]"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "Summary A: France's capital and the start of the notes lookup."
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "text": "[Summary of previous conversation]"
+        }
+      ],
+      "role": "user"
+    },
+    {
+      "parts": [
+        {
+          "text": "Summary B: the notes lookup and Germany's capital."
+        }
+      ],
+      "role": "model"
+    },
+    {
+      "parts": [
+        {
+          "text": "And of Italy?"
+        }
+      ],
+      "role": "user"
+    }
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "NONE",
+      "allowedFunctionNames": []
+    }
+  },
+  "generationConfig": {
+    "maxOutputTokens": 64000,
+    "thinkingConfig": {
+      "includeThoughts": false,
+      "thinkingBudget": 512,
+      "thinkingLevel": null
+    }
+  }
+}

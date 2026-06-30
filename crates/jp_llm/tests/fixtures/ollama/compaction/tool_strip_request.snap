@@ -1,0 +1,79 @@
+---
+source: crates/jp_llm/src/provider/compaction_request_tests.rs
+expression: request
+---
+{
+  "model": "qwen3.5:9b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "What is the capital of France?",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [],
+      "thinking": "The user wants a capital city."
+    },
+    {
+      "role": "assistant",
+      "content": "Paris.",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "user",
+      "content": "Read my notes file.",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "function": {
+            "name": "read_file",
+            "arguments": {}
+          }
+        }
+      ],
+      "thinking": null
+    },
+    {
+      "role": "tool",
+      "content": "- buy milk\n- call dentist",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "assistant",
+      "content": "Your notes mention milk and the dentist.",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "user",
+      "content": "And the capital of Germany?",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "assistant",
+      "content": "Berlin.",
+      "tool_calls": [],
+      "thinking": null
+    },
+    {
+      "role": "user",
+      "content": "And of Italy?",
+      "tool_calls": [],
+      "thinking": null
+    }
+  ],
+  "options": {},
+  "stream": false,
+  "think": false
+}
