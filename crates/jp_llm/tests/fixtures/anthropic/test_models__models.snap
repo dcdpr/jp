@@ -17,7 +17,7 @@ expression: v
             1000000,
         ),
         max_output_tokens: Some(
-            64000,
+            128000,
         ),
         reasoning: Some(
             Adaptive {
