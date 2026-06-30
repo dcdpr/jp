@@ -51,8 +51,8 @@ fn tool_action_parses_config_values() {
         ToolInterruptAction::Restart
     );
     assert_eq!(
-        ToolInterruptAction::from_str("stop_reply").unwrap(),
-        ToolInterruptAction::StopReply
+        ToolInterruptAction::from_str("respond").unwrap(),
+        ToolInterruptAction::Respond
     );
 }
 

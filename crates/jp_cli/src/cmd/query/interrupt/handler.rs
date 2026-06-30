@@ -9,11 +9,11 @@
 //!
 //! ## Replies
 //!
-//! Choosing to reply (`r` while streaming, `s` while tools run) opens the
-//! inline reply widget ([`jp_inquire::InlineReply`]), which renders to the
-//! caller's `/dev/tty` writer and offers a `Ctrl+X` escape to the configured
-//! external editor.
-//! Setting `interrupt.{streaming,tool_call}.reply_in_editor` skips the inline
+//! Choosing to reply (`r` while streaming or while tools run) opens the inline
+//! reply widget ([`jp_inquire::InlineReply`]), which renders to the caller's
+//! `/dev/tty` writer and offers a `Ctrl+X` escape to the configured external
+//! editor.
+//! Setting `interrupt.{streaming,tool_call}.compose_in_editor` skips the inline
 //! step and opens the editor directly.
 //!
 //! ## Testing
@@ -98,11 +98,15 @@ enum ReplyResult {
     /// The user submitted a non-empty reply.
     Reply(String),
 
-    /// The user backed out: an empty submission, a cancel, or an emptied or
-    /// aborted editor.
-    /// The call site decides what backing out means (return to the menu, use a
-    /// canned message, …).
-    Back,
+    /// The user submitted an empty (or whitespace-only) reply: "send nothing".
+    /// The call site commits forward (the canned tool message, or back to a
+    /// streaming menu that has no separate nothing-to-send action).
+    Empty,
+
+    /// The user pressed `Ctrl+C` (or the prompt errored): "back up a level".
+    /// The call site returns to the interrupt menu where one exists, and
+    /// otherwise falls back like `Empty`.
+    Cancelled,
 }
 
 /// Handles user interrupts (Ctrl+C) during query execution.
@@ -118,7 +122,7 @@ pub struct InterruptHandler<P: PromptBackend = TerminalPromptBackend> {
     backend: P,
 
     /// The configured editor, used for the `Ctrl+X` escape and the
-    /// `reply_in_editor` opt-in.
+    /// `compose_in_editor` opt-in.
     /// `None` when no editor is configured; the inline widget still works.
     editor: Option<Arc<dyn EditorBackend>>,
 
@@ -189,16 +193,20 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 'c' => return InterruptAction::Continue,
                 's' => return InterruptAction::Stop,
                 'a' => return InterruptAction::Abort,
-                'r' => match self.collect_reply("Reply:", config.reply_in_editor, printer) {
+                'r' => match self.collect_reply("Reply:", config.compose_in_editor, printer) {
                     ReplyResult::Reply(text) => return InterruptAction::Reply(text),
-                    // Backing out of a menu-driven reply re-shows the menu (the
-                    // loop iterates).
-                    ReplyResult::Back if menu => {}
+                    // Empty submit or `Ctrl+C` in a menu-driven reply re-shows
+                    // the menu (the loop iterates).
+                    ReplyResult::Empty | ReplyResult::Cancelled if menu => {}
                     // A configured (menu-less) reply has no menu to return to,
                     // so it mirrors the `'c'` branch: keep polling a live
                     // stream, otherwise continue from the partial response.
-                    ReplyResult::Back if stream_alive => return InterruptAction::Resume,
-                    ReplyResult::Back => return InterruptAction::Continue,
+                    ReplyResult::Empty | ReplyResult::Cancelled if stream_alive => {
+                        return InterruptAction::Resume;
+                    }
+                    ReplyResult::Empty | ReplyResult::Cancelled => {
+                        return InterruptAction::Continue;
+                    }
                 },
                 _ => unreachable!("unexpected interrupt choice"),
             }
@@ -207,10 +215,11 @@ impl<P: PromptBackend> InterruptHandler<P> {
 
     /// Handle an interrupt during tool execution.
     ///
-    /// Presents a menu with options to stop & reply, restart, or continue
+    /// Presents a menu with options to stop & respond, restart, or continue
     /// waiting.
-    /// When the user chooses "Stop & Reply", they can supply a custom message;
-    /// an empty or cancelled reply produces the canned default.
+    /// Choosing "Stop & respond" collects a response: a typed message stops the
+    /// tool and sends it, an empty submission stops with the canned default,
+    /// and `Ctrl+C` backs out to the menu.
     ///
     /// When `config.action` is `prompt` the interrupt menu is shown; otherwise
     /// the configured action runs directly without a menu.
@@ -219,52 +228,61 @@ impl<P: PromptBackend> InterruptHandler<P> {
         config: &ToolInterruptConfig,
         printer: &Printer,
     ) -> InterruptAction {
-        let choice = match config.action {
-            ToolInterruptAction::Prompt => {
-                let options = vec![
-                    InlineOption::new('c', "Continue"),
-                    InlineOption::new('s', "Stop & Reply"),
-                    InlineOption::new('r', "Restart"),
-                ];
+        let menu = config.action == ToolInterruptAction::Prompt;
 
-                self.backend
-                    .inline_select("Interrupted", options, None, &mut printer.prompt_writer())
-                    .unwrap_or('c')
+        loop {
+            let choice = match config.action {
+                ToolInterruptAction::Prompt => {
+                    let options = vec![
+                        InlineOption::new('c', "Continue"),
+                        InlineOption::new('r', "Stop & respond"),
+                        InlineOption::new('t', "Restart"),
+                    ];
+
+                    self.backend
+                        .inline_select("Interrupted", options, None, &mut printer.prompt_writer())
+                        .unwrap_or('c')
+                }
+                ToolInterruptAction::Continue => 'c',
+                ToolInterruptAction::Restart => 't',
+                ToolInterruptAction::Respond => 'r',
+            };
+
+            match choice {
+                'c' => return InterruptAction::Resume,
+                't' => return InterruptAction::RestartTool,
+                'r' => match self.collect_reply("Reply:", config.compose_in_editor, printer) {
+                    ReplyResult::Reply(text) => {
+                        return InterruptAction::ToolCancelled { response: text };
+                    }
+                    // `Ctrl+C` backs up to the menu (the loop iterates). A
+                    // menu-less configured `respond` has no menu, so it falls
+                    // through to the canned message below.
+                    ReplyResult::Cancelled if menu => {}
+                    // An empty submission stops the tool with the canned "no
+                    // explanation" message; so does a menu-less `Ctrl+C`.
+                    ReplyResult::Empty | ReplyResult::Cancelled => {
+                        return InterruptAction::ToolCancelled {
+                            response: DEFAULT_TOOL_CANCELLED_RESPONSE.to_owned(),
+                        };
+                    }
+                },
+                _ => unreachable!("unexpected interrupt choice"),
             }
-            ToolInterruptAction::Continue => 'c',
-            ToolInterruptAction::Restart => 'r',
-            ToolInterruptAction::StopReply => 's',
-        };
-
-        match choice {
-            'c' => InterruptAction::Resume,
-            'r' => InterruptAction::RestartTool,
-            's' => {
-                // An empty or cancelled reply falls through to the canned
-                // message, preserving the "interrupt a tool with no
-                // explanation" shortcut.
-                let response = match self.collect_reply("Reply:", config.reply_in_editor, printer) {
-                    ReplyResult::Reply(text) => text,
-                    ReplyResult::Back => DEFAULT_TOOL_CANCELLED_RESPONSE.to_owned(),
-                };
-
-                InterruptAction::ToolCancelled { response }
-            }
-            _ => unreachable!("unexpected interrupt choice"),
         }
     }
 
     /// Collect a reply, honoring the straight-to-editor opt-in.
     ///
-    /// With `reply_in_editor` set and an editor configured, opens the editor
+    /// With `compose_in_editor` set and an editor configured, opens the editor
     /// seeded empty; otherwise collects through the inline widget.
     fn collect_reply(
         &self,
         message: &str,
-        reply_in_editor: bool,
+        compose_in_editor: bool,
         printer: &Printer,
     ) -> ReplyResult {
-        if reply_in_editor {
+        if compose_in_editor {
             let Some(editor) = self.editor.as_ref() else {
                 // No editor configured: fall back to the inline widget rather
                 // than silently doing nothing.
@@ -275,8 +293,10 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 Ok((EditOutcome::Saved, text)) if !text.trim().is_empty() => {
                     ReplyResult::Reply(text)
                 }
-                // Empty save or a cancelled (non-zero-exit) editor: back out.
-                Ok(_) => ReplyResult::Back,
+                // An empty/cancelled editor drops into the inline prompt — the
+                // editor is never a terminal action. The user can type there or
+                // submit empty / `Ctrl+C`.
+                Ok(_) => self.collect_reply_inline(message, printer),
                 // A spawn / I/O failure is not a user cancellation: surface it
                 // (chrome + diagnostics) and fall back to the inline widget so
                 // the user can still reply.
@@ -290,10 +310,12 @@ impl<P: PromptBackend> InterruptHandler<P> {
         self.collect_reply_inline(message, printer)
     }
 
-    /// Collect a reply through the inline widget, looping on the editor escape.
+    /// Collect a reply through the inline widget.
     ///
-    /// Prompt errors and `Ctrl+C` are handled explicitly (never swallowed): a
-    /// non-`Submit` outcome or an error backs out.
+    /// The `Ctrl+X` editor escape always returns to the inline prompt — it is
+    /// never a terminal action.
+    /// The only exits are a submission (empty or not) and `Ctrl+C` (or a prompt
+    /// error), handled explicitly, never swallowed.
     fn collect_reply_inline(&self, message: &str, printer: &Printer) -> ReplyResult {
         let mut buffer = String::new();
         loop {
@@ -303,39 +325,32 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 .inline_reply(message, &buffer, self.edit_mode, output)
             {
                 Ok(ReplyOutcome::OpenEditor { current_text }) => {
-                    let Some(editor) = self.editor.as_ref() else {
-                        // No editor configured: the escape is a no-op, the
-                        // widget stays open with the buffer intact.
-                        continue;
-                    };
-
-                    match editor.edit_text(&current_text) {
-                        Ok((EditOutcome::Saved, edited)) if !edited.trim().is_empty() => {
-                            // Re-seed the inline prompt with the editor's output.
-                            buffer = edited;
-                        }
-                        // Emptied or cancelled editor: back out.
-                        Ok(_) => return ReplyResult::Back,
-                        // A spawn / I/O failure is not a user cancellation:
-                        // surface it (chrome + diagnostics) and keep the buffer,
-                        // re-prompting rather than discarding what the user
-                        // typed.
-                        Err(error) => {
-                            report_editor_failure(printer, &error, "Keeping your text.");
-                            buffer = current_text;
+                    // The editor escape always returns here; whatever was typed
+                    // before `Ctrl+X` is preserved.
+                    buffer = current_text;
+                    if let Some(editor) = self.editor.as_ref() {
+                        match editor.edit_text(&buffer) {
+                            // Re-seed with the editor's output, even if empty.
+                            Ok((EditOutcome::Saved, edited)) => buffer = edited,
+                            // Aborted editor: keep the buffer as it was.
+                            Ok((EditOutcome::Cancelled, _)) => {}
+                            // A spawn / I/O failure is surfaced (chrome +
+                            // diagnostics); the buffer is kept.
+                            Err(error) => {
+                                report_editor_failure(printer, &error, "Keeping your text.");
+                            }
                         }
                     }
                 }
                 Ok(ReplyOutcome::Submit(text)) if !text.trim().is_empty() => {
                     return ReplyResult::Reply(text);
                 }
-                // A blank (empty or whitespace-only) submission, a `Ctrl+C`
-                // cancel, or a prompt error all back out. Whitespace is treated
-                // as blank so the tool path falls through to its canned
+                // A blank (empty or whitespace-only) submission commits forward
+                // with nothing; `Ctrl+C` or a prompt error backs up a level.
+                // Whitespace counts as blank so the tool path reaches its canned
                 // rejection rather than sending a blank-looking reply.
-                Ok(ReplyOutcome::Submit(_) | ReplyOutcome::Cancelled) | Err(_) => {
-                    return ReplyResult::Back;
-                }
+                Ok(ReplyOutcome::Submit(_)) => return ReplyResult::Empty,
+                Ok(ReplyOutcome::Cancelled) | Err(_) => return ReplyResult::Cancelled,
             }
         }
     }

@@ -52,16 +52,16 @@ pub struct StreamingInterruptConfig {
     #[setting(default)]
     pub action: StreamingInterruptAction,
 
-    /// Open the editor directly for a reply, skipping the inline widget.
+    /// Compose the reply in the external editor instead of the inline widget.
     ///
     /// Defaults to `false`.
-    /// When `true`, the `reply` path opens the configured editor immediately
-    /// instead of the inline reply prompt; a non-empty saved result is sent, an
-    /// empty or cancelled result returns to the menu.
+    /// When `true`, the `reply` action opens `editor.cmd` directly instead of
+    /// the inline reply prompt; `false` starts in the inline widget, where
+    /// `Ctrl+X` escapes to the editor on demand.
     /// Falls back to the inline widget when no editor is configured, and has no
     /// effect in non-interactive (no-tty) mode.
     #[setting(default = false)]
-    pub reply_in_editor: bool,
+    pub compose_in_editor: bool,
 }
 
 /// Ctrl-C behavior while tools are executing.
@@ -73,21 +73,22 @@ pub struct ToolInterruptConfig {
     /// - `prompt`: Show the interrupt menu and choose (default).
     /// - `continue`: Keep waiting for the running tools to finish.
     /// - `restart`: Cancel the running tools and run them again.
-    /// - `stop_reply`: Cancel the running tools and send a message back to the
+    /// - `respond`: Cancel the running tools and send a message back to the
     ///   assistant in their place.
     #[setting(default)]
     pub action: ToolInterruptAction,
 
-    /// Open the editor directly for a reply, skipping the inline widget.
+    /// Compose the response in the external editor instead of the inline
+    /// widget.
     ///
     /// Defaults to `false`.
-    /// When `true`, the `stop_reply` path opens the configured editor
-    /// immediately instead of the inline reply prompt; a non-empty saved result
-    /// is sent, an empty result falls through to the canned rejection notice.
+    /// When `true`, the `respond` action opens `editor.cmd` directly instead of
+    /// the inline reply prompt; `false` starts in the inline widget, where
+    /// `Ctrl+X` escapes to the editor on demand.
     /// Falls back to the inline widget when no editor is configured, and has no
     /// effect in non-interactive (no-tty) mode.
     #[setting(default = false)]
-    pub reply_in_editor: bool,
+    pub compose_in_editor: bool,
 }
 
 /// What Ctrl-C does while the assistant is generating content.
@@ -131,7 +132,7 @@ pub enum ToolInterruptAction {
     /// Cancel the running tools and send a message back to the assistant in
     /// place of their results.
     /// An empty message uses a canned rejection notice.
-    StopReply,
+    Respond,
 }
 
 impl AssignKeyValue for PartialInterruptConfig {
@@ -152,7 +153,7 @@ impl AssignKeyValue for PartialStreamingInterruptConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "action" => self.action = kv.try_some_from_str()?,
-            "reply_in_editor" => self.reply_in_editor = kv.try_some_bool()?,
+            "compose_in_editor" => self.compose_in_editor = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -165,7 +166,7 @@ impl AssignKeyValue for PartialToolInterruptConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "action" => self.action = kv.try_some_from_str()?,
-            "reply_in_editor" => self.reply_in_editor = kv.try_some_bool()?,
+            "compose_in_editor" => self.compose_in_editor = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -186,7 +187,7 @@ impl PartialConfigDelta for PartialStreamingInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             action: delta_opt(self.action.as_ref(), next.action),
-            reply_in_editor: delta_opt(self.reply_in_editor.as_ref(), next.reply_in_editor),
+            compose_in_editor: delta_opt(self.compose_in_editor.as_ref(), next.compose_in_editor),
         }
     }
 }
@@ -195,7 +196,7 @@ impl PartialConfigDelta for PartialToolInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             action: delta_opt(self.action.as_ref(), next.action),
-            reply_in_editor: delta_opt(self.reply_in_editor.as_ref(), next.reply_in_editor),
+            compose_in_editor: delta_opt(self.compose_in_editor.as_ref(), next.compose_in_editor),
         }
     }
 }
@@ -213,7 +214,7 @@ impl FillDefaults for PartialStreamingInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             action: self.action.or(defaults.action),
-            reply_in_editor: self.reply_in_editor.or(defaults.reply_in_editor),
+            compose_in_editor: self.compose_in_editor.or(defaults.compose_in_editor),
         }
     }
 }
@@ -222,7 +223,7 @@ impl FillDefaults for PartialToolInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             action: self.action.or(defaults.action),
-            reply_in_editor: self.reply_in_editor.or(defaults.reply_in_editor),
+            compose_in_editor: self.compose_in_editor.or(defaults.compose_in_editor),
         }
     }
 }
@@ -242,7 +243,7 @@ impl ToPartial for StreamingInterruptConfig {
 
         Self::Partial {
             action: partial_opt(&self.action, defaults.action),
-            reply_in_editor: partial_opt(&self.reply_in_editor, defaults.reply_in_editor),
+            compose_in_editor: partial_opt(&self.compose_in_editor, defaults.compose_in_editor),
         }
     }
 }
@@ -253,7 +254,7 @@ impl ToPartial for ToolInterruptConfig {
 
         Self::Partial {
             action: partial_opt(&self.action, defaults.action),
-            reply_in_editor: partial_opt(&self.reply_in_editor, defaults.reply_in_editor),
+            compose_in_editor: partial_opt(&self.compose_in_editor, defaults.compose_in_editor),
         }
     }
 }

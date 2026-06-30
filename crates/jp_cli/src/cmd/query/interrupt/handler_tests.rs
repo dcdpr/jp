@@ -15,7 +15,7 @@ fn make_printer() -> Printer {
 fn streaming(action: StreamingInterruptAction) -> StreamingInterruptConfig {
     StreamingInterruptConfig {
         action,
-        reply_in_editor: false,
+        compose_in_editor: false,
     }
 }
 
@@ -23,7 +23,7 @@ fn streaming(action: StreamingInterruptAction) -> StreamingInterruptConfig {
 fn tool(action: ToolInterruptAction) -> ToolInterruptConfig {
     ToolInterruptConfig {
         action,
-        reply_in_editor: false,
+        compose_in_editor: false,
     }
 }
 
@@ -130,13 +130,17 @@ fn streaming_interrupt_open_editor_re_seeds_then_submits() {
 }
 
 #[test]
-fn streaming_interrupt_open_editor_empty_returns_to_menu() {
-    // `r` → Ctrl+X → editor emptied → back to menu → `s` → Stop.
+fn streaming_interrupt_open_editor_empty_re_prompts_then_menu() {
+    // `r` → Ctrl+X → editor emptied → re-prompt inline (empty) → empty submit →
+    // back to menu → `s` → Stop. The editor escape is never terminal.
     let backend = MockPromptBackend::new()
         .with_inline_responses(['r', 's'])
-        .with_reply_outcomes([ReplyOutcome::OpenEditor {
-            current_text: String::new(),
-        }]);
+        .with_reply_outcomes([
+            ReplyOutcome::OpenEditor {
+                current_text: String::new(),
+            },
+            ReplyOutcome::Submit(String::new()),
+        ]);
     let editor = MockEditorBackend::empty();
     let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Prompt),
@@ -182,7 +186,7 @@ fn streaming_interrupt_defaults_to_stop_on_error() {
 #[test]
 fn tool_interrupt_stop_with_custom_response() {
     let backend = MockPromptBackend::new()
-        .with_inline_responses(['s'])
+        .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit("don't run this tool".into())]);
     let action =
         handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
@@ -195,7 +199,7 @@ fn tool_interrupt_stop_with_custom_response() {
 fn tool_interrupt_stop_empty_uses_canned_response() {
     // An empty reply falls through to the canned rejection message.
     let backend = MockPromptBackend::new()
-        .with_inline_responses(['s'])
+        .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
     let action =
         handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
@@ -205,17 +209,15 @@ fn tool_interrupt_stop_empty_uses_canned_response() {
 }
 
 #[test]
-fn tool_interrupt_stop_cancel_uses_canned_response() {
-    // A cancelled reply also falls through to the canned message (the
-    // "interrupt a tool with no explanation" shortcut).
+fn tool_interrupt_reply_cancel_returns_to_menu() {
+    // `Ctrl+C` in the reply prompt backs out to the tool menu (it does NOT send
+    // the canned message); a follow-up `c` then continues.
     let backend = MockPromptBackend::new()
-        .with_inline_responses(['s'])
+        .with_inline_responses(['r', 'c'])
         .with_reply_outcomes([ReplyOutcome::Cancelled]);
     let action =
         handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
-    assert!(
-        matches!(action, InterruptAction::ToolCancelled { response } if response.contains("intentionally rejected"))
-    );
+    assert_eq!(action, InterruptAction::Resume);
 }
 
 #[test]
@@ -223,7 +225,7 @@ fn tool_interrupt_stop_whitespace_uses_canned_response() {
     // A whitespace-only reply is treated as blank and falls through to the
     // canned message, rather than sending a blank-looking tool response.
     let backend = MockPromptBackend::new()
-        .with_inline_responses(['s'])
+        .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit("   \n\t ".into())]);
     let action =
         handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
@@ -234,7 +236,7 @@ fn tool_interrupt_stop_whitespace_uses_canned_response() {
 
 #[test]
 fn tool_interrupt_restart() {
-    let handler = handler(MockPromptBackend::new().with_inline_responses(['r']));
+    let handler = handler(MockPromptBackend::new().with_inline_responses(['t']));
     let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
     assert_eq!(action, InterruptAction::RestartTool);
 }
@@ -340,25 +342,37 @@ fn configured_tool_restart_skips_menu() {
 }
 
 #[test]
-fn configured_tool_stop_reply_uses_inline_prompt() {
+fn configured_tool_respond_uses_inline_prompt() {
     let backend =
         MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Submit("use ripgrep".into())]);
     let action = handler(backend)
-        .handle_tool_interrupt(&tool(ToolInterruptAction::StopReply), &make_printer());
+        .handle_tool_interrupt(&tool(ToolInterruptAction::Respond), &make_printer());
     assert_eq!(action, InterruptAction::ToolCancelled {
         response: "use ripgrep".into()
     });
 }
 
 #[test]
-fn reply_in_editor_opens_editor_directly() {
-    // With `reply_in_editor`, `r` skips the inline widget and sends the editor
+fn configured_tool_respond_cancel_uses_canned() {
+    // A menu-less `respond` has no menu to return to, so `Ctrl+C` falls
+    // through to the canned message (it must not loop).
+    let backend = MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Cancelled]);
+    let action = handler(backend)
+        .handle_tool_interrupt(&tool(ToolInterruptAction::Respond), &make_printer());
+    assert!(
+        matches!(action, InterruptAction::ToolCancelled { response } if response.contains("intentionally rejected"))
+    );
+}
+
+#[test]
+fn compose_in_editor_opens_editor_directly() {
+    // With `compose_in_editor`, `r` skips the inline widget and sends the editor
     // result directly. No reply outcomes are scripted on the prompt backend.
     let backend = MockPromptBackend::new().with_inline_responses(['r']);
     let editor = MockEditorBackend::always("written in the editor");
     let config = StreamingInterruptConfig {
         action: StreamingInterruptAction::Prompt,
-        reply_in_editor: true,
+        compose_in_editor: true,
     };
     let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
         &config,
@@ -372,13 +386,16 @@ fn reply_in_editor_opens_editor_directly() {
 }
 
 #[test]
-fn reply_in_editor_empty_returns_to_menu() {
-    // `reply_in_editor` with an empty editor result returns to the menu.
-    let backend = MockPromptBackend::new().with_inline_responses(['r', 's']);
+fn compose_in_editor_empty_drops_to_inline() {
+    // `compose_in_editor` with an empty editor result drops into the inline
+    // prompt; an empty submit there returns to the menu → `s` → Stop.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r', 's'])
+        .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
     let editor = MockEditorBackend::empty();
     let config = StreamingInterruptConfig {
         action: StreamingInterruptAction::Prompt,
-        reply_in_editor: true,
+        compose_in_editor: true,
     };
     let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
         &config,
@@ -389,23 +406,23 @@ fn reply_in_editor_empty_returns_to_menu() {
 }
 
 #[test]
-fn reply_in_editor_without_editor_falls_back_to_inline() {
-    // `reply_in_editor` is set but no editor configured: fall back to the
+fn compose_in_editor_without_editor_falls_back_to_inline() {
+    // `compose_in_editor` is set but no editor configured: fall back to the
     // inline widget rather than doing nothing.
     let backend = MockPromptBackend::new()
         .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit("typed inline".into())]);
     let config = StreamingInterruptConfig {
         action: StreamingInterruptAction::Prompt,
-        reply_in_editor: true,
+        compose_in_editor: true,
     };
     let action = handler(backend).handle_streaming_interrupt(&config, &make_printer(), true);
     assert_eq!(action, InterruptAction::Reply("typed inline".into()));
 }
 
 #[test]
-fn reply_in_editor_spawn_failure_falls_back_to_inline() {
-    // `reply_in_editor` set, but the editor can't start: fall back to the inline
+fn compose_in_editor_spawn_failure_falls_back_to_inline() {
+    // `compose_in_editor` set, but the editor can't start: fall back to the inline
     // widget (a spawn error is not a user cancellation) rather than silently
     // backing out.
     let backend = MockPromptBackend::new()
@@ -414,7 +431,7 @@ fn reply_in_editor_spawn_failure_falls_back_to_inline() {
     let editor = MockEditorBackend::failing();
     let config = StreamingInterruptConfig {
         action: StreamingInterruptAction::Prompt,
-        reply_in_editor: true,
+        compose_in_editor: true,
     };
     let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
         &config,

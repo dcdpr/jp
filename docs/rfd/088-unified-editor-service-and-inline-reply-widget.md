@@ -15,7 +15,7 @@ Consolidate JP's four independent editor-invocation paths onto a single
 interrupt-menu reply prompt with a richer inline editing widget, built on a
 vendored copy of [reedline], that accepts short replies inline, supports
 multi-line input, and escalates to the configured editor on demand.
-A per-context opt-in (`reply_in_editor`) skips the inline step and opens the
+A per-context opt-in (`compose_in_editor`) skips the inline step and opens the
 editor immediately, for users who prefer that.
 
 ## Motivation
@@ -85,29 +85,34 @@ When the user presses `Ctrl+C` during streaming and chooses `r`:
    A second **Ctrl+C** at the menu escalates to graceful shutdown (see [RFD
    045]).
 
-After the editor closes (when invoked via `Ctrl+X`):
+After the editor closes (when invoked via `Ctrl+X`), the inline reply prompt
+always re-appears — the editor is never a terminal action:
 
-- If the editor's output is empty, control returns to the interrupt menu.
-- If the editor's output is non-empty, the inline reply prompt re-appears with
-  the editor's output as the buffer; the user must press Enter to send.
+- A non-empty result re-seeds the buffer; the user presses Enter to send.
+- An empty result (or an aborted editor) re-appears with an empty buffer; the
+  user can type again, submit empty, or `Ctrl+C` back to the menu.
 
-**Opt-in: straight to the editor.** Setting `interrupt.streaming.reply_in_editor
+**Opt-in: straight to the editor.** Setting `interrupt.streaming.compose_in_editor
 = true` skips the inline widget for `r` and opens the configured editor
 immediately, seeded empty.
-A non-empty result is sent as-is; an empty result returns to the interrupt menu.
+A non-empty result is sent as-is; an empty or cancelled result drops into the
+inline prompt (where the user can type, submit empty, or `Ctrl+C` back to the
+menu).
 This serves users who always want a full editor for replies and would rather not
 pass through the inline step.
 
-#### `s` (Stop & Reply) in the tool-interrupt menu
+#### `r` (Stop & respond) in the tool-interrupt menu
 
-Same flow as `r`, with one difference: an empty Enter or a `Ctrl+C` cancel does
-not return to the menu — it falls through to today's
-`DEFAULT_TOOL_CANCELLED_RESPONSE` canned message, which is delivered to the LLM.
-This preserves the existing "interrupt a tool with no explanation" shortcut.
+Same flow as the streaming `r`, with one difference at the inline prompt: an
+empty Enter does not return to the menu — it stops the tool with the
+`DEFAULT_TOOL_CANCELLED_RESPONSE` canned message, preserving the "interrupt a
+tool with no explanation" shortcut.
+`Ctrl+C` still backs out to the menu (a second `Ctrl+C` there escalates), and
+the `Ctrl+X` editor escape still always returns to the inline prompt.
 
-The `interrupt.tool_call.reply_in_editor` opt-in applies here too: when set, `s`
-opens the editor directly, and an empty editor result falls through to the
-canned message.
+The `interrupt.tool_call.compose_in_editor` opt-in applies here too: when set, `r`
+opens the editor directly; an empty or cancelled editor result drops into the
+inline prompt (where an empty submit then sends the canned message).
 
 #### `jp query` (initial prompt)
 
@@ -457,9 +462,10 @@ pub fn handle_streaming_interrupt(
             'c'                   => return InterruptAction::Continue,
             's'                   => return InterruptAction::Stop,
             'a'                   => return InterruptAction::Abort,
-            'r' => match self.collect_reply("Reply:", self.reply_in_editor, writer) {
+            'r' => match self.collect_reply("Reply:", self.compose_in_editor, writer) {
                 ReplyResult::Reply(text) => return InterruptAction::Reply(text),
-                ReplyResult::Back        => continue, // back to menu
+                // Empty submit or Ctrl+C: re-show the menu.
+                ReplyResult::Empty | ReplyResult::Cancelled => continue,
             },
             _ => unreachable!(),
         }
@@ -469,12 +475,12 @@ pub fn handle_streaming_interrupt(
 fn collect_reply(
     &self,
     message: &str,
-    reply_in_editor: bool,
+    compose_in_editor: bool,
     writer: &mut dyn Write,
 ) -> ReplyResult {
     // Straight-to-editor opt-in: skip the inline widget and open the editor
     // directly, seeded empty.
-    if reply_in_editor {
+    if compose_in_editor {
         let Some(editor) = self.editor.as_ref() else {
             // No editor configured: fall back to the inline widget rather than
             // silently doing nothing (see Configuration changes).
@@ -484,59 +490,55 @@ fn collect_reply(
             Ok((EditOutcome::Saved, text)) if !text.trim().is_empty() => {
                 ReplyResult::Reply(text)
             }
-            Ok(_)  => ReplyResult::Back,                 // empty or cancelled
-            // A spawn/I/O failure is not a cancellation: report it and fall
-            // back to the inline widget so the user can still reply.
+            // Empty/cancelled editor (or a spawn/I/O failure, reported): drop
+            // into the inline prompt — the editor is never a terminal action.
+            Ok(_)  => self.collect_reply(message, false, writer),
             Err(e) => { self.report(e); self.collect_reply(message, false, writer) }
         };
     }
 
     let mut buffer = String::new();
     loop {
-        // Prompt errors and Ctrl+C are handled explicitly, never swallowed by
-        // `.ok()?` — the regression RFD 045 warns about.
+        // Prompt errors and Ctrl+C are handled explicitly, never swallowed.
         match self.backend.inline_reply(message, &buffer, writer) {
+            Ok(ReplyOutcome::OpenEditor { current_text }) => {
+                // The editor escape always returns to the inline prompt.
+                buffer = current_text;
+                if let Some(editor) = self.editor.as_ref() {
+                    match editor.edit_text(&buffer) {
+                        Ok((EditOutcome::Saved, edited)) => buffer = edited, // even if empty
+                        Ok((EditOutcome::Cancelled, _))  => {}               // keep buffer
+                        Err(e) => self.report(e),                            // keep buffer
+                    }
+                }
+            }
             Ok(ReplyOutcome::Submit(text)) if !text.trim().is_empty() => {
                 return ReplyResult::Reply(text)
             }
-            Ok(ReplyOutcome::Submit(_)) => return ReplyResult::Back, // empty
-            Ok(ReplyOutcome::Cancelled) => return ReplyResult::Back, // Ctrl+C
-            Ok(ReplyOutcome::OpenEditor { current_text }) => {
-                let Some(editor) = self.editor.as_ref() else { continue };
-                match editor.edit_text(&current_text) {
-                    Ok((EditOutcome::Saved, edited))
-                        if !edited.trim().is_empty() =>
-                    {
-                        buffer = edited; // re-seed the inline prompt
-                    }
-                    Ok(_)  => return ReplyResult::Back, // empty or cancelled
-                    // A spawn/I/O failure is not a cancellation: report it and
-                    // keep the buffer, re-prompting instead of discarding it.
-                    Err(e) => { self.report(e); buffer = current_text; }
-                }
-            }
-            Err(e) => { self.report(e); return ReplyResult::Back }
+            Ok(ReplyOutcome::Submit(_))          => return ReplyResult::Empty,     // send nothing
+            Ok(ReplyOutcome::Cancelled) | Err(_) => return ReplyResult::Cancelled, // back a level
         }
     }
 }
 ```
 
-`collect_reply` returns `ReplyResult { Reply(String), Back }` rather than an
+`collect_reply` returns `ReplyResult { Reply(String), Empty, Cancelled }` rather
+than an
 `Option`, so prompt errors and `Ctrl+C` are handled explicitly instead of being
 swallowed by `.ok()?` — the regression [RFD 045] warns about.
 The `writer` (the `/dev/tty` prompt target) is threaded from the menu loop into
 `collect_reply` and on to `inline_reply`, matching the writer-passing pattern of
 the other `PromptBackend` methods.
-The tool-interrupt `s` flow uses the same helper but substitutes
+The tool-interrupt `r` flow uses the same helper but substitutes
 `DEFAULT_TOOL_CANCELLED_RESPONSE` for `Back`, preserving today's canned-message
 semantics.
 
 This sketch is the `action = prompt` path.
 The `[interrupt].*.action` config wraps it: a non-`prompt` action skips the menu
-and runs directly, and a configured `reply` / `stop_reply` calls `collect_reply`
+and runs directly, and a configured `reply` / `respond` calls `collect_reply`
 directly — the cancel fallback for those menu-less paths is pinned in
 [Configuration changes](#configuration-changes), not left to implementation.
-The `reply_in_editor` argument is read from the same per-context config struct.
+The `compose_in_editor` argument is read from the same per-context config struct.
 
 ### Empty-Enter policy
 
@@ -546,7 +548,7 @@ Per-call-site policy:
 | Call site                            | Empty-text policy                                                |
 | ------------------------------------ | ---------------------------------------------------------------- |
 | Streaming `r`                        | Empty → `Cancelled` (back to menu)                               |
-| Tool `s`                             | Empty → fall through to canned `DEFAULT_TOOL_CANCELLED_RESPONSE` |
+| Tool `r`                             | Empty → fall through to canned `DEFAULT_TOOL_CANCELLED_RESPONSE` |
 | Tool permission `r` (skip reason)    | Empty → `None` (skip with no reason)                             |
 | Tool permission `e` (edit arguments) | Empty → fall back to Ask (args unchanged)                        |
 | Tool result edit                     | Empty → `None` (fall back to Ask)                                |
@@ -564,10 +566,10 @@ Two keys are added under `interrupt.{streaming,tool_call}` and one under
 cmd = "code --wait" # string form (shell = false), or a table (below)
 
 [interrupt.streaming]
-reply_in_editor = false # r opens the editor directly, skipping the widget
+compose_in_editor = false # r opens the editor directly, skipping the widget
 
 [interrupt.tool_call]
-reply_in_editor = false # s opens the editor directly, skipping the widget
+compose_in_editor = false # r opens the editor directly, skipping the widget
 
 [editor.inline]
 edit_mode = "emacs" # "emacs" | "vi"
@@ -587,15 +589,15 @@ edit_mode = "emacs" # "emacs" | "vi"
   program is spawned **directly** (the `"$@"` path-forwarding convention is
   Unix-only) — wrap any shell logic in a script and point `program` at it
   (`shell = false`) instead.
-- **`reply_in_editor`** — defaults to `false`.
-  When `true`, the reply path opens the configured editor **instead of** showing
-  `InlineReply`; a non-empty saved result is sent immediately, an empty or
-  cancelled (non-zero-exit) result returns to the menu.
+- **`compose_in_editor`** — defaults to `false`.
+  When `true`, the reply/response opens the configured editor **instead of** the
+  inline widget; a non-empty saved result is sent, and an empty or cancelled
+  editor result drops into the inline prompt (the editor is never a terminal
+  action — the user can type there, submit empty, or `Ctrl+C` back to the menu).
   A spawn/start failure (e.g. a missing `shell = false` `editor.cmd` binary) is
-  surfaced and falls back to the inline widget rather than being treated as a
-  cancellation.
-  If no editor is configured it likewise falls back to the inline widget (never
-  a silent no-op).
+  surfaced and likewise falls back to the inline widget.
+  If no editor is configured it falls back to the inline widget too (never a
+  silent no-op).
   In non-interactive / no-tty mode there is no prompt, so the key has no effect.
 - **`editor.inline.edit_mode`** — selects reedline's edit mode for the inline
   widget: the *editing style* of the inline buffer, orthogonal to which external
@@ -608,8 +610,8 @@ menu-less configured-action paths, so nothing is left to implementation:
 | ------------------------ | ----- | ------------------- | ----------------------------- |
 | streaming `r`            | yes   | back to menu        | back to menu (2nd → escalate) |
 | streaming `action=reply` | no    | resume the response | resume the response           |
-| tool `s`                 | yes   | canned message      | back to menu (2nd → escalate) |
-| tool `action=stop_reply` | no    | canned message      | canned message                |
+| tool `r`                 | yes   | canned message      | back to menu (2nd → escalate) |
+| tool `action=respond`    | no    | canned message      | canned message                |
 
 "Escalate" is RFD 045's graceful shutdown.
 The menu-less configured-action rows have no menu to return to, so cancel
@@ -656,7 +658,7 @@ Two terms enter the glossary:
 - **Behavior change for the `r` flow.** By default `r` opens the inline reply
   widget instead of the `inquire::Editor` "press `e`" two-step.
   (The old flow never went *straight* to the editor either — it always showed
-  that intermediate prompt; `reply_in_editor` is what makes straight-to-editor
+  that intermediate prompt; `compose_in_editor` is what makes straight-to-editor
   possible for the first time.)
   JP is pre-release, so the default change is acceptable; flagged for
   completeness.
@@ -720,7 +722,7 @@ renders through `Printer`'s tty writer.
   editor *selection* (e.g., a different external editor for inline replies vs.
   the query prompt).
   One external editor is configured; one is used.
-  (`reply_in_editor` controls *whether* a reply uses that editor, and
+  (`compose_in_editor` controls *whether* a reply uses that editor, and
   `editor.inline.edit_mode` controls the *inline widget's* editing style — both
   separate axes from *which* external editor opens, so neither conflicts with
   this non-goal.)
@@ -814,16 +816,16 @@ Estimated diff: ~250 LOC.
   `prompt_result_confirmation`, and the `prompter.has_editor()` term in
   `coordinator.rs`'s `can_prompt` gate (so `ResultMode::Edit` prompts on any
   tty).
-- Add `editor: Option<Arc<dyn EditorBackend>>` and `reply_in_editor` to
+- Add `editor: Option<Arc<dyn EditorBackend>>` and `compose_in_editor` to
   `InterruptHandler`; thread the editor through both
   `InterruptHandler::with_backend` call sites in `interrupt/signals.rs`.
 - Rewrite `handle_streaming_interrupt` and `handle_tool_interrupt` as loops with
   `collect_reply` returning `ReplyResult`; map reedline `Signal::CtrlC` to
   `Cancelled` and a cancelled *menu* to RFD 045's `Escalated`.
-- Add `interrupt.{streaming,tool_call}.reply_in_editor` to `jp_config` and apply
+- Add `interrupt.{streaming,tool_call}.compose_in_editor` to `jp_config` and apply
   the cancel/empty behavior matrix (incl. the menu-less configured-action rows).
 - Update existing handler tests; add tests for `Cancelled → menu → submit`,
-  `OpenEditor → empty → menu`, the `reply_in_editor` straight-to-editor path,
+  `OpenEditor → empty → menu`, the `compose_in_editor` straight-to-editor path,
   and the configured-action cancel fallbacks.
 
 Depends on Phases 1 and 2.
@@ -835,7 +837,7 @@ Estimated diff: ~400 LOC, mostly tests.
 
 - Add **EditorBackend** and **InlineReply** to
   `docs/architecture/ubiquitous-language.md`.
-- Document `interrupt.*.reply_in_editor` and `editor.inline.edit_mode` in the
+- Document `interrupt.*.compose_in_editor` and `editor.inline.edit_mode` in the
   config reference.
 - Update any user-facing docs that describe the `r` flow.
 
@@ -861,7 +863,7 @@ Reviewable independently after Phase 3.
   `editor::edit_query` (path A)
 - `crates/jp_config/src/editor.rs` — `EditorConfig::command()` and `path()`
 - `crates/jp_config/src/interrupt.rs` — the `interrupt.{streaming,tool_call}`
-  config; the `action` field ships separately, `reply_in_editor` is added here
+  config; the `action` field ships separately, `compose_in_editor` is added here
 
 [RFD 045]: 045-layered-interrupt-handler-stack.md
 [RFD 048]: 048-four-channel-output-model.md

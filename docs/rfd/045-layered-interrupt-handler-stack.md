@@ -308,7 +308,7 @@ CLI starts:
     ├── Tool execution:
     │     push ToolInterruptHandler        ← topmost
     │     ... tools run ...
-    │     Ctrl-C → tool menu (Continue/Stop & Reply/Restart)
+    │     Ctrl-C → tool menu (Continue/Stop & respond/Restart)
     │     drop ToolInterruptHandler
     ├── (gap: response processing)
     │     TurnInterruptHandler is topmost

@@ -853,12 +853,12 @@ JP's tool-execution interrupt menu offers three choices:
   Tools keep running; new approvals append as they complete.
   The cycle commits normally when all tools finish.
 
-- **Stop & Reply**: cancel in-flight tools, then run the normal cycle-end commit
+- **Stop & respond**: cancel in-flight tools, then run the normal cycle-end commit
   path.
   Any deltas already approved at apply chrome commit to the event stream as a
   single merged `ConfigDelta`.
   The user's reply text is attached to each cancelled tool as its response
-  content (wrapped in JP's cancellation message), matching current Stop & Reply
+  content (wrapped in JP's cancellation message), matching current Stop & respond
   behavior — the LLM sees the cancelled tool responses, not a new user request.
   User-explicit approvals from apply chrome are not revoked by cutting the cycle
   short.
@@ -883,7 +883,7 @@ dirty-state persistence, no provisional delta can leak to the event stream
 through a termination path.
 
 **User implication.** Approvals via apply chrome are provisional until the cycle
-closes via Continue or Stop & Reply.
+closes via Continue or Stop & respond.
 A user who clicks "apply" at apply chrome and then chooses Restart does not get
 their config change — the Restart explicitly discards the batch to avoid
 double-counting on the replayed run.
@@ -891,7 +891,7 @@ double-counting on the replayed run.
 Implementation note: the buffer must live outside `ConversationMut`'s
 dirty-state tracking so that drop-persistence cannot leak provisional deltas.
 A plain `Vec` owned by the cycle coordinator, cleared on Restart and flushed to
-the stream on Continue / Stop & Reply success.
+the stream on Continue / Stop & respond success.
 
 ### Re-Resolve Failures
 

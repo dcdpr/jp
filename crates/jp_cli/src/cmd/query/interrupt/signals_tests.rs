@@ -223,8 +223,8 @@ fn tool_signal_shutdown_restart_returns_restart() {
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // Mock user selecting 'r' (Restart) from interrupt menu
-    let backend = MockPromptBackend::new().with_inline_responses(['r']);
+    // Mock user selecting 't' (Restart) from interrupt menu
+    let backend = MockPromptBackend::new().with_inline_responses(['t']);
 
     let result = handle_tool_signal(
         SignalTo::Shutdown,
@@ -253,8 +253,11 @@ fn tool_signal_shutdown_cancelled_returns_cancelled_with_canned_response() {
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // Mock user selecting 's' (Stop & Reply) with no text — canned response
-    let backend = MockPromptBackend::new().with_inline_responses(['s']);
+    // Mock user selecting 'r' (Stop & respond) then submitting empty — canned
+    // response.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
 
     let result = handle_tool_signal(
         SignalTo::Shutdown,
@@ -283,9 +286,9 @@ fn tool_signal_shutdown_cancelled_with_custom_response() {
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // Mock user selecting 's' (Stop & Reply) then typing a message
+    // Mock user selecting 'r' (Stop & respond) then typing a message
     let backend = MockPromptBackend::new()
-        .with_inline_responses(['s'])
+        .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit("wrong tool, use grep instead".into())]);
 
     let result = handle_tool_signal(
@@ -345,7 +348,7 @@ fn tool_signal_shutdown_suppressed_when_prompting() {
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
     // This should NOT show the interrupt menu because a prompt is active
-    let backend = MockPromptBackend::new().with_inline_responses(['s']);
+    let backend = MockPromptBackend::new().with_inline_responses(['r']);
 
     let result = handle_tool_signal(
         SignalTo::Shutdown,
@@ -375,8 +378,10 @@ fn tool_signal_shutdown_not_suppressed_when_not_prompting() {
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // This should show the interrupt menu.
-    let backend = MockPromptBackend::new().with_inline_responses(['s']);
+    // This should show the interrupt menu; an empty reply cancels the tool.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
 
     let result = handle_tool_signal(
         SignalTo::Shutdown,
