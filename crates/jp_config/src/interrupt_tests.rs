@@ -8,10 +8,22 @@ fn compose_in_editor_parses_bools_and_strings() {
     assert_eq!(ComposeInEditor::default(), ComposeInEditor::Inline);
     assert_eq!(ComposeInEditor::from(false), ComposeInEditor::Inline);
     assert_eq!(ComposeInEditor::from(true), ComposeInEditor::Editor);
-    assert_eq!(ComposeInEditor::from_str("false").unwrap(), ComposeInEditor::Inline);
-    assert_eq!(ComposeInEditor::from_str("true").unwrap(), ComposeInEditor::Editor);
-    assert_eq!(ComposeInEditor::from_str("always").unwrap(), ComposeInEditor::Always);
-    assert_eq!(ComposeInEditor::from_str("never").unwrap(), ComposeInEditor::Never);
+    assert_eq!(
+        ComposeInEditor::from_str("false").unwrap(),
+        ComposeInEditor::Inline
+    );
+    assert_eq!(
+        ComposeInEditor::from_str("true").unwrap(),
+        ComposeInEditor::Editor
+    );
+    assert_eq!(
+        ComposeInEditor::from_str("always").unwrap(),
+        ComposeInEditor::Always
+    );
+    assert_eq!(
+        ComposeInEditor::from_str("never").unwrap(),
+        ComposeInEditor::Never
+    );
     assert!(ComposeInEditor::from_str("sometimes").is_err());
 }
 
