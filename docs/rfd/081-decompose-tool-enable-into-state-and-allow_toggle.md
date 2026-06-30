@@ -1,6 +1,6 @@
 # RFD 081: Decompose tool enable into state and allow\_toggle
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-11
