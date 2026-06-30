@@ -144,14 +144,19 @@ PartialAppConfig {
     interrupt: PartialInterruptConfig {
         streaming: PartialStreamingInterruptConfig {
             action: None,
+            compose_in_editor: None,
         },
         tool_call: PartialToolInterruptConfig {
             action: None,
+            compose_in_editor: None,
         },
     },
     editor: PartialEditorConfig {
         cmd: None,
         envs: None,
+        inline: PartialInlineEditorConfig {
+            edit_mode: None,
+        },
     },
     template: PartialTemplateConfig {
         values: {},

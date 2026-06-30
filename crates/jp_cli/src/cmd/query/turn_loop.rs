@@ -45,7 +45,7 @@ use tracing::{debug, info, warn};
 
 use super::{
     build_sections, build_thread,
-    interrupt::{LoopAction, handle_llm_event, handle_streaming_signal},
+    interrupt::{LoopAction, handle_llm_event, handle_streaming_signal, reply_edit_mode},
     stream::{StreamRetryState, handle_stream_error},
     tool::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
@@ -57,6 +57,7 @@ use super::{
 };
 use crate::{
     cmd::query::tool::coordinator::ExecutionResult,
+    editor::build_editor_backend,
     error::Error,
     render::metadata::set_rendered_arguments,
     signals::{SignalRx, SignalTo},
@@ -216,8 +217,9 @@ pub(super) async fn run_turn_loop(
     // executing (tool question prompts) phases.
     let prompter = Arc::new(ToolPrompter::with_prompt_backend(
         printer.clone(),
-        cfg.editor.path(),
+        build_editor_backend(&cfg.editor),
         prompt_backend.clone(),
+        reply_edit_mode(cfg.editor.inline.edit_mode),
     ));
 
     loop {
@@ -360,6 +362,8 @@ pub(super) async fn run_turn_loop(
                                     stream,
                                     &printer,
                                     prompt_backend.as_ref(),
+                                    build_editor_backend(&cfg.editor),
+                                    reply_edit_mode(cfg.editor.inline.edit_mode),
                                     &cfg.interrupt.streaming,
                                     !llm_alive,
                                 )
@@ -557,8 +561,9 @@ pub(super) async fn run_turn_loop(
                     let unavailable = tool_coordinator.prepare(restart_calls);
                     let restart_prompter = ToolPrompter::with_prompt_backend(
                         printer.clone(),
-                        cfg.editor.path(),
+                        build_editor_backend(&cfg.editor),
                         prompt_backend.clone(),
+                        reply_edit_mode(cfg.editor.inline.edit_mode),
                     );
                     let (executors, skipped) = tool_coordinator
                         .run_permission_phase(
@@ -635,6 +640,8 @@ pub(super) async fn run_turn_loop(
                         &mut turn_state,
                         &printer,
                         prompt_backend.as_ref(),
+                        build_editor_backend(&cfg.editor),
+                        reply_edit_mode(cfg.editor.inline.edit_mode),
                         Arc::clone(&inquiry_backend),
                         &conv,
                         mcp_client,

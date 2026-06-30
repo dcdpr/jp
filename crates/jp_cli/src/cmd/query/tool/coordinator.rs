@@ -97,7 +97,8 @@ use jp_conversation::{
         SelectOption, ToolCallRequest, ToolCallResponse,
     },
 };
-use jp_inquire::prompt::PromptBackend;
+use jp_editor::EditorBackend;
+use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
 use jp_llm::tool::executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
 use jp_mcp::Client;
 use jp_printer::Printer;
@@ -828,6 +829,8 @@ impl ToolCoordinator {
         turn_state: &mut TurnState,
         printer: &Printer,
         prompt_backend: &dyn PromptBackend,
+        editor: Option<Arc<dyn EditorBackend>>,
+        edit_mode: ReplyEditMode,
         inquiry_backend: Arc<dyn InquiryBackend>,
         conv: &ConversationMut,
         mcp_client: &Client,
@@ -1106,6 +1109,8 @@ impl ToolCoordinator {
                             self.is_prompting(),
                             printer,
                             prompt_backend,
+                            editor.clone(),
+                            edit_mode,
                             &self.interrupt_config,
                         ) {
                             ToolSignalResult::Continue => {}
@@ -1312,8 +1317,10 @@ impl ToolCoordinator {
                         });
                     }
                     result_mode @ (ResultMode::Ask | ResultMode::Edit) => {
-                        let can_prompt =
-                            is_tty && (result_mode == ResultMode::Ask || prompter.has_editor());
+                        // Both Ask and Edit prompt on any tty: the Edit flow
+                        // uses the inline widget, which no longer requires a
+                        // configured editor.
+                        let can_prompt = is_tty;
                         if can_prompt {
                             if *prompt_active {
                                 pending_prompts.push_back(PendingPrompt::ResultMode {

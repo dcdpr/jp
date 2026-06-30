@@ -3,59 +3,64 @@ mod parser;
 use std::{
     fs::{self, OpenOptions},
     io::{Read as _, Write as _},
-    str::FromStr,
+    sync::Arc,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{FixedOffset, Local};
-use duct::Expression;
 use jp_config::{
-    AppConfig, PartialAppConfig, ToPartial as _, model::parameters::PartialReasoningConfig,
+    AppConfig, PartialAppConfig, ToPartial as _, editor::EditorConfig,
+    model::parameters::PartialReasoningConfig,
 };
 use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, EventKind},
 };
+use jp_editor::{EditOutcome, EditRequest, EditorBackend, EditorError, TerminalEditorBackend};
+use jp_printer::Printer;
+use tracing::warn;
 
 use crate::{
     editor::parser::QueryDocument,
     error::{Error, Result},
 };
 
+/// Build a terminal editor backend from the resolved editor configuration.
+///
+/// Returns `None` when no editor command resolves: neither `editor.cmd` is set
+/// nor does a configured editor environment variable point at an installed
+/// binary.
+pub(crate) fn build_editor_backend(config: &EditorConfig) -> Option<Arc<dyn EditorBackend>> {
+    config
+        .command()
+        .map(|cmd| Arc::new(TerminalEditorBackend::new(cmd)) as Arc<dyn EditorBackend>)
+}
+
+/// Surface an editor failure that JP recovered from rather than aborting.
+///
+/// The full error goes to the diagnostics channel (`tracing`, visible with
+/// `-vvv` or in the log file); a concise notice goes to the chrome channel
+/// (stderr) so the user actually sees that their editor didn't open.
+/// `recovery` names what JP did instead (e.g.
+/// "Continuing with the inline editor.").
+///
+/// Safe to call between inline-reply prompts: the `reedline` engine is dropped
+/// when `InlineReply::prompt` returns, so the terminal is back in cooked mode
+/// by the time this writes.
+/// The leading newline starts the notice on a fresh line below the prompt.
+pub(crate) fn report_editor_failure(printer: &Printer, error: &EditorError, recovery: &str) {
+    warn!(%error, "editor failed during reply/edit");
+    printer.eprintln(format!(
+        "\n⚠ Couldn't open your editor: {error}. {recovery}"
+    ));
+}
+
 /// The name of the file used to store the current query message.
 pub(crate) const QUERY_FILENAME: &str = "QUERY_MESSAGE.md";
-
-/// How to edit the query.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub(crate) enum Editor {
-    /// Use whatever editor is configured.
-    #[default]
-    Default,
-
-    /// Use the given command.
-    Command(String),
-
-    /// Do not edit the query.
-    Disabled,
-}
-
-impl FromStr for Editor {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s {
-            "true" => Ok(Self::Default),
-            "false" => Ok(Self::Disabled),
-            s => Ok(Self::Command(s.to_owned())),
-        }
-    }
-}
 
 /// Options for opening an editor.
 #[derive(Debug)]
 pub(crate) struct Options {
-    cmd: Expression,
-
     /// The working directory to use.
     cwd: Option<Utf8PathBuf>,
 
@@ -67,9 +72,8 @@ pub(crate) struct Options {
 }
 
 impl Options {
-    pub(crate) fn new(cmd: Expression) -> Self {
+    pub(crate) fn new() -> Self {
         Self {
-            cmd,
             cwd: None,
             content: None,
             force_write: false,
@@ -148,10 +152,16 @@ impl Drop for RevertFileGuard {
 /// If the file exists, it will be opened, but the content will not be modified
 /// (in other words, `content` is ignored).
 ///
-/// When the editor is closed, the contents are returned.
-pub(crate) fn open(path: Utf8PathBuf, options: Options) -> Result<(String, RevertFileGuard)> {
+/// When the editor is closed, the interaction outcome and the file's contents
+/// are returned.
+/// On [`EditOutcome::Cancelled`] the contents reflect whatever the editor left
+/// on disk; the caller decides how to treat a cancellation.
+pub(crate) fn open(
+    path: Utf8PathBuf,
+    options: Options,
+    editor: &dyn EditorBackend,
+) -> Result<(EditOutcome, String, RevertFileGuard)> {
     let Options {
-        cmd,
         cwd,
         content,
         force_write,
@@ -185,32 +195,17 @@ pub(crate) fn open(path: Utf8PathBuf, options: Options) -> Result<(String, Rever
         file.write_all(current_content.as_bytes())?;
     }
 
-    // Open the editor
-    let output = cmd
-        .before_spawn({
-            let path = path.clone();
-            move |cmd| {
-                cmd.arg(path.clone());
-
-                if let Some(cwd) = &cwd {
-                    cmd.current_dir(cwd);
-                }
-
-                Ok(())
-            }
+    let outcome = editor
+        .edit_file(EditRequest {
+            paths: std::slice::from_ref(&path),
+            cwd: cwd.as_deref(),
         })
-        .unchecked()
-        .run()?;
-
-    let status = output.status;
-    if !status.success() {
-        return Err(Error::Editor(format!("Editor exited with error: {status}")));
-    }
+        .map_err(|error| Error::Editor(error.to_string()))?;
 
     // Read the edited content
     let content = fs::read_to_string(path)?;
 
-    Ok((content, guard))
+    Ok((outcome, content, guard))
 }
 
 /// Open an editor for the user to input or edit text using a file in the
@@ -220,7 +215,7 @@ pub(crate) fn edit_query(
     conversation_root: &Utf8Path,
     stream: &ConversationStream,
     query: &str,
-    cmd: Expression,
+    editor: &dyn EditorBackend,
     config_error: Option<&str>,
 ) -> Result<(String, PartialAppConfig)> {
     let query_file_path = conversation_root.join(QUERY_FILENAME);
@@ -243,12 +238,18 @@ pub(crate) fn edit_query(
     let history_value = build_history_text(stream);
     doc.meta.history.value = &history_value;
 
-    let options = Options::new(cmd.clone())
+    let options = Options::new()
         .with_cwd(conversation_root)
         .with_content(doc)
         .with_force_write(true);
 
-    let (content, mut guard) = open(query_file_path.clone(), options)?;
+    let (outcome, content, mut guard) = open(query_file_path.clone(), options, editor)?;
+
+    // A cancelled editor (non-zero exit) sends nothing: return an empty query so
+    // the caller skips it, and let the guard revert `QUERY_MESSAGE.md`.
+    if outcome == EditOutcome::Cancelled {
+        return Ok((String::new(), PartialAppConfig::empty()));
+    }
 
     let doc = QueryDocument::try_from(content.as_str()).unwrap_or_default();
     let mut partial = PartialAppConfig::empty();
@@ -257,7 +258,7 @@ pub(crate) fn edit_query(
             Ok(v) => partial = v,
             Err(error) => {
                 let error = error.to_string();
-                return edit_query(config, conversation_root, stream, "", cmd, Some(&error));
+                return edit_query(config, conversation_root, stream, "", editor, Some(&error));
             }
         }
     }
@@ -382,3 +383,7 @@ fn build_history_text(history: &ConversationStream) -> String {
     text.extend(messages);
     text
 }
+
+#[cfg(test)]
+#[path = "editor_tests.rs"]
+mod tests;

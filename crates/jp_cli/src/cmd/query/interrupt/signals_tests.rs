@@ -3,7 +3,10 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use jp_config::AppConfig;
 use jp_conversation::{ConversationStream, event::ChatRequest};
-use jp_inquire::prompt::{MockPromptBackend, TerminalPromptBackend};
+use jp_inquire::{
+    ReplyEditMode, ReplyOutcome,
+    prompt::{MockPromptBackend, TerminalPromptBackend},
+};
 use jp_printer::{OutputFormat, Printer};
 
 use super::*;
@@ -56,6 +59,8 @@ fn streaming_signal_resume_continues_without_breaking_loop() {
         &mut stream,
         &printer,
         &backend,
+        None,
+        ReplyEditMode::Emacs,
         &streaming_prompt(),
         false, // stream NOT finished -> stream alive -> Resume path
     );
@@ -91,6 +96,8 @@ fn streaming_signal_continue_breaks_for_prefill_request() {
         &mut stream,
         &printer,
         &backend,
+        None,
+        ReplyEditMode::Emacs,
         &streaming_prompt(),
         true, // stream finished -> dead -> Continue path
     );
@@ -114,6 +121,8 @@ fn streaming_signal_quit_breaks_for_persist() {
         &mut stream,
         &printer,
         &TerminalPromptBackend,
+        None,
+        ReplyEditMode::Emacs,
         &streaming_prompt(),
         false, // stream not finished
     );
@@ -136,6 +145,8 @@ fn tool_signal_quit_cancels_and_continues() {
         false, // not prompting
         &printer,
         &TerminalPromptBackend,
+        None,
+        ReplyEditMode::Emacs,
         &tool_prompt(),
     );
 
@@ -160,6 +171,8 @@ fn regression_streaming_quit_must_not_skip_persistence() {
         &mut stream,
         &printer,
         &TerminalPromptBackend,
+        None,
+        ReplyEditMode::Emacs,
         &streaming_prompt(),
         false, // stream not finished
     );
@@ -187,6 +200,8 @@ fn regression_tool_quit_must_not_skip_persistence() {
         false, // not prompting
         &printer,
         &TerminalPromptBackend,
+        None,
+        ReplyEditMode::Emacs,
         &tool_prompt(),
     );
 
@@ -208,8 +223,8 @@ fn tool_signal_shutdown_restart_returns_restart() {
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // Mock user selecting 'r' (Restart) from interrupt menu
-    let backend = MockPromptBackend::new().with_inline_responses(['r']);
+    // Mock user selecting 't' (Restart) from interrupt menu
+    let backend = MockPromptBackend::new().with_inline_responses(['t']);
 
     let result = handle_tool_signal(
         SignalTo::Shutdown,
@@ -218,6 +233,8 @@ fn tool_signal_shutdown_restart_returns_restart() {
         false, // not prompting
         &printer,
         &backend,
+        None,
+        ReplyEditMode::Emacs,
         &tool_prompt(),
     );
 
@@ -236,8 +253,11 @@ fn tool_signal_shutdown_cancelled_returns_cancelled_with_canned_response() {
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // Mock user selecting 's' (Stop & Reply) with no text — canned response
-    let backend = MockPromptBackend::new().with_inline_responses(['s']);
+    // Mock user selecting 'r' (Stop & respond) then submitting empty — canned
+    // response.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
 
     let result = handle_tool_signal(
         SignalTo::Shutdown,
@@ -246,6 +266,8 @@ fn tool_signal_shutdown_cancelled_returns_cancelled_with_canned_response() {
         false, // not prompting
         &printer,
         &backend,
+        None,
+        ReplyEditMode::Emacs,
         &tool_prompt(),
     );
 
@@ -264,10 +286,10 @@ fn tool_signal_shutdown_cancelled_with_custom_response() {
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // Mock user selecting 's' (Stop & Reply) then typing a message
+    // Mock user selecting 'r' (Stop & respond) then typing a message
     let backend = MockPromptBackend::new()
-        .with_inline_responses(['s'])
-        .with_text_responses(["wrong tool, use grep instead"]);
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([ReplyOutcome::Submit("wrong tool, use grep instead".into())]);
 
     let result = handle_tool_signal(
         SignalTo::Shutdown,
@@ -276,6 +298,8 @@ fn tool_signal_shutdown_cancelled_with_custom_response() {
         false, // not prompting
         &printer,
         &backend,
+        None,
+        ReplyEditMode::Emacs,
         &tool_prompt(),
     );
 
@@ -303,6 +327,8 @@ fn tool_signal_shutdown_resume_continues_without_cancel() {
         false, // not prompting
         &printer,
         &backend,
+        None,
+        ReplyEditMode::Emacs,
         &tool_prompt(),
     );
 
@@ -322,7 +348,7 @@ fn tool_signal_shutdown_suppressed_when_prompting() {
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
     // This should NOT show the interrupt menu because a prompt is active
-    let backend = MockPromptBackend::new().with_inline_responses(['s']);
+    let backend = MockPromptBackend::new().with_inline_responses(['r']);
 
     let result = handle_tool_signal(
         SignalTo::Shutdown,
@@ -331,6 +357,8 @@ fn tool_signal_shutdown_suppressed_when_prompting() {
         true, // prompting
         &printer,
         &backend,
+        None,
+        ReplyEditMode::Emacs,
         &tool_prompt(),
     );
 
@@ -350,8 +378,10 @@ fn tool_signal_shutdown_not_suppressed_when_not_prompting() {
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // This should show the interrupt menu.
-    let backend = MockPromptBackend::new().with_inline_responses(['s']);
+    // This should show the interrupt menu; an empty reply cancels the tool.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
 
     let result = handle_tool_signal(
         SignalTo::Shutdown,
@@ -360,6 +390,8 @@ fn tool_signal_shutdown_not_suppressed_when_not_prompting() {
         false, // not prompting
         &printer,
         &backend,
+        None,
+        ReplyEditMode::Emacs,
         &tool_prompt(),
     );
 

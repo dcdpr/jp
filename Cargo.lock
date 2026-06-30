@@ -305,6 +305,9 @@ name = "bitflags"
 version = "2.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2261d10cca569e4643e526d8dc2e62e433cc8aba21ab764233731f8d369bf394"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "block-buffer"
@@ -736,6 +739,7 @@ dependencies = [
  "mio",
  "parking_lot",
  "rustix",
+ "serde",
  "signal-hook",
  "signal-hook-mio",
  "winapi",
@@ -963,7 +967,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1011,15 +1015,6 @@ dependencies = [
  "os_pipe",
  "shared_child",
  "shared_thread",
-]
-
-[[package]]
-name = "duct_sh"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8139179d1d133ab7153920ba3812915b17c61e2514a6f98b1fd03f2c07668d1"
-dependencies = [
- "duct",
 ]
 
 [[package]]
@@ -1106,7 +1101,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1180,6 +1175,17 @@ name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
+
+[[package]]
+name = "fd-lock"
+version = "4.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ce92ff622d6dadf7349484f42c93271a0d49b7cc4d466a936405bacbe10aa78"
+dependencies = [
+ "cfg-if",
+ "rustix",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "find-msvc-tools"
@@ -1902,7 +1908,6 @@ dependencies = [
  "bitflags",
  "crossterm",
  "dyn-clone",
- "tempfile",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -1960,6 +1965,15 @@ name = "is_terminal_polyfill"
 version = "1.70.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7943c866cc5cd64cbc25b2e01621d07fa8eb2a1a23160ee81ce38704e97b8ecf"
+
+[[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
 
 [[package]]
 name = "itoa"
@@ -2225,7 +2239,6 @@ dependencies = [
  "clean-path",
  "directories",
  "duct",
- "duct_sh",
  "glob",
  "humantime",
  "indexmap",
@@ -2276,9 +2289,11 @@ name = "jp_editor"
 version = "0.1.0"
 dependencies = [
  "camino",
- "open-editor",
+ "camino-tempfile",
+ "duct",
  "serde",
  "serde_json",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -2311,8 +2326,10 @@ dependencies = [
 name = "jp_inquire"
 version = "0.1.0"
 dependencies = [
+ "crossterm",
  "inquire",
  "parking_lot",
+ "reedline",
 ]
 
 [[package]]
@@ -2341,7 +2358,6 @@ dependencies = [
  "jp_tool",
  "minijinja",
  "ollama-rs",
- "open-editor",
  "openai_responses",
  "paste",
  "quick-xml",
@@ -2892,15 +2908,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 
 [[package]]
-name = "open-editor"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fd068aaa1a8a41846aa26201e1796842f9083b5436f08cf505b7ca6767c40e5"
-dependencies = [
- "which",
-]
-
-[[package]]
 name = "openai_responses"
 version = "0.1.6"
 source = "git+https://github.com/JeanMertz/openai-responses-rs#2d462d32680e5fc0c52fdbc48e8ac5fb9d63029d"
@@ -3361,6 +3368,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "reedline"
+version = "0.48.0"
+source = "git+https://github.com/JeanMertz/reedline?branch=changes#d6a56e266758c5a28d7b635b20611dfb50c6acfb"
+dependencies = [
+ "chrono",
+ "crossterm",
+ "fd-lock",
+ "itertools",
+ "nu-ansi-term",
+ "serde",
+ "strip-ansi-escapes",
+ "strum",
+ "thiserror 2.0.18",
+ "unicase",
+ "unicode-segmentation",
+ "unicode-width",
+]
+
+[[package]]
 name = "ref-cast"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3604,7 +3630,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4086,7 +4112,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e362d9935bc50f019969e2f9ecd66786612daae13e8f277be7bfb66e8bed3f7"
 dependencies = [
  "libc",
- "sigchld",
  "windows-sys 0.60.2",
 ]
 
@@ -4101,17 +4126,6 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
-
-[[package]]
-name = "sigchld"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47106eded3c154e70176fc83df9737335c94ce22f821c32d17ed1db1f83badb1"
-dependencies = [
- "libc",
- "os_pipe",
- "signal-hook",
-]
 
 [[package]]
 name = "signal-hook"
@@ -4251,6 +4265,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
+name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+dependencies = [
+ "strum_macros",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4324,7 +4359,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5149,7 +5184,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

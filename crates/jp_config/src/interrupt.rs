@@ -13,6 +13,8 @@
 //! action = "prompt"   # while tools are executing
 //! ```
 
+use std::{fmt, str::FromStr};
+
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 
@@ -51,6 +53,23 @@ pub struct StreamingInterruptConfig {
     ///   so far is kept as context.
     #[setting(default)]
     pub action: StreamingInterruptAction,
+
+    /// Where the `reply` is composed: inline widget or external editor.
+    ///
+    /// Accepts `true`/`false` or `"always"`/`"never"`:
+    ///
+    /// - `false` (default): start in the inline widget; `Ctrl+X` escapes to
+    ///   `editor.cmd` on demand.
+    /// - `true`: open `editor.cmd` directly; if it cannot open, fall back to
+    ///   the inline widget.
+    /// - `"always"`: open `editor.cmd` directly; if it cannot open, return to
+    ///   the menu — never the inline widget.
+    /// - `"never"`: inline widget only; the `Ctrl+X` editor escape is disabled.
+    ///
+    /// An empty or cancelled editor returns to the menu.
+    /// Has no effect in non-interactive (no-tty) mode.
+    #[setting(default)]
+    pub compose_in_editor: ComposeInEditor,
 }
 
 /// Ctrl-C behavior while tools are executing.
@@ -62,10 +81,28 @@ pub struct ToolInterruptConfig {
     /// - `prompt`: Show the interrupt menu and choose (default).
     /// - `continue`: Keep waiting for the running tools to finish.
     /// - `restart`: Cancel the running tools and run them again.
-    /// - `stop_reply`: Cancel the running tools and send a message back to the
+    /// - `respond`: Cancel the running tools and send a message back to the
     ///   assistant in their place.
     #[setting(default)]
     pub action: ToolInterruptAction,
+
+    /// Where the `respond` message is composed: inline widget or external
+    /// editor.
+    ///
+    /// Accepts `true`/`false` or `"always"`/`"never"`:
+    ///
+    /// - `false` (default): start in the inline widget; `Ctrl+X` escapes to
+    ///   `editor.cmd` on demand.
+    /// - `true`: open `editor.cmd` directly; if it cannot open, fall back to
+    ///   the inline widget.
+    /// - `"always"`: open `editor.cmd` directly; if it cannot open, return to
+    ///   the menu — never the inline widget.
+    /// - `"never"`: inline widget only; the `Ctrl+X` editor escape is disabled.
+    ///
+    /// An empty or cancelled editor returns to the menu.
+    /// Has no effect in non-interactive (no-tty) mode.
+    #[setting(default)]
+    pub compose_in_editor: ComposeInEditor,
 }
 
 /// What Ctrl-C does while the assistant is generating content.
@@ -109,7 +146,154 @@ pub enum ToolInterruptAction {
     /// Cancel the running tools and send a message back to the assistant in
     /// place of their results.
     /// An empty message uses a canned rejection notice.
-    StopReply,
+    Respond,
+}
+
+/// Where a reply or response is composed.
+///
+/// Accepts `true`/`false` or `"always"`/`"never"`:
+///
+/// - `false` (default): start in the inline widget; `Ctrl+X` escapes to the
+///   external editor on demand.
+/// - `true`: start in the external editor; fall back to the inline widget if it
+///   cannot open.
+/// - `"always"`: start in the external editor; on failure return to the menu,
+///   never the inline widget.
+/// - `"never"`: inline widget only; the `Ctrl+X` editor escape is disabled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ComposeInEditor {
+    /// Inline widget only; the `Ctrl+X` editor escape is disabled.
+    /// (`"never"`)
+    Never,
+
+    /// Start in the inline widget; `Ctrl+X` escapes to the editor.
+    /// (`false`)
+    #[default]
+    Inline,
+
+    /// Start in the editor; fall back to the inline widget on failure.
+    /// (`true`)
+    Editor,
+
+    /// Start in the editor; on failure return to the menu, never the inline
+    /// widget.
+    /// (`"always"`)
+    Always,
+}
+
+impl ComposeInEditor {
+    /// Whether composing starts in the external editor (`true` / `"always"`).
+    #[must_use]
+    pub const fn starts_in_editor(self) -> bool {
+        matches!(self, Self::Editor | Self::Always)
+    }
+
+    /// Whether the inline widget should wire the `Ctrl+X` editor escape.
+    /// Disabled only for `"never"`.
+    #[must_use]
+    pub const fn editor_escape(self) -> bool {
+        !matches!(self, Self::Never)
+    }
+
+    /// Whether a failed editor falls back to the inline widget (`true`) rather
+    /// than returning to the menu (`"always"`).
+    #[must_use]
+    pub const fn falls_back_to_inline(self) -> bool {
+        matches!(self, Self::Editor)
+    }
+}
+
+impl From<bool> for ComposeInEditor {
+    fn from(v: bool) -> Self {
+        if v { Self::Editor } else { Self::Inline }
+    }
+}
+
+impl FromStr for ComposeInEditor {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "true" => Ok(Self::Editor),
+            "false" => Ok(Self::Inline),
+            "always" => Ok(Self::Always),
+            "never" => Ok(Self::Never),
+            _ => Err(format!(
+                "invalid compose_in_editor value: '{s}', expected one of: true, false, always, \
+                 never"
+            )),
+        }
+    }
+}
+
+impl fmt::Display for ComposeInEditor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Never => write!(f, "never"),
+            Self::Inline => write!(f, "false"),
+            Self::Editor => write!(f, "true"),
+            Self::Always => write!(f, "always"),
+        }
+    }
+}
+
+impl Serialize for ComposeInEditor {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Inline => serializer.serialize_bool(false),
+            Self::Editor => serializer.serialize_bool(true),
+            Self::Never => serializer.serialize_str("never"),
+            Self::Always => serializer.serialize_str("always"),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ComposeInEditor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ComposeVisitor;
+
+        impl serde::de::Visitor<'_> for ComposeVisitor {
+            type Value = ComposeInEditor;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a boolean or one of: \"always\", \"never\"")
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<ComposeInEditor, E> {
+                Ok(ComposeInEditor::from(v))
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<ComposeInEditor, E> {
+                v.parse().map_err(serde::de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_any(ComposeVisitor)
+    }
+}
+
+impl schematic::Schematic for ComposeInEditor {
+    fn schema_name() -> Option<String> {
+        Some("ComposeInEditor".to_owned())
+    }
+
+    fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
+        use schematic::schema::{BooleanType, EnumType, LiteralValue, UnionType};
+
+        schema.union(UnionType::new_any([
+            schema.nest().boolean(BooleanType::default()),
+            schema.nest().enumerable(EnumType::new([
+                LiteralValue::String("always".into()),
+                LiteralValue::String("never".into()),
+            ])),
+        ]))
+    }
 }
 
 impl AssignKeyValue for PartialInterruptConfig {
@@ -130,6 +314,7 @@ impl AssignKeyValue for PartialStreamingInterruptConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "action" => self.action = kv.try_some_from_str()?,
+            "compose_in_editor" => self.compose_in_editor = kv.try_some_bool_or_from_str()?,
             _ => return missing_key(&kv),
         }
 
@@ -142,6 +327,7 @@ impl AssignKeyValue for PartialToolInterruptConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "action" => self.action = kv.try_some_from_str()?,
+            "compose_in_editor" => self.compose_in_editor = kv.try_some_bool_or_from_str()?,
             _ => return missing_key(&kv),
         }
 
@@ -162,6 +348,7 @@ impl PartialConfigDelta for PartialStreamingInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             action: delta_opt(self.action.as_ref(), next.action),
+            compose_in_editor: delta_opt(self.compose_in_editor.as_ref(), next.compose_in_editor),
         }
     }
 }
@@ -170,6 +357,7 @@ impl PartialConfigDelta for PartialToolInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             action: delta_opt(self.action.as_ref(), next.action),
+            compose_in_editor: delta_opt(self.compose_in_editor.as_ref(), next.compose_in_editor),
         }
     }
 }
@@ -187,6 +375,7 @@ impl FillDefaults for PartialStreamingInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             action: self.action.or(defaults.action),
+            compose_in_editor: self.compose_in_editor.or(defaults.compose_in_editor),
         }
     }
 }
@@ -195,6 +384,7 @@ impl FillDefaults for PartialToolInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             action: self.action.or(defaults.action),
+            compose_in_editor: self.compose_in_editor.or(defaults.compose_in_editor),
         }
     }
 }
@@ -214,6 +404,7 @@ impl ToPartial for StreamingInterruptConfig {
 
         Self::Partial {
             action: partial_opt(&self.action, defaults.action),
+            compose_in_editor: partial_opt(&self.compose_in_editor, defaults.compose_in_editor),
         }
     }
 }
@@ -224,6 +415,7 @@ impl ToPartial for ToolInterruptConfig {
 
         Self::Partial {
             action: partial_opt(&self.action, defaults.action),
+            compose_in_editor: partial_opt(&self.compose_in_editor, defaults.compose_in_editor),
         }
     }
 }

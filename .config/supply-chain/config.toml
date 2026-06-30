@@ -40,6 +40,9 @@ audit-as-crates-io = true
 [policy.openai_responses]
 audit-as-crates-io = false
 
+[policy.reedline]
+audit-as-crates-io = true
+
 [policy.saphyr]
 audit-as-crates-io = true
 
@@ -251,10 +254,6 @@ criteria = "safe-to-deploy"
 version = "1.1.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.duct_sh]]
-version = "1.0.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.encode_unicode]]
 version = "1.0.0"
 criteria = "safe-to-deploy"
@@ -419,10 +418,6 @@ criteria = "safe-to-deploy"
 version = "0.3.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.open-editor]]
-version = "1.1.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.os_pipe]]
 version = "1.2.2"
 criteria = "safe-to-deploy"
@@ -481,6 +476,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.redox_users]]
 version = "0.5.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.reedline]]
+version = "0.48.0@git:d6a56e266758c5a28d7b635b20611dfb50c6acfb"
 criteria = "safe-to-deploy"
 
 [[exemptions.relative-path]]

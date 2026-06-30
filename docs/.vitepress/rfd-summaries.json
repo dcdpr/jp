@@ -172,7 +172,7 @@
     "summary": "Redesign `jp init` to generate schema-driven config with interactive model/mode selection and curated commented fields."
   },
   "045-layered-interrupt-handler-stack.md": {
-    "hash": "15419eb7ab5a46ba0403e3fa03648d88a4fbe36a5f9c7a54bc41e4ba9baf6c7f",
+    "hash": "44a70f65ce739c91fbdebe6fa9581c679513413abb1c7a2665938f5bbf2308ba",
     "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
   },
   "046-nested-workspace-projection.md": {
@@ -312,7 +312,7 @@
     "summary": "Plugin configuration integration with AppConfig enabling trust policies, checksum pinning, execution policies, and per-plugin options."
   },
   "078-tool-config-mutation.md": {
-    "hash": "9494743e8944d94e2cca0232efe3a2f58535880f44aa854e5702b89817138d03",
+    "hash": "a7d017ca934de55cbfe69ca9d6becc4d98bdbadeb4cc5282444450238ed62e49",
     "summary": "Scoped tool config access via `access.config` rules, with re-invocation on delta rejection and per-cycle commit buffering."
   },
   "080-editor-as-a-config-source.md": {
@@ -348,8 +348,8 @@
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
-    "hash": "ed23d4b3ef9ce5d00d623166c48e3b63b0dd13511aa1405a4f3958b9613affff",
-    "summary": "Consolidate editor invocation paths; add inline reply widget with editor escape."
+    "hash": "f622ae62a709c085ea877a74cbb1ea90a7c993e5f292fcd77f420e8c0e512d4a",
+    "summary": "Unify editor invocation through EditorBackend trait; add vendored reedline-based InlineReply widget for interrupt menu replies."
   },
   "089-streaming-paragraph-rendering.md": {
     "hash": "4a1e571acfd0db31efce7efa36dfc985dc6cd93e672fa4ca1f45936dd2a809c7",

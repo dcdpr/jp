@@ -37,7 +37,6 @@ minijinja = { workspace = true, features = [
     "unicode",
 ] }
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }
-open-editor = { workspace = true }
 openai_responses = { workspace = true, features = ["stream"] }
 quick-xml = { workspace = true, features = ["serialize"] }
 reqwest = { workspace = true }

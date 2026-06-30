@@ -253,6 +253,28 @@ impl Printer {
         }
     }
 
+    /// Get an **owned** writer for interactive prompt output.
+    ///
+    /// Like [`Self::prompt_writer`] it targets the TTY (`/dev/tty`) when
+    /// available, falling back to `out`.
+    /// Unlike `prompt_writer`, the returned writer owns a clone of the
+    /// printer's command channel, so it is `'static` and `Send` and can be
+    /// handed to components that need to own their output stream (e.g. the
+    /// vendored line editor).
+    /// Writes still flow through the printer's serialized worker, so they stay
+    /// ordered with the printer's other output.
+    #[must_use]
+    pub fn owned_prompt_writer(&self) -> Box<dyn io::Write + Send> {
+        Box::new(OwnedPrinterWriter {
+            tx: self.tx.clone(),
+            target: if self.has_tty {
+                PrintTarget::Tty
+            } else {
+                PrintTarget::Out
+            },
+        })
+    }
+
     /// Configure the bounded-latency controller's budget.
     ///
     /// When `max_latency` is non-zero, the worker shrinks the per-character
@@ -448,6 +470,44 @@ impl io::Write for PrinterWriter<'_> {
             .send(Command::Flush(tx))
             .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "printer shutdown"))?;
 
+        rx.recv()
+            .map_err(|_| io::Error::other("failed to receive flush signal"))
+    }
+}
+
+/// An owned writer targeting one of the [`Printer`]'s streams.
+///
+/// Returned (boxed) by [`Printer::owned_prompt_writer`].
+/// Owns a clone of the printer's command channel, so it is `'static` and
+/// `Send`; writes flow through the printer's serialized worker just like
+/// [`PrinterWriter`].
+struct OwnedPrinterWriter {
+    /// Clone of the printer's command channel.
+    tx: Sender<Command>,
+
+    /// The target output stream.
+    target: PrintTarget,
+}
+
+impl io::Write for OwnedPrinterWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let s = str::from_utf8(buf).map_err(io::Error::other)?;
+        let task = PrintTask {
+            content: s.to_owned(),
+            mode: PrintMode::Instant,
+            target: self.target,
+        };
+        self.tx
+            .send(Command::Print(task))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "printer shutdown"))?;
+        Ok(s.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let (tx, rx) = mpsc::channel();
+        self.tx
+            .send(Command::Flush(tx))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "printer shutdown"))?;
         rx.recv()
             .map_err(|_| io::Error::other("failed to receive flush signal"))
     }

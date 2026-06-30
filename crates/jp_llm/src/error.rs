@@ -426,13 +426,6 @@ pub enum ToolError {
         error: std::io::Error,
     },
 
-    #[error("Failed to open editor to edit tool call")]
-    OpenEditorError {
-        arguments: Value,
-        #[source]
-        error: open_editor::errors::OpenEditorError,
-    },
-
     #[error("Failed to edit tool call")]
     EditArgumentsError {
         arguments: Value,

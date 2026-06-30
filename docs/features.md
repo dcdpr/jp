@@ -29,14 +29,10 @@ The editor to open is configurable via one of the following ways:
 - The `--edit` flag.
 
   ```sh
-  # Open the query in the default editor, even if an inline query is provided.
+  # Open the editor, even if an inline query is provided.
   jp query --edit "How high is the highest mountain in the world?"
   
-  # Open the query in a specific editor.
-  jp query --edit=vim "Will the moon ever crash into the earth?"
-  
   # Do not open the editor, even if no inline query is provided.
-  jp query --edit=false
   jp query --no-edit
   jp query -E
   ```

@@ -1,6 +1,6 @@
 # RFD 045: Layered Interrupt Handler Stack
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-24
@@ -130,10 +130,10 @@ struct RouterInner {
     stack: Mutex<Vec<RegisteredHandler>>,
 
     /// Notifies the topmost handler's event loop that SIGINT arrived.
-    /// Each handler registration installs its own notification channel;
-    /// the router sends to whichever is on top.
+    /// Each handler registration installs its own notification channel; the
+    /// router sends to whichever is on top.
     ///
-    /// When the stack is empty, the router cancels shutdown_token instead.
+    /// When the stack is empty, the router cancels shutdown\_token instead.
     ///
     /// Escalation state (press count, last timestamp).
     escalation: Mutex<EscalationState>,
@@ -166,23 +166,26 @@ config loading or MCP startup.
 ```rust
 /// Outcome of an interrupt handler invocation.
 pub enum InterruptOutcome {
-    /// The handler fully processed the signal. No further propagation.
+    /// The handler fully processed the signal.
+    /// No further propagation.
     Handled,
 
-    /// The handler declines to act. The caller should check the next
-    /// handler on the stack (if any) or fall back to graceful shutdown.
+    /// The handler declines to act.
+    /// The caller should check the next handler on the stack (if any) or fall
+    /// back to graceful shutdown.
     Declined,
 
-    /// The handler's interactive prompt was cancelled (Ctrl-C during
-    /// raw mode). The caller should trigger graceful shutdown.
+    /// The handler's interactive prompt was cancelled (Ctrl-C during raw mode).
+    /// The caller should trigger graceful shutdown.
     /// See "Dual Delivery Paths and Prompt Escalation."
     Escalated,
 }
 
 struct RegisteredHandler {
     id: HandlerId,
-    /// The router sends to this channel to notify the handler's event
-    /// loop that SIGINT arrived. The event loop then calls the handler.
+    /// The router sends to this channel to notify the handler's event loop that
+    /// SIGINT arrived.
+    /// The event loop then calls the handler.
     notify_tx: mpsc::Sender<()>,
 }
 ```
@@ -200,9 +203,9 @@ Registration returns an RAII guard and a notification receiver:
 
 ```rust
 impl SignalRouter {
-    /// Register a handler scope. Returns a guard (drop to deregister)
-    /// and a receiver that fires when SIGINT arrives while this handler
-    /// is topmost.
+    /// Register a handler scope.
+    /// Returns a guard (drop to deregister) and a receiver that fires when
+    /// SIGINT arrives while this handler is topmost.
     pub fn push_handler(&self) -> (InterruptGuard, mpsc::Receiver<()>) {
         let (tx, rx) = mpsc::channel(1);
         let id = self.inner.push(tx);
@@ -305,7 +308,7 @@ CLI starts:
     ├── Tool execution:
     │     push ToolInterruptHandler        ← topmost
     │     ... tools run ...
-    │     Ctrl-C → tool menu (Continue/Stop & Reply/Restart)
+    │     Ctrl-C → tool menu (Continue/Stop & respond/Restart)
     │     drop ToolInterruptHandler
     ├── (gap: response processing)
     │     TurnInterruptHandler is topmost
@@ -356,7 +359,8 @@ pub enum InterruptOutcome {
     /// The handler fully processed the signal.
     Handled,
 
-    /// The handler declines to act. Propagate to the next handler.
+    /// The handler declines to act.
+    /// Propagate to the next handler.
     Declined,
 
     /// The handler's interactive prompt was cancelled by Ctrl-C.
@@ -418,9 +422,10 @@ If no handler remains, the router cancels the `shutdown_token`.
 
 ```rust
 impl SignalRouter {
-    /// Called by a handler's event loop when it declines to handle the
-    /// current interrupt. The router notifies the next handler on the
-    /// stack, or falls back to graceful shutdown.
+    /// Called by a handler's event loop when it declines to handle the current
+    /// interrupt.
+    /// The router notifies the next handler on the stack, or falls back to
+    /// graceful shutdown.
     pub fn decline(&self) {
         self.inner.notify_next_or_shutdown();
     }
