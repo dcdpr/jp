@@ -141,8 +141,8 @@ jp query -c dev-tools.toml -t dev -T fs_modify_file "review this"
 ### `apply_enable_tools` Group Awareness
 
 The `apply_enable_tools` function in `query.rs` resolves each tool's effective
-enable through `EnableConfig::effective` (per-field over the `*` defaults; see
-RFD 081) before applying `--tools` / `--no-tools` flags.
+enable through `PartialEnableConfig::effective` (per-field over the `*`
+defaults; see RFD 081) before applying `--tools` / `--no-tools` flags.
 With group overrides, a tool's effective enable may also come from a group's
 `overrides.enable`, not the tool's own field.
 

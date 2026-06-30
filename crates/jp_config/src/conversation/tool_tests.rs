@@ -397,9 +397,11 @@ fn test_tool_config_command() {
 
 #[test]
 fn test_enable_schema() {
-    // `enable` is a normal nested struct: `state` and `allow_toggle` are real
-    // fields, so they show up in the config field surface like any other field
-    // (e.g. as `conversation.tools.*.enable.state`).
+    // `EnableConfig`'s root schema is a struct exposing `state` and
+    // `allow_toggle` as real fields (not a bool|string union like the old
+    // `Enable`). This is the type's own schema: in `AppConfig::fields()` the
+    // `enable` field stays a flat leaf (`conversation.tools.*.enable`) because
+    // it's a `no_deserialize_derive` config.
     let schema = SchemaBuilder::build_root::<EnableConfig>();
     let SchemaType::Struct(s) = schema.ty else {
         panic!("expected struct, got {:?}", schema.ty)

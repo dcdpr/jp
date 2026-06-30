@@ -220,7 +220,7 @@
     "summary": "Groups can declare default tool configuration, allowing tool inheritance without per-tool repetition."
   },
   "057-group-configuration-overrides.md": {
-    "hash": "9c450aa38b8488aec886fe931bf33aece6cba6d6302de903480c7794205bdf45",
+    "hash": "12c558fbe5588dd27289ee648f2083dec36913b3b12816a0e6229a6d3bdd7319",
     "summary": "Adds group `overrides` section to enforce tool configuration that outlasts tool-level settings but yields to CLI flags."
   },
   "058-typed-content-blocks-for-tool-responses.md": {
