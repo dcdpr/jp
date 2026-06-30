@@ -193,7 +193,7 @@ modeled after the existing `describe_tools` entry:
 
 - `source: ToolSource::Builtin { tool: None }`.
 
-- `enable: EnableConfig { state: Some(true), allow_toggle:
+- `enable: PartialEnableConfig { state: Some(true), allow_toggle:
   Some(AllowToggle::IfNamed) }` — enabled by default, immune to bare `-T`
   (disable-all), disableable by name.
   CLI: `-T ask_user`.
@@ -956,7 +956,7 @@ Override `BuiltinTool::inquiry_source()` (the hook [RFD 082] introduces) to
 return `InquirySource::Assistant`, so the recording site 082 established
 surfaces `ask_user`'s exchanges with the correct provenance.
 Add the `ask_user()` config entry to `jp_cli::cmd::query::tool::builtins::all()`
-with `enable: EnableConfig { state: Some(true), allow_toggle:
+with `enable: PartialEnableConfig { state: Some(true), allow_toggle:
 Some(AllowToggle::IfNamed) }` (per [RFD 081]), `questions.answer.prompt_label =
 Some("Assistant".to_owned())`, a long-form `description`, and the full
 `parameters` schema (see [Tool configuration](#tool-configuration)).
