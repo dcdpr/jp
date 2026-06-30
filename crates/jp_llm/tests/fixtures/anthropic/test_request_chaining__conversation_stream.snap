@@ -142,11 +142,11 @@ expression: v
     "interrupt": {
       "streaming": {
         "action": "prompt",
-        "reply_in_editor": false
+        "compose_in_editor": false
       },
       "tool_call": {
         "action": "prompt",
-        "reply_in_editor": false
+        "compose_in_editor": false
       }
     },
     "editor": {
