@@ -248,8 +248,10 @@ Depends on [RFD 055] (tool groups with membership and exhaustive validation).
 2. Update `ToolsConfig::get()` and `ToolsConfig::iter()` to look up the tool's
    included groups and pass their defaults when constructing
    `ToolConfigWithDefaults`.
-3. Update accessor methods (`run()`, `result()`, `style()`, `enable()`,
-   `enable_mode()`, `questions()`) to walk `tool → groups → defaults`.
+3. Update accessor methods (`run()`, `result()`, `style()`, `is_enabled()`,
+   `effective_enable()`, `questions()`) to walk `tool → groups → defaults`.
+   The `enable` field resolves per-field (`state` / `allow_toggle`) from the
+   stored `EnableConfig` across the same chain (see RFD 081).
 
 ## References
 

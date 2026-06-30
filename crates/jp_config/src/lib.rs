@@ -60,6 +60,7 @@ pub use fill::FillDefaults;
 use indexmap::IndexMap;
 pub use partial::ToPartial;
 use relative_path::RelativePathBuf;
+use schematic::HandlerError;
 pub use schematic::{
     Config, ConfigError, PartialConfig, Schema, SchemaBuilder, SchemaType, Schematic, schema,
 };
@@ -499,8 +500,38 @@ impl AppConfig {
 impl Validator for AppConfig {
     fn validate(&self) -> Result<(), ConfigError> {
         self.assistant.validate()?;
-        self.conversation.validate()
+        self.conversation.validate()?;
+        reject_locked_off_tool_choice(self)
     }
+}
+
+/// Reject `assistant.tool_choice = "<tool>"` when `<tool>` resolves to a
+/// locked-off tool (`state = false`, `allow_toggle = never`).
+///
+/// A locked-off tool is dropped from the assistant-visible tool list regardless
+/// of `tool_choice`, so forcing it would reference a tool that is never sent.
+/// This is the only validator that sees both `assistant.tool_choice` and
+/// `conversation.tools`, so the cross-section check lives here.
+fn reject_locked_off_tool_choice(config: &AppConfig) -> Result<(), ConfigError> {
+    let Some(name) = config.assistant.tool_choice.function_name() else {
+        return Ok(());
+    };
+
+    let Some(tool) = config.conversation.tools.get(name) else {
+        return Ok(());
+    };
+
+    let enable = tool.effective_enable();
+    if !enable.state && enable.is_locked() {
+        return Err(HandlerError::new(format!(
+            "assistant.tool_choice forces `{name}`, but conversation.tools.{name}.enable is \
+             locked off (state = false, allow_toggle = never); a locked-off tool is never sent to \
+             the assistant"
+        ))
+        .into());
+    }
+
+    Ok(())
 }
 
 impl PartialAppConfig {

@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
-    conversation::tool::{Enable, PartialToolConfig},
+    conversation::tool::{AllowToggle, Enable, PartialEnableConfig, PartialToolConfig},
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
     util::build,
 };
@@ -39,19 +39,39 @@ fn make_partial_with_tools() -> PartialAppConfig {
             ..Default::default()
         }),
         ("explicitly_enabled_tool".into(), PartialToolConfig {
-            enable: Some(Enable::On),
+            enable: Some(PartialEnableConfig::ON),
             ..Default::default()
         }),
         ("explicitly_disabled_tool".into(), PartialToolConfig {
-            enable: Some(Enable::Off),
+            enable: Some(PartialEnableConfig::OFF),
             ..Default::default()
         }),
         ("explicit_tool".into(), PartialToolConfig {
-            enable: Some(Enable::Explicit),
+            enable: Some(PartialEnableConfig {
+                state: Some(false),
+                allow_toggle: Some(AllowToggle::IfNamed),
+            }),
             ..Default::default()
         }),
     ]);
     partial
+}
+
+/// Resolve a tool's effective [`Enable`] from a partial config: the per-tool
+/// value over the global `*` defaults, then the hardcoded fallback.
+fn effective(partial: &PartialAppConfig, name: &str) -> Enable {
+    let defaults = partial
+        .conversation
+        .tools
+        .defaults
+        .enable
+        .clone()
+        .unwrap_or_default();
+    partial.conversation.tools.tools[name]
+        .enable
+        .clone()
+        .unwrap_or_default()
+        .effective(&defaults)
 }
 
 /// Helper to build directives from a list.
@@ -152,7 +172,6 @@ async fn run_mock_turn(
 }
 
 #[test]
-#[expect(clippy::too_many_lines)]
 fn test_query_tools_and_no_tools() {
     // Create a partial configuration with a few tools.
     let mut partial = make_partial_with_tools();
@@ -169,22 +188,10 @@ fn test_query_tools_and_no_tools() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        None,
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::On)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::Off)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::Explicit)
-    );
+    assert!(effective(&partial, "implicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_enabled_tool").state);
+    assert!(!effective(&partial, "explicitly_disabled_tool").state);
+    assert!(!effective(&partial, "explicit_tool").state);
 
     // Disable one tool.
     partial = IntoPartialAppConfig::apply_cli_config(
@@ -200,22 +207,10 @@ fn test_query_tools_and_no_tools() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::Off),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::On)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::Off)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::Explicit)
-    );
+    assert!(!effective(&partial, "implicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_enabled_tool").state);
+    assert!(!effective(&partial, "explicitly_disabled_tool").state);
+    assert!(!effective(&partial, "explicit_tool").state);
 
     // Enable one tool.
     partial = IntoPartialAppConfig::apply_cli_config(
@@ -231,24 +226,12 @@ fn test_query_tools_and_no_tools() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::Off),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::On)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::On)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::Explicit)
-    );
+    assert!(!effective(&partial, "implicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_disabled_tool").state);
+    assert!(!effective(&partial, "explicit_tool").state);
 
-    // Enable all tools -- explicit tools should stay explicit.
+    // Enable all tools -- if_named tools stay disabled and keep their policy.
     partial = IntoPartialAppConfig::apply_cli_config(
         &Query {
             tool_directives: directives(vec![ToolDirective::EnableAll]),
@@ -260,23 +243,15 @@ fn test_query_tools_and_no_tools() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::On),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::On)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::On)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::Explicit),
+    assert!(effective(&partial, "implicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_disabled_tool").state);
+    let explicit = effective(&partial, "explicit_tool");
+    assert!(
+        !explicit.state,
         "explicit tools should NOT be enabled by --tools without arguments"
     );
+    assert_eq!(explicit.allow_toggle, AllowToggle::IfNamed);
 
     // Disable all tools.
     partial = IntoPartialAppConfig::apply_cli_config(
@@ -290,22 +265,10 @@ fn test_query_tools_and_no_tools() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::Off),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::Off)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::Off)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::Off)
-    );
+    assert!(!effective(&partial, "implicitly_enabled_tool").state);
+    assert!(!effective(&partial, "explicitly_enabled_tool").state);
+    assert!(!effective(&partial, "explicitly_disabled_tool").state);
+    assert!(!effective(&partial, "explicit_tool").state);
 
     // Enable multiple tools.
     partial = IntoPartialAppConfig::apply_cli_config(
@@ -322,22 +285,10 @@ fn test_query_tools_and_no_tools() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::Off),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::On)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::On)
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::Off)
-    );
+    assert!(!effective(&partial, "implicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_disabled_tool").state);
+    assert!(!effective(&partial, "explicit_tool").state);
 }
 
 #[test]
@@ -356,11 +307,12 @@ fn test_explicit_tool_enabled_by_name() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::On),
+    let explicit = effective(&partial, "explicit_tool");
+    assert!(
+        explicit.state,
         "explicit tools should be enabled when named specifically"
     );
+    assert_eq!(explicit.allow_toggle, AllowToggle::IfNamed);
 }
 
 #[test]
@@ -383,17 +335,10 @@ fn test_enable_all_and_explicit_by_name() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::On),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::On),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::On),
+    assert!(effective(&partial, "implicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_disabled_tool").state);
+    assert!(
+        effective(&partial, "explicit_tool").state,
         "naming an explicit tool alongside --tools should enable it"
     );
 }
@@ -414,15 +359,13 @@ fn test_enable_all_skips_unnamed_explicit() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::On),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::Explicit),
+    assert!(effective(&partial, "implicitly_enabled_tool").state);
+    let explicit = effective(&partial, "explicit_tool");
+    assert!(
+        !explicit.state,
         "bare --tools should not enable explicit tools"
     );
+    assert_eq!(explicit.allow_toggle, AllowToggle::IfNamed);
 }
 
 // --- New tests for ordered/interleaved evaluation (RFD 008) ---
@@ -447,23 +390,13 @@ fn test_interleaved_disable_all_then_enable_named() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::Off),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::Off),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::On),
+    assert!(!effective(&partial, "implicitly_enabled_tool").state);
+    assert!(!effective(&partial, "explicitly_enabled_tool").state);
+    assert!(
+        effective(&partial, "explicitly_disabled_tool").state,
         "named tool should be re-enabled after disable-all"
     );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::Off),
-    );
+    assert!(!effective(&partial, "explicit_tool").state);
 }
 
 #[test]
@@ -486,27 +419,19 @@ fn test_interleaved_enable_all_then_disable_named() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::Off),
+    assert!(
+        !effective(&partial, "implicitly_enabled_tool").state,
         "the carved-out tool should be disabled"
     );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::On),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::On),
-    );
+    assert!(effective(&partial, "explicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_disabled_tool").state);
 }
 
 #[test]
 fn test_interleaved_disable_all_then_enable_all() {
-    // `--no-tools --tool` is now well-defined: disable all, then enable all.
-    // DisableAll sets explicit_tool to Off, then EnableAll sees Off (not
-    // Explicit) and enables it. Sequential evaluation doesn't preserve the
-    // original Explicit marker once it's been overwritten.
+    // `--no-tools --tool`: both are bulk directives. Under the scope/policy
+    // model a bulk directive only flips freely-toggleable (`any`) tools, so an
+    // `if_named` tool keeps its policy and stays disabled across the sequence.
     let mut partial = make_partial_with_tools();
 
     partial = IntoPartialAppConfig::apply_cli_config(
@@ -520,22 +445,18 @@ fn test_interleaved_disable_all_then_enable_all() {
     )
     .unwrap();
 
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::On),
+    assert!(effective(&partial, "implicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_enabled_tool").state);
+    assert!(effective(&partial, "explicitly_disabled_tool").state);
+    let explicit = effective(&partial, "explicit_tool");
+    assert!(
+        !explicit.state,
+        "bulk directives must not flip an if_named tool"
     );
     assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::On),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::On),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::On),
-        "DisableAll wiped Explicit to Off, so EnableAll sees Off and enables it"
+        explicit.allow_toggle,
+        AllowToggle::IfNamed,
+        "the if_named policy is preserved across bulk directives"
     );
 }
 
@@ -561,23 +482,184 @@ fn test_interleaved_three_step_composition() {
     .unwrap();
 
     // Everything should be off -- the final disable reverts the enable.
-    assert_eq!(
-        partial.conversation.tools.tools["implicitly_enabled_tool"].enable,
-        Some(Enable::Off),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_enabled_tool"].enable,
-        Some(Enable::Off),
-    );
-    assert_eq!(
-        partial.conversation.tools.tools["explicitly_disabled_tool"].enable,
-        Some(Enable::Off),
+    assert!(!effective(&partial, "implicitly_enabled_tool").state);
+    assert!(!effective(&partial, "explicitly_enabled_tool").state);
+    assert!(
+        !effective(&partial, "explicitly_disabled_tool").state,
         "final disable should override the intermediate enable"
     );
-    assert_eq!(
-        partial.conversation.tools.tools["explicit_tool"].enable,
-        Some(Enable::Off),
+    assert!(!effective(&partial, "explicit_tool").state);
+}
+
+#[test]
+fn test_named_disable_of_locked_on_tool_errors() {
+    // `describe_tools` is injected as locked-on; naming it for disable errors
+    // with an allow_toggle-aware message.
+    let err = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_directives: directives(vec![ToolDirective::Disable("describe_tools".into())]),
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("describe_tools"), "unexpected error: {err}");
+    assert!(err.contains("locked-on"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_named_enable_of_locked_off_tool_errors() {
+    let mut partial = make_partial_with_tools();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("network".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig::LOCKED_OFF),
+            ..Default::default()
+        });
+
+    let err = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_directives: directives(vec![ToolDirective::Enable("network".into())]),
+            ..Default::default()
+        },
+        None,
+        partial,
+        None,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("network"), "unexpected error: {err}");
+    assert!(err.contains("locked-off"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_bulk_directives_skip_locked_tools() {
+    let mut partial = make_partial_with_tools();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("network".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig::LOCKED_OFF),
+            ..Default::default()
+        });
+
+    // Bulk enable then bulk disable: neither touches locked tools, neither
+    // errors.
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_directives: directives(vec![ToolDirective::EnableAll, ToolDirective::DisableAll]),
+            ..Default::default()
+        },
+        None,
+        partial,
+        None,
+    )
+    .unwrap();
+
+    let net = effective(&partial, "network");
+    assert!(
+        !net.state,
+        "locked-off tool stays off through bulk directives"
     );
+    assert!(net.is_locked());
+    // The injected locked-on builtin stays on.
+    assert!(effective(&partial, "describe_tools").state);
+}
+
+#[test]
+fn test_sticky_tool_named_disable_and_bulk_skip() {
+    let make = || {
+        let mut partial = PartialAppConfig::default();
+        partial
+            .conversation
+            .tools
+            .tools
+            .insert("ask_user".into(), PartialToolConfig {
+                enable: Some(PartialEnableConfig {
+                    state: Some(true),
+                    allow_toggle: Some(AllowToggle::IfNamed),
+                }),
+                ..Default::default()
+            });
+        partial
+    };
+
+    // A named disable flips a sticky tool off.
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_directives: directives(vec![ToolDirective::Disable("ask_user".into())]),
+            ..Default::default()
+        },
+        None,
+        make(),
+        None,
+    )
+    .unwrap();
+    assert!(!effective(&partial, "ask_user").state);
+
+    // A bulk disable leaves a sticky tool on (`if_named` rejects bulk).
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_directives: directives(vec![ToolDirective::DisableAll]),
+            ..Default::default()
+        },
+        None,
+        make(),
+        None,
+    )
+    .unwrap();
+    let sticky = effective(&partial, "ask_user");
+    assert!(sticky.state, "bulk disable must not flip an if_named tool");
+    assert_eq!(sticky.allow_toggle, AllowToggle::IfNamed);
+}
+
+#[test]
+fn test_tool_use_accepts_tool_enabled_via_defaults() {
+    // A tool with no per-tool `enable` is enabled via the default-on fallback,
+    // so `-u <name>` accepts it.
+    let mut partial = PartialAppConfig::default();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("fs_read".into(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            ..Default::default()
+        });
+
+    let result = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("fs_read".into())),
+            ..Default::default()
+        },
+        None,
+        partial,
+        None,
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
+}
+
+#[test]
+fn test_tool_use_accepts_locked_on_builtin() {
+    // `describe_tools` (locked-on) is force-selectable via `-u`.
+    let result = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("describe_tools".into())),
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    );
+    assert!(result.is_ok(), "{:?}", result.err());
 }
 
 #[test]

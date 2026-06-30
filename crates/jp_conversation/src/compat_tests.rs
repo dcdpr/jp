@@ -321,3 +321,39 @@ fn partial_config_empty_object() {
     let config = deserialize_partial_config(json!({}));
     assert_eq!(config, PartialAppConfig::empty());
 }
+
+#[test]
+fn legacy_enable_strings_survive_compat_deserialization() {
+    use jp_config::conversation::tool::{AllowToggle, PartialEnableConfig};
+
+    // A stored config (base snapshot or `config_delta`, both routed through
+    // this function) with pre-RFD-081 legacy `enable` strings on per-tool
+    // entries must still load and map to the canonical shapes.
+    let value = json!({
+        "conversation": {
+            "tools": {
+                "describe_tools": { "enable": "always" },
+                "dangerous": { "enable": "explicit" },
+                "off_tool": { "enable": "off" }
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+    let tools = &config.conversation.tools.tools;
+
+    assert_eq!(
+        tools["describe_tools"].enable,
+        Some(PartialEnableConfig::LOCKED_ON),
+        "legacy `always` must map to locked-on"
+    );
+    assert_eq!(
+        tools["dangerous"].enable,
+        Some(PartialEnableConfig {
+            state: Some(false),
+            allow_toggle: Some(AllowToggle::IfNamed),
+        }),
+        "legacy `explicit` must map to off-unless-named"
+    );
+    assert_eq!(tools["off_tool"].enable, Some(PartialEnableConfig::OFF));
+}

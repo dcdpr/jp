@@ -1,7 +1,7 @@
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{
-    Enable, PartialOneOrManyTypes, PartialToolConfig, PartialToolParameterConfig, RunMode,
-    ToolSource,
+    PartialEnableConfig, PartialOneOrManyTypes, PartialToolConfig, PartialToolParameterConfig,
+    RunMode, ToolSource,
     style::{
         InlineResults, LinkStyle, ParametersStyle, PartialDisplayStyleConfig,
         PartialErrorStyleConfig,
@@ -17,7 +17,7 @@ pub fn all() -> IndexMap<String, PartialToolConfig> {
 pub fn describe_tools() -> PartialToolConfig {
     PartialToolConfig {
         source: Some(ToolSource::Builtin { tool: None }),
-        enable: Some(Enable::Always),
+        enable: Some(PartialEnableConfig::LOCKED_ON),
         description: Some(
             "Get detailed descriptions and usage examples for one or more tools.".to_owned(),
         ),

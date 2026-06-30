@@ -140,14 +140,15 @@ jp query -c dev-tools.toml -t dev -T fs_modify_file "review this"
 
 ### `apply_enable_tools` Group Awareness
 
-The `apply_enable_tools` function in `query.rs` currently inspects
-`PartialToolConfig.enable` to determine CLI behavior.
-With group overrides, a tool's effective enable may come from a group's
+The `apply_enable_tools` function in `query.rs` resolves each tool's effective
+enable through `EnableConfig::effective` (per-field over the `*` defaults; see
+RFD 081) before applying `--tools` / `--no-tools` flags.
+With group overrides, a tool's effective enable may also come from a group's
 `overrides.enable`, not the tool's own field.
 
-The CLI enable/disable logic must resolve each tool's effective enable through
-the full chain (`* > group.defaults > tool > group.overrides`) before applying
-`--tools` / `--no-tools` flags.
+The CLI enable/disable logic must therefore resolve each tool's effective enable
+through the full chain (`* > group.defaults > tool > group.overrides`) before
+applying the directive engine's scope/policy rules.
 
 ## Drawbacks
 
@@ -215,13 +216,20 @@ is harder.
 
 ## Risks and Open Questions
 
-**Interaction with `enable = "explicit"`.** If a group has `overrides.enable =
-"explicit"`, the tool won't respond to `--tools GROUP` (per the enable table in
-[RFD 055]).
+**Interaction with `allow_toggle = "if_named"`.** If a group has
+`overrides.enable` with `allow_toggle = "if_named"`, the tool won't respond to
+`--tools GROUP` (per the enable table in [RFD 055]).
 This is internally consistent but surprising — the group's own override
 prevents group activation.
-This should be documented: use `explicit_or_group` if you want the tool to be
-hidden by default but still respond to group activation.
+This should be documented: use `allow_toggle = "if_named_or_group"` (RFD 081) if
+you want the tool hidden by default but still responsive to group activation.
+
+**CLI vs group `allow_toggle = "never"`.** A group override that sets
+`allow_toggle = "never"` would, under RFD 081's directive engine, block a named
+CLI directive — conflicting with this RFD's commitment that CLI flags win over
+group overrides.
+This RFD must decide whether group-sourced `allow_toggle` blocks CLI directives
+or whether CLI directives bypass it.
 
 ## Implementation Plan
 

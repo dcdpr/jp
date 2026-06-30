@@ -1,11 +1,10 @@
 # RFD 081: Decompose tool enable into state and allow\_toggle
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-11
 - **Extends**: [RFD 008]
-- **Required by**: [RFD 083]
 
 ## Summary
 
@@ -168,18 +167,25 @@ The schema accepts the value now to avoid a later additive change.
 
 ### Serde
 
-`Deserialize` is implemented on `EnableConfig` and `PartialEnableConfig`, not on
-resolved `Enable` — `Enable` is produced by the resolver, not deserialized
+`EnableConfig` is a plain `#[derive(Config)]` struct with
+`#[config(no_deserialize_derive)]`, exactly like `ModelIdConfig`: only
+`Deserialize` is hand-written (on the generated `PartialEnableConfig`, the form
+config files / `base_config.json` / `config_delta` events load into); the
+`Serialize`, `Schematic`, per-field merge, and delta machinery are the standard
+macro-generated implementations.
+This keeps `enable` uniform with every other nested config field and requires no
+`schematic` macro changes.
+`Enable` is the resolved form, produced by the resolver, not deserialized
 directly.
-Both deserializers accept a bool, a string, or a map.
+The deserializer accepts a bool, a string, or a map.
 Within the map form, the `allow_toggle` field accepts the strings `"any"` (=
 `Always`), `"never"` (= `Never`), `"if_named"`, or `"if_named_or_group"`.
 Omitted map fields stay `None` so they participate in per-field merging — see
 [Defaults and merge](#defaults-and-merge).
 
 The table below describes the form a TOML input produces when deserialized into
-`EnableConfig` and then passed through the resolver with no defaults layer (so
-any `None` field falls through to the hardcoded fallback):
+`PartialEnableConfig` and then passed through the resolver with no defaults
+layer (so any `None` field falls through to the hardcoded fallback):
 
 | Input                               | Resolver output, no defaults layer        |
 | ----------------------------------- | ----------------------------------------- |
@@ -200,35 +206,33 @@ flat-enum variants.
 They are preserved for backward compatibility — see [Backward
 compatibility](#backward-compatibility).
 
-`Serialize` follows the same per-field rules for stored `EnableConfig` and
-`PartialEnableConfig`; the serialization table below applies to both.
-The bool shorthand is emitted only when both fields are set and `allow_toggle`
-is `Always`; otherwise the map form is emitted, carrying only the fields that
-are set.
-A stored `{ state: Some(true), allow_toggle: None }` therefore serializes as `{
-state = true }`, never `true` — `true` would erase inheritance from a defaults
-layer.
-Serialization always operates on the stored optional fields, never on
-`effective_enable()`, when writing config files, `base_config.json`, or
-`config_delta` events.
-Round-trip is exact for inputs already in canonical form; legacy strings and
-explicit-`Always` maps are one-way-normalized to canonical on the first
-write-back.
-
-`PartialEnableConfig` serializes only the fields that are `Some`.
+`Serialize` is the macro-generated implementation: **output is always the table
+form**, never a bool shorthand — mirroring how `ModelIdConfig` accepts a
+`provider/name` string on input but writes a `{ provider, name }` table.
+Each partial field carries `skip_serializing_if = "Option::is_none"`, so a
+partial that sets just one half writes just that half, preserving inheritance
+from lower layers.
 This matters because `jp config set` and `config_delta` events write partial
-deltas that may set just one half — e.g. `jp config set
-conversation.tools.foo.enable.allow_toggle if_named` produces a partial with
-`state: None`, which the bool shorthand cannot express.
+deltas that may set only one field — e.g. `jp config set
+conversation.tools.foo.enable.allow_toggle if_named` produces `{ allow_toggle =
+"if_named" }`, leaving `state` to inherit.
+Serialization operates on the stored optional fields, never on
+`effective_enable()`.
 
-| Partial input                                        | Serialized output           |
-| ---------------------------------------------------- | --------------------------- |
-| `{ state: Some(true), allow_toggle: Some(Always) }`  | `true` (bool shorthand)     |
-| `{ state: Some(false), allow_toggle: Some(Always) }` | `false` (bool shorthand)    |
-| `{ state: Some(_), allow_toggle: Some(non-Always) }` | `{ state, allow_toggle }`   |
-| `{ state: Some(_), allow_toggle: None }`             | `{ state }`                 |
-| `{ state: None, allow_toggle: Some(_) }`             | `{ allow_toggle }`          |
-| `{ state: None, allow_toggle: None }`                | omitted from the parent map |
+| Partial input                                        | Serialized output                         |
+| ---------------------------------------------------- | ----------------------------------------- |
+| `{ state: Some(true), allow_toggle: Some(Always) }`  | `{ state = true, allow_toggle = "any" }`  |
+| `{ state: Some(false), allow_toggle: Some(Always) }` | `{ state = false, allow_toggle = "any" }` |
+| `{ state: Some(_), allow_toggle: Some(_) }`          | `{ state, allow_toggle }`                 |
+| `{ state: Some(_), allow_toggle: None }`             | `{ state }`                               |
+| `{ state: None, allow_toggle: Some(_) }`             | `{ allow_toggle }`                        |
+| `{ state: None, allow_toggle: None }`                | `{}` (empty; omitted by the parent map)   |
+
+Round-trip is exact for the table form.
+The bool / legacy-string shorthands are one-way-normalized to the table form on
+the first write-back — `enable = true` becomes `enable = { state = true,
+allow_toggle = "any" }`, the same shorthand normalization `model.id =
+"anthropic/claude"` already undergoes.
 
 On the deserialize side, bool and legacy-string inputs to a
 `PartialEnableConfig` fill *both* fields (so `enable = true` in a delta
@@ -500,9 +504,9 @@ cannot be disabled" framing.
 ### Predicates and helpers
 
 ```rust
-impl EnableConfig {
-    // Stored-form constants used by builtin registrations and other
-    // code that needs a compile-time-known configuration.
+impl PartialEnableConfig {
+    // Partial-form constants used by builtin registrations and the directive
+    // engine, which work on partials.
     pub const ON: Self = Self {
         state: Some(true),
         allow_toggle: Some(AllowToggle::Always),
@@ -532,7 +536,7 @@ impl Enable {
 ```
 
 `describe_tools`'s builtin registration becomes `enable:
-Some(EnableConfig::LOCKED_ON)`.
+Some(PartialEnableConfig::LOCKED_ON)`.
 
 ## Backward compatibility
 
@@ -569,11 +573,11 @@ lost, changing tool availability for old conversations.
 Output is always canonical.
 The compat path is read-only — no new code emits legacy strings.
 On the first re-serialization after this RFD lands (e.g. a subsequent
-`config_delta` write, or a `jp config set` against the user's config file),
-legacy strings normalize to bool shorthand or the map form.
+`config_delta` write, or a `jp config set` against the user's config file), the
+bool and legacy-string shorthands normalize to the table form.
 
 In-code builtin registrations (currently `Enable::Always` for `describe_tools`)
-are updated to `EnableConfig::LOCKED_ON` as part of the same change.
+are updated to `PartialEnableConfig::LOCKED_ON` as part of the same change.
 
 RFD updates accompany the code change:
 
@@ -602,12 +606,15 @@ RFD updates accompany the code change:
 
 ## Drawbacks
 
-**One-way serde normalization.** Legacy string inputs (`"on"`, `"off"`,
-`"always"`, `"explicit"`) serialize back as their canonical form.
+**One-way serde normalization.** The bool and legacy-string inputs (`true`,
+`false`, `"on"`, `"off"`, `"always"`, `"explicit"`) serialize back as the table
+form (e.g.
+`enable = true` becomes `enable = { state = true, allow_toggle = "any" }`).
 The shape is stable from the first write-back onward.
-Round-trip is exact only for inputs already in canonical form — consistent with
-existing `Enable` behavior (today's `enable = "on"` already collapses to `enable
-= true`).
+This is the same shorthand-to-table normalization `ModelIdConfig` already
+performs (`model.id = "anthropic/claude"` writes back as a `{ provider, name }`
+table), so `enable` stays uniform with the rest of the config rather than
+carrying a bespoke serializer.
 
 **Slightly more TOML for non-default cases.** Non-default `allow_toggle` values
 require the map form: `enable = { state = true, allow_toggle = "never" }` in new
@@ -740,14 +747,14 @@ change.
   `ToggleScope` lives in `jp_config` alongside `Enable` because
   `Enable::accepts` consumes it; the CLI directive parser in `jp_cli` produces
   values of this type rather than defining its own.
-- Implement `Serialize` / `Deserialize` with the bool-or-map shape for
-  `EnableConfig` and `PartialEnableConfig`.
-  `Enable` only needs `Serialize` — it is produced by the resolver, not
-  deserialized directly.
-- Implement `Schematic`.
-- Add the `EnableConfig::ON` / `OFF` / `LOCKED_ON` / `LOCKED_OFF` constants and
-  the `Enable::is_enabled`, `Enable::is_locked`, and `Enable::accepts`
-  predicates.
+- Hand-write `Deserialize` on `PartialEnableConfig` to accept the bool /
+  legacy-string / table inputs (`#[config(no_deserialize_derive)]`); let the
+  macro auto-derive `Serialize` (table output) and `Schematic`, the same way
+  `ModelIdConfig` does.
+  No `schematic` macro change is needed.
+- Add the `PartialEnableConfig::ON` / `OFF` / `LOCKED_ON` / `LOCKED_OFF`
+  constants (builtins and the directive engine work on partials) and the
+  `Enable::is_enabled`, `Enable::is_locked`, and `Enable::accepts` predicates.
 - Update the partial-config infrastructure (`PartialEnableConfig`, `ToPartial`,
   `PartialConfigDelta`, `AssignKeyValue`) for the new struct shape.
 - Implement compat-aware deserialization: accept `true` / `false` / `"on"` /
@@ -779,7 +786,7 @@ change.
   Locked-off tools are filtered out regardless of `assistant.tool_choice`.
   See [Locked-off means hidden](#locked-off-means-hidden).
 - Update the builtin registration of `describe_tools` to
-  `EnableConfig::LOCKED_ON`.
+  `PartialEnableConfig::LOCKED_ON`.
 
 ### Phase 3: directive engine
 
@@ -808,7 +815,7 @@ change.
   the directive intent differs from the current state.
 - Add tests for the named-directive error paths and silent no-op paths.
 - Add tests for `tool_definitions()` and `Ctx::configure_active_mcp_servers`
-  against `EnableConfig::LOCKED_ON`.
+  against `PartialEnableConfig::LOCKED_ON`.
 - Add layered-merge tests:
   - `enable = { state = true }` on a tool inherits `allow_toggle` from
     `[conversation.tools.'*']`.

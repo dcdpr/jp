@@ -6,7 +6,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use clean_path::clean;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use toml_edit::DocumentMut;
+use toml_edit::{DocumentMut, Item, TableLike};
 use tracing::debug;
 
 use crate::{Error, PartialAppConfig};
@@ -194,10 +194,16 @@ impl ConfigFile {
 /// Only keys present in `source` are touched.
 /// When both sides have a sub-table for the same key the merge recurses;
 /// otherwise the source value overwrites the target.
-fn deep_merge_toml(target: &mut toml_edit::Table, source: &toml_edit::Table) {
-    for (key, source_item) in source {
-        if let Some(target_table) = target.get_mut(key).and_then(|t| t.as_table_mut())
-            && let Some(source_table) = source_item.as_table()
+///
+/// Recursion descends into any table-like value — both standard tables and
+/// inline tables (`{ ... }`) — so a nested key set against an inline-table
+/// value (e.g. `conversation.tools.foo.enable.state` over an inline `enable = {
+/// state = true, allow_toggle = "never" }`) deep-merges the subfield instead of
+/// replacing the whole inline table.
+fn deep_merge_toml(target: &mut dyn TableLike, source: &dyn TableLike) {
+    for (key, source_item) in source.iter() {
+        if let Some(target_table) = target.get_mut(key).and_then(Item::as_table_like_mut)
+            && let Some(source_table) = source_item.as_table_like()
         {
             deep_merge_toml(target_table, source_table);
         } else {

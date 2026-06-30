@@ -244,14 +244,13 @@ Since group names and tool names cannot collide, name resolution is unambiguous.
 The existing `enable` field on tool config controls tool activation behavior.
 Groups interact with it as follows:
 
-| `enable` value      | `--tools GROUP`   | `--no-tools GROUP` |
-| ------------------- | ----------------- | ------------------ |
-| `None` (default)    | Enabled           | Disabled           |
-| `on` / `true`       | Enabled           | Disabled           |
-| `off` / `false`     | Enabled           | Disabled           |
-| `explicit`          | **Not enabled**   | Disabled           |
-| `explicit_or_group` | Enabled           | Disabled           |
-| `always`            | (already enabled) | **Not disabled**   |
+| `enable` value   | `--tools GROUP`   | `--no-tools GROUP` |
+| ---------------- | ----------------- | ------------------ |
+| `None` (default) | Enabled           | Disabled           |
+| `on` / `true`    | Enabled           | Disabled           |
+| `off` / `false`  | Enabled           | Disabled           |
+| `explicit`       | **Not enabled**   | Disabled           |
+| `always`         | (already enabled) | **Not disabled**   |
 
 - **`None` (default)**: the tool has no explicit enable setting.
   Treated as enabled (consistent with `is_none_or(Enable::is_on)` in the current
@@ -261,12 +260,14 @@ Groups interact with it as follows:
   enabled by bare `--tools`.
   Requires being named directly: `--tools TOOL`.
 
-- **`explicit_or_group`** (new variant): like `explicit`, the tool is not
-  enabled by bare `--tools`.
-  But unlike `explicit`, it *is* enabled when a group it belongs to is activated
+- **`allow_toggle = "if_named_or_group"`** (RFD 081): like `if_named`, the tool
+  is not enabled by bare `--tools`.
+  But unlike `if_named`, it *is* enabled when a group it belongs to is activated
   via `--tools GROUP`.
   This allows tools that should not be swept up by blanket enable-all but should
   respond to targeted group activation.
+  The variant already exists in the schema (RFD 081); tool groups only need the
+  `--tools GROUP` parser that produces `ToggleScope::NamedGroup`.
 
 - **`always`**: cannot be disabled by any mechanism, including `--no-tools
   GROUP`.
@@ -281,11 +282,6 @@ array fields use `MergeableVec`'s append/replace strategies.
 This must be documented clearly.
 The justification (avoiding re-declaration verbosity with exhaustive groups) is
 sound, but it adds a concept users must learn.
-
-**New `Enable` variant.** Adding `explicit_or_group` increases the surface area
-of an already nuanced enum.
-Users who don't use groups will never encounter it, but it is another value to
-document and maintain.
 
 ## Alternatives
 
@@ -337,11 +333,6 @@ The boolean is sufficient.
 `groups` differs from other fields.
 If this causes confusion in practice, we could fall back to replace semantics
 and accept the verbosity cost for exhaustive groups.
-
-**`Enable` enum growth.** The enum now has five variants (`on`, `off`,
-`explicit`, `explicit_or_group`, `always`).
-If future features add more activation modes, the enum may need restructuring.
-For now, five variants is manageable.
 
 ## Implementation Notes
 
@@ -403,9 +394,11 @@ the config system.
    since group/tool name collisions are a config error).
 2. When a group name is matched, expand to enable/disable all tools with
    included membership in that group.
-3. Respect `enable` field variants: `explicit` tools are not activated by group
-   enable; `always` tools are not disabled by group disable.
-4. Add `Enable::ExplicitOrGroup` variant.
+3. Respect each tool's `allow_toggle` policy: `if_named` tools are not activated
+   by group enable; locked (`never`) tools are not flipped by group directives.
+   `if_named_or_group` tools (RFD 081) respond to group activation.
+4. Produce `ToggleScope::NamedGroup` from the `--tools GROUP` / `--no-tools
+   GROUP` parser so the directive engine applies the group scope.
 5. Update existing tests in `query_tests.rs` to cover group interactions.
 
 ## References

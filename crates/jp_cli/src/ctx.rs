@@ -175,7 +175,7 @@ impl Ctx {
         let mut server_ids = HashSet::new();
 
         for (_name, cfg) in self.config.conversation.tools.iter() {
-            if !cfg.enable() {
+            if !cfg.is_enabled() {
                 continue;
             }
 

@@ -1068,9 +1068,12 @@ fn validate_tool_arguments(
 /// Resolve all enabled tool definitions from config.
 ///
 /// If `forced_tool` is provided (e.g. from `ToolChoice::Function`), that tool
-/// is included even when its `enable()` check returns `false`.
-/// This prevents a mismatch between `tool_choice` and the declared tools list,
-/// which some providers (notably Google/Gemini) reject outright.
+/// is included even when it is disabled, preventing a mismatch between
+/// `tool_choice` and the declared tools list that some providers (notably
+/// Google/Gemini) reject outright.
+///
+/// A locked-off tool (`state = false`, `allow_toggle = never`) is the
+/// exception: it is always dropped, even when named by `forced_tool`.
 pub async fn tool_definitions(
     configs: impl Iterator<Item = (&str, ToolConfigWithDefaults)>,
     mcp_client: &jp_mcp::Client,
@@ -1079,8 +1082,10 @@ pub async fn tool_definitions(
     let mut definitions = Vec::new();
 
     for (name, config) in configs {
+        let enable = config.effective_enable();
         let forced = forced_tool.is_some_and(|f| f == name);
-        if !forced && !config.enable() {
+        // Drop disabled tools, but keep a forced tool unless it is locked-off.
+        if !enable.is_enabled() && (!forced || enable.is_locked()) {
             continue;
         }
 

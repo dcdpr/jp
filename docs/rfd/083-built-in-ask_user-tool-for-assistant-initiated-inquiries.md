@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
-- **Requires**: [RFD 081], [RFD 082]
+- **Requires**: [RFD 082]
 
 ## Summary
 
@@ -193,14 +193,15 @@ modeled after the existing `describe_tools` entry:
 
 - `source: ToolSource::Builtin { tool: None }`.
 
-- `enable: Enable { state: true, allow_toggle: IfNamed }` — enabled by default,
-  immune to bare `-T` (disable-all), disableable by name.
+- `enable: EnableConfig { state: Some(true), allow_toggle:
+  Some(AllowToggle::IfNamed) }` — enabled by default, immune to bare `-T`
+  (disable-all), disableable by name.
   CLI: `-T ask_user`.
   TOML: `conversation.tools.ask_user.enable = { state = false }` — disables
   while preserving the `if_named` toggle policy via RFD 081's partial-merge
   rules.
   Note that the bool shorthand `enable = false` also disables but resets
-  `allow_toggle` to `always`, which may not be the intent.
+  `allow_toggle` to `any`, which may not be the intent.
   This is the shape [RFD 081] introduces; 083 consumes it without contributing
   any new variant or predicate of its own.
 
@@ -955,10 +956,10 @@ Override `BuiltinTool::inquiry_source()` (the hook [RFD 082] introduces) to
 return `InquirySource::Assistant`, so the recording site 082 established
 surfaces `ask_user`'s exchanges with the correct provenance.
 Add the `ask_user()` config entry to `jp_cli::cmd::query::tool::builtins::all()`
-with `enable: Enable { state: true, allow_toggle: IfNamed }` (per [RFD 081]),
-`questions.answer.prompt_label = Some("Assistant".to_owned())`, a long-form
-`description`, and the full `parameters` schema (see [Tool
-configuration](#tool-configuration)).
+with `enable: EnableConfig { state: Some(true), allow_toggle:
+Some(AllowToggle::IfNamed) }` (per [RFD 081]), `questions.answer.prompt_label =
+Some("Assistant".to_owned())`, a long-form `description`, and the full
+`parameters` schema (see [Tool configuration](#tool-configuration)).
 Register the builtin in `handle_turn`.
 Tests for argument validation, the `NeedsInput → Success` round-trip, the
 JSON-encoded success body, that `tool_definitions()` exposes the expected
