@@ -174,6 +174,38 @@ fn edit_result_preserves_multiline_content() {
     assert_eq!(result, Some(multiline.to_string()));
 }
 
+#[test]
+fn edit_result_editor_escape_failure_keeps_buffer_and_notifies_chrome() {
+    // Ctrl+X -> editor can't start -> the typed buffer is kept and the widget
+    // re-prompts, so a second submit still returns the text (the spawn failure
+    // must NOT propagate as a fatal prompt error — the old `?` behavior). The
+    // failure is surfaced on the chrome channel (stderr), not just the tracing
+    // log, so the user knows their editor didn't open.
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let prompt = MockPromptBackend::new().with_reply_outcomes([
+        ReplyOutcome::OpenEditor {
+            current_text: "draft".into(),
+        },
+        ReplyOutcome::Submit("draft, then more".into()),
+    ]);
+    let prompter = ToolPrompter::with_backends(
+        printer.clone(),
+        Some(Arc::new(MockEditorBackend::failing())),
+        Arc::new(prompt),
+    );
+
+    let result = prompter.edit_result("seed").unwrap();
+    assert_eq!(result, Some("draft, then more".to_string()));
+
+    printer.flush();
+    let output = err.lock();
+    assert!(
+        output.contains("Couldn't open your editor"),
+        "editor failure must be surfaced on chrome. Output: {output}"
+    );
+}
+
 // --- Skip reasoning (`edit_text`) ----------------------------------------
 
 #[test]

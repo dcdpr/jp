@@ -136,7 +136,8 @@ impl InlineReply {
     }
 
     /// Build the reedline edit mode, registering JP's custom bindings into the
-    /// keymap that handles typing (the emacs map, or the vi *insert* map).
+    /// emacs map, or into both vi keymaps (insert *and* normal) so the editor
+    /// escape and newline bindings work regardless of vi mode.
     fn build_edit_mode(&self) -> Box<dyn EditMode> {
         match self.edit_mode {
             ReplyEditMode::Emacs => {
@@ -147,7 +148,9 @@ impl InlineReply {
             ReplyEditMode::Vi => {
                 let mut insert = default_vi_insert_keybindings();
                 add_custom_bindings(&mut insert);
-                Box::new(Vi::new(insert, default_vi_normal_keybindings()))
+                let mut normal = default_vi_normal_keybindings();
+                add_custom_bindings(&mut normal);
+                Box::new(Vi::new(insert, normal))
             }
         }
     }

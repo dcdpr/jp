@@ -16,7 +16,9 @@ use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, EventKind},
 };
-use jp_editor::{EditOutcome, EditRequest, EditorBackend, TerminalEditorBackend};
+use jp_editor::{EditOutcome, EditRequest, EditorBackend, EditorError, TerminalEditorBackend};
+use jp_printer::Printer;
+use tracing::warn;
 
 use crate::{
     editor::parser::QueryDocument,
@@ -32,6 +34,25 @@ pub(crate) fn build_editor_backend(config: &EditorConfig) -> Option<Arc<dyn Edit
     config
         .command()
         .map(|cmd| Arc::new(TerminalEditorBackend::new(cmd)) as Arc<dyn EditorBackend>)
+}
+
+/// Surface an editor failure that JP recovered from rather than aborting.
+///
+/// The full error goes to the diagnostics channel (`tracing`, visible with
+/// `-vvv` or in the log file); a concise notice goes to the chrome channel
+/// (stderr) so the user actually sees that their editor didn't open.
+/// `recovery` names what JP did instead (e.g.
+/// "Continuing with the inline editor.").
+///
+/// Safe to call between inline-reply prompts: the `reedline` engine is dropped
+/// when `InlineReply::prompt` returns, so the terminal is back in cooked mode
+/// by the time this writes.
+/// The leading newline starts the notice on a fresh line below the prompt.
+pub(crate) fn report_editor_failure(printer: &Printer, error: &EditorError, recovery: &str) {
+    warn!(%error, "editor failed during reply/edit");
+    printer.eprintln(format!(
+        "\n⚠ Couldn't open your editor: {error}. {recovery}"
+    ));
 }
 
 /// The name of the file used to store the current query message.

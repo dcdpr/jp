@@ -31,13 +31,28 @@ fn emacs_keymap_binds_newline_keys() {
 
 #[test]
 fn vi_mode_registers_bindings_into_insert_keymap() {
-    // The editor escape lives in the *insert* keymap (where typing happens),
-    // not the normal keymap.
+    // The editor escape is registered into the insert keymap (where typing
+    // happens).
     let mut insert = default_vi_insert_keybindings();
     add_custom_bindings(&mut insert);
 
     assert_eq!(
         insert.find_binding(KeyModifiers::CONTROL, KeyCode::Char('x')),
+        Some(ReedlineEvent::ExecuteHostCommand(
+            OPEN_EDITOR_SENTINEL.to_owned()
+        ))
+    );
+}
+
+#[test]
+fn vi_mode_registers_bindings_into_normal_keymap() {
+    // The escape must also work after `Esc` into normal mode, so the custom
+    // bindings are registered into the normal keymap too.
+    let mut normal = default_vi_normal_keybindings();
+    add_custom_bindings(&mut normal);
+
+    assert_eq!(
+        normal.find_binding(KeyModifiers::CONTROL, KeyCode::Char('x')),
         Some(ReedlineEvent::ExecuteHostCommand(
             OPEN_EDITOR_SENTINEL.to_owned()
         ))

@@ -41,7 +41,8 @@ use jp_inquire::{
     prompt::{PromptBackend, TerminalPromptBackend},
 };
 use jp_printer::Printer;
-use tracing::warn;
+
+use crate::editor::report_editor_failure;
 
 /// Default response sent to the LLM when the user cancels a tool without
 /// supplying a custom message.
@@ -276,10 +277,11 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 }
                 // Empty save or a cancelled (non-zero-exit) editor: back out.
                 Ok(_) => ReplyResult::Back,
-                // A spawn / I/O failure is not a user cancellation: log it and
-                // fall back to the inline widget so the user can still reply.
+                // A spawn / I/O failure is not a user cancellation: surface it
+                // (chrome + diagnostics) and fall back to the inline widget so
+                // the user can still reply.
                 Err(error) => {
-                    warn!(%error, "editor failed to open for reply; falling back to inline widget");
+                    report_editor_failure(printer, &error, "Continuing with the inline editor.");
                     self.collect_reply_inline(message, printer)
                 }
             };
@@ -314,11 +316,12 @@ impl<P: PromptBackend> InterruptHandler<P> {
                         }
                         // Emptied or cancelled editor: back out.
                         Ok(_) => return ReplyResult::Back,
-                        // A spawn / I/O failure is not a user cancellation: log
-                        // it and keep the buffer, re-prompting rather than
-                        // discarding what the user typed.
+                        // A spawn / I/O failure is not a user cancellation:
+                        // surface it (chrome + diagnostics) and keep the buffer,
+                        // re-prompting rather than discarding what the user
+                        // typed.
                         Err(error) => {
-                            warn!(%error, "editor failed from inline reply; keeping buffer");
+                            report_editor_failure(printer, &error, "Keeping your text.");
                             buffer = current_text;
                         }
                     }

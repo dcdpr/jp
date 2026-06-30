@@ -22,7 +22,7 @@ use jp_printer::Printer;
 use jp_tool::AnswerType;
 use serde_json::Value;
 
-use crate::Error;
+use crate::{Error, editor::report_editor_failure};
 
 /// Well-known question ID used for tool permission inquiries.
 pub const PERMISSION_QUESTION_ID: &str = "__permission__";
@@ -404,13 +404,16 @@ impl ToolPrompter {
                 ReplyOutcome::OpenEditor { current_text } => {
                     text = current_text;
                     if let Some(editor) = &self.editor {
-                        match editor
-                            .edit_text(&text)
-                            .map_err(|error| Error::Editor(error.to_string()))?
-                        {
-                            (EditOutcome::Saved, edited) => text = edited,
+                        match editor.edit_text(&text) {
+                            Ok((EditOutcome::Saved, edited)) => text = edited,
                             // Editor cancelled: keep the buffer and re-prompt.
-                            (EditOutcome::Cancelled, _) => {}
+                            Ok((EditOutcome::Cancelled, _)) => {}
+                            // A spawn / I/O failure must not abort the whole
+                            // prompt: surface it (chrome + diagnostics) and keep
+                            // the buffer, re-prompting the inline widget.
+                            Err(error) => {
+                                report_editor_failure(&self.printer, &error, "Keeping your text.");
+                            }
                         }
                     }
                 }
