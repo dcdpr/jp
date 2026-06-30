@@ -172,8 +172,8 @@ The schema accepts the value now to avoid a later additive change.
 resolved `Enable` — `Enable` is produced by the resolver, not deserialized
 directly.
 Both deserializers accept a bool, a string, or a map.
-Within the map form, the `allow_toggle` field accepts the strings `"any"`
-(= `Always`), `"never"` (= `Never`), `"if_named"`, or `"if_named_or_group"`.
+Within the map form, the `allow_toggle` field accepts the strings `"any"` (=
+`Always`), `"never"` (= `Never`), `"if_named"`, or `"if_named_or_group"`.
 Omitted map fields stay `None` so they participate in per-field merging — see
 [Defaults and merge](#defaults-and-merge).
 
@@ -205,9 +205,9 @@ compatibility](#backward-compatibility).
 The bool shorthand is emitted only when both fields are set and `allow_toggle`
 is `Always`; otherwise the map form is emitted, carrying only the fields that
 are set.
-A stored `{ state: Some(true), allow_toggle: None }` therefore serializes as
-`{ state = true }`, never `true` — `true` would erase inheritance from a
-defaults layer.
+A stored `{ state: Some(true), allow_toggle: None }` therefore serializes as `{
+state = true }`, never `true` — `true` would erase inheritance from a defaults
+layer.
 Serialization always operates on the stored optional fields, never on
 `effective_enable()`, when writing config files, `base_config.json`, or
 `config_delta` events.
@@ -430,9 +430,9 @@ partial config before MCP servers start, so it cannot promise the tool reaches
 the LLM.
 A tool backed by an optional MCP server that fails to start is still dropped
 later by `tool_definitions()`.
-Reconciling that runtime mismatch — a forced tool absent from the resolved
-list — is a pre-existing concern orthogonal to this RFD and is left to the
-runtime access-control track.
+Reconciling that runtime mismatch — a forced tool absent from the resolved list
+— is a pre-existing concern orthogonal to this RFD and is left to the runtime
+access-control track.
 
 ### Locked-off means hidden
 
@@ -591,9 +591,9 @@ RFD updates accompany the code change:
   resolution, replacing the `Enable` field type and the `enable()` /
   `enable_mode()` accessor names with `is_enabled()` / `effective_enable()`.
 - [RFD 057]'s `apply_enable_tools` wording is updated to route through the
-  partial-config resolver seam (`PartialEnableConfig::effective`). The existing
-  note that [RFD 057] must decide whether group-sourced `allow_toggle = Never`
-  blocks CLI directives is preserved.
+  partial-config resolver seam (`PartialEnableConfig::effective`).
+  The existing note that [RFD 057] must decide whether group-sourced
+  `allow_toggle = Never` blocks CLI directives is preserved.
 - [RFD 083] is updated to fix stale `allow_toggle` wording: the bool-shorthand
   note that "resets `allow_toggle` to `always`" becomes `any`, and the builtin
   registration examples change from the resolved `Enable { ... }` to the stored
@@ -719,8 +719,8 @@ correct `state` / `allow_toggle`.
 implemented) lets tools write to paths under `conversation.tools.*` via the
 `access.config` grant model.
 Existing payloads that write a bool or legacy string (`true`, `"on"`,
-`"always"`, …) to `conversation.tools.*.enable` remain valid — the deserializer
-accepts them unchanged, so no migration is forced.
+`"always"`, …) to `conversation.tools.*.enable` remain valid — the
+deserializer accepts them unchanged, so no migration is forced.
 A tool only needs the map form (`{ state, allow_toggle }`) when it wants to set
 one subfield while preserving the other from a lower layer.
 When [RFD 078] is implemented, confirm grant payloads and any built-in
@@ -759,8 +759,9 @@ change.
   standard tables today (`as_table_mut` / `as_table`), so a nested `jp config
   set conversation.tools.foo.enable.state ...` against an `enable = { state =
   true, allow_toggle = "never" }` inline table would replace the whole value and
-  drop `allow_toggle`. Switch the recursion to table-likes (`as_table_like_mut`
-  / `as_table_like`) so inline and standard tables both deep-merge.
+  drop `allow_toggle`.
+  Switch the recursion to table-likes (`as_table_like_mut` / `as_table_like`) so
+  inline and standard tables both deep-merge.
 
 ### Phase 2: predicates and ctx
 
@@ -785,8 +786,8 @@ change.
 - Rewrite `apply_enable_tools` to use the scope-vs-policy model.
   The bulk-only filters (`is_explicit`, `is_always`) are removed.
   The named-disable guard is generalized to the named directive case.
-- `ToggleScope::NamedGroup` is added but no parser produces it (parking spot
-  for [RFD 055]).
+- `ToggleScope::NamedGroup` is added but no parser produces it (parking spot for
+  [RFD 055]).
 - Route `apply_tool_use` and `apply_enable_tools` through the partial-config
   resolver seam (`PartialEnableConfig::effective`; see [Effective enable
   resolution](#effective-enable-resolution)) instead of inspecting raw partial
@@ -794,7 +795,8 @@ change.
 - Add an `AppConfig`-level validation check (in `AppConfig::validate`, which
   sees both `assistant` and `conversation.tools`) that rejects
   `assistant.tool_choice = Function(name)` when `name` resolves to a locked-off
-  tool. The error names both `assistant.tool_choice` and
+  tool.
+  The error names both `assistant.tool_choice` and
   `conversation.tools.<name>.enable`, matching how `--tool-use NAME` validates
   against the enabled set today.
 
