@@ -583,9 +583,10 @@ edit_mode = "emacs" # "emacs" | "vi"
   Windows.
   Set `shell = true` for pipes, `&&`, or subshells; on Unix the edited path(s)
   are forwarded to the shell command via `"$@"`.
-  On non-Unix platforms `shell = true` runs through the platform shell but does
-  **not** forward the edited path — wrap any shell logic in a script and point
-  `program` at it (`shell = false`) instead.
+  On non-Unix platforms `shell = true` is unsupported: it is logged and the
+  program is spawned **directly** (the `"$@"` path-forwarding convention is
+  Unix-only) — wrap any shell logic in a script and point `program` at it
+  (`shell = false`) instead.
 - **`reply_in_editor`** — defaults to `false`.
   When `true`, the reply path opens the configured editor **instead of** showing
   `InlineReply`; a non-empty saved result is sent immediately, an empty or
