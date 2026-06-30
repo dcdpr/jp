@@ -41,6 +41,7 @@ use jp_inquire::{
     prompt::{PromptBackend, TerminalPromptBackend},
 };
 use jp_printer::Printer;
+use tracing::warn;
 
 /// Default response sent to the LLM when the user cancels a tool without
 /// supplying a custom message.
@@ -273,8 +274,14 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 Ok((EditOutcome::Saved, text)) if !text.trim().is_empty() => {
                     ReplyResult::Reply(text)
                 }
-                // Empty, cancelled, or a spawn failure: back out.
-                _ => ReplyResult::Back,
+                // Empty save or a cancelled (non-zero-exit) editor: back out.
+                Ok(_) => ReplyResult::Back,
+                // A spawn / I/O failure is not a user cancellation: log it and
+                // fall back to the inline widget so the user can still reply.
+                Err(error) => {
+                    warn!(%error, "editor failed to open for reply; falling back to inline widget");
+                    self.collect_reply_inline(message, printer)
+                }
             };
         }
 
@@ -305,8 +312,15 @@ impl<P: PromptBackend> InterruptHandler<P> {
                             // Re-seed the inline prompt with the editor's output.
                             buffer = edited;
                         }
-                        // Emptied, cancelled, or failed: back out.
-                        _ => return ReplyResult::Back,
+                        // Emptied or cancelled editor: back out.
+                        Ok(_) => return ReplyResult::Back,
+                        // A spawn / I/O failure is not a user cancellation: log
+                        // it and keep the buffer, re-prompting rather than
+                        // discarding what the user typed.
+                        Err(error) => {
+                            warn!(%error, "editor failed from inline reply; keeping buffer");
+                            buffer = current_text;
+                        }
                     }
                 }
                 Ok(ReplyOutcome::Submit(text)) if !text.trim().is_empty() => {

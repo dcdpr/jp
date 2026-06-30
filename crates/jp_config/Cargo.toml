@@ -19,7 +19,6 @@ camino = { workspace = true }
 clean-path = { workspace = true }
 directories = { workspace = true }
 duct = { workspace = true }
-duct_sh = { workspace = true }
 glob = { workspace = true }
 humantime = { workspace = true }
 indexmap = { workspace = true }

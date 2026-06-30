@@ -6,11 +6,14 @@ use duct::Expression;
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 
+#[cfg(unix)]
+use crate::types::command::shell_command_line;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt, delta_opt_vec},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec},
     fill::FillDefaults,
-    partial::{ToPartial, partial_opt, partial_opts},
+    partial::{ToPartial, partial_opt, partial_opt_config},
+    types::command::{CommandConfigOrString, PartialCommandConfigOrString},
 };
 
 /// Editor configuration.
@@ -19,14 +22,23 @@ use crate::{
 pub struct EditorConfig {
     /// The command to open the editor.
     ///
-    /// If unset, falls back to `envs`.
+    /// Either a string (`cmd = "code --wait"`) or a table (`cmd = { program =
+    /// "code", args = ["--wait"] }`).
+    /// The file(s) being edited are appended as arguments, so both forms open
+    /// `code --wait <file>`.
     ///
-    /// Runs through the shell, so quoting, pipes, and `&&` work.
-    /// The file(s) being edited are appended as arguments, so `cmd = "code
-    /// --wait"` opens `code --wait <file>`.
-    /// To place the file elsewhere, reference `"$@"` yourself, e.g. `cmd =
-    /// 'my-wrapper "$@" --flag'`.
-    pub cmd: Option<String>,
+    /// A string is split with shell-word semantics and run directly, without a
+    /// shell, so a missing editor is reported as an error rather than silently
+    /// doing nothing — this is the cross-platform form and the right choice on
+    /// Windows.
+    /// For pipes, `&&`, or subshells, set `shell = true`.
+    /// On Unix the edited path(s) are forwarded to the shell command via
+    /// `"$@"`; on Windows prefer `shell = false` and wrap any shell logic in a
+    /// script.
+    ///
+    /// If unset, falls back to `envs`.
+    #[setting(nested)]
+    pub cmd: Option<CommandConfigOrString>,
 
     /// The environment variables to use for editing text.
     /// Used if `cmd` is unset.
@@ -94,7 +106,7 @@ impl AssignKeyValue for PartialEditorConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "cmd" => self.cmd = kv.try_some_string()?,
+            _ if kv.p("cmd") => self.cmd.assign(kv)?,
             _ if kv.p("envs") => kv.try_some_vec_of_strings(&mut self.envs)?,
             _ if kv.p("inline") => self.inline.assign(kv)?,
             _ => return missing_key(&kv),
@@ -107,7 +119,7 @@ impl AssignKeyValue for PartialEditorConfig {
 impl PartialConfigDelta for PartialEditorConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            cmd: delta_opt(self.cmd.as_ref(), next.cmd),
+            cmd: delta_opt_partial(self.cmd.as_ref(), next.cmd),
             envs: delta_opt_vec(self.envs.as_ref(), next.envs),
             inline: self.inline.delta(next.inline),
         }
@@ -129,7 +141,7 @@ impl ToPartial for EditorConfig {
         let defaults = Self::Partial::default();
 
         Self::Partial {
-            cmd: partial_opts(self.cmd.as_ref(), defaults.cmd),
+            cmd: partial_opt_config(self.cmd.as_ref(), defaults.cmd),
             envs: partial_opt(&self.envs, defaults.envs),
             inline: self.inline.to_partial(),
         }
@@ -184,10 +196,15 @@ impl EditorConfig {
     /// The returned expression expects the path(s) being edited to be appended
     /// as trailing arguments (e.g. via `duct`'s `before_spawn`):
     ///
-    /// - `cmd` runs through the shell (so `&&`, `|`, and quoting work) and
-    ///   forwards the appended path(s) via `"$@"`.
-    ///   A `cmd` that already references `$@`/`$*` controls placement itself,
-    ///   so nothing is appended.
+    /// - `cmd` with `shell = false` (the default, including the string form)
+    ///   spawns the program directly with its arguments, then the appended
+    ///   path(s); a missing program surfaces as a spawn error rather than a
+    ///   shell exit code.
+    /// - `cmd` with `shell = true` runs through the system shell (`/bin/sh` on
+    ///   Unix) so `&&`, `|`, and quoting work.
+    ///   On Unix the appended path(s) are forwarded via `"$@"` (a command
+    ///   already referencing `$@`/`$*` controls placement itself); other
+    ///   platforms do not forward the path, so prefer `shell = false` there.
     /// - Env-var values are split with [`shlex::split`] so `JP_EDITOR="code
     ///   -w"` runs `code` with `-w`, then the path(s) as further arguments.
     ///   Values with unbalanced quoting are skipped.
@@ -195,8 +212,9 @@ impl EditorConfig {
     pub fn command(&self) -> Option<Expression> {
         self.cmd
             .clone()
-            .filter(|cmd| !cmd.trim().is_empty())
-            .map(|cmd| shell_command(&cmd))
+            .map(CommandConfigOrString::command)
+            .filter(|c| !c.program.trim().is_empty())
+            .map(|c| editor_expression(&c.program, &c.args, c.shell))
             .or_else(|| {
                 self.envs.iter().find_map(|v| {
                     let value = env::var(v).ok()?;
@@ -212,29 +230,45 @@ impl EditorConfig {
     }
 }
 
-/// Build a shell expression for `cmd` that forwards the caller's appended
-/// path(s) to the editor command.
+/// Build a duct expression for an editor command.
 ///
-/// `sh -c <script>` assigns the first trailing operand to `$0`, so the script
-/// sets an explicit `$0` (`jp-editor`) and forwards the appended path(s)
-/// through `"$@"`.
-/// A `cmd` that already references its arguments (`$@`/`$*`) is left untouched.
+/// The caller appends the edited path(s) as trailing arguments.
+/// `shell = false` spawns `program` directly with `args` (cross-platform), so a
+/// missing program is a spawn error; `shell = true` wraps the command in
+/// `/bin/sh -c`, forwarding the appended path(s) via `"$@"`.
 #[cfg(unix)]
-fn shell_command(cmd: &str) -> Expression {
-    let script = if cmd.contains("$@") || cmd.contains("$*") {
-        cmd.to_owned()
-    } else {
-        format!(r#"{cmd} "$@""#)
-    };
+fn editor_expression(program: &str, args: &[String], shell: bool) -> Expression {
+    if !shell {
+        return duct::cmd(program, args.to_vec());
+    }
+
+    // `program` is shell syntax and used verbatim; `args` are shell-quoted.
+    // `sh -c <script>` assigns the first trailing operand to `$0`, so set an
+    // explicit `$0` (`jp-editor`) and forward the appended path(s) via `"$@"`.
+    // A script that already references its arguments is left untouched.
+    let mut script = shell_command_line(program, args);
+    if !(script.contains("$@") || script.contains("$*")) {
+        script.push_str(r#" "$@""#);
+    }
 
     duct::cmd("/bin/sh", ["-c", script.as_str(), "jp-editor"])
 }
 
-/// On non-unix platforms, fall back to the platform shell without argument
-/// forwarding; `cmd` is expected to reference the path itself.
+/// On non-unix platforms there is no portable way to forward the edited path
+/// into a `shell = true` command (the `"$@"` convention is Unix-only), so the
+/// command is always spawned directly.
+/// `shell = true` is logged as unsupported and degraded to a direct spawn; use
+/// `shell = false` and wrap any shell logic in a script on these platforms.
 #[cfg(not(unix))]
-fn shell_command(cmd: &str) -> Expression {
-    duct_sh::sh_dangerous(cmd)
+fn editor_expression(program: &str, args: &[String], shell: bool) -> Expression {
+    if shell {
+        tracing::warn!(
+            "`editor.cmd` with `shell = true` is not supported on this platform; running the \
+             program directly. Use `shell = false` and wrap any shell logic in a script."
+        );
+    }
+
+    duct::cmd(program, args.to_vec())
 }
 
 #[cfg(test)]

@@ -15,7 +15,7 @@
 //! [`edit_file`]: EditorBackend::edit_file
 //! [`edit_text`]: EditorBackend::edit_text
 
-use std::{fs, sync::Mutex};
+use std::{fs, io, sync::Mutex};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
@@ -147,6 +147,10 @@ impl EditorBackend for TerminalEditorBackend {
 /// [`edit_text`]: EditorBackend::edit_text
 pub struct MockEditorBackend {
     responses: Mutex<Vec<String>>,
+
+    /// When set, every call fails with a spawn error instead of returning
+    /// scripted text (simulates a broken or missing editor).
+    fail: bool,
 }
 
 impl MockEditorBackend {
@@ -158,6 +162,17 @@ impl MockEditorBackend {
     pub fn with_responses(responses: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
             responses: Mutex::new(responses.into_iter().map(Into::into).collect()),
+            fail: false,
+        }
+    }
+
+    /// Creates a mock whose `edit_text` / `edit_file` calls fail with a spawn
+    /// error, simulating a broken or missing editor.
+    #[must_use]
+    pub fn failing() -> Self {
+        Self {
+            responses: Mutex::new(vec![]),
+            fail: true,
         }
     }
 
@@ -191,6 +206,10 @@ impl MockEditorBackend {
 
 impl EditorBackend for MockEditorBackend {
     fn edit_text(&self, _content: &str) -> Result<(EditOutcome, String), EditorError> {
+        if self.fail {
+            return Err(mock_failure());
+        }
+
         let mut responses = self.responses.lock().unwrap();
         let text = if responses.is_empty() {
             // If no more responses, return empty (simulates user clearing
@@ -204,6 +223,19 @@ impl EditorBackend for MockEditorBackend {
     }
 
     fn edit_file(&self, _req: EditRequest<'_>) -> Result<EditOutcome, EditorError> {
+        if self.fail {
+            return Err(mock_failure());
+        }
+
         Ok(EditOutcome::Saved)
     }
+}
+
+/// A spawn error used by [`MockEditorBackend::failing`] to simulate an editor
+/// that can't be started.
+fn mock_failure() -> EditorError {
+    EditorError::Spawn(io::Error::new(
+        io::ErrorKind::NotFound,
+        "mock editor failure",
+    ))
 }

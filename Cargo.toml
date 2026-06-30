@@ -64,7 +64,6 @@ datetime_literal = { version = "0.1", default-features = false }
 dhat = { version = "0.3", default-features = false }
 directories = { version = "6", default-features = false }
 duct = { version = "1", default-features = false }
-duct_sh = { version = "1", default-features = false }
 dyn-clone = { version = "1", default-features = false }
 dyn-hash = { version = "1", default-features = false }
 eventsource-stream = { version = "0.2", default-features = false }

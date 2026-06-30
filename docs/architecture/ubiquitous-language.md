@@ -105,8 +105,8 @@ The frontend seam for invoking the user's configured editor.
 Exposes `edit_text` (string in, edited string out) and `edit_file` (open the
 editor on caller-owned paths), covering both editing shapes a frontend offers.
 Each frontend is one implementation: `TerminalEditorBackend` spawns the editor
-as a local process via `EditorConfig::command()`, and `MockEditorBackend` scripts
-outcomes for tests.
+as a local process via `EditorConfig::command()`, and `MockEditorBackend`
+scripts outcomes for tests.
 Defined as the `EditorBackend` trait in `jp_editor`; call sites obtain one
 through `build_editor_backend` in `jp_cli`.
 

@@ -8,8 +8,11 @@ use std::{ffi::OsStr, process::Stdio, sync::Arc};
 pub use builtin::BuiltinTool;
 use camino::Utf8Path;
 use indexmap::IndexMap;
-use jp_config::conversation::tool::{
-    CommandConfig, OneOrManyTypes, ToolConfigWithDefaults, ToolParameterConfig, ToolSource,
+use jp_config::{
+    conversation::tool::{
+        CommandConfig, OneOrManyTypes, ToolConfigWithDefaults, ToolParameterConfig, ToolSource,
+    },
+    types::command::shell_command_line,
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_mcp::{
@@ -440,10 +443,9 @@ pub async fn run_tool_command(
         })?;
 
     let mut cmd = if shell {
-        let shell_cmd = std::iter::once(program.clone())
-            .chain(args.iter().cloned())
-            .collect::<Vec<_>>()
-            .join(" ");
+        // `program` is shell syntax and used verbatim; `args` are shell-quoted
+        // so multi-word arguments keep their boundaries.
+        let shell_cmd = shell_command_line(&program, &args);
 
         let mut cmd = Command::new("sh");
         cmd.arg("-c").arg(&shell_cmd);

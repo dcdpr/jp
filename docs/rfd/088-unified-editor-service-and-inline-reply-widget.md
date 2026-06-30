@@ -56,8 +56,8 @@ Today's `r` flow goes straight into `inquire::Editor`'s "press `e` to edit,
 `Enter` to submit" two-step prompt, which forces the editor for every reply,
 however short.
 A first-class inline editor — with a rich editing experience and a `Ctrl+X`
-escape hatch (inspired by readline's `edit-and-execute-command`) — covers
-both short replies and long ones without forcing a process-spawn for the trivial
+escape hatch (inspired by readline's `edit-and-execute-command`) — covers both
+short replies and long ones without forcing a process-spawn for the trivial
 case.
 
 ## Design
@@ -128,13 +128,13 @@ text — the JSON arguments, the skip-reason placeholder, the tool result — wi
 
 Because `InlineReply` needs only a tty, the permission-menu options `r` ("Skip
 and reply") and `e` ("Edit arguments") are no longer gated on a configured
-editor; they appear whenever a prompt can be shown, and only the `Ctrl+X`
-escape requires `editor.command`.
+editor; they appear whenever a prompt can be shown, and only the `Ctrl+X` escape
+requires `editor.command`.
 The result-delivery confirmation is un-gated the same way: "Edit result first"
 (`e`) appears whenever a tty is present, and `ResultMode::Edit` prompts on any
 tty rather than requiring an editor.
-In every case `Ctrl+X` with no editor configured is a no-op — the inline
-widget stays open.
+In every case `Ctrl+X` with no editor configured is a no-op — the inline widget
+stays open.
 The `JP_EDITOR="subl -w"` arg-drop bug closes as a side effect of routing that
 escape through `EditorConfig::command()`.
 
@@ -143,8 +143,8 @@ caller re-seeds the `InlineReply` buffer with the user's text and re-prompts,
 surfacing the error in the prompt line — no process re-spawn, edits preserved,
 and the old "Re-open editor?
 y/n" confirmation step drops out.
-`Ctrl+X` still escapes to the full editor for a large rewrite, and its
-result re-validates through the same loop.
+`Ctrl+X` still escapes to the full editor for a large rewrite, and its result
+re-validates through the same loop.
 An emptied buffer abandons the edit and falls back to the Ask prompt with the
 arguments unchanged — it never submits empty JSON or runs the tool with cleared
 arguments.
@@ -198,6 +198,12 @@ pub enum EditOutcome {
 
 `edit_text` returns `(EditOutcome, String)`; on `Cancelled` the string is
 meaningless and callers ignore it.
+An `Err` (`EditorError::Spawn` / `Io`) is distinct from `Cancelled`: it means
+the editor never ran or file I/O failed, so callers surface it and recover (fall
+back to the inline widget, keep the typed buffer) rather than treating it as a
+user cancellation.
+Because `editor.cmd` defaults to `shell = false` (direct spawn), a missing
+editor binary lands here as a spawn error rather than a shell's non-zero exit.
 Whether the content was *modified*, *unchanged*, or *emptied* is a content-delta
 question the caller answers inline (`new == old`, `new.trim().is_empty()`) —
 not the backend's concern, and a `classify` helper that only wraps `==` is not
@@ -328,13 +334,13 @@ JP keeps every familiar default binding, including the Meta/Alt-based ones
 (`Meta+B/F/D`, `Meta+Backspace`, …).
 Custom bindings layered on top:
 
-| Key           | Action           | Mechanism                                                    |
-| ------------- | ---------------- | ------------------------------------------------------------ |
-| Enter         | submit (default) | reedline default                                             |
-| Shift+Enter   | newline          | `EditCommand::InsertNewline` (kitty protocol; incl. Ghostty) |
-| Alt+Enter     | newline          | same edit command (portable fallback)                        |
-| Ctrl+X        | open editor      | custom `ReedlineEvent` that returns `OpenEditor`             |
-| Ctrl+C        | cancel           | reedline `Signal::CtrlC`, surfaced as `Cancelled`            |
+| Key         | Action           | Mechanism                                                    |
+| ----------- | ---------------- | ------------------------------------------------------------ |
+| Enter       | submit (default) | reedline default                                             |
+| Shift+Enter | newline          | `EditCommand::InsertNewline` (kitty protocol; incl. Ghostty) |
+| Alt+Enter   | newline          | same edit command (portable fallback)                        |
+| Ctrl+X      | open editor      | custom `ReedlineEvent` that returns `OpenEditor`             |
+| Ctrl+C      | cancel           | reedline `Signal::CtrlC`, surfaced as `Cancelled`            |
 
 `Ctrl+C` is the single, mode-independent cancel: in raw mode it arrives as byte
 `0x03`, reedline returns `Signal::CtrlC`, and the widget maps it to `Cancelled`.
@@ -479,7 +485,9 @@ fn collect_reply(
                 ReplyResult::Reply(text)
             }
             Ok(_)  => ReplyResult::Back,                 // empty or cancelled
-            Err(e) => { self.report(e); ReplyResult::Back }
+            // A spawn/I/O failure is not a cancellation: report it and fall
+            // back to the inline widget so the user can still reply.
+            Err(e) => { self.report(e); self.collect_reply(message, false, writer) }
         };
     }
 
@@ -488,7 +496,7 @@ fn collect_reply(
         // Prompt errors and Ctrl+C are handled explicitly, never swallowed by
         // `.ok()?` — the regression RFD 045 warns about.
         match self.backend.inline_reply(message, &buffer, writer) {
-            Ok(ReplyOutcome::Submit(text)) if !text.is_empty() => {
+            Ok(ReplyOutcome::Submit(text)) if !text.trim().is_empty() => {
                 return ReplyResult::Reply(text)
             }
             Ok(ReplyOutcome::Submit(_)) => return ReplyResult::Back, // empty
@@ -502,7 +510,9 @@ fn collect_reply(
                         buffer = edited; // re-seed the inline prompt
                     }
                     Ok(_)  => return ReplyResult::Back, // empty or cancelled
-                    Err(e) => { self.report(e); return ReplyResult::Back }
+                    // A spawn/I/O failure is not a cancellation: report it and
+                    // keep the buffer, re-prompting instead of discarding it.
+                    Err(e) => { self.report(e); buffer = current_text; }
                 }
             }
             Err(e) => { self.report(e); return ReplyResult::Back }
@@ -550,6 +560,9 @@ Two keys are added under `interrupt.{streaming,tool_call}` and one under
 `editor.inline`:
 
 ```toml
+[editor]
+cmd = "code --wait" # string form (shell = false), or a table (below)
+
 [interrupt.streaming]
 reply_in_editor = false # r opens the editor directly, skipping the widget
 
@@ -560,13 +573,28 @@ reply_in_editor = false # s opens the editor directly, skipping the widget
 edit_mode = "emacs" # "emacs" | "vi"
 ```
 
+- **`editor.cmd`** — accepts a string (`cmd = "code --wait"`) or a table (`cmd
+  = { program = "code", args = ["--wait"], shell = false }`), reusing the
+  `CommandConfig` shape already used by local tools.
+  A string (and `shell = false`, the default) runs the program **directly**, so
+  the edited path is a real argument and a missing editor surfaces as a spawn
+  error rather than a silent non-zero exit.
+  `shell = false` is the cross-platform form and the recommended choice on
+  Windows.
+  Set `shell = true` for pipes, `&&`, or subshells; on Unix the edited path(s)
+  are forwarded to the shell command via `"$@"`.
+  On non-Unix platforms `shell = true` runs through the platform shell but does
+  **not** forward the edited path — wrap any shell logic in a script and point
+  `program` at it (`shell = false`) instead.
 - **`reply_in_editor`** — defaults to `false`.
   When `true`, the reply path opens the configured editor **instead of** showing
   `InlineReply`; a non-empty saved result is sent immediately, an empty or
-  cancelled result returns to the menu.
-  If no editor is configured it falls back to the inline widget (never a silent
-  no-op).
-  A non-zero editor exit is treated as `Cancelled`.
+  cancelled (non-zero-exit) result returns to the menu.
+  A spawn/start failure (e.g. a missing `shell = false` `editor.cmd` binary) is
+  surfaced and falls back to the inline widget rather than being treated as a
+  cancellation.
+  If no editor is configured it likewise falls back to the inline widget (never
+  a silent no-op).
   In non-interactive / no-tty mode there is no prompt, so the key has no effect.
 - **`editor.inline.edit_mode`** — selects reedline's edit mode for the inline
   widget: the *editing style* of the inline buffer, orthogonal to which external
@@ -600,8 +628,7 @@ Two terms enter the glossary:
   editor, with `edit_text` (string in/out) and `edit_file` (path-based) methods.
   Each frontend (terminal, web, native, mock) is one implementation.
 - **InlineReply** — the `jp_inquire` widget for short replies in interrupt
-  menus; supports inline typing with a `Ctrl+X` escape to the
-  `EditorBackend`.
+  menus; supports inline typing with a `Ctrl+X` escape to the `EditorBackend`.
 
 ## Drawbacks
 

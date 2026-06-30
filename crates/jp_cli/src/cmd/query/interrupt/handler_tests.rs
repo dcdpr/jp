@@ -402,3 +402,46 @@ fn reply_in_editor_without_editor_falls_back_to_inline() {
     let action = handler(backend).handle_streaming_interrupt(&config, &make_printer(), true);
     assert_eq!(action, InterruptAction::Reply("typed inline".into()));
 }
+
+#[test]
+fn reply_in_editor_spawn_failure_falls_back_to_inline() {
+    // `reply_in_editor` set, but the editor can't start: fall back to the inline
+    // widget (a spawn error is not a user cancellation) rather than silently
+    // backing out.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([ReplyOutcome::Submit("typed inline".into())]);
+    let editor = MockEditorBackend::failing();
+    let config = StreamingInterruptConfig {
+        action: StreamingInterruptAction::Prompt,
+        reply_in_editor: true,
+    };
+    let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
+        &config,
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Reply("typed inline".into()));
+}
+
+#[test]
+fn inline_editor_escape_spawn_failure_keeps_buffer() {
+    // `r` -> Ctrl+X (OpenEditor) -> editor can't start -> the typed buffer is
+    // kept and the widget re-prompts, so a second submit still sends the text
+    // (rather than discarding it as a cancellation).
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([
+            ReplyOutcome::OpenEditor {
+                current_text: "draft".into(),
+            },
+            ReplyOutcome::Submit("draft, then more".into()),
+        ]);
+    let editor = MockEditorBackend::failing();
+    let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Prompt),
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Reply("draft, then more".into()));
+}

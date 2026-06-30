@@ -348,7 +348,7 @@
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
-    "hash": "7e58c0d53068e84f559e97b5282c30fe64773150abe5efd811e08843327e1b66",
+    "hash": "e2cbdba66416681da29f53ed310e93dd2cb086c320f2e854c619f65197d03da8",
     "summary": "Unify editor invocation through EditorBackend trait; add vendored reedline-based InlineReply widget for interrupt menu replies."
   },
   "089-streaming-paragraph-rendering.md": {

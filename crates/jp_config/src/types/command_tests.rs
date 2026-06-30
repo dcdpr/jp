@@ -74,6 +74,25 @@ fn test_command_config_string_empty_parses_to_empty_program() {
 }
 
 #[test]
+fn shell_command_line_no_args_is_program_verbatim() {
+    // The program is shell syntax and must pass through untouched.
+    assert_eq!(shell_command_line("foo | bar", &[]), "foo | bar");
+}
+
+#[test]
+fn shell_command_line_quotes_multiword_args() {
+    let line = shell_command_line("grep", &["foo bar".to_owned(), "file".to_owned()]);
+    assert_eq!(line, "grep 'foo bar' file");
+}
+
+#[test]
+fn shell_command_line_keeps_program_raw() {
+    // Only the discrete args are quoted; the program stays verbatim.
+    let line = shell_command_line("a && b", &["c".to_owned()]);
+    assert_eq!(line, "a && b c");
+}
+
+#[test]
 fn test_command_config_structured_passthrough() {
     let mut p = PartialCommandConfigOrString::default();
 

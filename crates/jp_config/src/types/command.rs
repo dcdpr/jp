@@ -134,6 +134,33 @@ impl CommandConfigOrString {
     }
 }
 
+/// Build a shell command line from a raw `program` and its discrete `args`.
+///
+/// `program` is used verbatim — it may itself be shell syntax (`&&`, `|`,
+/// redirects).
+/// The `args` are shell-quoted with [`shlex::try_join`] so multi-word arguments
+/// keep their boundaries instead of being word-split by the shell (`try_join`
+/// only fails on an interior NUL byte, which a config value can't carry; a raw
+/// space-join is the fallback).
+///
+/// The caller wraps the result in its own shell invocation (`sh -c <line>`).
+#[must_use]
+pub fn shell_command_line(program: &str, args: &[String]) -> String {
+    if args.is_empty() {
+        return program.to_owned();
+    }
+
+    shlex::try_join(args.iter().map(String::as_str)).map_or_else(
+        |_| {
+            std::iter::once(program)
+                .chain(args.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(" ")
+        },
+        |quoted| format!("{program} {quoted}"),
+    )
+}
+
 /// External command configuration.
 ///
 /// A user-facing description of a command JP should run: which program, with
@@ -153,11 +180,14 @@ pub struct CommandConfig {
 
     /// Whether to run the command in a shell.
     ///
-    /// If this is enabled, a shell will be invoked to run the command.
-    /// This allows for things like piping and subshells.
+    /// When enabled, the command runs via `/bin/sh -c`, so pipes, `&&`, and
+    /// subshells work.
+    /// When disabled (the default), the program is executed directly with its
+    /// arguments.
     ///
-    /// NOTE that setting this to `true` implies that JP will always ask for
-    /// confirmation before running the tool, for security reasons.
+    /// Consumers may attach their own policy to shell commands — for example,
+    /// tools always prompt for confirmation before running a `shell = true`
+    /// command, for security reasons.
     #[setting(default)]
     pub shell: bool,
 }
