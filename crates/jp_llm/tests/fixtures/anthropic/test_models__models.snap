@@ -7,6 +7,155 @@ expression: v
         id: ModelIdConfig {
             provider: Anthropic,
             name: Name(
+                "claude-sonnet-5",
+            ),
+        },
+        display_name: Some(
+            "Claude Sonnet 5",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Adaptive {
+                xhigh: true,
+                max: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: Some(
+            true,
+        ),
+        features: [
+            "interleaved-thinking",
+            "context-editing",
+            "adaptive-thinking",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Anthropic,
+            name: Name(
+                "claude-fable-5",
+            ),
+        },
+        display_name: Some(
+            "Claude Fable 5",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Adaptive {
+                xhigh: true,
+                max: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: Some(
+            true,
+        ),
+        features: [
+            "interleaved-thinking",
+            "context-editing",
+            "adaptive-thinking",
+            "thinking-always-on",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Anthropic,
+            name: Name(
+                "claude-opus-4-8",
+            ),
+        },
+        display_name: Some(
+            "Claude Opus 4.8",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Adaptive {
+                xhigh: true,
+                max: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: Some(
+            true,
+        ),
+        features: [
+            "interleaved-thinking",
+            "context-editing",
+            "adaptive-thinking",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Anthropic,
+            name: Name(
+                "claude-opus-4-7",
+            ),
+        },
+        display_name: Some(
+            "Claude Opus 4.7",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Adaptive {
+                xhigh: true,
+                max: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-01-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: Some(
+            true,
+        ),
+        features: [
+            "interleaved-thinking",
+            "context-editing",
+            "adaptive-thinking",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Anthropic,
+            name: Name(
                 "claude-sonnet-4-6",
             ),
         },
@@ -17,7 +166,7 @@ expression: v
             1000000,
         ),
         max_output_tokens: Some(
-            64000,
+            128000,
         ),
         reasoning: Some(
             Adaptive {
@@ -222,117 +371,6 @@ expression: v
         features: [
             "interleaved-thinking",
             "context-editing",
-            "prefill",
-        ],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Anthropic,
-            name: Name(
-                "claude-opus-4-20250514",
-            ),
-        },
-        display_name: Some(
-            "Claude Opus 4",
-        ),
-        context_window: Some(
-            200000,
-        ),
-        max_output_tokens: Some(
-            32000,
-        ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 1024,
-                max_tokens: None,
-            },
-        ),
-        knowledge_cutoff: Some(
-            2025-03-01,
-        ),
-        deprecated: Some(
-            Active,
-        ),
-        structured_output: Some(
-            false,
-        ),
-        features: [
-            "interleaved-thinking",
-            "context-editing",
-            "prefill",
-        ],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Anthropic,
-            name: Name(
-                "claude-sonnet-4-20250514",
-            ),
-        },
-        display_name: Some(
-            "Claude Sonnet 4",
-        ),
-        context_window: Some(
-            1000000,
-        ),
-        max_output_tokens: Some(
-            64000,
-        ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 1024,
-                max_tokens: None,
-            },
-        ),
-        knowledge_cutoff: Some(
-            2025-03-01,
-        ),
-        deprecated: Some(
-            Active,
-        ),
-        structured_output: Some(
-            false,
-        ),
-        features: [
-            "interleaved-thinking",
-            "context-editing",
-            "prefill",
-        ],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Anthropic,
-            name: Name(
-                "claude-3-haiku-20240307",
-            ),
-        },
-        display_name: Some(
-            "Claude Haiku 3",
-        ),
-        context_window: Some(
-            200000,
-        ),
-        max_output_tokens: Some(
-            4096,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: Some(
-            2024-08-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: claude-haiku-4-5-20251001",
-                retire_at: Some(
-                    2026-04-20,
-                ),
-            },
-        ),
-        structured_output: Some(
-            false,
-        ),
-        features: [
             "prefill",
         ],
     },

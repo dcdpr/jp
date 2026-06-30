@@ -24,9 +24,9 @@ arguments = ["serve-bookworm"]
 
 [providers.llm.aliases]
 # Anthropic aliases
-anthropic = "anthropic/claude-sonnet-4-6"
-claude = "anthropic/claude-sonnet-4-6"
-sonnet = "anthropic/claude-sonnet-4-6"
+anthropic = "anthropic/claude-sonnet-5"
+claude = "anthropic/claude-sonnet-5"
+sonnet = "anthropic/claude-sonnet-5"
 opus = "anthropic/claude-opus-4-8"
 fable = "anthropic/claude-fable-5"
 opus6 = "anthropic/claude-opus-4-6"

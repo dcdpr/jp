@@ -371,7 +371,7 @@ fn has_google() -> bool {
 
 fn default_model_id_for(provider: ProviderId) -> Option<ModelIdConfig> {
     let name = match provider {
-        ProviderId::Anthropic => Name("claude-sonnet-4-6".into()),
+        ProviderId::Anthropic => Name("claude-sonnet-5".into()),
         ProviderId::Google => Name("gemini-3.1-pro-preview".into()),
         ProviderId::Openai => Name("gpt-5.2".into()),
         _ => return None,
