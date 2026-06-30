@@ -312,7 +312,7 @@
     "summary": "Plugin configuration integration with AppConfig enabling trust policies, checksum pinning, execution policies, and per-plugin options."
   },
   "078-tool-config-mutation.md": {
-    "hash": "5affe5c07eac1da973fd6c8e2dac64a04a5d205a0c89111d73186e36e7cc284f",
+    "hash": "a7d017ca934de55cbfe69ca9d6becc4d98bdbadeb4cc5282444450238ed62e49",
     "summary": "Scoped tool config access via `access.config` rules, with re-invocation on delta rejection and per-cycle commit buffering."
   },
   "080-editor-as-a-config-source.md": {
@@ -348,7 +348,7 @@
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
-    "hash": "d3b451550d67f7a22bf7a3a9e55d4aa212933d8999127a105bfe71e2a20e8c41",
+    "hash": "e72c1d31a7d1cdc368e6cb1feff49ea19a9e647ecb95f663be946da65de86832",
     "summary": "Unify editor invocation through EditorBackend trait; add vendored reedline-based InlineReply widget for interrupt menu replies."
   },
   "089-streaming-paragraph-rendering.md": {

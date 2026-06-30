@@ -61,6 +61,7 @@ pub struct InlineReply {
     initial_text: String,
     help_message: Option<String>,
     edit_mode: ReplyEditMode,
+    editor_escape: bool,
 }
 
 impl InlineReply {
@@ -72,6 +73,7 @@ impl InlineReply {
             initial_text: String::new(),
             help_message: None,
             edit_mode: ReplyEditMode::default(),
+            editor_escape: true,
         }
     }
 
@@ -94,6 +96,17 @@ impl InlineReply {
     #[must_use]
     pub fn with_edit_mode(mut self, mode: ReplyEditMode) -> Self {
         self.edit_mode = mode;
+        self
+    }
+
+    /// Enable or disable the `Ctrl+X` escape to the external editor.
+    ///
+    /// When disabled, `Ctrl+X` is left unbound (the widget never emits
+    /// [`ReplyOutcome::OpenEditor`]); the caller should also omit any editor
+    /// hint from the help message.
+    #[must_use]
+    pub fn with_editor_escape(mut self, enabled: bool) -> Self {
+        self.editor_escape = enabled;
         self
     }
 
@@ -142,14 +155,14 @@ impl InlineReply {
         match self.edit_mode {
             ReplyEditMode::Emacs => {
                 let mut keybindings = default_emacs_keybindings();
-                add_custom_bindings(&mut keybindings);
+                add_custom_bindings(&mut keybindings, self.editor_escape);
                 Box::new(Emacs::new(keybindings))
             }
             ReplyEditMode::Vi => {
                 let mut insert = default_vi_insert_keybindings();
-                add_custom_bindings(&mut insert);
+                add_custom_bindings(&mut insert, self.editor_escape);
                 let mut normal = default_vi_normal_keybindings();
-                add_custom_bindings(&mut normal);
+                add_custom_bindings(&mut normal, self.editor_escape);
                 Box::new(Vi::new(insert, normal))
             }
         }
@@ -158,15 +171,18 @@ impl InlineReply {
 
 /// Register JP's custom bindings into `keybindings`:
 ///
-/// - `Ctrl+X` escapes to the external editor (via the host-command sentinel).
+/// - `Ctrl+X` escapes to the external editor (via the host-command sentinel),
+///   unless `editor_escape` is `false`.
 /// - `Shift+Enter` (kitty protocol) and `Alt+Enter` (portable fallback) insert
 ///   a newline for multi-line input.
-fn add_custom_bindings(keybindings: &mut Keybindings) {
-    keybindings.add_binding(
-        KeyModifiers::CONTROL,
-        KeyCode::Char('x'),
-        ReedlineEvent::ExecuteHostCommand(OPEN_EDITOR_SENTINEL.to_owned()),
-    );
+fn add_custom_bindings(keybindings: &mut Keybindings, editor_escape: bool) {
+    if editor_escape {
+        keybindings.add_binding(
+            KeyModifiers::CONTROL,
+            KeyCode::Char('x'),
+            ReedlineEvent::ExecuteHostCommand(OPEN_EDITOR_SENTINEL.to_owned()),
+        );
+    }
     keybindings.add_binding(
         KeyModifiers::SHIFT,
         KeyCode::Enter,

@@ -284,15 +284,11 @@ Ok(
             interrupt: PartialInterruptConfig {
                 streaming: PartialStreamingInterruptConfig {
                     action: None,
-                    compose_in_editor: Some(
-                        false,
-                    ),
+                    compose_in_editor: None,
                 },
                 tool_call: PartialToolInterruptConfig {
                     action: None,
-                    compose_in_editor: Some(
-                        false,
-                    ),
+                    compose_in_editor: None,
                 },
             },
             editor: PartialEditorConfig {

@@ -15,7 +15,7 @@ fn make_printer() -> Printer {
 fn streaming(action: StreamingInterruptAction) -> StreamingInterruptConfig {
     StreamingInterruptConfig {
         action,
-        compose_in_editor: false,
+        compose_in_editor: ComposeInEditor::Inline,
     }
 }
 
@@ -23,7 +23,7 @@ fn streaming(action: StreamingInterruptAction) -> StreamingInterruptConfig {
 fn tool(action: ToolInterruptAction) -> ToolInterruptConfig {
     ToolInterruptConfig {
         action,
-        compose_in_editor: false,
+        compose_in_editor: ComposeInEditor::Inline,
     }
 }
 
@@ -372,7 +372,7 @@ fn compose_in_editor_opens_editor_directly() {
     let editor = MockEditorBackend::always("written in the editor");
     let config = StreamingInterruptConfig {
         action: StreamingInterruptAction::Prompt,
-        compose_in_editor: true,
+        compose_in_editor: ComposeInEditor::Editor,
     };
     let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
         &config,
@@ -386,16 +386,14 @@ fn compose_in_editor_opens_editor_directly() {
 }
 
 #[test]
-fn compose_in_editor_empty_drops_to_inline() {
-    // `compose_in_editor` with an empty editor result drops into the inline
-    // prompt; an empty submit there returns to the menu → `s` → Stop.
-    let backend = MockPromptBackend::new()
-        .with_inline_responses(['r', 's'])
-        .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
+fn compose_in_editor_empty_returns_to_menu() {
+    // `true` (Editor): emptying the editor is a bail-out, so it returns to the
+    // menu (not the inline widget) → `s` → Stop.
+    let backend = MockPromptBackend::new().with_inline_responses(['r', 's']);
     let editor = MockEditorBackend::empty();
     let config = StreamingInterruptConfig {
         action: StreamingInterruptAction::Prompt,
-        compose_in_editor: true,
+        compose_in_editor: ComposeInEditor::Editor,
     };
     let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
         &config,
@@ -403,6 +401,43 @@ fn compose_in_editor_empty_drops_to_inline() {
         true,
     );
     assert_eq!(action, InterruptAction::Stop);
+}
+
+#[test]
+fn compose_always_spawn_failure_returns_to_menu() {
+    // `"always"`: a broken editor must NOT fall back to the inline widget — it
+    // returns to the menu. `r` → editor fails → menu → `s` → Stop. The scripted
+    // inline reply is never consumed (no inline widget appears); landing on
+    // Stop rather than Reply proves the inline path was not taken.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r', 's'])
+        .with_reply_outcomes([ReplyOutcome::Submit("must not be used".into())]);
+    let editor = MockEditorBackend::failing();
+    let config = StreamingInterruptConfig {
+        action: StreamingInterruptAction::Prompt,
+        compose_in_editor: ComposeInEditor::Always,
+    };
+    let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
+        &config,
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Stop);
+}
+
+#[test]
+fn compose_never_uses_inline_widget() {
+    // `"never"`: inline widget only (the `Ctrl+X` escape is disabled — verified
+    // in `jp_inquire`'s keymap tests). `r` → inline → submit.
+    let backend = MockPromptBackend::new()
+        .with_inline_responses(['r'])
+        .with_reply_outcomes([ReplyOutcome::Submit("inline only".into())]);
+    let config = StreamingInterruptConfig {
+        action: StreamingInterruptAction::Prompt,
+        compose_in_editor: ComposeInEditor::Never,
+    };
+    let action = handler(backend).handle_streaming_interrupt(&config, &make_printer(), true);
+    assert_eq!(action, InterruptAction::Reply("inline only".into()));
 }
 
 #[test]
@@ -414,7 +449,7 @@ fn compose_in_editor_without_editor_falls_back_to_inline() {
         .with_reply_outcomes([ReplyOutcome::Submit("typed inline".into())]);
     let config = StreamingInterruptConfig {
         action: StreamingInterruptAction::Prompt,
-        compose_in_editor: true,
+        compose_in_editor: ComposeInEditor::Editor,
     };
     let action = handler(backend).handle_streaming_interrupt(&config, &make_printer(), true);
     assert_eq!(action, InterruptAction::Reply("typed inline".into()));
@@ -431,7 +466,7 @@ fn compose_in_editor_spawn_failure_falls_back_to_inline() {
     let editor = MockEditorBackend::failing();
     let config = StreamingInterruptConfig {
         action: StreamingInterruptAction::Prompt,
-        compose_in_editor: true,
+        compose_in_editor: ComposeInEditor::Editor,
     };
     let action = handler_with_editor(backend, editor).handle_streaming_interrupt(
         &config,

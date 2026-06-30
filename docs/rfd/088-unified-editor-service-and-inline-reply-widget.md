@@ -15,8 +15,8 @@ Consolidate JP's four independent editor-invocation paths onto a single
 interrupt-menu reply prompt with a richer inline editing widget, built on a
 vendored copy of [reedline], that accepts short replies inline, supports
 multi-line input, and escalates to the configured editor on demand.
-A per-context opt-in (`compose_in_editor`) skips the inline step and opens the
-editor immediately, for users who prefer that.
+A per-context `compose_in_editor` setting (`false`/`true`/`"always"`/`"never"`)
+chooses where composition happens, from inline-only to editor-only.
 
 ## Motivation
 
@@ -92,9 +92,9 @@ always re-appears — the editor is never a terminal action:
 - An empty result (or an aborted editor) re-appears with an empty buffer; the
   user can type again, submit empty, or `Ctrl+C` back to the menu.
 
-**Opt-in: straight to the editor.** Setting `interrupt.streaming.compose_in_editor
-= true` skips the inline widget for `r` and opens the configured editor
-immediately, seeded empty.
+**Opt-in: straight to the editor.** Setting
+`interrupt.streaming.compose_in_editor = true` skips the inline widget for `r`
+and opens the configured editor immediately, seeded empty.
 A non-empty result is sent as-is; an empty or cancelled result drops into the
 inline prompt (where the user can type, submit empty, or `Ctrl+C` back to the
 menu).
@@ -110,9 +110,9 @@ tool with no explanation" shortcut.
 `Ctrl+C` still backs out to the menu (a second `Ctrl+C` there escalates), and
 the `Ctrl+X` editor escape still always returns to the inline prompt.
 
-The `interrupt.tool_call.compose_in_editor` opt-in applies here too: when set, `r`
-opens the editor directly; an empty or cancelled editor result drops into the
-inline prompt (where an empty submit then sends the canned message).
+The `interrupt.tool_call.compose_in_editor` opt-in applies here too: when set,
+`r` opens the editor directly; an empty or cancelled editor result drops into
+the inline prompt (where an empty submit then sends the canned message).
 
 #### `jp query` (initial prompt)
 
@@ -419,6 +419,8 @@ pub trait PromptBackend: Send + Sync {
         &self,
         message: &str,
         initial_text: &str,
+        edit_mode: ReplyEditMode,
+        editor_escape: bool, // `false` unwires the `Ctrl+X` editor escape
         writer: &mut dyn Write,
     ) -> Result<ReplyOutcome, InquireError>;
 }
@@ -475,32 +477,40 @@ pub fn handle_streaming_interrupt(
 fn collect_reply(
     &self,
     message: &str,
-    compose_in_editor: bool,
+    compose: ComposeInEditor,
     writer: &mut dyn Write,
 ) -> ReplyResult {
-    // Straight-to-editor opt-in: skip the inline widget and open the editor
-    // directly, seeded empty.
-    if compose_in_editor {
-        let Some(editor) = self.editor.as_ref() else {
-            // No editor configured: fall back to the inline widget rather than
-            // silently doing nothing (see Configuration changes).
-            return self.collect_reply(message, false, writer);
-        };
-        return match editor.edit_text("") {
-            Ok((EditOutcome::Saved, text)) if !text.trim().is_empty() => {
-                ReplyResult::Reply(text)
-            }
-            // Empty/cancelled editor (or a spawn/I/O failure, reported): drop
-            // into the inline prompt — the editor is never a terminal action.
-            Ok(_)  => self.collect_reply(message, false, writer),
-            Err(e) => { self.report(e); self.collect_reply(message, false, writer) }
-        };
+    // Inline-first modes (`false` / `"never"`): the Ctrl+X escape is wired only
+    // for `false` (`compose.editor_escape()`).
+    if !compose.starts_in_editor() {
+        return self.collect_reply_inline(message, compose.editor_escape(), writer);
     }
 
+    // Editor-first modes (`true` / `"always"`): open the editor directly.
+    let Some(editor) = self.editor.as_ref() else {
+        return self.editor_unavailable(message, compose, writer, None);
+    };
+    match editor.edit_text("") {
+        Ok((EditOutcome::Saved, text)) if !text.trim().is_empty() => ReplyResult::Reply(text),
+        // Empty/cancelled editor: the user bailed → back to the menu.
+        Ok(_)  => ReplyResult::Cancelled,
+        // Editor couldn't run: `editor_unavailable` falls back to the inline
+        // widget (`true`) or returns to the menu (`"always"`), reporting the
+        // failure on the chrome channel.
+        Err(e) => self.editor_unavailable(message, compose, writer, Some(e)),
+    }
+}
+
+fn collect_reply_inline(
+    &self,
+    message: &str,
+    editor_escape: bool,
+    writer: &mut dyn Write,
+) -> ReplyResult {
     let mut buffer = String::new();
     loop {
         // Prompt errors and Ctrl+C are handled explicitly, never swallowed.
-        match self.backend.inline_reply(message, &buffer, writer) {
+        match self.backend.inline_reply(message, &buffer, editor_escape, writer) {
             Ok(ReplyOutcome::OpenEditor { current_text }) => {
                 // The editor escape always returns to the inline prompt.
                 buffer = current_text;
@@ -523,22 +533,25 @@ fn collect_reply(
 ```
 
 `collect_reply` returns `ReplyResult { Reply(String), Empty, Cancelled }` rather
-than an
-`Option`, so prompt errors and `Ctrl+C` are handled explicitly instead of being
-swallowed by `.ok()?` — the regression [RFD 045] warns about.
+than an `Option`, so prompt errors and `Ctrl+C` are handled explicitly instead
+of being swallowed by `.ok()?` — the regression [RFD 045] warns about.
 The `writer` (the `/dev/tty` prompt target) is threaded from the menu loop into
 `collect_reply` and on to `inline_reply`, matching the writer-passing pattern of
 the other `PromptBackend` methods.
 The tool-interrupt `r` flow uses the same helper but substitutes
-`DEFAULT_TOOL_CANCELLED_RESPONSE` for `Back`, preserving today's canned-message
-semantics.
+`DEFAULT_TOOL_CANCELLED_RESPONSE` for an empty/cancelled reply, preserving
+today's canned-message semantics.
+`compose_in_editor` is the `ComposeInEditor` enum (`false`/`true`/`"always"`/
+`"never"`); `starts_in_editor()` and `editor_escape()` select the path above,
+and `editor_unavailable` applies the `true`-vs-`"always"` failure fallback.
 
 This sketch is the `action = prompt` path.
 The `[interrupt].*.action` config wraps it: a non-`prompt` action skips the menu
 and runs directly, and a configured `reply` / `respond` calls `collect_reply`
 directly — the cancel fallback for those menu-less paths is pinned in
 [Configuration changes](#configuration-changes), not left to implementation.
-The `compose_in_editor` argument is read from the same per-context config struct.
+The `compose_in_editor` argument is read from the same per-context config
+struct.
 
 ### Empty-Enter policy
 
@@ -566,10 +579,10 @@ Two keys are added under `interrupt.{streaming,tool_call}` and one under
 cmd = "code --wait" # string form (shell = false), or a table (below)
 
 [interrupt.streaming]
-compose_in_editor = false # r opens the editor directly, skipping the widget
+compose_in_editor = false # false | true | "always" | "never"
 
 [interrupt.tool_call]
-compose_in_editor = false # r opens the editor directly, skipping the widget
+compose_in_editor = false # false | true | "always" | "never"
 
 [editor.inline]
 edit_mode = "emacs" # "emacs" | "vi"
@@ -589,16 +602,25 @@ edit_mode = "emacs" # "emacs" | "vi"
   program is spawned **directly** (the `"$@"` path-forwarding convention is
   Unix-only) — wrap any shell logic in a script and point `program` at it
   (`shell = false`) instead.
-- **`compose_in_editor`** — defaults to `false`.
-  When `true`, the reply/response opens the configured editor **instead of** the
-  inline widget; a non-empty saved result is sent, and an empty or cancelled
-  editor result drops into the inline prompt (the editor is never a terminal
-  action — the user can type there, submit empty, or `Ctrl+C` back to the menu).
-  A spawn/start failure (e.g. a missing `shell = false` `editor.cmd` binary) is
-  surfaced and likewise falls back to the inline widget.
-  If no editor is configured it falls back to the inline widget too (never a
-  silent no-op).
+
+- **`compose_in_editor`** — where the reply/response is composed; a spectrum
+  from inline-only to editor-only.
+  Accepts a bool or a string:
+
+  - `false` *(default)* — start in the inline widget; `Ctrl+X` escapes to
+    `editor.cmd` on demand.
+  - `true` — open `editor.cmd` directly; if it can't open, fall back to the
+    inline widget (with a chrome notice).
+  - `"always"` — open `editor.cmd` directly; if it can't open, return to the
+    menu — **never** the inline widget (for users who can't use it).
+    A chrome notice surfaces the failure.
+  - `"never"` — inline widget only; the `Ctrl+X` editor escape is unwired and
+    unadvertised (for users who don't want the editor launched).
+
+  In every editor-first mode (`true` / `"always"`), a non-empty saved result is
+  sent and an empty or cancelled editor returns to the menu (the user bailed).
   In non-interactive / no-tty mode there is no prompt, so the key has no effect.
+
 - **`editor.inline.edit_mode`** — selects reedline's edit mode for the inline
   widget: the *editing style* of the inline buffer, orthogonal to which external
   editor `Ctrl+X` opens (that is `editor.command`).
@@ -822,11 +844,12 @@ Estimated diff: ~250 LOC.
 - Rewrite `handle_streaming_interrupt` and `handle_tool_interrupt` as loops with
   `collect_reply` returning `ReplyResult`; map reedline `Signal::CtrlC` to
   `Cancelled` and a cancelled *menu* to RFD 045's `Escalated`.
-- Add `interrupt.{streaming,tool_call}.compose_in_editor` to `jp_config` and apply
-  the cancel/empty behavior matrix (incl. the menu-less configured-action rows).
+- Add `interrupt.{streaming,tool_call}.compose_in_editor` to `jp_config` and
+  apply the cancel/empty behavior matrix (incl. the menu-less configured-action
+  rows).
 - Update existing handler tests; add tests for `Cancelled → menu → submit`,
-  `OpenEditor → empty → menu`, the `compose_in_editor` straight-to-editor path,
-  and the configured-action cancel fallbacks.
+  `OpenEditor → empty → menu`, the `compose_in_editor` straight-to-editor
+  path, and the configured-action cancel fallbacks.
 
 Depends on Phases 1 and 2.
 Closes path C. Ships the new `r` UX.

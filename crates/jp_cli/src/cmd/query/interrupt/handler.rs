@@ -31,11 +31,11 @@ use std::sync::Arc;
 use jp_config::{
     editor::InlineEditMode,
     interrupt::{
-        StreamingInterruptAction, StreamingInterruptConfig, ToolInterruptAction,
+        ComposeInEditor, StreamingInterruptAction, StreamingInterruptConfig, ToolInterruptAction,
         ToolInterruptConfig,
     },
 };
-use jp_editor::{EditOutcome, EditorBackend};
+use jp_editor::{EditOutcome, EditorBackend, EditorError};
 use jp_inquire::{
     InlineOption, ReplyEditMode, ReplyOutcome,
     prompt::{PromptBackend, TerminalPromptBackend},
@@ -272,42 +272,69 @@ impl<P: PromptBackend> InterruptHandler<P> {
         }
     }
 
-    /// Collect a reply, honoring the straight-to-editor opt-in.
+    /// Collect a reply according to the `compose_in_editor` mode.
     ///
-    /// With `compose_in_editor` set and an editor configured, opens the editor
-    /// seeded empty; otherwise collects through the inline widget.
+    /// - `false` / `"never"`: collect through the inline widget (the `Ctrl+X`
+    ///   editor escape is wired only for `false`).
+    /// - `true` / `"always"`: open the editor seeded empty.
+    ///   A non-empty save is sent; an empty or cancelled editor returns to the
+    ///   menu.
+    ///   When the editor can't run, `true` falls back to the inline widget and
+    ///   `"always"` returns to the menu (never the inline widget).
     fn collect_reply(
         &self,
         message: &str,
-        compose_in_editor: bool,
+        compose: ComposeInEditor,
         printer: &Printer,
     ) -> ReplyResult {
-        if compose_in_editor {
-            let Some(editor) = self.editor.as_ref() else {
-                // No editor configured: fall back to the inline widget rather
-                // than silently doing nothing.
-                return self.collect_reply_inline(message, printer);
-            };
-
-            return match editor.edit_text("") {
-                Ok((EditOutcome::Saved, text)) if !text.trim().is_empty() => {
-                    ReplyResult::Reply(text)
-                }
-                // An empty/cancelled editor drops into the inline prompt — the
-                // editor is never a terminal action. The user can type there or
-                // submit empty / `Ctrl+C`.
-                Ok(_) => self.collect_reply_inline(message, printer),
-                // A spawn / I/O failure is not a user cancellation: surface it
-                // (chrome + diagnostics) and fall back to the inline widget so
-                // the user can still reply.
-                Err(error) => {
-                    report_editor_failure(printer, &error, "Continuing with the inline editor.");
-                    self.collect_reply_inline(message, printer)
-                }
-            };
+        // Inline-first modes (`false` / `"never"`).
+        if !compose.starts_in_editor() {
+            return self.collect_reply_inline(message, compose.editor_escape(), printer);
         }
 
-        self.collect_reply_inline(message, printer)
+        // Editor-first modes (`true` / `"always"`): open the editor directly.
+        let Some(editor) = self.editor.as_ref() else {
+            // No editor configured: nothing to open.
+            return self.editor_unavailable(message, compose, printer, None);
+        };
+
+        match editor.edit_text("") {
+            Ok((EditOutcome::Saved, text)) if !text.trim().is_empty() => ReplyResult::Reply(text),
+            // Empty save or a cancelled (non-zero-exit) editor: the user bailed,
+            // so return to the menu.
+            Ok(_) => ReplyResult::Cancelled,
+            // The editor could not run.
+            Err(error) => self.editor_unavailable(message, compose, printer, Some(error)),
+        }
+    }
+
+    /// Handle an editor-first mode (`true` / `"always"`) when the editor can't
+    /// be used — a spawn/I/O failure or no editor configured.
+    ///
+    /// `true` falls back to the inline widget so the user can still reply;
+    /// `"always"` returns to the menu, never the inline widget (the user opted
+    /// out of it).
+    /// A spawn failure is surfaced on the chrome channel.
+    fn editor_unavailable(
+        &self,
+        message: &str,
+        compose: ComposeInEditor,
+        printer: &Printer,
+        error: Option<EditorError>,
+    ) -> ReplyResult {
+        if compose.falls_back_to_inline() {
+            if let Some(error) = error {
+                report_editor_failure(printer, &error, "Continuing with the inline editor.");
+            }
+            return self.collect_reply_inline(message, compose.editor_escape(), printer);
+        }
+
+        // `"always"`: never the inline widget.
+        match error {
+            Some(error) => report_editor_failure(printer, &error, "Returning to the menu."),
+            None => printer.eprintln("\n⚠ No editor configured; returning to the menu."),
+        }
+        ReplyResult::Cancelled
     }
 
     /// Collect a reply through the inline widget.
@@ -316,13 +343,18 @@ impl<P: PromptBackend> InterruptHandler<P> {
     /// never a terminal action.
     /// The only exits are a submission (empty or not) and `Ctrl+C` (or a prompt
     /// error), handled explicitly, never swallowed.
-    fn collect_reply_inline(&self, message: &str, printer: &Printer) -> ReplyResult {
+    fn collect_reply_inline(
+        &self,
+        message: &str,
+        editor_escape: bool,
+        printer: &Printer,
+    ) -> ReplyResult {
         let mut buffer = String::new();
         loop {
             let output = printer.owned_prompt_writer();
             match self
                 .backend
-                .inline_reply(message, &buffer, self.edit_mode, output)
+                .inline_reply(message, &buffer, self.edit_mode, editor_escape, output)
             {
                 Ok(ReplyOutcome::OpenEditor { current_text }) => {
                     // The editor escape always returns here; whatever was typed

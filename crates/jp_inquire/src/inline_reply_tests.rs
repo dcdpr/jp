@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn emacs_keymap_binds_editor_escape() {
     let mut keybindings = default_emacs_keybindings();
-    add_custom_bindings(&mut keybindings);
+    add_custom_bindings(&mut keybindings, true);
 
     assert_eq!(
         keybindings.find_binding(KeyModifiers::CONTROL, KeyCode::Char('x')),
@@ -16,7 +16,7 @@ fn emacs_keymap_binds_editor_escape() {
 #[test]
 fn emacs_keymap_binds_newline_keys() {
     let mut keybindings = default_emacs_keybindings();
-    add_custom_bindings(&mut keybindings);
+    add_custom_bindings(&mut keybindings, true);
 
     let newline = Some(ReedlineEvent::Edit(vec![EditCommand::InsertNewline]));
     assert_eq!(
@@ -34,7 +34,7 @@ fn vi_mode_registers_bindings_into_insert_keymap() {
     // The editor escape is registered into the insert keymap (where typing
     // happens).
     let mut insert = default_vi_insert_keybindings();
-    add_custom_bindings(&mut insert);
+    add_custom_bindings(&mut insert, true);
 
     assert_eq!(
         insert.find_binding(KeyModifiers::CONTROL, KeyCode::Char('x')),
@@ -49,13 +49,30 @@ fn vi_mode_registers_bindings_into_normal_keymap() {
     // The escape must also work after `Esc` into normal mode, so the custom
     // bindings are registered into the normal keymap too.
     let mut normal = default_vi_normal_keybindings();
-    add_custom_bindings(&mut normal);
+    add_custom_bindings(&mut normal, true);
 
     assert_eq!(
         normal.find_binding(KeyModifiers::CONTROL, KeyCode::Char('x')),
         Some(ReedlineEvent::ExecuteHostCommand(
             OPEN_EDITOR_SENTINEL.to_owned()
         ))
+    );
+}
+
+#[test]
+fn editor_escape_disabled_leaves_ctrl_x_unbound_but_keeps_newlines() {
+    // `compose_in_editor = "never"`: the `Ctrl+X` escape must not be wired, but
+    // the multi-line newline bindings still apply.
+    let mut keybindings = default_emacs_keybindings();
+    add_custom_bindings(&mut keybindings, false);
+
+    assert_eq!(
+        keybindings.find_binding(KeyModifiers::CONTROL, KeyCode::Char('x')),
+        None
+    );
+    assert_eq!(
+        keybindings.find_binding(KeyModifiers::ALT, KeyCode::Enter),
+        Some(ReedlineEvent::Edit(vec![EditCommand::InsertNewline]))
     );
 }
 
@@ -101,10 +118,12 @@ fn builders_set_fields() {
     let reply = InlineReply::new("Reply:")
         .with_initial_text("seed")
         .with_help_message("Alt+Enter for newline")
-        .with_edit_mode(ReplyEditMode::Vi);
+        .with_edit_mode(ReplyEditMode::Vi)
+        .with_editor_escape(false);
 
     assert_eq!(reply.message, "Reply:");
     assert_eq!(reply.initial_text, "seed");
     assert_eq!(reply.help_message.as_deref(), Some("Alt+Enter for newline"));
     assert_eq!(reply.edit_mode, ReplyEditMode::Vi);
+    assert!(!reply.editor_escape);
 }

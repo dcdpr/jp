@@ -853,13 +853,14 @@ JP's tool-execution interrupt menu offers three choices:
   Tools keep running; new approvals append as they complete.
   The cycle commits normally when all tools finish.
 
-- **Stop & respond**: cancel in-flight tools, then run the normal cycle-end commit
-  path.
+- **Stop & respond**: cancel in-flight tools, then run the normal cycle-end
+  commit path.
   Any deltas already approved at apply chrome commit to the event stream as a
   single merged `ConfigDelta`.
   The user's reply text is attached to each cancelled tool as its response
-  content (wrapped in JP's cancellation message), matching current Stop & respond
-  behavior — the LLM sees the cancelled tool responses, not a new user request.
+  content (wrapped in JP's cancellation message), matching current Stop &
+  respond behavior — the LLM sees the cancelled tool responses, not a new user
+  request.
   User-explicit approvals from apply chrome are not revoked by cutting the cycle
   short.
 

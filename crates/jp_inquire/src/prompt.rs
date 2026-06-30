@@ -26,6 +26,8 @@ pub trait PromptBackend: Send + Sync {
     /// Display an inline reply prompt: a rich, multi-line editable buffer with
     /// a `Ctrl+X` escape to the external editor.
     ///
+    /// `editor_escape` controls whether `Ctrl+X` is wired (and advertised) to
+    /// open the external editor; pass `false` to present an inline-only widget.
     /// `output` is the owned stream the widget renders to (the caller's
     /// `/dev/tty` target).
     fn inline_reply(
@@ -33,6 +35,7 @@ pub trait PromptBackend: Send + Sync {
         message: &str,
         initial_text: &str,
         edit_mode: ReplyEditMode,
+        editor_escape: bool,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError>;
 
@@ -71,9 +74,10 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
         message: &str,
         initial_text: &str,
         edit_mode: ReplyEditMode,
+        editor_escape: bool,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
-        (*self).inline_reply(message, initial_text, edit_mode, output)
+        (*self).inline_reply(message, initial_text, edit_mode, editor_escape, output)
     }
 
     fn text(
@@ -120,12 +124,19 @@ impl PromptBackend for TerminalPromptBackend {
         message: &str,
         initial_text: &str,
         edit_mode: ReplyEditMode,
+        editor_escape: bool,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
+        let help = if editor_escape {
+            "Enter to send · Alt+Enter for newline · Ctrl+X to edit in $EDITOR"
+        } else {
+            "Enter to send · Alt+Enter for newline"
+        };
         InlineReply::new(message)
             .with_initial_text(initial_text)
             .with_edit_mode(edit_mode)
-            .with_help_message("Enter to send · Alt+Enter for newline · Ctrl+X to edit in $EDITOR")
+            .with_editor_escape(editor_escape)
+            .with_help_message(help)
             .prompt(output)
     }
 
@@ -233,6 +244,7 @@ impl PromptBackend for MockPromptBackend {
         _message: &str,
         _initial_text: &str,
         _edit_mode: ReplyEditMode,
+        _editor_escape: bool,
         _output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
         self.reply_outcomes
