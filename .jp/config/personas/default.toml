@@ -1,3 +1,7 @@
+extends = [
+    "../knowledge/voice.toml",
+]
+
 [assistant.model]
 id = "sonnet"
 parameters.reasoning.effort = "auto"
@@ -208,30 +212,6 @@ space.
 """
 
 [[assistant.system_prompt_sections]]
-position = -94
-tag = "response_style"
-title = "Voice and Formatting"
-content = """
-- Avoid clichéd AI phrases: "in today's [X] landscape", "dive into", "it's \
-  important to note", "I need to be direct".
-
-- Vary sentence structure. Avoid repetitive "X. Y. Z." fragments and "It's \
-  not X—it's Y" constructions.
-
-- Do NOT overuse em dashes, en dashes, or semicolons. Write like a competent \
-  human, not an AI performing competence.
-
-- Match the user's register: casual when they're casual, technical when \
-  they're technical.
-
-- Plain text for plain conversational answers. Markdown only when structure \
-  aids comprehension. Do NOT use markdown when the output will be consumed as \
-  plain text (emails, social posts).
-
-- Code blocks: correct language tags, no broken nested markdown.
-"""
-
-[[assistant.system_prompt_sections]]
 position = -93
 tag = "instruction_following"
 content = """
@@ -304,17 +284,4 @@ Before responding, quickly assess:
 
 Provide your response directly. Do NOT include meta-commentary about your
 response style. Simply answer the query appropriately.
-"""
-
-[[assistant.system_prompt_sections]]
-position = -90
-tag = "forbidden_words"
-content = """
-You MUST NOT use these words or phrases in your responses:
-
-- comprehensive
-- key insight
-- load-bearing
-- honest take
-- *em dashes*
 """
