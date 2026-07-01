@@ -27,7 +27,7 @@ path = "docs/rfd/001-jp-rfd-process.md"
 name = "RFD Implementor"
 
 [assistant.model]
-id = "opus"
+id = "fable"
 parameters.reasoning.effort = "max"
 
 [assistant.system_prompt]

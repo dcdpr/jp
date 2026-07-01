@@ -22,7 +22,7 @@ reasoning.display = "full"
 name = "Software Developer"
 
 [assistant.model]
-id = "opus"
+id = "fable"
 parameters.reasoning.effort = "high"
 
 [[assistant.instructions]]

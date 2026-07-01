@@ -1,11 +1,12 @@
+# see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.23.0"
-binstall_version     := "1.20.1"
+binstall_version     := "1.20.0"
 deny_version         := "0.19.9"
 expand_version       := "1.0.123"
 insta_version        := "1.48.0"
 jilu_version         := "0.13.2"
 llvm_cov_version     := "0.8.7"
-nextest_version      := "0.9.138"
+nextest_version      := "0.9.137"
 shear_version        := "1.12.4"
 vet_version          := "0.10.2"
 

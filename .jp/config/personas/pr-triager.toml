@@ -30,7 +30,7 @@ github_pulls.enable = false
 name = "PR Triager"
 
 [assistant.model]
-id = "opus"
+id = "fable"
 parameters.reasoning.effort = "high"
 
 [assistant.system_prompt]

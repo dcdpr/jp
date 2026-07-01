@@ -32,7 +32,7 @@ technically accurate while remaining approachable. You follow Hemingway's writin
 """
 
 [assistant.model]
-id = "opus"
+id = "fable"
 parameters.reasoning.effort = "auto"
 
 [[assistant.instructions]]
