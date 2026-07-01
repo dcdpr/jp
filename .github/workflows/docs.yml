@@ -53,9 +53,11 @@ jobs:
       - uses: actions/configure-pages@d5606572c479bee637007364c6b4800ac4fc8573 # v5
       - run: corepack enable
       - run: just build-changelog > change-log.md
-      - run: just build-docs
+      # Fetch the plugin registry before the build so VitePress copies it from
+      # the public directory into the deployed site (served at /plugins.json).
       - if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
         run: just plugin-registry-fetch
+      - run: just build-docs
       - if: ${{ github.ref == 'refs/heads/main' }}
         uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
         with:

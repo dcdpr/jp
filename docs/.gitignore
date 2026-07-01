@@ -4,3 +4,6 @@
 .vitepress/cache
 .vitepress/dist
 .yarn/*
+
+# Fetched at build time by `just plugin-registry-fetch`.
+public/plugins.json

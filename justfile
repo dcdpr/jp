@@ -1761,12 +1761,17 @@ plugin-registry-build CHECKSUMS="":
     cargo run --quiet -p build-registry -- $args
 
 # Fetch the latest released plugin registry from GitHub.
+#
+# Writes into the VitePress public directory so the file is served verbatim at
+# the site root (https://jp.computer/plugins.json), which is the URL the CLI
+# reads the registry from.
 [group('plugins')]
 plugin-registry-fetch:
     #!/usr/bin/env sh
     set -eu
+    mkdir -p docs/public
     curl -fL https://raw.githubusercontent.com/dcdpr/jp/plugin-registry/plugins.json \
-        -o docs/registry/plugins.json
+        -o docs/public/plugins.json
 
 # Build plugins for the host and install to the local plugin directory.
 [group('plugins')]
