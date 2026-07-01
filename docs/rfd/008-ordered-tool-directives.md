@@ -40,6 +40,17 @@ jp q --tool --no-tools=dangerous_tool
 
 ## Design
 
+> [!TIP]
+> Since RFD 081, a directive only mutates a tool's `state`; whether a given
+> directive may flip that state is gated by the tool's `allow_toggle` policy
+> (`any` / `never` / `if_named` / `if_named_or_group`).
+> Bare `-t` / `-T` are bulk-scope directives and only affect freely-toggleable
+> (`any`) tools, so they can no longer erase a tool's classification (the
+> behavior the original `test_interleaved_disable_all_then_enable_all`
+> documented).
+> Named directives a policy forbids are errors.
+> See RFD 081 for the scope/policy model.
+
 Replace the two separate fields on `Query`:
 
 ```rust

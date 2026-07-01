@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use schematic::{SchemaBuilder, SchemaType, schema::LiteralValue};
+use schematic::{SchemaBuilder, SchemaType};
 use serde_json::json;
 
 use super::*;
@@ -71,56 +71,154 @@ fn access_on_local_tool_is_accepted_by_validation() {
 }
 
 #[test]
-fn test_enable_from_bool() {
-    assert_eq!(Enable::from(true), Enable::On);
-    assert_eq!(Enable::from(false), Enable::Off);
+fn test_enable_config_from_bool() {
+    assert_eq!(PartialEnableConfig::from(true), PartialEnableConfig::ON);
+    assert_eq!(PartialEnableConfig::from(false), PartialEnableConfig::OFF);
 }
 
 #[test]
-fn test_enable_from_str() {
-    assert_eq!("true".parse::<Enable>(), Ok(Enable::On));
-    assert_eq!("on".parse::<Enable>(), Ok(Enable::On));
-    assert_eq!("false".parse::<Enable>(), Ok(Enable::Off));
-    assert_eq!("off".parse::<Enable>(), Ok(Enable::Off));
-    assert_eq!("explicit".parse::<Enable>(), Ok(Enable::Explicit));
-    assert_eq!("always".parse::<Enable>(), Ok(Enable::Always));
-    assert!("invalid".parse::<Enable>().is_err());
+fn test_enable_config_from_str() {
+    assert_eq!(
+        "true".parse::<PartialEnableConfig>(),
+        Ok(PartialEnableConfig::ON)
+    );
+    assert_eq!(
+        "on".parse::<PartialEnableConfig>(),
+        Ok(PartialEnableConfig::ON)
+    );
+    assert_eq!(
+        "false".parse::<PartialEnableConfig>(),
+        Ok(PartialEnableConfig::OFF)
+    );
+    assert_eq!(
+        "off".parse::<PartialEnableConfig>(),
+        Ok(PartialEnableConfig::OFF)
+    );
+    // Legacy `always` is locked-on; legacy `explicit` is off-unless-named.
+    assert_eq!(
+        "always".parse::<PartialEnableConfig>(),
+        Ok(PartialEnableConfig::LOCKED_ON)
+    );
+    assert_eq!(
+        "explicit".parse::<PartialEnableConfig>(),
+        Ok(PartialEnableConfig {
+            state: Some(false),
+            allow_toggle: Some(AllowToggle::IfNamed),
+        })
+    );
+    assert!("invalid".parse::<PartialEnableConfig>().is_err());
 }
 
 #[test]
-fn test_enable_serde_roundtrip() {
-    // Serialize
-    assert_eq!(serde_json::to_value(Enable::On).unwrap(), true);
-    assert_eq!(serde_json::to_value(Enable::Off).unwrap(), false);
-    assert_eq!(serde_json::to_value(Enable::Explicit).unwrap(), "explicit");
-    assert_eq!(serde_json::to_value(Enable::Always).unwrap(), "always");
+fn test_enable_config_serialize() {
+    // Output is always the table form (auto-derived), carrying only the fields
+    // that are set. The bool / legacy-string forms are input-only.
+    assert_eq!(
+        serde_json::to_value(PartialEnableConfig::ON).unwrap(),
+        json!({ "state": true, "allow_toggle": "any" })
+    );
+    assert_eq!(
+        serde_json::to_value(PartialEnableConfig::OFF).unwrap(),
+        json!({ "state": false, "allow_toggle": "any" })
+    );
+    assert_eq!(
+        serde_json::to_value(PartialEnableConfig::LOCKED_ON).unwrap(),
+        json!({ "state": true, "allow_toggle": "never" })
+    );
+    assert_eq!(
+        serde_json::to_value(PartialEnableConfig::LOCKED_OFF).unwrap(),
+        json!({ "state": false, "allow_toggle": "never" })
+    );
 
-    // Deserialize from bool
+    // Unset fields are omitted, preserving inheritance from lower layers.
     assert_eq!(
-        serde_json::from_value::<Enable>(true.into()).unwrap(),
-        Enable::On
+        serde_json::to_value(PartialEnableConfig {
+            state: Some(true),
+            allow_toggle: None,
+        })
+        .unwrap(),
+        json!({ "state": true })
     );
     assert_eq!(
-        serde_json::from_value::<Enable>(false.into()).unwrap(),
-        Enable::Off
+        serde_json::to_value(PartialEnableConfig {
+            state: None,
+            allow_toggle: Some(AllowToggle::IfNamed),
+        })
+        .unwrap(),
+        json!({ "allow_toggle": "if_named" })
+    );
+    assert_eq!(
+        serde_json::to_value(PartialEnableConfig::default()).unwrap(),
+        json!({})
+    );
+}
+
+#[test]
+fn test_enable_config_deserialize() {
+    // Bool fills both fields.
+    assert_eq!(
+        serde_json::from_value::<PartialEnableConfig>(json!(true)).unwrap(),
+        PartialEnableConfig::ON
+    );
+    assert_eq!(
+        serde_json::from_value::<PartialEnableConfig>(json!(false)).unwrap(),
+        PartialEnableConfig::OFF
     );
 
-    // Deserialize from string
+    // Legacy strings fill both fields.
     assert_eq!(
-        serde_json::from_value::<Enable>("on".into()).unwrap(),
-        Enable::On
+        serde_json::from_value::<PartialEnableConfig>(json!("on")).unwrap(),
+        PartialEnableConfig::ON
     );
     assert_eq!(
-        serde_json::from_value::<Enable>("off".into()).unwrap(),
-        Enable::Off
+        serde_json::from_value::<PartialEnableConfig>(json!("always")).unwrap(),
+        PartialEnableConfig::LOCKED_ON
     );
     assert_eq!(
-        serde_json::from_value::<Enable>("explicit".into()).unwrap(),
-        Enable::Explicit
+        serde_json::from_value::<PartialEnableConfig>(json!("explicit")).unwrap(),
+        PartialEnableConfig {
+            state: Some(false),
+            allow_toggle: Some(AllowToggle::IfNamed),
+        }
+    );
+
+    // The table form preserves omitted fields as `None`.
+    assert_eq!(
+        serde_json::from_value::<PartialEnableConfig>(json!({ "state": true })).unwrap(),
+        PartialEnableConfig {
+            state: Some(true),
+            allow_toggle: None,
+        }
     );
     assert_eq!(
-        serde_json::from_value::<Enable>("always".into()).unwrap(),
-        Enable::Always
+        serde_json::from_value::<PartialEnableConfig>(
+            json!({ "allow_toggle": "if_named_or_group" })
+        )
+        .unwrap(),
+        PartialEnableConfig {
+            state: None,
+            allow_toggle: Some(AllowToggle::IfNamedOrGroup),
+        }
+    );
+    assert_eq!(
+        serde_json::from_value::<PartialEnableConfig>(
+            json!({ "state": false, "allow_toggle": "never" })
+        )
+        .unwrap(),
+        PartialEnableConfig::LOCKED_OFF
+    );
+
+    // `any` is the freely-toggleable spelling; legacy `always` is NOT accepted
+    // for `allow_toggle` (as a top-level value it means locked-on instead).
+    assert_eq!(
+        serde_json::from_value::<PartialEnableConfig>(json!({ "allow_toggle": "any" })).unwrap(),
+        PartialEnableConfig {
+            state: None,
+            allow_toggle: Some(AllowToggle::Always),
+        }
+    );
+    assert!(
+        serde_json::from_value::<PartialEnableConfig>(json!({ "allow_toggle": "always" })).is_err()
     );
 }
 
@@ -147,7 +245,7 @@ enable = true
     base.merge(&(), next).unwrap();
 
     assert_eq!(base.format, Some(FormatMode::Unattended));
-    assert_eq!(base.enable, Some(Enable::On));
+    assert_eq!(base.enable, Some(PartialEnableConfig::ON));
 }
 
 #[test]
@@ -167,25 +265,47 @@ run = "ask"
 fn test_enable_assign_kv() {
     let mut p = PartialToolConfig::default_values(&()).unwrap().unwrap();
 
-    // Assign via string "true"
+    // Assign via string "true" (bool shorthand fills both fields).
     let kv = KvAssignment::try_from_cli("enable", "true").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.enable, Some(Enable::On));
+    assert_eq!(p.enable, Some(PartialEnableConfig::ON));
 
-    // Assign via string "explicit"
+    // Assign via legacy string "explicit".
     let kv = KvAssignment::try_from_cli("enable", "explicit").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.enable, Some(Enable::Explicit));
+    assert_eq!(
+        p.enable,
+        Some(PartialEnableConfig {
+            state: Some(false),
+            allow_toggle: Some(AllowToggle::IfNamed),
+        })
+    );
 
-    // Assign via JSON bool
+    // Assign via JSON bool.
     let kv = KvAssignment::try_from_cli("enable:", "false").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.enable, Some(Enable::Off));
+    assert_eq!(p.enable, Some(PartialEnableConfig::OFF));
 
-    // Assign via JSON string
-    let kv = KvAssignment::try_from_cli("enable:", r#""explicit""#).unwrap();
+    // Nested assignment of a single subfield preserves the other field.
+    let kv = KvAssignment::try_from_cli("enable.allow_toggle", "if_named").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.enable, Some(Enable::Explicit));
+    assert_eq!(
+        p.enable,
+        Some(PartialEnableConfig {
+            state: Some(false),
+            allow_toggle: Some(AllowToggle::IfNamed),
+        })
+    );
+
+    let kv = KvAssignment::try_from_cli("enable.state", "true").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(
+        p.enable,
+        Some(PartialEnableConfig {
+            state: Some(true),
+            allow_toggle: Some(AllowToggle::IfNamed),
+        })
+    );
 }
 
 #[test]
@@ -196,7 +316,7 @@ fn test_tools_config() {
     let mut p = PartialToolsConfig::default_values(&()).unwrap().unwrap();
 
     p.tools.insert("cargo_check".to_owned(), PartialToolConfig {
-        enable: Some(Enable::Off),
+        enable: Some(PartialEnableConfig::OFF),
         source: Some(ToolSource::Local { tool: None }),
         ..Default::default()
     });
@@ -207,7 +327,7 @@ fn test_tools_config() {
     assert_eq!(
         p.tools,
         IndexMap::<_, _>::from_iter(vec![("cargo_check".to_owned(), PartialToolConfig {
-            enable: Some(Enable::On),
+            enable: Some(PartialEnableConfig::ON),
             source: Some(ToolSource::Local { tool: None }),
             ..Default::default()
         })])
@@ -219,7 +339,7 @@ fn test_tools_config() {
         p.tools,
         IndexMap::<_, _>::from_iter(vec![
             ("cargo_check".to_owned(), PartialToolConfig {
-                enable: Some(Enable::On),
+                enable: Some(PartialEnableConfig::ON),
                 source: Some(ToolSource::Local { tool: None }),
                 ..Default::default()
             }),
@@ -277,25 +397,20 @@ fn test_tool_config_command() {
 
 #[test]
 fn test_enable_schema() {
-    let schema = SchemaBuilder::build_root::<Enable>();
-    assert_eq!(schema.name, Some("Enable".to_owned()));
-    let SchemaType::Union(union) = schema.ty else {
-        panic!("expected union")
+    // `EnableConfig`'s root schema is a struct exposing `state` and
+    // `allow_toggle` as real fields (not a bool|string union like the old
+    // `Enable`). This is the type's own schema: in `AppConfig::fields()` the
+    // `enable` field stays a flat leaf (`conversation.tools.*.enable`) because
+    // it's a `no_deserialize_derive` config.
+    let schema = SchemaBuilder::build_root::<EnableConfig>();
+    let SchemaType::Struct(s) = schema.ty else {
+        panic!("expected struct, got {:?}", schema.ty)
     };
-    assert_eq!(union.variants_types.len(), 2);
-    assert_eq!(
-        union.variants_types[0].ty,
-        SchemaType::Boolean(Box::default())
+    assert!(s.fields.contains_key("state"), "missing `state` field");
+    assert!(
+        s.fields.contains_key("allow_toggle"),
+        "missing `allow_toggle` field"
     );
-    let SchemaType::Enum(e) = &union.variants_types[1].ty else {
-        panic!("expected enum")
-    };
-    assert_eq!(e.values, vec![
-        LiteralValue::String("on".into()),
-        LiteralValue::String("off".into()),
-        LiteralValue::String("explicit".into()),
-        LiteralValue::String("always".into())
-    ]);
 }
 
 #[test]
@@ -308,7 +423,7 @@ fn test_tool_config_json_merge_preserves_existing_fields() {
         command: Some(PartialCommandConfigOrString::String(
             "my-command".to_owned(),
         )),
-        enable: Some(Enable::Off),
+        enable: Some(PartialEnableConfig::OFF),
         ..Default::default()
     });
 
@@ -318,7 +433,7 @@ fn test_tool_config_json_merge_preserves_existing_fields() {
     p.assign(kv).unwrap();
 
     let tool = p.tools.get("my_tool").unwrap();
-    assert_eq!(tool.enable, Some(Enable::On));
+    assert_eq!(tool.enable, Some(PartialEnableConfig::ON));
     assert_eq!(tool.run, Some(RunMode::Unattended));
     // These must survive the merge.
     assert_eq!(tool.source, Some(ToolSource::Local { tool: None }));
@@ -336,7 +451,7 @@ fn test_tool_config_json_merge_null_clears_field() {
 
     p.tools.insert("t".to_owned(), PartialToolConfig {
         source: Some(ToolSource::Local { tool: None }),
-        enable: Some(Enable::On),
+        enable: Some(PartialEnableConfig::ON),
         run: Some(RunMode::Edit),
         summary: Some("keep me".to_owned()),
         ..Default::default()
@@ -359,7 +474,7 @@ fn test_tool_config_json_merge_nested_object() {
 
     p.tools.insert("t".to_owned(), PartialToolConfig {
         source: Some(ToolSource::Local { tool: None }),
-        enable: Some(Enable::Off),
+        enable: Some(PartialEnableConfig::OFF),
         ..Default::default()
     });
 
@@ -369,7 +484,7 @@ fn test_tool_config_json_merge_nested_object() {
     p.assign(kv).unwrap();
 
     let tool = p.tools.get("t").unwrap();
-    assert_eq!(tool.enable, Some(Enable::On));
+    assert_eq!(tool.enable, Some(PartialEnableConfig::ON));
     assert_eq!(tool.source, Some(ToolSource::Local { tool: None }));
 
     let style = tool.style.as_ref().unwrap();
@@ -475,4 +590,208 @@ fn test_tool_options_assign_preserves_siblings() {
 
     assert_eq!(p.options["debug"], JsonValue(json!(true)));
     assert_eq!(p.options["verbose"], JsonValue(json!("true")));
+}
+
+#[test]
+fn test_enable_effective_fills_from_defaults_then_fallback() {
+    // Nothing set anywhere: enabled, freely toggleable.
+    assert_eq!(
+        PartialEnableConfig::default().effective(&PartialEnableConfig::default()),
+        Enable {
+            state: true,
+            allow_toggle: AllowToggle::Always,
+        }
+    );
+
+    // Per-tool overrides only `state`; `allow_toggle` comes from defaults.
+    let tool = PartialEnableConfig {
+        state: Some(true),
+        allow_toggle: None,
+    };
+    let defaults = PartialEnableConfig {
+        state: Some(false),
+        allow_toggle: Some(AllowToggle::IfNamed),
+    };
+    assert_eq!(tool.effective(&defaults), Enable {
+        state: true,
+        allow_toggle: AllowToggle::IfNamed,
+    });
+}
+
+#[test]
+fn test_enable_accepts_by_scope() {
+    let locked = Enable {
+        state: true,
+        allow_toggle: AllowToggle::Never,
+    };
+    assert!(locked.is_locked());
+    assert!(!locked.accepts(ToggleScope::Bulk));
+    assert!(!locked.accepts(ToggleScope::Named));
+
+    let any = Enable {
+        state: false,
+        allow_toggle: AllowToggle::Always,
+    };
+    assert!(any.accepts(ToggleScope::Bulk));
+    assert!(any.accepts(ToggleScope::Named));
+
+    let if_named = Enable {
+        state: false,
+        allow_toggle: AllowToggle::IfNamed,
+    };
+    assert!(!if_named.accepts(ToggleScope::Bulk));
+    assert!(if_named.accepts(ToggleScope::Named));
+    assert!(!if_named.accepts(ToggleScope::NamedGroup));
+
+    let group = Enable {
+        state: false,
+        allow_toggle: AllowToggle::IfNamedOrGroup,
+    };
+    assert!(!group.accepts(ToggleScope::Bulk));
+    assert!(group.accepts(ToggleScope::Named));
+    assert!(group.accepts(ToggleScope::NamedGroup));
+}
+
+#[test]
+fn test_enable_cross_layer_merge_preserves_other_field() {
+    use schematic::PartialConfig as _;
+
+    // Lower layer sets only `state`; higher layer sets only `allow_toggle`.
+    // Per-field merge keeps both.
+    let mut base: PartialToolConfig = toml::from_str("enable = { state = true }").unwrap();
+    let next: PartialToolConfig = toml::from_str(r#"enable = { allow_toggle = "never" }"#).unwrap();
+    base.merge(&(), next).unwrap();
+    assert_eq!(
+        base.enable,
+        Some(PartialEnableConfig {
+            state: Some(true),
+            allow_toggle: Some(AllowToggle::Never),
+        })
+    );
+
+    // A bool in a higher layer fully specifies both fields, overriding any
+    // inherited `allow_toggle`.
+    let mut base: PartialToolConfig =
+        toml::from_str(r#"enable = { allow_toggle = "if_named" }"#).unwrap();
+    let next: PartialToolConfig = toml::from_str("enable = true").unwrap();
+    base.merge(&(), next).unwrap();
+    assert_eq!(base.enable, Some(PartialEnableConfig::ON));
+}
+
+#[test]
+fn test_enable_cross_key_defaults_inheritance() {
+    use crate::{PartialAppConfig, util::build};
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.enable = Some(PartialEnableConfig {
+        state: Some(false),
+        allow_toggle: Some(AllowToggle::IfNamed),
+    });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("foo".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            enable: Some(PartialEnableConfig {
+                state: Some(true),
+                allow_toggle: None,
+            }),
+            ..Default::default()
+        });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("bar".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let tools = &config.conversation.tools;
+
+    // `foo` overrides only `state`; `allow_toggle` inherits from `*`.
+    assert_eq!(tools.get("foo").unwrap().effective_enable(), Enable {
+        state: true,
+        allow_toggle: AllowToggle::IfNamed,
+    });
+
+    // `bar` sets no `enable`; both fields inherit from `*`.
+    assert_eq!(tools.get("bar").unwrap().effective_enable(), Enable {
+        state: false,
+        allow_toggle: AllowToggle::IfNamed,
+    });
+}
+
+#[test]
+fn test_locked_off_tool_choice_is_rejected() {
+    use crate::{PartialAppConfig, assistant::tool_choice::ToolChoice, util::build};
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.tool_choice = Some(ToolChoice::Function("net".to_owned()));
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("net".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            enable: Some(PartialEnableConfig::LOCKED_OFF),
+            ..Default::default()
+        });
+
+    let err = build(partial).unwrap_err().to_string();
+    assert!(
+        err.contains("locked off") && err.contains("assistant.tool_choice"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn test_forced_tool_choice_on_toggleable_tool_is_accepted() {
+    use crate::{PartialAppConfig, assistant::tool_choice::ToolChoice, util::build};
+
+    // A forced tool that is merely disabled (not locked-off) is allowed.
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.tool_choice = Some(ToolChoice::Function("net".to_owned()));
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("net".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            enable: Some(PartialEnableConfig::OFF),
+            ..Default::default()
+        });
+
+    assert!(build(partial).is_ok());
+}
+
+#[test]
+fn test_delta_enable_records_only_changed_subfield() {
+    use crate::delta::PartialConfigDelta as _;
+
+    let prev = PartialToolConfig {
+        enable: Some(PartialEnableConfig {
+            state: Some(true),
+            allow_toggle: Some(AllowToggle::IfNamed),
+        }),
+        ..Default::default()
+    };
+    let next = PartialToolConfig {
+        enable: Some(PartialEnableConfig {
+            state: Some(false),
+            allow_toggle: Some(AllowToggle::IfNamed),
+        }),
+        ..Default::default()
+    };
+
+    // Only `state` changed, so the delta carries just `state`.
+    assert_eq!(
+        prev.delta(next).enable,
+        Some(PartialEnableConfig {
+            state: Some(false),
+            allow_toggle: None,
+        })
+    );
 }

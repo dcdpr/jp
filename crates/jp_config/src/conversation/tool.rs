@@ -185,11 +185,14 @@ fn reject_access_on_non_local_tools(tools: &ToolsConfig) -> Result<(), ConfigErr
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolsDefaultsConfig {
-    /// Whether the tool is enabled.
+    /// Default tool enablement, and which directives may change it.
     ///
-    /// Accepts `true`/`false`, `"on"`/`"off"`, or `"explicit"`.
-    /// See [`Enable`] for details.
-    pub enable: Option<Enable>,
+    /// Applies to every tool that doesn't set its own `enable`.
+    /// Accepts a bool (`true`/`false`), a legacy string (`"on"`, `"off"`,
+    /// `"explicit"`, `"always"`), or a `{ state, allow_toggle }` table.
+    /// When unset, tools fall back to enabled and freely toggleable.
+    #[setting(nested)]
+    pub enable: Option<EnableConfig>,
 
     /// How to run the tool.
     ///
@@ -237,7 +240,8 @@ pub struct ToolsDefaultsConfig {
 impl AssignKeyValue for PartialToolsDefaultsConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "enable" => self.enable = kv.try_some_bool_or_from_str()?,
+            "enable" => self.enable = kv.try_some_object_bool_or_from_str()?,
+            _ if kv.p("enable") => self.enable.assign(kv)?,
             "run" => self.run = kv.try_some_from_str()?,
             "format" => self.format = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
@@ -252,7 +256,7 @@ impl AssignKeyValue for PartialToolsDefaultsConfig {
 impl PartialConfigDelta for PartialToolsDefaultsConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            enable: delta_opt(self.enable.as_ref(), next.enable),
+            enable: delta_opt_partial(self.enable.as_ref(), next.enable),
             run: delta_opt(self.run.as_ref(), next.run),
             format: delta_opt(self.format.as_ref(), next.format),
             result: delta_opt(self.result.as_ref(), next.result),
@@ -278,7 +282,7 @@ impl ToPartial for ToolsDefaultsConfig {
         let defaults = Self::Partial::default();
 
         Self::Partial {
-            enable: partial_opts(self.enable.as_ref(), defaults.enable),
+            enable: partial_opt_config(self.enable.as_ref(), defaults.enable),
             run: partial_opt(&self.run, defaults.run),
             format: partial_opts(self.format.as_ref(), defaults.format),
             result: partial_opt(&self.result, defaults.result),
@@ -299,11 +303,14 @@ pub struct ToolConfig {
     #[setting(required)]
     pub source: ToolSource,
 
-    /// Whether the tool is enabled.
+    /// Whether the tool is enabled, and which directives may change that.
     ///
-    /// Accepts `true`/`false`, `"on"`/`"off"`, or `"explicit"`.
-    /// See [`Enable`] for details.
-    pub enable: Option<Enable>,
+    /// Accepts a bool (`true`/`false`), a legacy string (`"on"`, `"off"`,
+    /// `"explicit"`, `"always"`), or a `{ state, allow_toggle }` table.
+    /// When unset, inherits from `[conversation.tools.'*']`, then falls back to
+    /// enabled and freely toggleable.
+    #[setting(nested)]
+    pub enable: Option<EnableConfig>,
 
     /// The command to run.
     /// Only used for local tools.
@@ -420,7 +427,8 @@ impl AssignKeyValue for PartialToolConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "source" => self.source = kv.try_some_from_str()?,
-            "enable" => self.enable = kv.try_some_bool_or_from_str()?,
+            "enable" => self.enable = kv.try_some_object_bool_or_from_str()?,
+            _ if kv.p("enable") => self.enable.assign(kv)?,
             _ if kv.p("command") => self.command.assign(kv)?,
             "summary" => self.summary = kv.try_some_string()?,
             "description" => self.description = kv.try_some_string()?,
@@ -444,7 +452,7 @@ impl PartialConfigDelta for PartialToolConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             source: delta_opt(self.source.as_ref(), next.source),
-            enable: delta_opt(self.enable.as_ref(), next.enable),
+            enable: delta_opt_partial(self.enable.as_ref(), next.enable),
             command: delta_opt_partial(self.command.as_ref(), next.command),
             summary: delta_opt(self.summary.as_ref(), next.summary),
             description: delta_opt(self.description.as_ref(), next.description),
@@ -508,7 +516,7 @@ impl ToPartial for ToolConfig {
 
         Self::Partial {
             source: partial_opt(&self.source, defaults.source),
-            enable: partial_opts(self.enable.as_ref(), defaults.enable),
+            enable: partial_opt_config(self.enable.as_ref(), defaults.enable),
             command: partial_opt_config(self.command.as_ref(), defaults.command),
             summary: partial_opts(self.summary.as_ref(), defaults.summary),
             description: partial_opts(self.description.as_ref(), defaults.description),
@@ -1002,32 +1010,39 @@ pub struct ToolConfigWithDefaults {
 }
 
 impl ToolConfigWithDefaults {
-    /// Return whether the tool is enabled.
+    /// Return the resolved [`Enable`] for this tool.
     ///
-    /// Returns `true` only for [`Enable::On`].
-    /// Both [`Enable::Off`] and [`Enable::Explicit`] return `false`.
-    /// If no value is set, defaults to `true`.
+    /// Fills each field from the per-tool config, then the global defaults,
+    /// then the hardcoded fallback (`state = true`, `allow_toggle = any`).
+    ///
+    /// A per-tool `#[setting(default = true)]` would not work here: the schema
+    /// default is keyed by field, not by map entry, so an entry that omits
+    /// `enable` has no per-entry default to fall back on.
+    /// The fallback is applied at resolution time instead.
     #[must_use]
-    pub fn enable(&self) -> bool {
-        // NOTE: We cannot define `#[setting(default = true)]` on the `enable`
-        // field, because `AppConfig::default_values()` will result in an empty
-        // `conversation.tools` map, which means that if we then merge that map
-        // with the actual configuration, the `enable` field will still default
-        // to `false`, because there is no default value set for any specific
-        // entry in the map.
-        self.tool
+    pub fn effective_enable(&self) -> Enable {
+        let tool = self
+            .tool
             .enable
-            .or(self.defaults.enable)
-            .is_none_or(Enable::is_on)
+            .as_ref()
+            .map(ToPartial::to_partial)
+            .unwrap_or_default();
+        let defaults = self
+            .defaults
+            .enable
+            .as_ref()
+            .map(ToPartial::to_partial)
+            .unwrap_or_default();
+        tool.effective(&defaults)
     }
 
-    /// Return the [`Enable`] value for this tool.
+    /// Return whether the tool is effectively enabled.
     ///
-    /// Returns `None` if neither the tool nor the defaults specify an enable
-    /// value.
+    /// If neither the tool nor the global defaults set a value, the tool is
+    /// enabled.
     #[must_use]
-    pub fn enable_mode(&self) -> Option<Enable> {
-        self.tool.enable.or(self.defaults.enable)
+    pub fn is_enabled(&self) -> bool {
+        self.effective_enable().is_enabled()
     }
 
     /// Return the command to run the tool.
@@ -1319,148 +1334,310 @@ impl schematic::Schematic for QuestionTarget {
     }
 }
 
-/// Whether a tool is enabled.
-///
-/// This controls tool activation behavior, particularly in relation to the
-/// `--tools` (`-t`) CLI flag.
-///
-/// In configuration files, this accepts both boolean values (`true`/`false`)
-/// and string values (`"on"`, `"off"`, `"explicit"`).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Enable {
-    /// The tool is enabled.
-    /// Equivalent to `true`.
-    On,
+/// CLI directive scope: which kind of `--tool` / `--no-tool` directive is being
+/// matched against a tool's [`AllowToggle`] policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToggleScope {
+    /// `-t` / `-T` with no argument: a bulk directive over all tools.
+    Bulk,
 
-    /// The tool is disabled.
-    /// Equivalent to `false`.
-    Off,
+    /// `-t NAME` / `-T NAME`: a directive naming a single tool.
+    Named,
 
-    /// The tool requires explicit activation.
+    /// `-t GROUP` / `-T GROUP`: a directive naming a tool group.
     ///
-    /// Unlike [`Enable::Off`], an `Explicit` tool will not be enabled by
-    /// `--tools` (enable all tools), but can be enabled by naming it
-    /// specifically, e.g. `--tools my_tool`.
-    Explicit,
+    /// Reserved for tool-group parsing; no directive parser produces this value
+    /// yet.
+    NamedGroup,
+}
 
-    /// The tool is always enabled and cannot be disabled (even with
-    /// `--no-tools`).
+/// Which CLI directives may flip a tool's enabled state.
+///
+/// - `any`: any `--tool` / `--no-tool` directive may flip the state (default).
+/// - `never`: no directive may flip the state (the tool is locked).
+/// - `if_named`: only a directive that names the tool may flip the state.
+/// - `if_named_or_group`: a directive naming the tool or its group may flip the
+///   state.
+///   Behaves like `if_named` until tool groups land.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum AllowToggle {
+    /// Any directive may flip the tool's state.
+    #[default]
+    #[serde(rename = "any")]
     Always,
+
+    /// No directive may flip the tool's state.
+    Never,
+
+    /// Only named-tool directives may flip the tool's state.
+    IfNamed,
+
+    /// Named-tool or named-group directives may flip the tool's state.
+    IfNamedOrGroup,
+}
+
+/// Resolved tool activation: the effective enabled `state` and the
+/// `allow_toggle` policy that governs which CLI directives may change it.
+///
+/// Produced on demand by the effective-enable resolver
+/// ([`ToolConfigWithDefaults::effective_enable`] and
+/// [`PartialEnableConfig::effective`]); never stored directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Enable {
+    /// Whether the tool is enabled.
+    pub state: bool,
+
+    /// Which directive scopes may flip [`state`].
+    ///
+    /// [`state`]: Self::state
+    pub allow_toggle: AllowToggle,
 }
 
 impl Enable {
-    /// Returns `true` if the tool is enabled (i.e. [`Enable::On`]).
+    /// Returns whether the tool is enabled.
     #[must_use]
-    pub const fn is_on(self) -> bool {
-        matches!(self, Self::On)
+    pub const fn is_enabled(&self) -> bool {
+        self.state
     }
 
-    /// Returns `true` if the tool requires explicit activation.
+    /// Returns whether the tool's state is locked, i.e. no directive may flip
+    /// it.
     #[must_use]
-    pub const fn is_explicit(self) -> bool {
-        matches!(self, Self::Explicit)
+    pub const fn is_locked(&self) -> bool {
+        matches!(self.allow_toggle, AllowToggle::Never)
     }
 
-    /// Returns `true` if the tool is always enabled.
+    /// Returns whether a directive of the given [`ToggleScope`] may flip the
+    /// tool's state under the current [`AllowToggle`] policy.
+    ///
+    /// `Always` accepts every scope, `Never` accepts none, `IfNamed` accepts
+    /// only named-tool directives, and `IfNamedOrGroup` accepts named-tool and
+    /// named-group directives.
     #[must_use]
-    pub const fn is_always(self) -> bool {
-        matches!(self, Self::Always)
+    pub const fn accepts(&self, scope: ToggleScope) -> bool {
+        matches!(
+            (self.allow_toggle, scope),
+            (AllowToggle::Always, _)
+                | (AllowToggle::IfNamed, ToggleScope::Named)
+                | (
+                    AllowToggle::IfNamedOrGroup,
+                    ToggleScope::Named | ToggleScope::NamedGroup
+                )
+        )
     }
 }
 
-impl From<bool> for Enable {
-    fn from(v: bool) -> Self {
-        if v { Self::On } else { Self::Off }
+/// Tool activation: whether the tool is enabled and which `--tool` /
+/// `--no-tool` CLI directives may change that.
+///
+/// ```toml
+/// # Bool shorthand: enabled / disabled, freely toggleable.
+/// enable = true
+///
+/// # Table form for finer control. An omitted field inherits from the global
+/// # `[conversation.tools.'*']` defaults, then falls back to enabled / `any`.
+/// enable = { state = false, allow_toggle = "if_named" }  # off unless named
+/// enable = { state = true, allow_toggle = "never" }      # always on, locked
+/// ```
+///
+/// The legacy strings `"on"`, `"off"`, `"always"` (= locked-on), and
+/// `"explicit"` (= off-unless-named) are still accepted on input.
+#[derive(Debug, Clone, PartialEq, Config)]
+#[config(rename_all = "snake_case", no_deserialize_derive)]
+pub struct EnableConfig {
+    /// Whether the tool is enabled.
+    ///
+    /// When unset, inherits from the `[conversation.tools.'*']` defaults, then
+    /// falls back to enabled.
+    pub state: Option<bool>,
+
+    /// Which `--tool` / `--no-tool` directives may flip `state`.
+    ///
+    /// - `any`: any directive may flip it (the default).
+    /// - `never`: no directive may flip it (the tool is locked).
+    /// - `if_named`: only a directive that names the tool may flip it.
+    /// - `if_named_or_group`: a directive naming the tool or its group may flip
+    ///   it.
+    ///
+    /// When unset, inherits from the `[conversation.tools.'*']` defaults, then
+    /// falls back to `any`.
+    pub allow_toggle: Option<AllowToggle>,
+}
+
+impl PartialEnableConfig {
+    /// Enabled, freely toggleable.
+    pub const ON: Self = Self {
+        state: Some(true),
+        allow_toggle: Some(AllowToggle::Always),
+    };
+
+    /// Disabled, freely toggleable.
+    pub const OFF: Self = Self {
+        state: Some(false),
+        allow_toggle: Some(AllowToggle::Always),
+    };
+
+    /// Enabled, cannot be toggled off.
+    pub const LOCKED_ON: Self = Self {
+        state: Some(true),
+        allow_toggle: Some(AllowToggle::Never),
+    };
+
+    /// Disabled, cannot be toggled on.
+    pub const LOCKED_OFF: Self = Self {
+        state: Some(false),
+        allow_toggle: Some(AllowToggle::Never),
+    };
+
+    /// Resolve this per-tool value against a `defaults` layer into the
+    /// effective [`Enable`].
+    ///
+    /// Each field is filled from `self`, then `defaults`, then the hardcoded
+    /// fallback (`state = true`, `allow_toggle = any`).
+    #[must_use]
+    pub fn effective(&self, defaults: &Self) -> Enable {
+        Enable {
+            state: self.state.or(defaults.state).unwrap_or(true),
+            allow_toggle: self
+                .allow_toggle
+                .or(defaults.allow_toggle)
+                .unwrap_or_default(),
+        }
     }
 }
 
-impl FromStr for Enable {
+impl From<bool> for PartialEnableConfig {
+    fn from(state: bool) -> Self {
+        Self {
+            state: Some(state),
+            allow_toggle: Some(AllowToggle::Always),
+        }
+    }
+}
+
+impl FromStr for PartialEnableConfig {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "true" | "on" => Ok(Self::On),
-            "false" | "off" => Ok(Self::Off),
-            "explicit" => Ok(Self::Explicit),
-            "always" => Ok(Self::Always),
-            _ => Err(format!(
-                "invalid enable value: '{s}', expected one of: true, false, on, off, explicit, \
-                 always"
-            )),
+        Ok(match s {
+            "true" | "on" => Self::ON,
+            "false" | "off" => Self::OFF,
+            "always" => Self::LOCKED_ON,
+            "explicit" => Self {
+                state: Some(false),
+                allow_toggle: Some(AllowToggle::IfNamed),
+            },
+            _ => {
+                return Err(format!(
+                    "invalid enable value: '{s}', expected a boolean, one of \"on\", \"off\", \
+                     \"explicit\", \"always\", or a {{ state, allow_toggle }} table"
+                ));
+            }
+        })
+    }
+}
+
+impl AssignKeyValue for PartialEnableConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => *self = kv.try_object_bool_or_from_str()?,
+            "state" => self.state = kv.try_some_bool()?,
+            "allow_toggle" => self.allow_toggle = kv.try_some_from_str()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialConfigDelta for PartialEnableConfig {
+    fn delta(&self, next: Self) -> Self {
+        Self {
+            state: delta_opt(self.state.as_ref(), next.state),
+            allow_toggle: delta_opt(self.allow_toggle.as_ref(), next.allow_toggle),
         }
     }
 }
 
-impl fmt::Display for Enable {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::On => write!(f, "on"),
-            Self::Off => write!(f, "off"),
-            Self::Explicit => write!(f, "explicit"),
-            Self::Always => write!(f, "always"),
+impl ToPartial for EnableConfig {
+    fn to_partial(&self) -> Self::Partial {
+        PartialEnableConfig {
+            state: self.state,
+            allow_toggle: self.allow_toggle,
         }
     }
 }
 
-impl Serialize for Enable {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        match self {
-            Self::On => serializer.serialize_bool(true),
-            Self::Off => serializer.serialize_bool(false),
-            Self::Explicit => serializer.serialize_str("explicit"),
-            Self::Always => serializer.serialize_str("always"),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for Enable {
+/// Accept a bool, a legacy string, or a `{ state, allow_toggle }` table on
+/// input.
+/// Output is always the table form (auto-derived), mirroring how
+/// [`ModelIdConfig`] accepts a `provider/name` string but writes a table.
+///
+/// [`ModelIdConfig`]: crate::model::id::ModelIdConfig
+impl<'de> Deserialize<'de> for PartialEnableConfig {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
         struct EnableVisitor;
 
-        impl serde::de::Visitor<'_> for EnableVisitor {
-            type Value = Enable;
+        impl<'de> serde::de::Visitor<'de> for EnableVisitor {
+            type Value = PartialEnableConfig;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter
-                    .write_str("a boolean or one of: \"on\", \"off\", \"explicit\", \"always\"")
+                formatter.write_str(
+                    "a boolean, one of \"on\"/\"off\"/\"explicit\"/\"always\", or a { state, \
+                     allow_toggle } table",
+                )
             }
 
-            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Enable, E> {
-                Ok(Enable::from(v))
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
+                Ok(PartialEnableConfig::from(v))
             }
 
-            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Enable, E> {
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
                 v.parse().map_err(serde::de::Error::custom)
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                let mut state: Option<bool> = None;
+                let mut allow_toggle: Option<AllowToggle> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "state" => {
+                            if state.is_some() {
+                                return Err(serde::de::Error::duplicate_field("state"));
+                            }
+                            state = Some(map.next_value()?);
+                        }
+                        "allow_toggle" => {
+                            if allow_toggle.is_some() {
+                                return Err(serde::de::Error::duplicate_field("allow_toggle"));
+                            }
+                            allow_toggle = Some(map.next_value()?);
+                        }
+                        other => {
+                            return Err(serde::de::Error::unknown_field(other, &[
+                                "state",
+                                "allow_toggle",
+                            ]));
+                        }
+                    }
+                }
+
+                Ok(PartialEnableConfig {
+                    state,
+                    allow_toggle,
+                })
             }
         }
 
         deserializer.deserialize_any(EnableVisitor)
-    }
-}
-
-impl schematic::Schematic for Enable {
-    fn schema_name() -> Option<String> {
-        Some("Enable".to_owned())
-    }
-
-    fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
-        use schematic::schema::{BooleanType, EnumType, LiteralValue, UnionType};
-
-        schema.union(UnionType::new_any([
-            schema.nest().boolean(BooleanType::default()),
-            schema.nest().enumerable(EnumType::new([
-                LiteralValue::String("on".into()),
-                LiteralValue::String("off".into()),
-                LiteralValue::String("explicit".into()),
-                LiteralValue::String("always".into()),
-            ])),
-        ]))
     }
 }
 

@@ -74,7 +74,7 @@ use jp_config::{
     conversation::{
         ConversationConfig,
         tool::{
-            Enable, ToolSource,
+            Enable, PartialEnableConfig, PartialToolConfig, ToggleScope, ToolSource,
             access::{AccessConfig, PartialAccessConfig, PartialFsRuleConfig},
         },
     },
@@ -1417,48 +1417,97 @@ fn apply_enable_tools(
         .into());
     }
 
-    // Validate that core tools are not disabled by name.
-    for d in directives.iter() {
-        if let ToolDirective::Disable(name) = d
-            && let Some(tool) = partial.conversation.tools.tools.get(name.as_str())
-            && tool.enable.is_some_and(Enable::is_always)
-        {
-            return Err(format!("Tool '{name}' is a system tool and cannot be disabled").into());
-        }
-    }
-
-    // Apply directives left-to-right.
+    // Apply directives left-to-right. Each directive only flips a tool's
+    // `state`; the tool's `allow_toggle` policy decides whether the flip is
+    // permitted for the directive's scope (see `Enable::accepts`). A named
+    // directive a policy forbids is an error; a bulk directive is skipped.
+    let defaults = partial
+        .conversation
+        .tools
+        .defaults
+        .enable
+        .clone()
+        .unwrap_or_default();
     for d in directives.iter() {
         match d {
             ToolDirective::EnableAll => {
-                partial
-                    .conversation
-                    .tools
-                    .tools
-                    .iter_mut()
-                    .filter(|(_, v)| !v.enable.is_some_and(Enable::is_explicit))
-                    .for_each(|(_, v)| v.enable = Some(Enable::On));
+                for (name, tool) in &mut partial.conversation.tools.tools {
+                    apply_directive_to_tool(name, tool, &defaults, ToggleScope::Bulk, true)?;
+                }
             }
             ToolDirective::DisableAll => {
-                partial
-                    .conversation
-                    .tools
-                    .tools
-                    .iter_mut()
-                    .filter(|(_, v)| !v.enable.is_some_and(Enable::is_always))
-                    .for_each(|(_, v)| v.enable = Some(Enable::Off));
+                for (name, tool) in &mut partial.conversation.tools.tools {
+                    apply_directive_to_tool(name, tool, &defaults, ToggleScope::Bulk, false)?;
+                }
             }
             ToolDirective::Enable(name) => {
                 if let Some(tool) = partial.conversation.tools.tools.get_mut(name.as_str()) {
-                    tool.enable = Some(Enable::On);
+                    apply_directive_to_tool(name, tool, &defaults, ToggleScope::Named, true)?;
                 }
             }
             ToolDirective::Disable(name) => {
                 if let Some(tool) = partial.conversation.tools.tools.get_mut(name.as_str()) {
-                    tool.enable = Some(Enable::Off);
+                    apply_directive_to_tool(name, tool, &defaults, ToggleScope::Named, false)?;
                 }
             }
         }
+    }
+
+    Ok(())
+}
+
+/// Resolve a partial tool's effective [`Enable`] against the global `*`
+/// defaults (and the hardcoded fallback).
+fn effective_enable(
+    enable: Option<&PartialEnableConfig>,
+    defaults: &PartialEnableConfig,
+) -> Enable {
+    match enable {
+        Some(enable) => enable.effective(defaults),
+        None => PartialEnableConfig::default().effective(defaults),
+    }
+}
+
+/// Apply a single tool directive to one tool's partial `enable`.
+///
+/// `scope` identifies the directive kind (bulk vs named) and `desired_state` is
+/// the state the directive wants.
+/// The flip is applied only when the tool's effective `allow_toggle` policy
+/// accepts `scope`; the tool's existing `allow_toggle` is always preserved.
+///
+/// Returns an error only for a *named* directive whose target's policy forbids
+/// the flip (a locked tool).
+/// Bulk directives skip such tools silently.
+fn apply_directive_to_tool(
+    name: &str,
+    tool: &mut PartialToolConfig,
+    defaults: &PartialEnableConfig,
+    scope: ToggleScope,
+    desired_state: bool,
+) -> BoxedResult<()> {
+    let effective = effective_enable(tool.enable.as_ref(), defaults);
+
+    // Already in the desired state: nothing to do, and never an error.
+    if effective.state == desired_state {
+        return Ok(());
+    }
+
+    if effective.accepts(scope) {
+        // Flip only `state`; the tool's own `allow_toggle` is preserved.
+        tool.enable
+            .get_or_insert_with(PartialEnableConfig::default)
+            .state = Some(desired_state);
+        return Ok(());
+    }
+
+    if scope == ToggleScope::Named {
+        let verb = if desired_state { "enable" } else { "disable" };
+        let lock = if effective.state {
+            "locked-on"
+        } else {
+            "locked-off"
+        };
+        return Err(format!("cannot {verb} `{name}`: this tool is configured as {lock}").into());
     }
 
     Ok(())
@@ -1485,12 +1534,19 @@ fn apply_tool_use(
     partial.assistant.tool_choice = match tool {
         None | Some("true") => Some(ToolChoice::Required),
         Some(v) => {
+            let defaults = partial
+                .conversation
+                .tools
+                .defaults
+                .enable
+                .clone()
+                .unwrap_or_default();
             if !partial
                 .conversation
                 .tools
                 .tools
                 .iter()
-                .filter(|(_, cfg)| cfg.enable.is_some_and(Enable::is_on))
+                .filter(|(_, cfg)| effective_enable(cfg.enable.as_ref(), &defaults).state)
                 .any(|(name, _)| name == v)
             {
                 return Err(format!("tool choice '{v}' does not match any enabled tools").into());
@@ -1582,7 +1638,7 @@ fn apply_mounts(
     // config (the fully-layered view) so a bare mount expands over the tools
     // actually enabled in the resolved config, honoring `*` defaults.
     let tools_config = merged_config.map_or(&partial.conversation.tools, |v| &v.conversation.tools);
-    let default_enable = tools_config.defaults.enable;
+    let default_enable = tools_config.defaults.enable.clone().unwrap_or_default();
     let existing = &tools_config.tools;
 
     let mut plans = Vec::new();
@@ -1594,7 +1650,7 @@ fn apply_mounts(
             Some(tool) => vec![(tool.clone(), tool_access_empty(existing, tool))],
             None => existing
                 .iter()
-                .filter(|(_, cfg)| is_enabled_local(cfg, default_enable))
+                .filter(|(_, cfg)| is_enabled_local(cfg, &default_enable))
                 .map(|(name, _)| (name.clone(), tool_access_empty(existing, name)))
                 .collect(),
         };
@@ -1820,17 +1876,11 @@ fn tool_access_empty(
 /// Whether a partial tool config is an enabled local tool.
 ///
 /// The tool's own `enable` takes precedence over the global `*` default; a tool
-/// that is `off` or `explicit` after that resolution is not part of a bare
-/// mount's scope.
-fn is_enabled_local(
-    cfg: &jp_config::conversation::tool::PartialToolConfig,
-    default_enable: Option<Enable>,
-) -> bool {
+/// whose effective `state` resolves to `false` is not part of a bare mount's
+/// scope.
+fn is_enabled_local(cfg: &PartialToolConfig, default_enable: &PartialEnableConfig) -> bool {
     matches!(cfg.source, Some(ToolSource::Local { .. }))
-        && !matches!(
-            cfg.enable.or(default_enable),
-            Some(Enable::Off | Enable::Explicit)
-        )
+        && effective_enable(cfg.enable.as_ref(), default_enable).state
 }
 
 /// The workspace-default rule injected to preserve a tool's prior implicit

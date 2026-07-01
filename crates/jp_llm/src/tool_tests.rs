@@ -809,6 +809,64 @@ async fn test_execute_local_exposes_invocation_ids_in_context() {
     }
 }
 
+/// Regression for RFD 081: `tool_definitions` keeps a *forced* tool that is
+/// merely disabled (`OFF`), but always drops a locked-off tool (`state =
+/// false`, `allow_toggle = never`) even when it is forced.
+#[tokio::test]
+async fn test_tool_definitions_forced_tool_drops_locked_off() {
+    use jp_config::{
+        AppConfig, Config,
+        conversation::tool::{PartialToolConfig, ToolConfig},
+    };
+
+    let off: PartialToolConfig = serde_json::from_value(json!({
+        "source": "local",
+        "command": "echo off",
+        "enable": false,
+    }))
+    .expect("valid partial tool config");
+    let locked_off: PartialToolConfig = serde_json::from_value(json!({
+        "source": "local",
+        "command": "echo locked",
+        "enable": { "state": false, "allow_toggle": "never" },
+    }))
+    .expect("valid partial tool config");
+
+    let mut cfg = AppConfig::new_test();
+    cfg.conversation.tools.insert(
+        "off_tool".to_owned(),
+        ToolConfig::from_partial(off, vec![]).expect("resolved tool config"),
+    );
+    cfg.conversation.tools.insert(
+        "locked_off_tool".to_owned(),
+        ToolConfig::from_partial(locked_off, vec![]).expect("resolved tool config"),
+    );
+
+    let mcp_client = jp_mcp::Client::new(IndexMap::new());
+
+    // Forcing the toggleable OFF tool keeps it in the definitions.
+    let defs = tool_definitions(cfg.conversation.tools.iter(), &mcp_client, Some("off_tool"))
+        .await
+        .expect("tool definitions resolve");
+    assert!(
+        defs.iter().any(|d| d.name == "off_tool"),
+        "a forced toggleable OFF tool must be kept"
+    );
+
+    // Forcing the locked-off tool still drops it.
+    let defs = tool_definitions(
+        cfg.conversation.tools.iter(),
+        &mcp_client,
+        Some("locked_off_tool"),
+    )
+    .await
+    .expect("tool definitions resolve");
+    assert!(
+        !defs.iter().any(|d| d.name == "locked_off_tool"),
+        "a locked-off tool must be dropped even when forced"
+    );
+}
+
 mod merge_mcp_param {
     use indexmap::IndexMap;
     use jp_config::conversation::tool::{OneOrManyTypes, ToolParameterConfig};

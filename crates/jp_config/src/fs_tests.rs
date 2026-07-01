@@ -194,6 +194,26 @@ fn deep_merge_replaces_table_with_value() {
 }
 
 #[test]
+fn deep_merge_recurses_into_inline_table() {
+    // A standard-table source merged into an inline-table target deep-merges
+    // the subfield instead of replacing the whole inline table (RFD 081).
+    let target = "enable = { state = true, allow_toggle = \"never\" }\n";
+    let source = "[enable]\nstate = false\n";
+    let result = merge(target, source);
+    assert!(result.contains("state = false"), "{result}");
+    assert!(result.contains(r#"allow_toggle = "never""#), "{result}");
+}
+
+#[test]
+fn deep_merge_recurses_inline_table_into_inline_table() {
+    let target = "enable = { state = true, allow_toggle = \"never\" }\n";
+    let source = "enable = { state = false }\n";
+    let result = merge(target, source);
+    assert!(result.contains("state = false"), "{result}");
+    assert!(result.contains(r#"allow_toggle = "never""#), "{result}");
+}
+
+#[test]
 fn merge_delta_preserves_formatting() {
     let original = indoc! {r#"
         extends = [
@@ -238,6 +258,51 @@ fn merge_delta_preserves_formatting() {
     assert!(
         config.content.contains(r#"default_id = "ask""#),
         "delta applied: {}",
+        config.content
+    );
+}
+
+#[test]
+fn merge_delta_preserves_inline_table_enable_siblings() {
+    use crate::conversation::tool::{PartialEnableConfig, PartialToolConfig};
+
+    // RFD 081: setting only `conversation.tools.foo.enable.state` against an
+    // existing inline-table `enable` must preserve `allow_toggle`.
+    let original = indoc! {r#"
+        [conversation.tools.foo]
+        source = "builtin"
+        enable = { state = true, allow_toggle = "never" }
+    "#};
+
+    let mut config = ConfigFile {
+        path: "test.toml".into(),
+        format: Format::Toml,
+        content: original.to_owned(),
+    };
+
+    let mut delta = PartialAppConfig::default();
+    delta
+        .conversation
+        .tools
+        .tools
+        .insert("foo".to_owned(), PartialToolConfig {
+            enable: Some(PartialEnableConfig {
+                state: Some(false),
+                allow_toggle: None,
+            }),
+            ..Default::default()
+        });
+
+    config.merge_delta(&delta).unwrap();
+
+    assert!(
+        config.content.contains("state = false"),
+        "state updated: {}",
+        config.content
+    );
+    assert!(
+        config.content.contains(r#"allow_toggle = "never""#),
+        "allow_toggle preserved: {}",
         config.content
     );
 }

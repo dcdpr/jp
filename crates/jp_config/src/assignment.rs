@@ -528,6 +528,45 @@ impl KvAssignment {
         self.try_object_or_from_str().map(Some)
     }
 
+    /// Like [`Self::try_object_or_from_str`], but also accepts JSON booleans
+    /// via [`From<bool>`].
+    ///
+    /// Used for fields like `enable` that accept a bool shorthand, a string, or
+    /// a `{ ... }` table.
+    pub(crate) fn try_object_bool_or_from_str<T, E>(self) -> Result<T, KvAssignmentError>
+    where
+        T: DeserializeOwned + From<bool> + FromStr<Err = E>,
+        E: Into<BoxedError>,
+    {
+        let Self { key, value, .. } = self;
+
+        match value {
+            KvValue::Json(v @ Value::Object(_)) => {
+                serde_json::from_value(v).map_err(|err| kv_error(&key, err))
+            }
+            KvValue::Json(Value::Bool(b)) => Ok(T::from(b)),
+            KvValue::Json(Value::String(s)) | KvValue::String(s) => T::from_str(&s)
+                .map_err(Into::into)
+                .or_else(|err| assignment_error(&key, Value::String(s), err)),
+            KvValue::Json(_) => type_error(&key, &value, &["object", "bool", "string"]),
+        }
+    }
+
+    /// Convenience method for [`Self::try_object_bool_or_from_str`] that wraps
+    /// the `Ok` value into `Some`.
+    pub(crate) fn try_some_object_bool_or_from_str<T, E>(
+        self,
+    ) -> Result<Option<T>, KvAssignmentError>
+    where
+        T: DeserializeOwned + From<bool> + FromStr<Err = E>,
+        E: Into<BoxedError>,
+    {
+        if self.is_json_null() {
+            return Ok(None);
+        }
+        self.try_object_bool_or_from_str().map(Some)
+    }
+
     /// Try to parse the value using [`FromStr`].
     pub(crate) fn try_from_str<T, E>(self) -> Result<T, KvAssignmentError>
     where

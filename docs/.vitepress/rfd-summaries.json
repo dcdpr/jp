@@ -24,7 +24,7 @@
     "summary": "Llamacpp provider will drop the openai crate to properly extract reasoning content from all three llama.cpp reasoning formats."
   },
   "008-ordered-tool-directives.md": {
-    "hash": "9c59dbebffbc50f458f9f44df9f5e42fe297054e5eae1f09040004de40324b2a",
+    "hash": "5d173618f6ba31c7fc77b5b5b848ab613fe94cb1c0347ffb911059ec7bfe96cf",
     "summary": "Make CLI tool flags order-sensitive, processing `--tool` and `--no-tools` left-to-right instead of in fixed order."
   },
   "009-stateful-tool-protocol.md": {
@@ -212,15 +212,15 @@
     "summary": "Split conversation storage: extract immutable base config snapshot into separate base_config.json file from events.json."
   },
   "055-tool-groups.md": {
-    "hash": "1fa3086b22c7382a4f95b905be49b8e1aa49a28795e3c0ab72878c4262037e74",
+    "hash": "7ee66bb4381be5f2305762a1b4b0f36f05d640438d096a6ef427fc2c5f4fcf9e",
     "summary": "Named tool groups enable CLI shortcuts and exhaustive validation ensuring every tool is classified relative to a group."
   },
   "056-group-configuration-defaults.md": {
-    "hash": "cd1b390d1985c957332ff1e08c993376fb4c0b66da5d59a10045de38f4d9c920",
+    "hash": "78af2f2b1a40cec11fca3df536110e27bab8e2ca5b510b4a38009983dfa9a260",
     "summary": "Groups can declare default tool configuration, allowing tool inheritance without per-tool repetition."
   },
   "057-group-configuration-overrides.md": {
-    "hash": "03b4559dfe157c6253d33d457c6542fa568bdffe882807d06375b49268b480d0",
+    "hash": "12c558fbe5588dd27289ee648f2083dec36913b3b12816a0e6229a6d3bdd7319",
     "summary": "Adds group `overrides` section to enforce tool configuration that outlasts tool-level settings but yields to CLI flags."
   },
   "058-typed-content-blocks-for-tool-responses.md": {
@@ -320,7 +320,7 @@
     "summary": "Move editor invocation into startup pipeline to treat it as a config source, fixing phantom deltas."
   },
   "081-decompose-tool-enable-into-state-and-allow_toggle.md": {
-    "hash": "23a1a1249bb6fbec12bc91a6488f1eeb3d1536fdd3055472f4924d6318917857",
+    "hash": "5b0b17ecf25c0894688b044baae4a5af54f18ced702ef0454d31bab7ce482de3",
     "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
   },
   "082-unified-inquiry-event-recording.md": {
@@ -328,7 +328,7 @@
     "summary": "Unify inquiry event recording across all routing paths; add cancellation/redaction variants; track attempts per turn."
   },
   "083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md": {
-    "hash": "5e41c7be50a62b9413191614e605270658c3860c3249d4b30ce4ab616cfa0b96",
+    "hash": "11b0999e4212efd2f5ecbed7549921df06764b620d2c53475066e926e8292e99",
     "summary": "Built-in tool for assistant to ask typed questions mid-turn with human-only enforcement and optional answer persistence."
   },
   "084-configurable-markdown-element-coloring.md": {
