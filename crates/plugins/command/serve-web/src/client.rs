@@ -77,13 +77,11 @@ impl PluginClient {
     /// Request the list of conversations from the host.
     pub async fn list_conversations(&self) -> Result<Vec<ConversationSummary>, ClientError> {
         let id = self.next_id();
-        let rx = self.register(&id);
-
-        self.send(&PluginToHost::ListConversations(OptionalId {
+        let msg = PluginToHost::ListConversations(OptionalId {
             id: Some(id.clone()),
-        }))?;
+        });
 
-        match await_response(rx).await? {
+        match self.request(&id, &msg).await? {
             HostToPlugin::Conversations(resp) => Ok(resp.data),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -93,18 +91,42 @@ impl PluginClient {
     /// Request events for a specific conversation.
     pub async fn read_events(&self, conversation: &str) -> Result<EventsResponse, ClientError> {
         let id = self.next_id();
-        let rx = self.register(&id);
-
-        self.send(&PluginToHost::ReadEvents(ReadEventsRequest {
+        let msg = PluginToHost::ReadEvents(ReadEventsRequest {
             id: Some(id.clone()),
             conversation: conversation.to_owned(),
-        }))?;
+        });
 
-        match await_response(rx).await? {
+        match self.request(&id, &msg).await? {
             HostToPlugin::Events(resp) => Ok(resp),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
         }
+    }
+
+    /// Register a request, send it, and await the matching response.
+    ///
+    /// Removes the pending entry on a transport failure (send error or timeout)
+    /// so a stalled or failed request can't leak a dead sender.
+    /// A delivered response is removed by `dispatch`, and a closed channel
+    /// leaves nothing to remove, so the cleanup here targets only the
+    /// transport-error paths.
+    async fn request(&self, id: &str, msg: &PluginToHost) -> Result<HostToPlugin, ClientError> {
+        let rx = self.register(id);
+
+        let result = match self.send(msg) {
+            Ok(()) => await_response(rx).await,
+            Err(e) => Err(e),
+        };
+
+        if result.is_err() {
+            self.inner
+                .pending
+                .lock()
+                .expect("pending lock poisoned")
+                .remove(id);
+        }
+
+        result
     }
 
     /// Send an exit message to the host.

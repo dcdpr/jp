@@ -132,7 +132,8 @@ fn run_server(
         .set_nonblocking(true)
         .map_err(|e| format!("failed to configure listener: {e}"))?;
 
-    if !ip.is_loopback() {
+    let is_loopback = ip.is_loopback();
+    if !is_loopback {
         warn!(
             %socket_addr,
             "Binding to a non-loopback address exposes all conversations without authentication"
@@ -150,6 +151,22 @@ fn run_server(
             language: None,
         }),
     )?;
+
+    // The `warn!` above is invisible at the default log level, so surface the
+    // exposure through a `Print` that always reaches the terminal.
+    if !is_loopback {
+        send(
+            &mut stdout,
+            &PluginToHost::Print(PrintMessage {
+                text: "Warning: bound to a non-loopback address; every conversation in this \
+                       workspace is reachable over the network without authentication.\n"
+                    .into(),
+                channel: "content".into(),
+                format: "plain".into(),
+                language: None,
+            }),
+        )?;
+    }
 
     // Wrap stdout for shared access between the protocol client and log layer.
     let writer: SharedWriter = Arc::new(Mutex::new(Box::new(stdout)));

@@ -133,3 +133,30 @@ async fn pending_request_resolves_when_stdin_closes() {
 
     assert!(matches!(err, ClientError::ChannelClosed));
 }
+
+/// A writer whose every operation fails, to exercise the send-error path.
+struct FailingWriter;
+
+impl Write for FailingWriter {
+    fn write(&mut self, _buf: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "boom"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "boom"))
+    }
+}
+
+#[tokio::test]
+async fn failed_send_does_not_leak_pending() {
+    // Hold the sender so the reader loop stays parked and can't drain the map
+    // itself; the request must clean up its own entry when the send fails.
+    let (_tx, rx) = std::sync::mpsc::channel::<u8>();
+    let stdin = BufReader::new(BlockingReader { rx });
+    let writer: SharedWriter = Arc::new(Mutex::new(Box::new(FailingWriter)));
+    let (client, _shutdown) = PluginClient::start(stdin, writer);
+
+    let err = client.list_conversations().await.unwrap_err();
+    assert!(matches!(err, ClientError::Protocol(_)));
+    assert!(client.inner.pending.lock().unwrap().is_empty());
+}
