@@ -320,7 +320,7 @@
     "summary": "Move editor invocation into startup pipeline to treat it as a config source, fixing phantom deltas."
   },
   "081-decompose-tool-enable-into-state-and-allow_toggle.md": {
-    "hash": "63eafa5204a7a99f2de09c9a97f65373b380826fa1f3a26169c20fedb34f216a",
+    "hash": "5b0b17ecf25c0894688b044baae4a5af54f18ced702ef0454d31bab7ce482de3",
     "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
   },
   "082-unified-inquiry-event-recording.md": {
@@ -328,13 +328,13 @@
     "summary": "Unify inquiry event recording across all routing paths; add cancellation/redaction variants; track attempts per turn."
   },
   "083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md": {
-    "hash": "10c9a9a9ebad43505cb14920c3a8a0ec423c0339a0b5aac8f5d2a1d2c110e55a",
+    "hash": "11b0999e4212efd2f5ecbed7549921df06764b620d2c53475066e926e8292e99",
     "summary": "Built-in tool for assistant to ask typed questions mid-turn with human-only enforcement and optional answer persistence."
   },
   "084-configurable-markdown-element-coloring.md": {
-  "hash": "0b3970cd3d65e095c1f8e92bf18b0bd9e5c1f0ee60a8c977ef7ff02bc94883d6",
-  "summary": "Introduce configurable per-markdown-element styling via MarkdownStyleSheet, replacing hard-coded SGR escapes."
-},
+    "hash": "0b3970cd3d65e095c1f8e92bf18b0bd9e5c1f0ee60a8c977ef7ff02bc94883d6",
+    "summary": "Introduce configurable per-markdown-element styling via MarkdownStyleSheet, replacing hard-coded SGR escapes."
+  },
   "085-query-explain.md": {
     "hash": "3d46dd516939328c6c3256cdd24dea057bb955751620c7d383aefd4afcf48d0f",
     "summary": "Add --explain flag to jp query showing rendered system prompt, tools, attachments, and final request without calling the LLM provider."
