@@ -40,6 +40,23 @@ fn abbreviation_eg() {
 }
 
 #[test]
+fn abbreviation_eg_after_open_paren() {
+    // Regression: `(e.g.` is preceded by an open paren, not whitespace.
+    // The multi-word abbreviation merge must still fire so the
+    // parenthetical stays part of its sentence instead of splitting onto
+    // its own line.
+    assert_eq!(
+        split(
+            "Override for tools whose questions are the assistant's (e.g. `ask_user`). It works."
+        ),
+        vec![
+            "Override for tools whose questions are the assistant's (e.g. `ask_user`).",
+            "It works."
+        ]
+    );
+}
+
+#[test]
 fn abbreviation_fig() {
     assert_eq!(
         split("See Fig. 3 for details. The results are clear."),
