@@ -17,6 +17,8 @@ env:
   JUST_VERBOSE: 4
 permissions:
   contents: write
+  # Required for the publish job to dispatch the docs workflow via the API.
+  actions: write
 jobs:
   build:
     strategy:
