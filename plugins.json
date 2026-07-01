@@ -1,1 +1,35 @@
-{"version":1,"plugins":{}}
+{
+  "version": 1,
+  "plugins": {
+    "path": {
+      "id": "path",
+      "description": "Print JP directory paths",
+      "official": true,
+      "repository": "https://github.com/dcdpr/jp",
+      "type": "command",
+      "binaries": {
+        "aarch64-apple-darwin": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-aarch64-apple-darwin",
+          "sha256": "3149ea4d690760e97b6c5aa849a2d2d64eddfd674f68626860a9a163259e4a31"
+        },
+        "x86_64-pc-windows-msvc": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-pc-windows-msvc",
+          "sha256": "679b3f7630c7bf27a23853fd046142aabad1481ee4845f2f7513853c7ea5047f"
+        },
+        "x86_64-unknown-linux-gnu": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-unknown-linux-gnu",
+          "sha256": "c02e05a06db705d4232b22d73f58684d2630ea0abee5ea072cce4157fb49e44f"
+        }
+      }
+    },
+    "serve": {
+      "id": "serve",
+      "description": "JP server components",
+      "official": true,
+      "type": "command_group",
+      "suggests": [
+        "serve web"
+      ]
+    }
+  }
+}
