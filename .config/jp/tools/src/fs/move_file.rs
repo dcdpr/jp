@@ -117,7 +117,7 @@ fn fs_move_file_impl<R: ProcessRunner>(
             // so. Lumping symlinks in here is consistent with the source
             // side, where the link entry itself is what gets renamed.
             Some(_) => {
-                if let Some(outcome) = confirm_overwrite_file(answers, target) {
+                if let Some(outcome) = confirm_overwrite_file(answers, target)? {
                     return Ok(outcome);
                 }
             }
@@ -221,19 +221,23 @@ fn classify_source(
     Ok(Some(result))
 }
 
-fn confirm_overwrite_file(answers: &Map<String, Value>, target: &str) -> Option<Outcome> {
+fn confirm_overwrite_file(
+    answers: &Map<String, Value>,
+    target: &str,
+) -> Result<Option<Outcome>, Error> {
     match answers.get("overwrite_file").and_then(Value::as_bool) {
-        Some(true) => None,
-        Some(false) => Some(error_outcome(format!(
+        Some(true) => Ok(None),
+        Some(false) => Ok(Some(error_outcome(format!(
             "Destination '{target}' already exists."
-        ))),
-        None => Some(Outcome::NeedsInput {
-            question: Question::boolean(
+        )))),
+        None => {
+            let question = Question::boolean(
                 "overwrite_file",
                 format!("Destination '{target}' exists. Overwrite?"),
-            )
-            .with_default(Value::Bool(false)),
-        }),
+            )?
+            .with_default(Value::Bool(false));
+            Ok(Some(Outcome::NeedsInput { question }))
+        }
     }
 }
 
@@ -278,10 +282,11 @@ fn confirm_dirty_source<R: ProcessRunner>(
         Some(false) => Ok(Some(error_outcome(format!(
             "'{source}' has uncommitted changes; please stage or discard first."
         )))),
-        None => Ok(Some(Outcome::NeedsInput {
-            question: Question::boolean("move_dirty_source", prompt)
-                .with_default(Value::Bool(false)),
-        })),
+        None => {
+            let question =
+                Question::boolean("move_dirty_source", prompt)?.with_default(Value::Bool(false));
+            Ok(Some(Outcome::NeedsInput { question }))
+        }
     }
 }
 

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use camino::Utf8Path;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
-use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
+use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
 use jp_mcp::Client;
 use jp_tool::Question;
 use serde_json::{Map, Value};
@@ -129,6 +129,12 @@ pub enum ExecutorResult {
 
         /// The question that needs to be answered.
         question: Question,
+
+        /// Resolved provenance for the persisted `InquiryRequest`.
+        ///
+        /// Built-in tools may override this via `BuiltinTool::inquiry_source`;
+        /// local and MCP tools attribute the question to the tool by name.
+        source: InquirySource,
 
         /// Accumulated answers so far (for retry).
         accumulated_answers: IndexMap<String, Value>,

@@ -40,14 +40,15 @@ use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-/// Create an inquiry ID for a tool call question.
+/// Create the stream-correlation inquiry ID for a tool-call question.
 ///
-/// Format: `<tool_call_id>.<question_id>` — unique per question within a tool
-/// call.
+/// Format: `<tool_call_id>.<question_id>.<attempt>`, unique per attempt within
+/// the turn (`attempt` is the 1-indexed per-`(tool_call_id, question_id)`
+/// counter from `TurnState`).
 /// The tool name is not included because it's already stored in the
 /// `InquirySource` of the `InquiryRequest` event.
-pub fn tool_call_inquiry_id(tool_call_id: &str, question_id: &str) -> String {
-    format!("{tool_call_id}.{question_id}")
+pub fn tool_call_inquiry_id(tool_call_id: &str, question_id: &str, attempt: usize) -> String {
+    format!("{tool_call_id}.{question_id}.{attempt}")
 }
 
 /// Create a JSON schema for a structured inquiry.
@@ -62,7 +63,7 @@ pub fn create_inquiry_schema(question: &Question) -> Map<String, Value> {
             "type": "string",
             "enum": options
         }),
-        AnswerType::Text => json!({
+        AnswerType::Text | AnswerType::Secret => json!({
             "type": "string"
         }),
     };
@@ -206,7 +207,7 @@ impl InquiryBackend for LlmInquiryBackend {
         question: &Question,
         cancellation_token: CancellationToken,
     ) -> Result<Value, InquiryError> {
-        let config = self.config_for(tool_name, &question.id);
+        let config = self.config_for(tool_name, question.id.as_str());
 
         info!(
             inquiry_id,

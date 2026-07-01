@@ -43,7 +43,7 @@ fn test_inquiry_config(provider: MockProvider) -> InquiryConfig {
 }
 
 fn test_question() -> Question {
-    Question::boolean("confirm", "Create backup?")
+    Question::boolean("confirm", "Create backup?").unwrap()
 }
 
 fn test_events() -> ConversationStream {
@@ -53,21 +53,21 @@ fn test_events() -> ConversationStream {
 #[test]
 fn test_tool_call_inquiry_id() {
     assert_eq!(
-        tool_call_inquiry_id("call_abc123", "apply_changes"),
-        "call_abc123.apply_changes"
+        tool_call_inquiry_id("call_abc123", "apply_changes", 1),
+        "call_abc123.apply_changes.1"
     );
 }
 
 #[test]
 fn test_tool_call_inquiry_id_unique_per_question() {
-    let id_a = tool_call_inquiry_id("call_1", "confirm");
-    let id_b = tool_call_inquiry_id("call_1", "reason");
+    let id_a = tool_call_inquiry_id("call_1", "confirm", 1);
+    let id_b = tool_call_inquiry_id("call_1", "reason", 1);
     assert_ne!(id_a, id_b);
 }
 
 #[test]
 fn test_create_inquiry_schema_boolean() {
-    let question = Question::boolean("q1", "Confirm?");
+    let question = Question::boolean("q1", "Confirm?").unwrap();
 
     let schema = create_inquiry_schema(&question);
 
@@ -87,11 +87,9 @@ fn test_create_inquiry_schema_boolean() {
 
 #[test]
 fn test_create_inquiry_schema_select() {
-    let question = Question::select("q2", "Choose one").with_options(vec![
-        "A".to_string(),
-        "B".to_string(),
-        "C".to_string(),
-    ]);
+    let question = Question::select("q2", "Choose one")
+        .unwrap()
+        .with_options(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
 
     let schema = create_inquiry_schema(&question);
     let props = schema.get("properties").and_then(Value::as_object).unwrap();
@@ -107,7 +105,7 @@ fn test_create_inquiry_schema_select() {
 
 #[test]
 fn test_create_inquiry_schema_text() {
-    let question = Question::text("q3", "Enter text");
+    let question = Question::text("q3", "Enter text").unwrap();
 
     let schema = create_inquiry_schema(&question);
     let props = schema.get("properties").and_then(Value::as_object).unwrap();
@@ -122,7 +120,7 @@ fn test_create_inquiry_schema_text() {
 
 #[test]
 fn test_create_inquiry_schema_stable_across_ids() {
-    let question = Question::boolean("q1", "Confirm?");
+    let question = Question::boolean("q1", "Confirm?").unwrap();
 
     let schema_a = create_inquiry_schema(&question);
     let schema_b = create_inquiry_schema(&question);
@@ -131,7 +129,7 @@ fn test_create_inquiry_schema_stable_across_ids() {
 
 #[tokio::test]
 async fn llm_backend_returns_answer() {
-    let inquiry_id = tool_call_inquiry_id("call_abc", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_abc", "confirm", 1);
     let config = InquiryConfig {
         system_prompt: Some("You are a helpful assistant.".to_string()),
         ..test_inquiry_config(structured_provider(json!({ "answer": true })))
@@ -154,7 +152,7 @@ async fn llm_backend_returns_answer() {
 
 #[tokio::test]
 async fn llm_backend_returns_error_on_missing_structured_data() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let config = test_inquiry_config(MockProvider::with_message("I don't know"));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 
@@ -173,7 +171,7 @@ async fn llm_backend_returns_error_on_missing_structured_data() {
 
 #[tokio::test]
 async fn llm_backend_returns_error_on_answer_extraction_failure() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let config = test_inquiry_config(structured_provider(json!({ "unrelated": true })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 
@@ -194,7 +192,7 @@ async fn llm_backend_returns_error_on_answer_extraction_failure() {
 async fn llm_backend_returns_cancelled_when_token_is_already_cancelled() {
     let config = test_inquiry_config(structured_provider(json!({ "answer": true })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
 
     let token = CancellationToken::new();
     token.cancel();
@@ -214,9 +212,10 @@ async fn llm_backend_returns_cancelled_when_token_is_already_cancelled() {
 
 #[tokio::test]
 async fn llm_backend_passes_select_question() {
-    let inquiry_id = tool_call_inquiry_id("call_sel", "choose");
-    let question =
-        Question::select("choose", "Pick one").with_options(vec!["A".to_string(), "B".to_string()]);
+    let inquiry_id = tool_call_inquiry_id("call_sel", "choose", 1);
+    let question = Question::select("choose", "Pick one")
+        .unwrap()
+        .with_options(vec!["A".to_string(), "B".to_string()]);
     let config = test_inquiry_config(structured_provider(json!({ "answer": "B" })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 
@@ -235,8 +234,8 @@ async fn llm_backend_passes_select_question() {
 
 #[tokio::test]
 async fn llm_backend_passes_text_question() {
-    let inquiry_id = tool_call_inquiry_id("call_txt", "reason");
-    let question = Question::text("reason", "Why?");
+    let inquiry_id = tool_call_inquiry_id("call_txt", "reason", 1);
+    let question = Question::text("reason", "Why?").unwrap();
     let config = test_inquiry_config(structured_provider(json!({ "answer": "Because reasons" })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 
@@ -255,7 +254,7 @@ async fn llm_backend_passes_text_question() {
 
 #[tokio::test]
 async fn mock_backend_returns_configured_answer() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let backend = MockInquiryBackend::new(HashMap::from([(inquiry_id.clone(), json!(true))]));
 
     let result = backend
@@ -290,7 +289,7 @@ async fn mock_backend_returns_error_for_unknown_inquiry() {
 
 #[tokio::test]
 async fn mock_backend_ignores_cancellation_token() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let backend = MockInquiryBackend::new(HashMap::from([(inquiry_id.clone(), json!(42))]));
 
     // Even with a cancelled token, mock returns immediately.
@@ -312,7 +311,7 @@ async fn mock_backend_ignores_cancellation_token() {
 
 #[tokio::test]
 async fn llm_backend_uses_per_question_override() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let default_config = test_inquiry_config(
         // Default provider returns wrong data (would fail extraction).
         structured_provider(json!({ "unrelated": true })),
@@ -548,7 +547,7 @@ fn truncate_triggers_with_overhead() {
 
 #[tokio::test]
 async fn dedicated_model_backend_returns_answer() {
-    let inquiry_id = tool_call_inquiry_id("call_dedicated", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_dedicated", "confirm", 1);
     let config = InquiryConfig {
         provider: Arc::new(structured_provider(json!({ "answer": true }))),
         model: ModelDetails::empty(ModelIdConfig {

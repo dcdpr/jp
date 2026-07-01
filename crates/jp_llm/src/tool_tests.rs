@@ -26,7 +26,7 @@ fn test_execution_outcome_completed_error_into_response() {
 
 #[test]
 fn test_execution_outcome_needs_input_into_response() {
-    let question = Question::text("q1", "What is your name?");
+    let question = Question::text("q1", "What is your name?").unwrap();
 
     let outcome = ExecutionOutcome::NeedsInput {
         id: "call_789".to_string(),
@@ -66,7 +66,7 @@ fn test_execution_outcome_id() {
 
     let needs_input = ExecutionOutcome::NeedsInput {
         id: "id2".to_string(),
-        question: Question::text("q", "?"),
+        question: Question::text("q", "?").unwrap(),
     };
     assert_eq!(needs_input.id(), "id2");
 
@@ -96,7 +96,7 @@ fn test_execution_outcome_helper_methods() {
 
     let needs_input = ExecutionOutcome::NeedsInput {
         id: "3".to_string(),
-        question: Question::boolean("q", "?"),
+        question: Question::boolean("q", "?").unwrap(),
     };
     assert!(!needs_input.is_success());
     assert!(needs_input.needs_input());
@@ -108,6 +108,35 @@ fn test_execution_outcome_helper_methods() {
     assert!(!cancelled.is_success());
     assert!(!cancelled.needs_input());
     assert!(cancelled.is_cancelled());
+}
+
+#[test]
+fn parse_command_output_valid_needs_input() {
+    let stdout = br#"{"type":"needs_input","question":{"id":"confirm","text":"?","pre_amble":null,"answer_type":{"type":"boolean"},"default":null}}"#;
+    assert!(matches!(
+        parse_command_output(stdout, b"", true),
+        CommandResult::NeedsInput(_)
+    ));
+}
+
+#[test]
+fn parse_command_output_dotted_question_id_is_invalid_inquiry() {
+    let stdout = br#"{"type":"needs_input","question":{"id":"a.b","text":"?","pre_amble":null,"answer_type":{"type":"boolean"},"default":null}}"#;
+    let result = parse_command_output(stdout, b"", true);
+    assert!(matches!(
+        result,
+        CommandResult::InvalidInquiry { ref question_id } if question_id == "a.b"
+    ));
+    // Renders as a tool-level error, not raw text.
+    assert!(result.into_tool_result("t").is_err());
+}
+
+#[test]
+fn parse_command_output_non_outcome_is_raw() {
+    assert!(matches!(
+        parse_command_output(b"plain text", b"", true),
+        CommandResult::RawOutput { .. }
+    ));
 }
 
 /// Build a minimal `ToolParameterConfig` for use in validation tests.

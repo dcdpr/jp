@@ -1,5 +1,7 @@
+use std::{fmt, str::FromStr};
+
 use camino::Utf8PathBuf;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 mod access;
@@ -83,6 +85,97 @@ impl Outcome {
     }
 }
 
+/// A validated tool-question identifier.
+///
+/// A `QuestionId` never contains a `.`: the dot is reserved as the segment
+/// separator in the persisted inquiry ID
+/// (`<tool_call_id>.<question_id>.<attempt>`).
+/// The only ways to build one are the validating `FromStr`/`TryFrom`
+/// conversions and `Deserialize`, so an invalid id cannot exist past the tool
+/// boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[serde(transparent)]
+pub struct QuestionId(String);
+
+impl QuestionId {
+    /// The id as a string slice.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl FromStr for QuestionId {
+    type Err = InvalidQuestionId;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.contains('.') {
+            return Err(InvalidQuestionId);
+        }
+        Ok(Self(s.to_owned()))
+    }
+}
+
+impl TryFrom<String> for QuestionId {
+    type Error = InvalidQuestionId;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        if s.contains('.') {
+            return Err(InvalidQuestionId);
+        }
+        Ok(Self(s))
+    }
+}
+
+impl TryFrom<&str> for QuestionId {
+    type Error = InvalidQuestionId;
+
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        s.parse()
+    }
+}
+
+impl fmt::Display for QuestionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl PartialEq<str> for QuestionId {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<&str> for QuestionId {
+    fn eq(&self, other: &&str) -> bool {
+        self.0 == *other
+    }
+}
+
+impl<'de> Deserialize<'de> for QuestionId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::try_from(s).map_err(serde::de::Error::custom)
+    }
+}
+
+/// Error returned when a string is not a valid [`QuestionId`] (it contains a
+/// `.`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InvalidQuestionId;
+
+impl fmt::Display for InvalidQuestionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("question id must not contain '.'")
+    }
+}
+
+impl std::error::Error for InvalidQuestionId {}
+
 /// A request for additional input.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -90,7 +183,7 @@ pub struct Question {
     /// The question ID.
     ///
     /// This must be passed back to the tool when answering the question.
-    pub id: String,
+    pub id: QuestionId,
 
     /// The question to ask.
     ///
@@ -113,36 +206,60 @@ pub struct Question {
 
 impl Question {
     /// Create a new text question.
-    pub fn text(id: impl Into<String>, text: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
+    /// Fails if `id` contains a `.`.
+    pub fn text(id: impl Into<String>, text: impl Into<String>) -> Result<Self, InvalidQuestionId> {
+        Ok(Self {
+            id: QuestionId::try_from(id.into())?,
             text: text.into(),
             pre_amble: None,
             answer_type: AnswerType::Text,
             default: None,
-        }
+        })
     }
 
     /// Create a new boolean question.
-    pub fn boolean(id: impl Into<String>, text: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
+    /// Fails if `id` contains a `.`.
+    pub fn boolean(
+        id: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Result<Self, InvalidQuestionId> {
+        Ok(Self {
+            id: QuestionId::try_from(id.into())?,
             text: text.into(),
             pre_amble: None,
             answer_type: AnswerType::Boolean,
             default: None,
-        }
+        })
     }
 
-    /// Create a new boolean question.
-    pub fn select(id: impl Into<String>, text: impl Into<String>) -> Self {
-        Self {
-            id: id.into(),
+    /// Create a new select question.
+    /// Fails if `id` contains a `.`.
+    pub fn select(
+        id: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Result<Self, InvalidQuestionId> {
+        Ok(Self {
+            id: QuestionId::try_from(id.into())?,
             text: text.into(),
             pre_amble: None,
             answer_type: AnswerType::Select { options: vec![] },
             default: None,
-        }
+        })
+    }
+
+    /// Create a new secret (no-echo, non-persisted) question.
+    /// Fails if `id` contains a `.`.
+    pub fn secret(
+        id: impl Into<String>,
+        text: impl Into<String>,
+    ) -> Result<Self, InvalidQuestionId> {
+        Ok(Self {
+            id: QuestionId::try_from(id.into())?,
+            text: text.into(),
+            pre_amble: None,
+            answer_type: AnswerType::Secret,
+            default: None,
+        })
     }
 
     /// Set the preamble text.
@@ -193,6 +310,7 @@ impl Question {
 
 /// The type of answer expected for a given question.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum AnswerType {
     /// Boolean yes/no question
     Boolean,
@@ -202,6 +320,12 @@ pub enum AnswerType {
 
     /// Free-form text input
     Text,
+
+    /// Free-form text input whose answer must not be persisted on disk.
+    ///
+    /// Prompter input is not echoed, and the persisted inquiry response is
+    /// recorded as redacted rather than carrying the answer.
+    Secret,
 }
 
 /// Contextual information available to a tool.
@@ -287,3 +411,7 @@ impl Action {
         matches!(self, Self::FormatArguments)
     }
 }
+
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;
