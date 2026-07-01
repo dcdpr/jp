@@ -608,8 +608,8 @@ RFD updates accompany the code change:
 
 **One-way serde normalization.** The bool and legacy-string inputs (`true`,
 `false`, `"on"`, `"off"`, `"always"`, `"explicit"`) serialize back as the table
-form (e.g.
-`enable = true` becomes `enable = { state = true, allow_toggle = "any" }`).
+form (e.g. `enable = true` becomes `enable = { state = true, allow_toggle =
+"any" }`).
 The shape is stable from the first write-back onward.
 This is the same shorthand-to-table normalization `ModelIdConfig` already
 performs (`model.id = "anthropic/claude"` writes back as a `{ provider, name }`
