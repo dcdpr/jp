@@ -62,6 +62,10 @@ jobs:
             # Skip .d (dep-info) and .pdb files.
             case "$bin" in *.d|*.pdb) continue;; esac
             name=$(basename "$bin")
+            # Strip the .exe extension so asset names are uniform across
+            # platforms (jp-<id>-<target>). The installer re-adds .exe on
+            # Windows, and build-registry builds extension-less download URLs.
+            name="${name%.exe}"
             cp "$bin" "staged/${name}-${{ matrix.target }}"
           done
           ls -la staged/
