@@ -494,8 +494,13 @@ rfd-review NNN *ARGS: _install-jp
 #
 # Looks up the matching `rfd-review:<id>` conversation by title and attaches
 # its latest user/assistant turn (the reviewer's verdicts plus any author
-# notes from that round). When an `rfd-triage:<id>` conversation already
-# exists, prompts whether to continue, archive-and-start-fresh, or quit.
+# notes from that round).
+#
+# When the current session has an active conversation (typically the agentic
+# session that drafted the RFD), offers to triage there so the assistant keeps
+# that accumulated context. Declining falls back to a titled `rfd-triage:<id>`
+# conversation, prompting to continue, archive-and-start-fresh, or quit when one
+# already exists.
 #
 # Looks up Bear notes tagged `rfd/<id>/triage` and attaches them. If none
 # match, prompts whether to continue without notes, edit the prompt inline,
@@ -530,17 +535,42 @@ rfd-triage NNN *ARGS: _install-jp
         exit 1
     fi
 
-    title="rfd-triage:${rfd_id}"
+    # Prefer the session's active conversation, when there is one. An RFD is
+    # usually drafted in an agentic session that already holds the relevant
+    # context (the RFD text, related code, prior discussion); triaging the
+    # review there keeps that context instead of starting fresh. Falls back to
+    # the titled `rfd-triage:<id>` conversation when there's no active
+    # conversation or the offer is declined.
+    target=""
+    active_id=$(jp -F json conversation ls +s 2>/dev/null \
+        | jq -r '.[-1].ID // empty' 2>/dev/null || true)
+    if [ -n "$active_id" ]; then
+        if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+            printf "This session's active conversation is %s.\n" "$active_id" > /dev/tty
+            printf "  Triage in the [a]ctive conversation / [n]ew triage conversation / [q]uit: " > /dev/tty
+            IFS= read -r ans < /dev/tty
+        else
+            ans=n
+        fi
+        case "$ans" in
+            a|A) target="--id $active_id" ;;
+            q|Q) exit 0 ;;
+            *)   ;;
+        esac
+    fi
 
-    existing=""
-    out=$(just _resolve-conversation "$title")
-    case "$out" in
-        "CONTINUE "*) existing="${out#CONTINUE }" ;;
-        "ARCHIVE "*)  jp conversation archive "${out#ARCHIVE }" || true ;;
-        NEW)          ;;
-        QUIT)         exit 0 ;;
-        *)            echo "Unexpected from _resolve-conversation: $out" >&2; exit 1 ;;
-    esac
+    if [ -z "$target" ]; then
+        title="rfd-triage:${rfd_id}"
+        out=$(just _resolve-conversation "$title")
+        case "$out" in
+            "CONTINUE "*) target="--id ${out#CONTINUE }" ;;
+            "ARCHIVE "*)  jp conversation archive "${out#ARCHIVE }" || true
+                          target="--new --title $title" ;;
+            NEW)          target="--new --title $title" ;;
+            QUIT)         exit 0 ;;
+            *)            echo "Unexpected from _resolve-conversation: $out" >&2; exit 1 ;;
+        esac
+    fi
 
     note_attach=""
     extra_edit=""
@@ -556,78 +586,10 @@ rfd-triage NNN *ARGS: _install-jp
 
     args=$(just _shape-args "$msg" "$@")
 
-    if [ -n "$existing" ]; then
-        printf "Resuming triage on $file (%s)\n\n" "$existing" >&2
-        jp query --id "$existing" --cfg=personas/rfd-triager \
-            --attach "file://$file" \
-            --attach "jp://${review_id}?select=u,a:-1" \
-            $note_attach \
-            $extra_edit \
-            $args
-    else
-        printf "Triaging feedback on $file\n\n" >&2
-        jp query --new --title "$title" --cfg=personas/rfd-triager \
-            --attach "file://$file" \
-            --attach "jp://${review_id}?select=u,a:-1" \
-            $note_attach \
-            $extra_edit \
-            $args
-    fi
-
-# Apply triage decisions to an RFD.
-#
-# Resumes the existing `rfd-triage:<id>` conversation with the dev persona
-# so the assistant can edit the RFD file based on the triage verdicts.
-# Re-attaches the RFD file so the dev sees the current state (including
-# any prior-round edits), and looks up Bear notes tagged `rfd/<id>/apply`
-# for any author guidance about what to apply.
-#
-# Accepts a permanent number (41, 041) or a draft ID (D01).
-[group('rfd')]
-[positional-arguments]
-rfd-apply NNN *ARGS: _install-jp
-    #!/usr/bin/env sh
-    set -eu
-
-    shift # remove NNN from positional params
-    msg="The triage decisions for this RFD are in the conversation above. \
-    Please apply the accepted and amended verdicts to the RFD by editing the \
-    attached file. Re-read the file first - it may have been edited in a \
-    previous round and the line numbers from the triage may have moved. \
-    Stick to the verdicts; do not introduce changes that weren't triaged."
-
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    rfd_id="${out%% *}"
-    file="${out#* }"
-
-    # The apply step lives inside the triage conversation; that conversation
-    # must already exist.
-    triage_id=$(jp -F json conversation ls 2>/dev/null \
-        | jq -r --arg t "rfd-triage:${rfd_id}" \
-            'first(.[] | select(.Title == $t) | .ID) // empty' \
-        2>/dev/null || true)
-    if [ -z "$triage_id" ]; then
-        echo "No 'rfd-triage:${rfd_id}' conversation found. Run 'just rfd-triage ${rfd_id}' first." >&2
-        exit 1
-    fi
-
-    note_attach=""
-    extra_edit=""
-    note_out=$(just _bear-note "rfd/${rfd_id}/apply")
-    case "$note_out" in
-        "FOUND "*) note_attach="--attach ${note_out#FOUND }"
-                   printf "Attaching Bear notes tagged 'rfd/%s/apply'\n" "$rfd_id" >&2 ;;
-        EDIT)      extra_edit="--edit" ;;
-        CONTINUE)  ;;
-        QUIT)      exit 0 ;;
-        *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
-    esac
-
-    args=$(just _shape-args "$msg" "$@")
-
-    printf "Applying triage decisions to $file (%s)\n\n" "$triage_id" >&2
-    jp query --id "$triage_id" --cfg=personas/dev \
-        --attach "$file" \
+    printf "Triaging feedback on $file\n\n" >&2
+    jp query $target --cfg=personas/rfd-triager \
+        --attach "file://$file" \
+        --attach "jp://${review_id}?select=u,a:-1" \
         $note_attach \
         $extra_edit \
         $args
