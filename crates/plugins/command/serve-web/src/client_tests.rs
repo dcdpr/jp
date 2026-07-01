@@ -14,6 +14,35 @@ fn shared_writer() -> SharedWriter {
     Arc::new(Mutex::new(Box::new(Vec::<u8>::new())))
 }
 
+/// Start a client whose reader consumes bytes from the returned sender.
+///
+/// Pair with `feed_after_register` to deliver a canned response only once a
+/// request is pending.
+/// Feeding through a pre-filled reader instead races the reader thread against
+/// request registration: the reader can dispatch (and drop) the response before
+/// the request has registered, leaving the request to wait out the full
+/// timeout.
+fn channel_client() -> (PluginClient, std::sync::mpsc::Sender<u8>) {
+    let (tx, rx) = std::sync::mpsc::channel::<u8>();
+    let stdin = BufReader::new(BlockingReader { rx });
+    let (client, _shutdown) = PluginClient::start(stdin, shared_writer());
+    (client, tx)
+}
+
+/// Deliver `line` to the reader once `client` has a pending request, so the
+/// response is dispatched to a waiting receiver rather than dropped.
+fn feed_after_register(client: &PluginClient, tx: std::sync::mpsc::Sender<u8>, line: String) {
+    let client = client.clone();
+    tokio::spawn(async move {
+        while client.inner.pending.lock().unwrap().is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+        for b in line.into_bytes() {
+            let _ = tx.send(b);
+        }
+    });
+}
+
 #[tokio::test]
 async fn list_conversations_roundtrip() {
     let response = HostToPlugin::Conversations(ConversationsResponse {
@@ -26,9 +55,8 @@ async fn list_conversations_roundtrip() {
         }],
     });
 
-    let stdin_data = format!("{}\n", host_line(&response));
-    let stdin = BufReader::new(Cursor::new(stdin_data));
-    let (client, _shutdown) = PluginClient::start(stdin, shared_writer());
+    let (client, tx) = channel_client();
+    feed_after_register(&client, tx, format!("{}\n", host_line(&response)));
     let result = client.list_conversations().await.unwrap();
 
     assert_eq!(result.len(), 1);
@@ -44,9 +72,8 @@ async fn read_events_roundtrip() {
         data: vec![json!({"type": "turn_start", "timestamp": "2025-01-01T00:00:00Z"})],
     });
 
-    let stdin_data = format!("{}\n", host_line(&response));
-    let stdin = BufReader::new(Cursor::new(stdin_data));
-    let (client, _shutdown) = PluginClient::start(stdin, shared_writer());
+    let (client, tx) = channel_client();
+    feed_after_register(&client, tx, format!("{}\n", host_line(&response)));
     let result = client.read_events("456").await.unwrap();
 
     assert_eq!(result.conversation, "456");
@@ -61,9 +88,8 @@ async fn host_error_propagated() {
         message: "something went wrong".to_owned(),
     });
 
-    let stdin_data = format!("{}\n", host_line(&response));
-    let stdin = BufReader::new(Cursor::new(stdin_data));
-    let (client, _shutdown) = PluginClient::start(stdin, shared_writer());
+    let (client, tx) = channel_client();
+    feed_after_register(&client, tx, format!("{}\n", host_line(&response)));
     let err = client.list_conversations().await.unwrap_err();
 
     assert!(matches!(err, ClientError::Host(msg) if msg.contains("something went wrong")));
