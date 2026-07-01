@@ -19,8 +19,7 @@ pub struct Registry {
 
     /// Map of command path to plugin metadata.
     ///
-    /// Keys are space-separated command paths (e.g.
-    /// `"serve"`, `"serve web"`).
+    /// Keys are space-separated command paths (e.g. `"serve"`, `"serve web"`).
     /// Each key corresponds to a `jp` subcommand.
     pub plugins: BTreeMap<String, RegistryPlugin>,
 }
@@ -68,8 +67,7 @@ pub enum PluginKind {
         suggests: Vec<String>,
 
         /// Platform-specific downloadable binaries, keyed by target triple
-        /// (e.g.
-        /// `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`).
+        /// (e.g. `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`).
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         binaries: BTreeMap<String, RegistryBinary>,
     },

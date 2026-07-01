@@ -115,8 +115,8 @@ pub trait Handler: Debug + DynClone + DynHash + Send + Sync {
 }
 ```
 
-- **`scheme()`** — returns the URI scheme this handler owns (e.g.
-  `"file"`, `"http"`).
+- **`scheme()`** — returns the URI scheme this handler owns (e.g. `"file"`,
+  `"http"`).
   Must be unique across all handlers.
 - **`add(uri)`** — stores the attachment reference.
   Called when the user adds an attachment.

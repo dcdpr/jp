@@ -44,9 +44,8 @@ pub struct ReasoningConfig {
     /// spanning the full terminal width, visually distinguishing them from
     /// regular message content.
     ///
-    /// Accepts either an ANSI 256-color index (e.g.
-    /// `236`) or a hex RGB string (e.g.
-    /// `"#1d2021"`).
+    /// Accepts either an ANSI 256-color index (e.g. `236`) or a hex RGB string
+    /// (e.g. `"#1d2021"`).
     #[setting(default = default_reasoning_background)]
     pub background: Option<Color>,
 }

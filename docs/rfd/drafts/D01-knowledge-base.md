@@ -37,9 +37,9 @@ team information, skill guides — users currently have two options:
 > REVIEW:
 >
 > Attachments are also added to the system prompt, they are just a convenient
-> way to attach "something" that can be fetched using a handler (e.g.
-> `file://` or `https://`), and thus are mostly similar to "inline everything in
-> the system prompt" approach.
+> way to attach "something" that can be fetched using a handler (e.g. `file://`
+> or `https://`), and thus are mostly similar to "inline everything in the
+> system prompt" approach.
 
 Neither approach gives the assistant a structured way to discover what knowledge
 is available and pull in only what it needs.

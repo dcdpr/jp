@@ -112,8 +112,8 @@ Every command has access to it via the shared context.
 The normal command pipeline drains tasks at exactly one place: the end of
 `jp_cli::lib::run`, after `cli.command.run()` returns and before ephemeral
 conversation cleanup.
-Commands that bypass `Ctx` construction (e.g.
-`jp init`) do not run a drain — they cannot spawn tasks either.
+Commands that bypass `Ctx` construction (e.g. `jp init`) do not run a drain —
+they cannot spawn tasks either.
 
 ```rust
 // Wait for background tasks to complete and sync their results to the workspace.

@@ -24,8 +24,8 @@ use crate::{
 pub struct ProviderConfig {
     /// LLM provider configurations.
     ///
-    /// Configuration for different LLM providers (e.g.
-    /// Anthropic, OpenAI, Ollama).
+    /// Configuration for different LLM providers (e.g. Anthropic, OpenAI,
+    /// Ollama).
     #[setting(nested)]
     pub llm: LlmProviderConfig,
 

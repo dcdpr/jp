@@ -661,8 +661,7 @@ impl ChatRenderer {
 /// In `pretty` mode, the label is bold and the optional suffix and detail are
 /// dimmed.
 /// Plain mode emits the same characters without ANSI styling so it survives
-/// ANSI-stripping pipes (e.g.
-/// `jp c print | grep`).
+/// ANSI-stripping pipes (e.g. `jp c print | grep`).
 fn build_role_header_line(
     label: &str,
     suffix: Option<&str>,

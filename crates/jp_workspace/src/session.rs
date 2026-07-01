@@ -88,9 +88,8 @@
 //! ```
 //!
 //! Encoding the source keeps two sessions that share a value but differ in
-//! source from aliasing one file (e.g.
-//! `$JP_SESSION=1234` and `$TMUX_PANE=1234`, or an `Env` value that matches a
-//! session-leader PID).
+//! source from aliasing one file (e.g. `$JP_SESSION=1234` and
+//! `$TMUX_PANE=1234`, or an `Env` value that matches a session-leader PID).
 //! The file contains a `SessionMapping` with the session's conversation
 //! history.
 //!
@@ -190,8 +189,7 @@ pub enum SessionSource {
     /// detection is not possible for these — cleanup relies on checking
     /// whether the referenced conversation still exists.
     Env {
-        /// The name of the environment variable (e.g.
-        /// `"JP_SESSION"`).
+        /// The name of the environment variable (e.g. `"JP_SESSION"`).
         key: String,
     },
 }

@@ -889,8 +889,7 @@ Depends on [RFD 082] being implemented first (the recording lifecycle and the
      question's `answer_type` and — for `select` — `options` *before* applying
      it.
      On mismatch, the coordinator synthesizes a tool-level error response naming
-     `QuestionConfig.answer` as the source (e.g.
-     `"<tool_name>: the configured
+     `QuestionConfig.answer` as the source (e.g. `"<tool_name>: the configured
      conversation.tools.<tool>.questions.<id>.answer value does not match the
      question's answer_type. Update the configuration; do not retry."`), and
      records the corresponding inquiry response as `InquiryResponse::Cancelled {

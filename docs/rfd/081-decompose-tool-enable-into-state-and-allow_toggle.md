@@ -358,8 +358,8 @@ Today this is inconsistent: `tool_definitions()` goes through
 `cfg.enable.is_some_and(Enable::is_on)`, which fails for tools that rely on the
 default-on fallback.
 Under this RFD every consumer routes through the same resolver, so `--tool-use
-NAME` works for builtins (e.g.
-`describe_tools`) and for user tools that leave `enable` unset.
+NAME` works for builtins (e.g. `describe_tools`) and for user tools that leave
+`enable` unset.
 
 If [RFD 056] / [RFD 057] land, the same per-field resolution extends across
 their group-default and group-override layers in the order those RFDs define —

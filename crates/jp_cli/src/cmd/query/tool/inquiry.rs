@@ -87,8 +87,7 @@ pub enum InquiryError {
     #[error("LLM provider error: {0}")]
     Provider(#[from] jp_llm::Error),
 
-    /// The inquiry was cancelled (e.g.
-    /// Ctrl+C).
+    /// The inquiry was cancelled (e.g. Ctrl+C).
     #[error("Inquiry cancelled")]
     Cancelled,
 

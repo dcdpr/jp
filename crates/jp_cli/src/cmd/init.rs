@@ -92,8 +92,7 @@ impl Init {
     /// already set there.
     ///
     /// Skipped silently when no user-global config directory can be determined
-    /// (e.g.
-    /// `$HOME` is unset).
+    /// (e.g. `$HOME` is unset).
     /// Empty input also skips, leaving transcripts to fall back to the generic
     /// `user` label.
     fn maybe_ask_and_persist_user_name(

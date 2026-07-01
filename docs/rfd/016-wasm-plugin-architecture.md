@@ -246,8 +246,8 @@ The interfaces are intentionally narrow.
 `process.run` is "run a command in a clean environment, get output" — not raw
 `fork`/`exec`.
 `http.get` is a simple GET with optional headers — not a full HTTP client.
-The interfaces can be extended later (e.g.
-`http.post`, `process.run_streaming`) as needs arise.
+The interfaces can be extended later (e.g. `http.post`, `process.run_streaming`)
+as needs arise.
 
 ### Plugin configuration
 
@@ -321,8 +321,7 @@ The `jp_wasm` crate owns the Wasm runtime and all plugin execution:
   `reqwest`, `std::fs` with sandbox enforcement)
 - Secret scrubbing at the host boundary
 - Inquiry-based permission prompts for unconfigured capabilities
-- Capability-specific adapters (e.g.
-  `WasmHandler` for attachments)
+- Capability-specific adapters (e.g. `WasmHandler` for attachments)
 
 <!-- end list -->
 
@@ -496,8 +495,8 @@ in HTTP headers) and replaces them with `[REDACTED]`.
 This follows GitHub Actions' approach to secret masking in workflow logs.
 The same limitations apply:
 
-- Short or common values (e.g.
-  `true`, `8080`) may cause false positives in output.
+- Short or common values (e.g. `true`, `8080`) may cause false positives in
+  output.
 - Encoded forms (base64, URL-encoding, hex) are not detected.
 - Partial substring matches may garble unrelated output.
 
@@ -640,8 +639,7 @@ Bad for ecosystem stability.
 
 4. **Dynamic export naming.** The capability discovery mechanism relies on
    `wasmtime`'s `get_export_index` returning exports with predictable names
-   (e.g.
-   `jp:plugin/attachment`).
+   (e.g. `jp:plugin/attachment`).
    The exact export name format for interface exports in the component model
    needs validation during prototyping.
 

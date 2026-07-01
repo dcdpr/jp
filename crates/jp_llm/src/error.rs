@@ -584,8 +584,7 @@ pub(crate) fn extract_retry_from_text(text: &str) -> Option<Duration> {
 ///    See:
 ///    <https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers>
 /// 4. `x-ratelimit-reset-requests` / `x-ratelimit-reset-tokens` — OpenAI-style
-///    Human-duration values (e.g.
-///    `6m0s`).
+///    Human-duration values (e.g. `6m0s`).
 ///    Takes the longer of the two if both are present.
 /// 5. `x-ratelimit-reset` — Unix timestamp, converted relative to now.
 fn extract_retry_after(headers: &HeaderMap) -> Option<Duration> {

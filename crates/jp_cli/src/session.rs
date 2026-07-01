@@ -18,9 +18,9 @@ use tracing::debug;
 /// session granularity.
 ///
 /// Only variables with per-tab or per-pane granularity are included.
-/// Per-window variables (e.g.
-/// `$WT_SESSION`, `$KITTY_WINDOW_ID`, `$ALACRITTY_WINDOW_ID`) are deliberately
-/// excluded because multiple tabs in the same window share the value.
+/// Per-window variables (e.g. `$WT_SESSION`, `$KITTY_WINDOW_ID`,
+/// `$ALACRITTY_WINDOW_ID`) are deliberately excluded because multiple tabs in
+/// the same window share the value.
 const TERMINAL_SESSION_VARS: &[(&str, &str)] = &[
     ("TMUX_PANE", "tmux"),
     ("WEZTERM_PANE", "WezTerm"),

@@ -169,9 +169,9 @@ This is what makes cross-backend transfer (e.g. a future sqlite-backed workspace
 exporting into a filesystem-backed one) work without any format-translation
 matrix: one interchange format, N backend adapters that already exist as the
 load/persist traits.
-A per-backend export format (e.g.
-SQL dumps from an sqlite backend) would be backup tooling for that backend, not
-conversation interchange, and is out of scope here.
+A per-backend export format (e.g. SQL dumps from an sqlite backend) would be
+backup tooling for that backend, not conversation interchange, and is out of
+scope here.
 
 ### Naming: "import" is now two things
 

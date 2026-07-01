@@ -125,8 +125,7 @@ pub enum Event {
 
     /// The end of a fenced code block.
     FencedCodeEnd {
-        /// The closing fence string (e.g.
-        /// ` ``` ` or `~~~~~`).
+        /// The closing fence string (e.g. ` ``` ` or `~~~~~`).
         fence: String,
         /// Visual indent (in spaces) the renderer should apply.
         indent: usize,

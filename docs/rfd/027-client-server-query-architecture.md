@@ -79,8 +79,7 @@ jp query "message"          jp query --detach "message"
 ```
 
 The server is the `jp` binary re-executed with a hidden `_serve` subcommand
-(e.g.
-`jp _serve --config-fd=N --socket-path=...`).
+(e.g. `jp _serve --config-fd=N --socket-path=...`).
 This subcommand is not visible in `--help` and is not part of the public CLI
 surface.
 It runs the agent loop from `jp_agent`, manages the conversation lock, persists

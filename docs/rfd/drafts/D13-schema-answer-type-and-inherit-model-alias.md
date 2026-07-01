@@ -34,8 +34,8 @@ schema and receive a complete structured answer in a single inquiry call.
 
 [RFD 034] introduced per-question model targeting so that different inquiry
 questions can be routed to different models.
-The typical setup routes inquiries to a cheap model (e.g.
-Haiku) to save cost on simple boolean questions.
+The typical setup routes inquiries to a cheap model (e.g. Haiku) to save cost on
+simple boolean questions.
 
 Some inquiry questions require the main assistant model's capabilities — for
 example, generating file content or writing code.

@@ -761,9 +761,8 @@ fn test_inline_code_wrap_preserves_code_bg_on_content() {
 }
 
 /// Regression: when a wrap-break landed between the *last breakable space* and
-/// the start of an inline span (e.g.
-/// `**bold**` opened mid-line), the escapes recorded past the break point were
-/// dropped.
+/// the start of an inline span (e.g. `**bold**` opened mid-line), the escapes
+/// recorded past the break point were dropped.
 /// The continuation line was then re-stylized using `attrs.restore_sequence()`,
 /// which promoted the style (here: bold) onto text that should have been plain.
 #[test]

@@ -459,10 +459,8 @@ impl KvAssignment {
     /// object are left untouched.
     ///
     /// This is the right semantic for partial-config overrides where the caller
-    /// only wants to change specific fields (e.g.
-    /// `enable` and `run`) without wiping out fields loaded from earlier config
-    /// layers (e.g.
-    /// `source`).
+    /// only wants to change specific fields (e.g. `enable` and `run`) without
+    /// wiping out fields loaded from earlier config layers (e.g. `source`).
     ///
     /// [`try_object`]: Self::try_object
     pub(crate) fn try_merge_object<T: AssignKeyValue>(self, target: &mut T) -> AssignResult {

@@ -56,10 +56,8 @@ Search for item definitions within a crate.
 
 Each item contains:
 
-- Item Path (e.g.
-  `serde_json::value::Value`)
-- Item Type (e.g.
-  `enum`)
+- Item Path (e.g. `serde_json::value::Value`)
+- Item Type (e.g. `enum`)
 - Type Signature
 - Documentation
 - Related Resource URIs

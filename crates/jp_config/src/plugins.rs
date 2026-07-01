@@ -31,8 +31,7 @@ pub struct PluginsConfig {
     #[setting(default = 5)]
     pub shutdown_timeout_secs: u16,
 
-    /// Command plugin configurations, keyed by plugin name (e.g.
-    /// `serve`).
+    /// Command plugin configurations, keyed by plugin name (e.g. `serve`).
     #[setting(nested, merge = merge_nested_indexmap)]
     pub command: IndexMap<String, CommandPluginConfig>,
 }

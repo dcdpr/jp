@@ -65,8 +65,7 @@ use crate::{
 
 /// Events produced by the merged streaming loop sources.
 enum StreamingLoopEvent {
-    /// A signal from the signal handler (e.g.
-    /// Ctrl+C).
+    /// A signal from the signal handler (e.g. Ctrl+C).
     Signal(SignalTo),
     /// An event from the LLM provider stream.
     Llm(Box<Result<Event, StreamError>>),

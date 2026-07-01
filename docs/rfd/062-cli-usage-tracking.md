@@ -199,8 +199,7 @@ struct ValueUsage {
 ```
 
 Arguments are keyed by their **clap argument ID** — the Rust field name in the
-derive struct (e.g.
-`model`, `no_edit`, `reasoning`).
+derive struct (e.g. `model`, `no_edit`, `reasoning`).
 This is the canonical identifier that is stable regardless of whether the user
 typed `-m`, `--model`, or `--model=opus`.
 Short flags, long flags, and positional arguments all share the same ID space.
@@ -556,9 +555,8 @@ Not worth the complexity for counter data.
 
 - **Field renames orphan usage data**: Clap's derive API assigns argument IDs
   from the Rust field name, not from `long` or `short`.
-  Renaming a field (e.g.
-  `model` → `model_id`) changes the clap ID from `model` to `model-id` even if
-  the CLI flags (`-m`, `--model`) are unchanged.
+  Renaming a field (e.g. `model` → `model_id`) changes the clap ID from `model`
+  to `model-id` even if the CLI flags (`-m`, `--model`) are unchanged.
   This orphans the old ID's counters and starts fresh under the new ID.
   This is more likely than a CLI-breaking rename since the field name is an
   internal detail.

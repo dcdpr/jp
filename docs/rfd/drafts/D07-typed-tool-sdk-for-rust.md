@@ -228,8 +228,7 @@ This connects the SDK to the protocol defined in RFD D06.
 
 Convert existing workspace tools one at a time from `t.req()` / `t.opt()` to
 typed args structs.
-Start with simple tools (e.g.
-`cargo_check`) and work toward complex ones (e.g.
+Start with simple tools (e.g. `cargo_check`) and work toward complex ones (e.g.
 `fs_modify_file`).
 Each migration is independently mergeable.
 

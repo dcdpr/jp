@@ -167,8 +167,7 @@ InquiryRequest (tool 2)   ← persisted when tool 2 hits inquiry
 ```
 
 All requests precede all responses, satisfying provider ordering constraints
-(e.g.
-Gemini requires function calls grouped before function responses).
+(e.g. Gemini requires function calls grouped before function responses).
 Responses may arrive out of request order (tool 3 before tool 2), but providers
 match responses to requests by `tool_call_id`, not by position.
 

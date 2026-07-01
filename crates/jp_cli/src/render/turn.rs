@@ -39,8 +39,7 @@ pub enum ConfigSource {
     Fixed,
 }
 
-/// Renders conversation events for replay (e.g.
-/// `jp conversation print`).
+/// Renders conversation events for replay (e.g. `jp conversation print`).
 ///
 /// Owns a [`TurnView`] for chat/structured rendering and a [`ToolRenderer`] for
 /// tool UI; dispatches each event to the right one and rebuilds the view at

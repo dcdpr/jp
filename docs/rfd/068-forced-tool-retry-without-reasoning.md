@@ -57,8 +57,7 @@ If all conditions hold, trigger a retry.
    The model's reasoning and text response from the first attempt are already in
    the conversation history, giving it full context.
 2. Build a new `ChatQuery` with:
-   - The original `tool_choice` (e.g.
-     `Function("git_list_patches")`)
+   - The original `tool_choice` (e.g. `Function("git_list_patches")`)
    - Reasoning disabled (override the config for this single request)
 3. The provider layer now sees a forced tool call with no reasoning config, so
    it sends the real `tool_choice` parameter to the API.

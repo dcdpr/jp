@@ -20,8 +20,8 @@ No changes to JP's agent loop are required.
 
 ## Why sub-agents?
 
-Using a frontier model (e.g.
-Claude Opus) for an entire conversation is expensive.
+Using a frontier model (e.g. Claude Opus) for an entire conversation is
+expensive.
 A typical agent task — "refactor error handling in jp\_llm" — benefits from a
 research-plan-implement workflow: research the codebase on a cheaper model,
 produce a plan, then execute.

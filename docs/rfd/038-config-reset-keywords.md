@@ -33,9 +33,8 @@ enum with `Apply` (existing shape) and `Reset` (new) variants.
 
 This RFD focuses on reset points in the `--cfg` directive stream: the two
 keyword reset points and the entry-local `loader.reset = "none"` setting.
-Conversation-ID values for `--cfg` (e.g.
-`--cfg=jp-c17528832001`) and fork-implicit config are out of scope here; see
-[Non-Goals](#non-goals).
+Conversation-ID values for `--cfg` (e.g. `--cfg=jp-c17528832001`) and
+fork-implicit config are out of scope here; see [Non-Goals](#non-goals).
 
 ## Motivation
 
@@ -456,8 +455,8 @@ event at creation time.
 
 ## Drawbacks
 
-**`--no-cfg` alone is still incomplete.** Some config fields (e.g.
-`model`) are required and have no default values.
+**`--no-cfg` alone is still incomplete.** Some config fields (e.g. `model`) are
+required and have no default values.
 `--no-cfg` without subsequent `--cfg` values produces a config that fails
 validation.
 This is the intended behavior for the escape-hatch use case (user will add their

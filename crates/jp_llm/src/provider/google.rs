@@ -857,8 +857,7 @@ fn resolve_and_process(value: Value, defs: &Map<String, Value>) -> Value {
     }
 }
 
-/// Look up a `$ref` path (e.g.
-/// `#/$defs/MyType`) in the definitions map.
+/// Look up a `$ref` path (e.g. `#/$defs/MyType`) in the definitions map.
 fn resolve_ref(ref_path: &str, defs: &Map<String, Value>) -> Option<Map<String, Value>> {
     let name = ref_path.rsplit("defs/").next().unwrap_or(ref_path);
     defs.get(name).and_then(Value::as_object).cloned()

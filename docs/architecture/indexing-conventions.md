@@ -47,8 +47,8 @@ Two consequences worth calling out:
   reading where `1` is the first turn and `-1` is the last.
   As a result `--from -N` selects the same starting turn as `--last N`.
 
-- The compaction DSL's `-N` (e.g.
-  `..-3`, "keep the last 3 turns") is a *count*, not a position.
+- The compaction DSL's `-N` (e.g. `..-3`, "keep the last 3 turns") is a *count*,
+  not a position.
   It is unaffected by the 1-based rule and keeps its Python-slice "keep last N"
   meaning.
   Only the DSL's absolute bounds (`5..`) are positions and are 1-based.

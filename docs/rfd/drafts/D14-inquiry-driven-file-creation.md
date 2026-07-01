@@ -224,8 +224,8 @@ The output shows only the file path.
   invisible to the user.
 
 - **`inherit` model means inquiry cost equals main model cost.** Routing the
-  inquiry to the main model (e.g.
-  Opus) instead of a cheap model (Haiku) is more expensive per call.
+  inquiry to the main model (e.g. Opus) instead of a cheap model (Haiku) is more
+  expensive per call.
   This is unavoidable — generating file content requires the main model's
   capabilities.
   The cost is comparable to what the LLM would have spent generating content

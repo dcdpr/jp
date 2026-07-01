@@ -366,9 +366,8 @@ struct CommandArtifacts {
 /// Launch jp via `launcher`, copy its trace log and streams into `out_dir`
 /// (keyed by `<ts><label>`), and return the filtered events.
 ///
-/// `label` distinguishes a command's files within a sequence (e.g.
-/// `-cmd1`); it is empty for a single-command run, preserving the standalone
-/// file names.
+/// `label` distinguishes a command's files within a sequence (e.g. `-cmd1`); it
+/// is empty for a single-command run, preserving the standalone file names.
 /// Returns an error when jp exits without flushing its trace log.
 #[allow(
     clippy::too_many_arguments,

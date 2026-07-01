@@ -105,8 +105,7 @@ fn command_cmd_string_forwards_appended_path() {
     assert_eq!(out, "<FILE>");
 }
 
-/// Multiple edited paths (e.g.
-/// `jp conversation edit`) are all appended.
+/// Multiple edited paths (e.g. `jp conversation edit`) are all appended.
 #[cfg(unix)]
 #[test]
 fn command_cmd_string_forwards_multiple_paths() {

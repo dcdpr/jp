@@ -145,8 +145,8 @@ impl Octocrab {
 
     /// GET a path with a custom `Accept` header, returning the raw response
     /// body as a string.
-    /// Used for endpoints that vary their content type by `Accept` (e.g.
-    /// PR diffs via `application/vnd.github.diff`).
+    /// Used for endpoints that vary their content type by `Accept` (e.g. PR
+    /// diffs via `application/vnd.github.diff`).
     pub(crate) async fn get_with_accept(&self, path: &str, accept: &str) -> Result<String> {
         let request = self
             .inner

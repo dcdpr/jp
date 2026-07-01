@@ -28,8 +28,8 @@ without requiring them to context-switch to a browser or remember exact flag
 names.
 Completions are particularly valuable for JP because:
 
-- Flag names are not always guessable (e.g.
-  `-!` for `--no-persist` or `-%` for `--template`).
+- Flag names are not always guessable (e.g. `-!` for `--no-persist` or `-%` for
+  `--template`).
 - Several flags accept structured values that benefit from completion hints
   (`--cfg KEY=VALUE`, `--model provider/name`).
 - Subcommands have short aliases (`q` for `query`, `c` for `conversation`) that

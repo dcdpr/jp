@@ -1636,9 +1636,9 @@ fn comrak_options_with_intra_doc_links() -> Options<'static> {
 /// Recursively walk the AST collecting paragraphs to reflow.
 ///
 /// Descends into the container types matched explicitly below.
-/// Other containers (e.g.
-/// `DescriptionList`) and leaf blocks (code blocks, headings, tables, HTML
-/// blocks) are skipped, so their content survives verbatim.
+/// Other containers (e.g. `DescriptionList`) and leaf blocks (code blocks,
+/// headings, tables, HTML blocks) are skipped, so their content survives
+/// verbatim.
 ///
 /// Paragraphs that contain a [`LineBreak`] inline child — i.e. an explicit
 /// markdown hard break — are also left untouched.
@@ -1876,8 +1876,7 @@ fn collect_inline_atomic_ranges_from_text(text: &str) -> Vec<Range<usize>> {
 /// paragraph encountered.
 /// Mirrors the descend list in `collect_paragraphs` so we don't miss a
 /// paragraph nested in a list item or alert inside the stripped block-quote
-/// content (e.g.
-/// `> - foo. bar.`).
+/// content (e.g. `> - foo. bar.`).
 fn walk_paragraphs_for_atomic_ranges<'a>(
     node: &'a AstNode<'a>,
     line_starts: &[usize],

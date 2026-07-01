@@ -309,8 +309,8 @@ Examples below use `jp w` for brevity.
   workspace.
 - `jp w ls`: list known workspaces and their checkouts, mirroring `jp c ls`.
 - `jp w show [<target>]`: with no target, report the session's active workspace;
-  with `<target>` (e.g.
-  `jp w show <id>`), report that workspace — mirroring `jp c show`.
+  with `<target>` (e.g. `jp w show <id>`), report that workspace — mirroring
+  `jp c show`.
   The readout covers how it was resolved, whether the session is **sticky** to
   it, whether cwd is overriding it, the conversation count, and the active
   conversation (if any).

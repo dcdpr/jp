@@ -206,11 +206,10 @@ impl TurnCoordinator {
     /// in the stream.
     ///
     /// Does NOT render the user's request to the terminal.
-    /// The caller (e.g.
-    /// `query.rs` after an editor session) is responsible for echoing the
-    /// request via [`TurnView::render_user_request`] when desired — most
-    /// invocations do not need an echo since the user already saw their own
-    /// input on the terminal.
+    /// The caller (e.g. `query.rs` after an editor session) is responsible for
+    /// echoing the request via [`TurnView::render_user_request`] when desired
+    /// — most invocations do not need an echo since the user already saw their
+    /// own input on the terminal.
     ///
     /// [`TurnStart`]: jp_conversation::event::TurnStart
     pub fn start_turn(&mut self, stream: &mut ConversationStream, request: ChatRequest) {

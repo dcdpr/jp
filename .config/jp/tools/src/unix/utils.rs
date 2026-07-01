@@ -226,8 +226,8 @@ fn scan_fragment(
 /// - `/dev` — stdio file descriptors.
 /// - Workspace root — the files the tool should operate on.
 /// - Symlink chain ancestors — every directory from the `which` path to the
-///   canonical binary, including resolved directory symlinks (e.g.
-///   `/etc` → `/private/etc`).
+///   canonical binary, including resolved directory symlinks (e.g. `/etc` →
+///   `/private/etc`).
 ///   Required for `execvp` traversal.
 /// - Canonical binary directory — the real executable.
 /// - Transitive library directories — from `otool -L`.
@@ -360,8 +360,8 @@ fn resolve_binary(util: &str) -> Result<ResolvedBinary, std::io::Error> {
 /// For each link in the chain, adds every ancestor directory up to `/` (since
 /// `sandbox-exec` needs `subpath` access to each intermediate directory for
 /// `execvp` traversal).
-/// Also resolves directory symlinks (e.g.
-/// `/etc` → `/private/etc`) so their real paths are included.
+/// Also resolves directory symlinks (e.g. `/etc` → `/private/etc`) so their
+/// real paths are included.
 fn collect_symlink_dirs(path: &Path) -> Vec<String> {
     let mut dirs = Vec::new();
     let mut current = path.to_path_buf();

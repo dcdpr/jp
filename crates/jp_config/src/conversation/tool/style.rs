@@ -67,8 +67,7 @@ pub struct DisplayStyleConfig {
     /// How to display the tool call parameters.
     ///
     /// - `json`: Show as JSON.
-    /// - `function_call`: Show as a function call (e.g.
-    ///   `tool_name(arg=val)`).
+    /// - `function_call`: Show as a function call (e.g. `tool_name(arg=val)`).
     /// - `off`: Do not show parameters.
     /// - `<command>`: Use a custom command to format the parameters.
     #[setting(default)]

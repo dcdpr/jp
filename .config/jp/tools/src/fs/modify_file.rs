@@ -331,8 +331,7 @@ fn pattern_preview(s: &str) -> String {
 
 /// Prepends a report to a successful outcome.
 ///
-/// Non-success outcomes (e.g.
-/// `NeedsInput`) are passed through unchanged.
+/// Non-success outcomes (e.g. `NeedsInput`) are passed through unchanged.
 fn append_report(outcome: Outcome, report: &str) -> Outcome {
     if report.is_empty() {
         return outcome;

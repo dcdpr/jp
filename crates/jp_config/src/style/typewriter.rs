@@ -44,8 +44,8 @@ pub struct TypewriterConfig {
     /// `text_delay`/`code_delay` as the queue of pending characters grows,
     /// keeping printed output within `max_latency` of what the source has
     /// already emitted.
-    /// With a fast provider (e.g.
-    /// Cerebras) this prevents the typewriter from falling many seconds behind.
+    /// With a fast provider (e.g. Cerebras) this prevents the typewriter from
+    /// falling many seconds behind.
     /// When the source stops emitting, the controller switches to drain mode
     /// and stops slowing back down as the queue empties.
     ///

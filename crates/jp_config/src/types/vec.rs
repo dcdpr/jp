@@ -94,9 +94,9 @@ impl<T> MergeableVec<T> {
 
     /// Returns `true` if the `MergeableVec` is empty.
     ///
-    /// A `Merged` variant with no items but with metadata (e.g.
-    /// `dedup` or `strategy`) is NOT considered empty, because the metadata
-    /// must still participate in merges.
+    /// A `Merged` variant with no items but with metadata (e.g. `dedup` or
+    /// `strategy`) is NOT considered empty, because the metadata must still
+    /// participate in merges.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         match self {

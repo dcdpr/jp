@@ -37,8 +37,7 @@ use crate::{
 pub(crate) struct ConversationLoadRequest {
     /// Parsed conversation targets from CLI arguments.
     ///
-    /// - `None`: no conversations needed (e.g.
-    ///   `jp c ls`, `jp query --new`)
+    /// - `None`: no conversations needed (e.g. `jp c ls`, `jp query --new`)
     /// - `Some(vec![])`: need one, resolve from session/picker
     /// - `Some(vec![target])`: single target (keyword, ID, or picker)
     /// - `Some(vec![id1, id2])`: multiple explicit IDs
@@ -300,8 +299,8 @@ pub(crate) struct PickerFilter {
     /// Restrict the picker to this set of conversation IDs.
     ///
     /// Composed on top of the partition filters above.
-    /// Used by callers that pre-compute a candidate set (e.g.
-    /// `c use --grep`) and want the picker to draw only from that set.
+    /// Used by callers that pre-compute a candidate set (e.g. `c use --grep`)
+    /// and want the picker to draw only from that set.
     pub candidate_ids: Option<Vec<ConversationId>>,
 }
 
@@ -689,8 +688,7 @@ fn resolve_single_picker(
 /// Resolve the `conversation.default_id` config value to a concrete ID.
 ///
 /// Returns `None` for `Ask` or unset (fall through to picker), or if the target
-/// cannot be resolved (e.g.
-/// `Previous` with no session history).
+/// cannot be resolved (e.g. `Previous` with no session history).
 fn resolve_default_id(
     default_id: DefaultConversationId,
     workspace: &Workspace,
