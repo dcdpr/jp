@@ -14,7 +14,7 @@
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-pc-windows-msvc",
-          "sha256": "679b3f7630c7bf27a23853fd046142aabad1481ee4845f2f7513853c7ea5047f"
+          "sha256": "21ae9d7ee7bde7fd14aa40634689b5a08e6c2f215aa2ed8f310a5885951479db"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-unknown-linux-gnu",
