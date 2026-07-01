@@ -8,6 +8,7 @@ on:
       - 'crates/plugins/**'
       - 'crates/internal/build-registry/**'
       - 'docs/registry/**'
+      - '.github/workflows/plugins.yml'
 env:
   CARGO_TERM_COLOR: always
   JUST_TIMESTAMP: true
