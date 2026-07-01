@@ -228,8 +228,9 @@ fn parse_args(init: &InitMessage) -> Args {
 
 /// Install the tracing subscriber with the protocol log layer.
 ///
-/// Events are buffered until the protocol writer is available. Returns a
-/// handle that must be activated once the writer and log level are known.
+/// Events are buffered until the protocol writer is available.
+/// Returns a handle that must be activated once the writer and log level are
+/// known.
 fn init_tracing() -> ProtocolLogHandle {
     use tracing_subscriber::prelude::*;
 

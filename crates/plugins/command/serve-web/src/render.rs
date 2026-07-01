@@ -1,9 +1,9 @@
 //! Rendering pipeline: raw JSON events to HTML-ready types.
 //!
 //! Works directly with `serde_json::Value` events received from the JP host
-//! protocol, without depending on `jp_conversation` types. The host decodes
-//! base64-encoded storage fields before sending, so values arrive as plain
-//! text.
+//! protocol, without depending on `jp_conversation` types.
+//! The host decodes base64-encoded storage fields before sending, so values
+//! arrive as plain text.
 
 use serde_json::Value;
 

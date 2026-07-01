@@ -1,7 +1,7 @@
 //! Custom tracing layer that sends log events through the plugin protocol.
 //!
-//! Events are buffered in memory until the protocol connection is ready,
-//! then flushed and all subsequent events are written as `PluginToHost::Log`
+//! Events are buffered in memory until the protocol connection is ready, then
+//! flushed and all subsequent events are written as `PluginToHost::Log`
 //! JSON-lines on stdout.
 
 use std::{io::Write, sync::Mutex};
@@ -45,10 +45,11 @@ impl ProtocolLogLayer {
     /// Create a new layer and its activation handle.
     ///
     /// The layer buffers events until [`ProtocolLogHandle::activate`] is
-    /// called. Both the layer and handle share a `'static` reference to the
-    /// sink (leaked via `Box::leak`). This is intentional: the layer is
-    /// installed as the global tracing subscriber and lives for the entire
-    /// process.
+    /// called.
+    /// Both the layer and handle share a `'static` reference to the sink
+    /// (leaked via `Box::leak`).
+    /// This is intentional: the layer is installed as the global tracing
+    /// subscriber and lives for the entire process.
     pub fn new() -> (Self, ProtocolLogHandle) {
         let sink: &'static Mutex<Sink> =
             Box::leak(Box::new(Mutex::new(Sink::Buffering(Vec::new()))));
@@ -60,8 +61,8 @@ impl ProtocolLogLayer {
 impl ProtocolLogHandle {
     /// Switch from buffering to protocol mode.
     ///
-    /// Flushes any buffered events that meet `min_level` through `writer`,
-    /// then all future events are sent directly.
+    /// Flushes any buffered events that meet `min_level` through `writer`, then
+    /// all future events are sent directly.
     pub fn activate(&self, writer: &SharedWriter, min_level: Level) {
         let buffer = {
             let mut sink = self.sink.lock().expect("sink lock");

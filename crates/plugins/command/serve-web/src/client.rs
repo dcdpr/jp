@@ -1,8 +1,8 @@
 //! Protocol client for communicating with the JP host.
 //!
 //! Manages the stdin reader loop and provides async methods for sending
-//! requests and awaiting responses. Thread-safe and shareable across axum
-//! handlers via `Arc`.
+//! requests and awaiting responses.
+//! Thread-safe and shareable across axum handlers via `Arc`.
 
 use std::{
     collections::HashMap,
@@ -21,8 +21,8 @@ use jp_plugin::message::{
 use tokio::sync::{oneshot, watch};
 use tracing::{debug, error, trace, warn};
 
-/// Shared writer for stdout, used by both the protocol client and the
-/// tracing log layer.
+/// Shared writer for stdout, used by both the protocol client and the tracing
+/// log layer.
 pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 
 /// A protocol client that talks to the JP host over stdin/stdout.
@@ -43,8 +43,9 @@ impl PluginClient {
     /// Start the protocol client.
     ///
     /// Spawns a background thread that reads from `stdin` and dispatches
-    /// responses to pending requests. Returns the client and a watch channel
-    /// that signals when a shutdown message is received from the host.
+    /// responses to pending requests.
+    /// Returns the client and a watch channel that signals when a shutdown
+    /// message is received from the host.
     pub fn start(
         stdin: impl BufRead + Send + 'static,
         writer: SharedWriter,
