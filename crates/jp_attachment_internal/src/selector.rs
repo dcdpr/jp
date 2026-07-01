@@ -2,9 +2,9 @@
 //!
 //! See the crate README for the full grammar.
 //!
-//! The DSL uses `,` as the content separator (e.g.
-//! `u,a:-1`) so it survives URL query-string parsing intact — form-urlencoded
-//! decoding turns `+` into a space, but leaves `,` alone.
+//! The DSL uses `,` as the content separator (e.g. `u,a:-1`) so it survives URL
+//! query-string parsing intact — form-urlencoded decoding turns `+` into a
+//! space, but leaves `,` alone.
 
 use std::{fmt, str::FromStr};
 

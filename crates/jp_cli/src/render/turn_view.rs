@@ -53,9 +53,8 @@ pub(crate) struct TurnView {
     /// [`Self::ensure_assistant_header`] on first use.
     assistant_header_rendered: bool,
 
-    /// Dimmed detail (e.g.
-    /// `turn 2, 12 minutes ago`) to append to the first role header rendered in
-    /// the current turn.
+    /// Dimmed detail (e.g. `turn 2, 12 minutes ago`) to append to the first
+    /// role header rendered in the current turn.
     /// Consumed by [`Self::emit_role_header`], which every header path routes
     /// through, so the first header in a turn takes it and later ones don't.
     /// Set per turn by replay via [`Self::set_turn_detail`]; left `None` by the
@@ -97,8 +96,7 @@ impl TurnView {
     }
 
     /// Set the dimmed detail attached to the first role header of the upcoming
-    /// turn (e.g.
-    /// `turn 2, 12 minutes ago`).
+    /// turn (e.g. `turn 2, 12 minutes ago`).
     ///
     /// Consumed by whichever header — user or assistant — renders first;
     /// later headers in the same turn render without it.

@@ -9,9 +9,8 @@
 ## Summary
 
 This RFD introduces support for attaching files from outside the workspace
-directory (e.g.
-`jp q --attach ~/Downloads/report.pdf`) and defines the `external:` URI scheme
-for identifying these resources.
+directory (e.g. `jp q --attach ~/Downloads/report.pdf`) and defines the
+`external:` URI scheme for identifying these resources.
 External attachments are content-snapshotted on attach, privacy-safe (no
 absolute paths stored in conversation state), and compatible with [RFD 066]'s
 blob store and [RFD 067]'s deduplication.

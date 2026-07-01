@@ -206,8 +206,7 @@ fn load_partial_at_path_with_max_depth<P: Into<PathBuf>>(
 /// either the filesystem root or `root` is reached.
 ///
 /// At each directory level, it attempts to load a config file with the same
-/// file name (e.g.
-/// `config.toml`).
+/// file name (e.g. `config.toml`).
 /// All found configs are merged together, with deeper (more specific) paths
 /// taking precedence over shallower ones.
 ///

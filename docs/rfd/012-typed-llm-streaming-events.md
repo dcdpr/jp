@@ -156,9 +156,8 @@ parsed.
 
 ### Metadata handling
 
-Streaming metadata (e.g.
-Anthropic's thinking signatures via `SignatureDelta`) currently piggy-backs on
-`ConversationEvent`'s metadata map.
+Streaming metadata (e.g. Anthropic's thinking signatures via `SignatureDelta`)
+currently piggy-backs on `ConversationEvent`'s metadata map.
 With `EventPart`, metadata moves to a field on `Event::Part`:
 
 ```rust

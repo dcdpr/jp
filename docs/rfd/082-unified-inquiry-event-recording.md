@@ -307,11 +307,10 @@ For every `Outcome::NeedsInput { question }`:
    cancellation — the token is cancelled by `interrupt/signals.rs` in response
    to user actions (`InterruptAction::RestartTool`, `ToolCancelled`, hard quit).
    Mapping it to `User` (not `BackendError`) keeps the audit trail honest.
-   Prompter I/O errors (e.g.
-   EOF on stdin mid-prompt) are indistinguishable from Ctrl-C at the
-   coordinator's vantage today and follow the same `User` path; if a future
-   change distinguishes them, the right landing is a new `CancellationReason`
-   variant rather than re-using `BackendError`.
+   Prompter I/O errors (e.g. EOF on stdin mid-prompt) are indistinguishable from
+   Ctrl-C at the coordinator's vantage today and follow the same `User` path; if
+   a future change distinguishes them, the right landing is a new
+   `CancellationReason` variant rather than re-using `BackendError`.
 
 `Cancelled` records that the inquiry was closed without an answer — for the
 audit trail only.
@@ -382,9 +381,8 @@ Tool authors MUST NOT set `default` to a sensitive literal on an
 **Scope.** 082 gives the `Secret` variant three effects:
 
 1. **Prompter no-echo input.** `PromptBackend` gains a no-echo input method
-   (e.g.
-   `password`), implemented on `TerminalPromptBackend` via `inquire::Password`
-   and on `MockPromptBackend` as a regular queued response.
+   (e.g. `password`), implemented on `TerminalPromptBackend` via
+   `inquire::Password` and on `MockPromptBackend` as a regular queued response.
    `ToolPrompter::prompt_question` dispatches to it when `question.answer_type
    == AnswerType::Secret`.
 2. **`Redacted` persistence.** Every code path that would record
@@ -760,8 +758,7 @@ format](#inquiry-id-format).
   Old streams cannot contain `Secret` answers, so backward compat on read is
   trivial.
 - **`PromptBackend` gains a no-echo input method.** A new method on the trait
-  (e.g.
-  `password`) requires updates to `TerminalPromptBackend` (via
+  (e.g. `password`) requires updates to `TerminalPromptBackend` (via
   `inquire::Password`) and `MockPromptBackend`, plus any other in-tree
   implementors.
   Small surface but a real trait change.
@@ -1017,8 +1014,7 @@ Secret-question handling:
   shape is `{"type": "secret"}`).
   Propagate the variant at the recording boundary
   (`tool_question_to_inquiry_question` or equivalent).
-- Add a no-echo input method on `PromptBackend` (e.g.
-  `password`).
+- Add a no-echo input method on `PromptBackend` (e.g. `password`).
   Implement it on `TerminalPromptBackend` via `inquire::Password` and on
   `MockPromptBackend` as a regular queued response source.
   Update any other in-tree implementors.

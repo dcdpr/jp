@@ -838,8 +838,7 @@ The `kind` field identifies the entry type:
 |                 | and lists sub-plugins via `suggests`. `jp <group>`     |
 |                 | prints help and exits with code 2.                     |
 
-Future plugin types (e.g.
-`"wasm"` from [RFD 016]) will use additional values.
+Future plugin types (e.g. `"wasm"` from [RFD 016]) will use additional values.
 JP ignores entries with unrecognized `kind` values.
 
 **`id`** (required) — Stable identifier used for binary naming, config keys,

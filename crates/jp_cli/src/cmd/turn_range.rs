@@ -198,14 +198,12 @@ pub(crate) struct TurnRange {
     turn: Option<TurnSpec>,
 
     /// Start of the range: a 1-based turn index, `-N` from the end, a duration
-    /// (e.g.
-    /// `5h`), or `last-compaction` (after the most recent compaction).
+    /// (e.g. `5h`), or `last-compaction` (after the most recent compaction).
     #[arg(long, value_parser = parse_bound)]
     from: Option<CliRangeBound>,
 
     /// End of the range: a 1-based turn index, `-N` from the end, or a duration
-    /// (e.g.
-    /// `2h`).
+    /// (e.g. `2h`).
     #[arg(long, value_parser = parse_to_bound)]
     to: Option<CliRangeBound>,
 }

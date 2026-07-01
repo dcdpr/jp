@@ -303,8 +303,8 @@ impl AppConfig {
     /// `#[setting(default)]` values — those are only injected by
     /// [`PartialConfig::finalize`].
     /// Calling `from_partial` directly on a partial that hasn't been finalized
-    /// will silently fall back to the Rust `Default` trait (e.g.
-    /// `""` for `String`, `0` for `u16`).
+    /// will silently fall back to the Rust `Default` trait (e.g. `""` for
+    /// `String`, `0` for `u16`).
     ///
     /// This method merges [`PartialConfig::default_values`] as a base layer
     /// before converting, so callers don't need to manage the finalize step

@@ -143,8 +143,8 @@ created by automation should typically set an expiration.
 
 ### Tag-based filtering instead of a dedicated `hidden` flag
 
-Use the existing metadata system to tag conversations (e.g.
-`tags: ["hidden"]`) and filter based on tags in `conversation ls`.
+Use the existing metadata system to tag conversations (e.g. `tags: ["hidden"]`)
+and filter based on tags in `conversation ls`.
 
 Rejected because hidden/visible is a binary property that every conversation
 has, not an arbitrary classification.

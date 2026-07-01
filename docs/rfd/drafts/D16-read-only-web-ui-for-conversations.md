@@ -165,8 +165,8 @@ Key properties:
   Sidebar appears as a drawer toggled via a CSS checkbox hack (`<input
   type="checkbox">` + `<label>` + sibling selectors).
   No JavaScript.
-- **Responsive breakpoint**: At wider viewports (e.g.
-  `>768px`), the sidebar is always visible alongside the conversation.
+- **Responsive breakpoint**: At wider viewports (e.g. `>768px`), the sidebar is
+  always visible alongside the conversation.
 - **Native interactions**: Standard viewport meta tag (`width=device-width,
   initial-scale=1`).
   No JavaScript that could interfere with iOS text selection, zoom, or

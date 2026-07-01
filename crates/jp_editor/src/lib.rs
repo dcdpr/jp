@@ -74,8 +74,8 @@ pub enum EditorError {
 /// Terminal editor backend: spawns the editor as a local process.
 ///
 /// The path(s) being edited are appended as trailing arguments to the
-/// configured command, preserving any flags the user attached (e.g.
-/// `code --wait`).
+/// configured command, preserving any flags the user attached (e.g. `code
+/// --wait`).
 pub struct TerminalEditorBackend {
     cmd: Expression,
 }

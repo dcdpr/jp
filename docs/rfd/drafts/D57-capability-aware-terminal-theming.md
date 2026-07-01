@@ -17,9 +17,8 @@ downgrading 24-bit color to 256 or 16, selecting a light or dark default theme,
 and stripping color and unsafe control sequences for non-terminal channels and
 `NO_COLOR`.
 This fixes unreadable inline code on light terminals and garbled syntax
-highlighting on non-truecolor terminals (e.g.
-Apple Terminal), while keeping the styling model reusable by future web or TUI
-frontends.
+highlighting on non-truecolor terminals (e.g. Apple Terminal), while keeping the
+styling model reusable by future web or TUI frontends.
 
 ## Motivation
 
@@ -174,8 +173,7 @@ A background-bearing element must contrast with whatever foreground is shown.
 JP resolves this on `ColorProfile.scheme`:
 
 - **`Some(Light | Dark)`:** honor the user's terminal foreground and set only
-  the scheme-matched background (e.g.
-  `inline_code.body.bg = base01`).
+  the scheme-matched background (e.g. `inline_code.body.bg = base01`).
   A light theme yields a light code background that the user's dark text reads
   on; JP does not override a foreground it cannot improve on.
 - **`None` (undetermined):** set a self-contained pair (`fg = base05`, `bg =

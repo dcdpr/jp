@@ -66,8 +66,7 @@ pub enum HostToPlugin {
     /// The plugin should respond with `PluginToHost::Describe` and exit.
     Describe,
 
-    /// Graceful shutdown request (e.g.
-    /// SIGINT/SIGTERM received).
+    /// Graceful shutdown request (e.g. SIGINT/SIGTERM received).
     Shutdown,
 }
 

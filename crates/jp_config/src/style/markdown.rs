@@ -51,8 +51,8 @@ pub struct MarkdownConfig {
 
     /// Syntax highlighting theme for code blocks.
     ///
-    /// Uses `bat` / `syntect` theme names (e.g.
-    /// `"Monokai Extended"`, `"OneHalfDark"`, `"base16"`).
+    /// Uses `bat` / `syntect` theme names (e.g. `"Monokai Extended"`,
+    /// `"OneHalfDark"`, `"base16"`).
     #[setting(default = "gruvbox-dark")]
     pub theme: Option<String>,
 

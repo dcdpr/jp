@@ -231,9 +231,8 @@ must include:
 
 - The conversation ID that wasn't found.
 - A suggestion to check `jp conversation ls`.
-- Any close matches (e.g.
-  Levenshtein-distance-1 from an existing ID) if typo assistance is cheap to
-  implement.
+- Any close matches (e.g. Levenshtein-distance-1 from an existing ID) if typo
+  assistance is cheap to implement.
 
 Typo assistance is a nice-to-have, not a blocker.
 

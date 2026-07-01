@@ -280,8 +280,7 @@ The equivalent command normalizes wizard assignments to the simplest CLI form:
 
    Fields without a dedicated flag fall back to `--cfg KEY=VALUE` syntax.
 
-   Short-form flags (e.g.
-   `-m`) are never shown, to improve flag readability.
+   Short-form flags (e.g. `-m`) are never shown, to improve flag readability.
 
 This normalization is best-effort.
 If the reverse mapping doesn't exist for a field (e.g., a new flag was added but

@@ -266,8 +266,7 @@ fn build_sub_hunk(hunk: &str, selected: &[usize]) -> Result<String, String> {
 /// Each element is either:
 ///
 /// - An integer (single line index, e.g. `42`)
-/// - A string range with inclusive bounds (e.g.
-///   `"1:50"`)
+/// - A string range with inclusive bounds (e.g. `"1:50"`)
 fn parse_line_selectors(values: Vec<Value>) -> Result<Vec<usize>, String> {
     let mut indices = vec![];
     for value in values {

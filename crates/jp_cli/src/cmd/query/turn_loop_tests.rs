@@ -4256,8 +4256,8 @@ async fn test_inquiry_failure_marks_tool_as_error() {
 /// The live header must use `cfg.assistant.model.id.resolved()`, not the
 /// provider's `ModelDetails.id`.
 /// With the previous code, the two could drift when the provider rewrites the
-/// id (e.g.
-/// Anthropic resolving an unversioned name to a date-suffixed canonical form).
+/// id (e.g. Anthropic resolving an unversioned name to a date-suffixed
+/// canonical form).
 /// On replay, `TurnRenderer` reads the stored per-turn config and shows the
 /// configured id — so live had to match that, or the same conversation would
 /// render with two different model strings between `jp q` and `jp c print`.

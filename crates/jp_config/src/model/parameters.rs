@@ -50,9 +50,8 @@ pub struct ParametersConfig {
     /// Temperature of the model.
     ///
     /// Controls the randomness of the output.
-    /// Higher values (e.g.
-    /// 0.8) make the output more random, while lower values (e.g.
-    /// 0.2) make it more deterministic.
+    /// Higher values (e.g. 0.8) make the output more random, while lower values
+    /// (e.g. 0.2) make it more deterministic.
     pub temperature: Option<f32>,
 
     /// Control the randomness and diversity of the generated text.
@@ -320,8 +319,8 @@ impl From<PartialCustomReasoningConfig> for PartialReasoningConfig {
 pub enum ReasoningEffort {
     /// Disable reasoning entirely.
     ///
-    /// Providers map this to their native "off" mechanism (e.g.
-    /// OpenAI `none`/`minimal`, Anthropic budget 0).
+    /// Providers map this to their native "off" mechanism (e.g. OpenAI
+    /// `none`/`minimal`, Anthropic budget 0).
     /// If a provider doesn't support fully disabling reasoning, it uses the
     /// lowest available effort level.
     None,

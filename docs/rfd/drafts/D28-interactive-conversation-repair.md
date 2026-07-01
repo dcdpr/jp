@@ -223,8 +223,7 @@ are skipped.
 
 The `$EDITOR` repair for `events.json` assumes an editor is configured.
 If `$EDITOR` is unset, this option should either fall back to a sensible default
-(e.g.
-`vi`) or be omitted from the menu, leaving only "trash."
+(e.g. `vi`) or be omitted from the menu, leaving only "trash."
 
 ## Implementation Plan
 

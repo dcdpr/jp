@@ -282,8 +282,8 @@ The symmetric model puts a constraint on `--cfg <name>` lookups: named configs
 must live inside the relevant root's `config/` sandbox.
 Files elsewhere remain reachable via:
 
-- `--cfg <path>` with an explicit path (e.g.
-  `jp q -c ./agents/foo.toml`) — bypasses load-path resolution entirely.
+- `--cfg <path>` with an explicit path (e.g. `jp q -c ./agents/foo.toml`) —
+  bypasses load-path resolution entirely.
 - `extends = ["../agents/foo.toml"]` from any config file — `extends` paths
   resolve relative to the file containing them via `to_logical_path`, which
   permits `..` and arbitrary navigation.

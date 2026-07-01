@@ -896,8 +896,8 @@ mod merge_mcp_param {
         ));
     }
 
-    /// MCP `items` without a parsable `type` (e.g.
-    /// `$ref`) and no user override results in `items: None`.
+    /// MCP `items` without a parsable `type` (e.g. `$ref`) and no user override
+    /// results in `items: None`.
     /// This is the exact pre-fix state that produced the `array schema missing
     /// items` error from OpenAI — documented here so a future change that adds
     /// `$ref` resolution will surface as a test update.

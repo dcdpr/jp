@@ -1171,8 +1171,7 @@ fn map_event(
 /// them correctly.
 ///
 /// In-stream errors carry no HTTP headers, so `retry_after` timing comes solely
-/// from message-body parsing (e.g.
-/// `"Please try again in 2.398s."`).
+/// from message-body parsing (e.g. `"Please try again in 2.398s."`).
 ///
 /// Classification checks both `type` and `code` because OpenAI's per-minute
 /// token/request rate-limits arrive as `type=tokens|requests` with

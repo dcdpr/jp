@@ -41,8 +41,7 @@ jp query -C dev          # "undo" dev's overrides
 ```
 
 This should revert fields that `dev` introduced, but leave untouched any field
-that was subsequently claimed by another config source (e.g.
-`architect`).
+that was subsequently claimed by another config source (e.g. `architect`).
 If both `dev` and `architect` set `tools = [read_file]`, reverting `dev` should
 not disable the tool — `architect` still wants it.
 
@@ -248,20 +247,19 @@ pub struct ConfigDelta {
     environment variable overrides (see [Key-value and shortcut flag
     claims](#key-value-and-shortcut-flag-claims)).
   - **Field present with one or more entries** — claimed.
-    A file may carry multiple identity hashes (e.g.
-    `hash(id)` *and* `hash(path)` for a workspace file that declares `id`),
-    letting revert match on any one of them.
+    A file may carry multiple identity hashes (e.g. `hash(id)` *and*
+    `hash(path)` for a workspace file that declares `id`), letting revert match
+    on any one of them.
     Matching uses the `HASH` prefix of each entry; the `LABEL` is for display
     only.
 
 #### Source identity
 
 Each claim source is stored as a `HASH:LABEL` string.
-The hash (e.g.
-SHA-256) is always present for identity matching.
-The label provides human-readable context for provenance display (e.g.
-[RFD 060]) but varies by source location to avoid leaking user-specific paths
-into shared workspace storage:
+The hash (e.g. SHA-256) is always present for identity matching.
+The label provides human-readable context for provenance display (e.g. [RFD
+060]) but varies by source location to avoid leaking user-specific paths into
+shared workspace storage:
 
 | Source type                     | Label                      | Example                            |
 | ------------------------------- | -------------------------- | ---------------------------------- |
@@ -696,15 +694,12 @@ See also [RFD 060] for the provenance-display angle.
 The config has several fields backed by custom merge types whose strategies can
 be Append, Prepend, or Replace:
 
-- `MergeableString` (e.g.
-  `assistant.system_prompt`, see `crates/jp_config/src/types/string.rs` and
-  `internal/merge/string.rs`).
-- `MergeableVec` (e.g.
-  `assistant.instructions`, `conversation.attachments`, see
+- `MergeableString` (e.g. `assistant.system_prompt`, see
+  `crates/jp_config/src/types/string.rs` and `internal/merge/string.rs`).
+- `MergeableVec` (e.g. `assistant.instructions`, `conversation.attachments`, see
   `crates/jp_config/src/types/vec.rs` and `internal/merge/vec.rs`).
-- `MergeableMap` (e.g.
-  `plugins.command`, `providers.mcp`, see `crates/jp_config/src/types/map.rs`
-  and `internal/merge/map.rs`).
+- `MergeableMap` (e.g. `plugins.command`, `providers.mcp`, see
+  `crates/jp_config/src/types/map.rs` and `internal/merge/map.rs`).
 
 A revert delta that encoded its target value with, say, Append strategy would
 concatenate the target onto the current resolved state rather than replacing it.
@@ -1311,8 +1306,8 @@ claim granularity:
 | **Duplicate-capable** | Whole-field claim (path only, no element suffix)                                                    | Revert emits the entire prior value of the field           |
 
 The distinction matters because `Vec<String>` fields like
-`ToolCommandConfig.args` permit repeated identical entries (e.g.
-`args = ["-I", "path1", "-I", "path2"]`).
+`ToolCommandConfig.args` permit repeated identical entries (e.g. `args = ["-I",
+"path1", "-I", "path2"]`).
 A per-element identity of `self.clone()` would make both `-I` entries
 indistinguishable, and `remove_element(path, "-I")` would wipe both when the
 user meant to revert only one source's contribution.
@@ -1675,9 +1670,9 @@ per-directive deltas.
 - `-c` key-value args record claims keyed on the kv identity `hash("kv:" +
   field_path + "=" + canonical_value)` (still used for apply-side provenance
   even though kv `-C` is value-based).
-- `-c` JSON-object args (e.g.
-  `-c '{"assistant":{"name":"x"}}'`) are pre-expanded via `try_merge_object`
-  into per-leaf kv assignments, each recording its own kv identity.
+- `-c` JSON-object args (e.g. `-c '{"assistant":{"name":"x"}}'`) are
+  pre-expanded via `try_merge_object` into per-leaf kv assignments, each
+  recording its own kv identity.
 - Shortcut flags go through their `apply_*` helper, which records the
   `(field_path, canonical_value)` claim alongside the partial mutation.
   Each helper gains a `claims: &mut BTreeMap<String, Vec<String>>` parameter.

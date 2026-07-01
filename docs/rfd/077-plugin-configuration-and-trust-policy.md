@@ -71,8 +71,8 @@ The registry introduces a `kind` field on each plugin entry:
 `kind` defaults to `"command"` when absent, so existing registry entries remain
 valid.
 The dispatch pipeline filters on `kind` and ignores entries with unrecognized
-values, allowing future plugin types (e.g.
-`wasm`) to be added to the registry without breaking older JP versions.
+values, allowing future plugin types (e.g. `wasm`) to be added to the registry
+without breaking older JP versions.
 
 The `PluginKind` enum in `jp_plugin::registry`:
 

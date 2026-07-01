@@ -30,17 +30,13 @@ pub(crate) struct Compact {
 
     /// Preserve the first N turns (or turns within a duration).
     ///
-    /// Accepts a turn count (e.g.
-    /// `2`) or a duration (e.g.
-    /// `5h`).
+    /// Accepts a turn count (e.g. `2`) or a duration (e.g. `5h`).
     #[arg(long, conflicts_with_all = ["from", "first", "last", "turn"])]
     keep_first: Option<RuleBound>,
 
     /// Preserve the last N turns (or turns within a duration).
     ///
-    /// Accepts a turn count (e.g.
-    /// `3`) or a duration (e.g.
-    /// `2h`).
+    /// Accepts a turn count (e.g. `3`) or a duration (e.g. `2h`).
     #[arg(long, conflicts_with_all = ["to", "first", "last", "turn"])]
     keep_last: Option<RuleBound>,
 
@@ -49,8 +45,7 @@ pub(crate) struct Compact {
     /// `--from`/`--to` bound the compacted range directly (overriding
     /// `--keep-first`/`--keep-last`); `--first N`/`--last N` compact the first
     /// or last N turns; `--turn N` compacts a single turn, or `--turn A..B` an
-    /// inclusive range (e.g.
-    /// `1..5` is turns 1-5).
+    /// inclusive range (e.g. `1..5` is turns 1-5).
     #[command(flatten)]
     range: TurnRange,
 

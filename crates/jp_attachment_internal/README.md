@@ -89,16 +89,15 @@ jp-c17013123456?raw                             # → jp://jp-c17013123456?raw
 jp-c17013123456?raw=all                         # → jp://jp-c17013123456?raw=all
 ```
 
-A bare value after `?` (e.g.
-`a:-1`) becomes the value of an implicit `select=`.
+A bare value after `?` (e.g. `a:-1`) becomes the value of an implicit `select=`.
 If the suffix already names a known parameter (`select` or `raw`), it's passed
 through verbatim.
 
 ### Other variants
 
 Reserved for future use.
-Today, requesting any non-conversation variant (e.g.
-`jp-w…` for workspaces) returns a clear error.
+Today, requesting any non-conversation variant (e.g. `jp-w…` for workspaces)
+returns a clear error.
 Adding new resources is a single dispatch arm in `lib.rs` plus a renderer.
 
 ## Output

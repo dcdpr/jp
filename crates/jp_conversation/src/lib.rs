@@ -47,8 +47,7 @@ pub use storage::decode_event_value;
 pub use stream::{ConversationStream, IterTurns, StreamError, Turn, TurnMut};
 
 /// A wrapper around `DateTime<Utc>` that implements `Debug` to match `time`'s
-/// `OffsetDateTime` format (e.g.
-/// `2020-01-01 0:00:00.0 +00`).
+/// `OffsetDateTime` format (e.g. `2020-01-01 0:00:00.0 +00`).
 pub(crate) struct DebugDt<'a>(pub &'a chrono::DateTime<chrono::Utc>);
 
 impl std::fmt::Debug for DebugDt<'_> {

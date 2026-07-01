@@ -41,8 +41,8 @@ pub(crate) fn build_editor_backend(config: &EditorConfig) -> Option<Arc<dyn Edit
 /// The full error goes to the diagnostics channel (`tracing`, visible with
 /// `-vvv` or in the log file); a concise notice goes to the chrome channel
 /// (stderr) so the user actually sees that their editor didn't open.
-/// `recovery` names what JP did instead (e.g.
-/// "Continuing with the inline editor.").
+/// `recovery` names what JP did instead (e.g. "Continuing with the inline
+/// editor.").
 ///
 /// Safe to call between inline-reply prompts: the `reedline` engine is dropped
 /// when `InlineReply::prompt` returns, so the terminal is back in cooked mode

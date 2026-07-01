@@ -31,9 +31,9 @@ LLM-based relevance scoring works but is the wrong tool.
 A Haiku-class chat-completion call costs roughly 500-2000ms and a few cents per
 invocation, generates output through a constrained-decoding schema, and uses a
 model that was trained for open-ended generation, not relevance ranking.
-Cross-encoder rerankers (e.g.
-`BAAI/bge-reranker-v2-m3`) solve the same problem in ~50ms, locally, with
-task-specific training, and at zero per-call cost once installed.
+Cross-encoder rerankers (e.g. `BAAI/bge-reranker-v2-m3`) solve the same problem
+in ~50ms, locally, with task-specific training, and at zero per-call cost once
+installed.
 
 This RFD introduces the primitive so consumers can be designed against it.
 The consumers themselves (instruction reminders, KB retrieval) ship as separate
@@ -414,9 +414,8 @@ The shape is defined by a sibling `RerankerModelIdConfig` in
 
 Behavior:
 
-- **Unknown provider ID** (e.g.
-  `model = "cohere/..."`) fails at config-load time with a typed deserialization
-  error.
+- **Unknown provider ID** (e.g. `model = "cohere/..."`) fails at config-load
+  time with a typed deserialization error.
   Consumer code never sees an unresolvable provider.
 - **Omitting a provider's config block is fine** — schematic fills in defaults.
   The `Unavailable` error only surfaces when a consumer actually calls a

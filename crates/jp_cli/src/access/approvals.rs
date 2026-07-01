@@ -26,8 +26,7 @@ pub struct ApprovalStore {
 /// A single approved `(rule_path -> canonical_target)` binding.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MountApproval {
-    /// The workspace-relative mount path (e.g.
-    /// `fork`).
+    /// The workspace-relative mount path (e.g. `fork`).
     pub rule_path: String,
     /// The canonical absolute target the mount is approved to resolve to.
     pub canonical_target: Utf8PathBuf,

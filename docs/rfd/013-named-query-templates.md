@@ -353,8 +353,8 @@ the `ToolsConfig` precedent.
 Store templates as separate `.md` or `.toml` files in a `templates/` directory.
 More flexible for large templates, but adds file discovery complexity and
 diverges from the config-centric approach.
-Could be added later as a complement (e.g.
-`content_file = "templates/feature.md"`).
+Could be added later as a complement (e.g. `content_file =
+"templates/feature.md"`).
 
 ### Prompt-driven template creation (no config)
 
@@ -475,8 +475,7 @@ Can be merged independently.
   > [RFD 030] documents the schema DSL.
 
 - **Custom template functions.** Expose Rust functions in the minijinja
-  environment (e.g.
-  `get_config()`, `model_id()`, `git_branch()`, `env()`).
+  environment (e.g. `get_config()`, `model_id()`, `git_branch()`, `env()`).
 
 - **`answer` mode.** A field controlling the Q\&A process itself (`ask`,
   `unattended`, `edit`) — e.g. skipping prompts when all defaults are present.

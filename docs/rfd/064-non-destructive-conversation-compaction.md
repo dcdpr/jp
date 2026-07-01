@@ -705,8 +705,7 @@ Each rule in the array defines a single compaction operation:
 | `summary`    | table             | —       | Generate an LLM summary.        |
 
 `keep_first` and `keep_last` accept a positive integer (turn count) or a
-duration string (e.g.
-`"5h"`).
+duration string (e.g. `"5h"`).
 
 `tool_calls` accepts: `"strip"` (both), `"strip-responses"`, `"strip-requests"`,
 `"omit"`.
@@ -786,9 +785,9 @@ Rejected because:
 
 ### Named compaction profiles
 
-A `profiles` map keyed by name (e.g.
-`default`, `heavy`, `light`) inside `conversation.compaction`, with a
-`--profile` flag to select one at invocation time.
+A `profiles` map keyed by name (e.g. `default`, `heavy`, `light`) inside
+`conversation.compaction`, with a `--profile` flag to select one at invocation
+time.
 Rejected because JP's config pipeline already provides this capability: variant
 configs live in `config.d/` files and are loaded with `-c`.
 Profiles would duplicate the config layering mechanism with a

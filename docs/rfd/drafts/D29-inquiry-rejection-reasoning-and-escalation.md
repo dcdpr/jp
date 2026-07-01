@@ -18,9 +18,8 @@ unnecessary tool failures.
 
 ## Motivation
 
-When a tool needs confirmation (e.g.
-`fs_modify_file`'s `apply_changes` question), the inquiry system ([RFD 028])
-routes the question to a sub-agent.
+When a tool needs confirmation (e.g. `fs_modify_file`'s `apply_changes`
+question), the inquiry system ([RFD 028]) routes the question to a sub-agent.
 If the sub-agent answers `false`, the tool fails with:
 
 ```

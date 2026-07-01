@@ -177,8 +177,7 @@ This is a recovery aid for the user, not machine-readable state.
 
 If a conversation with the same directory name already exists in `.trash/` (from
 a previous sanitization run), the new trashed version gets an integer suffix
-(e.g.
-`17457886043-my-chat-1`).
+(e.g. `17457886043-my-chat-1`).
 
 ### API
 

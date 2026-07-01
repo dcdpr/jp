@@ -1020,8 +1020,7 @@ fn blockquote(text: &str) -> String {
 /// A single tool selection directive from the CLI.
 ///
 /// Directives are evaluated left-to-right, allowing users to compose tool sets
-/// precisely (e.g.
-/// `--no-tools --tool=write --no-tools=fs_modify_file`).
+/// precisely (e.g. `--no-tools --tool=write --no-tools=fs_modify_file`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ToolDirective {
     EnableAll,

@@ -360,8 +360,8 @@ Key concerns:
   It adds code surface for parsing and round-tripping.
 
 - **Editor compatibility.** The design assumes the editor can open a directory.
-  Most modern editors support this, but some minimal editors (e.g.
-  `ed`, `nano`) do not.
+  Most modern editors support this, but some minimal editors (e.g. `ed`, `nano`)
+  do not.
   For these editors, the experience degrades — the user would need to open
   `CONVERSATION` directly and navigate to event files manually.
 

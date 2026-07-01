@@ -63,8 +63,8 @@ This design builds on the trait-based storage backend from [RFD 073]:
 conversation persistence flows through `PersistBackend::write`, loading through
 `LoadBackend`, and the filesystem implementation (`FsStorageBackend`, wrapping
 the internal `Storage`) is where dual-root reads and writes live.
-Backends that do not model two roots (e.g.
-`InMemoryStorageBackend`) keep their current single-store behavior.
+Backends that do not model two roots (e.g. `InMemoryStorageBackend`) keep their
+current single-store behavior.
 
 ### Storage Model
 

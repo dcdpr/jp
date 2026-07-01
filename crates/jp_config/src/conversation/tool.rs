@@ -308,9 +308,8 @@ pub struct ToolConfig {
     /// The command to run.
     /// Only used for local tools.
     ///
-    /// Can be a simple string (e.g.
-    /// `ls -la`) or a structured object with `program`, `args`, and `shell`
-    /// properties.
+    /// Can be a simple string (e.g. `ls -la`) or a structured object with
+    /// `program`, `args`, and `shell` properties.
     #[setting(nested)]
     pub command: Option<CommandConfigOrString>,
 
@@ -1350,8 +1349,7 @@ pub enum Enable {
 }
 
 impl Enable {
-    /// Returns `true` if the tool is enabled (i.e.
-    /// [`Enable::On`]).
+    /// Returns `true` if the tool is enabled (i.e. [`Enable::On`]).
     #[must_use]
     pub const fn is_on(self) -> bool {
         matches!(self, Self::On)

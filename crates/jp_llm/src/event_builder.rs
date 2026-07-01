@@ -26,9 +26,9 @@
 //!   index are complete and should be merged into a single `ConversationEvent`
 //! - **Order preservation**: Flush events arrive in index order
 //! - **Tool calls may be multi-part**: Providers that stream tool calls
-//!   incrementally (e.g.
-//!   Anthropic) emit `ToolCallPart::Start` when the tool call begins, followed
-//!   by `ToolCallPart::ArgumentChunk` events as JSON arrives.
+//!   incrementally (e.g. Anthropic) emit `ToolCallPart::Start` when the tool
+//!   call begins, followed by `ToolCallPart::ArgumentChunk` events as JSON
+//!   arrives.
 //!   The Flush after the last chunk marks the tool call as complete.
 
 use std::collections::{HashMap, hash_map::Entry};
@@ -225,8 +225,8 @@ impl EventBuilder {
     /// ensure any partially accumulated events are not silently dropped.
     ///
     /// Tool-call buffers are an exception: a normally-completed tool call
-    /// always emits an explicit [`Event::Flush`] (e.g.
-    /// Anthropic's `ContentBlockStop`).
+    /// always emits an explicit [`Event::Flush`] (e.g. Anthropic's
+    /// `ContentBlockStop`).
     /// A buffer that only reaches drain is structurally incomplete — the
     /// stream ended before the block was closed.
     /// Persisting it would create an orphaned `tool_use` in the conversation,

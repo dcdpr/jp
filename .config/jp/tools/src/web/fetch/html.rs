@@ -538,11 +538,9 @@ fn list_section_headers(html: &str) -> Vec<SectionHeader> {
 /// Resolve the anchor ID for a heading, trying multiple patterns:
 ///
 /// 1. `id` attribute on the heading itself
-/// 2. `id` attribute on a parent element (e.g.
-///    `<section id="..."><h3>`)
+/// 2. `id` attribute on a parent element (e.g. `<section id="..."><h3>`)
 /// 3. `href="#id"` on a child anchor (permalink pattern)
-/// 4. `id` attribute on a child element (e.g.
-///    `<h3><div id="...">`)
+/// 4. `id` attribute on a child element (e.g. `<h3><div id="...">`)
 /// 5. `id` or `name` on the immediately preceding sibling element
 fn resolve_heading_id(heading: &ElementRef<'_>) -> Option<String> {
     // Pattern 1: id on heading.

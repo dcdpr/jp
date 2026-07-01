@@ -926,9 +926,9 @@ impl ConversationStream {
     /// Injects synthetic [`ToolCallResponse`]s for any [`ToolCallRequest`]s
     /// that lack a matching response.
     ///
-    /// This can happen when the user interrupts tool execution (e.g.
-    /// Ctrl+C → "save & exit") after the request has been streamed but before
-    /// responses are recorded.
+    /// This can happen when the user interrupts tool execution (e.g. Ctrl+C →
+    /// "save & exit") after the request has been streamed but before responses
+    /// are recorded.
     /// Providers such as Anthropic reject streams where a `tool_use` block has
     /// no corresponding `tool_result`.
     ///

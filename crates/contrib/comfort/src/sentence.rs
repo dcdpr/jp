@@ -77,7 +77,10 @@ static ABBREV_RE: LazyLock<Regex> = LazyLock::new(|| {
 /// trailing period.
 static MULTI_ABBREV_RE: LazyLock<Regex> = LazyLock::new(|| {
     let alts: Vec<String> = EN_MULTI_ABBREVS.iter().map(|a| regex::escape(a)).collect();
-    let pattern = format!(r"(?:^|\s)(?:{})$", alts.join("|"));
+    // Leading context matches `ABBREV_RE`: whitespace, quotes, or an opening
+    // paren/bracket. Without the paren, `(e.g.` fails to merge and the
+    // parenthetical splits onto its own line.
+    let pattern = format!(r#"(?:^|[\s"'`(\[])(?:{})$"#, alts.join("|"));
     Regex::new(&pattern).expect("valid multi-abbreviation regex")
 });
 

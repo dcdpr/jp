@@ -54,9 +54,8 @@ pub enum ConfigLoaderError {
 pub struct ConfigLoader {
     /// file stem to search for.
     ///
-    /// This is the file name without the extension (e.g.
-    /// `config` or `.jp`), the extension is fixed to a list of valid
-    /// extensions.
+    /// This is the file name without the extension (e.g. `config` or `.jp`),
+    /// the extension is fixed to a list of valid extensions.
     /// See [`CONFIG_FILE_EXTENSIONS`].
     pub file_stem: Cow<'static, str>,
 

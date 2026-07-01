@@ -93,9 +93,9 @@ fn has_embedded_fence(block: &str) -> bool {
 
 /// Fixes orphaned closing fences from mid-line code fence patterns.
 ///
-/// When an LLM produces backticks mid-line (e.g.
-/// `text:```lang`), the bare closing fence on the next line gets misinterpreted
-/// as a new code block opening.
+/// When an LLM produces backticks mid-line (e.g. `text:```lang`), the bare
+/// closing fence on the next line gets misinterpreted as a new code block
+/// opening.
 /// This fixup detects when a `Block` contains such an embedded fence pattern
 /// and converts the following bare `FencedCodeStart` (no language tag) into a
 /// `Block` instead.

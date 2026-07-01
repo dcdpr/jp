@@ -223,11 +223,10 @@ The host must therefore approve and bake external targets into the compiled
 lookup against pre-approved data.
 
 Mount approval prompts are user-local trust prompts owned by the host.
-They use the terminal prompting UI (e.g.
-`TerminalPromptBackend`) but are **not** recorded as `InquiryRequest` /
-`InquiryResponse` events in the conversation stream — the prompt contains the
-canonical external target path, which by design does not enter shared
-conversation state.
+They use the terminal prompting UI (e.g. `TerminalPromptBackend`) but are
+**not** recorded as `InquiryRequest` / `InquiryResponse` events in the
+conversation stream — the prompt contains the canonical external target path,
+which by design does not enter shared conversation state.
 The durable record is the user-local approval store only.
 
 Approval is **target-only**: the user approves that a specific

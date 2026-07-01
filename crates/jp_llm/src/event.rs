@@ -315,9 +315,8 @@ pub enum FinishReason {
     /// rather than failing.
     /// Any partial output already streamed should be discarded.
     Refused {
-        /// The policy area that triggered the decline (e.g.
-        /// `cyber`, `bio`), or `None` when the refusal maps to no named
-        /// category.
+        /// The policy area that triggered the decline (e.g. `cyber`, `bio`), or
+        /// `None` when the refusal maps to no named category.
         category: Option<String>,
 
         /// A human-readable explanation.

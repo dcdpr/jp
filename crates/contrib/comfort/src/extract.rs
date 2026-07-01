@@ -3,9 +3,8 @@
 //! A *block* is a maximal run of consecutive line doc-comments — either outer
 //! (`///`) or inner (`//!`) — sharing the same indentation and separated only
 //! by a single newline.
-//! Blank lines inside the block (i.e.
-//! `///\n` with no body content) are part of the block; a truly blank source
-//! line ends it.
+//! Blank lines inside the block (i.e. `///\n` with no body content) are part of
+//! the block; a truly blank source line ends it.
 
 use std::ops::Range;
 

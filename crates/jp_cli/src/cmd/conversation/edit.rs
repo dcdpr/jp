@@ -66,8 +66,7 @@ pub(crate) struct Edit {
     /// Without a value, toggles: removes expiration if set, or sets it to
     /// expire immediately (when no longer active) if unset.
     ///
-    /// Accepts a duration (e.g.
-    /// `1h`, `30m`) or `now` for immediate expiration.
+    /// Accepts a duration (e.g. `1h`, `30m`) or `now` for immediate expiration.
     #[arg(long = "tmp", group = "property", conflicts_with = "no_expires_at")]
     expires_at: Option<Option<ExpirationDuration>>,
 

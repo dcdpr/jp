@@ -54,8 +54,7 @@ support all three trait families.
 
 Fields that use custom `value_parser` functions do not need new bridging types.
 Clap's `value_parser` translates CLI string input into the field's target type
-(e.g.
-`schemars::Schema`, `DateTime<Utc>`, `String`).
+(e.g. `schemars::Schema`, `DateTime<Utc>`, `String`).
 Serde deserializes JSON input into the same target type directly.
 The `value_parser` functions remain CLI-only conveniences — they are invisible
 to serde.
@@ -148,8 +147,8 @@ usage.
 
 **Stdin interaction.** When `--args-json -` is used, the pre-parse logic
 consumes stdin to read the JSON payload.
-This means commands that also read stdin (e.g.
-`Query` piping input) will find it empty.
+This means commands that also read stdin (e.g. `Query` piping input) will find
+it empty.
 JSON callers must embed all input in the JSON payload (e.g. the `query` field)
 rather than relying on stdin piping.
 This should be documented in the CLI help text for `--args-json`.
@@ -391,8 +390,7 @@ end-to-end.
 
 5. **Negative flags.** CLI has `--no-edit`, `--no-reasoning`, `--no-tool-use`,
    etc. In JSON, these are better expressed as the positive field set to `false`
-   (e.g.
-   `"edit": false` instead of `"no_edit": true`).
+   (e.g. `"edit": false` instead of `"no_edit": true`).
    The serde representation needs to decide whether to mirror the CLI naming or
    optimize for JSON ergonomics.
    Mirroring CLI naming is the default (since the structs are the source of

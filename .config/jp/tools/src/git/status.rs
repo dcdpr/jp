@@ -19,8 +19,7 @@ const MAX_UNTRACKED: usize = 500;
 /// A single entry from `git status --porcelain`.
 #[derive(Debug, PartialEq)]
 struct StatusEntry {
-    /// The two-character XY status code (e.g.
-    /// `" M"`, `"??"`, `"A "`).
+    /// The two-character XY status code (e.g. `" M"`, `"??"`, `"A "`).
     code: String,
     /// The path, or `old -> new` for renames and copies.
     path: String,

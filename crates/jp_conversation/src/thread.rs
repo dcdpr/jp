@@ -145,9 +145,9 @@ impl Thread {
     ///
     /// System prompt and sections are rendered to strings.
     /// Attachments are passed through unconverted — each provider is
-    /// responsible for converting them to its native format (e.g.
-    /// Anthropic document blocks, Gemini inline data, or XML for providers
-    /// without native support).
+    /// responsible for converting them to its native format (e.g. Anthropic
+    /// document blocks, Gemini inline data, or XML for providers without native
+    /// support).
     ///
     /// Events are filtered via `EventKind::is_provider_visible()` to exclude
     /// internal types.
