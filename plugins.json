@@ -10,11 +10,11 @@
       "binaries": {
         "aarch64-apple-darwin": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-aarch64-apple-darwin",
-          "sha256": "3149ea4d690760e97b6c5aa849a2d2d64eddfd674f68626860a9a163259e4a31"
+          "sha256": "b50511f4ccf6c3810067f0fa4a9ac3213d2a22b5b82a7158a11cbc8228136c07"
         },
         "x86_64-pc-windows-msvc": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-pc-windows-msvc",
-          "sha256": "21ae9d7ee7bde7fd14aa40634689b5a08e6c2f215aa2ed8f310a5885951479db"
+          "sha256": "6bf4bd7bd35a527d1c61a815dbef806b6cd1f51eff38c048cc93423930b17ca6"
         },
         "x86_64-unknown-linux-gnu": {
           "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-path-x86_64-unknown-linux-gnu",
@@ -30,6 +30,30 @@
       "suggests": [
         "serve web"
       ]
+    },
+    "serve web": {
+      "id": "serve-web",
+      "description": "Read-only web UI for browsing conversations",
+      "official": true,
+      "repository": "https://github.com/dcdpr/jp",
+      "type": "command",
+      "requires": [
+        "serve"
+      ],
+      "binaries": {
+        "aarch64-apple-darwin": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-aarch64-apple-darwin",
+          "sha256": "c69e9baacd71adb0c38ad3439604f14a752517794fe7d19a068bc1702bebd243"
+        },
+        "x86_64-pc-windows-msvc": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-pc-windows-msvc",
+          "sha256": "53b0648c1ab3627c48cb31a6b062038808c3c9483c7a66f1081d4aab82e4feef"
+        },
+        "x86_64-unknown-linux-gnu": {
+          "url": "https://github.com/dcdpr/jp/releases/download/plugins/jp-serve-web-x86_64-unknown-linux-gnu",
+          "sha256": "2c9319f58ee19cfe57b1edd143020b2fc3285bcbdb4a5d44796d534291d5bb10"
+        }
+      }
     }
   }
 }
