@@ -14,11 +14,12 @@ mod views;
 
 use std::{
     io::{self, BufRead, BufReader, IsTerminal as _, Write},
+    net::{IpAddr, SocketAddr, TcpListener},
     sync::{Arc, Mutex},
 };
 
 use jp_plugin::message::{DescribeResponse, HostToPlugin, InitMessage, PluginToHost, PrintMessage};
-use tracing::{Level, info};
+use tracing::{Level, info, warn};
 
 use crate::{
     client::SharedWriter,
@@ -36,8 +37,12 @@ Options:
 
 Configuration (in .jp/config.toml):
   [plugins.command.serve.options]
-  bind = \"0.0.0.0\"
-  port = 8080";
+  bind = \"127.0.0.1\"
+  port = 8080
+
+The server has no authentication and exposes every conversation in the
+workspace. Binding to a non-loopback address (e.g. 0.0.0.0) makes all of them
+reachable from the network.";
 
 fn main() {
     let log_handle = init_tracing();
@@ -114,12 +119,32 @@ fn run_server(
         })
         .unwrap_or(3000);
 
+    let ip: IpAddr = bind
+        .parse()
+        .map_err(|e| format!("invalid bind address `{bind}`: {e}"))?;
+    let socket_addr = SocketAddr::new(ip, port);
+
+    // Bind before announcing, so a bind failure is reported instead of a false
+    // "Serving at" message. The listener is handed to axum below.
+    let listener =
+        TcpListener::bind(socket_addr).map_err(|e| format!("failed to bind {socket_addr}: {e}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|e| format!("failed to configure listener: {e}"))?;
+
+    if !ip.is_loopback() {
+        warn!(
+            %socket_addr,
+            "Binding to a non-loopback address exposes all conversations without authentication"
+        );
+    }
+
     // Send early protocol messages before sharing stdout.
     send(&mut stdout, &PluginToHost::Ready)?;
     send(
         &mut stdout,
         &PluginToHost::Print(PrintMessage {
-            text: format!("Serving at http://{bind}:{port}\n"),
+            text: format!("Serving at http://{socket_addr}\n"),
             channel: "content".into(),
             format: "plain".into(),
             language: None,
@@ -150,15 +175,14 @@ fn run_server(
     let exit_client = client.clone();
 
     let result = rt.block_on(async {
-        let addr = format!("{bind}:{port}");
-        info!(%addr, "Starting web server");
+        info!(%socket_addr, "Starting web server");
 
         let mut shutdown = shutdown_rx;
         let shutdown_signal = async move {
             let _ = shutdown.changed().await;
         };
 
-        routes::serve(client, &addr, shutdown_signal)
+        routes::serve(client, listener, shutdown_signal)
             .await
             .map_err(|e| format!("server error: {e}"))
     });

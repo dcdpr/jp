@@ -1,6 +1,6 @@
 //! Axum router and HTTP handlers.
 
-use std::{future::Future, net::SocketAddr};
+use std::future::Future;
 
 use axum::{
     Router,
@@ -12,7 +12,10 @@ use maud::Markup;
 use tokio::net::TcpListener;
 use tracing::{debug, info};
 
-use crate::{client::PluginClient, render, style, views};
+use crate::{
+    client::{ClientError, PluginClient},
+    render, style, views,
+};
 
 /// Shared state for axum handlers.
 #[derive(Clone)]
@@ -20,10 +23,11 @@ struct AppState {
     client: PluginClient,
 }
 
-/// Start the HTTP server and block until `shutdown` resolves.
+/// Start the HTTP server on an already-bound listener and block until
+/// `shutdown` resolves.
 pub(crate) async fn serve(
     client: PluginClient,
-    addr: &str,
+    listener: std::net::TcpListener,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> Result<(), String> {
     let state = AppState { client };
@@ -38,15 +42,13 @@ pub(crate) async fn serve(
         .route("/assets/style.css", axum::routing::get(serve_css))
         .with_state(state);
 
-    let socket_addr: SocketAddr = addr
-        .parse()
-        .map_err(|e| format!("invalid address `{addr}`: {e}"))?;
+    let local_addr = listener.local_addr().ok();
+    let listener =
+        TcpListener::from_std(listener).map_err(|e| format!("failed to adopt listener: {e}"))?;
 
-    let listener = TcpListener::bind(socket_addr)
-        .await
-        .map_err(|e| format!("failed to bind {addr}: {e}"))?;
-
-    info!(%socket_addr, "Web server listening");
+    if let Some(addr) = local_addr {
+        info!(%addr, "Web server listening");
+    }
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown)
@@ -78,11 +80,15 @@ async fn conversation_detail(
 ) -> Result<Markup, AppError> {
     debug!(%id, "GET /conversations/{{id}}");
 
-    let resp = state
-        .client
-        .read_events(&id)
-        .await
-        .map_err(|e| AppError::NotFound(e.to_string()))?;
+    let resp = state.client.read_events(&id).await.map_err(|e| match e {
+        // The host reports a missing conversation as an error response; other
+        // variants are server-side failures.
+        ClientError::Host(msg) => {
+            debug!(%id, %msg, "conversation not found");
+            AppError::NotFound
+        }
+        e => AppError::Internal(e.to_string()),
+    })?;
 
     // Find the title from the conversation list (protocol doesn't include it
     // in the events response). Fall back to "Untitled".
@@ -122,15 +128,15 @@ async fn serve_css() -> impl IntoResponse {
 }
 
 enum AppError {
-    NotFound(String),
+    NotFound,
     Internal(String),
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         match self {
-            Self::NotFound(msg) => {
-                let body = views::layout::error_page("Not Found", &msg);
+            Self::NotFound => {
+                let body = views::layout::error_page("Not Found", "Conversation not found.");
                 (StatusCode::NOT_FOUND, body).into_response()
             }
             Self::Internal(msg) => {

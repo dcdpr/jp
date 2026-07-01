@@ -69,15 +69,67 @@ async fn host_error_propagated() {
     assert!(matches!(err, ClientError::Host(msg) if msg.contains("something went wrong")));
 }
 
-#[test]
-fn shutdown_signals_watch() {
+#[tokio::test]
+async fn shutdown_signals_watch() {
     let shutdown_msg = HostToPlugin::Shutdown;
     let stdin_data = format!("{}\n", host_line(&shutdown_msg));
     let stdin = BufReader::new(Cursor::new(stdin_data));
-    let (_client, shutdown_rx) = PluginClient::start(stdin, shared_writer());
+    let (_client, mut shutdown_rx) = PluginClient::start(stdin, shared_writer());
 
-    // Give the reader thread a moment to process.
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        shutdown_rx.wait_for(|v| *v),
+    )
+    .await
+    .expect("shutdown not signaled")
+    .unwrap();
+}
 
-    assert!(*shutdown_rx.borrow());
+/// A reader that blocks on `read` until a byte is sent, and reports EOF when
+/// the sending end is dropped.
+/// Lets a test hold the reader loop open, register a request, and then close
+/// stdin at a controlled moment.
+struct BlockingReader {
+    rx: std::sync::mpsc::Receiver<u8>,
+}
+
+impl std::io::Read for BlockingReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self.rx.recv() {
+            Ok(byte) => {
+                buf[0] = byte;
+                Ok(1)
+            }
+            // Sender dropped: report EOF.
+            Err(_) => Ok(0),
+        }
+    }
+}
+
+#[tokio::test]
+async fn pending_request_resolves_when_stdin_closes() {
+    let (tx, rx) = std::sync::mpsc::channel::<u8>();
+    let stdin = BufReader::new(BlockingReader { rx });
+    let (client, _shutdown) = PluginClient::start(stdin, shared_writer());
+
+    // Issue a request and wait until it is registered as pending.
+    let request = tokio::spawn({
+        let client = client.clone();
+        async move { client.list_conversations().await }
+    });
+    while client.inner.pending.lock().unwrap().is_empty() {
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+
+    // Closing stdin (dropping the sender) makes the reader loop exit and drain
+    // the pending map, so the request resolves instead of hanging.
+    drop(tx);
+
+    let err = tokio::time::timeout(std::time::Duration::from_secs(1), request)
+        .await
+        .expect("request hung after stdin closed")
+        .unwrap()
+        .unwrap_err();
+
+    assert!(matches!(err, ClientError::ChannelClosed));
 }

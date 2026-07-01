@@ -122,19 +122,25 @@ fn pretty_print_args(value: Option<&Value>) -> String {
     serde_json::to_string_pretty(val).unwrap_or_else(|_| val.to_string())
 }
 
+/// Truncate to at most `max` bytes, cutting on a character boundary.
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
-        s.to_owned()
-    } else {
-        let truncated: String = s.chars().take(max).collect();
-        format!("{truncated}\n\n... (truncated)")
+        return s.to_owned();
     }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n\n... (truncated)", &s[..end])
 }
 
 /// Convert markdown to HTML using comrak.
 pub(crate) fn markdown_to_html(md: &str) -> String {
+    // Raw HTML in the markdown is escaped, not passed through: conversation
+    // content is untrusted (tool output, fetched pages, file contents) and the
+    // result is injected into the page verbatim, so raw HTML would be a stored
+    // XSS vector.
     let mut options = comrak::Options::default();
-    options.render.r#unsafe = true;
     options.extension.strikethrough = true;
     options.extension.table = true;
     options.extension.autolink = true;

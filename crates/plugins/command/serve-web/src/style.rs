@@ -7,17 +7,20 @@ use sha2::{Digest as _, Sha256};
 /// The CSS content, embedded at compile time.
 pub(crate) const CSS: &str = include_str!("style.css");
 
-/// Compute a stable `ETag` from the CSS content hash.
-pub(crate) fn css_etag() -> String {
-    static ETAG: OnceLock<String> = OnceLock::new();
-    ETAG.get_or_init(|| {
+/// A short hex hash of the CSS content, used to cache-bust the stylesheet URL.
+pub(crate) fn css_version() -> &'static str {
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION.get_or_init(|| {
         let hash = Sha256::digest(CSS.as_bytes());
-        let hex: String = hash[..8].iter().fold(String::new(), |mut acc, b| {
+        hash[..8].iter().fold(String::new(), |mut acc, b| {
             use std::fmt::Write as _;
             let _ = write!(acc, "{b:02x}");
             acc
-        });
-        format!("\"{hex}\"")
+        })
     })
-    .clone()
+}
+
+/// The `ETag` header value for the CSS: the content hash in quotes.
+pub(crate) fn css_etag() -> String {
+    format!("\"{}\"", css_version())
 }

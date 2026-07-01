@@ -12,6 +12,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
     thread,
+    time::Duration,
 };
 
 use jp_plugin::message::{
@@ -24,6 +25,12 @@ use tracing::{debug, error, trace, warn};
 /// Shared writer for stdout, used by both the protocol client and the tracing
 /// log layer.
 pub type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+
+/// How long a request waits for a matching host response before giving up.
+///
+/// Guards against a lost or id-less response leaving a handler awaiting
+/// forever, which would otherwise stall graceful shutdown.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A protocol client that talks to the JP host over stdin/stdout.
 ///
@@ -76,7 +83,7 @@ impl PluginClient {
             id: Some(id.clone()),
         }))?;
 
-        match rx.await.map_err(|_| ClientError::ChannelClosed)? {
+        match await_response(rx).await? {
             HostToPlugin::Conversations(resp) => Ok(resp.data),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -93,7 +100,7 @@ impl PluginClient {
             conversation: conversation.to_owned(),
         }))?;
 
-        match rx.await.map_err(|_| ClientError::ChannelClosed)? {
+        match await_response(rx).await? {
             HostToPlugin::Events(resp) => Ok(resp),
             HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
             other => Err(ClientError::Unexpected(format!("{other:?}"))),
@@ -143,6 +150,17 @@ pub enum ClientError {
     ChannelClosed,
     /// Protocol-level I/O or serialization error.
     Protocol(String),
+    /// No response arrived within [`REQUEST_TIMEOUT`].
+    Timeout,
+}
+
+/// Await a pending response, failing with [`ClientError`] on a closed channel
+/// or timeout instead of blocking forever.
+async fn await_response(rx: oneshot::Receiver<HostToPlugin>) -> Result<HostToPlugin, ClientError> {
+    tokio::time::timeout(REQUEST_TIMEOUT, rx)
+        .await
+        .map_err(|_| ClientError::Timeout)?
+        .map_err(|_| ClientError::ChannelClosed)
 }
 
 impl std::fmt::Display for ClientError {
@@ -152,6 +170,7 @@ impl std::fmt::Display for ClientError {
             Self::Unexpected(msg) => write!(f, "unexpected response: {msg}"),
             Self::ChannelClosed => write!(f, "protocol channel closed"),
             Self::Protocol(msg) => write!(f, "protocol error: {msg}"),
+            Self::Timeout => write!(f, "timed out waiting for host response"),
         }
     }
 }
@@ -210,7 +229,11 @@ fn reader_loop(reader: impl BufRead, inner: &Inner, shutdown_tx: &watch::Sender<
         }
     }
 
-    // stdin closed — host process is gone.
+    // stdin closed — host process is gone. Drop every pending sender so any
+    // in-flight request resolves with `ChannelClosed` instead of hanging and
+    // stalling graceful shutdown.
+    inner.pending.lock().expect("pending lock poisoned").clear();
+
     debug!("stdin reader loop exited");
     let _ = shutdown_tx.send(true);
 }

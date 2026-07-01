@@ -2,6 +2,8 @@
 
 use maud::{DOCTYPE, Markup, html};
 
+use crate::style;
+
 /// Wrap page content in the common HTML shell.
 #[expect(
     clippy::needless_pass_by_value,
@@ -15,7 +17,8 @@ pub(crate) fn page(title: &str, body: Markup) -> Markup {
                 meta charset="utf-8";
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { (title) " - JP" }
-                link rel="stylesheet" href="/assets/style.css";
+                link rel="stylesheet"
+                    href=(format!("/assets/style.css?v={}", style::css_version()));
             }
             body {
                 (body)

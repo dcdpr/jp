@@ -182,6 +182,30 @@ fn plain_text_tool_response() {
     }
 }
 
+#[test]
+fn markdown_html_is_escaped() {
+    // Untrusted conversation content must not inject live HTML.
+    let html = markdown_to_html("<script>alert(1)</script>\n\nhi");
+    assert!(!html.contains("<script"), "raw HTML leaked: {html}");
+    // Surrounding markdown still renders.
+    assert!(html.contains("hi"));
+}
+
+#[test]
+fn truncate_multibyte_is_boundary_safe() {
+    // 4 bytes each; 3 chars = 12 bytes, over the 10-byte budget.
+    let s = "😀😀😀";
+    let out = truncate(s, 10);
+    assert!(out.ends_with("... (truncated)"));
+    // Cut on a char boundary: 10 rounds down to 8 bytes = 2 emoji.
+    assert!(out.starts_with("😀😀\n"));
+}
+
+#[test]
+fn truncate_short_string_is_unchanged() {
+    assert_eq!(truncate("hello", 10), "hello");
+}
+
 // RenderedEvent doesn't derive Debug, add a basic impl for panic messages.
 impl std::fmt::Debug for RenderedEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
