@@ -335,6 +335,63 @@ fn ordered_list_item_uses_three_space_continuation() {
 }
 
 #[test]
+fn align_tables_covers_full_last_row_with_trailing_code_span() {
+    // Comrak reports the table's end sourcepos short of the last row's final
+    // `|` when that row's last cell ends with a code span and another block
+    // follows the table in the same list item. Without snapping the
+    // replacement range to the line end, the stale tail bytes survive as
+    // `` ` | `` junk after the rewritten table.
+    let body = indoc! {r#"
+        1. Intro:
+
+           | A         | B      |
+           | --------- | ------ |
+           | `x = "y"` | `Code` |
+
+           Trailing paragraph inside the same item.
+    "#};
+    let out = crate::format::format_markdown_canonical(body, 80);
+    assert_eq!(out, body, "table must survive with no trailing junk");
+    assert_eq!(crate::format::format_markdown_canonical(&out, 80), out);
+}
+
+#[test]
+fn canonical_preserves_table_inside_list_item() {
+    // Regression: `align_tables` emitted rows `2..n` at column 0, losing the
+    // list-item continuation indent that sits inside the replaced source
+    // range. The de-indented rows no longer re-parsed as a table, so the
+    // reflow pass collapsed them into wrapped prose.
+    let body = indoc! {"
+        6. Some intro text:
+
+           | Head A | Head B |
+           | ------ | ------ |
+           | a1     | b1     |
+           | a2     | b2     |
+    "};
+    let out = crate::format::format_markdown_canonical(body, 80);
+    assert_eq!(out, body, "in-item table must survive canonicalization");
+    // The canonical form is a fixed point.
+    assert_eq!(crate::format::format_markdown_canonical(&out, 80), out);
+}
+
+#[test]
+fn canonical_preserves_table_inside_block_quote() {
+    // Same regression class as the list-item case: continuation lines inside
+    // a block quote carry a `> ` prefix that lives inside the replaced range.
+    let body = indoc! {"
+        > Intro:
+        >
+        > | Head A | Head B |
+        > | ------ | ------ |
+        > | a1     | b1     |
+    "};
+    let out = crate::format::format_markdown_canonical(body, 80);
+    assert_eq!(out, body, "in-quote table must survive canonicalization");
+    assert_eq!(crate::format::format_markdown_canonical(&out, 80), out);
+}
+
+#[test]
 fn list_item_continuation_indent_matches_marker_width() {
     // `100. ` is a 5-char marker, so continuation lines should be indented
     // by 5 spaces.
