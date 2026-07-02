@@ -132,6 +132,17 @@ fn parse_command_output_dotted_question_id_is_invalid_inquiry() {
 }
 
 #[test]
+fn parse_command_output_empty_question_id_is_invalid_inquiry() {
+    let stdout = br#"{"type":"needs_input","question":{"id":"","text":"?","pre_amble":null,"answer_type":{"type":"boolean"},"default":null}}"#;
+    let result = parse_command_output(stdout, b"", true);
+    assert!(matches!(
+        result,
+        CommandResult::InvalidInquiry { ref question_id } if question_id.is_empty()
+    ));
+    assert!(result.into_tool_result("t").is_err());
+}
+
+#[test]
 fn parse_command_output_non_outcome_is_raw() {
     assert!(matches!(
         parse_command_output(b"plain text", b"", true),

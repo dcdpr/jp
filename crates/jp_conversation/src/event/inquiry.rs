@@ -3,7 +3,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// Opaque identifier for an inquiry.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -280,8 +280,15 @@ pub enum InquiryResponse {
 
 impl InquiryResponse {
     /// Creates an answered inquiry response.
+    ///
+    /// A null answer is never a meaningful answer for any answer type; record a
+    /// `Cancelled` response instead.
     #[must_use]
     pub fn answered(id: impl Into<InquiryId>, answer: Value) -> Self {
+        debug_assert!(
+            !answer.is_null(),
+            "inquiry answers must not be null; record a cancellation instead"
+        );
         Self::Answered {
             id: id.into(),
             answer,
@@ -337,30 +344,37 @@ impl<'de> Deserialize<'de> for InquiryResponse {
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        struct Raw {
-            id: InquiryId,
-            #[serde(default)]
-            outcome: Option<String>,
-            #[serde(default)]
-            answer: Option<Value>,
-            #[serde(default)]
-            reason: Option<CancellationReason>,
-        }
+        // Deserialized through a raw map so a literal `null` answer stays
+        // distinguishable from an absent `answer` field: an `Option<Value>`
+        // field folds both into `None`, rejecting `Answered { answer: Null }`
+        // even though the serializer can produce it.
+        let mut raw = Map::deserialize(deserializer)?;
 
-        let raw = Raw::deserialize(deserializer)?;
-        match raw.outcome.as_deref() {
+        let id = raw
+            .get("id")
+            .and_then(Value::as_str)
+            .map(InquiryId::new)
+            .ok_or_else(|| de::Error::missing_field("id"))?;
+        let outcome = raw
+            .get("outcome")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+
+        match outcome.as_deref() {
             Some("answered") => {
                 let answer = raw
-                    .answer
+                    .remove("answer")
                     .ok_or_else(|| de::Error::missing_field("answer"))?;
-                Ok(Self::Answered { id: raw.id, answer })
+                Ok(Self::Answered { id, answer })
             }
-            Some("cancelled") => Ok(Self::Cancelled {
-                id: raw.id,
-                reason: raw.reason.unwrap_or(CancellationReason::User),
-            }),
-            Some("redacted") => Ok(Self::Redacted { id: raw.id }),
+            Some("cancelled") => {
+                let reason = raw
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .map_or(CancellationReason::User, CancellationReason::from_tag);
+                Ok(Self::Cancelled { id, reason })
+            }
+            Some("redacted") => Ok(Self::Redacted { id }),
             Some(other) => Err(de::Error::unknown_variant(other, &[
                 "answered",
                 "cancelled",
@@ -368,10 +382,10 @@ impl<'de> Deserialize<'de> for InquiryResponse {
             ])),
             // Legacy pre-082 flat form: `{ "id", "answer" }` is an answer.
             None => {
-                let answer = raw.answer.ok_or_else(|| {
+                let answer = raw.remove("answer").ok_or_else(|| {
                     de::Error::custom("inquiry response missing `outcome` and `answer`")
                 })?;
-                Ok(Self::Answered { id: raw.id, answer })
+                Ok(Self::Answered { id, answer })
             }
         }
     }

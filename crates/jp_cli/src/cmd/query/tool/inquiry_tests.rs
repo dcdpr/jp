@@ -189,6 +189,27 @@ async fn llm_backend_returns_error_on_answer_extraction_failure() {
 }
 
 #[tokio::test]
+async fn llm_backend_returns_error_on_null_answer() {
+    // A provider returning `{"answer": null}` must fail extraction rather
+    // than produce an `Answered { answer: Null }` record.
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
+    let config = test_inquiry_config(structured_provider(json!({ "answer": null })));
+    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+
+    let result = backend
+        .inquire(
+            test_events(),
+            &inquiry_id,
+            "test_tool",
+            &test_question(),
+            CancellationToken::new(),
+        )
+        .await;
+
+    assert!(matches!(result, Err(InquiryError::AnswerExtraction { .. })));
+}
+
+#[tokio::test]
 async fn llm_backend_returns_cancelled_when_token_is_already_cancelled() {
     let config = test_inquiry_config(structured_provider(json!({ "answer": true })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);

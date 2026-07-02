@@ -333,12 +333,16 @@ impl InquiryBackend for LlmInquiryBackend {
             "Structured inquiry completed",
         );
 
+        // A literal `null` answer is rejected here rather than recorded: it is
+        // never a meaningful answer, and `InquiryResponse::answered` refuses
+        // null values.
         structured_data
             .get_mut("answer")
             .map(Value::take)
+            .filter(|answer| !answer.is_null())
             .ok_or_else(|| {
                 let reason = format!(
-                    "missing 'answer' field in structured response: {}",
+                    "missing or null 'answer' field in structured response: {}",
                     serde_json::to_string(&structured_data)
                         .unwrap_or_else(|_| "<unparsable>".into())
                 );

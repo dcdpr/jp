@@ -552,7 +552,7 @@ fn test_permission_decision_cache_is_isolated_from_answers() {
         turn_state
             .remembered_permission_decisions
             .get(&PermissionCacheKey::new("my_tool")),
-        Some(&Value::from("y")),
+        Some(&true),
     );
     assert!(
         turn_state.remembered_tool_answers.is_empty(),

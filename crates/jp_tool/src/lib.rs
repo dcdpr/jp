@@ -87,9 +87,10 @@ impl Outcome {
 
 /// A validated tool-question identifier.
 ///
-/// A `QuestionId` never contains a `.`: the dot is reserved as the segment
-/// separator in the persisted inquiry ID
-/// (`<tool_call_id>.<question_id>.<attempt>`).
+/// A `QuestionId` is never empty and never contains a `.`: the dot is reserved
+/// as the segment separator in the persisted inquiry ID
+/// (`<tool_call_id>.<question_id>.<attempt>`), and an empty id is a
+/// tool-authoring bug.
 /// The only ways to build one are the validating `FromStr`/`TryFrom`
 /// conversions and `Deserialize`, so an invalid id cannot exist past the tool
 /// boundary.
@@ -109,7 +110,7 @@ impl FromStr for QuestionId {
     type Err = InvalidQuestionId;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.contains('.') {
+        if s.is_empty() || s.contains('.') {
             return Err(InvalidQuestionId);
         }
         Ok(Self(s.to_owned()))
@@ -120,7 +121,7 @@ impl TryFrom<String> for QuestionId {
     type Error = InvalidQuestionId;
 
     fn try_from(s: String) -> Result<Self, Self::Error> {
-        if s.contains('.') {
+        if s.is_empty() || s.contains('.') {
             return Err(InvalidQuestionId);
         }
         Ok(Self(s))
@@ -163,14 +164,14 @@ impl<'de> Deserialize<'de> for QuestionId {
     }
 }
 
-/// Error returned when a string is not a valid [`QuestionId`] (it contains a
-/// `.`).
+/// Error returned when a string is not a valid [`QuestionId`] (it is empty or
+/// contains a `.`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InvalidQuestionId;
 
 impl fmt::Display for InvalidQuestionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("question id must not contain '.'")
+        f.write_str("question id must be non-empty and must not contain '.'")
     }
 }
 
@@ -206,7 +207,7 @@ pub struct Question {
 
 impl Question {
     /// Create a new text question.
-    /// Fails if `id` contains a `.`.
+    /// Fails if `id` is empty or contains a `.`.
     pub fn text(id: impl Into<String>, text: impl Into<String>) -> Result<Self, InvalidQuestionId> {
         Ok(Self {
             id: QuestionId::try_from(id.into())?,
@@ -218,7 +219,7 @@ impl Question {
     }
 
     /// Create a new boolean question.
-    /// Fails if `id` contains a `.`.
+    /// Fails if `id` is empty or contains a `.`.
     pub fn boolean(
         id: impl Into<String>,
         text: impl Into<String>,
@@ -233,7 +234,7 @@ impl Question {
     }
 
     /// Create a new select question.
-    /// Fails if `id` contains a `.`.
+    /// Fails if `id` is empty or contains a `.`.
     pub fn select(
         id: impl Into<String>,
         text: impl Into<String>,
@@ -248,7 +249,7 @@ impl Question {
     }
 
     /// Create a new secret (no-echo, non-persisted) question.
-    /// Fails if `id` contains a `.`.
+    /// Fails if `id` is empty or contains a `.`.
     pub fn secret(
         id: impl Into<String>,
         text: impl Into<String>,

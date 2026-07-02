@@ -690,27 +690,22 @@ impl ToolCoordinator {
         let persisted = turn_state
             .remembered_permission_decisions
             .get(&permission_key)
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+            .copied();
 
-        if let Some(ref decision) = persisted {
-            match decision.as_str() {
-                "y" | "Y" => {
-                    self.set_tool_state(&info.tool_id, ToolCallState::Running);
-                    return PermissionDecision::Approved(executor);
-                }
-                "n" | "N" => {
-                    self.set_tool_state(&info.tool_id, ToolCallState::Completed);
-                    return PermissionDecision::Skipped(ToolCallResponse {
-                        id: info.tool_id.clone(),
-                        result: Ok("Tool skipped by user (remembered).".to_string()),
-                    });
-                }
-                _ => {} // Unknown value, fall through to prompt
+        match persisted {
+            Some(true) => {
+                self.set_tool_state(&info.tool_id, ToolCallState::Running);
+                PermissionDecision::Approved(executor)
             }
+            Some(false) => {
+                self.set_tool_state(&info.tool_id, ToolCallState::Completed);
+                PermissionDecision::Skipped(ToolCallResponse {
+                    id: info.tool_id.clone(),
+                    result: Ok("Tool skipped by user (remembered).".to_string()),
+                })
+            }
+            None => PermissionDecision::NeedsPrompt { executor, info },
         }
-
-        PermissionDecision::NeedsPrompt { executor, info }
     }
 
     /// Applies the result of an interactive permission prompt.
@@ -731,7 +726,7 @@ impl ToolCoordinator {
                 if persist {
                     turn_state
                         .remembered_permission_decisions
-                        .insert(permission_key.clone(), Value::from("y"));
+                        .insert(permission_key, true);
                 }
                 executor.set_arguments(arguments);
                 self.set_tool_state(&info.tool_id, ToolCallState::Running);
@@ -741,7 +736,7 @@ impl ToolCoordinator {
                 if persist {
                     turn_state
                         .remembered_permission_decisions
-                        .insert(permission_key.clone(), Value::from("n"));
+                        .insert(permission_key, false);
                 }
                 self.set_tool_state(&info.tool_id, ToolCallState::Completed);
                 let msg = if let Some(r) = reason {
@@ -994,8 +989,11 @@ impl ToolCoordinator {
                     result,
                 } => match result {
                     Ok(answer) => {
+                        // Close the recorded pair before the tool lookup, so an
+                        // unknown index cannot leave the request unpaired on
+                        // disk (sanitize() would drop it on the next load).
+                        Self::record_inquiry_answer(conv, &inquiry_id, &answer);
                         if let Some(tool) = executing_tools.get_mut(&index) {
-                            Self::record_inquiry_answer(conv, &inquiry_id, &answer);
                             tool.accumulated_answers.insert(question_id, answer);
                             self.set_tool_state(&tool.tool_id, ToolCallState::Running);
                             Self::spawn_tool_execution(
@@ -1007,30 +1005,37 @@ impl ToolCoordinator {
                                 cancellation_token.child_token(),
                                 event_tx.clone(),
                             );
+                        } else {
+                            warn!(index, "Received InquiryResult for unknown tool.");
                         }
                     }
-                    Err(error) => match executing_tools.get(&index) {
-                        None => warn!(index, %error, "Received ToolResult for unknown tool."),
-                        Some(tool) => {
-                            Self::record_inquiry_cancelled(
-                                conv,
-                                &inquiry_id,
-                                Self::cancellation_reason(&error),
-                            );
-                            self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
+                    Err(error) => {
+                        Self::record_inquiry_cancelled(
+                            conv,
+                            &inquiry_id,
+                            Self::cancellation_reason(&error),
+                        );
+                        match executing_tools.get(&index) {
+                            None => {
+                                warn!(index, %error, "Received InquiryResult for unknown tool.");
+                            }
+                            Some(tool) => {
+                                self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
 
-                            results[index] = Some(ToolCallResponse {
-                                id: tool.tool_id.clone(),
-                                result: Err(format!(
-                                    "The tool '{}' asked a follow-up question (\"{}\") that was \
-                                     routed to a secondary assistant for resolution, but the \
-                                     secondary assistant failed to provide a valid answer. Error: \
-                                     {}. You may retry the tool call or end the turn.",
-                                    tool.tool_name, question_text, error,
-                                )),
-                            });
+                                results[index] = Some(ToolCallResponse {
+                                    id: tool.tool_id.clone(),
+                                    result: Err(format!(
+                                        "The tool '{}' asked a follow-up question (\"{}\") that \
+                                         was routed to a secondary assistant for resolution, but \
+                                         the secondary assistant failed to provide a valid \
+                                         answer. Error: {}. You may retry the tool call or end \
+                                         the turn.",
+                                        tool.tool_name, question_text, error,
+                                    )),
+                                });
+                            }
                         }
-                    },
+                    }
                 },
                 ExecutionEvent::PromptCancelled {
                     index,

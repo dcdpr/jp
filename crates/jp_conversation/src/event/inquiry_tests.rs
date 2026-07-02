@@ -57,6 +57,34 @@ fn test_inquiry_response_legacy_answered_deserialization() {
 }
 
 #[test]
+fn test_inquiry_response_null_answer_round_trips() {
+    // A literal `null` answer must stay distinguishable from an absent
+    // `answer` field: whatever the serializer produces, the deserializer
+    // accepts.
+    let response = InquiryResponse::Answered {
+        id: InquiryId::new("call_1.confirm.1"),
+        answer: Value::Null,
+    };
+
+    let json = serde_json::to_value(&response).unwrap();
+    assert_eq!(
+        json,
+        json!({ "outcome": "answered", "id": "call_1.confirm.1", "answer": null })
+    );
+
+    let deserialized: InquiryResponse = serde_json::from_value(json).unwrap();
+    assert_eq!(deserialized, response);
+
+    // The legacy flat form accepts a null answer the same way.
+    let legacy = json!({ "id": "call_1.confirm", "answer": null });
+    let deserialized: InquiryResponse = serde_json::from_value(legacy).unwrap();
+    assert_eq!(deserialized, InquiryResponse::Answered {
+        id: InquiryId::new("call_1.confirm"),
+        answer: Value::Null,
+    });
+}
+
+#[test]
 fn test_inquiry_response_cancelled_serialization() {
     let user = InquiryResponse::Cancelled {
         id: InquiryId::new("call_1.confirm.1"),

@@ -72,8 +72,8 @@ pub struct TurnState {
     /// Tool-permission decisions remembered for the duration of the turn.
     ///
     /// Gated by the permission prompt's `persist` flag.
-    /// Values are `"y"` or `"n"`.
-    pub remembered_permission_decisions: IndexMap<PermissionCacheKey, Value>,
+    /// `true` runs the tool without prompting again; `false` skips it.
+    pub remembered_permission_decisions: IndexMap<PermissionCacheKey, bool>,
 
     /// The number of times we've tried a request to the assistant.
     ///

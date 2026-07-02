@@ -11,6 +11,22 @@ fn question_id_rejects_dot() {
 }
 
 #[test]
+fn question_id_rejects_empty() {
+    assert_eq!("".parse::<QuestionId>(), Err(InvalidQuestionId));
+    assert_eq!(QuestionId::try_from(String::new()), Err(InvalidQuestionId));
+    assert_eq!(QuestionId::try_from(""), Err(InvalidQuestionId));
+
+    // Rejected at the deserialization boundary too.
+    assert!(serde_json::from_str::<QuestionId>("\"\"").is_err());
+
+    // And through every constructor.
+    assert!(Question::text("", "?").is_err());
+    assert!(Question::boolean("", "?").is_err());
+    assert!(Question::select("", "?").is_err());
+    assert!(Question::secret("", "?").is_err());
+}
+
+#[test]
 fn question_id_accepts_plain() {
     let id: QuestionId = "overwrite_file".parse().unwrap();
     assert_eq!(id, "overwrite_file");
