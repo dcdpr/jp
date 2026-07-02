@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 // Shared parsing and validation for the RFD data loaders.
@@ -9,6 +9,11 @@ import { resolve } from 'node:path'
 // return a formatted error message, or `null` when the check passes. The
 // caller decides severity — published RFDs throw, drafts warn (except
 // duplicate ids, which abort either way).
+//
+// `assembleBoard` (bottom of this file) composes the building blocks into the
+// full priority board. Both the web board (`rfd-board.data.js`) and the
+// `just rfd-list` CLI (`../rfd-list.mjs`) go through it, so the two never
+// drift.
 
 // Parse the inline metadata from an RFD markdown file.
 //
@@ -16,7 +21,12 @@ import { resolve } from 'node:path'
 // small custom parser. Handles both permanent (`NNN`) and draft (`DNN`) ids.
 export function parseMeta(content, filename) {
     const num = filename.match(/^(\d{3}|D\d{2})/)?.[1] ?? '000'
-    const title = content.match(/^# RFD (?:\d+|D\d+):\s*(.+)/m)?.[1]?.trim() ?? filename
+    const rawTitle = content.match(/^# RFD (?:\d+|D\d+):\s*(.+)/m)?.[1]?.trim() ?? filename
+
+    // Titles are consumed as plain text everywhere (CLI list, board, index,
+    // reference tooltips), but the markdown source escapes punctuation like
+    // `ask\_user` to avoid emphasis. Undo those escapes for display.
+    const title = rawTitle.replace(/\\([^A-Za-z0-9])/g, '$1')
 
     const field = (key) =>
         content.match(new RegExp(`^- \\*\\*${key}\\*\\*:\\s*(.+)`, 'm'))?.[1]?.trim() ?? null
@@ -26,6 +36,10 @@ export function parseMeta(content, filename) {
         title,
         status: field('Status'),
         category: field('Category'),
+        // The RFD number that superseded this one, if any (e.g. `033` -> `034`).
+        supersededBy:
+            content.match(/^- \*\*Superseded by\*\*:.*?\bRFD\s+(\d{3}|D\d{2})\b/m)?.[1]
+            ?? null,
         authors: field('Authors'),
         date: field('Date'),
         slug: filename.replace(/\.md$/, ''),
@@ -439,4 +453,58 @@ export function checkRequiresOnImplemented(graph) {
         `is Implemented the link is redundant. Remove the \`Requires\` entry ` +
         `(and the matching \`Required by\` back-link), or use \`Extends\` if the ` +
         `relationship is design lineage worth keeping.`
+}
+
+// Assemble the full priority board: every published RFD and prioritisable
+// draft, annotated with board position (`priority`), in-development flag, and
+// hard dependencies (`dependsOn`). Entries not placed on the board — including
+// terminal RFDs — carry `priority: null`.
+//
+// Returns the entries alongside the raw `priority` record so callers can tell
+// the prioritised `order` from the unsorted `backlog` (the cutoff sits at
+// `priority.order.length`). Throws when the board references an unknown id
+// (see `checkPriority`).
+//
+// Paths are resolved from this file's location, so the result is independent
+// of the caller's working directory.
+export function assembleBoard() {
+    const rfdDir = resolve(import.meta.dirname, '../../rfd')
+    const draftsDir = resolve(import.meta.dirname, '../../rfd/drafts')
+    const cachePath = resolve(import.meta.dirname, '../rfd-summaries.json')
+    const priorityPath = resolve(import.meta.dirname, '../../rfd/priority.json')
+
+    const publishedFiles = readdirSync(rfdDir)
+        .filter(f => /^\d{3}-.+\.md$/.test(f) && !f.startsWith('000-'))
+        .sort()
+    const draftFiles = readdirSync(draftsDir)
+        .filter(f => /^D\d{2}-.+\.md$/.test(f))
+        .sort()
+
+    let summaries
+    try {
+        summaries = JSON.parse(readFileSync(cachePath, 'utf-8'))
+    } catch {
+        summaries = {}
+    }
+
+    const entries = [
+        ...buildEntries(rfdDir, publishedFiles, summaries, '/rfd'),
+        ...buildEntries(draftsDir, draftFiles, {}, '/rfd/drafts'),
+    ]
+
+    // Combined graph so the ordering constraint spans both id spaces (a draft
+    // may require a published RFD).
+    const graph = new Map([
+        ...buildGraph(rfdDir, publishedFiles),
+        ...buildGraph(draftsDir, draftFiles),
+    ])
+
+    const priority = loadPriority(priorityPath)
+    mergePriority(entries, priority)
+    mergeDependencies(entries, graph)
+
+    const error = checkPriority(entries, priority)
+    if (error) throw new Error(error)
+
+    return { entries, priority }
 }
