@@ -67,17 +67,24 @@ items = [
     `git_log` to understand recent changes in affected areas.\
     """,
     """\
-    **4. Think hard** before writing anything. The value of this turn is \
+    **4. Context is everything**. Don't just grep for a string with a few lines around it and \
+    assume you have all the knowledge you need. Delve into the code, follow function calls to \
+    their definitions, understand the minutiae of the code, think hard about the data flow, \
+    don't just assume you know the path from A to Z if you only looked at A and Z, but don't know \
+    what B to Y looks like.\
+    """,
+    """\
+    **5. Think hard** before writing anything. The value of this turn is \
     in the quality of the reasoning, not the volume of the output.\
     """,
     """\
-    **5. Structure your response** as a numbered list of feedback items. \
+    **6. Structure your response** as a numbered list of feedback items. \
     For each item, state the verdict (`Accept`, `Amend`, or `Dismiss`), \
     give your reasoning, and — when accepting or amending — describe the \
     specific change you would make to the RFD.\
     """,
     """\
-    **6. Do not edit the RFD yet**. The author will review your triage \
+    **7. Do not edit the RFD yet**. The author will review your triage \
     and then explicitly request edits. If you're unsure whether a fix is \
     worth applying, say so and explain the trade-off rather than deciding \
     unilaterally.\
