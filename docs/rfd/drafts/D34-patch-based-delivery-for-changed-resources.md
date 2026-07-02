@@ -16,7 +16,7 @@
 
 [RFD 067] replaces a redundant resource delivery with a reference when the
 content is identical to a prior delivery.
-This RFD adds a third outcome for the case 067 falls through on: when the
+This RFD adds a third outcome for the case [RFD 067] falls through on: when the
 content has *changed* and the prior delivery is still within the LLM's effective
 context, JP sends a unified diff instead of the full content.
 
@@ -37,12 +37,9 @@ Brief definitions follow; each links to the RFD that owns the full design.
 - **Checksum** — the SHA-256 digest of a resource's raw content, computed by
   the **blob store** — [RFD 066]'s content-addressed storage — when the
   content is persisted.
-  The digest doubles as the retrieval key.
 - **Delivery** — this RFD's term for the moment a resource's content enters the
   conversation for the LLM: as an attachment, a tool result, or a
   `refresh_resource` result.
-  Every delivery records the resource's canonical URI and checksum in the
-  conversation history.
 - **Reference** — the replacement [RFD 067] emits for redundant content: a
   short message pointing at an earlier delivery ("identical to tool call
   `call_3` at turn 5").
@@ -88,18 +85,18 @@ Here the diff is not merely cheaper; it is the semantically useful answer ("what
 changed since last time"), and the reassembly risk is low because the LLM rarely
 needs the reconstructed full listing verbatim.
 
-If we do nothing, deduplication only helps with content that never changes.
-The edit-verify loop and the refreshed-listing pattern — the two highest-volume
-sources of redundant tokens — pay full price on every iteration.
+Without this RFD, deduplication only helps content that never changes; both
+patterns pay full price on every iteration.
 
 ## Design
 
-### A third outcome at 067's decision point
+### A third outcome at [RFD 067]'s decision point
 
 This RFD extends [RFD 067]'s per-block matching algorithm.
 No new pipeline stage is added; the patch check is a new arm at the same
-decision point in the `ToolCoordinator`, and applies to every path 067 covers:
-tool responses, `refresh_resource` calls ([RFD 065]), and re-attached resources.
+decision point in the `ToolCoordinator`, and applies to every path [RFD 067]
+covers: tool responses, `refresh_resource` calls ([RFD 065]), and re-attached
+resources.
 
 For each resource block about to be delivered:
 
@@ -114,10 +111,15 @@ For each resource block about to be delivered:
 
 A patch is delivered only when **all** of the following hold:
 
-1. A prior delivery of the same canonical URI exists within `lookback_turns` —
-   [RFD 067]'s window of recent turns eligible for matching.
-2. That prior delivery was a **full** delivery (see base invariant below).
-3. Both the prior and the new content are text.
+1. A **full** delivery of the same canonical URI exists within `lookback_turns`
+   — [RFD 067]'s window of recent turns eligible for matching.
+   That delivery is the patch base; later patch deliveries of the same URI do
+   not disqualify it (see base invariant below).
+2. The base content is retrievable from the blob store ([RFD 066]).
+   A failed retrieval — missing blob, checksum mismatch — fails this
+   condition.
+3. Both the base and the new content are text: their resources declare a text
+   mimeType ([RFD 065]) and their bytes are valid UTF-8.
 4. The new content exceeds `min_bytes` — [RFD 067]'s minimum content size,
    below which replacement overhead negates the savings.
 5. The patch is small relative to the content: `patch_bytes / content_bytes <=
@@ -140,53 +142,58 @@ This guarantees that any patch in the context window applies to exactly one full
 delivery that is also in the context window; the model never has to stack patch
 applications.
 
-The consequence: across repeated changes, successive patches are computed
-against the same base and grow in size.
-Each patch is **complete** with respect to the base — it contains all changes
-since the base delivery, not only the changes since the previous patch — so a
-later patch supersedes earlier ones, and the model needs only the base plus the
-most recent patch.
+The consequence: successive patches are computed against the same base, are each
+**complete** — all changes since the base, so a later patch supersedes earlier
+ones — and grow in size.
 When the cumulative diff exceeds `max_patch_ratio` (or the base ages out of
-`lookback_turns`), the patch conditions fail, JP delivers the full content, and
-that delivery becomes the new base.
-The mechanism is self-resetting: a resource that changes every turn — a file
-listing gaining a file per turn, say — accumulates patch size until a condition
-fails, receives a full delivery, and starts a new cycle.
-Between resets, every patch costs at most `max_patch_ratio` of the full content.
+`lookback_turns`), the conditions fail, JP delivers the full content, and that
+delivery becomes the new base.
+A resource that changes every turn — a file listing gaining a file per turn,
+say — thus cycles: patches accumulate until a condition fails, a full delivery
+resets the base, and between resets every patch costs at most `max_patch_ratio`
+of the full content.
 
 JP retrieves the base content from the blob store ([RFD 066]) using the checksum
 recorded in the conversation history, and computes the diff at delivery time.
 Handlers and tools are not involved — they return content as they do today.
 
+### Delivery records
+
+[RFD 067] records each delivery's canonical URI and checksum in the conversation
+history.
+Patching adds two requirements to that record:
+
+- **The delivery form.** Each record carries how the content was delivered:
+  full, reference, or patch.
+  The base lookup considers only full deliveries, and the re-read rule below
+  distinguishes full from patch deliveries; neither is answerable from `(uri,
+  checksum)` alone.
+- **The assembled checksum.** A patch delivery records the checksum of the
+  assembled new content, not of the patch text.
+  A later read returning identical content must match this record — that match
+  is what triggers the re-read rule.
+
 ### Re-reads after a patch deliver full content
 
 A patch serves change-awareness, but sometimes the LLM needs the assembled
-current state — re-reading a file to orient itself in surrounding code before
-the next edit, not to verify the last one.
-Without an escape hatch the model is trapped: re-reading the resource produces
-content identical to what JP recorded at the patch delivery, so the reference
-arm would answer with a pointer to a delivery that was itself a patch.
-Assembled current content would be unobtainable.
+current state — re-reading a file to orient itself, not to verify an edit.
+Without an escape hatch that state is unobtainable: a re-read returns content
+identical to the patch delivery's record, and the reference arm would answer
+with a pointer to the patch.
 
 The rule is state-based, not time-based.
 A reference is emitted only when a **full** delivery with the same canonical URI
 and checksum exists within `lookback_turns` — matching prefers full deliveries
 over patch deliveries of the same content.
-If the checksum matches only deliveries rendered as patches, the assembled
-content has never been in the context window, and JP delivers it in full no
-matter how many turns have passed since the patch.
-A repeated read while a resource's content exists in context only as
-base-plus-patch is treated as the model asking for what the patch withheld.
-That full delivery becomes the new patch base, so a subsequent identical read
-gets a reference — the escape hatch fires once per patch state, not once per
-read.
+If the checksum matches only patch deliveries, the assembled content has never
+been in the context window, and JP delivers it in full.
+That delivery becomes the new patch base, so a subsequent identical read gets a
+reference — the escape hatch fires once per patch state, not once per read.
 
-The escape hatch is behavioral, so the model self-selects per read:
-verify-intent reads are satisfied by the diff; reorient-intent reads cost one
-extra round-trip and receive full content.
+The model self-selects per read: verify-intent reads are satisfied by the diff;
+reorient-intent reads cost one extra round-trip and receive full content.
 Reads of a different line range carry a different fragment URI and never match,
-so surrounding-context range reads already receive full content without invoking
-this rule.
+so they receive full content without invoking this rule.
 
 ### Patch format
 
@@ -214,6 +221,9 @@ human-auditable in the conversation log.
 The default of 3 context lines per hunk is a starting point; whether more
 context improves the model's reconstruction reliability is a validation question
 (see Implementation Plan).
+
+How a patch delivery is displayed in the terminal is governed by the existing
+tool call style configuration (`style.tool_call`), unchanged by this RFD.
 
 ### Configuration
 
@@ -329,7 +339,7 @@ It remains the fallback whenever patch conditions fail.
   invariant.
 - **Rename detection.** A patch is never computed across different canonical
   URIs.
-- **Changes to 067's reference mechanism when patching is inactive.** With
+- **Changes to [RFD 067]'s reference mechanism when patching is inactive.** With
   `patch = false` (or this RFD absent), identical content behaves exactly as
   [RFD 067] specifies.
   With patching active, the one deliberate deviation is the re-read rule:
@@ -354,7 +364,7 @@ rework.
 Conversation compaction — dropping or summarizing old events to shrink the LLM
 request ([RFD 036], [RFD 064]) — can remove the base delivery a patch was
 computed against, leaving the patch dangling.
-The same concern exists for 067's references, but here it is a correctness
+The same concern exists for [RFD 067]'s references, but here it is a correctness
 problem, not an inconvenience.
 Compaction must either preserve full deliveries that serve as patch bases within
 the lookback window, or JP must treat a compacted base as failing condition 1
@@ -381,6 +391,8 @@ Phase 2.
 
 Implement the patch conditions, base lookup via blob store, diff computation,
 and the prefix message format in the `ToolCoordinator` dedup decision point.
+Extend [RFD 067]'s delivery record with the delivery form and the assembled
+content checksum (see Delivery records).
 Add `patch` and `max_patch_ratio` to `conversation.deduplication`.
 Ships with `patch = false`.
 
