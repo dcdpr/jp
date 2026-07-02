@@ -106,12 +106,23 @@ fn test_inquiry_response_cancelled_serialization() {
 }
 
 #[test]
-fn test_inquiry_response_cancelled_missing_reason_defaults_to_user() {
+fn test_inquiry_response_cancelled_missing_reason_is_unknown() {
+    // A `cancelled` event without a usable `reason` carries no audit claim;
+    // it must not be fabricated into a specific reason like `User`.
     let json = json!({ "outcome": "cancelled", "id": "call_1.confirm.1" });
     let response: InquiryResponse = serde_json::from_value(json).unwrap();
     assert_eq!(response, InquiryResponse::Cancelled {
         id: InquiryId::new("call_1.confirm.1"),
-        reason: CancellationReason::User,
+        reason: CancellationReason::Unknown("unspecified".to_owned()),
+    });
+
+    // A non-string reason is equally unusable and lands on the same sentinel,
+    // consistent with unrecognized string tags mapping to `Unknown`.
+    let json = json!({ "outcome": "cancelled", "id": "call_1.confirm.1", "reason": 42 });
+    let response: InquiryResponse = serde_json::from_value(json).unwrap();
+    assert_eq!(response, InquiryResponse::Cancelled {
+        id: InquiryId::new("call_1.confirm.1"),
+        reason: CancellationReason::Unknown("unspecified".to_owned()),
     });
 }
 

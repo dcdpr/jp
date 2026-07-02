@@ -1726,6 +1726,12 @@ impl ToolCoordinator {
             }
             Err(error) => {
                 let reason = Self::prompt_cancellation_reason(&error);
+                // Esc/Ctrl-C is routine; only genuine prompt failures are
+                // warning-worthy. The persisted record stays coarse, so this
+                // trace is the only place the underlying error survives.
+                if reason == CancellationReason::BackendError {
+                    warn!(%error, "Tool question prompt failed.");
+                }
                 drop(event_tx.blocking_send(ExecutionEvent::PromptCancelled {
                     index,
                     inquiry_id,

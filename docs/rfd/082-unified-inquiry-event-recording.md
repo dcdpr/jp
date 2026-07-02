@@ -329,17 +329,17 @@ valid `QuestionId` — see [Inquiry ID format](#inquiry-id-format)):
    user cancelled would land unpaired on disk.
    The `reason` is determined by the originating event:
 
-   ## | Originating event | `reason` | |
-
-   | ------------------------ | | `ExecutionEvent::PromptCancelled` (user Ctrl-C
-   or EOF) | `User` | | `InquiryError::Cancelled` (cancellation token fired:
-   user restart, tool cancel, hard quit) | `User` | | `InquiryError::Provider` |
-   `BackendError` | | `InquiryError::MissingStructuredData` | `BackendError` | |
-   `InquiryError::AnswerExtraction { .. }` | `BackendError` | |
-   `InquiryError::Other(_)` (mock-backend catch-all) | `BackendError` | |
-   `AnswerType::Secret` and no TTY available | `NoPromptBackend` | |
-   `AnswerType::Secret` and `target = "assistant"` | `AssistantRoutingDenied`
-   |\` |
+   | Originating event                                                                          | `reason`                 |
+   | ------------------------------------------------------------------------------------------ | ------------------------ |
+   | `ExecutionEvent::PromptCancelled` (Esc, Ctrl-C, or EOF at the prompt)                      | `User`                   |
+   | `ExecutionEvent::PromptCancelled` (prompter failure: I/O error, no TTY)                    | `BackendError`           |
+   | `InquiryError::Cancelled` (cancellation token fired: user restart, tool cancel, hard quit) | `User`                   |
+   | `InquiryError::Provider`                                                                   | `BackendError`           |
+   | `InquiryError::MissingStructuredData`                                                      | `BackendError`           |
+   | `InquiryError::AnswerExtraction { .. }`                                                    | `BackendError`           |
+   | `InquiryError::Other(_)` (mock-backend catch-all)                                          | `BackendError`           |
+   | `AnswerType::Secret` and no TTY available                                                  | `NoPromptBackend`        |
+   | `AnswerType::Secret` and `target = "assistant"`                                            | `AssistantRoutingDenied` |
 
    `InquiryError::Cancelled` returns `Err` from the inquiry backend today (see
    `crates/jp_cli/src/cmd/query/tool/inquiry.rs` around
@@ -347,10 +347,10 @@ valid `QuestionId` — see [Inquiry ID format](#inquiry-id-format)):
    cancellation — the token is cancelled by `interrupt/signals.rs` in response
    to user actions (`InterruptAction::RestartTool`, `ToolCancelled`, hard quit).
    Mapping it to `User` (not `BackendError`) keeps the audit trail honest.
-   Prompter I/O errors (e.g. EOF on stdin mid-prompt) are indistinguishable from
-   Ctrl-C at the coordinator's vantage today and follow the same `User` path; if
-   a future change distinguishes them, the right landing is a new
-   `CancellationReason` variant rather than re-using `BackendError`.
+   `ExecutionEvent::PromptCancelled` carries a reason mapped at the prompt site:
+   `inquire`'s cancel/interrupt errors are user actions, and every other
+   prompter error (I/O, no TTY, writer failure) is a backend failure recorded as
+   `BackendError`.
 
 `Cancelled` records that the inquiry was closed without an answer — for the
 audit trail only.
@@ -1013,8 +1013,10 @@ variant.
 Implement the custom `Serialize`/`Deserialize` for `CancellationReason` so
 unrecognized tags round-trip as `Unknown(s)` preserving `s` verbatim.
 Implement the custom `Deserialize` for `InquiryResponse` that accepts the legacy
-untagged form as `Answered` and defaults a missing `reason` on a tagged
-`Cancelled` event to `User`.
+untagged form as `Answered` and maps a missing (or non-string) `reason` on a
+tagged `Cancelled` event to `Unknown` with the sentinel tag `unspecified` —
+such a record carries no reason, and fabricating a specific one (e.g. `User`)
+would put a false claim in the audit trail.
 
 Split `TurnState.persisted_inquiry_responses` into `remembered_tool_answers:
 IndexMap<String, Value>` and `remembered_permission_decisions: IndexMap<String,

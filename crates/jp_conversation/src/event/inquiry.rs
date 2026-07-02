@@ -338,8 +338,10 @@ impl<'de> Deserialize<'de> for InquiryResponse {
     ///
     /// The flat form (`{ "id", "answer" }`, no `outcome`) deserializes as
     /// `Answered`.
-    /// A tagged `cancelled` event with no `reason` defaults to
-    /// `CancellationReason::User`.
+    /// A tagged `cancelled` event whose `reason` is missing or not a string
+    /// deserializes as `CancellationReason::Unknown` with the sentinel tag
+    /// `unspecified`: the record carries no usable reason, and no specific one
+    /// is fabricated for it.
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -368,10 +370,10 @@ impl<'de> Deserialize<'de> for InquiryResponse {
                 Ok(Self::Answered { id, answer })
             }
             Some("cancelled") => {
-                let reason = raw
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .map_or(CancellationReason::User, CancellationReason::from_tag);
+                let reason = raw.get("reason").and_then(Value::as_str).map_or_else(
+                    || CancellationReason::Unknown("unspecified".to_owned()),
+                    CancellationReason::from_tag,
+                );
                 Ok(Self::Cancelled { id, reason })
             }
             Some("redacted") => Ok(Self::Redacted { id }),
@@ -412,8 +414,9 @@ pub enum CancellationReason {
     /// and refused to route to the inquiry backend.
     AssistantRoutingDenied,
 
-    /// A reason produced by a newer JP that named a variant this build does not
-    /// recognize.
+    /// A reason this build cannot interpret: a tag named by a newer JP, or a
+    /// `cancelled` event whose `reason` was missing or not a string (recorded
+    /// with the sentinel tag `unspecified`).
     ///
     /// The payload is the unparsed serde tag, preserved verbatim so it
     /// round-trips unchanged.
