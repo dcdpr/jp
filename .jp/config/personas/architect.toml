@@ -48,7 +48,7 @@ code review.
 """
 
 [assistant.model]
-id = "opus"
+id = "fable"
 parameters.reasoning.effort = "high"
 
 [[assistant.instructions]]
