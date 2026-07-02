@@ -1145,8 +1145,9 @@ Secret-question handling:
   constructors, so the wire-shape change is transparent to them; for external
   local tools this is a breaking change to the stdout protocol, shipped without
   a compat shim (see Drawbacks).
-  Add a matching `Question::secret(text: String) -> Self` constructor in
-  `jp_tool` alongside `Question::text`/`boolean`/`select`.
+  Add a matching `Question::secret(id, text) -> Result<Self, InvalidQuestionId>`
+  constructor in `jp_tool` alongside `Question::text`/`boolean`/`select` (all
+  four validate the id through `QuestionId`).
   No `secret: bool` field is added to `Question`.
 - Add the matching `Secret` variant to
   `jp_conversation::event::inquiry::InquiryAnswerType` (which is already

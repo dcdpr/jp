@@ -3878,6 +3878,236 @@ async fn test_secret_static_answer_is_redacted() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
+/// A non-secret question with a configured static answer records a full
+/// `InquiryRequest`/`InquiryResponse::Answered` pair carrying the configured
+/// value (RFD 082: static answers are recorded, not pre-seeded).
+#[tokio::test]
+async fn test_static_answer_records_answered_inquiry() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        let mut tool_config = inquiry_tool_config(&[]);
+        tool_config
+            .questions
+            .insert("confirm".to_string(), QuestionConfig {
+                target: QuestionTarget::User,
+                answer: Some(json!(true)),
+            });
+        config
+            .conversation
+            .tools
+            .insert("static_tool".to_string(), tool_config);
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_static", "static_tool"),
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+        let executor_source = TestExecutorSource::new().with_executor("static_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::boolean("confirm", "Proceed?").unwrap()],
+                "static tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &signal_rx,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // The static answer reached the tool and it completed successfully.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        assert_eq!(tool_responses[0].content(), "static tool output");
+
+        // The round-trip is recorded as a request/response pair, with the
+        // response carrying the configured value.
+        let req: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_request())
+            .collect();
+        assert_eq!(req.len(), 1, "Should have one inquiry request");
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Answered { .. }));
+        assert_eq!(res[0].answer(), Some(&json!(true)));
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A "remember for this turn" prompter answer is reused for a later tool call
+/// in the same turn, and the cache hit still records a fresh
+/// `InquiryRequest`/`InquiryResponse::Answered` pair (RFD 082).
+#[tokio::test]
+async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // No question config: the question targets the user and is answered
+        // at the interactive prompter.
+        config
+            .conversation
+            .tools
+            .insert("cached_tool".to_string(), inquiry_tool_config(&[]));
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool twice");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_a", "cached_tool"),
+                single_tool_call_events("call_b", "cached_tool"),
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+        let executor_source = TestExecutorSource::new().with_executor("cached_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::boolean("confirm", "Proceed?").unwrap()],
+                "cached tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        // A single queued 'Y' ("yes, and remember for this turn"): the second
+        // call must be satisfied from the turn cache, because another prompt
+        // would find the queue empty and cancel.
+        let prompt_backend = Arc::new(MockPromptBackend::new().with_inline_responses(['Y']));
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &signal_rx,
+            &mcp_client,
+            root,
+            true,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            prompt_backend,
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // Both tool calls completed with the answer.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 2);
+        assert_eq!(tool_responses[0].content(), "cached tool output");
+        assert_eq!(tool_responses[1].content(), "cached tool output");
+
+        // Each round-trip records its own pair; the cache hit records
+        // `Answered`, not nothing.
+        let req: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_request())
+            .collect();
+        assert_eq!(req.len(), 2, "Should have two inquiry requests");
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 2, "Should have two inquiry responses");
+        for r in &res {
+            assert!(matches!(r, InquiryResponse::Answered { .. }));
+            assert_eq!(r.answer(), Some(&json!(true)));
+        }
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
 /// Tool has two questions, each triggering a separate inquiry round.
 /// Flow: tool call → `NeedsInput(q1)` → inquiry → answer → `NeedsInput(q2)`
 /// → inquiry → answer → completed.

@@ -58,8 +58,9 @@
 //! - **LLM target**: The question is formatted as a response asking the LLM to
 //!   re-run the tool with the answer.
 //!   The tool is marked as completed.
-//! - **Static answer**: Pre-populated before first execution, so the tool
-//!   should never ask for this input.
+//! - **Static answer**: When the tool asks a question with a configured
+//!   `QuestionConfig.answer`, the value is supplied without a prompt and the
+//!   round-trip is recorded as an inquiry request/response pair.
 //!
 //! # Non-Blocking Prompts
 //!
@@ -84,6 +85,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use indexmap::IndexMap;
+use inquire::error::InquireError;
 use jp_config::{
     conversation::tool::{
         FormatMode, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
@@ -115,6 +117,7 @@ use super::{
     prompter::{PermissionResult, ToolPrompter},
 };
 use crate::{
+    Error,
     cmd::query::turn::{
         TurnCoordinator,
         state::{PermissionCacheKey, ToolAnswerCacheKey, TurnState},
@@ -143,6 +146,9 @@ enum ExecutionEvent {
     PromptCancelled {
         index: usize,
         inquiry_id: InquiryId,
+        /// Why the prompt closed without an answer, mapped from the prompter
+        /// error at the prompt site.
+        reason: CancellationReason,
     },
 
     /// Result of a structured inquiry (LLM answering a tool question).
@@ -1026,10 +1032,15 @@ impl ToolCoordinator {
                         }
                     },
                 },
-                ExecutionEvent::PromptCancelled { index, inquiry_id } => {
+                ExecutionEvent::PromptCancelled {
+                    index,
+                    inquiry_id,
+                    reason,
+                } => {
                     self.handle_prompt_cancelled(
                         index,
                         &inquiry_id,
+                        reason,
                         &mut executing_tools,
                         &mut results,
                         &mut pending_prompts,
@@ -1262,6 +1273,19 @@ impl ToolCoordinator {
             | InquiryError::MissingStructuredData
             | InquiryError::AnswerExtraction { .. }
             | InquiryError::Other(_) => CancellationReason::BackendError,
+        }
+    }
+
+    /// Map a prompter error to its persisted [`CancellationReason`].
+    ///
+    /// `OperationCanceled`/`OperationInterrupted` are user-initiated (Esc,
+    /// Ctrl-C, or EOF at the prompt); every other error is a prompt failure.
+    fn prompt_cancellation_reason(error: &Error) -> CancellationReason {
+        match error {
+            Error::Inquire(
+                InquireError::OperationCanceled | InquireError::OperationInterrupted,
+            ) => CancellationReason::User,
+            _ => CancellationReason::BackendError,
         }
     }
 
@@ -1640,6 +1664,7 @@ impl ToolCoordinator {
         &mut self,
         index: usize,
         inquiry_id: &InquiryId,
+        reason: CancellationReason,
         executing_tools: &mut HashMap<usize, ExecutingTool>,
         results: &mut [Option<ToolCallResponse>],
         pending_prompts: &mut VecDeque<PendingPrompt>,
@@ -1650,15 +1675,19 @@ impl ToolCoordinator {
     ) {
         *prompt_active = false;
 
-        // A user cancellation (Ctrl-C / EOF at the prompt) closes the recorded
-        // inquiry as Cancelled(User).
-        Self::record_inquiry_cancelled(conv, inquiry_id, CancellationReason::User);
+        // A user cancellation (Esc / Ctrl-C / EOF at the prompt) completes the
+        // tool benignly; a prompt failure is a tool-level error.
+        let result = match reason {
+            CancellationReason::User => Ok("Tool input cancelled by user.".to_string()),
+            _ => Err("Tool input prompt failed.".to_string()),
+        };
+        Self::record_inquiry_cancelled(conv, inquiry_id, reason);
 
         if let Some(tool) = executing_tools.get(&index) {
             self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
             results[index] = Some(ToolCallResponse {
                 id: tool.tool_id.clone(),
-                result: Ok("Tool input cancelled by user.".to_string()),
+                result,
             });
         }
         self.process_next_prompt(
@@ -1679,8 +1708,8 @@ impl ToolCoordinator {
     ) {
         let question_id = question.id.to_string();
         let redact = question.answer_type == AnswerType::Secret;
-        tokio::task::spawn_blocking(move || {
-            if let Ok(result) = prompter.prompt_question(&question) {
+        tokio::task::spawn_blocking(move || match prompter.prompt_question(&question) {
+            Ok(result) => {
                 drop(event_tx.blocking_send(ExecutionEvent::PromptAnswer {
                     index,
                     question_id,
@@ -1689,8 +1718,14 @@ impl ToolCoordinator {
                     persist_level: result.persist_level,
                     redact,
                 }));
-            } else {
-                drop(event_tx.blocking_send(ExecutionEvent::PromptCancelled { index, inquiry_id }));
+            }
+            Err(error) => {
+                let reason = Self::prompt_cancellation_reason(&error);
+                drop(event_tx.blocking_send(ExecutionEvent::PromptCancelled {
+                    index,
+                    inquiry_id,
+                    reason,
+                }));
             }
         });
     }

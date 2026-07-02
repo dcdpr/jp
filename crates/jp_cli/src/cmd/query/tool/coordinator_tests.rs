@@ -594,6 +594,32 @@ fn test_cancellation_reason_mapping() {
 }
 
 #[test]
+fn test_prompt_cancellation_reason_mapping() {
+    // Esc/Ctrl-C/EOF at the prompt is a user cancellation; any other prompt
+    // failure (I/O, no TTY, writer errors) is a backend error.
+    assert_eq!(
+        ToolCoordinator::prompt_cancellation_reason(&Error::Inquire(
+            InquireError::OperationCanceled
+        )),
+        CancellationReason::User
+    );
+    assert_eq!(
+        ToolCoordinator::prompt_cancellation_reason(&Error::Inquire(
+            InquireError::OperationInterrupted
+        )),
+        CancellationReason::User
+    );
+    assert_eq!(
+        ToolCoordinator::prompt_cancellation_reason(&Error::Inquire(InquireError::NotTTY)),
+        CancellationReason::BackendError
+    );
+    assert_eq!(
+        ToolCoordinator::prompt_cancellation_reason(&Error::Fmt(std::fmt::Error)),
+        CancellationReason::BackendError
+    );
+}
+
+#[test]
 fn test_pending_prompt_question_variant() {
     let pending = PendingPrompt::Question {
         index: 0,
