@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import { checkMilestones, normalizePriority } from './rfd-priority.mjs'
+
 // Shared parsing and validation for the RFD data loaders.
 //
 // `rfds.data.js` (published) and `rfd-drafts.data.js` (drafts) both build on
@@ -92,7 +94,8 @@ export function buildEntries(dir, files, summaries, basePath) {
 }
 
 // Read the priority board state. This is human-curated source of truth: the
-// prioritised `order`, the unsorted `backlog` below the cutoff, and the dev's
+// prioritised `planned` milestone groups (see `normalizePriority` for the
+// exact shape), the unsorted `backlog` below the cutoff, and the dev's
 // in-development flags. Kept deliberately separate from the regenerable
 // `rfd-summaries.json` cache, so clearing the cache never loses the board. A
 // missing file is an empty board.
@@ -101,15 +104,9 @@ export function loadPriority(path) {
     try {
         raw = JSON.parse(readFileSync(path, 'utf-8'))
     } catch {
-        return { order: [], backlog: [], inDevelopment: [] }
+        raw = {}
     }
-    return {
-        order: Array.isArray(raw.order) ? raw.order.map(String) : [],
-        backlog: Array.isArray(raw.backlog) ? raw.backlog.map(String) : [],
-        inDevelopment: Array.isArray(raw.in_development)
-            ? raw.in_development.map(String)
-            : [],
-    }
+    return normalizePriority(raw)
 }
 
 // Statuses that take an RFD off the priority board. The board is the active
@@ -121,17 +118,24 @@ export const TERMINAL_STATUSES = new Set([
     'Abandoned',
 ])
 
-// Annotate each entry with its board position and in-development flag.
-// `priority` is the index in the combined `order` + `backlog` list (lower =
-// higher priority) or `null` when the RFD hasn't been placed yet. Status is left
-// untouched so the view can drop terminal RFDs itself.
+// Annotate each entry with its board position, milestone, and in-development
+// flag. `priority` is the index in the combined `order` + `backlog` list
+// (lower = higher priority) or `null` when the RFD hasn't been placed yet.
+// `milestone` is the name of the planned group the RFD sits in, or `null`
+// (unassigned, backlogged, or unplaced). Status is left untouched so the view
+// can drop terminal RFDs itself.
 export function mergePriority(entries, priority) {
     const combined = [...priority.order, ...(priority.backlog ?? [])]
     const rank = new Map(combined.map((num, i) => [num, i]))
     const inDev = new Set(priority.inDevelopment)
+    const milestoneOf = new Map()
+    for (const group of priority.planned) {
+        for (const num of group.ids) milestoneOf.set(num, group.milestone)
+    }
     for (const entry of entries) {
         entry.priority = rank.has(entry.num) ? rank.get(entry.num) : null
         entry.inDevelopment = inDev.has(entry.num)
+        entry.milestone = milestoneOf.get(entry.num) ?? null
     }
 }
 
@@ -460,10 +464,11 @@ export function checkRequiresOnImplemented(graph) {
 // hard dependencies (`dependsOn`). Entries not placed on the board — including
 // terminal RFDs — carry `priority: null`.
 //
-// Returns the entries alongside the raw `priority` record so callers can tell
-// the prioritised `order` from the unsorted `backlog` (the cutoff sits at
-// `priority.order.length`). Throws when the board references an unknown id
-// (see `checkPriority`).
+// Returns the entries alongside the normalized `priority` record so callers
+// can tell the prioritised `order` — and its milestone groups, `planned` —
+// from the unsorted `backlog` (the cutoff sits at `priority.order.length`).
+// Throws when the board references an unknown id (see `checkPriority`) or
+// when the milestone groups are malformed (see `checkMilestones`).
 //
 // Paths are resolved from this file's location, so the result is independent
 // of the caller's working directory.
@@ -503,7 +508,7 @@ export function assembleBoard() {
     mergePriority(entries, priority)
     mergeDependencies(entries, graph)
 
-    const error = checkPriority(entries, priority)
+    const error = checkPriority(entries, priority) ?? checkMilestones(priority.planned)
     if (error) throw new Error(error)
 
     return { entries, priority }

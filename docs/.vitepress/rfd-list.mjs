@@ -56,7 +56,7 @@ const other = shown
 
 if (asJson) {
     // Section flags are a text concern; JSON always emits every group so a
-    // `jq` consumer can filter on the `group`/`rank` tags itself.
+    // `jq` consumer can filter on the `group`/`rank`/`milestone` tags itself.
     const tagged = [
         ...planned.map((e, i) => ({ ...e, group: 'planned', rank: i + 1 })),
         ...backlog.map(e => ({ ...e, group: 'backlog', rank: null })),
@@ -109,10 +109,16 @@ function formatEntry(entry, rank) {
 }
 
 function renderSection({ title, list, ranked }) {
-    const body = list
-        .map((e, i) => formatEntry(e, ranked ? i + 1 : null))
-        .join('\n')
-    return `${title}\n\n${body}`
+    const lines = []
+    list.forEach((e, i) => {
+        lines.push(formatEntry(e, ranked ? i + 1 : null))
+        // Milestone lines mirror the web board: a marker closes the group of
+        // rows above it, so it prints after its section's last entry.
+        if (ranked && e.milestone !== null && e.milestone !== list[i + 1]?.milestone) {
+            lines.push(`        ─── ${e.milestone} milestone ───`)
+        }
+    })
+    return `${title}\n\n${lines.join('\n')}`
 }
 
 // Discoverability: a static menu of the section flags with their counts, so
