@@ -359,7 +359,8 @@ fn align_tables(text: &str) -> String {
     let line_starts = line_start_offsets(text);
 
     let mut replacements: Vec<Replacement> = Vec::new();
-    collect_table_replacements(root, text, &line_starts, &mut replacements);
+    let mut ancestors: Vec<&AstNode<'_>> = Vec::new();
+    collect_table_replacements(root, &mut ancestors, text, &line_starts, &mut replacements);
 
     if replacements.is_empty() {
         return text.to_owned();
@@ -379,8 +380,17 @@ fn align_tables(text: &str) -> String {
 }
 
 /// Walk the AST, queueing a [`Replacement`] for every table found.
+///
+/// `ancestors` carries the container chain above the current node so a table
+/// nested inside a list item, block quote, or footnote gets its continuation
+/// prefix re-applied to every emitted row after the first.
+/// The replaced source range spans from the table's first `|` to its last, so
+/// the interior lines' prefixes (indentation, `>` markers) are inside the range
+/// and would otherwise be lost — de-indenting rows `2..n` breaks the table out
+/// of its container and the reflow pass then mangles it as prose.
 fn collect_table_replacements<'a>(
     node: &'a AstNode<'a>,
+    ancestors: &mut Vec<&'a AstNode<'a>>,
     text: &str,
     line_starts: &[usize],
     out: &mut Vec<Replacement>,
@@ -391,6 +401,9 @@ fn collect_table_replacements<'a>(
             && let Some(aligned) =
                 render_aligned_table(node, &table_meta.alignments, text, line_starts)
         {
+            let range = extend_range_to_line_end(range, text);
+            let prefix = continuation_prefix_from_ancestors(ancestors);
+            let aligned = prefix_continuation_lines(&aligned, &prefix);
             // Preserve the trailing newline convention of the source slice
             // — if the original ended with `\n`, the replacement should
             // too (and vice versa).
@@ -408,9 +421,47 @@ fn collect_table_replacements<'a>(
         // Don't descend further — tables don't nest within tables in our model.
         return;
     }
+    ancestors.push(node);
     for child in node.children() {
-        collect_table_replacements(child, text, line_starts, out);
+        collect_table_replacements(child, ancestors, text, line_starts, out);
     }
+    ancestors.pop();
+}
+
+/// Extend `range` to the end of the line containing its endpoint, excluding the
+/// newline itself.
+/// A range already ending at a line boundary is returned unchanged.
+///
+/// Comrak can report a table's end column short of the last row's final `|`
+/// (observed when the last cell ends with a code span and another block follows
+/// the table inside the same list item).
+/// A table row always owns its whole line, so snapping the replacement range to
+/// the line end is safe and keeps the mis-attributed tail bytes from surviving
+/// next to the rewritten table.
+fn extend_range_to_line_end(mut range: Range<usize>, text: &str) -> Range<usize> {
+    if range.end == 0 || text.as_bytes()[range.end - 1] == b'\n' {
+        return range;
+    }
+    match text[range.end..].find('\n') {
+        Some(offset) => range.end += offset,
+        None => range.end = text.len(),
+    }
+    range
+}
+
+/// Prepend `prefix` to every line of `text` after the first.
+///
+/// The first line keeps its position: a replacement starts mid-line, after the
+/// source prefix that is outside the replaced range.
+/// A trailing newline does not receive a dangling prefix.
+fn prefix_continuation_lines(text: &str, prefix: &str) -> String {
+    if prefix.is_empty() {
+        return text.to_owned();
+    }
+    let trimmed = text.trim_end_matches('\n');
+    let mut out = trimmed.replace('\n', &format!("\n{prefix}"));
+    out.push_str(&text[trimmed.len()..]);
+    out
 }
 
 /// Build the aligned markdown text for a single table node.
