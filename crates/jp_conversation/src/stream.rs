@@ -1,6 +1,6 @@
 //! See [`ConversationStream`].
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, PartialAppConfig, PartialConfig as _};
@@ -790,51 +790,91 @@ impl ConversationStream {
         });
     }
 
-    /// Removes [`InquiryResponse`]s whose ID doesn't match any
-    /// [`InquiryRequest`] in the stream.
+    /// Removes [`InquiryResponse`]s that have no matching [`InquiryRequest`]
+    /// **within the same turn**.
+    ///
+    /// The ID set is scoped to the containing turn so `InquiryId` reuse across
+    /// turns cannot cross-satisfy a pair.
+    /// When a legacy two-segment ID collides within a turn, requests and
+    /// responses pair by order (each request satisfies at most one response);
+    /// the unpaired excess is removed.
     ///
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     /// [`InquiryResponse`]: crate::event::InquiryResponse
     fn remove_orphaned_inquiry_responses(&mut self) {
-        let request_ids: Vec<InquiryId> = self
-            .events
-            .iter()
-            .filter_map(InternalEvent::as_event)
-            .filter_map(|e| e.as_inquiry_request())
-            .map(|r| r.id.clone())
-            .collect();
-
-        self.events.retain(|event| {
-            if let Some(event) = event.as_event()
-                && let Some(response) = event.as_inquiry_response()
-            {
-                return request_ids.contains(&response.id);
+        let mut request_counts: HashMap<(usize, InquiryId), usize> = HashMap::new();
+        let mut turn = 0;
+        for event in self.events.iter().filter_map(InternalEvent::as_event) {
+            if event.is_turn_start() {
+                turn += 1;
+            } else if let Some(request) = event.as_inquiry_request() {
+                *request_counts
+                    .entry((turn, request.id.clone()))
+                    .or_default() += 1;
             }
-            true
+        }
+
+        let mut turn = 0;
+        self.events.retain(|event| {
+            let Some(event) = event.as_event() else {
+                return true;
+            };
+            if event.is_turn_start() {
+                turn += 1;
+                return true;
+            }
+            let Some(response) = event.as_inquiry_response() else {
+                return true;
+            };
+            match request_counts.get_mut(&(turn, response.id().clone())) {
+                Some(remaining) if *remaining > 0 => {
+                    *remaining -= 1;
+                    true
+                }
+                _ => false,
+            }
         });
     }
 
-    /// Removes [`InquiryRequest`]s whose ID doesn't match any
-    /// [`InquiryResponse`] in the stream.
+    /// Removes [`InquiryRequest`]s that have no matching [`InquiryResponse`]
+    /// **within the same turn** (see
+    /// [`Self::remove_orphaned_inquiry_responses`] for the turn-scoping and
+    /// order-pairing rationale).
     ///
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     /// [`InquiryResponse`]: crate::event::InquiryResponse
     fn remove_orphaned_inquiry_requests(&mut self) {
-        let response_ids: Vec<InquiryId> = self
-            .events
-            .iter()
-            .filter_map(InternalEvent::as_event)
-            .filter_map(|e| e.as_inquiry_response())
-            .map(|r| r.id.clone())
-            .collect();
-
-        self.events.retain(|event| {
-            if let Some(event) = event.as_event()
-                && let Some(request) = event.as_inquiry_request()
-            {
-                return response_ids.contains(&request.id);
+        let mut response_counts: HashMap<(usize, InquiryId), usize> = HashMap::new();
+        let mut turn = 0;
+        for event in self.events.iter().filter_map(InternalEvent::as_event) {
+            if event.is_turn_start() {
+                turn += 1;
+            } else if let Some(response) = event.as_inquiry_response() {
+                *response_counts
+                    .entry((turn, response.id().clone()))
+                    .or_default() += 1;
             }
-            true
+        }
+
+        let mut turn = 0;
+        self.events.retain(|event| {
+            let Some(event) = event.as_event() else {
+                return true;
+            };
+            if event.is_turn_start() {
+                turn += 1;
+                return true;
+            }
+            let Some(request) = event.as_inquiry_request() else {
+                return true;
+            };
+            match response_counts.get_mut(&(turn, request.id.clone())) {
+                Some(remaining) if *remaining > 0 => {
+                    *remaining -= 1;
+                    true
+                }
+                _ => false,
+            }
         });
     }
 

@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use camino::Utf8PathBuf;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
+use jp_llm::tool::executor::MockExecutor;
 use jp_printer::{ErrChannel, OutputFormat, Printer};
 use schematic::Config as _;
 
@@ -257,62 +258,6 @@ fn test_static_answer_with_configured_answer() {
             .static_answer("my_tool", "nonexistent")
             .is_none()
     );
-}
-
-#[test]
-fn test_static_answers_for_tool_empty() {
-    let coordinator = ToolCoordinator::new(
-        jp_config::AppConfig::new_test().conversation.tools,
-        empty_executor_source(),
-    );
-    // Non-existent tool returns empty map
-    assert!(
-        coordinator
-            .static_answers_for_tool("nonexistent_tool")
-            .is_empty()
-    );
-}
-
-#[test]
-fn test_static_answers_for_tool_collects_all_answers() {
-    use jp_config::conversation::tool::{QuestionTarget, ToolConfig, ToolSource};
-    use schematic::Config as _;
-
-    // Create a tool config with multiple questions, some with answers
-    let tool_config = ToolConfig::from_partial(
-        jp_config::conversation::tool::PartialToolConfig {
-            source: Some(ToolSource::Builtin { tool: None }),
-            questions: indexmap::indexmap! {
-                "q1".to_string() => jp_config::conversation::tool::PartialQuestionConfig {
-                    target: Some(QuestionTarget::User),
-                    answer: Some(serde_json::json!("answer1")),
-                },
-                "q2".to_string() => jp_config::conversation::tool::PartialQuestionConfig {
-                    target: Some(QuestionTarget::User),
-                    answer: Some(serde_json::json!(42)),
-                },
-                "q3".to_string() => jp_config::conversation::tool::PartialQuestionConfig {
-                    target: Some(QuestionTarget::User),
-                    answer: None, // No static answer
-                }
-            },
-            ..Default::default()
-        },
-        vec![],
-    )
-    .expect("valid tool config");
-
-    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
-    tools_config.insert("my_tool".to_string(), tool_config);
-
-    let coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
-    let answers = coordinator.static_answers_for_tool("my_tool");
-
-    // Should have 2 answers (q1 and q2, but not q3)
-    assert_eq!(answers.len(), 2);
-    assert_eq!(answers.get("q1"), Some(&serde_json::json!("answer1")));
-    assert_eq!(answers.get("q2"), Some(&serde_json::json!(42)));
-    assert!(answers.get("q3").is_none());
 }
 
 #[tokio::test]
@@ -575,14 +520,118 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
 }
 
 #[test]
+fn test_permission_decision_cache_is_isolated_from_answers() {
+    let mut coordinator = ToolCoordinator::new(
+        jp_config::AppConfig::new_test().conversation.tools,
+        empty_executor_source(),
+    );
+    let mut turn_state = TurnState::default();
+
+    let info = PermissionInfo {
+        tool_id: "call_1".into(),
+        tool_name: "my_tool".into(),
+        tool_source: ToolSource::Builtin { tool: None },
+        run_mode: RunMode::Ask,
+        arguments: Value::Null,
+    };
+
+    // Persisting a "run" decision lands only in the permission cache.
+    coordinator
+        .apply_permission_result(
+            Ok(PermissionResult::Run {
+                arguments: Value::Null,
+                persist: true,
+            }),
+            &info,
+            &mut turn_state,
+            Box::new(MockExecutor::completed("call_1", "my_tool", "ok")),
+        )
+        .expect("run decision returns the executor");
+
+    assert_eq!(
+        turn_state
+            .remembered_permission_decisions
+            .get(&PermissionCacheKey::new("my_tool")),
+        Some(&true),
+    );
+    assert!(
+        turn_state.remembered_tool_answers.is_empty(),
+        "a permission decision must not leak into the tool-answer cache"
+    );
+
+    // A later call for the same tool reuses the decision without prompting.
+    let executor =
+        Box::new(MockExecutor::completed("call_2", "my_tool", "ok").with_permission_info(info));
+    let decision = coordinator.decide_permission(executor, true, &turn_state);
+    assert!(
+        matches!(decision, PermissionDecision::Approved(_)),
+        "a remembered `y` decision approves without prompting"
+    );
+}
+
+#[test]
+fn test_cancellation_reason_mapping() {
+    // `InquiryError::Cancelled` is a user-initiated cancellation; every other
+    // variant is a genuine backend failure.
+    assert_eq!(
+        ToolCoordinator::cancellation_reason(&InquiryError::Cancelled),
+        CancellationReason::User
+    );
+    assert_eq!(
+        ToolCoordinator::cancellation_reason(&InquiryError::MissingStructuredData),
+        CancellationReason::BackendError
+    );
+    assert_eq!(
+        ToolCoordinator::cancellation_reason(&InquiryError::AnswerExtraction {
+            reason: "nope".into()
+        }),
+        CancellationReason::BackendError
+    );
+    assert_eq!(
+        ToolCoordinator::cancellation_reason(&InquiryError::Other("boom".into())),
+        CancellationReason::BackendError
+    );
+}
+
+#[test]
+fn test_prompt_cancellation_reason_mapping() {
+    // Esc/Ctrl-C/EOF at the prompt is a user cancellation; any other prompt
+    // failure (I/O, no TTY, writer errors) is a backend error.
+    assert_eq!(
+        ToolCoordinator::prompt_cancellation_reason(&Error::Inquire(
+            InquireError::OperationCanceled
+        )),
+        CancellationReason::User
+    );
+    assert_eq!(
+        ToolCoordinator::prompt_cancellation_reason(&Error::Inquire(
+            InquireError::OperationInterrupted
+        )),
+        CancellationReason::User
+    );
+    assert_eq!(
+        ToolCoordinator::prompt_cancellation_reason(&Error::Inquire(InquireError::NotTTY)),
+        CancellationReason::BackendError
+    );
+    assert_eq!(
+        ToolCoordinator::prompt_cancellation_reason(&Error::Fmt(std::fmt::Error)),
+        CancellationReason::BackendError
+    );
+}
+
+#[test]
 fn test_pending_prompt_question_variant() {
     let pending = PendingPrompt::Question {
         index: 0,
-        question: jp_tool::Question::text("q1", "Test question"),
+        question: jp_tool::Question::text("q1", "Test question").unwrap(),
+        inquiry_id: InquiryId::new("iq"),
     };
 
     // Verify we can match and extract fields
-    let PendingPrompt::Question { index, question: q } = pending else {
+    let PendingPrompt::Question {
+        index, question: q, ..
+    } = pending
+    else {
         panic!("Expected Question variant");
     };
     assert_eq!(index, 0);
@@ -629,7 +678,8 @@ fn test_pending_prompt_queue_fifo_order() {
     // Add a question prompt
     queue.push_back(PendingPrompt::Question {
         index: 0,
-        question: jp_tool::Question::text("q1", "First"),
+        question: jp_tool::Question::text("q1", "First").unwrap(),
+        inquiry_id: InquiryId::new("iq"),
     });
 
     // Add a result mode prompt
@@ -647,14 +697,18 @@ fn test_pending_prompt_queue_fifo_order() {
     // Add another question prompt
     queue.push_back(PendingPrompt::Question {
         index: 2,
-        question: jp_tool::Question::boolean("q2", "Third"),
+        question: jp_tool::Question::boolean("q2", "Third").unwrap(),
+        inquiry_id: InquiryId::new("iq"),
     });
 
     // Verify FIFO order
     assert_eq!(queue.len(), 3);
 
     // First: Question at index 0
-    let PendingPrompt::Question { index, question } = queue.pop_front().unwrap() else {
+    let PendingPrompt::Question {
+        index, question, ..
+    } = queue.pop_front().unwrap()
+    else {
         panic!("Expected Question");
     };
     assert_eq!(index, 0);
@@ -668,7 +722,10 @@ fn test_pending_prompt_queue_fifo_order() {
     assert_eq!(tool_id, "call_1");
 
     // Third: Question at index 2
-    let PendingPrompt::Question { index, question } = queue.pop_front().unwrap() else {
+    let PendingPrompt::Question {
+        index, question, ..
+    } = queue.pop_front().unwrap()
+    else {
         panic!("Expected Question");
     };
     assert_eq!(index, 2);
@@ -686,7 +743,8 @@ fn test_pending_prompt_mixed_types_interleaved() {
     // Simulate: while prompt_active, queue these in arrival order
     queue.push_back(PendingPrompt::Question {
         index: 0,
-        question: jp_tool::Question::text("branch", "Which branch?"),
+        question: jp_tool::Question::text("branch", "Which branch?").unwrap(),
+        inquiry_id: InquiryId::new("iq"),
     });
 
     queue.push_back(PendingPrompt::ResultMode {
@@ -703,7 +761,9 @@ fn test_pending_prompt_mixed_types_interleaved() {
     queue.push_back(PendingPrompt::Question {
         index: 2,
         question: jp_tool::Question::boolean("confirm", "Confirm action?")
+            .unwrap()
             .with_default(serde_json::json!(true)),
+        inquiry_id: InquiryId::new("iq"),
     });
 
     // All three should be queued

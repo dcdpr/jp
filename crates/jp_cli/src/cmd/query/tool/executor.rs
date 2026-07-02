@@ -47,8 +47,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use camino::Utf8Path;
 use indexmap::IndexMap;
-use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults};
-use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
+use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
+use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
 use jp_llm::{
     ExecutionOutcome,
     tool::{
@@ -151,6 +151,26 @@ impl ToolExecutor {
             invocation,
         }
     }
+
+    /// Resolve the persisted `InquirySource` recorded for a question this tool
+    /// emits.
+    ///
+    /// Built-in tools may override their source via
+    /// `BuiltinTool::inquiry_source`; local and MCP tools always attribute the
+    /// question to the tool by name.
+    fn inquiry_source(&self) -> InquirySource {
+        match self.config.source() {
+            ToolSource::Builtin { .. } => {
+                self.builtin_executors.get(&self.request.name).map_or_else(
+                    || InquirySource::tool(self.request.name.as_str()),
+                    |tool| tool.inquiry_source(&self.request.name),
+                )
+            }
+            ToolSource::Local { .. } | ToolSource::Mcp { .. } => {
+                InquirySource::tool(self.request.name.as_str())
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -243,6 +263,7 @@ impl Executor for ToolExecutor {
                 tool_id: self.request.id.clone(),
                 tool_name: self.request.name.clone(),
                 question,
+                source: self.inquiry_source(),
                 accumulated_answers: answers.clone(),
             },
             Err(e) => ExecutorResult::Completed(ToolCallResponse {

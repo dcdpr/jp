@@ -1,6 +1,6 @@
 # RFD 082: Unified inquiry event recording
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
@@ -110,7 +110,44 @@ attempt is `1`; the next recording for the same key (the LLM gave an invalid
 answer and the tool re-asks; or a provider like Google Gemini reused the same
 `tool_call_id` in a later cycle and the same question came up again) gets
 attempt `2`; and so on.
-IDs are unique by construction within the turn.
+
+`question_id` MUST NOT contain `.`.
+This is enforced with a `QuestionId` newtype (in `jp_tool`, wrapping the `id`
+field of `Question`) whose `FromStr`/`TryFrom` validation rejects any string
+containing a dot.
+Validation happens once, at the tool→JP boundary where a `Question` is
+ingested: local-tool stdout is parsed into `QuestionId`, and built-in tools
+construct their questions through the same validated constructor, so past that
+boundary an invalid id is unrepresentable and no downstream code re-checks.
+`QuestionId` is distinct from the composite stream-correlation `InquiryId`
+(`<tool_call_id>.<question_id>.<attempt>`): it validates only the
+tool-author-set segment, and `attempt` is always numeric and therefore dot-free.
+
+When a tool emits a `NeedsInput` whose `question.id` is invalid, JP rejects it
+at the boundary.
+It logs an `error!` trace with the offending tool and id, and fails the tool
+with a tool-level error response (`tool produced an invalid inquiry: question id
+must not contain '.'`).
+No separate chrome line is emitted: the tool-level error is rendered to the
+terminal through the existing `ErrorStyleConfig` path like any other tool
+failure, so a bespoke notice would double-print.
+Because the malformed outcome is dropped before any inquiry event is
+constructed, it never enters the recording pipeline, and the "every `NeedsInput`
+is recorded" invariant holds without a carve-out (there is a `ToolCallRequest`/
+`ToolCallResponse` pair for the failed call, but no `InquiryRequest`).
+One implementation caveat: local-tool stdout is parsed by
+`serde_json::from_str::<Outcome>` (`crates/jp_llm/src/tool.rs`), which today
+falls back to `RawOutput` on any parse error.
+The ingestion path MUST distinguish a well-formed `NeedsInput` carrying an
+invalid `question.id` (which becomes an `error!` plus a tool-level error) from
+output that is not an `Outcome` at all (which becomes `RawOutput`), so the
+invalid-inquiry diagnostic is not silently swallowed by the fallback.
+
+Given that constraint, the join is injective and IDs are **unique by
+construction within the turn**, even when `tool_call_id` contains dots (which JP
+cannot control, since providers generate it): for any joined string the last two
+dot-separated tokens are unambiguously `question_id` and `attempt`, and
+everything before them is `tool_call_id`.
 
 The counter is tracked per-turn (in `TurnState`) keyed by `(tool_call_id,
 question_id)`.
@@ -138,14 +175,17 @@ IDs.
 To read both formats without a migration step, the pairing logic on read accepts
 both shapes and falls back to request/response order within the turn when IDs
 collide (the same strategy used for tool-call IDs today).
-Only new writes use the three-segment form, and new writes do not collide
-because the counter is turn-scoped.
+Only new writes use the three-segment form, and new writes do not collide: the
+counter is turn-scoped and the no-dot rule on `question_id` keeps the join
+injective.
+(Legacy streams predate the no-dot rule, which is why the read-side order
+fallback remains.)
 
 This ID is the **stream-correlation** identifier for the persisted audit trail.
 It is distinct from two other identifiers that share some of the same parts:
 
 - The in-memory `TurnState` cache key (`<tool_name>.<question_id>` — see
-  [Splitting the turn-cache state] (\#splitting-the-turn-cache-state)) dedupes
+  [Splitting the turn-cache state](#splitting-the-turn-cache-state)) dedupes
   "remember for turn" answers across tool calls within the same turn.
 - The tool-facing `ExecutingTool::accumulated_answers` map remains keyed by the
   bare `question.id`, with latest-answer-wins semantics.
@@ -233,13 +273,14 @@ built-in.
 
 ### Recording lifecycle
 
-For every `Outcome::NeedsInput { question }`:
+For every `Outcome::NeedsInput { question }` that passed ingestion validation (a
+valid `QuestionId` — see [Inquiry ID format](#inquiry-id-format)):
 
 1. The coordinator reads the `InquirySource` carried on
    `ExecutorResult::NeedsInput`.
    Resolution happened at the executor boundary (see [Crossing the executor
-   boundary] (\#crossing-the-executor-boundary)); the coordinator does not
-   branch on tool type.
+   boundary](#crossing-the-executor-boundary)); the coordinator does not branch
+   on tool type.
 
 2. The coordinator records `InquiryRequest { id, source, question }` **before
    any routing decision** — including the cached-answer and static-answer
@@ -254,7 +295,7 @@ For every `Outcome::NeedsInput { question }`:
    - **Cached answer** (`remembered_tool_answers` — a previous `Y`/`N` in this
      turn).
      Skipped for `AnswerType::Secret` questions; secret answers do not enter the
-     cache (see [Secret questions] (\#secret-questions)).
+     cache (see [Secret questions](#secret-questions)).
      For non-`Secret` answer types: if found, record `InquiryResponse::Answered
      { id, answer }` with the cached value and resume tool execution.
      No prompt is shown.
@@ -267,7 +308,7 @@ For every `Outcome::NeedsInput { question }`:
 
 4. Otherwise, route the question (interactive prompter or inquiry backend).
    For `AnswerType::Secret` questions on the prompter path, the prompter uses a
-   no-echo input mode (see [Secret questions] (\#secret-questions) for the
+   no-echo input mode (see [Secret questions](#secret-questions) for the
    routing-scope caveat).
 
 5. On a successful answer:
@@ -275,8 +316,8 @@ For every `Outcome::NeedsInput { question }`:
    - Non-`Secret` answer type (from prompter or inquiry backend): record
      `InquiryResponse::Answered { id, answer }`.
    - `AnswerType::Secret` (from prompter only — the inquiry backend is
-     unreachable per the routing guard in [Secret questions]
-     (\#secret-questions)): record `InquiryResponse::Redacted { id }`.
+     unreachable per the routing guard in [Secret
+     questions](#secret-questions)): record `InquiryResponse::Redacted { id }`.
      The answer is delivered to the tool in-memory; only the persisted shape is
      redacted.
 
@@ -288,18 +329,17 @@ For every `Outcome::NeedsInput { question }`:
    user cancelled would land unpaired on disk.
    The `reason` is determined by the originating event:
 
-   | Originating event | `reason` | |
-   ------------------------------------------------------ |
-   ------------------------ | | `ExecutionEvent::PromptCancelled` (user Ctrl-C
-   or EOF) | `User` | | `InquiryError::Cancelled` (cancellation token fired — |
-   `User` | | user restart, tool cancel, hard quit) | | |
-   `InquiryError::Provider` | `BackendError` | |
-   `InquiryError::MissingStructuredData` | `BackendError` | |
-   `InquiryError::AnswerExtraction { .. }` | `BackendError` | |
-   `InquiryError::Other(_)` (mock-backend catch-all) | `BackendError` | |
-   `AnswerType::Secret` and no TTY available | `NoPromptBackend` | |
-   `AnswerType::Secret` and `target = "assistant"` | `AssistantRoutingDenied`
-   |\` |
+   | Originating event                                                                          | `reason`                 |
+   | ------------------------------------------------------------------------------------------ | ------------------------ |
+   | `ExecutionEvent::PromptCancelled` (Esc, Ctrl-C, or EOF at the prompt)                      | `User`                   |
+   | `ExecutionEvent::PromptCancelled` (prompter failure: I/O error, no TTY)                    | `BackendError`           |
+   | `InquiryError::Cancelled` (cancellation token fired: user restart, tool cancel, hard quit) | `User`                   |
+   | `InquiryError::Provider`                                                                   | `BackendError`           |
+   | `InquiryError::MissingStructuredData`                                                      | `BackendError`           |
+   | `InquiryError::AnswerExtraction { .. }`                                                    | `BackendError`           |
+   | `InquiryError::Other(_)` (mock-backend catch-all)                                          | `BackendError`           |
+   | `AnswerType::Secret` and no TTY available                                                  | `NoPromptBackend`        |
+   | `AnswerType::Secret` and `target = "assistant"`                                            | `AssistantRoutingDenied` |
 
    `InquiryError::Cancelled` returns `Err` from the inquiry backend today (see
    `crates/jp_cli/src/cmd/query/tool/inquiry.rs` around
@@ -307,10 +347,10 @@ For every `Outcome::NeedsInput { question }`:
    cancellation — the token is cancelled by `interrupt/signals.rs` in response
    to user actions (`InterruptAction::RestartTool`, `ToolCancelled`, hard quit).
    Mapping it to `User` (not `BackendError`) keeps the audit trail honest.
-   Prompter I/O errors (e.g. EOF on stdin mid-prompt) are indistinguishable from
-   Ctrl-C at the coordinator's vantage today and follow the same `User` path; if
-   a future change distinguishes them, the right landing is a new
-   `CancellationReason` variant rather than re-using `BackendError`.
+   `ExecutionEvent::PromptCancelled` carries a reason mapped at the prompt site:
+   `inquire`'s cancel/interrupt errors are user actions, and every other
+   prompter error (I/O, no TTY, writer failure) is a backend failure recorded as
+   `BackendError`.
 
 `Cancelled` records that the inquiry was closed without an answer — for the
 audit trail only.
@@ -324,10 +364,10 @@ variant rather than overloading `CancellationReason`.
 
 ### Secret questions
 
-Some tool questions ask for values that must not be persisted on disk — SSH
-passphrases, API keys, one-time tokens.
+Some tool questions ask for values the user does not want written into the
+conversation stream: SSH passphrases, API keys, one-time tokens.
 Recording the question text without the answer keeps the audit trail honest
-without leaking the secret.
+while keeping the answer out of the persisted inquiry event.
 
 `jp_tool::AnswerType` gains a new variant, `Secret`, for free-form text input
 whose answer must not be persisted:
@@ -399,6 +439,34 @@ Tool authors MUST NOT set `default` to a sensitive literal on an
      Both checks are generic on `question.answer_type == Secret`.
      The same machinery serves [RFD 083]'s `exclusive: true` flag (083 reuses
      these variants for its routing fail-fast paths).
+
+**What `Secret` does and does not cover.** The guarantee is scoped to JP's own
+handling of the inquiry: JP does not echo the prompt input, does not write the
+answer into the `InquiryResponse` (it records `Redacted { id }`), and does not
+store the answer in the `TurnState` turn-answer cache.
+It does **not** redact the value from anywhere else it might reach disk:
+
+- **Tool output.** If a tool echoes the secret back in its success or error
+  text, that text is persisted verbatim in `ToolCallResponse`.
+  JP does not scan tool output for the answer.
+- **Config values.** A secret supplied through `QuestionConfig.answer` lives in
+  the config file the user wrote it into, and can be persisted into the
+  conversation stream as a config delta, independent of the `Redacted` response.
+- **`Question.default`** is propagated verbatim (see above) and is not redacted.
+- **Logs** and any external tool behavior are out of scope.
+
+A "tainted value" model that tracks a secret across `ToolCallResponse`, config
+deltas, and logs is a larger redaction design and belongs in its own RFD.
+
+**Static-answer shape is not validated.** `QuestionConfig.answer` is an
+arbitrary JSON value, and 082 does not validate that a static answer for a
+`Secret` question is a string (the same looseness already applies to `Boolean`,
+`Select`, and `Text`).
+Whatever is configured is delivered to the tool in memory and the response is
+recorded as `Redacted` regardless of shape, so no secret leaks through a
+malformed static answer.
+Answer-shape validation (`CancellationReason::InvalidStaticAnswer`) arrives with
+[RFD 083]; 082 does not pull it forward.
 
 ### `InquiryResponse` serialization
 
@@ -552,7 +620,7 @@ Defined behavior:
 - **Turn renderer** (`crates/jp_cli/src/render/turn.rs`): continues to skip
   inquiry events entirely.
   Pretty rendering for `jp conversation show` is a non-goal here (see
-  [Non-Goals] (\#non-goals)).
+  [Non-Goals](#non-goals)).
 
 Any other reader that pattern-matches on `InquiryResponse` MUST handle all
 variants.
@@ -597,9 +665,9 @@ pub struct TurnState {
 
 The cache-key shapes (`<tool_name>.<question_id>` and
 `<tool_name>.__permission__`) are deliberately distinct from the
-stream-correlation `InquiryId` format defined in [Inquiry ID format]
-(\#inquiry-id-format) — today's `TurnState` uses `InquiryId` for both, which
-blurs the two roles.
+stream-correlation `InquiryId` format defined in [Inquiry ID
+format](#inquiry-id-format) — today's `TurnState` uses `InquiryId` for both,
+which blurs the two roles.
 Implementation may introduce dedicated newtypes per map to lift this distinction
 into the type system; 082 does not require it.
 
@@ -634,9 +702,14 @@ The tradeoff buys uniform recording: every question/answer exchange produces an
 `InquiryRequest`/`InquiryResponse` pair regardless of how the answer is
 resolved.
 
-**This is a behavior change for user-supplied local tools.** Built-in and MCP
-tools are unaffected (built-ins handle `answers` through the explicit two-call
-`NeedsInput → Success` pattern; MCP tools never see `answers`).
+**This is a behavior change for user-supplied local tools.** MCP tools are
+structurally unaffected: `execute_mcp` never receives the `answers` map.
+Built-in tools *do* receive the pre-seeded `answers` map today, through
+`BuiltinTool::execute(&self, arguments, answers)`, so removing the pre-seed
+changes what a built-in sees on its first call.
+Current in-tree built-ins use the two-call `NeedsInput → Success` pattern and
+do not read `answers` on first call, but that is a property to verify, not a
+structural guarantee (see the built-in audit bullet in Phase 3).
 Local tools receive the accumulated answers in the JSON context under `"tool": {
 "answers": answers, ... }` (`crates/jp_llm/src/tool.rs` around line 719).
 Today, `QuestionConfig.answer` is documented as "the question will not be
@@ -711,6 +784,18 @@ handler would require the handler to know the ID format, which conflicts with
 the "treat `InquiryId` as opaque" rule in [Inquiry ID
 format](#inquiry-id-format).
 
+The cancellation-reason mapping in [Recording lifecycle](#recording-lifecycle)
+requires the typed `InquiryError` at the recording site.
+`ExecutionEvent::InquiryResult.result` is `Result<Value, String>` today, and
+`spawn_inquiry` stringifies the error (`.map_err(|e| e.to_string())`) before the
+coordinator sees it, so the variant-to-`CancellationReason` mapping is
+impossible without parsing rendered text.
+Widen the event to carry `Result<Value, InquiryError>` (or a
+`CancellationReason` mapped at the `spawn_inquiry` site); the reason is derived
+from the error variant, never from the message.
+The model-facing `ToolCallResponse` text is rendered separately and is
+unchanged.
+
 ## Drawbacks
 
 - **Stream-size growth.** Adds two `InquiryRequest`/`InquiryResponse` events per
@@ -722,13 +807,16 @@ format](#inquiry-id-format).
 - **Static-answer contract change for user-supplied local tools.** Removing the
   pre-seed optimization means tools with a configured static answer execute
   twice (emit `NeedsInput`, then receive the injected answer) instead of once.
-  JP's own built-in and MCP tools are unaffected, but local tools that today
-  read `tool.answers` on first invocation and proceed without emitting
-  `NeedsInput` will no longer see the static answer on that first call — a real
-  contract change for that authoring pattern.
+  JP's own built-ins and MCP tools are affected differently: MCP is structurally
+  immune (`execute_mcp` receives no `answers` map), while built-ins receive the
+  map today and are unaffected only because current in-tree built-ins do not
+  read it on first call (a property to audit, not a guarantee).
+  Local tools that today read `tool.answers` on first invocation and proceed
+  without emitting `NeedsInput` will no longer see the static answer on that
+  first call — a real contract change for that authoring pattern.
   Tools with side effects before their first `NeedsInput` will run those side
   effects one extra time per configured static answer.
-  See the [Pre-seed removal] (\#pre-seed-removal) subsection for migration
+  See the [Pre-seed removal](#pre-seed-removal) subsection for migration
   guidance.
 - **Touches existing tool-question call sites.** The unified recording affects
   any tool that emits `Outcome::NeedsInput`, not just `ask_user`.
@@ -749,12 +837,25 @@ format](#inquiry-id-format).
   Downstream `match`es on the enum (the prompter, the editor renderer, any code
   that branches on answer types) need a new arm.
   `jp_tool::AnswerType` also gains `#[serde(tag = "type", rename_all =
-  "snake_case")]` to align its wire shape with the already-internally- tagged
-  `InquiryAnswerType` (and with this RFD's local-tool wire examples).
-  The persisted shape for non-secret questions is unchanged.
-  Existing in-tree tools build `Question` values through `jp_tool`'s
-  constructors rather than hand-encoding JSON, so the wire-shape change is
-  transparent to them.
+  "snake_case")]` so its wire shape matches `InquiryAnswerType` and this RFD's
+  local-tool wire examples.
+  This **changes the local-tool stdout protocol**: `answer_type` shifts from the
+  externally-tagged shape (`"Text"`, `{"Select": {"options": [...]}}`) to the
+  internally-tagged shape (`{"type": "text"}`, `{"type": "select", "options":
+  [...]}`).
+  It ships as a clean cutover with no read-both compatibility shim, which is
+  acceptable because JP has no external local-tool authors today; the only
+  consumer is the in-tree `.config/jp/tools` crate, whose tools serialize
+  `Question` values *through* `jp_tool` rather than hand-encoding JSON, so their
+  emitted shape updates with the type and stays self-consistent.
+  Persisted conversation streams are unaffected: the stream stores
+  `InquiryAnswerType` (already internally tagged), produced by converting
+  `AnswerType` in `tool_question_to_inquiry_question`, so `jp_tool::AnswerType`
+  never crosses the on-disk boundary and reading pre-082 streams does not
+  change.
+  At implementation time, grep for any persisted local-tool stdout fixtures (raw
+  JSON, not constructed via `Outcome`) before flipping the tag; the cutover must
+  update those.
   Old streams cannot contain `Secret` answers, so backward compat on read is
   trivial.
 - **`PromptBackend` gains a no-echo input method.** A new method on the trait
@@ -868,12 +969,16 @@ counter bounded per-turn rather than universally.
   opt in by declaring the question's answer type as `Secret`.
   The persisted response is `Redacted` rather than `Answered`, the prompter does
   not echo input, and routing to the inquiry backend (no-TTY fallback or `target
-  = "assistant"`) is refused with a tool-level error. 082 does not cover every
-  shape of sensitive content — e.g. a text answer that happens to contain a
-  token without the question being declared `Secret`, or partial sensitivity
-  inside an otherwise-archival answer.
-  A future RFD may add richer redaction policies if real-world use surfaces
-  them.
+  = "assistant"`) is refused with a tool-level error.
+  The guarantee is scoped to JP's own handling of the inquiry; it does not
+  redact the value from tool output (`ToolCallResponse`), config values or
+  deltas (a secret set via `QuestionConfig.answer`), `Question.default`, or logs
+  (see [What `Secret` does and does not cover](#secret-questions)). 082 also
+  does not cover sensitive content that was never declared `Secret` (e.g. a text
+  answer that happens to contain a token, or partial sensitivity inside an
+  otherwise-archival answer).
+  A future RFD may add richer redaction policies (e.g. tainted-value tracking)
+  if real-world use surfaces them.
 - **Stream-size growth for noisy tools.** Tools that prompt frequently produce
   more persisted bytes after this RFD.
   The events are small and the growth is bounded, but conversations dominated by
@@ -908,8 +1013,10 @@ variant.
 Implement the custom `Serialize`/`Deserialize` for `CancellationReason` so
 unrecognized tags round-trip as `Unknown(s)` preserving `s` verbatim.
 Implement the custom `Deserialize` for `InquiryResponse` that accepts the legacy
-untagged form as `Answered` and defaults a missing `reason` on a tagged
-`Cancelled` event to `User`.
+untagged form as `Answered` and maps a missing (or non-string) `reason` on a
+tagged `Cancelled` event to `Unknown` with the sentinel tag `unspecified` —
+such a record carries no reason, and fabricating a specific one (e.g. `User`)
+would put a false claim in the audit trail.
 
 Split `TurnState.persisted_inquiry_responses` into `remembered_tool_answers:
 IndexMap<String, Value>` and `remembered_permission_decisions: IndexMap<String,
@@ -955,6 +1062,12 @@ Recording-lifecycle plumbing:
 
 - Remove the pre-execution seeding of `accumulated_answers` from
   `static_answers_for_all_questions`.
+- Audit every `BuiltinTool` implementation for first-call reads of the `answers`
+  map before removing the pre-seed.
+  Built-ins receive `answers` structurally (unlike MCP tools), so a built-in
+  that reads it on first call would silently break; current in-tree built-ins
+  (e.g. `DescribeTools`) ignore it, but new built-ins, including [RFD 083]'s
+  `ask_user`, must follow the two-call `NeedsInput → Success` pattern.
 - Thread `&ConversationMut` into `handle_prompt_answer` and
   `handle_prompt_cancelled`.
 - Allocate the `InquiryId` at the request-recording site and thread it through
@@ -971,6 +1084,11 @@ Recording-lifecycle plumbing:
   cancellation including `InquiryError::Cancelled`; `BackendError` for genuine
   backend failures; `NoPromptBackend`/`AssistantRoutingDenied` for the
   secret-routing guard paths).
+- Widen `ExecutionEvent::InquiryResult.result` from `Result<Value, String>` to
+  carry the typed `InquiryError` (or a `CancellationReason` mapped at the
+  `spawn_inquiry` site) so the cancellation reason is derived from the error
+  variant rather than from stringified error text (see [Coordinator
+  plumbing](#coordinator-plumbing)).
 
 Inquiry ID format:
 
@@ -979,6 +1097,19 @@ Inquiry ID format:
   recorded under that key; first recording is attempt `1`.
   The counter resets only at turn boundaries (i.e. when a fresh `TurnState` is
   built).
+- Introduce a `QuestionId` newtype in `jp_tool` (wrapping `Question.id`) whose
+  `FromStr`/`TryFrom` validation rejects a dot, and route local-tool stdout and
+  built-in question construction through it so an invalid id cannot exist past
+  the boundary.
+  On a `NeedsInput` whose `question.id` is invalid, log an `error!` trace and
+  fail the tool with a tool-level error response (no chrome line; the error
+  renders via `ErrorStyleConfig`), then drop the outcome before constructing any
+  inquiry event.
+  Ensure the `serde_json::from_str::<Outcome>` ingestion path distinguishes an
+  invalid `question.id` from non-`Outcome` output so the diagnostic is not
+  swallowed by the `RawOutput` fallback.
+  This is what makes the three-segment join injective (see [Inquiry ID
+  format](#inquiry-id-format)).
 - Construct `InquiryRequest.id` as `<tool_call_id>.<question_id>.<attempt>` at
   the recording site.
   The matching `InquiryResponse.id` uses the same value.
@@ -991,10 +1122,19 @@ Inquiry ID format:
   (`crates/jp_conversation/src/stream.rs` around
   `remove_orphaned_inquiry_responses`), which can cross-satisfy pairs across
   turns once `tool_call_id` (and therefore `InquiryId`) reuse becomes possible.
-  Orphan removal and any synthetic-response injection operate within each turn's
-  event window instead.
+  082 keeps the existing behavior — an orphaned `InquiryRequest` or
+  `InquiryResponse` is *removed* — and only narrows the ID-set scope to the
+  containing turn's event window. 082 does not inject synthetic inquiry
+  responses: an orphan left by a crash, truncation, or manual edit is not a
+  cancellation, so writing a synthetic `Cancelled` (which would have to claim
+  some `reason`) would put a false record on disk.
   The same change applies to any other code that builds an `InquiryId` index
   over the full stream.
+  If [RFD 023] lands, incomplete-tail extraction runs before `sanitize()`, so
+  this per-turn orphan removal only ever applies to complete turns; the
+  incomplete turn's unpaired inquiry events are carried into the
+  `IncompleteTurn` rather than removed. (023 is Discussion; this is
+  forward-compatible, not a dependency.)
 
 Secret-question handling:
 
@@ -1004,9 +1144,12 @@ Secret-question handling:
   `{"type": "select", "options": [...]}`, `{"type": "text"}`, `{"type":
   "secret"}`) matches `InquiryAnswerType`.
   Existing in-tree tools build `Question` values through `jp_tool`'s
-  constructors, so the wire-shape change is transparent.
-  Add a matching `Question::secret(text: String) -> Self` constructor in
-  `jp_tool` alongside `Question::text`/`boolean`/`select`.
+  constructors, so the wire-shape change is transparent to them; for external
+  local tools this is a breaking change to the stdout protocol, shipped without
+  a compat shim (see Drawbacks).
+  Add a matching `Question::secret(id, text) -> Result<Self, InvalidQuestionId>`
+  constructor in `jp_tool` alongside `Question::text`/`boolean`/`select` (all
+  four validate the id through `QuestionId`).
   No `secret: bool` field is added to `Question`.
 - Add the matching `Secret` variant to
   `jp_conversation::event::inquiry::InquiryAnswerType` (which is already
@@ -1027,8 +1170,11 @@ Secret-question handling:
   In the static-answer short-circuit, apply the configured value to the
   in-memory `accumulated_answers` but record `InquiryResponse::Redacted { id }`
   instead of `Answered`.
-  On a successful prompter or inquiry-backend answer for a `Secret` question,
-  record `InquiryResponse::Redacted { id }` in place of `Answered`.
+  On a successful prompter answer for a `Secret` question, record
+  `InquiryResponse::Redacted { id }` in place of `Answered`.
+  The inquiry-backend path is guarded before routing (below) and must never
+  receive a `Secret` question; treat its arrival there as an internal invariant
+  violation.
 - Enforce the routing guard before routing a `Secret` question:
   - **No TTY available**: synthesize a tool-level error response and record
     `InquiryResponse::Cancelled { reason: NoPromptBackend }`.
@@ -1119,7 +1265,10 @@ Independent of the others, lands alongside Phase 3 in the same PR.
   RFD 023 assumes user-targeted `InquiryRequest`/`InquiryResponse` pairs are on
   disk so incomplete turns blocked on inquiries can be detected and resumed.
   RFD 005's prompter carve-out leaves that assumption unmet; 082 closes the gap.
-  RFD 023's `Requires` needs updating to reference 082 at 082 promotion time.
+  If 023 is confirmed to depend on 082, `just rfd-require` records the link on
+  both sides at promotion time (082's `Required by` and 023's `Requires`); it is
+  deliberately not hand-written into the metadata while both RFDs are in
+  Discussion.
 - [RFD 028] — the structured inquiry system this RFD's recording layer builds
   on.
 - [RFD 034] — defines the current `QuestionTarget` shape.

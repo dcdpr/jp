@@ -720,6 +720,17 @@ async fn format_args_custom(
             ))
         }
         CommandResult::Cancelled => Ok(String::new()),
+        CommandResult::InvalidInquiry { question_id } => {
+            warn!(
+                command = %cmd,
+                question_id = %question_id,
+                "Custom parameters formatter returned an invalid inquiry"
+            );
+            Err(format!(
+                "Custom parameters formatter '{cmd}' produced an invalid inquiry (question id \
+                 '{question_id}')"
+            ))
+        }
         CommandResult::RawOutput {
             stdout,
             success: true,

@@ -235,7 +235,7 @@ impl<'a> TurnMut<'a> {
                     }
                 }
                 EventKind::InquiryResponse(resp) => {
-                    let id = &resp.id;
+                    let id = resp.id();
 
                     let requests = turn_events
                         .iter()
@@ -254,7 +254,7 @@ impl<'a> TurnMut<'a> {
                         .filter_map(InternalEvent::as_event)
                         .chain(events.iter())
                         .filter_map(ConversationEvent::as_inquiry_response)
-                        .filter(|r| r.id == *id)
+                        .filter(|r| r.id() == id)
                         .count();
 
                     if responses >= requests {

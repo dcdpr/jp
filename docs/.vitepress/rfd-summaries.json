@@ -12,7 +12,7 @@
     "summary": "Buffer segments streaming markdown blocks; TerminalRenderer applies ANSI-aware terminal formatting; comrak chosen over pulldown-cmark."
   },
   "005-first-class-inquiry-events.md": {
-    "hash": "bd19573644d77d9c4d14b7b9c8feae87c997320977d53846fb717a7b69d6397f",
+    "hash": "6e06d81559aa0ca48fffd041ea70d2f74c8e3a59d3a9d3b9adba1e19361226ca",
     "summary": "Record inquiry events in conversation stream with centralized filtering to keep them hidden from LLM providers."
   },
   "006-turn-scoped-mutations.md": {
@@ -324,7 +324,7 @@
     "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
   },
   "082-unified-inquiry-event-recording.md": {
-    "hash": "57e2a66512d7ec922bb83f8078a81177a884797ae41ec6609f8f1e75e6fb842a",
+    "hash": "c617de652451b00153898d130a243a2b4e46ba4f9eb99db355927ebc5073df20",
     "summary": "Unify inquiry event recording across all routing paths; add cancellation/redaction variants; track attempts per turn."
   },
   "083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md": {
