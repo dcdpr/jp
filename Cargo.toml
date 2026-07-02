@@ -97,7 +97,7 @@ percent-encoding = { version = "2", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
 proc-macro2 = { version = "1", default-features = false }
 proptest = { version = "1", default-features = false }
-quick-xml = { version = "0.39", default-features = false }
+quick-xml = { version = "0.41", default-features = false }
 quote = { version = "1", default-features = false }
 ra-ap-rustc_lexer = { version = "0.167", default-features = false }
 rayon = { version = "1", default-features = false }

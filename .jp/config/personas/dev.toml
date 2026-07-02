@@ -5,6 +5,7 @@ extends = [
     "../knowledge/code-comments.toml",
     "../knowledge/ubiquitous-language.toml",
     "../knowledge/jp-config.toml",
+    "../knowledge/rfd-priority.toml",
     "../skill/web.toml",
     "../skill/read-files.toml",
     "../skill/edit-files.toml",
