@@ -354,5 +354,9 @@
   "089-streaming-paragraph-rendering.md": {
     "hash": "4a1e571acfd0db31efce7efa36dfc985dc6cd93e672fa4ca1f45936dd2a809c7",
     "summary": "Stream paragraphs incrementally while guaranteeing byte-identical output to non-streaming, with four guards managing block-start ambiguity, setext reinterpretation, inline spans, and wrap-in-progress stability."
+  },
+  "090-anthropic-subscription-auth-with-credential-fallback.md": {
+    "hash": "2f2a3694924055b6abf1a6e5a40af4759861017e172e1c94798dda2c3f7557e2",
+    "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
   }
 }
