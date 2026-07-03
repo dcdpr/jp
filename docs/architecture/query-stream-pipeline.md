@@ -900,7 +900,29 @@ fn render(command: ToolRenderCommand):
 
 Manages Ctrl+C behavior with context-aware menus.
 
-**Two contexts:**
+**Signal routing (RFD 045):** a process-wide `SignalRouter` (`jp_cli::signals`)
+is the single consumer of OS signals.
+Scopes that can act on an interrupt register on a LIFO handler stack
+(`push_handler`) and poll the returned notification channel from their own event
+loop; the router notifies only the topmost handler, and a handler may `decline`
+to pass the interrupt down the stack.
+Three handler scopes exist: the streaming loop, the tool execution loop, and a
+turn-level handler owning the gaps between turn phases (persistence, thread
+building, response processing) — a Ctrl+C landing in a gap commits partial
+content and ends the turn gracefully.
+
+Ctrl+C escalates: the first press goes to the topmost handler (or requests a
+graceful shutdown by cancelling the router's root shutdown token when no handler
+is registered — there are no dead zones), a second press within a 2-second
+cooldown bypasses all handlers and cancels the shutdown token, and any press
+after shutdown has begun exits the process immediately (code 130).
+Cancelling an interrupt menu itself with Ctrl+C escalates too: the streaming
+menu falls back to Stop, the tool menu cancels the running tools and begins a
+graceful shutdown.
+SIGTERM always requests a graceful shutdown and SIGQUIT always exits immediately
+(code 131); neither goes through the handler stack.
+
+**Two menu contexts:**
 
 1. **During Streaming**: Stream is paused, user chooses action
 2. **During Tool Execution**: Tools can be cancelled via `CancellationToken`
@@ -925,9 +947,9 @@ Manages Ctrl+C behavior with context-aware menus.
 ┌─────────────────────────────────────┐
 │  Interrupted during tool execution  │
 │                                     │
-│  [s] Stop - cancel tool, reply      │
-│  [r] Restart - cancel and retry     │
 │  [c] Continue - wait for tool       │
+│  [r] Stop & respond - cancel, reply │
+│  [t] Restart - cancel and retry     │
 │                                     │
 └─────────────────────────────────────┘
 ```
@@ -948,20 +970,26 @@ fn handle_interrupt(context: InterruptContext) -> InterruptAction:
                         InterruptAction::Resume
                     else:
                         InterruptAction::Continue { partial_content }
+                menu cancelled (Ctrl+C) =>
+                    InterruptAction::Stop  // save what we have, exit
 
         ToolExecution { tool_id, executor_state } =>
             choice = show_tool_menu()
             match choice:
-                's' =>
+                'r' =>
                     // Trigger cancellation via token
                     // Executors will terminate at next check point
                     InterruptAction::ToolCancelled {
-                        response: "Tool cancelled by user"
+                        response: user_reply or canned_rejection
                     }
-                'r' =>
+                't' =>
                     InterruptAction::RestartTool { tool_id }
                 'c' =>
                     InterruptAction::Resume
+                menu cancelled (Ctrl+C) =>
+                    // A second Ctrl+C on the menu escalates: cancel the
+                    // tools and begin a graceful shutdown (exit 130).
+                    InterruptAction::Escalate
 ```
 
 **Cancellation mechanism:**
@@ -1151,6 +1179,7 @@ The Turn Coordinator implements this state machine:
 | Evaluating  | No tool calls   | Complete               | Persist final cycle, → Idle                |
 | Executing   | All tools done  | Continuing             | Persist cycle, prepare follow-up           |
 | Executing   | Ctrl+C          | Interrupted(Tool)      | Show tool menu                             |
+| (gap)       | Ctrl+C          | Complete               | Turn handler commits partials, ends turn   |
 | Continuing  | —               | Streaming              | Send tool responses to LLM (new cycle)     |
 | Complete    | —               | Idle                   | Turn done                                  |
 
@@ -1288,7 +1317,8 @@ User presses Ctrl+C during tool execution
         ┌──────────────────────────┐
         │   Interrupt Handler      │
         │   Shows tool menu        │
-        │   User selects [s] Stop  │
+        │   User picks [r] Stop &  │
+        │   respond                │
         └──────────┬───────────────┘
                    │
                    │ returns InterruptAction::ToolCancelled

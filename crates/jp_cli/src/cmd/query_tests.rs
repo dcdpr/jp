@@ -22,13 +22,13 @@ use jp_printer::{OutputFormat, Printer};
 use jp_workspace::{ConversationHandle, Workspace};
 use relative_path::RelativePathBuf;
 use serde_json::Value;
-use tokio::sync::broadcast;
 
 use super::*;
 use crate::{
     KeyValueOrPath,
     cmd::target::{ConversationTarget, PickerFilter},
     config_pipeline::ConfigPipeline,
+    signals::SignalRouter,
 };
 
 fn make_partial_with_tools() -> PartialAppConfig {
@@ -147,13 +147,13 @@ async fn run_mock_turn(
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let (_signal_tx, signal_rx) = broadcast::channel(16);
+    let router = SignalRouter::detached();
 
     turn_loop::run_turn_loop(
         Arc::clone(&provider),
         &model,
         cfg,
-        &signal_rx,
+        &router,
         &mcp_client,
         root,
         false,

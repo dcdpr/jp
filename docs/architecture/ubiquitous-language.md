@@ -31,6 +31,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
     - [RFD](#rfd)
+    - [Signal Router](#signal-router)
     - [Thread](#thread)
     - [Tool Call](#tool-call)
     - [Turn](#turn)
@@ -112,8 +113,8 @@ through `build_editor_backend` in `jp_cli`.
 
 ### InlineReply
 
-The `jp_inquire` widget for short replies: the interrupt-menu reply (`r` while
-streaming, `s` while tools run) and the tool argument / result / skip-reason
+The `jp_inquire` widget for short replies: the interrupt-menu reply (`r` in both
+the streaming and tool menus) and the tool argument / result / skip-reason
 edits.
 It renders on the `/dev/tty` prompt writer and accepts inline typing, with a
 `Ctrl+X` escape to the configured editor (the `EditorBackend`) for longer edits.
@@ -159,6 +160,24 @@ Each RFD captures design rationale for a significant change.
 Numeric-prefixed RFDs (`001-`, `002-`, …) are the accepted series; `D`-prefixed
 RFDs (`D01-`, `D02-`, …) are drafts or abandoned proposals.
 The process itself is defined in [RFD-001].
+
+### Signal Router
+
+The process-wide owner of OS signal handling: `SignalRouter` in
+`jp_cli::signals` (RFD 045).
+It consumes SIGINT/SIGTERM/SIGQUIT once, tracks Ctrl+C **escalation** (first
+press → topmost interrupt handler, second press within the cooldown → graceful
+shutdown, any press after shutdown began → immediate exit), and owns the root
+**shutdown token** — a `CancellationToken` cancelled when a graceful shutdown
+is requested, observed cooperatively by teardown and long-running work.
+
+Scopes that can act on a Ctrl+C register an **interrupt handler** on the
+router's LIFO stack via `push_handler`, receiving an RAII guard and a
+notification channel polled from their own event loop.
+Only the topmost handler is notified; a handler may `decline` to pass the
+interrupt down the stack.
+The registered scopes are the streaming loop, the tool execution loop, and the
+turn-level handler covering gaps between turn phases.
 
 ### Thread
 

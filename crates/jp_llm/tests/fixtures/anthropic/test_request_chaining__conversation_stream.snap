@@ -140,6 +140,7 @@ expression: v
       }
     },
     "interrupt": {
+      "escalation_cooldown_secs": 2,
       "streaming": {
         "action": "prompt",
         "compose_in_editor": false

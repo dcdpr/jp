@@ -91,6 +91,14 @@ pub enum InterruptAction {
     /// If the user leaves the response empty, a canned message is used that
     /// instructs the LLM to evaluate why the tool was rejected.
     ToolCancelled { response: String },
+
+    /// Begin a graceful shutdown.
+    ///
+    /// Produced when an interrupt menu itself is cancelled with Ctrl-C:
+    /// pressing Ctrl-C on the menu escalates past it.
+    /// The streaming path commits partial content before completing; the tool
+    /// path cancels the running tools.
+    Escalate,
 }
 
 /// Outcome of collecting a reply from the user.
@@ -157,6 +165,8 @@ impl<P: PromptBackend> InterruptHandler<P> {
     /// the configured action runs directly without a menu.
     /// Choosing `reply` collects a reply; backing out of a menu-driven reply
     /// returns to the menu, while a configured (menu-less) `reply` resumes.
+    /// Cancelling the menu itself with `Ctrl+C` escalates: the caller should
+    /// commit partial content and begin a graceful shutdown.
     pub fn handle_streaming_interrupt(
         &self,
         config: &StreamingInterruptConfig,
@@ -175,12 +185,19 @@ impl<P: PromptBackend> InterruptHandler<P> {
                         InlineOption::new('a', "Abort (discard & exit)"),
                     ];
 
-                    // A cancelled menu falls back to a graceful stop. (RFD 045's
-                    // `Escalated` outcome is not yet implemented; this is the
-                    // graceful-shutdown stand-in.)
-                    self.backend
-                        .inline_select("Interrupted", options, None, &mut printer.prompt_writer())
-                        .unwrap_or('s')
+                    let selected = self.backend.inline_select(
+                        "Interrupted",
+                        options,
+                        None,
+                        &mut printer.prompt_writer(),
+                    );
+
+                    // A Ctrl-C that cancels the interrupt menu is an
+                    // escalation, not a "continue".
+                    match selected {
+                        Ok(choice) => choice,
+                        Err(_) => return InterruptAction::Escalate,
+                    }
                 }
                 StreamingInterruptAction::Continue => 'c',
                 StreamingInterruptAction::Reply => 'r',
@@ -220,6 +237,8 @@ impl<P: PromptBackend> InterruptHandler<P> {
     /// Choosing "Stop & respond" collects a response: a typed message stops the
     /// tool and sends it, an empty submission stops with the canned default,
     /// and `Ctrl+C` backs out to the menu.
+    /// Cancelling the menu itself with `Ctrl+C` escalates: the caller should
+    /// cancel the tools and begin a graceful shutdown.
     ///
     /// When `config.action` is `prompt` the interrupt menu is shown; otherwise
     /// the configured action runs directly without a menu.
@@ -239,9 +258,19 @@ impl<P: PromptBackend> InterruptHandler<P> {
                         InlineOption::new('t', "Restart"),
                     ];
 
-                    self.backend
-                        .inline_select("Interrupted", options, None, &mut printer.prompt_writer())
-                        .unwrap_or('c')
+                    let selected = self.backend.inline_select(
+                        "Interrupted",
+                        options,
+                        None,
+                        &mut printer.prompt_writer(),
+                    );
+
+                    // A Ctrl-C that cancels the interrupt menu is an
+                    // escalation, not a "continue".
+                    match selected {
+                        Ok(choice) => choice,
+                        Err(_) => return InterruptAction::Escalate,
+                    }
                 }
                 ToolInterruptAction::Continue => 'c',
                 ToolInterruptAction::Restart => 't',

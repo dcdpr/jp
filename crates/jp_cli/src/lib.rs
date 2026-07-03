@@ -53,10 +53,7 @@ use jp_term::table::{DetailRow, details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
 use relative_path::RelativePath;
 use serde_json::Value;
-use tokio::{
-    runtime::{self, Runtime},
-    sync::broadcast,
-};
+use tokio::runtime::{self, Runtime};
 use tracing::{debug, info, trace, warn};
 
 use crate::{
@@ -65,7 +62,6 @@ use crate::{
         target::resolve_request,
     },
     config_pipeline::ConfigPipeline,
-    signals::SignalTo,
     timer::{LineTimer, spawn_line_timer},
 };
 
@@ -438,10 +434,24 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     );
     let rt = ctx.handle().clone();
 
-    // Run the requested command.
+    // Run the requested command, racing it against the shutdown token.
     // `start_new` carries the interactive picker's "start a new conversation"
     // choice through to the query command, which honors it at lock time.
-    let output = rt.block_on(cli.command.run(&mut ctx, handles, start_new));
+    //
+    // When a graceful shutdown is requested (an unhandled or escalated
+    // Ctrl-C, or SIGTERM), the command future is dropped and the run falls
+    // through to the normal teardown below. Dropping the future releases
+    // conversation locks and persists dirty conversations (guard-scoped
+    // persistence); the teardown then drains background tasks and cleans up
+    // stale files.
+    let shutdown = ctx.signals.shutdown_token();
+    let output = rt.block_on(async {
+        tokio::select! {
+            biased;
+            output = cli.command.run(&mut ctx, handles, start_new) => output,
+            () = shutdown.cancelled() => Err(cmd::Error::interrupted()),
+        }
+    });
 
     if let Err(error) = output.as_ref()
         && error.disable_persistence
@@ -457,11 +467,10 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // before background tasks log any errors.
     ctx.printer.flush();
 
-    // Drain background tasks. Shows a timer line while waiting and lets the
-    // user interrupt: first Ctrl+C signals graceful cancellation with a 2s
-    // countdown; a second Ctrl+C — or SIGQUIT — escalates to a force quit
-    // that aborts tasks immediately and drops their pending workspace
-    // mutations.
+    // Drain background tasks. Shows a timer line while waiting. A graceful
+    // shutdown request (Ctrl-C, an interrupt earlier in the run, or SIGTERM)
+    // switches to a 2s cancellation countdown; any further Ctrl-C exits the
+    // process immediately via the signal router's escalation ladder.
     rt.block_on(drain_background_tasks(&mut ctx))
         .map_err(Error::Task)?;
 
@@ -476,13 +485,15 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     output.map_err(Into::into)
 }
 
-/// Drain background tasks at end of run, with interactive cancellation.
+/// Drain background tasks at end of run, with interrupt-aware cancellation.
 ///
 /// While [`TaskHandler::sync`] runs, prints a `⏱ Finishing background tasks…
 /// Ns` line on stderr after a 1s delay.
-/// The first SIGINT/SIGTERM switches the line to a 2s countdown and signals
-/// graceful cancellation; a second SIGINT (or any SIGQUIT) escalates to a force
-/// quit that aborts the `JoinSet` and drops pending workspace mutations.
+/// A graceful shutdown request — a Ctrl-C during the drain, an interrupt
+/// earlier in the run, or SIGTERM — switches the line to a 2s countdown and
+/// signals cancellation.
+/// Any Ctrl-C after shutdown has begun exits the process immediately (the
+/// signal router's escalation ladder).
 ///
 /// [`TaskHandler::sync`]: jp_task::TaskHandler::sync
 async fn drain_background_tasks(
@@ -493,11 +504,12 @@ async fn drain_background_tasks(
     }
 
     let cancel = ctx.task_handler.cancel_token();
-    let force = ctx.task_handler.force_token();
     let printer = ctx.printer.clone();
-    let mut signals = ctx.signals.receiver.resubscribe();
+    let shutdown = ctx.signals.shutdown_token();
     let show_chrome = ctx.term.is_tty;
-    let mut signals_open = true;
+    // The shutdown token only cancels once; after acting on it, stop
+    // selecting on it so the loop doesn't spin on a completed future.
+    let mut shutdown_watched = true;
 
     let mut timer = if show_chrome {
         spawn_line_timer(
@@ -519,43 +531,26 @@ async fn drain_background_tasks(
     let result = loop {
         tokio::select! {
             biased;
-            sig = signals.recv(), if signals_open => {
-                let escalate = match sig {
-                    Ok(SignalTo::Shutdown) => cancel.is_cancelled(),
-                    Ok(SignalTo::Quit) => true,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => {
-                        signals_open = false;
-                        continue;
-                    }
-                };
-
+            // A graceful shutdown request (pending from an interrupted
+            // command, or arriving mid-drain) cancels background tasks.
+            () = shutdown.cancelled(), if shutdown_watched => {
+                shutdown_watched = false;
                 stop_drain_timer(timer.take()).await;
 
-                if escalate {
-                    force.cancel();
-                    if show_chrome {
-                        drop(writeln!(
-                            printer.err_writer(),
-                            "\r\x1b[K⏱ Aborting background tasks…",
-                        ));
-                    }
-                    // No further escalation possible; stop watching signals.
-                    signals_open = false;
-                } else {
-                    cancel.cancel();
-                    if show_chrome {
-                        timer = spawn_line_timer(
-                            printer.clone(),
-                            true,
-                            Duration::ZERO,
-                            Duration::from_millis(100),
-                            |secs, _status| format!(
+                cancel.cancel();
+                if show_chrome {
+                    timer = spawn_line_timer(
+                        printer.clone(),
+                        true,
+                        Duration::ZERO,
+                        Duration::from_millis(100),
+                        |secs, _status| {
+                            format!(
                                 "\r\x1b[K⏱ Cancelling background tasks… {:.1}s",
                                 (2.0 - secs).max(0.0),
-                            ),
-                        );
-                    }
+                            )
+                        },
+                    );
                 }
             }
             result = &mut sync_fut => break result,
