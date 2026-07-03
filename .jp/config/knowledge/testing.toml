@@ -1,0 +1,113 @@
+[[assistant.system_prompt_sections]]
+tag = "Testing: Exceptional Paths Must Be Forced and Proven"
+content = """\
+A test of an exceptional path (an error, timeout, cancellation, retry, or \
+early-exit branch) must do two things: *force* the exceptional path to \
+occur, and *prove* the mechanism fired. Assertions that the happy path also \
+satisfies pin nothing.
+
+- **Slack assertions are the vacuous-test smell.** `is_ok()`, `count >= 2`, \
+  `output.contains(...)`, "completes either normally or via the exceptional \
+  path" — each of these passes when the mechanism under test silently never \
+  ran. Assert something *only* the exceptional path produces: an exact \
+  invocation count, a specific state transition, a specific error, the \
+  *absence* of an effect the normal path would have caused.
+
+- **Fixtures must create the window.** The work under test must still be in \
+  flight when the exceptional event lands. Use a fixture that blocks until \
+  acted upon; a fixture that completes instantly plus a delayed trigger \
+  tests the moment *after* the work, not the work.
+
+- **If the mechanism firing is indistinguishable from it silently not \
+  firing, strengthen the fixture** — a counting factory, a fixture that \
+  must be explicitly stopped, an input that only the exceptional branch \
+  consumes — not just the assertion.
+
+- **Watch a new test fail at least once** (against the unfixed code, an \
+  inverted assertion, or a disabled fixture). This repo has carried \
+  integration tests that passed for a long time while the path they named \
+  never executed — the fixture finished before the trigger fired, and every \
+  assertion also held on the normal path. A test never seen red proves \
+  nothing about what it can catch.\
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "Testing: A Failing Test Is Information — Don't Weaken It"
+content = """\
+When an assertion keeps failing (twice, three times), the failure is telling \
+you one of three things: the code is wrong, the test's premise is wrong, or \
+your model of the system is wrong. Find out which. Do not "keep momentum" by \
+replacing the strong assertion with a weaker one that happens to pass — a \
+weak green test is worse than a red one, because it documents a guarantee \
+nobody checks.
+
+- **Diagnose, don't dilute.** Reorder or split assertions so the first \
+  failure localizes which claim is false. Add temporary instrumentation \
+  (marked for removal) when reading the code doesn't settle it. Run the \
+  test in isolation to rule out interference.
+
+- **If the premise was wrong, fix the premise** (the fixture, the setup, \
+  the expected value) — explicitly, with a comment recording the corrected \
+  understanding — rather than loosening the expectation until it stops \
+  hurting.
+
+- **Deleting is honest; weakening is not.** If the behavior genuinely no \
+  longer exists, delete the test and say so. A test kept alive on life \
+  support with `is_ok()` misleads every future reader.\
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "Testing: User-Visible Output Is Asserted Exactly"
+content = """\
+Tests of user-visible output (stdout, stderr, rendered terminal content, \
+generated files) assert the *exact* expected output — a full static string \
+or a snapshot — never `contains()`.
+
+- `contains()` survives duplicated output, interleaved lines from other \
+  components, broken formatting, leaked escape codes, and missing \
+  surrounding context. Exact comparison catches all of these for free.
+
+- The exact expected value doubles as documentation: a reader sees \
+  precisely what the user sees.
+
+- When exactness is genuinely impractical, fix the *inputs* first (stubbed \
+  clocks, fixed IDs, deterministic ordering — house rules already require \
+  this); normalize the output second; reach for substring matching last, \
+  with a comment explaining why.
+
+- Structural checks on persisted data (a record exists, a field \
+  round-trips) may match on structure — but learn the storage encoding \
+  first (fields may be encoded or binary at rest) instead of discovering it \
+  through a failing assertion.\
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "Testing: Know Your Primitives and Test the Real Path"
+content = """\
+Concurrency and IPC primitives have delivery semantics that silently \
+invalidate tests. Know them before building a test on top of them.
+
+- **Channels:** a broadcast receiver only sees messages sent *after* it \
+  subscribed (a pre-sent message is never delivered to a late subscriber); \
+  a bounded channel of capacity 1 coalesces bursts into one delivery; a \
+  spawned listener task outlives its scope unless something closes the \
+  channel it parks on.
+
+- **Test through the production entry point.** A test helper that \
+  re-implements the code under test (instead of calling it) drifts: it \
+  keeps passing while the real path breaks. If the production API is \
+  awkward to call from tests, restructure the code so the testable core \
+  *is* the production path.
+
+- **Pin exact interactions.** Keybindings, menu choices, prompt sequences, \
+  and wire formats drift; a scripted interaction that no longer matches the \
+  real interface passes vacuously forever. Assert the *consequence* of the \
+  interaction (the thing it was supposed to cause happened), not merely \
+  that the run completed.
+
+- **Timing-based tests fail loudly or not at all.** Generous margins (a \
+  short trigger delay into a window held open by a blocking fixture), a \
+  hard outer timeout that fails the test, and assertions that cannot pass \
+  when the window is missed. A timing test that silently takes the happy \
+  path on a missed window is a vacuous test with extra steps.\
+"""
