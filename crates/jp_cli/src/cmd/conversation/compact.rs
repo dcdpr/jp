@@ -21,6 +21,7 @@ use crate::{
         turn_range::{Bound, TurnRange},
     },
     ctx::Ctx,
+    format::compaction_policy_label,
 };
 
 #[derive(Debug, clap::Args)]
@@ -352,7 +353,7 @@ fn segments_for_compactions(compactions: &[Compaction], conv_id: &str) -> Vec<Ti
                         None => "summary".to_owned(),
                     },
                 ),
-                None => mechanical_label(c),
+                None => compaction_policy_label(c),
             };
             TimelineSegment {
                 from: c.from_turn,
@@ -379,46 +380,6 @@ fn existing_segments(snapshot: &ConversationStream) -> Vec<TimelineSegment> {
             existing: true,
         })
         .collect()
-}
-
-/// Describe a compaction's mechanical policies (reasoning / tool calls) for the
-/// timeline, e.g. `reasoning + tools`.
-///
-/// Summaries are labeled by the caller (which owns the temp-file path), so this
-/// covers only the non-summary policies.
-/// Returns `None` when the compaction carries no mechanical policy.
-fn mechanical_label(compaction: &Compaction) -> Option<String> {
-    let mut parts = Vec::new();
-    if compaction.reasoning.is_some() {
-        parts.push("reasoning");
-    }
-    if let Some(policy) = &compaction.tool_calls {
-        match policy {
-            ToolCallPolicy::Strip {
-                request: true,
-                response: true,
-            } => parts.push("tools"),
-            ToolCallPolicy::Strip {
-                request: true,
-                response: false,
-            } => parts.push("tool requests"),
-            ToolCallPolicy::Strip {
-                request: false,
-                response: true,
-            } => parts.push("tool responses"),
-            ToolCallPolicy::Strip {
-                request: false,
-                response: false,
-            } => {}
-            ToolCallPolicy::Omit => parts.push("tools omitted"),
-        }
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" + "))
-    }
 }
 
 /// Write a generated summary to a temp file so the timeline can link to it.
@@ -723,7 +684,7 @@ impl Compact {
             let label = if rule.summary.is_some() {
                 Some("summary".to_owned())
             } else {
-                mechanical_label(&build_mechanical_compaction(
+                compaction_policy_label(&build_mechanical_compaction(
                     range.from_turn,
                     range.to_turn,
                     rule,
