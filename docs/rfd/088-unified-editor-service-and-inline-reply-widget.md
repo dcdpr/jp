@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-08
 - **Extends**: [RFD 048]
-- **Extended by**: [RFD 092]
+- **Extended by**: [RFD 092], [RFD 093]
 
 ## Summary
 
@@ -892,5 +892,6 @@ Reviewable independently after Phase 3.
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 080]: 080-editor-as-a-config-source.md
 [RFD 092]: 092-predictable-and-responsive-interrupt-escalation.md
+[RFD 093]: 093-inline-first-query-composition.md
 [cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
 [reedline]: https://crates.io/crates/reedline

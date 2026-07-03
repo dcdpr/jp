@@ -348,7 +348,7 @@
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
-    "hash": "d577a62824a2ab611bb486da2bae664282b26b423b5e57bee001337866dbd78b",
+    "hash": "3b04a88ad5edb5a36c97fb7273a0a39a198bc165567323c2dc2a83c8424bcbfb",
     "summary": "Unify editor invocation through EditorBackend trait; add vendored reedline-based InlineReply widget for interrupt menu replies."
   },
   "089-streaming-paragraph-rendering.md": {
@@ -366,5 +366,9 @@
   "092-predictable-and-responsive-interrupt-escalation.md": {
     "hash": "04132add4db5ee2b02339cea46a42ae794cd2b93043499dc9c1336cf3a71cdbf",
     "summary": "Hardened interrupt model with predictable three-rung escalation, menus at every stage, and watchdog-bounded graceful shutdown."
+  },
+  "093-inline-first-query-composition.md": {
+    "hash": "a4fa8987e41f656a337952452629eafd5768c9c24ffdbe30556692f0ffb616cb",
+    "summary": "Bare `jp query` composes inline by default; `Ctrl+X` escapes to external editor, with fallback modes configurable via `query.compose_in_editor`."
   }
 }

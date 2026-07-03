@@ -706,12 +706,12 @@ fn interrupt_continue_before_first_chunk_emits_assistant_header_on_resume() {
     );
 }
 
-/// Regression: a Reply interrupt inserts a new `ChatRequest` boundary, which in
-/// replay would render a labeled user header AND a fresh assistant header for
-/// the following content.
-/// Live mode must match.
+/// Regression: an editor-composed Reply interrupt inserts a new `ChatRequest`
+/// boundary whose text never appeared on the terminal, so live mode must echo
+/// it: a labeled user header AND a fresh assistant header for the following
+/// content, matching what replay renders for this `ChatRequest`.
 #[test]
-fn interrupt_reply_renders_user_header_for_new_request() {
+fn interrupt_reply_from_editor_renders_user_header_for_new_request() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
@@ -728,9 +728,12 @@ fn interrupt_reply_renders_user_header_for_new_request() {
     // Some assistant content arrives so the assistant header is emitted.
     coordinator.handle_event(&mut stream, Event::message(0, "partial answer"));
 
-    // User interrupts with a follow-up reply.
+    // User interrupts with a follow-up reply composed in the external editor.
     coordinator.handle_streaming_interrupt(
-        InterruptAction::Reply("actually, ignore that".into()),
+        InterruptAction::Reply {
+            content: "actually, ignore that".into(),
+            from_editor: true,
+        },
         &mut stream,
     );
 
@@ -753,6 +756,68 @@ fn interrupt_reply_renders_user_header_for_new_request() {
     assert!(
         after_alice.contains("\u{2500}\u{2500} jp "),
         "expected a fresh `── jp` header after the Reply, got: {output:?}"
+    );
+}
+
+/// An inline-composed Reply is already visible in scrollback on the widget's
+/// own line, so live mode must NOT echo a labeled user header for it — but the
+/// next assistant chunk must still open with a fresh assistant header.
+#[test]
+fn interrupt_reply_inline_skips_user_header_but_resets_assistant_header() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        Some("alice".into()),
+        None,
+        Some("anthropic/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("first question"));
+
+    // Some assistant content arrives so the assistant header is emitted.
+    coordinator.handle_event(&mut stream, Event::message(0, "partial answer"));
+
+    // User interrupts with a follow-up reply submitted from the inline widget.
+    coordinator.handle_streaming_interrupt(
+        InterruptAction::Reply {
+            content: "actually, ignore that".into(),
+            from_editor: false,
+        },
+        &mut stream,
+    );
+
+    // Resumed cycle delivers the new assistant content.
+    coordinator.handle_event(&mut stream, Event::message(1, "new answer"));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    let output = strip_ansi(&out.lock());
+
+    // No echoed user header: the widget's own line is the live rendering.
+    assert!(
+        !output.contains("\u{2500}\u{2500} alice "),
+        "expected no `── alice` header for an inline reply, got: {output:?}"
+    );
+
+    // The reply still lands in the stream as a `ChatRequest`.
+    assert!(
+        stream
+            .iter()
+            .filter_map(|e| e.event.as_chat_request())
+            .any(|r| r.content == "actually, ignore that"),
+        "expected the inline reply recorded as a ChatRequest"
+    );
+
+    // And the resumed assistant content opens with a fresh `── jp` header:
+    // one for the partial answer, a second after the inline reply.
+    assert_eq!(
+        output.matches("\u{2500}\u{2500} jp ").count(),
+        2,
+        "expected two `── jp` headers (partial answer + resumed content), got: {output:?}"
     );
 }
 
@@ -781,7 +846,10 @@ fn interrupt_reply_during_reasoning_preserves_partial_reasoning() {
     coordinator.handle_event(&mut stream, Event::reasoning(0, "the trade-offs"));
 
     coordinator.handle_streaming_interrupt(
-        InterruptAction::Reply("actually, do X instead".into()),
+        InterruptAction::Reply {
+            content: "actually, do X instead".into(),
+            from_editor: false,
+        },
         &mut stream,
     );
 

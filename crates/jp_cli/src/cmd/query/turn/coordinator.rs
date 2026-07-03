@@ -474,7 +474,10 @@ impl TurnCoordinator {
                 self.prepare_continuation();
             }
 
-            InterruptAction::Reply(content) => {
+            InterruptAction::Reply {
+                content,
+                from_editor,
+            } => {
                 // Inject partial reasoning + message as assistant events first,
                 // before the user's reply, so the resumed model sees its own
                 // interrupted reasoning as context.
@@ -482,18 +485,24 @@ impl TurnCoordinator {
                     self.push_event(conversation_stream, response);
                 }
 
-                // Add user's reply as a new request, then render it through
-                // the view so the live terminal gets the same labeled
-                // user header replay would emit for this `ChatRequest`.
-                // `render_user_request` also resets the assistant-header
-                // gate, so the next assistant chunk will print a fresh
-                // `── jp …` header.
                 let request = ChatRequest {
                     content,
                     schema: None,
                     author: self.author.clone(),
                 };
-                self.view.render_user_request(&request);
+
+                // An editor-composed reply never appeared on the terminal, so
+                // echo it through the view (labeled user header + body), same
+                // as replay would emit for this `ChatRequest`. An
+                // inline-composed reply is already visible in scrollback on
+                // the widget's own line, so skip the echo — but still reset
+                // the assistant-header gate so the next assistant chunk
+                // prints a fresh `── jp …` header.
+                if from_editor {
+                    self.view.render_user_request(&request);
+                } else {
+                    self.view.begin_turn();
+                }
                 self.push_event(conversation_stream, request);
                 self.prepare_continuation();
             }
