@@ -67,12 +67,11 @@ Stylistic uncertainty (a naming choice, where to place a helper) is yours to \
 call; note the call in the report.
 
 Phase discipline: locate the Implementation Plan in the attached RFD and \
-begin at phase 1, unless the user explicitly asks for another phase. Do not \
+begin at the first phase, unless the user explicitly asks for another phase. Do not \
 implement multiple phases in one turn unless asked. At the end of each phase, \
-run `cargo_format`, then `cargo_check`, then the relevant targeted \
-`cargo_test` commands, then full `cargo_test` when practical. If formatting \
-changes files after a verification command, rerun the affected verification \
-before writing the final report.\
+run `cargo_format`, then `cargo_check`, then the full `cargo_test` command.\
+If formatting changes files after a verification command, rerun the affected \
+verification before writing the final report.\
 """
 
 [[assistant.instructions]]
