@@ -38,9 +38,8 @@ use jp_llm::{
 };
 use jp_printer::{ErrChannel, Printer};
 use jp_workspace::{ConversationLock, ConversationMut};
-use tokio::{sync::mpsc, task::JoinHandle};
+use tokio::sync::mpsc;
 use tokio_stream::wrappers::{BroadcastStream, ReceiverStream, errors::BroadcastStreamRecvError};
-use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use super::{
@@ -61,6 +60,7 @@ use crate::{
     error::Error,
     render::metadata::set_rendered_arguments,
     signals::{SignalRx, SignalTo},
+    timer::LineTimer,
 };
 
 /// Events produced by the merged streaming loop sources.
@@ -103,14 +103,15 @@ where
     }
 }
 
-/// Spawns a waiting indicator task that prints elapsed time to the terminal.
+/// Spawns a waiting indicator task that prints elapsed time and an optional
+/// status detail to the terminal.
 ///
 /// Returns `None` if the indicator is disabled (not a TTY or config says no).
 fn spawn_waiting_indicator(
     printer: Arc<Printer>,
     config: &StreamingConfig,
     is_tty: bool,
-) -> Option<(CancellationToken, JoinHandle<()>)> {
+) -> Option<LineTimer> {
     if !is_tty {
         return None;
     }
@@ -120,8 +121,32 @@ fn spawn_waiting_indicator(
         config.progress.show,
         Duration::from_secs(u64::from(config.progress.delay_secs)),
         Duration::from_millis(u64::from(config.progress.interval_ms)),
-        |secs| format!("\r\x1b[K⏱ Waiting… {secs:.1}s"),
+        |secs, status| match status {
+            Some(detail) => format!("\r\x1b[K⏱ Waiting… {secs:.1}s ({detail})"),
+            None => format!("\r\x1b[K⏱ Waiting… {secs:.1}s"),
+        },
     )
+}
+
+/// Whether a streaming-loop event leaves the waiting indicator running.
+///
+/// Keep-alive pings, history patches, and part-less flushes produce no terminal
+/// output, so the indicator stays up through them.
+/// Everything else (content parts, finish, stream errors, signals, preparing
+/// ticks) is about to write to the terminal and must finish the indicator
+/// first.
+///
+/// A `Flush` that commits content is always preceded by a `Part` for the same
+/// index, which already finished the indicator; only a part-less flush — which
+/// commits nothing — can reach a live indicator.
+fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
+    match event {
+        StreamingLoopEvent::Llm(result) => matches!(
+            result.as_ref(),
+            Ok(Event::KeepAlive | Event::Patch(_) | Event::Flush { .. })
+        ),
+        StreamingLoopEvent::Signal(_) | StreamingLoopEvent::PreparingTick(_) => false,
+    }
 }
 
 /// Runs the turn loop: streaming from LLM, handling signals, executing tools.
@@ -258,18 +283,14 @@ pub(super) async fn run_turn_loop(
                     tool_choice: tool_choice.clone(),
                 };
 
-                // Start waiting indicator BEFORE the HTTP request. The drop
-                // guard ensures the indicator is cancelled if we exit early
-                // (error from run_cycle, break, return).
-                let waiting =
+                // Start waiting indicator BEFORE the HTTP request. Dropping
+                // the handle cancels the indicator if we exit early (error
+                // from the provider call, break, return).
+                let mut waiting =
                     spawn_waiting_indicator(printer.clone(), &cfg.style.streaming, is_tty);
-                let (waiting_token, mut waiting_handle) = match waiting {
-                    Some((token, handle)) => (Some(token), Some(handle)),
-                    None => (None, None),
-                };
-                let _waiting_guard = waiting_token
-                    .as_ref()
-                    .map(CancellationToken::drop_guard_ref);
+                if let Some(timer) = &waiting {
+                    timer.set_status("sending request");
+                }
 
                 // Build the three event sources for the streaming loop.
                 let sig_stream = StreamSource::Signal(
@@ -288,6 +309,9 @@ pub(super) async fn run_turn_loop(
                     .chat_completion_stream(model, query)
                     .await
                     .map_err(|e| map_llm_error(e, vec![]))?;
+                if let Some(timer) = &waiting {
+                    timer.set_status("waiting for first tokens");
+                }
                 let raw_stream = match idle_timeout {
                     Some(idle) => with_idle_timeout(raw_stream, idle),
                     None => raw_stream,
@@ -335,14 +359,16 @@ pub(super) async fn run_turn_loop(
                 let mut conv = lock.as_mut();
 
                 while let Some(event) = streams.next().await {
-                    // Cancel and await the waiting indicator on the first
-                    // event, ensuring its cleanup (line clear) completes before
-                    // we render any content.
-                    if let Some(handle) = waiting_handle.take() {
-                        if let Some(token) = &waiting_token {
-                            token.cancel();
+                    // The indicator survives events that render nothing and is
+                    // finished on the first event that can write to the
+                    // terminal. `finish` awaits the task so its line clear
+                    // completes before we render any content.
+                    if event_keeps_waiting_indicator(&event) {
+                        if let Some(timer) = &waiting {
+                            timer.set_status("receiving response data");
                         }
-                        drop(handle.await);
+                    } else if let Some(timer) = waiting.take() {
+                        timer.finish().await;
                     }
 
                     match event {

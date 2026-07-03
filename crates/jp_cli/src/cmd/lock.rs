@@ -25,14 +25,12 @@ use jp_conversation::ConversationId;
 use jp_printer::Printer;
 use jp_storage::lock::LockInfo;
 use jp_workspace::{ConversationHandle, ConversationLock, LockResult, Workspace, session::Session};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     ctx::Ctx,
     error::{Error, Result},
     signals::SignalRx,
-    timer::spawn_line_timer,
+    timer::{LineTimer, spawn_line_timer},
 };
 
 /// Result of attempting to acquire a conversation lock.
@@ -198,7 +196,7 @@ fn lock_holder_description(workspace: &Workspace, id: ConversationId) -> String 
 // Lock-wait timer (delegates to the shared spawn_line_timer infrastructure)
 // ---------------------------------------------------------------------------
 
-type Timer = Option<(CancellationToken, JoinHandle<()>)>;
+type Timer = Option<LineTimer>;
 
 fn spawn_lock_timer(
     printer: &Printer,
@@ -213,7 +211,7 @@ fn spawn_lock_timer(
         config.show,
         Duration::from_secs(u64::from(config.delay_secs)),
         Duration::from_millis(u64::from(config.interval_ms)),
-        move |elapsed| {
+        move |elapsed, _status| {
             let remaining = (total - elapsed).max(0.0);
             format!("\r\x1b[K⏱ Pending conversation lock {holder} ({remaining:.1}s)")
         },
@@ -221,8 +219,7 @@ fn spawn_lock_timer(
 }
 
 async fn cancel_timer(timer: Timer) {
-    if let Some((token, handle)) = timer {
-        token.cancel();
-        drop(handle.await);
+    if let Some(timer) = timer {
+        timer.finish().await;
     }
 }
