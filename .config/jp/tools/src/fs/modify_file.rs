@@ -415,12 +415,15 @@ fn guard_broad_replacement(
         Some(true) => None,
         Some(false) => Some(fail(reject_message)),
         None => {
-            let mut q =
-                Question::boolean("broad_replacement", text).with_default(Value::Bool(false));
+            let question = match Question::boolean("broad_replacement", text) {
+                Ok(q) => q,
+                Err(e) => return Some(Err(e.into())),
+            };
+            let mut question = question.with_default(Value::Bool(false));
             if let Some(p) = pre_amble {
-                q = q.with_preamble(p);
+                question = question.with_preamble(p);
             }
-            Some(Ok(Outcome::NeedsInput { question: q }))
+            Some(Ok(Outcome::NeedsInput { question }))
         }
     }
 }
@@ -751,12 +754,11 @@ fn apply_changes<R: ProcessRunner>(
                     return Err("File has uncommitted changes. Change discarded.".into());
                 }
                 None => {
-                    return Ok(Outcome::NeedsInput {
-                        question: Question::boolean(
-                            "modify_dirty_file",
-                            format!("File '{path}' has uncommitted changes. Modify anyway?"),
-                        ),
-                    });
+                    let question = Question::boolean(
+                        "modify_dirty_file",
+                        format!("File '{path}' has uncommitted changes. Modify anyway?"),
+                    )?;
+                    return Ok(Outcome::NeedsInput { question });
                 }
             }
         }
@@ -800,14 +802,13 @@ fn apply_changes<R: ProcessRunner>(
             );
         }
         None => {
-            return Ok(Outcome::NeedsInput {
-                question: Question::boolean(
-                    "apply_changes",
-                    "Do you want to apply the patch shown above?",
-                )
-                .with_preamble(patch)
-                .with_default(Value::Bool(true)),
-            });
+            let question = Question::boolean(
+                "apply_changes",
+                "Do you want to apply the patch shown above?",
+            )?
+            .with_preamble(patch)
+            .with_default(Value::Bool(true));
+            return Ok(Outcome::NeedsInput { question });
         }
     }
 

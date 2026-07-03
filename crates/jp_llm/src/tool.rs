@@ -27,7 +27,7 @@ use tokio::{
     process::Command,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{info, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::error::ToolError;
 
@@ -281,6 +281,17 @@ pub enum CommandResult {
         /// Whether the process exited successfully.
         success: bool,
     },
+
+    /// Tool emitted a well-formed `needs_input` whose question id is invalid
+    /// (empty, or contains a `.`, which is reserved as the inquiry-id
+    /// separator).
+    ///
+    /// Surfaced as a tool-level error so the malformed inquiry is dropped
+    /// before any inquiry event is constructed.
+    InvalidInquiry {
+        /// The offending question id, for the diagnostic trace.
+        question_id: String,
+    },
 }
 
 impl CommandResult {
@@ -331,6 +342,19 @@ impl CommandResult {
                     })
                     .to_string())
                 }
+            }
+            Self::InvalidInquiry { question_id } => {
+                error!(
+                    tool = name,
+                    question_id = %question_id,
+                    "tool produced an invalid inquiry: question id must be non-empty and must not \
+                     contain '.'"
+                );
+                Err(
+                    "tool produced an invalid inquiry: question id must be non-empty and must not \
+                     contain '.'"
+                        .to_owned(),
+                )
             }
             Self::NeedsInput(_) => {
                 unreachable!("NeedsInput should be handled by the caller")
@@ -572,11 +596,34 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
             }
         }
         Ok(Outcome::NeedsInput { question }) => CommandResult::NeedsInput(question),
-        Err(_) => CommandResult::RawOutput {
-            stdout: stdout_str.into_owned(),
-            stderr: String::from_utf8_lossy(stderr).into_owned(),
-            success,
-        },
+        // A `needs_input` whose question id is empty or contains a `.` fails
+        // to deserialize (`QuestionId` rejects both). Surface that as a
+        // tool-level error rather than silently treating the outcome as raw
+        // text. Any other parse failure stays `RawOutput`.
+        Err(_) => {
+            let invalid_id = serde_json::from_str::<Value>(&stdout_str)
+                .ok()
+                .and_then(|v| {
+                    (v.get("type").and_then(Value::as_str) == Some("needs_input"))
+                        .then(|| {
+                            v.get("question")
+                                .and_then(|q| q.get("id"))
+                                .and_then(Value::as_str)
+                        })
+                        .flatten()
+                        .filter(|id| id.is_empty() || id.contains('.'))
+                        .map(str::to_owned)
+                });
+
+            match invalid_id {
+                Some(question_id) => CommandResult::InvalidInquiry { question_id },
+                None => CommandResult::RawOutput {
+                    stdout: stdout_str.into_owned(),
+                    stderr: String::from_utf8_lossy(stderr).into_owned(),
+                    success,
+                },
+            }
+        }
     }
 }
 

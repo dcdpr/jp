@@ -1203,8 +1203,12 @@ pub struct QuestionConfig {
 
     /// The fixed answer to the question.
     ///
-    /// If this is set, the question will not be presented to the target, but
-    /// will always be answered with the given value.
+    /// If set, the question is never presented to the target: when the tool
+    /// asks it, the configured value is supplied automatically (no prompt is
+    /// shown and no assistant round-trip happens) and the tool is re-invoked
+    /// with the answer.
+    /// The exchange is still recorded in the conversation as an inquiry
+    /// request/response pair.
     // TODO: We should add an enumeration of possible options:
     //
     // - Fixed answer

@@ -195,20 +195,32 @@ migrate to `into_parts()`.
 
 The `ToolCoordinator` records inquiry events at two points:
 
-1. **On inquiry spawn** (`handle_tool_result`, when a question is routed through
-   the inquiry backend): Push an `InquiryRequest` into the conversation stream.
+1. **On question arrival** (`handle_tool_result`, before any routing decision):
+   Push an `InquiryRequest` into the conversation stream.
 
-2. **On inquiry result** (`InquiryResult` handler in the event loop): Push an
-   `InquiryResponse` into the conversation stream.
+2. **On resolution**: Push an `InquiryResponse` into the conversation stream —
+   `Answered` when an answer resolves the question, `Redacted` for
+   `AnswerType::Secret` answers, or `Cancelled` when the question closes without
+   an answer.
 
-Inquiry events are recorded for any question routed through the
-`InquiryBackend`, not only those with `QuestionTarget::Assistant`.
-In non-interactive environments (no TTY), user-targeted questions also fall
-through to the inquiry backend and are recorded.
+Inquiry events are recorded for **every** `Outcome::NeedsInput` round-trip,
+regardless of routing path (amended by [RFD 082]; this section originally
+excluded prompter-answered questions):
 
-Questions answered via interactive user prompts (TTY + `QuestionTarget::User`)
-are *not* recorded as inquiry events — they go through the `ToolPrompter` path,
-which doesn't touch the conversation stream.
+- Questions resolved by the interactive prompter (TTY + `QuestionTarget::User`).
+- Questions resolved by a cached "remember for turn" answer from earlier in the
+  same turn.
+- Questions resolved by a static `QuestionConfig.answer` value.
+- Questions routed through the `InquiryBackend` (explicit
+  `QuestionTarget::Assistant`, or user-targeted questions falling through in
+  non-interactive environments).
+
+When a question closes without an answer, the pair is completed with
+`InquiryResponse::Cancelled { reason }` rather than left dangling: `user` for a
+user cancellation (Ctrl-C at the prompt, or a cancellation token fired by a user
+action), `backend_error` for an inquiry-backend failure, and `no_prompt_backend`
+/ `assistant_routing_denied` for `AnswerType::Secret` questions that could not
+be routed to a human.
 
 `execute_with_prompting` receives `events: &mut ConversationStream` so the
 coordinator has write access.

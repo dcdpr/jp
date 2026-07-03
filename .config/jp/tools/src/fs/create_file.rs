@@ -72,13 +72,12 @@ pub(crate) async fn fs_create_file(
             Some(true) => {}
             Some(false) => return error("Path points to existing file"),
             None => {
-                return Ok(Outcome::NeedsInput {
-                    question: Question::boolean(
-                        "overwrite_file",
-                        format!("File '{path}' exists. Overwrite?"),
-                    )
-                    .with_default(Value::Bool(false)),
-                });
+                let question = Question::boolean(
+                    "overwrite_file",
+                    format!("File '{path}' exists. Overwrite?"),
+                )?
+                .with_default(Value::Bool(false));
+                return Ok(Outcome::NeedsInput { question });
             }
         },
         None => {}

@@ -2,8 +2,8 @@
 
 use std::fmt;
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+use serde_json::{Map, Value};
 
 /// Opaque identifier for an inquiry.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -189,6 +189,9 @@ pub enum InquiryAnswerType {
 
     /// Free-form text input.
     Text,
+
+    /// Free-form text input whose answer is not persisted on disk.
+    Secret,
 }
 
 /// A single option in a select inquiry.
@@ -232,70 +235,239 @@ impl From<&str> for SelectOption {
     }
 }
 
-/// An inquiry response event - the answer to an inquiry request.
+/// The outcome of an [`InquiryRequest`].
 ///
 /// This event MUST be in response to an `InquiryRequest` event, with a matching
 /// `id`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InquiryResponse {
-    /// ID matching the corresponding `InquiryRequest`.
-    pub id: InquiryId,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum InquiryResponse {
+    /// The inquiry was answered.
+    Answered {
+        /// ID matching the corresponding `InquiryRequest`.
+        id: InquiryId,
 
-    /// The answer provided.
+        /// The answer provided.
+        ///
+        /// The shape of this value depends on the `answer_type` of the
+        /// corresponding inquiry:
+        ///
+        /// - `Boolean`: `Value::Bool`
+        /// - `Select`: one of the option values
+        /// - `Text`: `Value::String`
+        answer: Value,
+    },
+
+    /// The inquiry was closed without an answer.
+    Cancelled {
+        /// ID matching the corresponding `InquiryRequest`.
+        id: InquiryId,
+
+        /// Why the inquiry was closed without an answer.
+        reason: CancellationReason,
+    },
+
+    /// The inquiry was answered, but the answer was deliberately not persisted
+    /// (e.g. a secret value).
     ///
-    /// The shape of this value depends on the `answer_type` of the
-    /// corresponding inquiry:
-    ///
-    /// - `Boolean`: `Value::Bool`
-    /// - `Select`: one of the option values
-    /// - `Text`: `Value::String`
-    pub answer: Value,
+    /// The tool still received the answer in-memory; only the on-disk record
+    /// omits it.
+    Redacted {
+        /// ID matching the corresponding `InquiryRequest`.
+        id: InquiryId,
+    },
 }
 
 impl InquiryResponse {
-    /// Creates a new inquiry response.
+    /// Creates an answered inquiry response.
+    ///
+    /// A null answer is never a meaningful answer for any answer type; record a
+    /// `Cancelled` response instead.
     #[must_use]
-    pub fn new(id: impl Into<InquiryId>, answer: Value) -> Self {
-        Self {
+    pub fn answered(id: impl Into<InquiryId>, answer: Value) -> Self {
+        debug_assert!(
+            !answer.is_null(),
+            "inquiry answers must not be null; record a cancellation instead"
+        );
+        Self::Answered {
             id: id.into(),
             answer,
         }
     }
 
-    /// Creates a new boolean inquiry response.
+    /// Creates an answered boolean inquiry response.
     #[must_use]
     pub fn boolean(id: impl Into<InquiryId>, answer: bool) -> Self {
-        Self::new(id, Value::Bool(answer))
+        Self::answered(id, Value::Bool(answer))
     }
 
-    /// Creates a new select inquiry response.
+    /// Creates an answered select inquiry response.
     #[must_use]
     pub fn select(id: impl Into<InquiryId>, answer: impl Into<Value>) -> Self {
-        Self::new(id, answer.into())
+        Self::answered(id, answer.into())
     }
 
-    /// Creates a new text inquiry response.
+    /// Creates an answered text inquiry response.
     #[must_use]
     pub fn text(id: impl Into<InquiryId>, answer: String) -> Self {
-        Self::new(id, Value::String(answer))
+        Self::answered(id, Value::String(answer))
     }
 
-    /// Returns the answer as a boolean, if applicable.
+    /// The inquiry ID, present on every variant.
     #[must_use]
-    pub fn as_bool(&self) -> Option<bool> {
-        self.answer.as_bool()
+    pub const fn id(&self) -> &InquiryId {
+        match self {
+            Self::Answered { id, .. } | Self::Cancelled { id, .. } | Self::Redacted { id } => id,
+        }
     }
 
-    /// Returns the answer as a string, if applicable.
+    /// The answer provided, if this response carries one.
+    ///
+    /// Returns `None` for `Cancelled` and `Redacted` responses.
     #[must_use]
-    pub fn as_str(&self) -> Option<&str> {
-        self.answer.as_str()
+    pub const fn answer(&self) -> Option<&Value> {
+        match self {
+            Self::Answered { answer, .. } => Some(answer),
+            Self::Cancelled { .. } | Self::Redacted { .. } => None,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for InquiryResponse {
+    /// Accepts both the tagged 082+ form and the legacy pre-082 flat form.
+    ///
+    /// The flat form (`{ "id", "answer" }`, no `outcome`) deserializes as
+    /// `Answered`.
+    /// A tagged `cancelled` event whose `reason` is missing or not a string
+    /// deserializes as `CancellationReason::Unknown` with the sentinel tag
+    /// `unspecified`: the record carries no usable reason, and no specific one
+    /// is fabricated for it.
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        // Deserialized through a raw map so a literal `null` answer stays
+        // distinguishable from an absent `answer` field: an `Option<Value>`
+        // field folds both into `None`, rejecting `Answered { answer: Null }`
+        // even though the serializer can produce it.
+        let mut raw = Map::deserialize(deserializer)?;
+
+        let id = raw
+            .get("id")
+            .and_then(Value::as_str)
+            .map(InquiryId::new)
+            .ok_or_else(|| de::Error::missing_field("id"))?;
+        let outcome = raw
+            .get("outcome")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+
+        match outcome.as_deref() {
+            Some("answered") => {
+                let answer = raw
+                    .remove("answer")
+                    .ok_or_else(|| de::Error::missing_field("answer"))?;
+                Ok(Self::Answered { id, answer })
+            }
+            Some("cancelled") => {
+                let reason = raw.get("reason").and_then(Value::as_str).map_or_else(
+                    || CancellationReason::Unknown("unspecified".to_owned()),
+                    CancellationReason::from_tag,
+                );
+                Ok(Self::Cancelled { id, reason })
+            }
+            Some("redacted") => Ok(Self::Redacted { id }),
+            Some(other) => Err(de::Error::unknown_variant(other, &[
+                "answered",
+                "cancelled",
+                "redacted",
+            ])),
+            // Legacy pre-082 flat form: `{ "id", "answer" }` is an answer.
+            None => {
+                let answer = raw.remove("answer").ok_or_else(|| {
+                    de::Error::custom("inquiry response missing `outcome` and `answer`")
+                })?;
+                Ok(Self::Answered { id, answer })
+            }
+        }
+    }
+}
+
+/// Why an inquiry was closed without an answer.
+///
+/// Recorded on [`InquiryResponse::Cancelled`] for the audit trail only; it does
+/// not drive retry behavior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CancellationReason {
+    /// The user explicitly cancelled (e.g. Ctrl-C at the prompt).
+    User,
+
+    /// The routing backend (prompter or inquiry backend) returned an error
+    /// instead of an answer.
+    BackendError,
+
+    /// A question that requires a human answer could not be routed because no
+    /// interactive terminal is available.
+    NoPromptBackend,
+
+    /// A question that requires a human answer was targeted at the assistant
+    /// and refused to route to the inquiry backend.
+    AssistantRoutingDenied,
+
+    /// A reason this build cannot interpret: a tag named by a newer JP, or a
+    /// `cancelled` event whose `reason` was missing or not a string (recorded
+    /// with the sentinel tag `unspecified`).
+    ///
+    /// The payload is the unparsed serde tag, preserved verbatim so it
+    /// round-trips unchanged.
+    /// Audit-trail only; readers MUST NOT branch on the contents.
+    Unknown(String),
+}
+
+impl CancellationReason {
+    /// The serde tag for this reason.
+    ///
+    /// `Unknown` returns its preserved tag verbatim.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::User => "user",
+            Self::BackendError => "backend_error",
+            Self::NoPromptBackend => "no_prompt_backend",
+            Self::AssistantRoutingDenied => "assistant_routing_denied",
+            Self::Unknown(tag) => tag,
+        }
     }
 
-    /// Returns the answer as a string, if applicable.
-    #[must_use]
-    pub fn as_string(&self) -> Option<String> {
-        self.answer.as_str().map(ToString::to_string)
+    /// Parses a serde tag into a reason, mapping unrecognized tags to
+    /// [`Self::Unknown`].
+    fn from_tag(tag: &str) -> Self {
+        match tag {
+            "user" => Self::User,
+            "backend_error" => Self::BackendError,
+            "no_prompt_backend" => Self::NoPromptBackend,
+            "assistant_routing_denied" => Self::AssistantRoutingDenied,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+}
+
+impl Serialize for CancellationReason {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> Deserialize<'de> for CancellationReason {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let tag = String::deserialize(deserializer)?;
+        Ok(Self::from_tag(&tag))
     }
 }
 
