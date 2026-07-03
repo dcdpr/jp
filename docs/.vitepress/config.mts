@@ -83,7 +83,7 @@ const rfdPriorityWriter = {
                 try {
                     res.end(readFileSync(file))
                 } catch {
-                    res.end('{"order":[],"backlog":[],"in_development":[]}')
+                    res.end('{"planned":[],"backlog":[],"in_development":[]}')
                 }
                 return
             }
@@ -117,18 +117,27 @@ const rfdPriorityWriter = {
 
                 const isStrArray = (v) =>
                     Array.isArray(v) && v.every((x) => typeof x === 'string')
+                const isGroup = (g) =>
+                    g !== null &&
+                    typeof g === 'object' &&
+                    (g.milestone === null || typeof g.milestone === 'string') &&
+                    isStrArray(g.ids)
                 if (
-                    !isStrArray(parsed.order) ||
+                    !Array.isArray(parsed.planned) ||
+                    !parsed.planned.every(isGroup) ||
                     !isStrArray(parsed.backlog) ||
                     !isStrArray(parsed.in_development)
                 ) {
                     res.statusCode = 400
-                    res.end('expected { order, backlog, in_development } as string arrays')
+                    res.end('expected { planned: [{ milestone, ids }], backlog, in_development }')
                     return
                 }
 
                 const out = {
-                    order: parsed.order,
+                    planned: parsed.planned.map((g) => ({
+                        milestone: g.milestone,
+                        ids: g.ids,
+                    })),
                     backlog: parsed.backlog,
                     in_development: parsed.in_development,
                 }

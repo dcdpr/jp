@@ -1,8 +1,13 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
+import { normalizePriority } from '../loaders/rfd-priority.mjs'
+
 const props = defineProps({
     entries: { type: Array, required: true },
+    // Raw board layout, in priority.json's shape: `planned` milestone groups,
+    // `backlog`, and `in_development`.
+    priority: { type: Object, required: true },
 })
 
 // Dragging only exists on the dev server. SortableJS is dynamically imported
@@ -11,6 +16,23 @@ const props = defineProps({
 const isDev = import.meta.env.DEV
 
 const TERMINAL = new Set(['Implemented', 'Superseded', 'Abandoned'])
+
+// Marker rows are synthetic list entries: labeled milestone lines plus the
+// unnamed cutoff between the prioritised list and the unsorted backlog. An
+// RFD belongs to the nearest milestone marker below it; anything below the
+// cutoff is backlog. Markers exist only in the rendered board — the file
+// stores the same structure as `planned` groups.
+const CUTOFF_NUM = '--cutoff--'
+
+function milestoneRow(name) {
+    return { marker: true, name, num: `milestone:${name}`, slug: `milestone:${name}` }
+}
+
+function cutoffRow() {
+    return { marker: true, name: null, num: CUTOFF_NUM, slug: CUTOFF_NUM }
+}
+
+const byNum = new Map(props.entries.map(e => [e.num, e]))
 
 // Every RFD's hard dependencies (Requires ∪ Extends). A dependency must sit
 // above its dependent in the list.
@@ -48,32 +70,57 @@ function topoSort(list) {
     return result.concat(remaining)
 }
 
-const active = props.entries
-    .filter(e => !TERMINAL.has(e.status))
-    .sort((a, b) => {
-        const ap = a.priority ?? Infinity
-        const bp = b.priority ?? Infinity
-        if (ap !== bp) return ap - bp
-        return a.num.localeCompare(b.num)
-    })
+// Build the board rows from a normalized priority record: each planned
+// group's RFDs followed by its milestone marker, then the cutoff, the
+// backlog, and finally any active RFDs the file doesn't mention. Dependencies
+// are kept above their dependents; the saved order is the tiebreak.
+function buildRows(p) {
+    const isActive = e => e && !TERMINAL.has(e.status)
+    const placed = new Set()
+    const rows = []
+    const push = num => {
+        const e = byNum.get(num)
+        if (isActive(e) && !placed.has(num)) {
+            rows.push(e)
+            placed.add(num)
+        }
+    }
+    for (const group of p.planned) {
+        group.ids.forEach(push)
+        if (group.milestone !== null) rows.push(milestoneRow(group.milestone))
+    }
+    rows.push(cutoffRow())
+    p.backlog.forEach(push)
+    const rest = props.entries
+        .filter(e => isActive(e) && !placed.has(e.num))
+        .sort((a, b) => a.num.localeCompare(b.num))
+    rows.push(...rest)
+    return topoSort(rows)
+}
 
-const items = ref(topoSort(active))
-const byNum = new Map(props.entries.map(e => [e.num, e]))
-const activeNums = new Set(items.value.map(e => e.num))
+const items = ref([])
+const inDev = ref(new Set())
+// Initial board state from the build-time data. On the dev server the same
+// function rebuilds it from a fresh fetch on mount.
+applyPriority(props.priority)
 
-const inDev = ref(new Set(
-    props.entries
-        .filter(e => e.inDevelopment && activeNums.has(e.num))
-        .map(e => e.num)
+// RFD numbers currently on the board (marker rows excluded).
+const rfdNums = computed(() => new Set(
+    items.value.filter(r => !r.marker).map(r => r.num)
 ))
+
+const cutoffIndex = computed(() =>
+    items.value.findIndex(r => r.marker && r.name === null)
+)
 
 const statusClass = status => 'rfd-badge--' + (status?.toLowerCase() ?? 'unknown')
 
-// Dev renders the whole list, including the draggable cutoff divider. The
-// production build shows only the prioritised rows above the divider.
+// Dev renders the whole list, including the draggable markers. The production
+// build shows the prioritised rows and their milestone lines above the
+// cutoff.
 const visibleItems = computed(() => {
     if (isDev) return items.value
-    const i = items.value.findIndex(e => e.divider)
+    const i = cutoffIndex.value
     return i === -1 ? items.value : items.value.slice(0, i)
 })
 
@@ -86,7 +133,7 @@ const requiredSet = ref(new Set())
 const dragNum = ref(null)
 
 function depsOnBoard(num) {
-    return [...(depMap.value.get(num) ?? [])].filter(d => activeNums.has(d))
+    return [...(depMap.value.get(num) ?? [])].filter(d => rfdNums.value.has(d))
 }
 
 function hover(num) {
@@ -128,18 +175,44 @@ function firstViolation(order) {
     return null
 }
 
+// Marker placement violated by a candidate order: a milestone marker sitting
+// below the unsorted cutoff. Milestones section the prioritised list; the
+// backlog is unsorted by definition. Returns a notice message, or null.
+function markerViolation(order) {
+    const cut = order.indexOf(CUTOFF_NUM)
+    if (cut === -1) return null
+    for (let i = cut + 1; i < order.length; i++) {
+        if (order[i].startsWith('milestone:')) {
+            return 'Milestone markers must stay above the unsorted cutoff.'
+        }
+    }
+    return null
+}
+
 // --- Autosave ---
 async function save() {
-    // Split the combined list at the divider: above it is the prioritised
-    // `order`, below it is the `backlog`. The divider row itself is dropped, so
-    // priority.json only ever holds real RFD ids.
+    // Split the combined list at its markers: each milestone marker closes
+    // the group of rows above it, and the cutoff separates the prioritised
+    // list from the backlog. Marker rows themselves are dropped; priority.json
+    // holds only RFD ids and milestone names.
     const rows = items.value
-    const cut = rows.findIndex(e => e.divider)
-    const above = cut === -1 ? rows : rows.slice(0, cut)
-    const below = cut === -1 ? [] : rows.slice(cut + 1)
+    const planned = []
+    let ids = []
+    let cut = 0
+    for (; cut < rows.length; cut++) {
+        const row = rows[cut]
+        if (row.marker && row.name === null) break
+        if (row.marker) {
+            planned.push({ milestone: row.name, ids })
+            ids = []
+        } else {
+            ids.push(row.num)
+        }
+    }
+    planned.push({ milestone: null, ids })
     const body = {
-        order: above.map(e => e.num),
-        backlog: below.map(e => e.num),
+        planned,
+        backlog: rows.slice(cut + 1).filter(r => !r.marker).map(r => r.num),
         in_development: [...inDev.value].sort(),
     }
     try {
@@ -172,22 +245,25 @@ function flash(num) {
     flashTimer = setTimeout(() => { flashNum.value = null }, 700)
 }
 
-// Jump a row to the top or bottom of its own section: the prioritised block
-// above the divider, or the backlog below it. Clamped so dependencies stay
-// above the row and dependents stay below it.
+// Jump a row to the top or bottom of its own section: the block bounded by
+// the nearest marker rows (milestone lines or the cutoff) around it. Clamped
+// so dependencies stay above the row and dependents stay below it.
 function moveTo(rfd, edge) {
     const list = items.value.slice()
     const from = list.indexOf(rfd)
     if (from === -1) return
-    const cut = list.findIndex(e => e.divider)
-    const inSorted = cut === -1 || from < cut
 
     list.splice(from, 1)
-    const divider = list.findIndex(e => e.divider)
-    let lo, hi
-    if (divider === -1) { lo = 0; hi = list.length }
-    else if (inSorted) { lo = 0; hi = divider }
-    else { lo = divider + 1; hi = list.length }
+    // Section bounds after removal: a marker index below `from` is unchanged,
+    // one at or past it shifted up by one — so `i < from` still identifies
+    // the markers that sat above the row.
+    let lo = 0
+    let hi = list.length
+    list.forEach((e, i) => {
+        if (!e.marker) return
+        if (i < from) lo = Math.max(lo, i + 1)
+        else hi = Math.min(hi, i)
+    })
 
     // Dependencies must stay above the row, dependents below it.
     const deps = new Set(depsOnBoard(rfd.num))
@@ -210,6 +286,84 @@ function moveTo(rfd, edge) {
     }
     items.value = list
     flash(rfd.num)
+    save()
+}
+
+// --- Milestone CRUD (dev only) ---
+//
+// Creating: hovering the gap above a row reveals a "+ milestone" pill after a
+// short delay; clicking it opens an inline name input at that position.
+// Renaming: click a milestone label. Deleting: the trashcan on the marker
+// row. Deleting is non-destructive — the rows above the marker flow into the
+// next milestone below, or become unassigned.
+
+// Insertion index for a new milestone marker, or null when no input is open.
+const creating = ref(null)
+const createName = ref('')
+// `num` of the milestone marker being renamed, or null.
+const renaming = ref(null)
+const renameName = ref('')
+
+// Focus an inline input as soon as it mounts (used as a function ref).
+const focusEl = el => { if (el) el.focus() }
+
+function milestoneNames() {
+    return new Set(
+        items.value.filter(r => r.marker && r.name !== null).map(r => r.name)
+    )
+}
+
+function openCreate(index) {
+    renaming.value = null
+    creating.value = index
+    createName.value = ''
+}
+
+function commitCreate() {
+    const index = creating.value
+    const name = createName.value.trim()
+    creating.value = null
+    if (index === null || !name) return
+    if (milestoneNames().has(name)) {
+        setNotice(`Milestone "${name}" already exists.`, 'warn', 3000)
+        return
+    }
+    const list = items.value.slice()
+    list.splice(index, 0, milestoneRow(name))
+    items.value = list
+    flash(`milestone:${name}`)
+    save()
+}
+
+function openRename(row) {
+    creating.value = null
+    renaming.value = row.num
+    renameName.value = row.name
+}
+
+function commitRename(row) {
+    const name = renameName.value.trim()
+    renaming.value = null
+    if (!name || name === row.name) return
+    if (milestoneNames().has(name)) {
+        setNotice(`Milestone "${name}" already exists.`, 'warn', 3000)
+        return
+    }
+    const index = items.value.indexOf(row)
+    if (index === -1) return
+    const list = items.value.slice()
+    list.splice(index, 1, milestoneRow(name))
+    items.value = list
+    flash(`milestone:${name}`)
+    save()
+}
+
+function removeMilestone(row) {
+    const index = items.value.indexOf(row)
+    if (index === -1) return
+    const list = items.value.slice()
+    list.splice(index, 1)
+    items.value = list
     save()
 }
 
@@ -236,6 +390,12 @@ function onMove(evt) {
     const relIdx = candidate.indexOf(relatedNum)
     if (relIdx === -1) return true
     candidate.splice(evt.willInsertAfter ? relIdx + 1 : relIdx, 0, draggedNum)
+
+    const markerErr = markerViolation(candidate)
+    if (markerErr) {
+        setNotice(markerErr, 'warn')
+        return false
+    }
 
     const pos = new Map(candidate.map((n, i) => [n, i]))
     const di = pos.get(draggedNum)
@@ -274,6 +434,12 @@ function onEnd() {
     // then drive the change through the reactive array.
     sortable.sort(current, false)
 
+    const markerErr = markerViolation(order)
+    if (markerErr) {
+        setNotice(`${markerErr} Reorder reverted.`, 'warn', 3000)
+        return
+    }
+
     const violation = firstViolation(order)
     if (violation) {
         setNotice(
@@ -286,32 +452,24 @@ function onEnd() {
     }
 
     clearNotice()
-    items.value = order.map(num => byNum.get(num))
+    const rowByNum = new Map(items.value.map(e => [e.num, e]))
+    items.value = order.map(num => rowByNum.get(num))
     save()
 }
 
-// In dev the VitePress data loader caches its result for the server's lifetime,
-// so a refresh would otherwise show stale priorities. Fetch the file fresh on
-// mount and rebuild from it. Production has no endpoint and keeps the build-time
-// data (correct for the static site).
-function applyPriority(p) {
-    const divider = props.entries.find(e => e.divider)
-    if (!divider) return
-    const isActive = e => e && !e.divider && !TERMINAL.has(e.status)
-    const order = (p.order ?? []).map(n => byNum.get(n)).filter(isActive)
-    const placed = new Set(order.map(e => e.num))
-    const backlog = (p.backlog ?? [])
-        .map(n => byNum.get(n))
-        .filter(e => isActive(e) && !placed.has(e.num))
-    backlog.forEach(e => placed.add(e.num))
-    const rest = props.entries
-        .filter(e => isActive(e) && !placed.has(e.num))
-        .sort((a, b) => a.num.localeCompare(b.num))
-    items.value = [...order, divider, ...backlog, ...rest]
-    const dev = new Set(p.in_development ?? [])
-    inDev.value = new Set(
-        items.value.filter(e => !e.divider && dev.has(e.num)).map(e => e.num)
+// Rebuild the board from a raw priority record (priority.json's shape),
+// tolerating the legacy flat `order` format. Runs at setup with the
+// build-time data, and again on mount with a fresh fetch: in dev the
+// VitePress data loader caches its result for the server's lifetime, so a
+// refresh would otherwise show stale priorities. Production has no endpoint
+// and keeps the build-time data (correct for the static site).
+function applyPriority(raw) {
+    const p = normalizePriority(raw)
+    items.value = buildRows(p)
+    const onBoard = new Set(
+        items.value.filter(r => !r.marker).map(r => r.num)
     )
+    inDev.value = new Set(p.inDevelopment.filter(num => onBoard.has(num)))
 }
 
 async function loadFreshPriority() {
@@ -336,7 +494,7 @@ onMounted(() => {
             touchStartThreshold: 5,
             // Drag from anywhere on the row, except the link, dev toggle, and
             // jump buttons, which stay clickable.
-            filter: 'a, input, label, button',
+            filter: 'a, input, label, button, .rfd-board-addzone',
             preventOnFilter: false,
             ghostClass: 'rfd-board-ghost',
             chosenClass: 'rfd-board-chosen',
@@ -360,15 +518,16 @@ onBeforeUnmount(() => {
 <div class="rfd-board">
     <div v-if="isDev" class="rfd-board-status">
         <span v-if="notice" :class="'rfd-board-' + notice.kind">{{ notice.text }}</span>
-        <span v-else class="rfd-board-hint">Drag a row to reorder — changes save automatically.</span>
+        <span v-else class="rfd-board-hint">Drag a row to reorder; hover the gap between rows to add a milestone. Changes save automatically.</span>
     </div>
     <p v-else class="rfd-board-note">
         The active backlog in priority order. Top of the list is worked on first.
+        Every RFD above a milestone line targets that release.
     </p>
 
     <ol ref="listRef" class="rfd-board-list" :class="{ 'is-editable': isDev }">
         <li
-            v-for="rfd in visibleItems"
+            v-for="(rfd, idx) in visibleItems"
             :key="rfd.slug"
             :data-num="rfd.num"
             class="rfd-board-item"
@@ -376,14 +535,58 @@ onBeforeUnmount(() => {
                 'is-dev': inDev.has(rfd.num),
                 'is-required': requiredSet.has(rfd.num),
                 'is-flash': flashNum === rfd.num,
-                'rfd-board-cutoff': rfd.divider,
+                'rfd-board-cutoff': rfd.marker,
             }"
             @mouseenter="hover(rfd.num)"
             @mouseleave="unhover()"
         >
-            <template v-if="rfd.divider">
+            <span
+                v-if="isDev && idx <= cutoffIndex"
+                class="rfd-board-addzone"
+                :class="{ 'is-open': creating === idx }"
+                @click.stop="openCreate(idx)"
+            >
+                <input
+                    v-if="creating === idx"
+                    :ref="focusEl"
+                    v-model="createName"
+                    class="rfd-board-milestone-input"
+                    placeholder="milestone name"
+                    @click.stop
+                    @keydown.enter.prevent="commitCreate()"
+                    @keydown.esc.prevent="creating = null"
+                    @blur="creating = null"
+                />
+                <span v-else class="rfd-board-addzone-pill">+ milestone</span>
+            </span>
+            <template v-if="rfd.marker">
                 <span class="rfd-board-cutoff-line"></span>
-                <span class="rfd-board-cutoff-label">unsorted below</span>
+                <span v-if="rfd.name === null" class="rfd-board-cutoff-label">unsorted below</span>
+                <template v-else>
+                    <input
+                        v-if="isDev && renaming === rfd.num"
+                        :ref="focusEl"
+                        v-model="renameName"
+                        class="rfd-board-milestone-input"
+                        @click.stop
+                        @keydown.enter.prevent="commitRename(rfd)"
+                        @keydown.esc.prevent="renaming = null"
+                        @blur="renaming = null"
+                    />
+                    <span
+                        v-else
+                        class="rfd-board-milestone-label"
+                        :class="{ 'is-editable': isDev }"
+                        :title="isDev ? 'Click to rename' : undefined"
+                        @click="isDev && openRename(rfd)"
+                    >{{ rfd.name }} milestone</span>
+                    <button
+                        v-if="isDev && renaming !== rfd.num"
+                        class="rfd-board-trash"
+                        title="Remove milestone"
+                        @click.stop="removeMilestone(rfd)"
+                    >🗑</button>
+                </template>
                 <span class="rfd-board-cutoff-line"></span>
             </template>
             <template v-else>
@@ -475,6 +678,75 @@ onBeforeUnmount(() => {
     letter-spacing: 0.04em;
     color: var(--vp-c-text-3);
     white-space: nowrap;
+}
+.rfd-board-milestone-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--vp-c-brand-1);
+    white-space: nowrap;
+}
+.rfd-board-milestone-label.is-editable { cursor: pointer; }
+.rfd-board-milestone-label.is-editable:hover { text-decoration: underline dotted; }
+/* Trashcan on a milestone marker row, revealed after a short hover delay. The
+   delay only applies on the way in; hiding is immediate. */
+.rfd-board-trash {
+    border: none;
+    background: none;
+    padding: 0;
+    margin: 0;
+    line-height: 1;
+    font-size: 0.85rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.12s;
+}
+.rfd-board-item:hover .rfd-board-trash {
+    opacity: 1;
+    transition-delay: 0.5s;
+}
+/* Hover zone in the gap above a row (dev only): reveals the "+ milestone"
+   pill after a short delay; clicking opens the inline name input. Overlaid on
+   the row's top margin so the list's DOM children stay just the sortable
+   rows — SortableJS counts children to compute drop indices. */
+.rfd-board-addzone {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -0.8rem;
+    height: 0.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 1;
+}
+.rfd-board-addzone-pill {
+    font-size: 0.7rem;
+    line-height: 1;
+    padding: 0.15rem 0.5rem;
+    border: 1px dashed var(--vp-c-brand-1);
+    border-radius: 999px;
+    color: var(--vp-c-brand-1);
+    background: var(--vp-c-bg);
+    opacity: 0;
+    transition: opacity 0.12s;
+}
+.rfd-board-addzone:hover .rfd-board-addzone-pill {
+    opacity: 1;
+    transition-delay: 0.5s;
+}
+.rfd-board-milestone-input {
+    position: relative;
+    z-index: 2;
+    font-size: 0.75rem;
+    line-height: 1.2;
+    padding: 0.15rem 0.4rem;
+    border: 1px solid var(--vp-c-brand-1);
+    border-radius: 4px;
+    background: var(--vp-c-bg);
+    color: var(--vp-c-text-1);
+    width: 10rem;
 }
 .rfd-board-handle {
     align-self: stretch;
