@@ -20,36 +20,47 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, trace};
 
 use super::handler::{InterruptAction, InterruptHandler};
-use crate::{
-    cmd::query::turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase},
-    signals::SignalTo,
-};
+use crate::cmd::query::turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase};
 
 /// Action to take in a select loop.
 ///
-/// Used by handlers that operate within a loop context (streaming, LLM events).
-/// The type parameter `T` is the return type when exiting the function early.
+/// Used by handlers that operate within a loop context (LLM events).
 #[derive(Debug)]
-pub enum LoopAction<T> {
+pub enum LoopAction {
     /// Continue the loop (wait for next event).
     Continue,
 
     /// Break the inner loop.
     Break,
-
-    /// Return from the function with the given value.
-    Return(T),
 }
 
-/// Handle a signal received during LLM streaming.
+/// Result of handling an interrupt during LLM streaming.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StreamingInterruptResult {
+    /// Keep polling the current stream.
+    Continue,
+
+    /// Break the inner streaming loop; the turn phase decides what happens
+    /// next.
+    Break,
+
+    /// Abort the turn without persisting the current cycle.
+    Abort,
+
+    /// The menu itself was cancelled with Ctrl-C: partial content is committed
+    /// and the turn is complete.
+    /// The caller should begin a graceful shutdown.
+    Escalate,
+}
+
+/// Handle a Ctrl-C interrupt notification received during LLM streaming.
 ///
-/// On Ctrl+C, applies the configured streaming interrupt behavior: the menu is
-/// shown only when `config.action` is `prompt`, otherwise the configured action
-/// runs directly.
+/// Applies the configured streaming interrupt behavior: the menu is shown only
+/// when `config.action` is `prompt`, otherwise the configured action runs
+/// directly.
 /// Then delegates to the turn coordinator's state machine for state transitions
 /// and content injection.
-pub fn handle_streaming_signal(
-    signal: SignalTo,
+pub fn handle_streaming_interrupt(
     turn_coordinator: &mut TurnCoordinator,
     conversation_stream: &mut ConversationStream,
     printer: &Printer,
@@ -58,50 +69,42 @@ pub fn handle_streaming_signal(
     edit_mode: ReplyEditMode,
     config: &StreamingInterruptConfig,
     llm_stream_finished: bool,
-) -> LoopAction<()> {
-    info!(?signal, "Received signal during streaming.");
+) -> StreamingInterruptResult {
+    info!("Interrupt received during streaming.");
 
-    match signal {
-        SignalTo::Quit => {
-            // Treat Quit like Stop: save partial content and exit gracefully.
-            // This ensures we don't lose progress on hard quit signals.
-            turn_coordinator.handle_quit(conversation_stream);
+    // Flush the renderer's markdown buffer to the printer queue, then drain
+    // the printer queue instantly (skip typewriter delays) so all generated
+    // content is visible before the interrupt menu appears.
+    turn_coordinator.flush_renderer();
+    printer.flush_instant();
 
-            LoopAction::Break
-        }
+    let action = InterruptHandler::with_backend(backend, editor, edit_mode)
+        .handle_streaming_interrupt(config, printer, !llm_stream_finished);
 
-        SignalTo::Shutdown => {
-            // Flush the renderer's markdown buffer to the printer queue,
-            // then drain the printer queue instantly (skip typewriter
-            // delays) so all generated content is visible before the
-            // interrupt menu appears.
-            turn_coordinator.flush_renderer();
-            printer.flush_instant();
+    // `Resume` means "keep waiting for the current stream." The state
+    // machine is a no-op for it, and we must NOT break the inner loop:
+    // breaking drops the live `SelectAll` and forces a redundant new
+    // HTTP request, which can land us in inconsistent state. Continue
+    // polling instead.
+    let is_resume = matches!(action, InterruptAction::Resume);
+    let is_escalate = matches!(action, InterruptAction::Escalate);
 
-            let action = InterruptHandler::with_backend(backend, editor, edit_mode)
-                .handle_streaming_interrupt(config, printer, !llm_stream_finished);
+    // Delegate state transition to the turn coordinator
+    match turn_coordinator.handle_streaming_interrupt(action, conversation_stream) {
+        // Return without persisting this cycle (previous turn cycles
+        // are already persisted).
+        TurnPhase::Aborted => StreamingInterruptResult::Abort,
 
-            // `Resume` means "keep waiting for the current stream." The state
-            // machine is a no-op for it, and we must NOT break the inner loop:
-            // breaking drops the live `SelectAll` and forces a redundant new
-            // HTTP request, which can land us in inconsistent state. Continue
-            // polling instead.
-            let is_resume = matches!(action, InterruptAction::Resume);
+        // Partial content is committed and the phase is Complete; the
+        // caller begins the graceful shutdown.
+        _ if is_escalate => StreamingInterruptResult::Escalate,
 
-            // Delegate state transition to the turn coordinator
-            match turn_coordinator.handle_streaming_interrupt(action, conversation_stream) {
-                // Return without persisting this cycle (previous turn cycles
-                // are already persisted).
-                TurnPhase::Aborted => LoopAction::Return(()),
+        // Resume keeps the existing stream alive.
+        _ if is_resume => StreamingInterruptResult::Continue,
 
-                // Resume keeps the existing stream alive.
-                _ if is_resume => LoopAction::Continue,
-
-                // All other phases break from loop, persist, then outer loop
-                // decides.
-                _ => LoopAction::Break,
-            }
-        }
+        // All other phases break from loop, persist, then outer loop
+        // decides.
+        _ => StreamingInterruptResult::Break,
     }
 }
 
@@ -123,7 +126,7 @@ pub fn handle_llm_event(
     event: Event,
     turn_coordinator: &mut TurnCoordinator,
     conversation_stream: &mut ConversationStream,
-) -> (LoopAction<()>, CommittedEvent) {
+) -> (LoopAction, CommittedEvent) {
     // `Patch` is a side-channel instruction from the provider to fix bad events
     // in the conversation stream. This can be handled directly instead of
     // passing through the turn coordinator.
@@ -190,11 +193,15 @@ fn apply_history_patches(stream: &mut ConversationStream, patches: &[EventPatch]
     }
 }
 
-/// Result of handling a signal during tool execution.
+/// Result of handling an interrupt during tool execution.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ToolSignalResult {
+pub enum ToolInterruptResult {
     /// Continue waiting for tool execution to complete.
     Continue,
+
+    /// A tool prompt is active; the interrupt was not handled here.
+    /// The caller should pass it down the handler stack.
+    Declined,
 
     /// Cancel current execution and restart with the same tools.
     /// The caller should wait for cancellation to complete, then re-execute.
@@ -203,27 +210,29 @@ pub enum ToolSignalResult {
     /// Cancel current execution and override cancelled tool responses with the
     /// user-supplied message.
     Cancelled { response: String },
+
+    /// Cancel current execution and begin a graceful shutdown: the user
+    /// cancelled the interrupt menu itself with Ctrl-C.
+    Escalate,
 }
 
-/// Handle a signal received during tool execution.
+/// Handle a Ctrl-C interrupt notification received during tool execution.
 ///
-/// On Ctrl+C, applies the configured tool interrupt behavior: the menu is shown
-/// only when `config.action` is `prompt`, otherwise the configured action runs
-/// directly.
+/// Applies the configured tool interrupt behavior: the menu is shown only when
+/// `config.action` is `prompt`, otherwise the configured action runs directly.
 /// Then delegates to the turn coordinator for state machine updates.
 ///
 /// If any tool is currently showing an interactive prompt (permission,
-/// question, result edit), the interrupt is suppressed and we let the active
-/// prompt handle Ctrl+C instead.
-/// This prevents UI conflicts between the interrupt menu and the active prompt.
+/// question, result edit), the interrupt is declined: the active prompt handles
+/// Ctrl+C itself, and the caller should pass the notification down the handler
+/// stack.
 ///
 /// # Arguments
 ///
 /// - `is_prompting` - Whether any tool is currently showing an interactive
 ///   prompt.
 /// - `backend` - Allows injecting a mock prompt backend for testing.
-pub fn handle_tool_signal(
-    signal: SignalTo,
+pub fn handle_tool_interrupt(
     cancellation_token: &CancellationToken,
     turn_coordinator: &mut TurnCoordinator,
     is_prompting: bool,
@@ -232,44 +241,34 @@ pub fn handle_tool_signal(
     editor: Option<Arc<dyn EditorBackend>>,
     edit_mode: ReplyEditMode,
     config: &ToolInterruptConfig,
-) -> ToolSignalResult {
-    match signal {
-        SignalTo::Quit => {
-            // For hard quit during tool execution, we cancel and let the normal
-            // flow handle persistence (responses will be cancelled).
+) -> ToolInterruptResult {
+    if is_prompting {
+        trace!("Declining interrupt: tool prompt is active");
+        return ToolInterruptResult::Declined;
+    }
+
+    let action = InterruptHandler::with_backend(backend, editor, edit_mode)
+        .handle_tool_interrupt(config, printer);
+
+    // Notify the state machine (reserved for future state transitions).
+    turn_coordinator.handle_tool_interrupt(&action);
+
+    match action {
+        InterruptAction::RestartTool => {
+            info!("Restarting tool execution");
             cancellation_token.cancel();
-            turn_coordinator.force_complete();
-            ToolSignalResult::Continue
+            ToolInterruptResult::Restart
         }
-
-        SignalTo::Shutdown => {
-            // If any tool is showing an interactive prompt, don't show the
-            // interrupt menu. Let the active prompt handle Ctrl+C (it will
-            // typically return OperationCanceled which the executor handles).
-            if is_prompting {
-                trace!("Suppressing interrupt menu: tool prompt is active");
-                return ToolSignalResult::Continue;
-            }
-
-            let action = InterruptHandler::with_backend(backend, editor, edit_mode)
-                .handle_tool_interrupt(config, printer);
-
-            // Notify the state machine (reserved for future state transitions).
-            turn_coordinator.handle_tool_interrupt(&action);
-
-            match action {
-                InterruptAction::RestartTool => {
-                    info!("Restarting tool execution");
-                    cancellation_token.cancel();
-                    ToolSignalResult::Restart
-                }
-                InterruptAction::ToolCancelled { response } => {
-                    cancellation_token.cancel();
-                    ToolSignalResult::Cancelled { response }
-                }
-                _ => ToolSignalResult::Continue,
-            }
+        InterruptAction::ToolCancelled { response } => {
+            cancellation_token.cancel();
+            ToolInterruptResult::Cancelled { response }
         }
+        InterruptAction::Escalate => {
+            info!("Escalating past the tool interrupt menu");
+            cancellation_token.cancel();
+            ToolInterruptResult::Escalate
+        }
+        _ => ToolInterruptResult::Continue,
     }
 }
 

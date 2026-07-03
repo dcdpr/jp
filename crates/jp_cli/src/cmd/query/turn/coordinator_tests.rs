@@ -363,6 +363,52 @@ fn test_peek_partial_events() {
 }
 
 #[test]
+fn test_complete_early_commits_partials() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    // Unflushed partial content sits in the event builder.
+    coordinator.handle_event(&mut stream, Event::message(0, "partial answer"));
+    let len_before = stream.len();
+
+    coordinator.complete_early(&mut stream);
+
+    assert_eq!(coordinator.current_phase(), TurnPhase::Complete);
+    // The partial message was committed to the stream.
+    assert_eq!(stream.len(), len_before + 1);
+}
+
+#[test]
+fn test_complete_early_without_partials() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    let len_before = stream.len();
+
+    coordinator.complete_early(&mut stream);
+
+    assert_eq!(coordinator.current_phase(), TurnPhase::Complete);
+    assert_eq!(stream.len(), len_before);
+}
+
+#[test]
 fn test_buffered_markdown_flushed_before_tool_call() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);

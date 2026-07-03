@@ -61,6 +61,7 @@ expression: "AppConfig::fields()"
     "plugins.auto_install",
     "plugins.command",
     "plugins.shutdown_timeout_secs",
+    "interrupt.escalation_cooldown_secs",
     "interrupt.tool_call.action",
     "interrupt.tool_call.compose_in_editor",
     "interrupt.streaming.action",

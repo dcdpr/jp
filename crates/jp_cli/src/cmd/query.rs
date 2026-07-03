@@ -129,7 +129,7 @@ use crate::{
     output::print_json,
     parser::AttachmentUrlOrPath,
     render::TurnView,
-    signals::SignalRx,
+    signals::SignalRouter,
 };
 
 type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -539,7 +539,7 @@ impl Query {
         let turn_result = self
             .handle_turn(
                 &cfg,
-                &ctx.signals.receiver,
+                &ctx.signals,
                 &ctx.mcp_client,
                 root,
                 ctx.term.is_tty,
@@ -791,7 +791,7 @@ impl Query {
     async fn handle_turn(
         &self,
         cfg: &AppConfig,
-        signals: &SignalRx,
+        signals: &SignalRouter,
         mcp_client: &jp_mcp::Client,
         root: Utf8PathBuf,
         is_tty: bool,

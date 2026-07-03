@@ -173,14 +173,15 @@ fn streaming_interrupt_continue_stream_dead() {
 }
 
 #[test]
-fn streaming_interrupt_defaults_to_stop_on_error() {
-    // No responses: the menu errors and falls back to Stop.
+fn streaming_interrupt_menu_cancel_escalates() {
+    // No pre-loaded responses: the menu select is cancelled, as a Ctrl-C
+    // press while the menu is showing would be.
     let action = handler(MockPromptBackend::new()).handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Prompt),
         &make_printer(),
         true,
     );
-    assert_eq!(action, InterruptAction::Stop);
+    assert_eq!(action, InterruptAction::Escalate);
 }
 
 #[test]
@@ -245,13 +246,6 @@ fn tool_interrupt_restart() {
 fn tool_interrupt_continue() {
     let handler = handler(MockPromptBackend::new().with_inline_responses(['c']));
     let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
-    assert_eq!(action, InterruptAction::Resume);
-}
-
-#[test]
-fn tool_interrupt_defaults_to_continue_on_error() {
-    let action = handler(MockPromptBackend::new())
-        .handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
     assert_eq!(action, InterruptAction::Resume);
 }
 
@@ -350,6 +344,15 @@ fn configured_tool_respond_uses_inline_prompt() {
     assert_eq!(action, InterruptAction::ToolCancelled {
         response: "use ripgrep".into()
     });
+}
+
+#[test]
+fn tool_interrupt_menu_cancel_escalates() {
+    // No pre-loaded responses: the menu select is cancelled, as a Ctrl-C
+    // press while the menu is showing would be.
+    let action = handler(MockPromptBackend::new())
+        .handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
+    assert_eq!(action, InterruptAction::Escalate);
 }
 
 #[test]
