@@ -56,9 +56,7 @@ use serde_json::Value;
 use tokio::{
     runtime::{self, Runtime},
     sync::broadcast,
-    task::JoinHandle,
 };
-use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace, warn};
 
 use crate::{
@@ -68,7 +66,7 @@ use crate::{
     },
     config_pipeline::ConfigPipeline,
     signals::SignalTo,
-    timer::spawn_line_timer,
+    timer::{LineTimer, spawn_line_timer},
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
@@ -507,7 +505,7 @@ async fn drain_background_tasks(
             true,
             Duration::from_secs(1),
             Duration::from_millis(100),
-            |secs| format!("\r\x1b[K⏱ Finishing background tasks… {secs:.1}s"),
+            |secs, _status| format!("\r\x1b[K⏱ Finishing background tasks… {secs:.1}s"),
         )
     } else {
         None
@@ -552,7 +550,7 @@ async fn drain_background_tasks(
                             true,
                             Duration::ZERO,
                             Duration::from_millis(100),
-                            |secs| format!(
+                            |secs, _status| format!(
                                 "\r\x1b[K⏱ Cancelling background tasks… {:.1}s",
                                 (2.0 - secs).max(0.0),
                             ),
@@ -568,10 +566,9 @@ async fn drain_background_tasks(
     result
 }
 
-async fn stop_drain_timer(timer: Option<(CancellationToken, JoinHandle<()>)>) {
-    if let Some((token, handle)) = timer {
-        token.cancel();
-        drop(handle.await);
+async fn stop_drain_timer(timer: Option<LineTimer>) {
+    if let Some(timer) = timer {
+        timer.finish().await;
     }
 }
 

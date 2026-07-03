@@ -1,7 +1,8 @@
 use std::{
+    collections::VecDeque,
     fmt,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     },
     time::Duration,
@@ -9,7 +10,7 @@ use std::{
 
 use async_trait::async_trait;
 use camino_tempfile::tempdir;
-use futures::stream;
+use futures::{StreamExt as _, stream};
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig,
@@ -2144,6 +2145,74 @@ impl Provider for DelayedMockProvider {
     }
 }
 
+/// A single scripted stream: (delay before yielding, event) pairs.
+type PacedScript = Vec<(Duration, Result<Event, StreamError>)>;
+
+/// A mock provider that paces stream events with per-event delays and serves a
+/// different script on each call.
+///
+/// Simulates a connection that opens, keep-alives, and only later produces
+/// content (or an error) — the scenarios where the waiting indicator must
+/// survive non-rendering events.
+struct PacedMockProvider {
+    /// Delay before `chat_completion_stream` returns the stream, simulating the
+    /// HTTP round-trip.
+    stream_delay: Duration,
+
+    /// One script per call.
+    scripts: Mutex<VecDeque<PacedScript>>,
+
+    model: ModelDetails,
+}
+
+impl PacedMockProvider {
+    fn new(stream_delay: Duration, scripts: Vec<PacedScript>) -> Self {
+        Self {
+            stream_delay,
+            scripts: Mutex::new(scripts.into()),
+            model: ModelDetails::empty(id::ModelIdConfig {
+                provider: ProviderId::Test,
+                name: "paced-mock".parse().expect("valid name"),
+            }),
+        }
+    }
+}
+
+#[async_trait]
+impl Provider for PacedMockProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        let mut model = self.model.clone();
+        model.id.name = name.clone();
+        Ok(model)
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![self.model.clone()])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        tokio::time::sleep(self.stream_delay).await;
+
+        let script = self
+            .scripts
+            .lock()
+            .expect("scripts mutex")
+            .pop_front()
+            .expect("a script for every provider call");
+
+        let stream = stream::iter(script).then(|(delay, event)| async move {
+            tokio::time::sleep(delay).await;
+            event
+        });
+
+        Ok(Box::pin(stream))
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_waiting_indicator_shows_during_delay() {
     // Tests that the waiting indicator appears when the LLM takes longer
@@ -2225,6 +2294,222 @@ async fn test_waiting_indicator_shows_during_delay() {
         assert!(
             output.contains("Response after delay"),
             "Stdout should contain LLM response.\nOutput:\n{output}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
+    // A keep-alive ping (e.g. an SSE heartbeat) renders nothing, so it must
+    // not tear down the waiting indicator — otherwise the user faces a blank
+    // terminal from the heartbeat until the first content token. Instead the
+    // indicator updates its status detail and keeps ticking until content
+    // arrives.
+
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.style.streaming.progress.show = true;
+        config.style.streaming.progress.delay_secs = 0;
+        config.style.streaming.progress.interval_ms = 50;
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Hello");
+
+        // 250ms HTTP round-trip ("sending request"), then 250ms of silence on
+        // the open stream ("waiting for first tokens"), then a keep-alive
+        // ("receiving response data"), then 250ms more before content.
+        let provider: Arc<dyn Provider> =
+            Arc::new(PacedMockProvider::new(Duration::from_millis(250), vec![
+                vec![
+                    (Duration::from_millis(250), Ok(Event::KeepAlive)),
+                    (
+                        Duration::from_millis(250),
+                        Ok(Event::message(0, "Response after keep-alive")),
+                    ),
+                    (Duration::ZERO, Ok(Event::flush(0))),
+                    (Duration::ZERO, Ok(Event::Finished(FinishReason::Completed))),
+                ],
+            ]));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &signal_rx,
+            &mcp_client,
+            root,
+            true, // is_tty = true to enable the indicator
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            chat_request.clone(),
+            InvocationContext::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+
+        let chrome = err.lock();
+        assert!(
+            chrome.contains("Waiting\u{2026}"),
+            "Chrome (stderr) should contain waiting indicator.\nChrome:\n{chrome}"
+        );
+        assert!(
+            chrome.contains("(sending request)"),
+            "Indicator should show the pre-connection status.\nChrome:\n{chrome}"
+        );
+        assert!(
+            chrome.contains("(waiting for first tokens)"),
+            "Indicator should show the stream-established status.\nChrome:\n{chrome}"
+        );
+        // This status is only set when a keep-alive (or other non-rendering
+        // event) arrives while the indicator is alive — its presence proves
+        // the indicator survived the keep-alive.
+        assert!(
+            chrome.contains("(receiving response data)"),
+            "Indicator should survive the keep-alive and show its status.\nChrome:\n{chrome}"
+        );
+        drop(chrome);
+
+        let output = out.lock();
+        assert!(
+            output.contains("Response after keep-alive"),
+            "Stdout should contain LLM response.\nOutput:\n{output}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_waiting_indicator_cleared_before_retry_notice() {
+    // A stream error is about to write retry chrome, so the indicator must be
+    // finished (line cleared) first. The keep-alive before the error also
+    // exercises the survive-then-finish sequence on the error path.
+
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.style.streaming.progress.show = true;
+        config.style.streaming.progress.delay_secs = 0;
+        config.style.streaming.progress.interval_ms = 50;
+        // Keep the retry backoff out of the test's runtime.
+        config.assistant.request.base_backoff_ms = 1;
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Hello");
+
+        // First call: keep-alive, then a transient error (triggers a retry).
+        // Second call: a normal response.
+        let provider: Arc<dyn Provider> =
+            Arc::new(PacedMockProvider::new(Duration::from_millis(100), vec![
+                vec![
+                    (Duration::from_millis(100), Ok(Event::KeepAlive)),
+                    (
+                        Duration::from_millis(100),
+                        Err(StreamError::transient("simulated hiccup")),
+                    ),
+                ],
+                vec![
+                    (
+                        Duration::ZERO,
+                        Ok(Event::message(0, "Response after retry")),
+                    ),
+                    (Duration::ZERO, Ok(Event::flush(0))),
+                    (Duration::ZERO, Ok(Event::Finished(FinishReason::Completed))),
+                ],
+            ]));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let (_signal_tx, signal_rx) = broadcast::channel(16);
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &signal_rx,
+            &mcp_client,
+            root,
+            true, // is_tty
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            chat_request.clone(),
+            InvocationContext::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+
+        let chrome = err.lock();
+        assert!(
+            chrome.contains("retrying (1/"),
+            "Chrome should contain the retry notice.\nChrome:\n{chrome}"
+        );
+        // Set only when a non-rendering event reaches a live indicator:
+        // proves the keep-alive did not tear the indicator down before the
+        // error arrived. The clear-before-notice ordering itself is enforced
+        // structurally by `LineTimer::finish` awaiting the timer task; it is
+        // not asserted here because the notice writes its own `\r\x1b[K`
+        // prefix, making the two clears indistinguishable in the buffer.
+        assert!(
+            chrome.contains("(receiving response data)"),
+            "Indicator should survive the keep-alive on the error path.\nChrome:\n{chrome}"
+        );
+        drop(chrome);
+
+        let output = out.lock();
+        assert!(
+            output.contains("Response after retry"),
+            "Stdout should contain the post-retry response.\nOutput:\n{output}"
         );
     }))
     .await;

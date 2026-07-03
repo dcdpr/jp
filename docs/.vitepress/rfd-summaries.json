@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "815391741e98b5ac0d3e8be055c79cfcf275cbbcc3b780fe87672c59bb719f1b",
+    "hash": "b670e160c468f18ee7f2da731165a66f614bc91cfa6c1cb8787662513b79ffc9",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -358,5 +358,9 @@
   "090-anthropic-subscription-auth-with-credential-fallback.md": {
     "hash": "2f2a3694924055b6abf1a6e5a40af4759861017e172e1c94798dda2c3f7557e2",
     "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
+  },
+  "091-printer-owned-status-line.md": {
+    "hash": "0e3e054a3170e2cadfc3e3410fcbd6cc72e8e6261ebfcb4c39314d66ad1031cd",
+    "summary": "Centralize ephemeral status-line rendering in the printer's worker thread to eliminate cross-site ordering bugs."
   }
 }

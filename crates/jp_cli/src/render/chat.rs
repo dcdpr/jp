@@ -45,10 +45,9 @@ use jp_md::{
     theme,
 };
 use jp_printer::{PrintableExt as _, Printer};
-use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::timer::spawn_line_timer;
+use crate::timer::{LineTimer, spawn_line_timer};
 
 /// The kind of content last pushed into the renderer.
 ///
@@ -77,8 +76,8 @@ pub struct ChatRenderer {
     reasoning_chars_count: usize,
     /// State for the current streaming fenced code block, if any.
     code_block: Option<CodeBlockState>,
-    /// Active reasoning timer token, used by `Timer` display mode.
-    reasoning_timer: Option<CancellationToken>,
+    /// Active reasoning timer, used by `Timer` display mode.
+    reasoning_timer: Option<LineTimer>,
     /// Whether a rendered reasoning block still owes its trailing inter-block
     /// separator.
     ///
@@ -276,17 +275,15 @@ impl ChatRenderer {
                 if self.reasoning_timer.is_none() {
                     self.flush();
 
-                    if let Some((token, _handle)) = spawn_line_timer(
+                    self.reasoning_timer = spawn_line_timer(
                         self.printer.clone(),
                         self.printer.pretty_printing_enabled(),
                         Duration::from_millis(300),
                         Duration::from_millis(100),
-                        |secs| {
+                        |secs, _status| {
                             format!("\r\x1b[K\x1b[2m\u{23f1} Reasoning\u{2026} {secs:.1}s\x1b[22m")
                         },
-                    ) {
-                        self.reasoning_timer = Some(token);
-                    }
+                    );
                 }
             }
 
@@ -598,11 +595,11 @@ impl ChatRenderer {
 
     /// Cancel the reasoning timer if one is running.
     ///
-    /// Cancels the token (so the background task stops ticking) and clears the
-    /// timer line on stderr immediately.
+    /// Dropping the handle cancels the background task; the synchronous clear
+    /// here guarantees the line is gone before the caller's next write, since
+    /// this method cannot await the task's own asynchronous clear.
     fn cancel_reasoning_timer(&mut self) {
-        if let Some(token) = self.reasoning_timer.take() {
-            token.cancel();
+        if self.reasoning_timer.take().is_some() {
             let _ = write!(self.printer.err_writer(), "\r\x1b[K");
         }
     }
