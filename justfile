@@ -1189,13 +1189,16 @@ rfd-promote NNN: _install-jp _install-comfort
 
         # Carry the board position across renumbering: `priority.json` stores
         # RFD ids, so rewrite the draft id to its new permanent number wherever
-        # it appears (`order`, `backlog`, or `in_development`).
+        # it appears (the `planned` milestone groups, `backlog`, or
+        # `in_development`; the legacy flat `order` is handled too).
         priority_file="docs/rfd/priority.json"
         if [ -f "$priority_file" ]; then
             jq --arg old "$old_draft_id" --arg new "$num" '
-                .order = ((.order // []) | map(if . == $old then $new else . end))
-                | .backlog = ((.backlog // []) | map(if . == $old then $new else . end))
-                | .in_development = ((.in_development // []) | map(if . == $old then $new else . end))
+                def sub_id: map(if . == $old then $new else . end);
+                (if .planned then .planned |= map(.ids |= sub_id) else . end)
+                | (if .order then .order |= sub_id else . end)
+                | .backlog = ((.backlog // []) | sub_id)
+                | .in_development = ((.in_development // []) | sub_id)
             ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
         fi
 
@@ -1615,40 +1618,22 @@ rfd-summaries *ARGS: _install-jp
 rfd-grep +ARGS:
     @rg {{ARGS}} docs/rfd/
 
-# List RFDs, optionally filtered by category.
+# List RFDs in priority order, optionally filtered by category.
+#
+# Shares the priority board's data (priority.json + summaries + relationship
+# graph) via `docs/.vitepress/loaders/rfd-shared.mjs`, so this list and the web
+# board at `/rfd/priority` stay in sync.
+#
+# Usage:
+#   just rfd-list                 # planned RFDs, in priority order (default)
+#   just rfd-list --backlog       # the unranked backlog instead
+#   just rfd-list --all           # planned + backlog + terminal/implemented
+#   just rfd-list --full          # add summaries and dependencies
+#   just rfd-list design          # filter to the "design" category
+#   just rfd-list --json          # every entry, tagged, for `jq` etc.
 [group('rfd')]
-rfd-list *CATEGORY:
-    #!/usr/bin/env sh
-    set -eu
-
-    filter="{{CATEGORY}}"
-
-    for file in docs/rfd/[0-9][0-9][0-9]-*.md docs/rfd/drafts/D[0-9][0-9]-*.md; do
-        [ -f "$file" ] || continue
-
-        num=$(basename "$file" | sed 's/-.*//')
-
-        # Skip templates.
-        [ "$num" = "000" ] && continue
-        status=$(sed -n 's/^- \*\*Status\*\*: \(.*\)/\1/p' "$file" | head -1)
-        category=$(sed -n 's/^- \*\*Category\*\*: \(.*\)/\1/p' "$file" | head -1)
-        title=$(sed -n 's/^# RFD [0-9A-Z]*: \(.*\)/\1/p' "$file" | head -1)
-
-        # Append the superseding RFD number to the status.
-        if [ "$status" = "Superseded" ]; then
-            by=$(sed -n 's/^- \*\*Superseded by\*\*: \[RFD \([0-9]*\)\].*/\1/p' "$file" | head -1)
-            [ -n "$by" ] && status="Superseded (${by})"
-        fi
-
-        # Filter by category if specified.
-        if [ -n "$filter" ]; then
-            match=$(echo "$category" | tr '[:upper:]' '[:lower:]')
-            want=$(echo "$filter" | tr '[:upper:]' '[:lower:]')
-            [ "$match" = "$want" ] || continue
-        fi
-
-        printf "%s  %-16s %-12s %s\n" "$num" "$status" "$category" "$title"
-    done
+rfd-list *ARGS:
+    node docs/.vitepress/rfd-list.mjs {{ARGS}}
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]

@@ -9,7 +9,7 @@ import {
     checkStatusGate,
     findCycles,
     findDuplicateIds,
-} from './rfd-shared.js'
+} from './rfd-shared.mjs'
 
 const draftsDir = resolve(import.meta.dirname, '../../rfd/drafts')
 const rfdDir = resolve(import.meta.dirname, '../../rfd')
