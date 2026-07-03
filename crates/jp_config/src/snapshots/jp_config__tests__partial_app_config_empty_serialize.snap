@@ -142,6 +142,7 @@ PartialAppConfig {
         },
     },
     interrupt: PartialInterruptConfig {
+        escalation_cooldown_secs: None,
         streaming: PartialStreamingInterruptConfig {
             action: None,
             compose_in_editor: None,

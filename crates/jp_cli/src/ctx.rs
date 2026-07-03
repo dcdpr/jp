@@ -2,6 +2,7 @@ use std::{
     collections::HashSet,
     io::{self, IsTerminal as _},
     sync::Arc,
+    time::Duration,
 };
 
 use camino::Utf8Path;
@@ -18,7 +19,7 @@ use tokio::{
     task::JoinSet,
 };
 
-use crate::{Globals, Result, signals::SignalPair};
+use crate::{Globals, Result, signals::SignalRouter};
 
 /// Context for the CLI application
 pub(crate) struct Ctx {
@@ -50,7 +51,9 @@ pub(crate) struct Ctx {
 
     pub(crate) task_handler: jp_task::TaskHandler,
 
-    pub(crate) signals: SignalPair,
+    /// Routes OS signals: Ctrl-C escalation, scoped interrupt handlers, and the
+    /// root shutdown token.
+    pub(crate) signals: SignalRouter,
 
     runtime: Runtime,
 
@@ -88,6 +91,8 @@ impl Ctx {
         printer: Printer,
     ) -> Self {
         let config = config.into();
+        let escalation_cooldown =
+            Duration::from_secs(config.interrupt.escalation_cooldown_secs.into());
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
         let is_tty = io::stdout().is_terminal();
@@ -110,7 +115,7 @@ impl Ctx {
             printer: Arc::new(printer),
             mcp_client,
             task_handler: TaskHandler::default(),
-            signals: SignalPair::new(&runtime),
+            signals: SignalRouter::new(&runtime, escalation_cooldown),
             runtime,
 
             #[cfg(test)]

@@ -105,7 +105,7 @@ use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::ConversationMut;
 use serde_json::{Map, Value};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -115,8 +115,12 @@ use super::{
     prompter::{PermissionResult, ToolPrompter, permission_inquiry_id, tool_question_inquiry_id},
 };
 use crate::{
-    cmd::query::turn::{TurnCoordinator, state::TurnState},
+    cmd::query::{
+        interrupt::signals::{ToolInterruptResult, handle_tool_interrupt},
+        turn::{TurnCoordinator, state::TurnState},
+    },
     render::tool::RenderOutcome,
+    signals::SignalRouter,
 };
 
 #[derive(Debug)]
@@ -151,7 +155,8 @@ enum ExecutionEvent {
         response: ToolCallResponse,
     },
 
-    Signal(crate::signals::SignalTo),
+    /// A Ctrl-C interrupt notification from the signal router.
+    Interrupt,
 
     ProgressTick {
         elapsed: Duration,
@@ -167,6 +172,12 @@ pub struct ExecutionResult {
     /// order is the caller's job.
     pub responses: Vec<(usize, ToolCallResponse)>,
     pub restart_requested: bool,
+
+    /// The user escalated past the tool interrupt menu (cancelled it with
+    /// Ctrl-C).
+    /// The running tools have been cancelled; the caller should begin a
+    /// graceful shutdown.
+    pub escalated: bool,
 }
 
 struct ExecutingTool {
@@ -824,7 +835,7 @@ impl ToolCoordinator {
         &mut self,
         executors: Vec<(usize, Box<dyn Executor>)>,
         prompter: Arc<ToolPrompter>,
-        mut signal_rx: broadcast::Receiver<crate::signals::SignalTo>,
+        signals: &SignalRouter,
         turn_coordinator: &mut TurnCoordinator,
         turn_state: &mut TurnState,
         printer: &Printer,
@@ -842,8 +853,14 @@ impl ToolCoordinator {
             return ExecutionResult {
                 responses: Vec::new(),
                 restart_requested: false,
+                escalated: false,
             };
         }
+
+        // Register the tool interrupt handler for this execution phase. While
+        // registered, the first Ctrl-C press is delivered to this event loop;
+        // the guard deregisters the handler when execution completes.
+        let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
 
         // The caller's `index` values come from the execution plan and may
         // be sparse (e.g. when some tools in the same plan are
@@ -890,14 +907,13 @@ impl ToolCoordinator {
             );
         }
 
-        let signal_tx = event_tx.clone();
+        // Forward interrupt notifications into the execution event channel.
+        // The task ends when the guard drops (closing the notification
+        // channel) or when the event channel closes.
+        let interrupt_tx = event_tx.clone();
         tokio::spawn(async move {
-            while let Ok(signal) = signal_rx.recv().await {
-                if signal_tx
-                    .send(ExecutionEvent::Signal(signal))
-                    .await
-                    .is_err()
-                {
+            while interrupt_rx.recv().await.is_some() {
+                if interrupt_tx.send(ExecutionEvent::Interrupt).await.is_err() {
                     break;
                 }
             }
@@ -932,6 +948,7 @@ impl ToolCoordinator {
         };
 
         let mut restart_requested = false;
+        let mut escalated = false;
         let mut cancellation_response: Option<String> = None;
         let mut cancelled_indices: Vec<usize> = Vec::new();
 
@@ -1093,17 +1110,18 @@ impl ToolCoordinator {
                         event_tx.clone(),
                     );
                 }
-                ExecutionEvent::Signal(signal) => {
-                    if !prompt_active {
-                        use crate::cmd::query::interrupt::signals::{
-                            ToolSignalResult, handle_tool_signal,
-                        };
+                ExecutionEvent::Interrupt => {
+                    if prompt_active {
+                        // An active inline prompt owns the terminal; pass the
+                        // interrupt down the handler stack instead of stacking
+                        // the menu on top of the prompt.
+                        signals.decline();
+                    } else {
                         if progress_shown {
                             tool_renderer.clear_progress();
                             progress_shown = false;
                         }
-                        match handle_tool_signal(
-                            signal,
+                        match handle_tool_interrupt(
                             &cancellation_token,
                             turn_coordinator,
                             self.is_prompting(),
@@ -1113,11 +1131,14 @@ impl ToolCoordinator {
                             edit_mode,
                             &self.interrupt_config,
                         ) {
-                            ToolSignalResult::Continue => {}
-                            ToolSignalResult::Restart => {
+                            ToolInterruptResult::Continue => {}
+                            // A tool prompt is pending; let the next handler
+                            // down the stack take the interrupt.
+                            ToolInterruptResult::Declined => signals.decline(),
+                            ToolInterruptResult::Restart => {
                                 restart_requested = true;
                             }
-                            ToolSignalResult::Cancelled { response } => {
+                            ToolInterruptResult::Cancelled { response } => {
                                 cancelled_indices = results
                                     .iter()
                                     .enumerate()
@@ -1125,6 +1146,13 @@ impl ToolCoordinator {
                                     .map(|(i, _)| i)
                                     .collect();
                                 cancellation_response = Some(response);
+                            }
+                            // The menu itself was cancelled with Ctrl-C: the
+                            // tools are already cancelled; surface the
+                            // escalation so the turn loop begins a graceful
+                            // shutdown.
+                            ToolInterruptResult::Escalate => {
+                                escalated = true;
                             }
                         }
                     }
@@ -1145,6 +1173,10 @@ impl ToolCoordinator {
                 break;
             }
         }
+
+        // Deregister the tool interrupt handler; its forwarding task exits
+        // when the notification channel closes.
+        drop(interrupt_guard);
 
         if let Some(token) = progress_token {
             token.cancel();
@@ -1176,6 +1208,7 @@ impl ToolCoordinator {
         ExecutionResult {
             responses,
             restart_requested,
+            escalated,
         }
     }
 

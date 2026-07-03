@@ -200,6 +200,21 @@ pub(crate) struct Error {
 }
 
 impl Error {
+    /// Error for a run stopped by a graceful shutdown request: an unhandled or
+    /// escalated Ctrl-C, or SIGTERM.
+    ///
+    /// Exits with code 130 (128 + SIGINT).
+    /// Persistence stays enabled so state mutated before the interrupt survives
+    /// the shutdown.
+    pub(crate) fn interrupted() -> Self {
+        Self {
+            code: NonZeroU8::new(130).expect("non-zero"),
+            message: Some("Interrupted".to_owned()),
+            metadata: vec![],
+            disable_persistence: false,
+        }
+    }
+
     pub(super) fn with_persistence(self, persist: bool) -> Self {
         Self {
             disable_persistence: !persist,

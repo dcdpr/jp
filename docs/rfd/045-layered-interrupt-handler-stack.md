@@ -1,10 +1,10 @@
 # RFD 045: Layered Interrupt Handler Stack
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-24
-- **Required by**: [RFD 088]
+- **Extended by**: [RFD 092]
 
 ## Summary
 
@@ -397,16 +397,16 @@ The full escalation sequence when a handler is showing a prompt:
    → SIGINT → router (escalation=2) → std::process::exit(130)
 ```
 
-Note: `jp_inquire` currently wraps `inquire::InquireError::OperationCanceled`,
-which conflates ESC and Ctrl-C.
-Both produce the same error.
+Note: `inquire` already distinguishes the two keys — ESC produces
+`InquireError::OperationCanceled` and Ctrl-C produces
+`InquireError::OperationInterrupted` (with the `crossterm` backend, which JP
+uses).
+The conflation is in JP's call sites, which treat every prompt error alike.
 For interrupt menus this is fine — cancelling an interrupt menu by any means
 should escalate.
 For non-interrupt prompts (tool permissions, tool questions), distinguishing ESC
-("skip this prompt") from Ctrl-C ("I want the interrupt menu") would be
-valuable.
-An upstream change request to `inquire` to distinguish the two keys is worth
-pursuing but is not a dependency for this RFD.
+("skip this prompt") from Ctrl-C ("I want the interrupt menu") remains valuable
+and requires no upstream change.
 
 ### Handler Decline and Propagation
 
@@ -677,4 +677,4 @@ Depends on Phases 2–4.
 
 [RFD 026]: 026-agent-loop-extraction.md
 [RFD 027]: 027-client-server-query-architecture.md
-[RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
+[RFD 092]: 092-predictable-and-responsive-interrupt-escalation.md

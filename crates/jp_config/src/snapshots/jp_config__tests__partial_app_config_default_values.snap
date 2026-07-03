@@ -282,6 +282,9 @@ Ok(
                 },
             },
             interrupt: PartialInterruptConfig {
+                escalation_cooldown_secs: Some(
+                    2,
+                ),
                 streaming: PartialStreamingInterruptConfig {
                     action: None,
                     compose_in_editor: None,

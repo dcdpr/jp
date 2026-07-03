@@ -427,24 +427,17 @@ impl TurnCoordinator {
         self.view.set_tool_separator(flag);
     }
 
-    /// Force transition to Complete phase.
+    /// End the turn early: commit any partial assistant content to the stream
+    /// and transition to `Complete` so the turn loop persists and exits.
     ///
-    /// Used when handling hard quit signals (SIGQUIT) where we want to save
-    /// progress and exit gracefully without showing an interrupt menu.
-    pub fn force_complete(&mut self) {
-        self.state = TurnPhase::Complete;
-    }
-
-    /// Handle a hard quit signal during streaming.
-    ///
-    /// Injects any partial content into the stream and transitions to Complete
-    /// so that the turn loop persists and exits.
-    pub fn handle_quit(&mut self, stream: &mut ConversationStream) {
+    /// Used by the turn-level interrupt handler when a Ctrl-C lands between
+    /// turn phases.
+    pub fn complete_early(&mut self, stream: &mut ConversationStream) {
         for response in self.peek_partial_events() {
             self.push_event(stream, response);
         }
 
-        self.force_complete();
+        self.state = TurnPhase::Complete;
     }
 
     /// Handle an interrupt action during LLM streaming.
@@ -459,7 +452,10 @@ impl TurnCoordinator {
         conversation_stream: &mut ConversationStream,
     ) -> TurnPhase {
         match action {
-            InterruptAction::Stop => {
+            // Stop and Escalate both end the turn with the partial content
+            // committed; escalation additionally makes the shell begin a
+            // graceful shutdown.
+            InterruptAction::Stop | InterruptAction::Escalate => {
                 // Inject partial content before completing
                 for response in self.peek_partial_events() {
                     self.push_event(conversation_stream, response);
@@ -533,10 +529,10 @@ impl TurnCoordinator {
     /// This method only handles state transitions.
     /// Currently a no-op reserved for future state transitions.
     /// The shell handles cancellation via [`CancellationToken`] and restart via
-    /// [`ToolSignalResult`].
+    /// [`ToolInterruptResult`].
     ///
     /// [`CancellationToken`]: tokio_util::sync::CancellationToken
-    /// [`ToolSignalResult`]: crate::cmd::query::interrupt::signals::ToolSignalResult
+    /// [`ToolInterruptResult`]: crate::cmd::query::interrupt::signals::ToolInterruptResult
     #[allow(clippy::unused_self, clippy::match_same_arms)]
     pub fn handle_tool_interrupt(&mut self, action: &InterruptAction) {
         match action {

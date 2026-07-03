@@ -33,10 +33,7 @@ use jp_printer::Printer;
 use jp_workspace::ConversationMut;
 use tracing::{error, warn};
 
-use crate::{
-    cmd::query::{interrupt::LoopAction, turn::TurnCoordinator},
-    error::Error,
-};
+use crate::{cmd::query::turn::TurnCoordinator, error::Error, signals::SignalRouter};
 
 /// Tracks retry state for stream errors within a single turn.
 ///
@@ -143,26 +140,37 @@ impl StreamRetryState {
     }
 }
 
+/// Outcome of [`handle_stream_error`].
+#[derive(Debug)]
+pub enum StreamErrorOutcome {
+    /// Retryable error within budget: break the inner event loop; the outer
+    /// turn loop re-enters `TurnPhase::Streaming` with a fresh stream.
+    Retry,
+
+    /// Non-retryable error or retry budget exhausted: propagate.
+    Fatal(Error),
+
+    /// A Ctrl-C arrived during the backoff wait.
+    /// The wait was cut short and the retry notification line cleared; the
+    /// caller should run the streaming interrupt flow (the stream is dead).
+    Interrupted,
+}
+
 /// Single source of truth for handling stream errors during LLM streaming.
 ///
-/// Decides whether to retry, flushes state, notifies the user, and sleeps for
+/// Decides whether to retry, flushes state, notifies the user, and waits for
 /// the backoff duration.
-/// Returns a [`LoopAction`] telling the caller what to do next.
-///
-/// # Returns
-///
-/// - [`LoopAction::Break`] — retryable error within budget.
-///   The caller should break the inner event loop; the outer turn loop will
-///   re-enter `TurnPhase::Streaming` with a fresh stream.
-/// - [`LoopAction::Return`] — non-retryable error or retry budget exhausted.
-///   The caller should propagate the error.
+/// A Ctrl-C during the wait cuts it short and surfaces as
+/// [`StreamErrorOutcome::Interrupted`] so the interrupt menu opens immediately
+/// instead of after the wait.
 pub async fn handle_stream_error(
     error: StreamError,
     retry_state: &mut StreamRetryState,
     turn_coordinator: &mut TurnCoordinator,
     conv: &ConversationMut,
     printer: &Arc<Printer>,
-) -> LoopAction<Result<(), Error>> {
+    signals: &SignalRouter,
+) -> StreamErrorOutcome {
     // Always flush buffered renderer output and any unflushed partial content
     // to the stream BEFORE deciding whether to retry or abort. Streamed text
     // the user already saw must never be dropped just because the error turned
@@ -186,7 +194,7 @@ pub async fn handle_stream_error(
         retry_state.clear_line(printer);
 
         error!("Stream error (not retryable or max retries exceeded): {error}");
-        return LoopAction::Return(Err(jp_llm::Error::Stream(error).into()));
+        return StreamErrorOutcome::Fatal(jp_llm::Error::Stream(error).into());
     }
 
     // Record the attempt (must happen before backoff calculation).
@@ -205,11 +213,25 @@ pub async fn handle_stream_error(
     warn!(attempt, max, kind, "{error}");
     retry_state.notify(kind, printer);
 
-    // 5. Backoff.
+    // 5. Backoff. A Ctrl-C during the wait cuts it short: a temporary handler
+    // scope (stacked above the streaming handler for the duration of the
+    // wait) catches the press, so the caller can show the interrupt menu
+    // immediately instead of after the wait.
     let delay = retry_state.backoff_duration(&error);
-    tokio::time::sleep(delay).await;
+    let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
+    let interrupted = tokio::select! {
+        biased;
+        Some(()) = interrupt_rx.recv() => true,
+        () = tokio::time::sleep(delay) => false,
+    };
+    drop(interrupt_guard);
 
-    LoopAction::Break
+    if interrupted {
+        retry_state.clear_line(printer);
+        return StreamErrorOutcome::Interrupted;
+    }
+
+    StreamErrorOutcome::Retry
 }
 
 #[cfg(test)]

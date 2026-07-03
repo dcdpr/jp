@@ -172,7 +172,7 @@
     "summary": "Redesign `jp init` to generate schema-driven config with interactive model/mode selection and curated commented fields."
   },
   "045-layered-interrupt-handler-stack.md": {
-    "hash": "44a70f65ce739c91fbdebe6fa9581c679513413abb1c7a2665938f5bbf2308ba",
+    "hash": "2e447eb40d6423319858cf9b45c302fc52b5063a017370cd55b735582d4e8342",
     "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
   },
   "046-nested-workspace-projection.md": {
@@ -348,7 +348,7 @@
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
-    "hash": "f36081947ce62a0682117b22f2962a9597164b340aa430c70c6cbfd5e7171213",
+    "hash": "d577a62824a2ab611bb486da2bae664282b26b423b5e57bee001337866dbd78b",
     "summary": "Unify editor invocation through EditorBackend trait; add vendored reedline-based InlineReply widget for interrupt menu replies."
   },
   "089-streaming-paragraph-rendering.md": {
@@ -362,6 +362,10 @@
   "091-printer-owned-status-line.md": {
     "hash": "0e3e054a3170e2cadfc3e3410fcbd6cc72e8e6261ebfcb4c39314d66ad1031cd",
     "summary": "Centralize ephemeral status-line rendering in the printer's worker thread to eliminate cross-site ordering bugs."
+  },
+  "092-predictable-and-responsive-interrupt-escalation.md": {
+    "hash": "04132add4db5ee2b02339cea46a42ae794cd2b93043499dc9c1336cf3a71cdbf",
+    "summary": "Hardened interrupt model with predictable three-rung escalation, menus at every stage, and watchdog-bounded graceful shutdown."
   },
   "093-inline-first-query-composition.md": {
     "hash": "a4fa8987e41f656a337952452629eafd5768c9c24ffdbe30556692f0ffb616cb",

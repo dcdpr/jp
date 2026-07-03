@@ -3,10 +3,7 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use jp_config::AppConfig;
 use jp_conversation::{ConversationStream, event::ChatRequest};
-use jp_inquire::{
-    ReplyEditMode, ReplyOutcome,
-    prompt::{MockPromptBackend, TerminalPromptBackend},
-};
+use jp_inquire::{ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
 use jp_printer::{OutputFormat, Printer};
 
 use super::*;
@@ -44,7 +41,7 @@ fn make_turn_coordinator() -> TurnCoordinator {
 /// request, which can land us in inconsistent state and was the root of the
 /// `tool_use without tool_result` follow-up failures.
 #[test]
-fn streaming_signal_resume_continues_without_breaking_loop() {
+fn streaming_interrupt_resume_continues_without_breaking_loop() {
     let printer = make_printer();
     let mut turn_coordinator = make_turn_coordinator();
     let mut stream = ConversationStream::new_test();
@@ -53,8 +50,7 @@ fn streaming_signal_resume_continues_without_breaking_loop() {
     // 'c' chosen while the stream is alive maps to InterruptAction::Resume.
     let backend = MockPromptBackend::new().with_inline_responses(['c']);
 
-    let result = handle_streaming_signal(
-        SignalTo::Shutdown,
+    let result = handle_streaming_interrupt(
         &mut turn_coordinator,
         &mut stream,
         &printer,
@@ -66,7 +62,7 @@ fn streaming_signal_resume_continues_without_breaking_loop() {
     );
 
     assert!(
-        matches!(result, LoopAction::Continue),
+        matches!(result, StreamingInterruptResult::Continue),
         "Resume must return Continue (not Break) so the current stream keeps polling; got \
          {result:?}"
     );
@@ -82,7 +78,7 @@ fn streaming_signal_resume_continues_without_breaking_loop() {
 /// That path needs to break the inner loop so the outer turn loop issues a
 /// fresh request with the partial content as prefill.
 #[test]
-fn streaming_signal_continue_breaks_for_prefill_request() {
+fn streaming_interrupt_continue_breaks_for_prefill_request() {
     let printer = make_printer();
     let mut turn_coordinator = make_turn_coordinator();
     let mut stream = ConversationStream::new_test();
@@ -90,8 +86,7 @@ fn streaming_signal_continue_breaks_for_prefill_request() {
 
     let backend = MockPromptBackend::new().with_inline_responses(['c']);
 
-    let result = handle_streaming_signal(
-        SignalTo::Shutdown,
+    let result = handle_streaming_interrupt(
         &mut turn_coordinator,
         &mut stream,
         &printer,
@@ -103,120 +98,45 @@ fn streaming_signal_continue_breaks_for_prefill_request() {
     );
 
     assert!(
-        matches!(result, LoopAction::Break),
+        matches!(result, StreamingInterruptResult::Break),
         "Continue (prefill) must Break so the outer loop issues the next request; got {result:?}"
     );
 }
 
 #[test]
-fn streaming_signal_quit_breaks_for_persist() {
+fn streaming_interrupt_menu_cancel_escalates() {
     let printer = make_printer();
     let mut turn_coordinator = make_turn_coordinator();
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    let result = handle_streaming_signal(
-        SignalTo::Quit,
+    // Unflushed partial content sits in the event builder.
+    turn_coordinator.handle_event(&mut stream, Event::message(0, "partial answer"));
+    let len_before = stream.len();
+
+    // No pre-loaded responses: the menu select is cancelled, as a Ctrl-C
+    // press while the menu is showing would be.
+    let backend = MockPromptBackend::new();
+
+    let result = handle_streaming_interrupt(
         &mut turn_coordinator,
         &mut stream,
         &printer,
-        &TerminalPromptBackend,
+        &backend,
         None,
         ReplyEditMode::Emacs,
         &streaming_prompt(),
-        false, // stream not finished
+        false,
     );
 
-    // Quit breaks (not returns) so persistence happens after the loop
-    assert!(matches!(result, LoopAction::Break));
+    assert_eq!(result, StreamingInterruptResult::Escalate);
+    // The partial content was committed and the turn completed.
+    assert_eq!(stream.len(), len_before + 1);
     assert_eq!(turn_coordinator.current_phase(), TurnPhase::Complete);
 }
 
 #[test]
-fn tool_signal_quit_cancels_and_continues() {
-    let printer = make_printer();
-    let token = CancellationToken::new();
-    let mut turn_coordinator = make_turn_coordinator();
-
-    let result = handle_tool_signal(
-        SignalTo::Quit,
-        &token,
-        &mut turn_coordinator,
-        false, // not prompting
-        &printer,
-        &TerminalPromptBackend,
-        None,
-        ReplyEditMode::Emacs,
-        &tool_prompt(),
-    );
-
-    // Quit cancels tools and continues so normal persistence flow happens
-    assert_eq!(result, ToolSignalResult::Continue);
-    assert!(token.is_cancelled());
-    assert_eq!(turn_coordinator.current_phase(), TurnPhase::Complete);
-}
-
-#[test]
-fn regression_streaming_quit_must_not_skip_persistence() {
-    // Regression test: Quit during streaming must NOT return early.
-    // It must Break so the post-loop persist happens.
-    let printer = make_printer();
-    let mut turn_coordinator = make_turn_coordinator();
-    let mut stream = ConversationStream::new_test();
-    turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
-
-    let result = handle_streaming_signal(
-        SignalTo::Quit,
-        &mut turn_coordinator,
-        &mut stream,
-        &printer,
-        &TerminalPromptBackend,
-        None,
-        ReplyEditMode::Emacs,
-        &streaming_prompt(),
-        false, // stream not finished
-    );
-
-    assert!(
-        matches!(result, LoopAction::Break),
-        "Quit must return Break (not Return) to ensure persistence happens"
-    );
-}
-
-#[test]
-fn regression_tool_quit_must_not_skip_persistence() {
-    // Regression test: Quit during tool execution must NOT return early.
-    // It must Continue (after cancelling) so normal flow persists.
-    let printer = make_printer();
-    let token = CancellationToken::new();
-    let mut turn_coordinator = make_turn_coordinator();
-    let mut stream = ConversationStream::new_test();
-    turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
-
-    let result = handle_tool_signal(
-        SignalTo::Quit,
-        &token,
-        &mut turn_coordinator,
-        false, // not prompting
-        &printer,
-        &TerminalPromptBackend,
-        None,
-        ReplyEditMode::Emacs,
-        &tool_prompt(),
-    );
-
-    assert!(
-        matches!(result, ToolSignalResult::Continue),
-        "Quit must return Continue (not Return) to ensure persistence happens"
-    );
-    assert!(
-        token.is_cancelled(),
-        "Quit must cancel tools to exit quickly"
-    );
-}
-
-#[test]
-fn tool_signal_shutdown_restart_returns_restart() {
+fn tool_interrupt_restart_returns_restart() {
     let printer = make_printer();
     let token = CancellationToken::new();
     let mut turn_coordinator = make_turn_coordinator();
@@ -226,8 +146,7 @@ fn tool_signal_shutdown_restart_returns_restart() {
     // Mock user selecting 't' (Restart) from interrupt menu
     let backend = MockPromptBackend::new().with_inline_responses(['t']);
 
-    let result = handle_tool_signal(
-        SignalTo::Shutdown,
+    let result = handle_tool_interrupt(
         &token,
         &mut turn_coordinator,
         false, // not prompting
@@ -238,7 +157,7 @@ fn tool_signal_shutdown_restart_returns_restart() {
         &tool_prompt(),
     );
 
-    assert_eq!(result, ToolSignalResult::Restart);
+    assert_eq!(result, ToolInterruptResult::Restart);
     assert!(
         token.is_cancelled(),
         "Restart should cancel current execution"
@@ -246,7 +165,7 @@ fn tool_signal_shutdown_restart_returns_restart() {
 }
 
 #[test]
-fn tool_signal_shutdown_cancelled_returns_cancelled_with_canned_response() {
+fn tool_interrupt_cancelled_returns_cancelled_with_canned_response() {
     let printer = make_printer();
     let token = CancellationToken::new();
     let mut turn_coordinator = make_turn_coordinator();
@@ -259,8 +178,7 @@ fn tool_signal_shutdown_cancelled_returns_cancelled_with_canned_response() {
         .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
 
-    let result = handle_tool_signal(
-        SignalTo::Shutdown,
+    let result = handle_tool_interrupt(
         &token,
         &mut turn_coordinator,
         false, // not prompting
@@ -272,14 +190,14 @@ fn tool_signal_shutdown_cancelled_returns_cancelled_with_canned_response() {
     );
 
     assert_matches!(
-        result, ToolSignalResult::Cancelled { ref response } if response.contains("intentionally rejected"),
+        result, ToolInterruptResult::Cancelled { ref response } if response.contains("intentionally rejected"),
         "Expected Cancelled with canned response, got {result:?}",
     );
     assert!(token.is_cancelled(), "Cancel should stop current execution");
 }
 
 #[test]
-fn tool_signal_shutdown_cancelled_with_custom_response() {
+fn tool_interrupt_cancelled_with_custom_response() {
     let printer = make_printer();
     let token = CancellationToken::new();
     let mut turn_coordinator = make_turn_coordinator();
@@ -291,8 +209,7 @@ fn tool_signal_shutdown_cancelled_with_custom_response() {
         .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit("wrong tool, use grep instead".into())]);
 
-    let result = handle_tool_signal(
-        SignalTo::Shutdown,
+    let result = handle_tool_interrupt(
         &token,
         &mut turn_coordinator,
         false, // not prompting
@@ -303,14 +220,14 @@ fn tool_signal_shutdown_cancelled_with_custom_response() {
         &tool_prompt(),
     );
 
-    assert_eq!(result, ToolSignalResult::Cancelled {
+    assert_eq!(result, ToolInterruptResult::Cancelled {
         response: "wrong tool, use grep instead".into()
     });
     assert!(token.is_cancelled(), "Cancel should stop current execution");
 }
 
 #[test]
-fn tool_signal_shutdown_resume_continues_without_cancel() {
+fn tool_interrupt_resume_continues_without_cancel() {
     let printer = make_printer();
     let token = CancellationToken::new();
     let mut turn_coordinator = make_turn_coordinator();
@@ -320,8 +237,7 @@ fn tool_signal_shutdown_resume_continues_without_cancel() {
     // Mock user selecting 'c' (Continue/wait for tool) from interrupt menu
     let backend = MockPromptBackend::new().with_inline_responses(['c']);
 
-    let result = handle_tool_signal(
-        SignalTo::Shutdown,
+    let result = handle_tool_interrupt(
         &token,
         &mut turn_coordinator,
         false, // not prompting
@@ -332,7 +248,7 @@ fn tool_signal_shutdown_resume_continues_without_cancel() {
         &tool_prompt(),
     );
 
-    assert_eq!(result, ToolSignalResult::Continue);
+    assert_eq!(result, ToolInterruptResult::Continue);
     assert!(
         !token.is_cancelled(),
         "Resume should NOT cancel - tool continues running"
@@ -340,18 +256,18 @@ fn tool_signal_shutdown_resume_continues_without_cancel() {
 }
 
 #[test]
-fn tool_signal_shutdown_suppressed_when_prompting() {
+fn tool_interrupt_declined_when_prompting() {
     let printer = make_printer();
     let token = CancellationToken::new();
     let mut turn_coordinator = make_turn_coordinator();
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // This should NOT show the interrupt menu because a prompt is active
+    // The menu must NOT be shown while a tool prompt is active; the
+    // notification is declined so it can propagate down the handler stack.
     let backend = MockPromptBackend::new().with_inline_responses(['r']);
 
-    let result = handle_tool_signal(
-        SignalTo::Shutdown,
+    let result = handle_tool_interrupt(
         &token,
         &mut turn_coordinator,
         true, // prompting
@@ -362,16 +278,15 @@ fn tool_signal_shutdown_suppressed_when_prompting() {
         &tool_prompt(),
     );
 
-    // Should continue without cancelling (prompt handles Ctrl+C)
-    assert_eq!(result, ToolSignalResult::Continue);
+    assert_eq!(result, ToolInterruptResult::Declined);
     assert!(
         !token.is_cancelled(),
-        "Should NOT cancel when prompt is active"
+        "Should NOT cancel when a prompt is active"
     );
 }
 
 #[test]
-fn tool_signal_shutdown_not_suppressed_when_not_prompting() {
+fn tool_interrupt_handled_when_not_prompting() {
     let printer = make_printer();
     let token = CancellationToken::new();
     let mut turn_coordinator = make_turn_coordinator();
@@ -383,8 +298,7 @@ fn tool_signal_shutdown_not_suppressed_when_not_prompting() {
         .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
 
-    let result = handle_tool_signal(
-        SignalTo::Shutdown,
+    let result = handle_tool_interrupt(
         &token,
         &mut turn_coordinator,
         false, // not prompting
@@ -397,11 +311,41 @@ fn tool_signal_shutdown_not_suppressed_when_not_prompting() {
 
     // Should process the interrupt and cancel
     assert!(
-        matches!(result, ToolSignalResult::Cancelled { .. }),
+        matches!(result, ToolInterruptResult::Cancelled { .. }),
         "Expected Cancelled variant when not prompting, got {result:?}"
     );
     assert!(
         token.is_cancelled(),
         "Should cancel when no prompt is active"
+    );
+}
+
+#[test]
+fn tool_interrupt_menu_cancel_escalates() {
+    let printer = make_printer();
+    let token = CancellationToken::new();
+    let mut turn_coordinator = make_turn_coordinator();
+    let mut stream = ConversationStream::new_test();
+    turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    // No pre-loaded responses: the menu select is cancelled, as a Ctrl-C
+    // press while the menu is showing would be.
+    let backend = MockPromptBackend::new();
+
+    let result = handle_tool_interrupt(
+        &token,
+        &mut turn_coordinator,
+        false, // not prompting
+        &printer,
+        &backend,
+        None,
+        ReplyEditMode::Emacs,
+        &tool_prompt(),
+    );
+
+    assert_eq!(result, ToolInterruptResult::Escalate);
+    assert!(
+        token.is_cancelled(),
+        "Escalation should cancel the running tools"
     );
 }
