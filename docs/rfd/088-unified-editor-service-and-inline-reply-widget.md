@@ -6,6 +6,7 @@
 - **Date**: 2026-05-08
 - **Requires**: [RFD 045]
 - **Extends**: [RFD 048]
+- **Extended by**: [RFD 093]
 
 ## Summary
 
@@ -891,5 +892,6 @@ Reviewable independently after Phase 3.
 [RFD 045]: 045-layered-interrupt-handler-stack.md
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 080]: 080-editor-as-a-config-source.md
+[RFD 093]: 093-inline-first-query-composition.md
 [cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
 [reedline]: https://crates.io/crates/reedline
