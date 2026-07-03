@@ -13,7 +13,7 @@ use jp_printer::{OutputFormat, Printer};
 use jp_workspace::{ConversationLock, Workspace};
 
 use super::*;
-use crate::cmd::query::interrupt::LoopAction;
+use crate::signals::SignalRouter;
 
 fn make_retry_state(max_retries: u32) -> StreamRetryState {
     let config = RequestConfig {
@@ -121,6 +121,7 @@ async fn retryable_error_breaks_for_retry() {
         turn_coordinator.start_turn(stream, ChatRequest::from("test"));
     });
 
+    let router = SignalRouter::detached();
     let error = StreamError::transient("server overloaded");
     let result = handle_stream_error(
         error,
@@ -128,10 +129,11 @@ async fn retryable_error_breaks_for_retry() {
         &mut turn_coordinator,
         &conv,
         &printer,
+        &router,
     )
     .await;
 
-    assert!(matches!(result, LoopAction::Break));
+    assert!(matches!(result, StreamErrorOutcome::Retry));
     assert_eq!(retry_state.consecutive_failures, 1);
 
     // Should have printed a retry notification to stderr
@@ -152,6 +154,7 @@ async fn non_retryable_error_returns_error() {
     let (_ws, lock) = make_test_lock();
     let conv = lock.as_mut();
 
+    let router = SignalRouter::detached();
     let error = StreamError::other("auth failure");
     let result = handle_stream_error(
         error,
@@ -159,10 +162,11 @@ async fn non_retryable_error_returns_error() {
         &mut turn_coordinator,
         &conv,
         &printer,
+        &router,
     )
     .await;
 
-    assert!(matches!(result, LoopAction::Return(Err(_))));
+    assert!(matches!(result, StreamErrorOutcome::Fatal(_)));
     assert_eq!(retry_state.consecutive_failures, 0); // not incremented
 }
 
@@ -178,6 +182,7 @@ async fn budget_exhausted_returns_error() {
     // First attempt exhausts budget
     retry_state.record_attempt();
 
+    let router = SignalRouter::detached();
     let error = StreamError::transient("still broken");
     let result = handle_stream_error(
         error,
@@ -185,10 +190,11 @@ async fn budget_exhausted_returns_error() {
         &mut turn_coordinator,
         &conv,
         &printer,
+        &router,
     )
     .await;
 
-    assert!(matches!(result, LoopAction::Return(Err(_))));
+    assert!(matches!(result, StreamErrorOutcome::Fatal(_)));
 }
 
 #[tokio::test]
@@ -217,6 +223,7 @@ async fn partial_content_flushed_on_retry() {
         "got {partial:?}"
     );
 
+    let router = SignalRouter::detached();
     let error = StreamError::connect("connection reset");
     let result = handle_stream_error(
         error,
@@ -224,10 +231,11 @@ async fn partial_content_flushed_on_retry() {
         &mut turn_coordinator,
         &conv,
         &printer,
+        &router,
     )
     .await;
 
-    assert!(matches!(result, LoopAction::Break));
+    assert!(matches!(result, StreamErrorOutcome::Retry));
 
     // Partial content should have been flushed to the conversation stream
     let has_response = conv.events().iter().any(|e| {
@@ -263,6 +271,7 @@ async fn partial_content_flushed_on_abort() {
 
     // A non-retryable error aborts the turn, but partial content must still be
     // flushed so streamed work isn't lost.
+    let router = SignalRouter::detached();
     let error = StreamError::other("auth failure");
     let result = handle_stream_error(
         error,
@@ -270,10 +279,11 @@ async fn partial_content_flushed_on_abort() {
         &mut turn_coordinator,
         &conv,
         &printer,
+        &router,
     )
     .await;
 
-    assert!(matches!(result, LoopAction::Return(Err(_))));
+    assert!(matches!(result, StreamErrorOutcome::Fatal(_)));
 
     let has_response = conv.events().iter().any(|e| {
         e.event.as_chat_response().is_some_and(
@@ -301,6 +311,7 @@ async fn retry_without_partial_content_still_works() {
     // No partial content — error happens before any events
     assert!(turn_coordinator.peek_partial_events().is_empty());
 
+    let router = SignalRouter::detached();
     let error = StreamError::transient("503 Service Unavailable");
     let result = handle_stream_error(
         error,
@@ -308,12 +319,63 @@ async fn retry_without_partial_content_still_works() {
         &mut turn_coordinator,
         &conv,
         &printer,
+        &router,
     )
     .await;
 
     // Should still break for retry, even without partial content
     assert!(
-        matches!(result, LoopAction::Break),
+        matches!(result, StreamErrorOutcome::Retry),
         "Should retry even without partial content"
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn interrupt_during_backoff_cuts_wait_short() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    // A provider-specified retry delay far longer than the test timeout: the
+    // only way this test finishes quickly is the interrupt cutting it short.
+    let config = RequestConfig {
+        max_retries: 3,
+        base_backoff_ms: 1,
+        max_backoff_secs: 120,
+        stream_idle_timeout_secs: 120,
+        cache: CachePolicy::default(),
+    };
+    let mut retry_state = StreamRetryState::new(config, false);
+    let mut turn_coordinator = make_turn_coordinator();
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+    });
+
+    let router = std::sync::Arc::new(SignalRouter::detached());
+    let signal_router = std::sync::Arc::clone(&router);
+    let signal_handle = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        signal_router.simulate_interrupt();
+    });
+
+    let error = StreamError::rate_limit(Some(Duration::from_mins(1)));
+    let result = tokio::time::timeout(
+        Duration::from_secs(10),
+        handle_stream_error(
+            error,
+            &mut retry_state,
+            &mut turn_coordinator,
+            &conv,
+            &printer,
+            &router,
+        ),
+    )
+    .await
+    .expect("the interrupt must cut the 60s backoff short");
+
+    signal_handle.await.unwrap();
+
+    assert!(matches!(result, StreamErrorOutcome::Interrupted));
+    // The attempt was recorded before the wait began.
+    assert_eq!(retry_state.consecutive_failures, 1);
 }

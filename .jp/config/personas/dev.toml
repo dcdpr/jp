@@ -3,6 +3,7 @@ extends = [
     "../knowledge/software-engineering.toml",
     "../knowledge/software-laws.toml",
     "../knowledge/code-comments.toml",
+    "../knowledge/testing.toml",
     "../knowledge/ubiquitous-language.toml",
     "../knowledge/jp-config.toml",
     "../knowledge/rfd-priority.toml",

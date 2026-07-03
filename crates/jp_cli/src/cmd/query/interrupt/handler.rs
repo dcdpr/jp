@@ -71,7 +71,18 @@ pub enum InterruptAction {
     Abort,
 
     /// Stop generation and immediately reply with a new user message.
-    Reply(String),
+    Reply {
+        /// The reply text.
+        content: String,
+
+        /// Whether the reply was composed in the external editor.
+        ///
+        /// An editor-composed reply never appeared on the terminal, so the
+        /// caller should echo it back.
+        /// An inline-composed reply is already visible in scrollback on the
+        /// widget's own line.
+        from_editor: bool,
+    },
 
     /// Resume generation (if stream is alive) or wait (if tool is running).
     Resume,
@@ -91,12 +102,24 @@ pub enum InterruptAction {
     /// If the user leaves the response empty, a canned message is used that
     /// instructs the LLM to evaluate why the tool was rejected.
     ToolCancelled { response: String },
+
+    /// Begin a graceful shutdown.
+    ///
+    /// Produced when an interrupt menu itself is cancelled with Ctrl-C:
+    /// pressing Ctrl-C on the menu escalates past it.
+    /// The streaming path commits partial content before completing; the tool
+    /// path cancels the running tools.
+    Escalate,
 }
 
 /// Outcome of collecting a reply from the user.
 enum ReplyResult {
     /// The user submitted a non-empty reply.
-    Reply(String),
+    /// `from_editor` records the composing surface: `true` when the text came
+    /// straight from the external editor (never rendered on the terminal),
+    /// `false` when it was submitted from the inline widget (visible in
+    /// scrollback).
+    Reply { text: String, from_editor: bool },
 
     /// The user submitted an empty (or whitespace-only) reply: "send nothing".
     /// The call site commits forward (the canned tool message, or back to a
@@ -157,6 +180,8 @@ impl<P: PromptBackend> InterruptHandler<P> {
     /// the configured action runs directly without a menu.
     /// Choosing `reply` collects a reply; backing out of a menu-driven reply
     /// returns to the menu, while a configured (menu-less) `reply` resumes.
+    /// Cancelling the menu itself with `Ctrl+C` escalates: the caller should
+    /// commit partial content and begin a graceful shutdown.
     pub fn handle_streaming_interrupt(
         &self,
         config: &StreamingInterruptConfig,
@@ -175,12 +200,19 @@ impl<P: PromptBackend> InterruptHandler<P> {
                         InlineOption::new('a', "Abort (discard & exit)"),
                     ];
 
-                    // A cancelled menu falls back to a graceful stop. (RFD 045's
-                    // `Escalated` outcome is not yet implemented; this is the
-                    // graceful-shutdown stand-in.)
-                    self.backend
-                        .inline_select("Interrupted", options, None, &mut printer.prompt_writer())
-                        .unwrap_or('s')
+                    let selected = self.backend.inline_select(
+                        "Interrupted",
+                        options,
+                        None,
+                        &mut printer.prompt_writer(),
+                    );
+
+                    // A Ctrl-C that cancels the interrupt menu is an
+                    // escalation, not a "continue".
+                    match selected {
+                        Ok(choice) => choice,
+                        Err(_) => return InterruptAction::Escalate,
+                    }
                 }
                 StreamingInterruptAction::Continue => 'c',
                 StreamingInterruptAction::Reply => 'r',
@@ -194,7 +226,12 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 's' => return InterruptAction::Stop,
                 'a' => return InterruptAction::Abort,
                 'r' => match self.collect_reply("Reply:", config.compose_in_editor, printer) {
-                    ReplyResult::Reply(text) => return InterruptAction::Reply(text),
+                    ReplyResult::Reply { text, from_editor } => {
+                        return InterruptAction::Reply {
+                            content: text,
+                            from_editor,
+                        };
+                    }
                     // Empty submit or `Ctrl+C` in a menu-driven reply re-shows
                     // the menu (the loop iterates).
                     ReplyResult::Empty | ReplyResult::Cancelled if menu => {}
@@ -220,6 +257,8 @@ impl<P: PromptBackend> InterruptHandler<P> {
     /// Choosing "Stop & respond" collects a response: a typed message stops the
     /// tool and sends it, an empty submission stops with the canned default,
     /// and `Ctrl+C` backs out to the menu.
+    /// Cancelling the menu itself with `Ctrl+C` escalates: the caller should
+    /// cancel the tools and begin a graceful shutdown.
     ///
     /// When `config.action` is `prompt` the interrupt menu is shown; otherwise
     /// the configured action runs directly without a menu.
@@ -239,9 +278,19 @@ impl<P: PromptBackend> InterruptHandler<P> {
                         InlineOption::new('t', "Restart"),
                     ];
 
-                    self.backend
-                        .inline_select("Interrupted", options, None, &mut printer.prompt_writer())
-                        .unwrap_or('c')
+                    let selected = self.backend.inline_select(
+                        "Interrupted",
+                        options,
+                        None,
+                        &mut printer.prompt_writer(),
+                    );
+
+                    // A Ctrl-C that cancels the interrupt menu is an
+                    // escalation, not a "continue".
+                    match selected {
+                        Ok(choice) => choice,
+                        Err(_) => return InterruptAction::Escalate,
+                    }
                 }
                 ToolInterruptAction::Continue => 'c',
                 ToolInterruptAction::Restart => 't',
@@ -252,7 +301,7 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 'c' => return InterruptAction::Resume,
                 't' => return InterruptAction::RestartTool,
                 'r' => match self.collect_reply("Reply:", config.compose_in_editor, printer) {
-                    ReplyResult::Reply(text) => {
+                    ReplyResult::Reply { text, .. } => {
                         return InterruptAction::ToolCancelled { response: text };
                     }
                     // `Ctrl+C` backs up to the menu (the loop iterates). A
@@ -299,7 +348,10 @@ impl<P: PromptBackend> InterruptHandler<P> {
         };
 
         match editor.edit_text("") {
-            Ok((EditOutcome::Saved, text)) if !text.trim().is_empty() => ReplyResult::Reply(text),
+            Ok((EditOutcome::Saved, text)) if !text.trim().is_empty() => ReplyResult::Reply {
+                text,
+                from_editor: true,
+            },
             // Empty save or a cancelled (non-zero-exit) editor: the user bailed,
             // so return to the menu.
             Ok(_) => ReplyResult::Cancelled,
@@ -375,7 +427,13 @@ impl<P: PromptBackend> InterruptHandler<P> {
                     }
                 }
                 Ok(ReplyOutcome::Submit(text)) if !text.trim().is_empty() => {
-                    return ReplyResult::Reply(text);
+                    // Even after a `Ctrl+X` round-trip the editor's output is
+                    // re-seeded here and submitted from the widget, so the
+                    // final text is visible on the terminal.
+                    return ReplyResult::Reply {
+                        text,
+                        from_editor: false,
+                    };
                 }
                 // A blank (empty or whitespace-only) submission commits forward
                 // with nothing; `Ctrl+C` or a prompt error backs up a level.

@@ -172,7 +172,7 @@
     "summary": "Redesign `jp init` to generate schema-driven config with interactive model/mode selection and curated commented fields."
   },
   "045-layered-interrupt-handler-stack.md": {
-    "hash": "44a70f65ce739c91fbdebe6fa9581c679513413abb1c7a2665938f5bbf2308ba",
+    "hash": "2e447eb40d6423319858cf9b45c302fc52b5063a017370cd55b735582d4e8342",
     "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
   },
   "046-nested-workspace-projection.md": {
@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "815391741e98b5ac0d3e8be055c79cfcf275cbbcc3b780fe87672c59bb719f1b",
+    "hash": "b670e160c468f18ee7f2da731165a66f614bc91cfa6c1cb8787662513b79ffc9",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -348,7 +348,7 @@
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
-    "hash": "f622ae62a709c085ea877a74cbb1ea90a7c993e5f292fcd77f420e8c0e512d4a",
+    "hash": "3b04a88ad5edb5a36c97fb7273a0a39a198bc165567323c2dc2a83c8424bcbfb",
     "summary": "Unify editor invocation through EditorBackend trait; add vendored reedline-based InlineReply widget for interrupt menu replies."
   },
   "089-streaming-paragraph-rendering.md": {
@@ -358,6 +358,18 @@
   "090-anthropic-subscription-auth-with-credential-fallback.md": {
     "hash": "2f2a3694924055b6abf1a6e5a40af4759861017e172e1c94798dda2c3f7557e2",
     "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
+  },
+  "091-printer-owned-status-line.md": {
+    "hash": "0e3e054a3170e2cadfc3e3410fcbd6cc72e8e6261ebfcb4c39314d66ad1031cd",
+    "summary": "Centralize ephemeral status-line rendering in the printer's worker thread to eliminate cross-site ordering bugs."
+  },
+  "092-predictable-and-responsive-interrupt-escalation.md": {
+    "hash": "04132add4db5ee2b02339cea46a42ae794cd2b93043499dc9c1336cf3a71cdbf",
+    "summary": "Hardened interrupt model with predictable three-rung escalation, menus at every stage, and watchdog-bounded graceful shutdown."
+  },
+  "093-inline-first-query-composition.md": {
+    "hash": "a4fa8987e41f656a337952452629eafd5768c9c24ffdbe30556692f0ffb616cb",
+    "summary": "Bare `jp query` composes inline by default; `Ctrl+X` escapes to external editor, with fallback modes configurable via `query.compose_in_editor`."
   },
   "094-built-in-tell_user-tool-for-mid-turn-user-addressed-messages.md": {
     "hash": "ffca3c7ad1fdbeb597df5b4ac2e3ad2dd85f944b390194ade88040755af1d2da",

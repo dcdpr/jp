@@ -72,7 +72,10 @@ fn streaming_interrupt_reply_submits() {
         &make_printer(),
         true,
     );
-    assert_eq!(action, InterruptAction::Reply("my reply message".into()));
+    assert_eq!(action, InterruptAction::Reply {
+        content: "my reply message".into(),
+        from_editor: false,
+    });
 }
 
 #[test]
@@ -103,7 +106,10 @@ fn streaming_interrupt_reply_empty_returns_to_menu_then_submits() {
         &make_printer(),
         true,
     );
-    assert_eq!(action, InterruptAction::Reply("second try".into()));
+    assert_eq!(action, InterruptAction::Reply {
+        content: "second try".into(),
+        from_editor: false,
+    });
 }
 
 #[test]
@@ -123,10 +129,12 @@ fn streaming_interrupt_open_editor_re_seeds_then_submits() {
         &make_printer(),
         true,
     );
-    assert_eq!(
-        action,
-        InterruptAction::Reply("from the editor, edited inline".into())
-    );
+    // The `Ctrl+X` round-trip ends with a widget submission, so the reply
+    // counts as inline-composed (visible in scrollback).
+    assert_eq!(action, InterruptAction::Reply {
+        content: "from the editor, edited inline".into(),
+        from_editor: false,
+    });
 }
 
 #[test]
@@ -173,14 +181,15 @@ fn streaming_interrupt_continue_stream_dead() {
 }
 
 #[test]
-fn streaming_interrupt_defaults_to_stop_on_error() {
-    // No responses: the menu errors and falls back to Stop.
+fn streaming_interrupt_menu_cancel_escalates() {
+    // No pre-loaded responses: the menu select is cancelled, as a Ctrl-C
+    // press while the menu is showing would be.
     let action = handler(MockPromptBackend::new()).handle_streaming_interrupt(
         &streaming(StreamingInterruptAction::Prompt),
         &make_printer(),
         true,
     );
-    assert_eq!(action, InterruptAction::Stop);
+    assert_eq!(action, InterruptAction::Escalate);
 }
 
 #[test]
@@ -248,13 +257,6 @@ fn tool_interrupt_continue() {
     assert_eq!(action, InterruptAction::Resume);
 }
 
-#[test]
-fn tool_interrupt_defaults_to_continue_on_error() {
-    let action = handler(MockPromptBackend::new())
-        .handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
-    assert_eq!(action, InterruptAction::Resume);
-}
-
 // A configured (non-prompt) action runs without consulting the prompt backend:
 // the empty backend would error if the menu were shown.
 
@@ -306,7 +308,10 @@ fn configured_streaming_reply_uses_inline_prompt() {
         &make_printer(),
         true,
     );
-    assert_eq!(action, InterruptAction::Reply("changed my mind".into()));
+    assert_eq!(action, InterruptAction::Reply {
+        content: "changed my mind".into(),
+        from_editor: false,
+    });
 }
 
 #[test]
@@ -353,6 +358,15 @@ fn configured_tool_respond_uses_inline_prompt() {
 }
 
 #[test]
+fn tool_interrupt_menu_cancel_escalates() {
+    // No pre-loaded responses: the menu select is cancelled, as a Ctrl-C
+    // press while the menu is showing would be.
+    let action = handler(MockPromptBackend::new())
+        .handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
+    assert_eq!(action, InterruptAction::Escalate);
+}
+
+#[test]
 fn configured_tool_respond_cancel_uses_canned() {
     // A menu-less `respond` has no menu to return to, so `Ctrl+C` falls
     // through to the canned message (it must not loop).
@@ -379,10 +393,10 @@ fn compose_in_editor_opens_editor_directly() {
         &make_printer(),
         true,
     );
-    assert_eq!(
-        action,
-        InterruptAction::Reply("written in the editor".into())
-    );
+    assert_eq!(action, InterruptAction::Reply {
+        content: "written in the editor".into(),
+        from_editor: true,
+    });
 }
 
 #[test]
@@ -437,7 +451,10 @@ fn compose_never_uses_inline_widget() {
         compose_in_editor: ComposeInEditor::Never,
     };
     let action = handler(backend).handle_streaming_interrupt(&config, &make_printer(), true);
-    assert_eq!(action, InterruptAction::Reply("inline only".into()));
+    assert_eq!(action, InterruptAction::Reply {
+        content: "inline only".into(),
+        from_editor: false,
+    });
 }
 
 #[test]
@@ -452,7 +469,10 @@ fn compose_in_editor_without_editor_falls_back_to_inline() {
         compose_in_editor: ComposeInEditor::Editor,
     };
     let action = handler(backend).handle_streaming_interrupt(&config, &make_printer(), true);
-    assert_eq!(action, InterruptAction::Reply("typed inline".into()));
+    assert_eq!(action, InterruptAction::Reply {
+        content: "typed inline".into(),
+        from_editor: false,
+    });
 }
 
 #[test]
@@ -473,7 +493,10 @@ fn compose_in_editor_spawn_failure_falls_back_to_inline() {
         &make_printer(),
         true,
     );
-    assert_eq!(action, InterruptAction::Reply("typed inline".into()));
+    assert_eq!(action, InterruptAction::Reply {
+        content: "typed inline".into(),
+        from_editor: false,
+    });
 }
 
 #[test]
@@ -495,5 +518,8 @@ fn inline_editor_escape_spawn_failure_keeps_buffer() {
         &make_printer(),
         true,
     );
-    assert_eq!(action, InterruptAction::Reply("draft, then more".into()));
+    assert_eq!(action, InterruptAction::Reply {
+        content: "draft, then more".into(),
+        from_editor: false,
+    });
 }
