@@ -6,7 +6,7 @@
 - **Date**: 2026-03-17
 - **Tracking Issue**: [\#518]
 - **Required by**: [RFD 029], [RFD 049], [RFD 051]
-- **Extended by**: [RFD 086], [RFD 088]
+- **Extended by**: [RFD 086], [RFD 088], [RFD 091]
 
 ## Summary
 
@@ -252,3 +252,4 @@ Independent of Phases 1-2.
 [RFD 051]: 051-sub-agent-workflows.md
 [RFD 086]: 086-line-oriented-stdin-input-for-cli-arguments.md
 [RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
+[RFD 091]: 091-printer-owned-status-line.md
