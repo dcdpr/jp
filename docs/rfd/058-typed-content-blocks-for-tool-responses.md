@@ -6,6 +6,7 @@
 - **Date**: 2026-03-15
 - **Requires**: [RFD 009], [RFD 065]
 - **Required by**: [RFD 066], [RFD 067]
+- **Extended by**: [RFD 094]
 
 ## Summary
 
@@ -138,6 +139,42 @@ The tool owns the formatting.
   "text": "Check succeeded. No warnings or errors found."
 }
 ```
+
+Text blocks may carry an optional `mimeType` describing the format of the text:
+
+```json
+{
+  "type": "text",
+  "text": "## Summary\n\nAll checks passed.",
+  "mimeType": "text/markdown"
+}
+```
+
+This is a JP extension — MCP's `TextContent` has no mimeType — following the
+MCP-compatible superset principle from [RFD 065].
+MCP tools never set it, and absence means plain text.
+LLM delivery is unchanged either way: the text passes through as-is.
+The field exists to inform JP-side presentation of the block; as with
+annotations, JP defines it for type-level use but does not act on it initially.
+
+Text blocks also support MCP's standard annotations (`audience`, `priority`,
+`lastModified`), matching MCP's `TextContent` schema — MCP defines annotations
+on every content type, not only resources:
+
+```json
+{
+  "type": "text",
+  "text": "Summary for the user.",
+  "annotations": {
+    "audience": [
+      "user"
+    ]
+  }
+}
+```
+
+As with resource blocks, JP defines the annotation types for type-level
+compatibility but does not act on them initially.
 
 #### `resource`
 
@@ -494,6 +531,13 @@ JP's internal type for tool results, defined in `jp_tool`:
 pub enum ContentBlock {
     Text {
         text: String,
+        /// Optional MIME type describing the text format (JP extension; MCP
+        /// tools never set it).
+        /// Absent means plain text.
+        mime_type: Option<String>,
+        /// MCP-standard annotations (`audience`, `priority`, `lastModified`).
+        /// Carried for MCP compatibility; not acted on initially.
+        annotations: Option<Annotations>,
     },
     Resource(Resource),
     Question {
@@ -505,8 +549,9 @@ pub enum ContentBlock {
 pub struct InputRequest {
     /// Unique ID for correlating answers on re-execution.
     pub id: String,
-    /// Short prompt label (one-liner). Displayed alongside the input field
-    /// in the terminal, or as the question text sent to the assistant.
+    /// Short prompt label (one-liner).
+    /// Displayed alongside the input field in the terminal, or as the question
+    /// text sent to the assistant.
     /// Supporting context belongs in content blocks, not here.
     pub text: String,
     /// JSON Schema defining the expected answer shape.
@@ -544,6 +589,10 @@ The deserializer detects the old format (flat `content` + `is_error` fields) and
 converts it to a single `ContentBlock::Text` block.
 On serialization, the new format is written.
 Old conversations remain readable; re-saved conversations use the new format.
+
+The migration carries JP's own consumers of the serialized shape with it: the
+terminal result renderer and the serve-web plugin become block-aware, and
+`inline_results` applies uniformly to a response's blocks.
 
 ### Response parsing
 
@@ -830,3 +879,4 @@ Depends on Phase 5.
 [RFD 065]: 065-typed-resource-model-for-attachments.md
 [RFD 066]: 066-content-addressable-blob-store.md
 [RFD 067]: 067-resource-deduplication-for-token-efficiency.md
+[RFD 094]: 094-built-in-tell_user-tool-for-mid-turn-user-addressed-messages.md
