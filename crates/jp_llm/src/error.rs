@@ -102,6 +102,13 @@ impl StreamError {
     }
 
     /// Returns whether this error is likely retryable.
+    ///
+    /// Uncategorized errors ([`StreamErrorKind::Other`]) are additionally
+    /// sniffed for transient network failure patterns (see
+    /// `looks_like_transient_network_error`).
+    /// Proxies and gateways sitting between us and the provider report upstream
+    /// failures in bodies that don't match any provider's error envelope, so
+    /// they end up classified as `Other` even though retrying usually succeeds.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         matches!(
@@ -111,6 +118,8 @@ impl StreamError {
                 | StreamErrorKind::RateLimit
                 | StreamErrorKind::Transient
         ) || self.retry_after.is_some()
+            || (self.kind == StreamErrorKind::Other
+                && looks_like_transient_network_error(&self.message))
     }
 }
 
@@ -502,6 +511,19 @@ pub(crate) fn looks_like_quota_error(text: &str) -> bool {
         || lower.contains("credit balance is too low")
         || lower.contains("quota exceeded")
         || lower.contains("resource_exhausted")
+}
+
+/// Heuristic check for transient network/proxy failures based on error text.
+///
+/// Catches upstream failures reported by proxies and gateways between us and
+/// the provider, which don't match any provider's error envelope:
+///
+/// - `"upstream unreachable"`, `"no healthy upstream"`, `"upstream connect
+///   error"` (envoy-style proxies)
+/// - `"network is unreachable"`, `"host unreachable"` (transport errors)
+pub(crate) fn looks_like_transient_network_error(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("unreachable") || lower.contains("upstream")
 }
 
 /// Extracts a retry-after duration from an error message body.
