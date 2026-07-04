@@ -105,7 +105,7 @@ impl StreamError {
     ///
     /// Uncategorized errors ([`StreamErrorKind::Other`]) are additionally
     /// sniffed for transient network failure patterns (see
-    /// [`looks_like_transient_network_error`]).
+    /// `looks_like_transient_network_error`).
     /// Proxies and gateways sitting between us and the provider report upstream
     /// failures in bodies that don't match any provider's error envelope, so
     /// they end up classified as `Other` even though retrying usually succeeds.
