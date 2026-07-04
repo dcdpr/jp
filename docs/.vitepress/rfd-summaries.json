@@ -224,7 +224,7 @@
     "summary": "Adds group `overrides` section to enforce tool configuration that outlasts tool-level settings but yields to CLI flags."
   },
   "058-typed-content-blocks-for-tool-responses.md": {
-    "hash": "4c8b925d579414f5ffa5d8f45d6a3a9628651d690cc01e017c3e129f369398cc",
+    "hash": "5e603eb54c4ddd915729fc1e2e99a3b5e9bd955e0babe11883656198a5bcf2e2",
     "summary": "Replace opaque tool output strings with typed content blocks (text, resource, question) mirroring MCP's CallToolResult model."
   },
   "059-shell-completions-and-man-pages.md": {
@@ -370,5 +370,9 @@
   "093-inline-first-query-composition.md": {
     "hash": "a4fa8987e41f656a337952452629eafd5768c9c24ffdbe30556692f0ffb616cb",
     "summary": "Bare `jp query` composes inline by default; `Ctrl+X` escapes to external editor, with fallback modes configurable via `query.compose_in_editor`."
+  },
+  "094-built-in-tell_user-tool-for-mid-turn-user-addressed-messages.md": {
+    "hash": "ffca3c7ad1fdbeb597df5b4ac2e3ad2dd85f944b390194ade88040755af1d2da",
+    "summary": "Add a built-in tell_user tool letting assistants deliver mid-turn user messages without ending the agentic loop."
   }
 }
