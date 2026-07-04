@@ -20,7 +20,9 @@
 !.github/**
 !justfile
 
-# Then the exclusions (applied within the un-ignored trees)
+# Then the exclusions (applied within the un-ignored trees).
+# Re-including a subtree of an excluded dir needs BOTH lines:
+# !/path/dir/ and !/path/dir/**
 .jp/conversations/
 .jp/local-conversations/
 docs/.yarn/
