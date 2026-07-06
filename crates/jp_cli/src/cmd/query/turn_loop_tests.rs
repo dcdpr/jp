@@ -5219,7 +5219,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let (_signal_tx, signal_rx) = broadcast::channel(16);
+    let router = SignalRouter::detached();
 
     let executor_source = TestExecutorSource::new().with_executor("mock_tool", |req| {
         Box::new(MockExecutor::completed(&req.id, &req.name, "tool output"))
@@ -5230,7 +5230,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         Arc::clone(&provider),
         &model,
         &config,
-        &signal_rx,
+        &router,
         &mcp_client,
         root,
         false,

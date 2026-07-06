@@ -1644,8 +1644,7 @@ fn replay_shades_tool_chrome_after_reasoning() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        last: None,
-        turn: None,
+        range: TurnRange::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1694,8 +1693,7 @@ fn replay_does_not_shade_tool_chrome_when_extension_disabled() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        last: None,
-        turn: None,
+        range: TurnRange::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1745,8 +1743,7 @@ fn replay_suppresses_tool_chrome_when_show_disabled() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        last: None,
-        turn: None,
+        range: TurnRange::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,

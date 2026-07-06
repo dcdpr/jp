@@ -1222,6 +1222,35 @@ fn test_enter_tool_call_after_reasoning_without_background_returns_none() {
 }
 
 #[test]
+fn test_gap_between_tool_call_and_next_reasoning_is_shaded() {
+    // Reasoning → tool call → reasoning: the blank line separating the tool
+    // chrome from the resumed reasoning sits inside the region, so it must
+    // carry the reasoning background just like the separator before the tool
+    // call.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "More\n\n".into(),
+    });
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        2,
+        "both the separator before the tool call and the gap after it stay inside the region, \
+         got: {output:?}"
+    );
+}
+
+#[test]
 fn test_extend_across_tool_calls_disabled_ends_the_region_at_the_tool_call() {
     // With the flag off, a tool call after reasoning does not continue the
     // region: the separator before it is unshaded and no chrome background is

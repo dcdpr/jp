@@ -224,11 +224,29 @@ impl ChatRenderer {
         {
             self.flush();
             if prev == ContentKind::ToolCall {
-                self.printer.println("");
+                self.blank_line_after_tool_call(next);
             }
         }
 
         self.last_content_kind = Some(next);
+    }
+
+    /// Print the blank line separating tool chrome from the content that
+    /// follows it.
+    ///
+    /// When the next content is reasoning that continues a shaded reasoning
+    /// region across the tool call, the gap sits inside the region and carries
+    /// the reasoning background; otherwise it is a plain blank line.
+    fn blank_line_after_tool_call(&mut self, next: ContentKind) {
+        let continues = next == ContentKind::Reasoning && self.reasoning_region_continues();
+
+        if continues && let Some(bg) = self.reasoning_background() {
+            let delay = self.config.typewriter.text_delay;
+            let separator = render_separator(Some(&bg));
+            self.printer.print(separator.typewriter(delay.into()));
+        } else {
+            self.printer.println("");
+        }
     }
 
     fn render_reasoning(&mut self, content: &str) {
@@ -665,6 +683,16 @@ impl ChatRenderer {
         self.last_content_kind = Some(ContentKind::ToolCall);
     }
 
+    /// Whether a tool call at the current point continues a reasoning region.
+    ///
+    /// True when the last chat response was reasoning and
+    /// `style.reasoning.extend_across_tool_calls` is enabled: the tool call is
+    /// then part of the surrounding reasoning rather than a break in it.
+    fn reasoning_region_continues(&self) -> bool {
+        self.config.reasoning.extend_across_tool_calls
+            && self.last_response_kind == Some(ContentKind::Reasoning)
+    }
+
     /// Resolve the tool-call boundary against the reasoning region.
     ///
     /// Drains the markdown buffer so buffered content lands before the tool
@@ -681,8 +709,7 @@ impl ChatRenderer {
     /// region stays continuous across the tool call, or `None` when the tool
     /// call does not extend a shaded reasoning region.
     pub fn enter_tool_call(&mut self) -> Option<DefaultBackground> {
-        let continues = self.config.reasoning.extend_across_tool_calls
-            && self.last_response_kind == Some(ContentKind::Reasoning);
+        let continues = self.reasoning_region_continues();
         self.flush_with_separator(continues);
         self.transition_to_tool_call();
         if continues {
