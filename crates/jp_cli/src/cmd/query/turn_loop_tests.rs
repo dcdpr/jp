@@ -51,7 +51,7 @@ use jp_storage::backend::FsStorageBackend;
 use jp_tool::Question;
 use jp_workspace::Workspace;
 use serde_json::{Map, Value, json};
-use tokio::time::timeout;
+use tokio::{sync::Notify, time::timeout};
 use tokio_util::sync::CancellationToken;
 
 use super::*;
@@ -832,14 +832,23 @@ struct SleepingExecutor {
     tool_id: String,
     tool_name: String,
     arguments: Map<String, Value>,
+    /// Notified when `execute` starts, so tests can fire an interrupt while the
+    /// tool is guaranteed to be running (and the tool interrupt handler
+    /// guaranteed to be registered, as the coordinator pushes it before
+    /// spawning executors).
+    /// A fixed sleep is not enough: on slow machines (e.g. Windows CI) the
+    /// press can land before the executing phase and be consumed by an earlier
+    /// handler.
+    started: Option<Arc<Notify>>,
 }
 
 impl SleepingExecutor {
-    fn new(tool_id: &str, tool_name: &str) -> Self {
+    fn notifying(tool_id: &str, tool_name: &str, started: Arc<Notify>) -> Self {
         Self {
             tool_id: tool_id.to_owned(),
             tool_name: tool_name.to_owned(),
             arguments: Map::new(),
+            started: Some(started),
         }
     }
 }
@@ -871,6 +880,10 @@ impl Executor for SleepingExecutor {
         _root: &Utf8Path,
         cancellation_token: CancellationToken,
     ) -> ExecutorResult {
+        if let Some(started) = &self.started {
+            started.notify_one();
+        }
+
         tokio::select! {
             () = cancellation_token.cancelled() => {
                 ExecutorResult::Completed(ToolCallResponse {
@@ -893,6 +906,9 @@ impl Executor for SleepingExecutor {
 struct DelayedPromptBackend {
     inner: MockPromptBackend,
     delay: Duration,
+    /// Notified when a prompt becomes active, so tests can fire an interrupt
+    /// inside the prompt window instead of guessing with a fixed sleep.
+    started: Arc<Notify>,
 }
 
 impl PromptBackend for DelayedPromptBackend {
@@ -903,6 +919,7 @@ impl PromptBackend for DelayedPromptBackend {
         default: Option<char>,
         writer: &mut dyn Write,
     ) -> Result<char, InquireError> {
+        self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.inline_select(message, options, default, writer)
     }
@@ -915,6 +932,7 @@ impl PromptBackend for DelayedPromptBackend {
         editor_escape: bool,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
+        self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner
             .inline_reply(message, initial_text, edit_mode, editor_escape, output)
@@ -926,6 +944,7 @@ impl PromptBackend for DelayedPromptBackend {
         default: Option<&str>,
         writer: &mut dyn Write,
     ) -> Result<String, InquireError> {
+        self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.text(message, default, writer)
     }
@@ -937,6 +956,7 @@ impl PromptBackend for DelayedPromptBackend {
         default: Option<usize>,
         writer: &mut dyn Write,
     ) -> Result<String, InquireError> {
+        self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.select(message, options, default, writer)
     }
@@ -950,6 +970,7 @@ impl PromptBackend for DelayedPromptBackend {
 /// 4. The tools are cancelled, a graceful shutdown begins, and the turn ends
 ///    with the interrupt error
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
 async fn test_tool_interrupt_menu_cancel_escalates() {
     let test_result = Box::pin(timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
@@ -1007,16 +1028,25 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
         // cancelling it (as a second Ctrl-C would) escalates.
         let backend = MockPromptBackend::new();
 
-        // The tool runs until the escalation cancels it.
-        let executor_source = TestExecutorSource::new().with_executor("slow_tool", |req| {
-            Box::new(SleepingExecutor::new(&req.id, &req.name))
+        // The tool runs until the escalation cancels it, and signals
+        // `tool_started` once it is executing.
+        let tool_started = Arc::new(Notify::new());
+        let executor_source = TestExecutorSource::new().with_executor("slow_tool", {
+            let tool_started = Arc::clone(&tool_started);
+            move |req| {
+                Box::new(SleepingExecutor::notifying(
+                    &req.id,
+                    &req.name,
+                    Arc::clone(&tool_started),
+                ))
+            }
         });
 
-        // Press Ctrl-C after 100ms (the tool runs until cancelled, so plenty
-        // of margin).
+        // Press Ctrl-C once the tool is executing, which guarantees the tool
+        // interrupt handler is topmost.
         let signal_router = Arc::clone(&router);
         let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tool_started.notified().await;
             signal_router.simulate_interrupt();
         });
 
@@ -1134,9 +1164,11 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
 
         // The question prompt stalls for 400ms before answering 'y'. While it
         // is pending, the execution event loop declines interrupts.
+        let prompt_started = Arc::new(Notify::new());
         let backend = DelayedPromptBackend {
             inner: MockPromptBackend::new().with_inline_responses(['y']),
             delay: Duration::from_millis(400),
+            started: Arc::clone(&prompt_started),
         };
 
         let executor_source = TestExecutorSource::new().with_executor("question_tool", |req| {
@@ -1148,12 +1180,12 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             ))
         });
 
-        // Press Ctrl-C 100ms into the 400ms prompt. The tool handler declines
-        // it (a prompt is active); the turn-level handler picks it up after
-        // the tool completes.
+        // Press Ctrl-C once the 400ms prompt is active. The tool handler
+        // declines it (a prompt is active); the turn-level handler picks it
+        // up after the tool completes.
         let signal_router = Arc::clone(&router);
         let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            prompt_started.notified().await;
             signal_router.simulate_interrupt();
         });
 
@@ -1472,9 +1504,15 @@ async fn test_tool_restart_on_interrupt() {
         // re-created the executor.
         let exec_calls = Arc::new(AtomicUsize::new(0));
         let exec_calls_in_factory = Arc::clone(&exec_calls);
+        let tool_started = Arc::new(Notify::new());
+        let tool_started_in_factory = Arc::clone(&tool_started);
         let executor_source = TestExecutorSource::new().with_executor("slow_tool", move |req| {
             if exec_calls_in_factory.fetch_add(1, Ordering::SeqCst) == 0 {
-                Box::new(SleepingExecutor::new(&req.id, &req.name))
+                Box::new(SleepingExecutor::notifying(
+                    &req.id,
+                    &req.name,
+                    Arc::clone(&tool_started_in_factory),
+                ))
             } else {
                 Box::new(MockExecutor::completed(
                     &req.id,
@@ -1484,12 +1522,12 @@ async fn test_tool_restart_on_interrupt() {
             }
         });
 
-        // Press Ctrl-C after 100ms (the tool runs until cancelled, so plenty
-        // of margin). The tool handler registered by the executing phase
-        // receives the press and shows the restart menu.
+        // Press Ctrl-C once the first execution is running. The tool handler
+        // registered by the executing phase receives the press and shows the
+        // restart menu.
         let signal_router = Arc::clone(&router);
         let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            tool_started.notified().await;
             signal_router.simulate_interrupt();
         });
 
