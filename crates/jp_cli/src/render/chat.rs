@@ -73,6 +73,19 @@ pub struct ChatRenderer {
     printer: Arc<Printer>,
     config: StyleConfig,
     last_content_kind: Option<ContentKind>,
+    /// The kind of the last *chat response* (reasoning or message), preserved
+    /// across tool-call interludes.
+    ///
+    /// [`Self::last_content_kind`] is overwritten with
+    /// [`ContentKind::ToolCall`] when a tool call is entered, losing the memory
+    /// of whether the surrounding region is reasoning.
+    /// This field keeps that memory so the tool-call boundary can decide
+    /// whether a tool call continues a reasoning region (and shade its chrome
+    /// to match).
+    /// Only the persistent display paths set it; ephemeral reasoning chrome
+    /// (`progress`/`static`/`timer`) never reaches them, so it never marks a
+    /// non-shaded region as continuable.
+    last_response_kind: Option<ContentKind>,
     reasoning_chars_count: usize,
     /// State for the current streaming fenced code block, if any.
     code_block: Option<CodeBlockState>,
@@ -115,6 +128,7 @@ impl ChatRenderer {
             printer,
             config,
             last_content_kind: None,
+            last_response_kind: None,
             reasoning_chars_count: 0,
             code_block: None,
             reasoning_timer: None,
@@ -301,6 +315,12 @@ impl ChatRenderer {
     }
 
     fn render_content(&mut self, content: &str) {
+        // Persistent chat-response content (full/truncate reasoning, messages)
+        // flows through here; remember its kind so the tool-call boundary can
+        // tell whether a following tool call continues a reasoning region.
+        // Ephemeral reasoning chrome never reaches this path, so it can't mark
+        // the region as reasoning.
+        self.last_response_kind = self.last_content_kind;
         self.buffer.push(content);
         self.flush_buffer_blocks();
     }
@@ -562,25 +582,42 @@ impl ChatRenderer {
     }
 
     pub fn flush(&mut self) {
+        // A plain flush leaves the current content region (a content-kind
+        // transition, a role header, or end of stream), so the deferred
+        // reasoning separator is emitted unshaded.
+        self.flush_with_separator(false);
+    }
+
+    /// Drain the buffer's end-of-region events to the printer, committing
+    /// buffered blocks and closing any open code block.
+    ///
+    /// A code block left open by the stream is closed here with a matched,
+    /// escalated fence (recognized or synthesized by `flush_events`) instead of
+    /// leaking its body as re-parsed markdown.
+    /// The deferred reasoning separator is left untouched — callers emit it
+    /// via [`flush_with_separator`] or leave it pending.
+    ///
+    /// [`flush_with_separator`]: Self::flush_with_separator
+    fn drain_buffer(&mut self) {
         self.cancel_reasoning_timer();
 
         // Drain the buffer's end-of-region events through the same fixup +
-        // render path as streaming. A code block left open by the stream is
-        // closed here with a matched, escalated fence (recognized or
-        // synthesized by `flush_events`) instead of leaking its body as
-        // re-parsed markdown.
+        // render path as streaming.
         for raw_event in self.buffer.flush_events() {
             if let Some(event) = self.fixups.apply(raw_event) {
                 self.handle_event(event);
             }
         }
         self.code_block = None;
+    }
 
-        // Reaching a flush means we're leaving the current content region (a
-        // content-kind transition, a role header, or end of stream). Emit any
-        // deferred reasoning separator unstyled so the gap to whatever follows
-        // isn't shaded.
-        self.emit_pending_reasoning_separator(false);
+    /// Drain the buffer, then emit the deferred reasoning separator.
+    ///
+    /// `shaded` carries the reasoning background on that separator, keeping the
+    /// gap inside a reasoning region; an unshaded separator ends the region.
+    fn flush_with_separator(&mut self, shaded: bool) {
+        self.drain_buffer();
+        self.emit_pending_reasoning_separator(shaded);
     }
 
     /// Signal that the current typewriter producer is done emitting.
@@ -628,6 +665,46 @@ impl ChatRenderer {
         self.last_content_kind = Some(ContentKind::ToolCall);
     }
 
+    /// Resolve the tool-call boundary against the reasoning region.
+    ///
+    /// Drains the markdown buffer so buffered content lands before the tool
+    /// header, emits the deferred reasoning separator — shaded when the tool
+    /// call continues the reasoning region, unshaded otherwise — and
+    /// transitions into tool-call mode.
+    ///
+    /// The tool call continues the region when the last chat response was
+    /// reasoning and `style.reasoning.extend_across_tool_calls` is enabled.
+    /// With the flag disabled the region ends at the tool call (an unshaded
+    /// separator, no chrome background), restoring the per-block behaviour.
+    ///
+    /// Returns the background to fill the tool chrome with so a reasoning
+    /// region stays continuous across the tool call, or `None` when the tool
+    /// call does not extend a shaded reasoning region.
+    pub fn enter_tool_call(&mut self) -> Option<DefaultBackground> {
+        let continues = self.config.reasoning.extend_across_tool_calls
+            && self.last_response_kind == Some(ContentKind::Reasoning);
+        self.flush_with_separator(continues);
+        self.transition_to_tool_call();
+        if continues {
+            self.reasoning_background()
+        } else {
+            None
+        }
+    }
+
+    /// Resolve the boundary for a tool call that shows no chrome.
+    ///
+    /// Drains buffered content so blocks before the tool commit (a complete
+    /// message keeps its trailing separator, so messages stay separated), but
+    /// leaves any deferred reasoning separator pending so the next visible
+    /// content decides its shading — a reasoning region stays continuous
+    /// across the invisible tool.
+    /// Does not transition into tool-call mode: with no chrome there is no
+    /// boundary for the next content to react to.
+    pub fn skip_tool_call(&mut self) {
+        self.drain_buffer();
+    }
+
     /// Reset the renderer state, discarding any buffered content.
     ///
     /// Used when the current streaming cycle is being interrupted and a new one
@@ -640,6 +717,7 @@ impl ChatRenderer {
         let pretty = self.printer.pretty_printing_enabled();
         self.formatter = formatter_from_config(&self.config, pretty);
         self.last_content_kind = None;
+        self.last_response_kind = None;
         self.reasoning_separator_pending = false;
         self.reasoning_chars_count = 0;
         self.code_block = None;

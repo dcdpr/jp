@@ -6,9 +6,10 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
 };
 use jp_llm::{
-    event::{Event, EventPart, FinishReason, ToolCallPart},
+    event::{Event, EventPart, FinishReason},
     event_builder::EventBuilder,
 };
+use jp_md::format::DefaultBackground;
 use jp_printer::Printer;
 
 use crate::cmd::query::{interrupt::InterruptAction, stream::TurnView};
@@ -243,11 +244,6 @@ impl TurnCoordinator {
                 metadata,
             } => {
                 match &part {
-                    EventPart::ToolCall(ToolCallPart::Start { .. }) => {
-                        // Streaming tool calls are always visible (the
-                        // hidden style only suppresses replay rendering).
-                        self.view.enter_tool_call(false);
-                    }
                     EventPart::Message(text) => {
                         self.view.render_chat_response(&ChatResponse::Message {
                             message: text.clone(),
@@ -263,8 +259,13 @@ impl TurnCoordinator {
                             data: serde_json::Value::String(chunk.clone()),
                         });
                     }
-                    EventPart::ToolCall(ToolCallPart::ArgumentChunk(_)) => {
-                        // Forwarded to EventBuilder only; no rendering.
+                    EventPart::ToolCall(_) => {
+                        // Tool-call parts are forwarded to the EventBuilder
+                        // below. The live tool-call boundary (the chat flush,
+                        // separator shading, and tool-call transition) is owned
+                        // by the turn loop, which holds the per-tool config and
+                        // renderer needed to decide whether the chrome is
+                        // visible.
                     }
                 }
 
@@ -415,10 +416,20 @@ impl TurnCoordinator {
         self.view.flush();
     }
 
-    /// Mark that tool calls are about to be rendered, so the next content chunk
-    /// gets a blank line separator.
-    pub fn transition_to_tool_call(&mut self) {
-        self.view.enter_tool_call(false);
+    /// Resolve the live tool-call boundary, returning the background the tool's
+    /// chrome should be filled with to keep a reasoning region continuous.
+    ///
+    /// `chrome_visible` is whether the tool's chrome will be rendered (the live
+    /// predicate `show && !json && !hidden`).
+    /// When visible, the deferred reasoning separator is drained with the
+    /// shading the region dictates and the chat renderer transitions into
+    /// tool-call mode; the returned background extends the reasoning region
+    /// across the tool chrome (`None` when the tool call doesn't continue a
+    /// shaded reasoning region).
+    /// When not visible the boundary is transparent and leaves the region
+    /// intact for the next visible content.
+    pub fn enter_tool_call(&mut self, chrome_visible: bool) -> Option<DefaultBackground> {
+        self.view.enter_tool_call_region(chrome_visible)
     }
 
     /// Wire the view's tool-separator flag to the turn's `ToolRenderer` so

@@ -245,7 +245,6 @@ Independent of Phases 1-2.
 - `crates/jp_printer/src/printer.rs` — current Printer implementation.
 - `curl` / `git` — precedent for stdout/stderr output separation.
 
-[RFD 019]: 019-non-interactive-mode.md
 [RFD 021]: 021-printer-live-redirection.md
 [RFD 029]: 029-scriptable-structured-output.md
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md

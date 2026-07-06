@@ -108,6 +108,7 @@ PartialAppConfig {
             display: None,
             summary_model: None,
             background: None,
+            extend_across_tool_calls: None,
         },
         streaming: PartialStreamingConfig {
             progress: PartialProgressConfig {

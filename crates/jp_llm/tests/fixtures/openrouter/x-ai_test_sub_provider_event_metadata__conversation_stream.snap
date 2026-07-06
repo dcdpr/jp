@@ -103,7 +103,8 @@ expression: v
       },
       "reasoning": {
         "display": "full",
-        "background": 236
+        "background": 236,
+        "extend_across_tool_calls": true
       },
       "streaming": {
         "progress": {

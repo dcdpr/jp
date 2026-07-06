@@ -144,3 +144,110 @@ fn test_restore_sequence_roundtrip() {
     assert!(seq.contains("48;5;248"));
     assert!(seq.contains("38;5;100"));
 }
+
+#[test]
+fn compound_sgr_tracks_every_sub_parameter() {
+    // A single escape combining a style attribute with a background: matching
+    // only the leading sub-parameter would miss the background entirely.
+    let mut s = AnsiState::default();
+    assert!(s.update("\x1b[1;48;5;236m"));
+    assert!(s.bold);
+    assert_eq!(s.background.as_deref(), Some("48;5;236"));
+}
+
+#[test]
+fn compound_sgr_leading_reset_clears_prior_state() {
+    let mut s = AnsiState {
+        bold: true,
+        ..Default::default()
+    };
+    assert!(s.update("\x1b[0;48;5;236m"));
+    assert!(!s.bold, "the leading 0 reset the prior bold");
+    assert_eq!(s.background.as_deref(), Some("48;5;236"));
+}
+
+#[test]
+fn compound_sgr_clears_foreground_and_background_together() {
+    let mut s = AnsiState {
+        foreground: Some("38;5;1".into()),
+        background: Some("48;5;1".into()),
+        ..Default::default()
+    };
+    assert!(s.update("\x1b[39;49m"));
+    assert!(s.foreground.is_none());
+    assert!(s.background.is_none());
+}
+
+#[test]
+fn compound_truecolor_foreground_and_background() {
+    // The 24-bit color operands must not be misread as further attributes.
+    let mut s = AnsiState::default();
+    s.update("\x1b[38;2;1;2;3;48;2;4;5;6m");
+    assert_eq!(s.foreground.as_deref(), Some("38;2;1;2;3"));
+    assert_eq!(s.background.as_deref(), Some("48;2;4;5;6"));
+}
+
+#[test]
+fn update_reports_background_events() {
+    let mut s = AnsiState::default();
+    assert!(
+        !s.update(BOLD_START),
+        "a style attribute is not a background event"
+    );
+    assert!(
+        s.update("\x1b[48;5;236m"),
+        "setting a background is an event"
+    );
+    assert!(s.update(BG_END), "clearing a background is an event");
+    assert!(s.update(RESET), "a reset is an event");
+    assert!(
+        !s.update("\x1b[38;5;200m"),
+        "setting a foreground is not a background event"
+    );
+    assert!(
+        !s.update(FG_END),
+        "clearing a foreground is not a background event"
+    );
+    assert!(
+        !s.update("\x1b[K"),
+        "a non-SGR escape is not a background event"
+    );
+}
+
+#[test]
+fn segments_keeps_an_st_terminated_osc_sequence_whole() {
+    // An OSC 8 hyperlink: the open/close sequences must each tokenize as one
+    // escape rather than splitting at the first letter of the URL.
+    let parts: Vec<_> = segments("\x1b]8;;url\x1b\\link\x1b]8;;\x1b\\").collect();
+    assert_eq!(parts, vec![
+        Segment::Escape("\x1b]8;;url\x1b\\"),
+        Segment::Text("link"),
+        Segment::Escape("\x1b]8;;\x1b\\"),
+    ]);
+}
+
+#[test]
+fn segments_keeps_a_bel_terminated_osc_sequence_whole() {
+    let parts: Vec<_> = segments("\x1b]8;;url\x07text").collect();
+    assert_eq!(parts, vec![
+        Segment::Escape("\x1b]8;;url\x07"),
+        Segment::Text("text"),
+    ]);
+}
+
+#[test]
+fn segments_yields_an_unterminated_osc_as_one_escape() {
+    // No terminator yet (split across a write boundary): the whole remainder is
+    // a single, incomplete escape.
+    let parts: Vec<_> = segments("\x1b]8;;url").collect();
+    assert_eq!(parts, vec![Segment::Escape("\x1b]8;;url")]);
+}
+
+#[test]
+fn visual_width_ignores_an_osc_hyperlink() {
+    // The hyperlink chrome is zero-width; only the link text counts.
+    assert_eq!(
+        visual_width("\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\"),
+        4
+    );
+}

@@ -64,6 +64,13 @@ pub struct TurnRenderer {
     /// are encountered so that `ToolCallResponse` can look up the name without
     /// needing access to the full conversation stream.
     tool_names: HashMap<String, String>,
+
+    /// Whether tool chrome is globally shown (`style.tool_call.show`).
+    ///
+    /// Combined with the JSON-format check and the per-tool `hidden` flag to
+    /// decide chrome visibility, so `jp conversation print` honors the same
+    /// settings as the live path's `tool_chrome_visible` predicate.
+    tool_chrome_shown: bool,
 }
 
 impl TurnRenderer {
@@ -79,6 +86,7 @@ impl TurnRenderer {
         invocation: InvocationContext,
     ) -> Self {
         let mut view = TurnView::new(printer.clone(), style.clone(), assistant_name, model_id);
+        let tool_chrome_shown = style.tool_call.show;
         let tool = ToolRenderer::new(
             ErrChannel::new(printer.clone()),
             style,
@@ -98,6 +106,7 @@ impl TurnRenderer {
             tools_config,
             user_only: false,
             tool_names: HashMap::new(),
+            tool_chrome_shown,
         }
     }
 
@@ -155,9 +164,16 @@ impl TurnRenderer {
                         .as_ref()
                         .map_or(default_style, ToolConfigWithDefaults::style);
 
-                    self.view.enter_tool_call(style.hidden);
+                    // Chrome visibility mirrors the live path so replay honors
+                    // the same settings: global `style.tool_call.show`, the
+                    // JSON format, and the per-tool `hidden` flag.
+                    let chrome_visible = self.tool_chrome_shown
+                        && !self.printer.format().is_json()
+                        && !style.hidden;
+                    let region = self.view.enter_tool_call_region(chrome_visible);
+                    self.tool.set_region(&req.id, region);
 
-                    if !style.hidden {
+                    if chrome_visible {
                         self.tool
                             .render_tool_call(&req.name, &req.arguments, &style.parameters);
 
@@ -178,11 +194,13 @@ impl TurnRenderer {
                     let tool_cfg = name.and_then(|n| self.tools_config.get(n));
                     let tool_style = tool_cfg.as_ref().map_or(default_style, |c| c.style());
                     let is_error = resp.result.is_err();
-                    let hidden = tool_style.hidden;
+                    let chrome_visible = self.tool_chrome_shown
+                        && !self.printer.format().is_json()
+                        && !tool_style.hidden;
                     let inline_results = tool_style.inline_results(is_error);
                     let results_file_link = tool_style.results_file_link(is_error);
 
-                    if !hidden {
+                    if chrome_visible {
                         self.tool
                             .render_result(resp, inline_results, results_file_link);
                     }
@@ -215,6 +233,7 @@ impl TurnRenderer {
         let mut style = config.style;
         style.typewriter.text_delay = DelayDuration::instant();
         style.typewriter.code_delay = DelayDuration::instant();
+        self.tool_chrome_shown = style.tool_call.show;
 
         self.view.reconfigure(
             self.printer.clone(),
