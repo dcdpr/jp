@@ -3,6 +3,7 @@ source: crates/jp_llm/src/provider/compaction_request_tests.rs
 expression: request
 ---
 {
+  "model": "claude-haiku-4-5",
   "messages": [
     {
       "role": "user",
@@ -72,7 +73,6 @@ expression: request
       ]
     }
   ],
-  "model": "claude-haiku-4-5",
   "max_tokens": 64000,
   "thinking": {
     "type": "disabled"
