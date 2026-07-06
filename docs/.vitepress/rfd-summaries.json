@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "b670e160c468f18ee7f2da731165a66f614bc91cfa6c1cb8787662513b79ffc9",
+    "hash": "735c84313996d54bf108e8694c9d313c46bc9d3d40336592c5759b18bb19cd04",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -374,5 +374,9 @@
   "094-built-in-tell_user-tool-for-mid-turn-user-addressed-messages.md": {
     "hash": "ffca3c7ad1fdbeb597df5b4ac2e3ad2dd85f944b390194ade88040755af1d2da",
     "summary": "Add a built-in tell_user tool letting assistants deliver mid-turn user messages without ending the agentic loop."
+  },
+  "088-reasoning-region-shading-across-tool-calls.md": {
+    "hash": "38f6db323c999be6e263b76973cda43dcd4968f699dee7d421e5507a3b748bb4",
+    "summary": "Extend reasoning-region background shading across tool calls to visually represent continuous reasoning despite interleaved tool execution."
   }
 }
