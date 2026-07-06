@@ -4773,6 +4773,7 @@ dependencies = [
  "strip-ansi-escapes",
  "test-log",
  "tokio",
+ "toml",
  "url",
  "which",
  "windows-sys 0.61.0",

@@ -267,3 +267,35 @@ fn safe_path_reaches_runner() {
 
     assert!(result.unwrap().unwrap_content().contains("42"));
 }
+
+/// The `util` parameter enum in the tool definition must stay in sync with
+/// [`ALLOWED_UTILS`]: the enum is what the model sees, the allowlist is what
+/// the code enforces.
+/// Drift in either direction yields a tool that advertises utilities it
+/// rejects, or silently hides utilities it supports.
+#[test]
+fn tool_definition_enum_matches_allowlist() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.jp/mcp/tools/unix/utils.toml");
+    let content = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+    let value: toml::Value = toml::from_str(&content).expect("valid TOML");
+
+    let mut advertised: Vec<&str> = value["conversation"]["tools"]["unix_utils"]["parameters"]
+        ["util"]["enum"]
+        .as_array()
+        .expect("`util` parameter has an `enum` array")
+        .iter()
+        .map(|v| v.as_str().expect("enum values are strings"))
+        .collect();
+    advertised.sort_unstable();
+
+    let mut allowed = ALLOWED_UTILS.to_vec();
+    allowed.sort_unstable();
+
+    pretty_assertions::assert_eq!(
+        advertised,
+        allowed,
+        "`util` enum in {} out of sync with ALLOWED_UTILS in unix/utils.rs",
+        path.display()
+    );
+}

@@ -7,16 +7,36 @@ use crate::util::{
     runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
 };
 
-pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> ToolResult {
-    cargo_check_impl(ctx, package.as_deref(), &DuctProcessRunner)
+pub(crate) async fn cargo_check(
+    ctx: &Context,
+    package: Option<String>,
+    checksum_freshness: bool,
+) -> ToolResult {
+    cargo_check_impl(
+        ctx,
+        package.as_deref(),
+        checksum_freshness,
+        &DuctProcessRunner,
+    )
 }
 
 fn cargo_check_impl<R: ProcessRunner>(
     ctx: &Context,
     package: Option<&str>,
+    checksum_freshness: bool,
     runner: &R,
 ) -> ToolResult {
     let clippy_scope = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
+
+    // Prevent warnings from being treated as errors, e.g. on CI.
+    let mut env = vec![("RUSTFLAGS", "-W warnings")];
+    if checksum_freshness {
+        // Use content checksums instead of file mtimes for cargo's freshness
+        // checks, so that sibling checkouts (git worktrees) sharing a target
+        // dir cannot serve each other's stale artifacts. Matches CI. Requires
+        // nightly cargo. See rust-lang/cargo#14136.
+        env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
+    }
 
     let ProcessOutput { stderr, status, .. } = runner.run_with_env(
         "cargo",
@@ -28,8 +48,7 @@ fn cargo_check_impl<R: ProcessRunner>(
             "--all-targets",
         ],
         &ctx.root,
-        // Prevent warnings from being treated as errors, e.g. on CI.
-        &[("RUSTFLAGS", "-W warnings")],
+        &env,
     )?;
 
     if !status.is_success() {

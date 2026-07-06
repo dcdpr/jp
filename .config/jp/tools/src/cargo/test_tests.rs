@@ -21,7 +21,7 @@ fn test_cargo_test_success() {
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner = MockProcessRunner::success(stdout);
 
-    let result = cargo_test_impl(&ctx, None, None, false, &runner)
+    let result = cargo_test_impl(&ctx, None, None, false, false, &runner)
         .unwrap()
         .into_content()
         .unwrap();
@@ -43,7 +43,7 @@ fn test_cargo_test_with_failure() {
     let stdout = r#"{"type":"test","event":"failed","name":"my_crate$tests::my_test","stdout":"assertion failed"}"#;
     let runner = MockProcessRunner::success(stdout);
 
-    let result = cargo_test_impl(&ctx, None, None, false, &runner)
+    let result = cargo_test_impl(&ctx, None, None, false, false, &runner)
         .unwrap()
         .into_content()
         .unwrap();
@@ -117,7 +117,7 @@ fn test_backtrace_disabled_by_default() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx, None, None, false, &runner).unwrap();
+    let _result = cargo_test_impl(&ctx, None, None, false, false, &runner).unwrap();
 
     assert_eq!(
         runner
@@ -126,6 +126,55 @@ fn test_backtrace_disabled_by_default() {
             .find(|(k, _)| k == "RUST_BACKTRACE")
             .map(|(_, v)| v.as_str()),
         Some("0"),
+    );
+}
+
+#[test]
+fn test_checksum_freshness_disabled_by_default() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
+    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let _result = cargo_test_impl(&ctx, None, None, false, false, &runner).unwrap();
+
+    assert!(
+        !runner
+            .captured_env()
+            .iter()
+            .any(|(k, _)| k == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS"),
+        "checksum freshness must be off unless opted into, so the tools work on stable cargo",
+    );
+}
+
+#[test]
+fn test_checksum_freshness_enabled() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
+    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let _result = cargo_test_impl(&ctx, None, None, false, true, &runner).unwrap();
+
+    assert_eq!(
+        runner
+            .captured_env()
+            .iter()
+            .find(|(k, _)| k == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS")
+            .map(|(_, v)| v.as_str()),
+        Some("true"),
     );
 }
 
@@ -142,7 +191,7 @@ fn test_backtrace_enabled() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx, None, None, true, &runner).unwrap();
+    let _result = cargo_test_impl(&ctx, None, None, true, false, &runner).unwrap();
 
     assert_eq!(
         runner
