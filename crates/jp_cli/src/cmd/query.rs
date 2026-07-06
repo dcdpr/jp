@@ -61,6 +61,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
@@ -85,6 +86,7 @@ use jp_config::{
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, ConversationStream,
     event::{ChatRequest, ChatResponse},
+    stream::{ApplyDelta, ResetDelta},
     thread::{Thread, ThreadBuilder},
 };
 use jp_inquire::prompt::TerminalPromptBackend;
@@ -123,6 +125,7 @@ use crate::{
         conversation::fork,
         lock::{LockRequest, acquire_lock},
     },
+    config_pipeline::{ConfigReset, ConfigResetEvents},
     ctx::IntoPartialAppConfig,
     editor,
     error::{Error, Result},
@@ -361,7 +364,7 @@ impl Query {
         // 2. picker "start new": `start_new` is set, create a fresh conversation.
         // 3. --fork/--id/session: resolve an existing conversation, lock it.
         // 4. Lock contention: user picks "new" or "fork" from the prompt.
-        let lock = self.acquire_lock(ctx, handle, start_new).await?;
+        let (lock, fresh) = self.acquire_lock(ctx, handle, start_new).await?;
 
         // Create symlinks and seed approvals for any `--mount` flags before the
         // turn runs, so tools can reach the mounted paths.
@@ -381,7 +384,29 @@ impl Query {
             warn!(%error, "Failed to record activation.");
         }
 
-        if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
+        // Persist config state changes into the conversation stream.
+        //
+        // A fresh conversation needs neither branch: its base config was
+        // written from this invocation's resolved config at creation time
+        // (that also absorbs any `--cfg` reset keyword, per [RFD 038]).
+        //
+        // A conversation carrying earlier config state — continuing or forked
+        // — records a `--cfg` reset keyword as its stream events, appended
+        // directly: between the `Reset` and whichever `Apply` restores the
+        // required fields the stream does not resolve to a valid config, so
+        // the empty-diff suppression path in `add_config_delta` cannot run.
+        //
+        // Without a reset keyword, any divergence between the stream's config
+        // and this invocation's resolved config is appended as a single
+        // suppression-checked `Apply` diff, as before.
+        //
+        // [RFD 038]: https://jp.computer/rfd/038
+        if let Some(reset_events) = ctx.config_reset.take() {
+            if !fresh {
+                lock.as_mut()
+                    .update_events(|events| persist_config_reset(events, reset_events, now));
+            }
+        } else if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
             lock.as_mut()
                 .update_events(|events| events.add_config_delta(delta));
         }
@@ -964,15 +989,22 @@ impl Query {
         Ok(())
     }
 
+    /// Resolve the target conversation and return its exclusive lock.
+    ///
+    /// The second element is `true` when the conversation was freshly created
+    /// by this call: its base config is this invocation's resolved config, so
+    /// no config state predates it.
+    /// Forks return `false` — a fork copies the source's base config and
+    /// events, and therefore carries config state from before this invocation.
     async fn acquire_lock(
         &self,
         ctx: &mut Ctx,
         handle: Option<ConversationHandle>,
         start_new: bool,
-    ) -> Result<ConversationLock> {
+    ) -> Result<(ConversationLock, bool)> {
         // Handle --new: create a fresh conversation.
         if self.is_new() {
-            return self.create_new_conversation(ctx);
+            return Ok((self.create_new_conversation(ctx)?, true));
         }
 
         // Handle the picker's "start a new conversation" choice. It carries no
@@ -982,14 +1014,14 @@ impl Query {
             if !self.allows_new_from_picker() {
                 return Err(Error::NewConflictsWithTarget);
             }
-            return self.create_new_conversation(ctx);
+            return Ok((self.create_new_conversation(ctx)?, true));
         }
 
         let handle = handle.ok_or(Error::NoConversationTarget)?;
 
         // Handle --fork: fork the conversation before locking.
         if let Some(fork_turns) = &self.fork {
-            return fork_conversation(ctx, &handle, *fork_turns);
+            return Ok((fork_conversation(ctx, &handle, *fork_turns)?, false));
         }
 
         let req = LockRequest::from_ctx(handle, ctx)
@@ -997,9 +1029,11 @@ impl Query {
             .allow_fork(true);
 
         match acquire_lock(req).await? {
-            LockOutcome::Acquired(lock) => Ok(lock),
-            LockOutcome::NewConversation => self.create_new_conversation(ctx),
-            LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None),
+            LockOutcome::Acquired(lock) => Ok((lock, false)),
+            LockOutcome::NewConversation => Ok((self.create_new_conversation(ctx)?, true)),
+            LockOutcome::ForkConversation(handle) => {
+                Ok((fork_conversation(ctx, &handle, None)?, false))
+            }
         }
     }
 }
@@ -1234,6 +1268,34 @@ fn apply_title_override(lock: &ConversationLock, title: Option<&str>, no_title: 
             m.title = None;
         });
     }
+}
+
+/// Append a `--cfg` reset keyword's events to a conversation stream.
+///
+/// Persists the reset-then-layer sequence from [RFD 038]: a [`ResetDelta`]
+/// marking the reset point, then the workspace partial for `WORKSPACE` resets,
+/// then whatever state this invocation layered on top of the reset point.
+/// Empty layers are skipped by [`ConversationStream::add_config_reset`], which
+/// also documents why the sequence bypasses diff-suppression.
+///
+/// [RFD 038]: https://jp.computer/rfd/038
+fn persist_config_reset(
+    events: &mut ConversationStream,
+    reset: ConfigResetEvents,
+    timestamp: DateTime<Utc>,
+) {
+    let mut layers = Vec::with_capacity(2);
+
+    if let ConfigReset::Workspace(delta) = reset.reset {
+        layers.push(ApplyDelta { timestamp, delta });
+    }
+
+    layers.push(ApplyDelta {
+        timestamp,
+        delta: reset.post,
+    });
+
+    events.add_config_reset(ResetDelta { timestamp }, layers);
 }
 
 fn get_config_delta_from_cli(

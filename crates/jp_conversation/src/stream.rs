@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use jp_config::{AppConfig, PartialAppConfig, PartialConfig as _};
+use jp_config::{AppConfig, ConfigError, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 use tracing::{error, warn};
@@ -36,11 +36,15 @@ enum InternalEvent {
     /// When this event is emitted, all subsequent events in the stream are
     /// bound to the new configuration.
     ///
-    /// This is a *delta* event, meaning that it is merged on top of all other
-    /// `ConfigDelta` events in the stream.
+    /// An [`Apply`] delta is merged on top of all previous `ConfigDelta` events
+    /// in the stream; a [`Reset`] discards the accumulated state, restarting
+    /// from program defaults.
     ///
     /// Any non-config events before the first `ConfigDelta` event are
     /// considered to have the default configuration.
+    ///
+    /// [`Apply`]: ConfigDelta::Apply
+    /// [`Reset`]: ConfigDelta::Reset
     ConfigDelta(ConfigDelta),
     /// An event in the conversation stream.
     Event(Box<ConversationEvent>),
@@ -154,82 +158,156 @@ impl InternalEvent {
 }
 
 /// A configuration delta.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ConfigDelta {
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigDelta {
+    /// Merge a partial configuration on top of the accumulated config state.
+    Apply(ApplyDelta),
+
+    /// Discard the accumulated config state.
+    ///
+    /// Config resolution restarts from program defaults; subsequent [`Apply`]
+    /// events layer on top.
+    ///
+    /// [`Apply`]: Self::Apply
+    Reset(ResetDelta),
+}
+
+impl ConfigDelta {
+    /// The timestamp of the event, regardless of variant.
+    #[must_use]
+    pub const fn timestamp(&self) -> DateTime<Utc> {
+        match self {
+            Self::Apply(delta) => delta.timestamp,
+            Self::Reset(delta) => delta.timestamp,
+        }
+    }
+}
+
+// Hand-rolled so `Apply` keeps the legacy flat shape (no `op` field) and
+// `Reset` carries `"op": "reset"`. The variant discriminator must live inside
+// the event body: the outer `InternalEvent` envelope already claims the
+// top-level `type` key.
+impl Serialize for ConfigDelta {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Apply(delta) => delta.serialize(serializer),
+            Self::Reset(delta) => {
+                #[derive(Serialize)]
+                struct Tagged<'a> {
+                    op: &'static str,
+                    #[serde(flatten)]
+                    inner: &'a ResetDelta,
+                }
+
+                Tagged {
+                    op: "reset",
+                    inner: delta,
+                }
+                .serialize(serializer)
+            }
+        }
+    }
+}
+
+/// A configuration delta that merges on top of the accumulated config state.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ApplyDelta {
     /// The timestamp of the event.
-    #[serde(
-        serialize_with = "crate::serialize_dt",
-        deserialize_with = "crate::deserialize_dt"
-    )]
+    #[serde(serialize_with = "crate::serialize_dt")]
     pub timestamp: DateTime<Utc>,
 
     /// The configuration delta.
     pub delta: Box<PartialAppConfig>,
 }
 
-impl ConfigDelta {
-    /// Get the [`PartialAppConfig`] delta.
-    #[must_use]
-    pub fn into_inner(self) -> Box<PartialAppConfig> {
-        self.delta
+/// A configuration delta that discards the accumulated config state, resetting
+/// it to program defaults.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ResetDelta {
+    /// The timestamp of the event.
+    #[serde(serialize_with = "crate::serialize_dt")]
+    pub timestamp: DateTime<Utc>,
+}
+
+impl From<ApplyDelta> for ConfigDelta {
+    fn from(delta: ApplyDelta) -> Self {
+        Self::Apply(delta)
     }
 }
 
-impl std::ops::Deref for ConfigDelta {
-    type Target = PartialAppConfig;
-
-    fn deref(&self) -> &Self::Target {
-        &self.delta
-    }
-}
-
-impl std::ops::DerefMut for ConfigDelta {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.delta
-    }
-}
-
-impl AsRef<PartialAppConfig> for ConfigDelta {
-    fn as_ref(&self) -> &PartialAppConfig {
-        &self.delta
-    }
-}
-
-impl From<ConfigDelta> for PartialAppConfig {
-    fn from(delta: ConfigDelta) -> Self {
-        *delta.delta
+impl From<ResetDelta> for ConfigDelta {
+    fn from(delta: ResetDelta) -> Self {
+        Self::Reset(delta)
     }
 }
 
 impl From<PartialAppConfig> for ConfigDelta {
     fn from(config: PartialAppConfig) -> Self {
-        Self {
+        Self::Apply(ApplyDelta {
             timestamp: Utc::now(),
             delta: Box::new(config),
-        }
+        })
     }
 }
 
 /// Deserialize a [`ConfigDelta`] from a raw JSON value, tolerating schema
-/// changes.
+/// changes within the `delta` subtree.
 ///
+/// The `op` field selects the variant: absent (which covers every event written
+/// before the reset variant existed) or `"apply"` decodes as
+/// [`ConfigDelta::Apply`]; `"reset"` decodes as [`ConfigDelta::Reset`].
 /// Delegates to [`deserialize_partial_config`] for the `delta` subtree and
 /// extracts the timestamp separately.
-pub(crate) fn deserialize_config_delta(value: &Value) -> ConfigDelta {
-    let delta = value
-        .get("delta")
-        .cloned()
-        .map_or_else(PartialAppConfig::empty, deserialize_partial_config);
-
+///
+/// # Errors
+///
+/// Returns an error for any other `op` value: an op added by a newer version
+/// must fail loudly here instead of being misread as an apply and corrupting
+/// config resolution.
+pub(crate) fn deserialize_config_delta(value: &Value) -> Result<ConfigDelta, String> {
     let timestamp = value
         .get("timestamp")
         .and_then(Value::as_str)
         .and_then(|s| crate::parse_dt(s).ok())
         .unwrap_or_else(Utc::now);
 
-    ConfigDelta {
+    if let Some(op) = value.get("op") {
+        if op == "reset" {
+            return Ok(ConfigDelta::Reset(ResetDelta { timestamp }));
+        }
+
+        if op != "apply" {
+            return Err(format!("unknown config delta `op`: {op}"));
+        }
+    }
+
+    let delta = value
+        .get("delta")
+        .cloned()
+        .map_or_else(PartialAppConfig::empty, deserialize_partial_config);
+
+    Ok(ConfigDelta::Apply(ApplyDelta {
         timestamp,
         delta: Box::new(delta),
+    }))
+}
+
+/// Fold a single [`ConfigDelta`] into an accumulated partial config state.
+///
+/// [`Apply`] merges the delta on top of `state`.
+/// [`Reset`] discards `state`, restarting from the empty partial
+/// (`PartialAppConfig::default()`); program defaults are injected when the
+/// partial is finalized into an [`AppConfig`].
+///
+/// [`Apply`]: ConfigDelta::Apply
+/// [`Reset`]: ConfigDelta::Reset
+fn fold_config_delta(state: &mut PartialAppConfig, delta: ConfigDelta) -> Result<(), ConfigError> {
+    match delta {
+        ConfigDelta::Apply(apply) => state.merge(&(), *apply.delta),
+        ConfigDelta::Reset(_) => {
+            *state = PartialAppConfig::default();
+            Ok(())
+        }
     }
 }
 
@@ -318,6 +396,10 @@ impl ConversationStream {
     /// in the stream from first to last, including any delta's that come
     /// *after* the last conversation event.
     ///
+    /// A [`Reset`] delta discards everything accumulated before it, including
+    /// the base configuration's contribution; resolution restarts from program
+    /// defaults.
+    ///
     /// If you need the configuration state of the last event in the stream, use
     /// [`ConversationStream::last`], which returns a
     /// [`ConversationEventWithConfig`]. containing the `config` field for that
@@ -326,6 +408,8 @@ impl ConversationStream {
     /// # Errors
     ///
     /// Returns an error if the merged configuration is invalid.
+    ///
+    /// [`Reset`]: ConfigDelta::Reset
     pub fn config(&self) -> Result<AppConfig, StreamError> {
         let mut partial = self.base_config.to_partial();
         let iter = self.events.iter().filter_map(|event| match event {
@@ -336,7 +420,7 @@ impl ConversationStream {
         });
 
         for delta in iter {
-            partial.merge(&(), delta.into())?;
+            fold_config_delta(&mut partial, delta)?;
         }
 
         AppConfig::from_partial_with_defaults(partial).map_err(Into::into)
@@ -380,25 +464,70 @@ impl ConversationStream {
 
     /// Add a config delta to the stream.
     ///
-    /// This is a no-op if the delta is empty.
+    /// An [`Apply`] delta is reduced to its diff against the stream's current
+    /// config state; if the diff is empty, nothing is appended.
+    /// A [`Reset`] is always appended: it carries no diff to suppress, and its
+    /// presence in the stream is the point.
+    ///
+    /// [`Apply`]: ConfigDelta::Apply
+    /// [`Reset`]: ConfigDelta::Reset
     pub fn add_config_delta(&mut self, delta: impl Into<ConfigDelta>) {
-        let ConfigDelta { delta, timestamp } = delta.into();
-        let delta = match self.config() {
-            Ok(config) => config.to_partial().delta(*delta),
-            Err(error) => {
-                error!(%error, "Unable to get valid config from conversation stream.");
-                return;
+        let delta = match delta.into() {
+            ConfigDelta::Apply(ApplyDelta { delta, timestamp }) => {
+                let delta = match self.config() {
+                    Ok(config) => config.to_partial().delta(*delta),
+                    Err(error) => {
+                        error!(%error, "Unable to get valid config from conversation stream.");
+                        return;
+                    }
+                };
+
+                if delta.is_empty() {
+                    return;
+                }
+
+                ConfigDelta::Apply(ApplyDelta {
+                    delta: Box::new(delta),
+                    timestamp,
+                })
             }
+            reset @ ConfigDelta::Reset(_) => reset,
         };
 
-        if delta.is_empty() {
-            return;
-        }
+        self.events.push(InternalEvent::ConfigDelta(delta));
+    }
 
-        self.events.push(InternalEvent::ConfigDelta(ConfigDelta {
-            delta: Box::new(delta),
-            timestamp,
-        }));
+    /// Append a config reset point followed by the state layered on top of it.
+    ///
+    /// Writes the reset-then-layer sequence as-is: the [`Reset`] is always
+    /// appended, then each non-empty layer as an [`Apply`].
+    /// No diff-suppression runs — between the `Reset` and whichever layer
+    /// restores the required fields, the stream may not resolve to a valid
+    /// configuration, so the suppression path in [`Self::add_config_delta`]
+    /// (which resolves the stream's current config) cannot run.
+    ///
+    /// This is the only way to append an `Apply` without diff-suppression:
+    /// tying the verbatim writes to a preceding `Reset` keeps the
+    /// reset-then-layer invariant enforced at the API level.
+    ///
+    /// [`Apply`]: ConfigDelta::Apply
+    /// [`Reset`]: ConfigDelta::Reset
+    pub fn add_config_reset(
+        &mut self,
+        reset: ResetDelta,
+        layers: impl IntoIterator<Item = ApplyDelta>,
+    ) {
+        self.events
+            .push(InternalEvent::ConfigDelta(ConfigDelta::Reset(reset)));
+
+        for layer in layers {
+            if layer.delta.is_empty() {
+                continue;
+            }
+
+            self.events
+                .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(layer)));
+        }
     }
 
     /// Add a config delta to the stream.
@@ -1212,7 +1341,7 @@ impl Extend<ConversationEventWithConfig> for ConversationStream {
             let config_delta = tail.delta(config.clone());
 
             if !config_delta.is_empty() {
-                self.add_config_delta(ConfigDelta {
+                self.add_config_delta(ApplyDelta {
                     delta: Box::new(config_delta),
                     timestamp: event.timestamp,
                 });
@@ -1263,7 +1392,7 @@ impl Iterator for IntoIter {
 
             match event {
                 InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = self.current_config.merge(&(), delta.into()) {
+                    if let Err(error) = fold_config_delta(&mut self.current_config, delta) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -1302,7 +1431,7 @@ impl DoubleEndedIterator for IntoIter {
                     // config.
                     for internal_event in self.inner_iter.as_slice() {
                         if let InternalEvent::ConfigDelta(delta) = internal_event
-                            && let Err(error) = config.merge(&(), delta.clone().into())
+                            && let Err(error) = fold_config_delta(&mut config, delta.clone())
                         {
                             error!(%error, "Failed to merge config delta.");
                         }
@@ -1343,7 +1472,7 @@ impl<'a> Iterator for Iter<'a> {
 
             match event {
                 InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = self.front_config.merge(&(), delta.clone().into()) {
+                    if let Err(error) = fold_config_delta(&mut self.front_config, delta.clone()) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -1374,7 +1503,7 @@ impl DoubleEndedIterator for Iter<'_> {
             let mut config = self.stream.base_config.to_partial();
             for internal_event in &self.stream.events[..self.back] {
                 if let InternalEvent::ConfigDelta(delta) = internal_event
-                    && let Err(error) = config.merge(&(), delta.clone().into())
+                    && let Err(error) = fold_config_delta(&mut config, delta.clone())
                 {
                     error!(%error, "Failed to merge config delta.");
                 }
@@ -1403,7 +1532,7 @@ impl<'a> Iterator for IterMut<'a> {
         for event in self.iter.by_ref() {
             match event {
                 InternalEvent::ConfigDelta(delta) => {
-                    if let Err(error) = self.front_config.merge(&(), delta.clone().into()) {
+                    if let Err(error) = fold_config_delta(&mut self.front_config, delta.clone()) {
                         error!(%error, "Failed to merge config delta.");
                     }
                 }
@@ -1726,7 +1855,9 @@ impl<'de> Deserialize<'de> for InternalEvent {
             .unwrap_or_default();
 
         if tag == "config_delta" {
-            return Ok(Self::ConfigDelta(deserialize_config_delta(&value)));
+            return deserialize_config_delta(&value)
+                .map(Self::ConfigDelta)
+                .map_err(serde::de::Error::custom);
         }
 
         if tag == "compaction" {

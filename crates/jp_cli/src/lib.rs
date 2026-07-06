@@ -61,7 +61,7 @@ use crate::{
         plugin::dispatch::{describe_plugin, discover_plugins},
         target::resolve_request,
     },
-    config_pipeline::ConfigPipeline,
+    config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents},
     timer::{LineTimer, spawn_line_timer},
 };
 
@@ -113,6 +113,13 @@ struct Globals {
         value_parser = KeyValueOrPath::from_str,
     )]
     config: Vec<KeyValueOrPath>,
+
+    /// Shorthand for `--cfg=NONE`: skip implicit config loading and start from
+    /// program defaults.
+    ///
+    /// Subsequent `--cfg` values layer on top of the defaults.
+    #[arg(long = "no-cfg", global = true, default_value_t = false)]
+    no_config: bool,
 
     /// Increase verbosity of logging.
     ///
@@ -210,10 +217,21 @@ pub(crate) enum LogFormat {
     Json,
 }
 
+/// A reserved UPPERCASE `--cfg` keyword naming a config reset point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CfgKeyword {
+    /// `NONE`: reset to program defaults, and skip implicit config loading for
+    /// the whole invocation.
+    None,
+    /// `WORKSPACE`: reset to the workspace's resolved config.
+    Workspace,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) enum KeyValueOrPath {
     KeyValue(KvAssignment),
     Path(Utf8PathBuf),
+    Keyword(CfgKeyword),
 }
 
 impl FromStr for KeyValueOrPath {
@@ -223,6 +241,17 @@ impl FromStr for KeyValueOrPath {
         // String prefixed with `@` is always a path.
         if let Some(s) = s.strip_prefix(PATH_STRING_PREFIX) {
             return Ok(Self::Path(Utf8PathBuf::from(s.trim())));
+        }
+
+        // Reserved UPPERCASE keywords are matched exactly, before any other
+        // resolution.
+        // A file literally named `NONE` or `WORKSPACE` is reachable through
+        // the `@` prefix above or a path-style prefix such as `./NONE`.
+        if s == "NONE" {
+            return Ok(Self::Keyword(CfgKeyword::None));
+        }
+        if s == "WORKSPACE" {
+            return Ok(Self::Keyword(CfgKeyword::Workspace));
         }
 
         // A JSON object is treated as a root-level config assignment that
@@ -412,11 +441,19 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // individual conversations, this is done lazily as needed.
     workspace.load_conversation_index();
 
-    let base = load_base_partial(fs_backend.as_deref())?;
-    let (config, handles, start_new) = resolve_config(
+    // `--no-cfg` is shorthand for a leading `--cfg=NONE`, applied to config
+    // resolution only. `Globals.config` stays as the user typed it: commands
+    // re-consume the raw `--cfg` args (e.g. `config set` persists them), and
+    // must not see a synthetic reset keyword they'd have to reject
+    // ([RFD 038]).
+    //
+    // [RFD 038]: https://jp.computer/rfd/038
+    let cfg_overrides = effective_cfg_overrides(&cli.globals);
+
+    let (config, handles, start_new, config_reset) = resolve_config(
         &cli.command,
-        base,
-        &cli.globals.config,
+        || load_base_partial(fs_backend.as_deref()),
+        &cfg_overrides,
         &mut workspace,
         session.as_ref(),
         fs_backend.as_deref(),
@@ -432,6 +469,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         session,
         printer,
     );
+    ctx.config_reset = config_reset;
     let rt = ctx.handle().clone();
 
     // Run the requested command, racing it against the shutdown token.
@@ -665,24 +703,36 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
 
 /// Resolve the final [`AppConfig`] and conversation handles.
 ///
-/// Takes a pre-loaded base partial (from config files + env) and runs the full
-/// config pipeline:
+/// Takes a loader for the base partial (the `files + env` layer) and runs the
+/// full config pipeline:
 ///
-/// 1. Extract `default_id` for conversation resolution (loading-time only).
-/// 2. Resolve conversation handles from the command's load request.
-/// 3. Merge per-conversation config layer.
-/// 4. Apply CLI flag overrides via [`IntoPartialAppConfig`].
-/// 5. Consume `default_id` so it doesn't leak into the runtime config.
-/// 6. Build the final [`AppConfig`].
+/// 1. Build the [`ConfigPipeline`], which invokes `load_base` unless a
+///    `--cfg=NONE` keyword skips implicit loading ([RFD 038]).
+/// 2. Extract `default_id` for conversation resolution (loading-time only).
+/// 3. Resolve conversation handles from the command's load request.
+/// 4. Merge per-conversation config layer.
+/// 5. Apply CLI flag overrides via [`IntoPartialAppConfig`].
+/// 6. Consume `default_id` so it doesn't leak into the runtime config.
+/// 7. Build the final [`AppConfig`].
+///
+/// [RFD 038]: https://jp.computer/rfd/038
 pub(crate) fn resolve_config(
     command: &Commands,
-    base: PartialAppConfig,
+    load_base: impl FnOnce() -> Result<PartialAppConfig>,
     cfg_overrides: &[KeyValueOrPath],
     workspace: &mut Workspace,
     session: Option<&jp_workspace::session::Session>,
     fs: Option<&FsStorageBackend>,
-) -> Result<(AppConfig, Vec<jp_workspace::ConversationHandle>, bool)> {
-    let pipeline = ConfigPipeline::new(base, cfg_overrides, Some(workspace), fs)?;
+) -> Result<(
+    AppConfig,
+    Vec<jp_workspace::ConversationHandle>,
+    bool,
+    Option<ConfigResetEvents>,
+)> {
+    let pipeline = ConfigPipeline::new(cfg_overrides, Some(workspace), fs, load_base)?;
+
+    // The effective reset point of this invocation, if any ([RFD 038]).
+    let config_reset = pipeline.config_reset();
 
     // Extract default_id — a loading-time concern consumed here, not
     // propagated to the runtime config.
@@ -703,20 +753,27 @@ pub(crate) fn resolve_config(
     let handles = outcome.handles;
 
     // Phase 2: per-conversation layer.
+    //
+    // Skipped when this invocation contains a reset point: the reset discards
+    // everything accumulated before it — including this layer — and resolving
+    // the stream's current config can itself fail, which must not block the
+    // reset (recovering from broken conversation config is a reset use case,
+    // [RFD 038]).
     let config_handle = request.config_conversation.and_then(|idx| handles.get(idx));
-    if let Some(handle) = config_handle
-        && let Err(error) = workspace.eager_load_conversation(handle)
-    {
-        tracing::warn!(error = ?error, "Failed to eager-load conversation.");
-    }
+    let conversation_partial = match config_handle {
+        Some(handle) if config_reset.is_none() => {
+            if let Err(error) = workspace.eager_load_conversation(handle) {
+                tracing::warn!(error = ?error, "Failed to eager-load conversation.");
+            }
 
-    let conversation_partial = config_handle
-        .map(|handle| {
-            command
-                .apply_conversation_config(workspace, PartialAppConfig::default(), None, handle)
-                .map_err(|error| Error::CliConfig(error.to_string()))
-        })
-        .transpose()?;
+            Some(
+                command
+                    .apply_conversation_config(workspace, PartialAppConfig::default(), None, handle)
+                    .map_err(|error| Error::CliConfig(error.to_string()))?,
+            )
+        }
+        _ => None,
+    };
 
     let mut partial = match conversation_partial {
         Some(conversation_config) => pipeline.partial_with_conversation(conversation_config)?,
@@ -731,8 +788,53 @@ pub(crate) fn resolve_config(
     // Consume default_id so it doesn't appear in the runtime config.
     partial.conversation.default_id.take();
 
+    // Capture this invocation's final partial for the reset persistence
+    // payload, before `build` consumes it.
+    let post_partial = config_reset.as_ref().map(|_| partial.clone());
+
     let config = build(partial)?;
-    Ok((config, handles, outcome.start_new))
+
+    // Assemble the reset point for conversation persistence ([RFD 038]): a
+    // continuing conversation records the reset, and whatever this invocation
+    // layered on top of it, into its event stream.
+    //
+    // Both layers resolve model aliases against the final config's flattened
+    // alias map (built by `build` above) before capture: partials stored as
+    // conversation config deltas must contain resolved model IDs (see
+    // [`PartialAppConfig::resolve_model_aliases`]), because the stream's own
+    // config resolution never resolves aliases.
+    let config_reset = config_reset.map(|mut reset| {
+        let aliases = &config.providers.llm.aliases;
+        if let ConfigReset::Workspace(workspace) = &mut reset {
+            workspace.resolve_model_aliases(aliases);
+        }
+
+        let mut post = post_partial.expect("captured when a reset point is present");
+        post.resolve_model_aliases(aliases);
+
+        ConfigResetEvents {
+            post: Box::new(reset.state().delta(post)),
+            reset,
+        }
+    });
+
+    Ok((config, handles, outcome.start_new, config_reset))
+}
+
+/// The `--cfg` directive list used for config resolution.
+///
+/// Prepends the `NONE` keyword when `--no-cfg` is set, without mutating
+/// [`Globals::config`]: the raw `--cfg` args are re-consumed by commands (e.g.
+/// `config set` persisting them), which reject reset keywords ([RFD 038]).
+///
+/// [RFD 038]: https://jp.computer/rfd/038
+fn effective_cfg_overrides(globals: &Globals) -> Vec<KeyValueOrPath> {
+    let mut overrides = Vec::with_capacity(globals.config.len() + 1);
+    if globals.no_config {
+        overrides.push(KeyValueOrPath::Keyword(CfgKeyword::None));
+    }
+    overrides.extend(globals.config.iter().cloned());
+    overrides
 }
 
 /// Load the base partial config from files and environment variables.

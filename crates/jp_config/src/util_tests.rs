@@ -737,6 +737,63 @@ fn test_load_partial_at_path_diamond_is_not_a_cycle() {
 }
 
 #[test]
+fn test_load_loader_directives_reads_own_section() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("entry.toml"),
+        indoc::indoc!(
+            r#"
+                [loader]
+                reset = "none"
+            "#
+        ),
+    );
+
+    let loader = load_loader_directives(root.join("entry.toml")).unwrap();
+    assert_eq!(loader.reset, Some(crate::loader::LoaderReset::None));
+
+    write_config(&root.join("plain.toml"), "assistant.system_prompt = \"p\"");
+    let loader = load_loader_directives(root.join("plain.toml")).unwrap();
+    assert_eq!(loader.reset, None);
+}
+
+#[test]
+fn test_load_loader_directives_ignores_extends() {
+    // The read is shallow: `[loader]` in a file reached through `extends`
+    // must not affect the declaring entry ([RFD 038]).
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("entry.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["fragment.toml"]
+            "#
+        ),
+    );
+    write_config(
+        &root.join("fragment.toml"),
+        indoc::indoc!(
+            r#"
+                [loader]
+                reset = "none"
+            "#
+        ),
+    );
+
+    let loader = load_loader_directives(root.join("entry.toml")).unwrap();
+    assert_eq!(loader.reset, None);
+
+    // The full load, by contrast, merges the fragment's section into the
+    // resolved partial; the pipeline strips it after reading directives.
+    let partial = load_partial_at_path(root.join("entry.toml"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(partial.loader.reset, Some(crate::loader::LoaderReset::None));
+}
+
+#[test]
 fn test_vec_dedup_preserves_order() {
     let result = vec_dedup(vec![3, 1, 2, 1, 3, 4], &()).unwrap();
     assert_eq!(result, vec![3, 1, 2, 4]);
