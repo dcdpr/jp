@@ -167,9 +167,8 @@ impl TurnRenderer {
                     // Chrome visibility mirrors the live path so replay honors
                     // the same settings: global `style.tool_call.show`, the
                     // JSON format, and the per-tool `hidden` flag.
-                    let chrome_visible = self.tool_chrome_shown
-                        && !self.printer.format().is_json()
-                        && !style.hidden;
+                    let chrome_visible =
+                        self.tool_chrome_shown && !self.printer.format().is_json() && !style.hidden;
                     let region = self.view.enter_tool_call_region(chrome_visible);
                     self.tool.set_region(&req.id, region);
 
