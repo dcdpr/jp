@@ -12,6 +12,11 @@ invoked as a subprocess with the given arguments. Output is returned as-is
 Path arguments are sandboxed to the workspace root — absolute paths and
 `..` traversals that escape the workspace are rejected.
 
+All utilities are read-only, except `touch`, which may create empty files
+and update file timestamps within the workspace. Use bare `touch <paths>`
+only — avoid `-t`/`-d`/`-r` timestamp flags, as backdated timestamps can
+silently corrupt build-system freshness tracking.
+
 See the `util` parameter enum values for the list of available tools.
 """
 
@@ -90,6 +95,12 @@ Print OS and architecture:
 ```json
 {"util": "uname", "args": "-sm"}
 ```
+
+Create an empty file, or bump a file's mtime (e.g. to force a rebuild of a
+crate whose artifacts are stale in a shared build cache):
+```json
+{"util": "touch", "args": ["crates/jp_cli/src/main.rs"]}
+```
 """
 
 [conversation.tools.unix_utils.style]
@@ -108,9 +119,11 @@ enum = [
     "file",
     "head",
     "jq",
+    "nl",
     "shasum",
     "sort",
     "tail",
+    "touch",
     "uname",
     "uniq",
     "uuidgen",

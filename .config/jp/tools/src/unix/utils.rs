@@ -14,9 +14,16 @@ use crate::{
 };
 
 const ALLOWED_UTILS: &[&str] = &[
-    "base64", "bc", "date", "file", "head", "jq", "shasum", "sort", "tail", "uname", "uniq",
-    "uuidgen", "wc", "nl",
+    "base64", "bc", "date", "file", "head", "jq", "nl", "shasum", "sort", "tail", "touch", "uname",
+    "uniq", "uuidgen", "wc",
 ];
+
+/// Utilities allowed to write inside the workspace.
+///
+/// Everything else runs under a read-only sandbox profile.
+/// `touch` only manipulates file metadata (create empty files, update mtimes)
+/// — it can never write or truncate file contents.
+const WRITE_UTILS: &[&str] = &["touch"];
 
 /// Truncate output beyond this limit to avoid burning tokens on huge results.
 const MAX_OUTPUT_BYTES: usize = 100_000;
@@ -233,6 +240,8 @@ fn scan_fragment(
 /// - Transitive library directories — from `otool -L`.
 /// - Per-util extra paths — e.g. timezone data for `date`.
 ///
+/// Utilities in [`WRITE_UTILS`] additionally get write access to the workspace
+/// root.
 /// Everything else (writes, network, `/Users`, `/tmp`, `/home`, etc.) is
 /// denied.
 fn sandbox_profile(
@@ -268,15 +277,30 @@ fn sandbox_profile(
         subpaths.push_str(&format!("    (subpath \"{p}\")\n"));
     }
 
-    Ok(Some(format!(
-        "(version 1)\n\
-         (deny default)\n\
-         (allow process*)\n\
-         (allow sysctl*)\n\
-         (allow file-read*\n\
-         \x20   (literal \"/\")\n\
-         {subpaths})"
-    )))
+    let mut profile = format!(
+            "(version 1)\n(deny default)\n(allow process*)\n(allow sysctl*)\n(allow \
+             file-read*\n\x20   (literal \"/\")\n{subpaths})"
+        );
+
+    if WRITE_UTILS.contains(&util) {
+        // Seatbelt evaluates write checks against canonical paths, so a
+        // workspace root reached through a symlink (e.g. `/var/folders` →
+        // `/private/var/folders`) must be allowed in both spellings.
+        let mut write_paths = vec![workspace_root.to_string()];
+        if let Ok(canonical) = std::fs::canonicalize(workspace_root)
+            && canonical != workspace_root.as_std_path()
+        {
+            write_paths.push(canonical.to_string_lossy().into_owned());
+        }
+
+        let mut write_subpaths = String::new();
+        for p in &write_paths {
+            write_subpaths.push_str(&format!("    (subpath \"{p}\")\n"));
+        }
+        profile.push_str(&format!("\n(allow file-write*\n{write_subpaths})"));
+    }
+
+    Ok(Some(profile))
 }
 
 /// Additional read paths required by specific utilities that cannot be

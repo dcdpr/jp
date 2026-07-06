@@ -25,7 +25,7 @@ fn test_cargo_expand_success() {
 
     let runner = MockProcessRunner::success(stdout);
 
-    let result = cargo_expand_impl(&ctx, "main", None, &runner).unwrap();
+    let result = cargo_expand_impl(&ctx, "main", None, false, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {r#"
             ```rust

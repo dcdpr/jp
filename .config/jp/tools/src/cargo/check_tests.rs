@@ -47,7 +47,7 @@ fn test_cargo_check_with_warnings() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {r#"
             ```
@@ -77,7 +77,7 @@ fn test_cargo_check_no_warnings() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
 
     assert_eq!(
         result.into_content().unwrap(),
@@ -100,7 +100,7 @@ fn clean_clippy_with_comfort_drift_appends_note() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
             Check succeeded. No warnings or errors found.
@@ -129,7 +129,7 @@ fn clippy_warnings_and_comfort_drift_are_both_reported() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
             ```
@@ -154,7 +154,7 @@ fn comfort_real_failure_is_reported_as_error() {
             status: ExitCode::from_code(2),
         });
 
-    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "comfort failed: comfort: parse error");
@@ -175,7 +175,7 @@ fn clippy_failure_short_circuits_before_running_comfort() {
             status: ExitCode::from_code(101),
         });
 
-    let result = cargo_check_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "Cargo command failed: error: build failed");
@@ -212,7 +212,7 @@ fn package_scope_is_passed_through_to_both_tools() {
         ])
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx, Some("my_pkg"), &runner).unwrap();
+    let result = cargo_check_impl(&ctx, Some("my_pkg"), false, &runner).unwrap();
     assert_eq!(
         result.into_content().unwrap(),
         "Check succeeded. No warnings or errors found."

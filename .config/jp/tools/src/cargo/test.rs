@@ -22,12 +22,14 @@ pub(crate) async fn cargo_test(
     package: Option<String>,
     testname: Option<String>,
     backtrace: Option<bool>,
+    checksum_freshness: bool,
 ) -> ToolResult {
     cargo_test_impl(
         ctx,
         package,
         testname,
         backtrace.unwrap_or(false),
+        checksum_freshness,
         &DuctProcessRunner,
     )
 }
@@ -37,10 +39,23 @@ fn cargo_test_impl<R: ProcessRunner>(
     package: Option<String>,
     testname: Option<String>,
     backtrace: bool,
+    checksum_freshness: bool,
     runner: &R,
 ) -> ToolResult {
     let test_name = testname.unwrap_or_default();
     let package = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
+
+    let mut env = vec![
+        ("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1"),
+        ("RUST_BACKTRACE", if backtrace { "1" } else { "0" }),
+    ];
+    if checksum_freshness {
+        // Use content checksums instead of file mtimes for cargo's freshness
+        // checks, so that sibling checkouts (git worktrees) sharing a target
+        // dir cannot serve each other's stale artifacts. Matches CI. Requires
+        // nightly cargo. See rust-lang/cargo#14136.
+        env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
+    }
 
     let ProcessOutput { stdout, stderr, .. } = runner.run_with_env(
         "cargo",
@@ -61,10 +76,7 @@ fn cargo_test_impl<R: ProcessRunner>(
             &test_name,
         ],
         &ctx.root,
-        &[
-            ("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1"),
-            ("RUST_BACKTRACE", if backtrace { "1" } else { "0" }),
-        ],
+        &env,
     )?;
 
     let mut total_tests = 0;
