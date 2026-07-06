@@ -1,4 +1,4 @@
-# RFD 088: Reasoning-region shading across tool calls
+# RFD 095: Reasoning-region shading across tool calls
 
 - **Status**: Implemented
 - **Category**: Design
@@ -196,13 +196,14 @@ That logic is `pub(crate)` and welded to the wrap pipeline.
 This RFD lifts it into a reusable, stateful **`ShadedWriter`** decorator:
 
 ```rust
-/// Wraps a writer and maintains a default-background invariant across the
-/// byte stream, preserving any background the content sets itself. The tracked
-/// `AnsiState` persists across writes.
+/// Wraps a writer and maintains a default-background invariant across the byte
+/// stream, preserving any background the content sets itself.
+/// The tracked `AnsiState` persists across writes.
 pub struct ShadedWriter<W: Write> { /* … */ }
 
-/// Convenience: run a `ShadedWriter` over a buffer. Used by replay and tests;
-/// the live path uses the streaming decorator directly.
+/// Convenience: run a `ShadedWriter` over a buffer.
+/// Used by replay and tests; the live path uses the streaming decorator
+/// directly.
 pub fn shade(text: &str, background: &DefaultBackground) -> String;
 ```
 
