@@ -10,6 +10,10 @@ summary = "Search the git commit history."
 description = """
 Returns a list of commits matching the given filters. Each entry includes the short hash, author, \
 date, and subject line. Use `git_show` to inspect a specific commit in detail.
+
+Two distinct search modes: `query` matches against commit *messages*, while `content` finds \
+commits whose *diff* adds or removes a string (git pickaxe, `-S`). To find when a line of code \
+was introduced or deleted, use `content` (or `git_blame` for lines still present).
 """
 
 examples = """
@@ -18,9 +22,19 @@ List recent commits:
 {}
 ```
 
-Search for commits mentioning a topic:
+Search for commits mentioning a topic in their message:
 ```json
 {"query": "streaming", "count": 10}
+```
+
+Find when a piece of code was added or removed:
+```json
+{"content": "c == '/'", "paths": ["crates/jp_config/src/model/id.rs"]}
+```
+
+Find commits touching diff lines matching a regex:
+```json
+{"content": "fn from_str\\(", "content_regex": true, "paths": ["crates/jp_config/src/model/id.rs"]}
 ```
 
 Commits touching a specific file:
@@ -41,7 +55,16 @@ Combine filters:
 
 [conversation.tools.git_log.parameters.query]
 type = "string"
-summary = "Search string matched against commit messages (substring match)."
+summary = "Search string matched against commit *messages* (substring match). Does NOT search file contents; use `content` for that."
+
+[conversation.tools.git_log.parameters.content]
+type = "string"
+summary = "Find commits whose diff adds or removes this exact string (git pickaxe, `-S`)."
+
+[conversation.tools.git_log.parameters.content_regex]
+type = "boolean"
+default = false
+summary = "Treat `content` as a POSIX extended regex matched against added/removed diff lines (`git log -G`)"
 
 [conversation.tools.git_log.parameters.paths]
 type = "array"

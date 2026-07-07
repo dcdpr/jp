@@ -41,7 +41,7 @@ fn basic_log() {
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::success(sample_log_output());
 
-    let content = git_log_impl(dir.path(), None, &[], 20, None, &runner, &[])
+    let content = git_log_impl(dir.path(), None, None, false, &[], 20, None, &runner, &[])
         .unwrap()
         .into_content()
         .unwrap();
@@ -67,12 +67,95 @@ fn log_with_query() {
         ])
         .returns_success(sample_log_output());
 
-    let content = git_log_impl(dir.path(), Some("widget"), &[], 20, None, &runner, &[])
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let content = git_log_impl(
+        dir.path(),
+        Some("widget"),
+        None,
+        false,
+        &[],
+        20,
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
 
     assert!(content.contains("abc123"));
+}
+
+#[test]
+fn log_with_content() {
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "log",
+            &format!("--format={LOG_FORMAT}"),
+            "-n",
+            "20",
+            "-Sc == '/'",
+        ])
+        .returns_success(sample_log_output());
+
+    let content = git_log_impl(
+        dir.path(),
+        None,
+        Some("c == '/'"),
+        false,
+        &[],
+        20,
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
+
+    assert!(content.contains("abc123"));
+}
+
+#[test]
+fn log_with_content_regex() {
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::builder()
+        .expect("git")
+        .args(&[
+            "log",
+            &format!("--format={LOG_FORMAT}"),
+            "-n",
+            "20",
+            "-Gfn from_str\\(",
+        ])
+        .returns_success(sample_log_output());
+
+    let content = git_log_impl(
+        dir.path(),
+        None,
+        Some("fn from_str\\("),
+        true,
+        &[],
+        20,
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
+
+    assert!(content.contains("abc123"));
+}
+
+#[test]
+fn log_content_regex_without_content_errors() {
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::never_called();
+
+    let outcome = git_log_impl(dir.path(), None, None, true, &[], 20, None, &runner, &[]).unwrap();
+    assert!(outcome.into_content().is_none(), "expected error outcome");
 }
 
 #[test]
@@ -90,10 +173,20 @@ fn log_with_paths() {
         ])
         .returns_success(sample_log_output());
 
-    let content = git_log_impl(dir.path(), None, &["src/main.rs"], 10, None, &runner, &[])
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let content = git_log_impl(
+        dir.path(),
+        None,
+        None,
+        false,
+        &["src/main.rs"],
+        10,
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
 
     assert!(content.contains("abc123"));
 }
@@ -112,10 +205,20 @@ fn log_with_since() {
         ])
         .returns_success(sample_log_output());
 
-    let content = git_log_impl(dir.path(), None, &[], 20, Some("2 weeks ago"), &runner, &[])
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let content = git_log_impl(
+        dir.path(),
+        None,
+        None,
+        false,
+        &[],
+        20,
+        Some("2 weeks ago"),
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
 
     assert!(content.contains("abc123"));
 }
@@ -125,12 +228,60 @@ fn log_empty_result() {
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::success("");
 
-    let content = git_log_impl(dir.path(), None, &[], 20, None, &runner, &[])
+    let content = git_log_impl(dir.path(), None, None, false, &[], 20, None, &runner, &[])
         .unwrap()
         .into_content()
         .unwrap();
 
-    assert_eq!(content, "No commits found matching the query.");
+    assert_eq!(content, "No commits found matching the given filters.");
+}
+
+#[test]
+fn log_empty_result_with_query_hints_at_content_param() {
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::success("");
+
+    let content = git_log_impl(
+        dir.path(),
+        Some("c == '/'"),
+        None,
+        false,
+        &[],
+        20,
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
+
+    assert!(content.starts_with("No commits found matching the given filters."));
+    assert!(content.contains("`query` matches commit *messages* only"));
+    assert!(content.contains("`content` parameter"));
+}
+
+#[test]
+fn log_empty_result_with_content_has_no_hint() {
+    let dir = tempdir().unwrap();
+    let runner = MockProcessRunner::success("");
+
+    let content = git_log_impl(
+        dir.path(),
+        None,
+        Some("widget"),
+        false,
+        &[],
+        20,
+        None,
+        &runner,
+        &[],
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
+
+    assert_eq!(content, "No commits found matching the given filters.");
 }
 
 #[test]
@@ -138,7 +289,7 @@ fn log_git_error() {
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::error("fatal: bad revision");
 
-    let outcome = git_log_impl(dir.path(), None, &[], 20, None, &runner, &[]).unwrap();
+    let outcome = git_log_impl(dir.path(), None, None, false, &[], 20, None, &runner, &[]).unwrap();
     assert!(outcome.into_content().is_none(), "expected error outcome");
 }
 
