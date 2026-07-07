@@ -165,15 +165,16 @@ fn tool_interrupt_restart_returns_restart() {
 }
 
 #[test]
-fn tool_interrupt_cancelled_returns_cancelled_with_canned_response() {
+fn tool_interrupt_cancelled_empty_reply_has_no_custom_message() {
     let printer = make_printer();
     let token = CancellationToken::new();
     let mut turn_coordinator = make_turn_coordinator();
     let mut stream = ConversationStream::new_test();
     turn_coordinator.start_turn(&mut stream, ChatRequest::from("test"));
 
-    // Mock user selecting 'r' (Stop & respond) then submitting empty — canned
-    // response.
+    // Mock user selecting 'r' (Stop & respond) then submitting empty — no
+    // custom message; the coordinator fills in each tool's configured
+    // cancellation response.
     let backend = MockPromptBackend::new()
         .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
@@ -190,8 +191,12 @@ fn tool_interrupt_cancelled_returns_cancelled_with_canned_response() {
     );
 
     assert_matches!(
-        result, ToolInterruptResult::Cancelled { ref response } if response.contains("intentionally rejected"),
-        "Expected Cancelled with canned response, got {result:?}",
+        result,
+        ToolInterruptResult::Cancelled {
+            response: None,
+            exit: false
+        },
+        "Expected Cancelled without a custom message, got {result:?}",
     );
     assert!(token.is_cancelled(), "Cancel should stop current execution");
 }
@@ -221,7 +226,8 @@ fn tool_interrupt_cancelled_with_custom_response() {
     );
 
     assert_eq!(result, ToolInterruptResult::Cancelled {
-        response: "wrong tool, use grep instead".into()
+        response: Some("wrong tool, use grep instead".into()),
+        exit: false
     });
     assert!(token.is_cancelled(), "Cancel should stop current execution");
 }

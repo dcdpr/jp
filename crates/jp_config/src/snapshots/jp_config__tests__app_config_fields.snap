@@ -73,6 +73,7 @@ expression: "AppConfig::fields()"
     "conversation.default_id",
     "conversation.start_local",
     "conversation.tools",
+    "conversation.tools.*.cancellation_response",
     "conversation.tools.*.enable",
     "conversation.tools.*.format",
     "conversation.tools.*.result",
