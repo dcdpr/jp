@@ -1244,8 +1244,8 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
         let encoded_response = STANDARD.encode(CUSTOM_CANCELLATION_RESPONSE);
         assert!(
             content.contains(&encoded_response),
-            "Should contain the configured cancellation response \
-             (base64-encoded).\nFile contents:\n{content}"
+            "Should contain the configured cancellation response (base64-encoded).\nFile \
+             contents:\n{content}"
         );
     }))
     .await;
