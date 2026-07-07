@@ -997,6 +997,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1135,6 +1136,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
                 })]),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1467,6 +1469,7 @@ async fn test_tool_restart_on_interrupt() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1620,6 +1623,7 @@ async fn test_merged_stream_exits_after_tool_response() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1730,6 +1734,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1871,6 +1876,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2019,6 +2025,7 @@ async fn test_tool_call_with_run_mode_unattended() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2155,6 +2162,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2307,6 +2315,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
         // tool_unattended runs automatically
         config
@@ -2327,6 +2336,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2512,6 +2522,7 @@ async fn test_tool_call_returns_error() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3696,6 +3707,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
         config
             .conversation
@@ -3715,6 +3727,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3885,6 +3898,7 @@ async fn test_single_tool_call_rendered_with_args() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -4127,6 +4141,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
             .collect(),
         options: IndexMap::default(),
         access: None,
+        cancellation_response: None,
     }
 }
 
@@ -4427,6 +4442,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -4855,6 +4871,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));

@@ -200,21 +200,24 @@ fn tool_interrupt_stop_with_custom_response() {
     let action =
         handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
     assert_eq!(action, InterruptAction::ToolCancelled {
-        response: "don't run this tool".into()
+        response: Some("don't run this tool".into()),
+        exit: false
     });
 }
 
 #[test]
-fn tool_interrupt_stop_empty_uses_canned_response() {
-    // An empty reply falls through to the canned rejection message.
+fn tool_interrupt_stop_empty_sends_no_custom_message() {
+    // An empty reply cancels without a custom message; each tool then answers
+    // with its configured cancellation response.
     let backend = MockPromptBackend::new()
         .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit(String::new())]);
     let action =
         handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
-    assert!(
-        matches!(action, InterruptAction::ToolCancelled { response } if response.contains("intentionally rejected"))
-    );
+    assert_eq!(action, InterruptAction::ToolCancelled {
+        response: None,
+        exit: false
+    });
 }
 
 #[test]
@@ -230,17 +233,30 @@ fn tool_interrupt_reply_cancel_returns_to_menu() {
 }
 
 #[test]
-fn tool_interrupt_stop_whitespace_uses_canned_response() {
-    // A whitespace-only reply is treated as blank and falls through to the
-    // canned message, rather than sending a blank-looking tool response.
+fn tool_interrupt_stop_whitespace_sends_no_custom_message() {
+    // A whitespace-only reply is treated as blank and cancels without a
+    // custom message, rather than sending a blank-looking tool response.
     let backend = MockPromptBackend::new()
         .with_inline_responses(['r'])
         .with_reply_outcomes([ReplyOutcome::Submit("   \n\t ".into())]);
     let action =
         handler(backend).handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
-    assert!(
-        matches!(action, InterruptAction::ToolCancelled { response } if response.contains("intentionally rejected"))
-    );
+    assert_eq!(action, InterruptAction::ToolCancelled {
+        response: None,
+        exit: false
+    });
+}
+
+#[test]
+fn tool_interrupt_stop_exits_turn() {
+    // The `s` menu entry cancels the tools and ends the turn: no reply is
+    // collected, and `exit` is set.
+    let handler = handler(MockPromptBackend::new().with_inline_responses(['s']));
+    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
+    assert_eq!(action, InterruptAction::ToolCancelled {
+        response: None,
+        exit: true
+    });
 }
 
 #[test]
@@ -347,13 +363,24 @@ fn configured_tool_restart_skips_menu() {
 }
 
 #[test]
+fn configured_tool_stop_skips_menu() {
+    let action = handler(MockPromptBackend::new())
+        .handle_tool_interrupt(&tool(ToolInterruptAction::Stop), &make_printer());
+    assert_eq!(action, InterruptAction::ToolCancelled {
+        response: None,
+        exit: true
+    });
+}
+
+#[test]
 fn configured_tool_respond_uses_inline_prompt() {
     let backend =
         MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Submit("use ripgrep".into())]);
     let action = handler(backend)
         .handle_tool_interrupt(&tool(ToolInterruptAction::Respond), &make_printer());
     assert_eq!(action, InterruptAction::ToolCancelled {
-        response: "use ripgrep".into()
+        response: Some("use ripgrep".into()),
+        exit: false
     });
 }
 
@@ -367,15 +394,16 @@ fn tool_interrupt_menu_cancel_escalates() {
 }
 
 #[test]
-fn configured_tool_respond_cancel_uses_canned() {
+fn configured_tool_respond_cancel_sends_no_custom_message() {
     // A menu-less `respond` has no menu to return to, so `Ctrl+C` falls
-    // through to the canned message (it must not loop).
+    // through to cancellation without a custom message (it must not loop).
     let backend = MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Cancelled]);
     let action = handler(backend)
         .handle_tool_interrupt(&tool(ToolInterruptAction::Respond), &make_printer());
-    assert!(
-        matches!(action, InterruptAction::ToolCancelled { response } if response.contains("intentionally rejected"))
-    );
+    assert_eq!(action, InterruptAction::ToolCancelled {
+        response: None,
+        exit: false
+    });
 }
 
 #[test]

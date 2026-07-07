@@ -751,6 +751,22 @@ pub(super) async fn run_turn_loop(
                     return Err(cmd::Error::interrupted().into());
                 }
 
+                // The user chose "Stop (cancel & exit)" (or configured
+                // `interrupt.tool_call.action = "stop"`): the tools were
+                // cancelled and their cancellation responses filled in.
+                // Persist the responses so every tool call keeps a matching
+                // response, then end the turn without a follow-up request.
+                if execution_result.stopped {
+                    commit_tool_responses(
+                        execution_result,
+                        pre_resolved,
+                        &mut tool_coordinator,
+                        &mut turn_coordinator,
+                        &mut conv,
+                    )?;
+                    break;
+                }
+
                 if execution_result.restart_requested {
                     restart_requested = true;
                     continue;

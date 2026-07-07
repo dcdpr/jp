@@ -178,6 +178,13 @@ pub struct ExecutionResult {
     /// The running tools have been cancelled; the caller should begin a
     /// graceful shutdown.
     pub escalated: bool,
+
+    /// The user chose "Stop (cancel & exit)" (or configured
+    /// `interrupt.tool_call.action = "stop"`).
+    /// The running tools have been cancelled and their cancellation responses
+    /// filled in; the caller should record the responses and end the turn
+    /// without a follow-up request.
+    pub stopped: bool,
 }
 
 struct ExecutingTool {
@@ -575,6 +582,16 @@ impl ToolCoordinator {
             .is_some_and(|cfg| cfg.style().hidden)
     }
 
+    /// Return the response recorded for a cancelled call to `tool_name`: the
+    /// tool's configured `cancellation_response`, falling back to the global
+    /// default for unconfigured tools.
+    pub fn cancellation_response(&self, tool_name: &str) -> String {
+        self.tools_config.get(tool_name).map_or_else(
+            || self.tools_config.defaults.cancellation_response.clone(),
+            |config| config.cancellation_response().to_owned(),
+        )
+    }
+
     pub fn result_mode(&self, tool_name: &str) -> ResultMode {
         self.tools_config
             .get(tool_name)
@@ -854,6 +871,7 @@ impl ToolCoordinator {
                 responses: Vec::new(),
                 restart_requested: false,
                 escalated: false,
+                stopped: false,
             };
         }
 
@@ -949,7 +967,9 @@ impl ToolCoordinator {
 
         let mut restart_requested = false;
         let mut escalated = false;
-        let mut cancellation_response: Option<String> = None;
+        let mut stopped = false;
+        let mut tools_cancelled = false;
+        let mut cancellation_message: Option<String> = None;
         let mut cancelled_indices: Vec<usize> = Vec::new();
 
         while let Some(event) = event_rx.recv().await {
@@ -1138,14 +1158,16 @@ impl ToolCoordinator {
                             ToolInterruptResult::Restart => {
                                 restart_requested = true;
                             }
-                            ToolInterruptResult::Cancelled { response } => {
+                            ToolInterruptResult::Cancelled { response, exit } => {
                                 cancelled_indices = results
                                     .iter()
                                     .enumerate()
                                     .filter(|(_, r)| r.is_none())
                                     .map(|(i, _)| i)
                                     .collect();
-                                cancellation_response = Some(response);
+                                tools_cancelled = true;
+                                cancellation_message = response;
+                                stopped = exit;
                             }
                             // The menu itself was cancelled with Ctrl-C: the
                             // tools are already cancelled; surface the
@@ -1195,13 +1217,23 @@ impl ToolCoordinator {
             }))
             .collect();
 
-        if let Some(cancel_msg) = cancellation_response {
+        if tools_cancelled {
             for &i in &cancelled_indices {
-                if let Some((_, response)) = responses.get_mut(i) {
-                    response.result = Ok(format!(
-                        "Tool run cancelled by user with a custom message:\n\n{cancel_msg}"
-                    ));
-                }
+                let Some((_, response)) = responses.get_mut(i) else {
+                    continue;
+                };
+
+                response.result = Ok(if let Some(msg) = &cancellation_message {
+                    format!("Tool run cancelled by user with a custom message:\n\n{msg}")
+                } else {
+                    // No custom message: each cancelled tool answers with its
+                    // configured cancellation response.
+                    let tool_name = executing_tools
+                        .get(&i)
+                        .map(|tool| tool.tool_name.as_str())
+                        .unwrap_or_default();
+                    self.cancellation_response(tool_name)
+                });
             }
         }
 
@@ -1209,6 +1241,7 @@ impl ToolCoordinator {
             responses,
             restart_requested,
             escalated,
+            stopped,
         }
     }
 

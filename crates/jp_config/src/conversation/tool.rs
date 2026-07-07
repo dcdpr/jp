@@ -232,9 +232,28 @@ pub struct ToolsDefaultsConfig {
     #[setting(default)]
     pub result: ResultMode,
 
+    /// The response recorded for a tool call when the user cancels it without
+    /// supplying a custom message.
+    ///
+    /// Applies to every tool that doesn't set its own `cancellation_response`.
+    #[setting(default = default_cancellation_response)]
+    pub cancellation_response: String,
+
     /// How to display the results of the tool in the terminal.
     #[setting(nested)]
     pub style: DisplayStyleConfig,
+}
+
+/// Default `cancellation_response`: a canned rejection notice that asks the
+/// assistant to reflect on why the tool call was cancelled.
+#[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
+fn default_cancellation_response(_: &()) -> schematic::TransformResult<Option<String>> {
+    Ok(Some(
+        "This tool request was intentionally rejected by the user. Please evaluate and either ask \
+         the user why it was rejected, or infer the reason by looking at the historical messages \
+         in the conversation."
+            .to_owned(),
+    ))
 }
 
 impl AssignKeyValue for PartialToolsDefaultsConfig {
@@ -245,6 +264,7 @@ impl AssignKeyValue for PartialToolsDefaultsConfig {
             "run" => self.run = kv.try_some_from_str()?,
             "format" => self.format = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
+            "cancellation_response" => self.cancellation_response = kv.try_some_string()?,
             _ if kv.p("style") => self.style.assign(kv)?,
             _ => return missing_key(&kv),
         }
@@ -260,6 +280,10 @@ impl PartialConfigDelta for PartialToolsDefaultsConfig {
             run: delta_opt(self.run.as_ref(), next.run),
             format: delta_opt(self.format.as_ref(), next.format),
             result: delta_opt(self.result.as_ref(), next.result),
+            cancellation_response: delta_opt(
+                self.cancellation_response.as_ref(),
+                next.cancellation_response,
+            ),
             style: self.style.delta(next.style),
         }
     }
@@ -272,6 +296,9 @@ impl FillDefaults for PartialToolsDefaultsConfig {
             run: self.run.or(defaults.run),
             format: self.format.or(defaults.format),
             result: self.result.or(defaults.result),
+            cancellation_response: self
+                .cancellation_response
+                .or(defaults.cancellation_response),
             style: self.style.fill_from(defaults.style),
         }
     }
@@ -286,6 +313,10 @@ impl ToPartial for ToolsDefaultsConfig {
             run: partial_opt(&self.run, defaults.run),
             format: partial_opts(self.format.as_ref(), defaults.format),
             result: partial_opt(&self.result, defaults.result),
+            cancellation_response: partial_opt(
+                &self.cancellation_response,
+                defaults.cancellation_response,
+            ),
             style: self.style.to_partial(),
         }
     }
@@ -387,6 +418,12 @@ pub struct ToolConfig {
     /// Overrides the global default.
     pub result: Option<ResultMode>,
 
+    /// The response recorded for this tool's call when the user cancels it
+    /// without supplying a custom message.
+    ///
+    /// Overrides the global default.
+    pub cancellation_response: Option<String>,
+
     /// How to display the results of the tool in the terminal.
     ///
     /// Overrides the global default.
@@ -437,6 +474,7 @@ impl AssignKeyValue for PartialToolConfig {
             "run" => self.run = kv.try_some_from_str()?,
             "format" => self.format = kv.try_some_from_str()?,
             "result" => self.result = kv.try_some_from_str()?,
+            "cancellation_response" => self.cancellation_response = kv.try_some_string()?,
             _ if kv.p("style") => self.style.assign(kv)?,
             "questions" => self.questions = kv.try_object()?,
             _ if kv.p("options") => kv.assign_to_entry(&mut self.options)?,
@@ -477,6 +515,10 @@ impl PartialConfigDelta for PartialToolConfig {
             run: delta_opt(self.run.as_ref(), next.run),
             format: delta_opt(self.format.as_ref(), next.format),
             result: delta_opt(self.result.as_ref(), next.result),
+            cancellation_response: delta_opt(
+                self.cancellation_response.as_ref(),
+                next.cancellation_response,
+            ),
             style: delta_opt_partial(self.style.as_ref(), next.style),
             questions: next
                 .questions
@@ -529,6 +571,10 @@ impl ToPartial for ToolConfig {
             run: partial_opts(self.run.as_ref(), defaults.run),
             format: partial_opts(self.format.as_ref(), defaults.format),
             result: partial_opts(self.result.as_ref(), defaults.result),
+            cancellation_response: partial_opts(
+                self.cancellation_response.as_ref(),
+                defaults.cancellation_response,
+            ),
             style: partial_opt_config(self.style.as_ref(), defaults.style),
             questions: self
                 .questions
@@ -1146,6 +1192,17 @@ impl ToolConfigWithDefaults {
     #[must_use]
     pub fn result_mut(&mut self) -> &mut ResultMode {
         self.tool.result.get_or_insert(self.defaults.result)
+    }
+
+    /// Return the cancellation response of the tool: the message recorded for
+    /// the tool call when the user cancels it without supplying a custom
+    /// message.
+    #[must_use]
+    pub fn cancellation_response(&self) -> &str {
+        self.tool
+            .cancellation_response
+            .as_deref()
+            .unwrap_or(&self.defaults.cancellation_response)
     }
 
     /// Return the display style of the tool.
