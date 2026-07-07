@@ -63,6 +63,8 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             git_log(
                 ctx.root,
                 t.opt("query")?,
+                t.opt("content")?,
+                t.opt("content_regex")?,
                 t.opt("paths")?,
                 t.opt("count")?,
                 t.opt("since")?,
