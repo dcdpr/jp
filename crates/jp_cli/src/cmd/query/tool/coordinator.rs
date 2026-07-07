@@ -171,20 +171,53 @@ pub struct ExecutionResult {
     /// tools that bypass execution; merging those back into the original stream
     /// order is the caller's job.
     pub responses: Vec<(usize, ToolCallResponse)>,
-    pub restart_requested: bool,
 
-    /// The user escalated past the tool interrupt menu (cancelled it with
-    /// Ctrl-C).
-    /// The running tools have been cancelled; the caller should begin a
-    /// graceful shutdown.
-    pub escalated: bool,
+    /// How the execution phase ended, and what the caller should do next.
+    pub outcome: ExecutionOutcome,
+}
+
+/// How a tool execution phase ended.
+///
+/// Variants are ordered by severity: interrupts can arrive on every event-loop
+/// iteration while cancelled tools drain, and a later, less severe choice must
+/// not downgrade an earlier one (see [`ExecutionOutcome::upgrade`]).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ExecutionOutcome {
+    /// Every tool produced a response (including cancellation responses filled
+    /// in for tools cancelled via "Stop & respond"); the caller should commit
+    /// the responses and continue the turn.
+    #[default]
+    Completed,
+
+    /// The user chose "Restart" (or configured `interrupt.tool_call.action =
+    /// "restart"`).
+    /// The running tools have been cancelled; the caller should re-execute the
+    /// batch.
+    Restart,
 
     /// The user chose "Stop (cancel & exit)" (or configured
     /// `interrupt.tool_call.action = "stop"`).
     /// The running tools have been cancelled and their cancellation responses
     /// filled in; the caller should record the responses and end the turn
     /// without a follow-up request.
-    pub stopped: bool,
+    Stopped,
+
+    /// The user escalated past the tool interrupt menu (cancelled it with
+    /// Ctrl-C).
+    /// The running tools have been cancelled; the caller should begin a
+    /// graceful shutdown.
+    Escalated,
+}
+
+impl ExecutionOutcome {
+    /// Record a newly observed outcome, keeping the most severe one.
+    ///
+    /// Without this, a second interrupt during the cancellation drain could
+    /// downgrade the outcome — e.g. a "Stop & respond" reply clearing an
+    /// earlier "Stop (cancel & exit)".
+    fn upgrade(&mut self, next: Self) {
+        *self = (*self).max(next);
+    }
 }
 
 struct ExecutingTool {
@@ -869,9 +902,7 @@ impl ToolCoordinator {
         if executors.is_empty() {
             return ExecutionResult {
                 responses: Vec::new(),
-                restart_requested: false,
-                escalated: false,
-                stopped: false,
+                outcome: ExecutionOutcome::Completed,
             };
         }
 
@@ -965,9 +996,7 @@ impl ToolCoordinator {
             None
         };
 
-        let mut restart_requested = false;
-        let mut escalated = false;
-        let mut stopped = false;
+        let mut outcome = ExecutionOutcome::Completed;
         let mut tools_cancelled = false;
         let mut cancellation_message: Option<String> = None;
         let mut cancelled_indices: Vec<usize> = Vec::new();
@@ -1156,7 +1185,7 @@ impl ToolCoordinator {
                             // down the stack take the interrupt.
                             ToolInterruptResult::Declined => signals.decline(),
                             ToolInterruptResult::Restart => {
-                                restart_requested = true;
+                                outcome.upgrade(ExecutionOutcome::Restart);
                             }
                             ToolInterruptResult::Cancelled { response, exit } => {
                                 cancelled_indices = results
@@ -1167,14 +1196,16 @@ impl ToolCoordinator {
                                     .collect();
                                 tools_cancelled = true;
                                 cancellation_message = response;
-                                stopped = exit;
+                                if exit {
+                                    outcome.upgrade(ExecutionOutcome::Stopped);
+                                }
                             }
                             // The menu itself was cancelled with Ctrl-C: the
                             // tools are already cancelled; surface the
                             // escalation so the turn loop begins a graceful
                             // shutdown.
                             ToolInterruptResult::Escalate => {
-                                escalated = true;
+                                outcome.upgrade(ExecutionOutcome::Escalated);
                             }
                         }
                     }
@@ -1237,12 +1268,7 @@ impl ToolCoordinator {
             }
         }
 
-        ExecutionResult {
-            responses,
-            restart_requested,
-            escalated,
-            stopped,
-        }
+        ExecutionResult { responses, outcome }
     }
 
     /// Builds an error response for a tool whose argument rendering failed.

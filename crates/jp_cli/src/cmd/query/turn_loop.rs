@@ -58,7 +58,10 @@ use super::{
     turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase, TurnState},
 };
 use crate::{
-    cmd::{self, query::tool::coordinator::ExecutionResult},
+    cmd::{
+        self,
+        query::tool::coordinator::{ExecutionOutcome, ExecutionResult},
+    },
     editor::build_editor_backend,
     error::Error,
     render::metadata::set_rendered_arguments,
@@ -735,51 +738,57 @@ pub(super) async fn run_turn_loop(
                     )
                     .await;
 
-                // The user cancelled the tool interrupt menu itself: an
-                // escalation (RFD 045). The tools were already cancelled, so
-                // persist their responses, begin a graceful shutdown, and end
-                // the turn with the interrupt error.
-                if execution_result.escalated {
-                    signals.shutdown_token().cancel();
-                    commit_tool_responses(
-                        execution_result,
-                        pre_resolved,
-                        &mut tool_coordinator,
-                        &mut turn_coordinator,
-                        &mut conv,
-                    )?;
-                    return Err(cmd::Error::interrupted().into());
-                }
+                match execution_result.outcome {
+                    // The user cancelled the tool interrupt menu itself: an
+                    // escalation (RFD 045). The tools were already cancelled,
+                    // so persist their responses, begin a graceful shutdown,
+                    // and end the turn with the interrupt error.
+                    ExecutionOutcome::Escalated => {
+                        signals.shutdown_token().cancel();
+                        commit_tool_responses(
+                            execution_result,
+                            pre_resolved,
+                            &mut tool_coordinator,
+                            &mut turn_coordinator,
+                            &mut conv,
+                        )?;
+                        return Err(cmd::Error::interrupted().into());
+                    }
 
-                // The user chose "Stop (cancel & exit)" (or configured
-                // `interrupt.tool_call.action = "stop"`): the tools were
-                // cancelled and their cancellation responses filled in.
-                // Persist the responses so every tool call keeps a matching
-                // response, then end the turn without a follow-up request.
-                if execution_result.stopped {
-                    commit_tool_responses(
-                        execution_result,
-                        pre_resolved,
-                        &mut tool_coordinator,
-                        &mut turn_coordinator,
-                        &mut conv,
-                    )?;
-                    break;
-                }
+                    // The user chose "Stop (cancel & exit)" (or configured
+                    // `interrupt.tool_call.action = "stop"`): the tools were
+                    // cancelled and their cancellation responses filled in.
+                    // Persist the responses so every tool call keeps a
+                    // matching response, then end the turn without a
+                    // follow-up request.
+                    ExecutionOutcome::Stopped => {
+                        commit_tool_responses(
+                            execution_result,
+                            pre_resolved,
+                            &mut tool_coordinator,
+                            &mut turn_coordinator,
+                            &mut conv,
+                        )?;
+                        break;
+                    }
 
-                if execution_result.restart_requested {
-                    restart_requested = true;
-                    continue;
-                }
+                    // The next loop iteration re-executes the cancelled
+                    // batch.
+                    ExecutionOutcome::Restart => {
+                        restart_requested = true;
+                    }
 
-                if commit_tool_responses(
-                    execution_result,
-                    pre_resolved,
-                    &mut tool_coordinator,
-                    &mut turn_coordinator,
-                    &mut conv,
-                )? {
-                    tool_choice = ToolChoice::Auto;
+                    ExecutionOutcome::Completed => {
+                        if commit_tool_responses(
+                            execution_result,
+                            pre_resolved,
+                            &mut tool_coordinator,
+                            &mut turn_coordinator,
+                            &mut conv,
+                        )? {
+                            tool_choice = ToolChoice::Auto;
+                        }
+                    }
                 }
             }
         }

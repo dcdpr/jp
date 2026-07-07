@@ -235,7 +235,11 @@ pub struct ToolsDefaultsConfig {
     /// The response recorded for a tool call when the user cancels it without
     /// supplying a custom message.
     ///
-    /// Applies to every tool that doesn't set its own `cancellation_response`.
+    /// Applies to every tool that doesn't set its own
+    /// `conversation.tools.<name>.cancellation_response`.
+    ///
+    /// If unset, defaults to a canned rejection notice telling the assistant
+    /// the call was intentionally rejected and asking it to evaluate why.
     #[setting(default = default_cancellation_response)]
     pub cancellation_response: String,
 
