@@ -45,11 +45,13 @@ fn test_map_models_skips_invalid_catalog_entries() {
         context_length: 128_000,
     };
 
-    // A `~`-prefixed rerouted listing in the live Openrouter catalog must not
-    // fail the fetch for unrelated models.
+    // An invalid ID in the live Openrouter catalog must not fail the fetch
+    // for unrelated models. The `~`-prefixed latest-alias listings are valid
+    // and must be kept.
     let models = map_models(vec![
         entry("z-ai/glm-5.2"),
         entry("~anthropic/claude-fable-latest"),
+        entry("model with spaces"),
         entry("anthropic/claude-haiku-4.5"),
     ]);
 
@@ -58,7 +60,11 @@ fn test_map_models_skips_invalid_catalog_entries() {
             .iter()
             .map(|m| m.id.name.as_ref())
             .collect::<Vec<_>>(),
-        vec!["z-ai/glm-5.2", "anthropic/claude-haiku-4.5"]
+        vec![
+            "z-ai/glm-5.2",
+            "~anthropic/claude-fable-latest",
+            "anthropic/claude-haiku-4.5"
+        ]
     );
 }
 
