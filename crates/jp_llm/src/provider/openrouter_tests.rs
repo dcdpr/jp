@@ -36,6 +36,32 @@ async fn sub_provider_event_metadata(model: &str, test_name: &str) -> Result {
     Ok(())
 }
 
+#[test]
+fn test_map_models_skips_invalid_catalog_entries() {
+    let entry = |id: &str| response::Model {
+        id: id.to_owned(),
+        name: id.to_owned(),
+        created: types::response::OffsetDateTimeFmt(chrono::DateTime::UNIX_EPOCH),
+        context_length: 128_000,
+    };
+
+    // A `~`-prefixed rerouted listing in the live Openrouter catalog must not
+    // fail the fetch for unrelated models.
+    let models = map_models(vec![
+        entry("z-ai/glm-5.2"),
+        entry("~anthropic/claude-fable-latest"),
+        entry("anthropic/claude-haiku-4.5"),
+    ]);
+
+    assert_eq!(
+        models
+            .iter()
+            .map(|m| m.id.name.as_ref())
+            .collect::<Vec<_>>(),
+        vec!["z-ai/glm-5.2", "anthropic/claude-haiku-4.5"]
+    );
+}
+
 async fn run_test(
     test_name: impl AsRef<str>,
     requests: impl IntoIterator<Item = TestRequest>,

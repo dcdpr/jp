@@ -93,14 +93,7 @@ impl Provider for Openrouter {
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
-        let mut models = self
-            .client
-            .models()
-            .await?
-            .data
-            .into_iter()
-            .map(map_model)
-            .collect::<Result<Vec<_>>>()?;
+        let mut models = map_models(self.client.models().await?.data);
 
         models.sort_by(|a, b| a.id.cmp(&b.id));
         models.dedup();
@@ -575,6 +568,28 @@ fn create_request(
         },
         is_structured,
     ))
+}
+
+/// Map catalog entries to [`ModelDetails`], skipping entries that cannot be
+/// parsed.
+///
+/// The catalog only enriches an already-validated model id with details, and
+/// `model_details` tolerates a model missing from the catalog entirely.
+/// An unparseable *unrelated* entry (e.g. Openrouter's `~`-prefixed rerouted
+/// listings, which violate the model id character set) must therefore not fail
+/// the whole fetch.
+fn map_models(models: Vec<response::Model>) -> Vec<ModelDetails> {
+    models
+        .into_iter()
+        .filter_map(|model| {
+            let id = model.id.clone();
+            map_model(model)
+                .inspect_err(
+                    |error| warn!(id, %error, "Skipping invalid model in Openrouter catalog."),
+                )
+                .ok()
+        })
+        .collect()
 }
 
 // TODO: Manually add a bunch of often-used models.
