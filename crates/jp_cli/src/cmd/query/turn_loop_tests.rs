@@ -1227,7 +1227,8 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // No prompt responses: the configured `stop` action never shows the
         // menu, so any prompt would fail the test.
@@ -1249,10 +1250,9 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
 
         // Press Ctrl-C once the tool is executing, which guarantees the tool
         // interrupt handler is topmost.
-        let signal_router = Arc::clone(&router);
         let signal_handle = tokio::spawn(async move {
             tool_started.notified().await;
-            signal_router.simulate_interrupt();
+            signals.interrupt().await;
         });
 
         let result = run_turn_loop(
