@@ -1758,3 +1758,56 @@ fn replay_suppresses_tool_chrome_when_show_disabled() {
         "tool chrome must be suppressed when style.tool_call.show is false, got: {chrome:?}"
     );
 }
+
+/// A reasoning region must not leak across turns.
+/// `--current-config` (`ConfigSource::Fixed`) skips the per-turn renderer
+/// rebuild, so a single `ChatRenderer` persists across turns: a turn that ends
+/// with reasoning followed by a turn that opens with a tool call must still
+/// render that tool's chrome unshaded.
+#[test]
+fn replay_does_not_leak_reasoning_region_across_turns() {
+    let (mut ctx, id, _out, err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("think about it"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::reasoning("Deep thought.\n\n"), ts(0, 0, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 0, 3)),
+        ConversationEvent::new(ChatRequest::from("now act"), ts(0, 0, 4)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 5),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 6),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(Some(2), None),
+        current_config: true,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        chrome.contains("Calling tool"),
+        "the tool chrome itself should render, got: {chrome:?}"
+    );
+    assert!(
+        !chrome.contains("\x1b[48;5;236m"),
+        "a tool call opening a new turn must not carry the previous turn's reasoning background, \
+         got: {chrome:?}"
+    );
+}

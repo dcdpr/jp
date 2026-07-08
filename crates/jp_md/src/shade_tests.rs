@@ -123,6 +123,18 @@ fn a_reset_then_carriage_return_re_asserts_before_the_erase() {
 }
 
 #[test]
+fn simple_background_code_is_preserved() {
+    // `\x1b[41m` (crossterm's `on_red()`) sets a content background with a
+    // simple SGR code, not the extended `48;…` form; the writer must not
+    // inject the region fill over it, and must resume the region once the
+    // content clears its background.
+    assert_eq!(
+        shade("\x1b[41mred\x1b[49mplain", &terminal_bg()),
+        "\x1b[41mred\x1b[49m\x1b[48;5;236mplain\x1b[49m"
+    );
+}
+
+#[test]
 fn osc_hyperlink_passes_through_intact_and_shades_the_link_text() {
     // The OSC 8 open/close sequences flow through verbatim (the URL is never
     // split or shaded over), while the visible link text gets the region

@@ -1251,6 +1251,47 @@ fn test_gap_between_tool_call_and_next_reasoning_is_shaded() {
 }
 
 #[test]
+fn test_role_header_ends_the_reasoning_region() {
+    // A role boundary (a new turn's header, or a user header) ends any
+    // reasoning region: a tool call at the start of the next turn must not
+    // continue the previous turn's reasoning.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, _out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.render_role_header("alice", None, None);
+
+    assert!(
+        renderer.enter_tool_call().is_none(),
+        "a reasoning region must not survive a role boundary"
+    );
+}
+
+#[test]
+fn test_user_request_ends_the_reasoning_region() {
+    // A user message ends any reasoning region, even on the headerless echo
+    // path that renders the request without a preceding role header.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, _out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.render_request("now act");
+
+    assert!(
+        renderer.enter_tool_call().is_none(),
+        "a reasoning region must not survive a user request"
+    );
+}
+
+#[test]
 fn test_extend_across_tool_calls_disabled_ends_the_region_at_the_tool_call() {
     // With the flag off, a tool call after reasoning does not continue the
     // region: the separator before it is unshaded and no chrome background is

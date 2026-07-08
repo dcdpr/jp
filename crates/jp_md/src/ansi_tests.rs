@@ -244,6 +244,30 @@ fn segments_yields_an_unterminated_osc_as_one_escape() {
 }
 
 #[test]
+fn simple_and_bright_background_codes_are_tracked() {
+    // `\x1b[41m` is crossterm's `on_red()`; a writer that misses it would
+    // shade over a background the content owns.
+    let mut s = AnsiState::default();
+    assert!(s.update("\x1b[41m"), "a simple background set is an event");
+    assert_eq!(s.background.as_deref(), Some("41"));
+    assert!(s.update("\x1b[49m"));
+    assert!(s.update("\x1b[101m"), "a bright background set is an event");
+    assert_eq!(s.background.as_deref(), Some("101"));
+}
+
+#[test]
+fn simple_and_bright_foreground_codes_are_tracked() {
+    let mut s = AnsiState::default();
+    assert!(
+        !s.update("\x1b[31m"),
+        "a foreground set is not a background event"
+    );
+    assert_eq!(s.foreground.as_deref(), Some("31"));
+    assert!(!s.update("\x1b[97m"));
+    assert_eq!(s.foreground.as_deref(), Some("97"));
+}
+
+#[test]
 fn visual_width_ignores_an_osc_hyperlink() {
     // The hyperlink chrome is zero-width; only the link text counts.
     assert_eq!(

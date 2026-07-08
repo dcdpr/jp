@@ -778,3 +778,26 @@ fn clearing_a_region_with_none_unshades_following_chrome() {
         "a None region must leave the header unshaded: {raw:?}"
     );
 }
+
+#[test]
+fn preparing_line_fills_to_the_edge_under_a_region() {
+    // The initial temp line can sit on screen for seconds before the first
+    // tick rewrites it; under a reasoning region it must erase to the right
+    // edge so the whole row is shaded, not just the span behind the text.
+    let (mut renderer, err) = create_renderer_with_show(true);
+    renderer.set_region("id1", Some(terminal_region()));
+
+    let (tick_tx, _tick_rx) = tokio::sync::mpsc::channel(1);
+    renderer.register("id1", "fs_read_file", &tick_tx);
+    renderer.channel.flush();
+
+    let raw = err.lock().clone();
+    assert!(
+        raw.contains("\x1b[48;5;236m"),
+        "the preparing line carries the region background: {raw:?}"
+    );
+    assert!(
+        raw.ends_with("\x1b[K\x1b[49m"),
+        "the preparing line must erase to the edge before the region closes: {raw:?}"
+    );
+}

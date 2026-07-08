@@ -662,10 +662,13 @@ impl ToolRenderer {
         // separator. The permanent header that replaces it later finds the debt
         // already cleared, and the blank line above survives the in-place
         // `complete`/header rewrite.
+        // The trailing erase fills the row to the right edge with the active
+        // background, so a shaded region covers the whole line while it waits
+        // for the first tick to rewrite it.
         let content = self.temp_line_content();
         self.write_chrome(self.current_region.as_ref(), |w| {
             self.emit_separator_to(w)?;
-            write!(w, "{content}")
+            write!(w, "{content}\x1b[K")
         });
     }
 

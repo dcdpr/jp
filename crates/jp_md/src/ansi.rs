@@ -137,6 +137,18 @@ impl AnsiState {
                     }
                     touched_background = true;
                 }
+                // Simple (40–47) and bright (100–107) background codes — the
+                // form crossterm's named-color helpers (`on_red()`, …) emit.
+                "40" | "41" | "42" | "43" | "44" | "45" | "46" | "47" | "100" | "101" | "102"
+                | "103" | "104" | "105" | "106" | "107" => {
+                    self.background = Some(code.to_string());
+                    touched_background = true;
+                }
+                // Simple (30–37) and bright (90–97) foreground codes.
+                "30" | "31" | "32" | "33" | "34" | "35" | "36" | "37" | "90" | "91" | "92"
+                | "93" | "94" | "95" | "96" | "97" => {
+                    self.foreground = Some(code.to_string());
+                }
                 _ => {}
             }
         }

@@ -82,6 +82,8 @@ pub struct ChatRenderer {
     /// This field keeps that memory so the tool-call boundary can decide
     /// whether a tool call continues a reasoning region (and shade its chrome
     /// to match).
+    /// Cleared at role headers and user requests — a reasoning region never
+    /// crosses a turn boundary or survives a user message.
     /// Only the persistent display paths set it; ephemeral reasoning chrome
     /// (`progress`/`static`/`timer`) never reaches them, so it never marks a
     /// non-shaded region as continuable.
@@ -168,6 +170,9 @@ impl ChatRenderer {
         self.printer.println(&formatted);
 
         self.last_content_kind = Some(ContentKind::Message);
+        // A user message ends any reasoning region; a tool call that follows
+        // must not continue the previous response's reasoning.
+        self.last_response_kind = None;
     }
 
     /// Render a labeled role-boundary header.
@@ -202,6 +207,9 @@ impl ChatRenderer {
         self.printer.println("");
 
         self.last_content_kind = None;
+        // A role boundary ends any reasoning region: a region never spans a
+        // turn boundary or survives a user message.
+        self.last_response_kind = None;
     }
 
     /// Flush the markdown buffer if the content kind is changing.
