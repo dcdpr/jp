@@ -28,7 +28,7 @@ use crate::{
     KeyValueOrPath,
     cmd::target::{ConversationTarget, PickerFilter},
     config_pipeline::ConfigPipeline,
-    signals::SignalRouter,
+    signals::testing::detached_router,
 };
 
 fn make_partial_with_tools() -> PartialAppConfig {
@@ -147,7 +147,7 @@ async fn run_mock_turn(
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     turn_loop::run_turn_loop(
         Arc::clone(&provider),

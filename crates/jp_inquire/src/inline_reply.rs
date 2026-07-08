@@ -4,6 +4,9 @@
 //! It accepts a typed reply inline, supports multi-line input (`Shift+Enter` /
 //! `Alt+Enter`), and offers a `Ctrl+X` escape hatch that asks the caller to
 //! open the configured external editor.
+//! Bracketed paste is enabled for the duration of the prompt, so pasted text
+//! (including newlines) is inserted into the buffer literally instead of being
+//! replayed as keystrokes, where the first newline would submit the reply.
 //! The widget itself never spawns an editor — it only signals intent via
 //! [`ReplyOutcome::OpenEditor`], keeping `jp_inquire` free of editor concerns.
 
@@ -121,6 +124,11 @@ impl InlineReply {
         let mut engine = Reedline::create()
             .with_output(output)
             .with_edit_mode(self.build_edit_mode())
+            // Ask the terminal to bracket pastes so a pasted newline is
+            // inserted into the buffer instead of submitting the reply.
+            // Terminals that don't support bracketed paste ignore the
+            // enable sequence, so this is safe unconditionally.
+            .use_bracketed_paste(true)
             .use_kitty_keyboard_enhancement(true);
 
         if self.edit_mode == ReplyEditMode::Vi {

@@ -35,13 +35,13 @@ audit-as-crates-io = true
 audit-as-crates-io = true
 
 [policy.inquire]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.openai_responses]
 audit-as-crates-io = false
 
 [policy.reedline]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.saphyr]
 audit-as-crates-io = true
@@ -326,10 +326,6 @@ criteria = "safe-to-deploy"
 version = "0.27.7"
 criteria = "safe-to-deploy"
 
-[[exemptions.inquire]]
-version = "0.9.1@git:941896e113e786d3c40345e1f70249930f4eadb0"
-criteria = "safe-to-deploy"
-
 [[exemptions.insta]]
 version = "1.43.2"
 criteria = "safe-to-deploy"
@@ -468,10 +464,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.redox_users]]
 version = "0.5.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.reedline]]
-version = "0.48.0@git:d6a56e266758c5a28d7b635b20611dfb50c6acfb"
 criteria = "safe-to-deploy"
 
 [[exemptions.relative-path]]
