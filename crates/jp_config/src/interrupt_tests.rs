@@ -107,6 +107,10 @@ fn tool_action_parses_config_values() {
         ToolInterruptAction::from_str("respond").unwrap(),
         ToolInterruptAction::Respond
     );
+    assert_eq!(
+        ToolInterruptAction::from_str("stop").unwrap(),
+        ToolInterruptAction::Stop
+    );
 }
 
 #[test]

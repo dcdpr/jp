@@ -44,15 +44,6 @@ use jp_printer::Printer;
 
 use crate::editor::report_editor_failure;
 
-/// Default response sent to the LLM when the user cancels a tool without
-/// supplying a custom message.
-const DEFAULT_TOOL_CANCELLED_RESPONSE: &str = indoc::concatdoc! {"
-    This tool request was intentionally rejected by the user. \
-    Please evaluate and either ask the user why it was rejected, \
-    or infer the reason by looking at the historical messages \
-    in the conversation.\
-"};
-
 /// Map the configured inline edit mode onto the reply widget's edit mode.
 pub(crate) fn reply_edit_mode(mode: InlineEditMode) -> ReplyEditMode {
     match mode {
@@ -97,11 +88,20 @@ pub enum InterruptAction {
     /// Cancel all running tools and restart the entire batch.
     RestartTool,
 
-    /// Cancel all running tools and return a user-supplied response to the LLM.
-    ///
-    /// If the user leaves the response empty, a canned message is used that
-    /// instructs the LLM to evaluate why the tool was rejected.
-    ToolCancelled { response: String },
+    /// Cancel all running tools and return a response to the LLM in place of
+    /// each cancelled tool's result.
+    ToolCancelled {
+        /// The user-supplied response.
+        ///
+        /// `None` when the user didn't type a message; each cancelled tool then
+        /// answers with its configured `cancellation_response`.
+        response: Option<String>,
+
+        /// Whether to end the turn after recording the cancelled responses,
+        /// instead of sending them back to the assistant in a follow-up
+        /// request.
+        exit: bool,
+    },
 
     /// Begin a graceful shutdown.
     ///
@@ -252,11 +252,13 @@ impl<P: PromptBackend> InterruptHandler<P> {
 
     /// Handle an interrupt during tool execution.
     ///
-    /// Presents a menu with options to stop & respond, restart, or continue
-    /// waiting.
+    /// Presents a menu with options to stop & respond, stop entirely, restart,
+    /// or continue waiting.
     /// Choosing "Stop & respond" collects a response: a typed message stops the
-    /// tool and sends it, an empty submission stops with the canned default,
-    /// and `Ctrl+C` backs out to the menu.
+    /// tool and sends it, an empty submission stops with each tool's configured
+    /// cancellation response, and `Ctrl+C` backs out to the menu.
+    /// Choosing "Stop (cancel & exit)" cancels the tools, records their
+    /// configured cancellation responses, and ends the turn.
     /// Cancelling the menu itself with `Ctrl+C` escalates: the caller should
     /// cancel the tools and begin a graceful shutdown.
     ///
@@ -275,6 +277,7 @@ impl<P: PromptBackend> InterruptHandler<P> {
                     let options = vec![
                         InlineOption::new('c', "Continue"),
                         InlineOption::new('r', "Stop & respond"),
+                        InlineOption::new('s', "Stop (cancel & exit)"),
                         InlineOption::new('t', "Restart"),
                     ];
 
@@ -295,24 +298,36 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 ToolInterruptAction::Continue => 'c',
                 ToolInterruptAction::Restart => 't',
                 ToolInterruptAction::Respond => 'r',
+                ToolInterruptAction::Stop => 's',
             };
 
             match choice {
                 'c' => return InterruptAction::Resume,
                 't' => return InterruptAction::RestartTool,
+                's' => {
+                    return InterruptAction::ToolCancelled {
+                        response: None,
+                        exit: true,
+                    };
+                }
                 'r' => match self.collect_reply("Reply:", config.compose_in_editor, printer) {
                     ReplyResult::Reply { text, .. } => {
-                        return InterruptAction::ToolCancelled { response: text };
+                        return InterruptAction::ToolCancelled {
+                            response: Some(text),
+                            exit: false,
+                        };
                     }
                     // `Ctrl+C` backs up to the menu (the loop iterates). A
                     // menu-less configured `respond` has no menu, so it falls
-                    // through to the canned message below.
+                    // through to the no-message cancellation below.
                     ReplyResult::Cancelled if menu => {}
-                    // An empty submission stops the tool with the canned "no
-                    // explanation" message; so does a menu-less `Ctrl+C`.
+                    // An empty submission stops the tool without a custom
+                    // message — each tool answers with its configured
+                    // cancellation response; so does a menu-less `Ctrl+C`.
                     ReplyResult::Empty | ReplyResult::Cancelled => {
                         return InterruptAction::ToolCancelled {
-                            response: DEFAULT_TOOL_CANCELLED_RESPONSE.to_owned(),
+                            response: None,
+                            exit: false,
                         };
                     }
                 },

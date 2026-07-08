@@ -10,6 +10,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use camino_tempfile::tempdir;
 use futures::{StreamExt as _, stream};
 use indexmap::IndexMap;
@@ -20,6 +21,7 @@ use jp_config::{
         CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
         style::{DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle},
     },
+    interrupt::ToolInterruptAction,
     model::id::{self, ProviderId},
 };
 use jp_conversation::{
@@ -1052,6 +1054,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1156,6 +1159,155 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
 }
 
+/// Tests the stop flow:
+///
+/// 1. LLM returns a tool call
+/// 2. During execution, Ctrl-C is routed to the tool interrupt handler
+/// 3. `interrupt.tool_call.action = "stop"` skips the menu: the tools are
+///    cancelled and each cancelled call records its configured
+///    `cancellation_response`
+/// 4. The responses are committed and the turn ends without a follow-up request
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
+async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
+    const CUSTOM_CANCELLATION_RESPONSE: &str =
+        "slow_tool was cancelled by the user; do not retry it this turn.";
+
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // Skip the interrupt menu: Ctrl-C during tool execution cancels the
+        // tools, records their cancellation responses, and ends the turn.
+        config.interrupt.tool_call.action = ToolInterruptAction::Stop;
+        config
+            .conversation
+            .tools
+            .insert("slow_tool".to_string(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Unattended),
+                format: None,
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new(),
+                result: None,
+                style: None,
+                questions: IndexMap::new(),
+                options: IndexMap::default(),
+                access: None,
+                cancellation_response: Some(CUSTOM_CANCELLATION_RESPONSE.to_string()),
+            });
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+        let conv_id = lock.id();
+
+        let chat_request = ChatRequest::from("Please use a tool");
+
+        let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+            "call_stop",
+            "slow_tool",
+            "This follow-up should never be requested.",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = Arc::new(SignalRouter::detached());
+
+        // No prompt responses: the configured `stop` action never shows the
+        // menu, so any prompt would fail the test.
+        let backend = MockPromptBackend::new();
+
+        // The tool runs until the stop cancels it, and signals `tool_started`
+        // once it is executing.
+        let tool_started = Arc::new(Notify::new());
+        let executor_source = TestExecutorSource::new().with_executor("slow_tool", {
+            let tool_started = Arc::clone(&tool_started);
+            move |req| {
+                Box::new(SleepingExecutor::notifying(
+                    &req.id,
+                    &req.name,
+                    Arc::clone(&tool_started),
+                ))
+            }
+        });
+
+        // Press Ctrl-C once the tool is executing, which guarantees the tool
+        // interrupt handler is topmost.
+        let signal_router = Arc::clone(&router);
+        let signal_handle = tokio::spawn(async move {
+            tool_started.notified().await;
+            signal_router.simulate_interrupt();
+        });
+
+        let result = run_turn_loop(
+            Arc::clone(&provider) as Arc<dyn Provider>,
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(backend),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source))
+                .with_interrupt(config.interrupt.tool_call.clone()),
+            chat_request.clone(),
+            InvocationContext::default(),
+        )
+        .await;
+
+        signal_handle.await.unwrap();
+
+        // Unlike an escalation, a stop ends the turn cleanly: no interrupt
+        // error, no graceful shutdown.
+        assert!(result.is_ok(), "stop must end the turn cleanly: {result:?}");
+        assert!(
+            !router.shutdown_token().is_cancelled(),
+            "stop must not request a graceful shutdown"
+        );
+
+        // No follow-up request was sent after the stop.
+        let call_count = provider.call_index.load(Ordering::SeqCst);
+        assert_eq!(call_count, 1, "stop must not trigger a follow-up request");
+
+        // The cancelled call's configured cancellation response was
+        // persisted, keeping every tool call paired with a response.
+        // Tool response content is base64-encoded in the raw events file.
+        let content = fs
+            .read_test_events_raw(&conv_id)
+            .expect("events should be persisted");
+        let encoded_response = STANDARD.encode(CUSTOM_CANCELLATION_RESPONSE);
+        assert!(
+            content.contains(&encoded_response),
+            "Should contain the configured cancellation response (base64-encoded).\nFile \
+             contents:\n{content}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
 /// A Ctrl-C pressed while a tool question prompt is active is declined by the
 /// tool handler and lands on the turn-level handler, which ends the turn
 /// gracefully once the tool completes: no follow-up request is sent.
@@ -1190,6 +1342,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
                 })]),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1522,6 +1675,7 @@ async fn test_tool_restart_on_interrupt() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1675,6 +1829,7 @@ async fn test_merged_stream_exits_after_tool_response() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1785,6 +1940,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1926,6 +2082,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2074,6 +2231,7 @@ async fn test_tool_call_with_run_mode_unattended() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2210,6 +2368,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2362,6 +2521,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
         // tool_unattended runs automatically
         config
@@ -2382,6 +2542,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2567,6 +2728,7 @@ async fn test_tool_call_returns_error() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3751,6 +3913,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
         config
             .conversation
@@ -3770,6 +3933,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3940,6 +4104,7 @@ async fn test_single_tool_call_rendered_with_args() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -4182,6 +4347,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
             .collect(),
         options: IndexMap::default(),
         access: None,
+        cancellation_response: None,
     }
 }
 
@@ -4482,6 +4648,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -4910,6 +5077,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));

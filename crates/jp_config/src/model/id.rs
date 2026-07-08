@@ -616,6 +616,10 @@ impl Id for ProviderId {
 }
 
 /// A model ID.
+///
+/// Must match `[a-zA-Z0-9_.:/~-]+`.
+/// The `~` is required by Openrouter, which prefixes its latest-alias catalog
+/// entries with it (e.g. `~anthropic/claude-fable-latest`).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Schematic)]
 #[serde(try_from = "String")]
 pub struct Name(pub String);
@@ -662,16 +666,16 @@ impl FromStr for Name {
     fn from_str(id: &str) -> Result<Self, Self::Err> {
         if id.is_empty()
             || id.chars().any(|c| {
-                !(c.is_numeric()
-                    || c.is_ascii_alphabetic()
+                !(c.is_ascii_alphanumeric()
                     || c == '-'
                     || c == '_'
                     || c == '.'
                     || c == ':'
-                    || c == '/')
+                    || c == '/'
+                    || c == '~')
             })
         {
-            return Err(ModelIdError);
+            return Err(ModelIdError(id.to_owned()));
         }
 
         Ok(Self(id.to_owned()))
@@ -686,8 +690,8 @@ impl From<Name> for String {
 
 /// Error when parsing `ModelId`.
 #[derive(Debug, thiserror::Error)]
-#[error("Model ID must be [a-zA-Z0-9_-.:/]+")]
-pub struct ModelIdError;
+#[error("Model ID must be [a-zA-Z0-9_.:/~-]+, got: {0:?}")]
+pub struct ModelIdError(pub String);
 
 #[cfg(test)]
 #[path = "id_tests.rs"]
