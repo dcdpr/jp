@@ -12,10 +12,12 @@
 //! With paragraph streaming on, a top-level paragraph's prose is emitted as
 //! [`Event::ParagraphChunk`]s and rendered before the paragraph ends, so
 //! anything a fixup would change after the fact has already been printed.
-//! The current fixups satisfy this because they only rewrite *following* fence
+//! The current fixups satisfy this because they only rewrite *following*
 //! events: [`OrphanedFenceFixup`] derives its embedded-fence flag from the
-//! accumulated paragraph and acts on the *next* bare fence, and
-//! [`FenceEscalationFixup`] touches only fenced-code events.
+//! accumulated paragraph and acts on the *next* bare fence,
+//! [`FenceEscalationFixup`] touches only fenced-code events, and
+//! [`SplitCodeSpanFixup`] rewrites only the leading prefix of the paragraph
+//! *after* a dangling opener, before any of it has rendered.
 //! A future fixup that repairs paragraph prose from whole-paragraph context
 //! must run in the buffer before streaming, or opt the affected paragraph out
 //! of streaming.
@@ -53,13 +55,14 @@ impl Fixups {
         Self { fixups }
     }
 
-    /// The fixup set applied to LLM output: orphaned-fence correction and fence
-    /// escalation.
+    /// The fixup set applied to LLM output: orphaned-fence correction, fence
+    /// escalation, and split code-span repair.
     #[must_use]
     pub fn llm_quirks() -> Self {
         Self::new(vec![
             Box::new(OrphanedFenceFixup::new()),
             Box::new(FenceEscalationFixup),
+            Box::new(SplitCodeSpanFixup::new()),
         ])
     }
 
@@ -229,6 +232,238 @@ impl EventFixup for FenceEscalationFixup {
             other => Some(other),
         }
     }
+}
+
+/// Maximum bytes of whitespace-free prefix searched for an orphaned closer.
+///
+/// An injected paragraph break splits a single token, so the closing run must
+/// appear within the first "word" of the following paragraph.
+/// The cap bounds the search for pathological single-word paragraphs; widen it
+/// if a real-world split ever exceeds it.
+const MAX_CLOSER_PREFIX: usize = 64;
+
+/// Repairs inline code spans split by a paragraph break injected mid-span.
+///
+/// LLM streams occasionally emit a spurious blank line inside an inline code
+/// span (`` `_rfd-next- `` + blank line + `` number` ``).
+/// CommonMark ends the paragraph at the blank line, so the opener renders as a
+/// harmless literal backtick, but the orphaned closer at the start of the next
+/// paragraph shifts every backtick pairing after it off by one, styling prose
+/// as code and code as prose.
+///
+/// The fixup tracks whether a paragraph ends inside an open code span
+/// (run-length aware, mirroring comrak's pairing rules).
+/// When the immediately following paragraph presents a backtick run of the same
+/// length within its leading whitespace-free prefix, that run is taken as the
+/// orphaned closer and backslash-escaped: it renders as a literal backtick and
+/// restores the pairing of every span after it.
+/// The dangling opener itself needs no repair, because an unpaired opener
+/// already renders literally.
+///
+/// Misfire guards, in rough order of selectivity:
+///
+/// - Only the immediately following paragraph-like event ([`Event::Block`] or
+///   the first [`Event::ParagraphChunk`]s of a paragraph) participates; any
+///   other event disarms the state.
+/// - The closer run must match the opener's run length exactly.
+/// - It must appear before any whitespace, within [`MAX_CLOSER_PREFIX`] bytes
+///   of the paragraph start.
+/// - A run at offset zero is only treated as a closer when followed by
+///   whitespace, so a legitimate `` `foo` `` span at paragraph start is left
+///   alone.
+///
+/// The rewrite happens in the paragraph's leading chunk before it is rendered,
+/// so the streaming constraint above holds.
+pub struct SplitCodeSpanFixup {
+    /// Run length of the unclosed opener that ended the previous paragraph.
+    armed: Option<usize>,
+    /// Whether a streamed paragraph is mid-flight.
+    in_paragraph: bool,
+    /// Open code span run length carried across the current paragraph's chunks
+    /// (computed over the *repaired* content).
+    open: Option<usize>,
+    /// Search for the orphaned closer in the current paragraph's prefix.
+    search: Search,
+}
+
+/// Closer-search state for the paragraph following a dangling opener.
+enum Search {
+    /// Not searching.
+    Off,
+    /// Scanning the leading whitespace-free prefix for a `run`-length backtick
+    /// run; `seen` counts prefix bytes consumed by earlier chunks.
+    Active {
+        /// The dangling opener's backtick run length.
+        run: usize,
+        /// Prefix bytes consumed by earlier chunks of this paragraph.
+        seen: usize,
+    },
+}
+
+impl Default for SplitCodeSpanFixup {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SplitCodeSpanFixup {
+    /// Create a new fixup.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            armed: None,
+            in_paragraph: false,
+            open: None,
+            search: Search::Off,
+        }
+    }
+}
+
+impl EventFixup for SplitCodeSpanFixup {
+    fn process(&mut self, event: Event) -> Option<Event> {
+        match event {
+            Event::ParagraphChunk {
+                mut content,
+                indent,
+                last,
+            } => {
+                if !self.in_paragraph {
+                    self.in_paragraph = true;
+                    self.open = None;
+                    self.search = self
+                        .armed
+                        .take()
+                        .map_or(Search::Off, |run| Search::Active { run, seen: 0 });
+                }
+                if let Search::Active { run, mut seen } = self.search {
+                    self.search = if repair_orphaned_closer(&mut content, run, &mut seen) {
+                        Search::Off
+                    } else {
+                        Search::Active { run, seen }
+                    };
+                }
+                self.open = scan_code_spans(&content, self.open);
+                if last {
+                    self.armed = self.open.take();
+                    self.in_paragraph = false;
+                    self.search = Search::Off;
+                }
+                Some(Event::ParagraphChunk {
+                    content,
+                    indent,
+                    last,
+                })
+            }
+            Event::Block {
+                mut content,
+                indent,
+            } => {
+                // A `Block` stands in for a whole paragraph; clear any stray
+                // streamed-paragraph state.
+                self.in_paragraph = false;
+                self.open = None;
+                self.search = Search::Off;
+                if let Some(run) = self.armed.take() {
+                    let mut seen = 0;
+                    let _ = repair_orphaned_closer(&mut content, run, &mut seen);
+                }
+                self.armed = scan_code_spans(&content, None);
+                Some(Event::Block { content, indent })
+            }
+            // Any other event breaks the paragraph continuation.
+            other => {
+                self.armed = None;
+                self.in_paragraph = false;
+                self.open = None;
+                self.search = Search::Off;
+                Some(other)
+            }
+        }
+    }
+}
+
+/// Search `content` (a leading portion of a paragraph) for the orphaned closer
+/// of a dangling `run`-length opener, escaping it in place when found.
+///
+/// Returns `true` when the search resolved — a backtick run, whitespace, or
+/// the prefix cap was reached — whether or not a repair was made.
+/// Returns `false` when `content` ended while still inside the whitespace-free
+/// prefix, in which case the search continues in the next chunk with `seen`
+/// advanced.
+fn repair_orphaned_closer(content: &mut String, run: usize, seen: &mut usize) -> bool {
+    let mut i = 0;
+    while i < content.len() {
+        if *seen + i >= MAX_CLOSER_PREFIX {
+            return true;
+        }
+        let b = content.as_bytes()[i];
+        if b == b'`' {
+            let len = backtick_run(content.as_bytes(), i);
+            // A run at offset zero is ambiguous with a legitimate span
+            // opener; only a following whitespace marks it as a closer.
+            let followed_by_ws = content[i + len..]
+                .chars()
+                .next()
+                .is_none_or(char::is_whitespace);
+            if len == run && (*seen + i > 0 || followed_by_ws) {
+                content.replace_range(i..i + len, &"\\`".repeat(len));
+            }
+            return true;
+        }
+        if b == b'\\' {
+            // A backslash-escaped character is ordinary prefix content.
+            i += 1;
+            if let Some(c) = content[i..].chars().next() {
+                i += c.len_utf8();
+            }
+            continue;
+        }
+        let c = content[i..].chars().next().unwrap_or('\0');
+        if c.is_whitespace() {
+            return true;
+        }
+        i += c.len_utf8();
+    }
+    *seen += content.len();
+    false
+}
+
+/// Scan `content` for inline code spans, starting from an already-`open` span's
+/// run length (or `None` at paragraph start), and return the open span's run
+/// length at the end.
+///
+/// Mirrors comrak's pairing: a backtick run opens a span, and only a run of the
+/// exact same length closes it; a backslash-escaped backtick outside a span is
+/// literal.
+fn scan_code_spans(content: &str, mut open: Option<usize>) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match (open, bytes[i]) {
+            (Some(len), b'`') => {
+                let run = backtick_run(bytes, i);
+                if run == len {
+                    open = None;
+                }
+                i += run;
+            }
+            (None, b'`') => {
+                open = Some(backtick_run(bytes, i));
+                i += open.unwrap_or(1);
+            }
+            // Skip the backslash and the escaped byte. Landing inside a
+            // multi-byte character is harmless: continuation bytes never
+            // match an ASCII backtick or backslash.
+            (None, b'\\') => i += 2,
+            _ => i += 1,
+        }
+    }
+    open
+}
+
+/// Count consecutive backticks in `bytes` starting at `start`.
+fn backtick_run(bytes: &[u8], start: usize) -> usize {
+    bytes[start..].iter().take_while(|&&b| b == b'`').count()
 }
 
 #[cfg(test)]
