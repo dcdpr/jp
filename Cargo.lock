@@ -1013,7 +1013,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1147,7 +1147,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1949,7 +1949,7 @@ dependencies = [
 [[package]]
 name = "inquire"
 version = "0.9.1"
-source = "git+https://github.com/JeanMertz/inquire?branch=merged#941896e113e786d3c40345e1f70249930f4eadb0"
+source = "git+https://github.com/JeanMertz/inquire?branch=merged#93ecb2750bc244b2af69b4294d6809957ec7adf0"
 dependencies = [
  "bitflags",
  "crossterm",
@@ -3475,7 +3475,7 @@ dependencies = [
 [[package]]
 name = "reedline"
 version = "0.48.0"
-source = "git+https://github.com/JeanMertz/reedline?branch=changes#d6a56e266758c5a28d7b635b20611dfb50c6acfb"
+source = "git+https://github.com/JeanMertz/reedline?branch=changes#afcd57f3f20a7c43b1fc5853ba610cdecf2e2684"
 dependencies = [
  "chrono",
  "crossterm",
@@ -3735,7 +3735,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4464,7 +4464,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5290,7 +5290,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
