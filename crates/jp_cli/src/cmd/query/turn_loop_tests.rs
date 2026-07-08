@@ -5061,10 +5061,10 @@ async fn test_inquiry_failure_marks_tool_as_error() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
-/// A misconfigured inquiry model override must be attributed to the
-/// override: the underlying cause (e.g. a missing API key environment
-/// variable) is otherwise indistinguishable from a main-model failure and
-/// points the user at the wrong config.
+/// A misconfigured inquiry model override must be attributed to the override:
+/// the underlying cause (e.g. a missing API key environment variable) is
+/// otherwise indistinguishable from a main-model failure and points the user at
+/// the wrong config.
 #[test]
 fn inquiry_model_override_error_names_the_override() {
     let error = Error::InquiryModelOverride {

@@ -49,9 +49,9 @@ pub(crate) enum Error {
     /// could not be used.
     ///
     /// A dedicated variant so the failure is attributed to the override: the
-    /// underlying LLM error (e.g. a missing API key environment variable)
-    /// would otherwise be indistinguishable from a main-model failure and
-    /// point the user at the wrong config.
+    /// underlying LLM error (e.g. a missing API key environment variable) would
+    /// otherwise be indistinguishable from a main-model failure and point the
+    /// user at the wrong config.
     #[error("Inquiry model override '{model}' is unusable")]
     InquiryModelOverride { model: String, source: jp_llm::Error },
 
