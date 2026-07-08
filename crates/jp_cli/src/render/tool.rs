@@ -327,7 +327,9 @@ impl ToolRenderer {
 
         if ext.is_none() {
             let trimmed = content.trim();
-            if trimmed.starts_with('<') && quick_xml::de::from_str::<Value>(trimmed).is_ok() {
+            if trimmed.starts_with('<')
+                && (has_xml_envelope(trimmed) || quick_xml::de::from_str::<Value>(trimmed).is_ok())
+            {
                 ext = Some("xml".to_owned());
             } else if trimmed.starts_with('{') && serde_json::from_str::<Value>(trimmed).is_ok() {
                 ext = Some("json".to_owned());
@@ -652,6 +654,29 @@ fn is_display_empty(value: &Value) -> bool {
         Value::Array(a) => a.is_empty(),
         _ => false,
     }
+}
+
+/// Returns `true` when the content is wrapped in a matching pair of root tags
+/// (e.g. `<git_blame>...</git_blame>`).
+///
+/// Tool results commonly use an XML-like envelope whose body is not guaranteed
+/// to be well-formed XML: it may embed raw source code or diff content with
+/// unescaped `&` or `<`.
+/// Detecting the envelope instead of parsing the full document keeps language
+/// detection independent of the embedded content.
+fn has_xml_envelope(content: &str) -> bool {
+    let Some(rest) = content.strip_prefix('<') else {
+        return false;
+    };
+
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':')))
+        .unwrap_or(rest.len());
+    let name = &rest[..end];
+
+    !name.is_empty()
+        && rest[end..].starts_with(['>', ' ', '\t', '\n', '\r'])
+        && content.ends_with(&format!("</{name}>"))
 }
 
 /// Render a JSON representation of the arguments.

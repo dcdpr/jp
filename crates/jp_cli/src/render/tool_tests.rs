@@ -257,6 +257,44 @@ fn test_render_result_basic() {
     insta::assert_snapshot!(output);
 }
 
+/// Pseudo-XML tool results (e.g. `git_blame`, `git_log`) embed raw content with
+/// unescaped `&` and `<`, which is not well-formed XML.
+/// The envelope alone decides whether the result is fenced, so the display
+/// stays consistent regardless of the embedded content.
+#[test]
+fn test_render_result_fences_xml_envelope_with_unescaped_body() {
+    let (renderer, out, _) = create_renderer();
+    let content = "<git_blame>\n  <file>src/lib.rs</file>\n  <hunk>\n    lines:\n      384: fn \
+                   format_blame(blame: &BlameOutput) -> Result<String> {\n      385:     let mut \
+                   out = String::from(\"<git_blame>\\n\");\n  </hunk>\n</git_blame>";
+    let response = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok(content.into()),
+    };
+    renderer.render_result(&response, &InlineResults::Full, &LinkStyle::Off);
+    renderer.channel.flush();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("```xml"),
+        "expected xml fence, got: {output}"
+    );
+}
+
+#[test]
+fn test_has_xml_envelope() {
+    // Matching root tag pair, regardless of body well-formedness.
+    assert!(has_xml_envelope("<git_blame>\nfoo & <bar\n</git_blame>"));
+    assert!(has_xml_envelope("<result>ok</result>"));
+    assert!(has_xml_envelope("<root attr=\"1\">\n</root>"));
+
+    // Mismatched or missing envelope.
+    assert!(!has_xml_envelope("plain text"));
+    assert!(!has_xml_envelope("<git_blame>unterminated"));
+    assert!(!has_xml_envelope("<a>foo</b>"));
+    assert!(!has_xml_envelope("< 5 and > 3"));
+    assert!(!has_xml_envelope("</closed>"));
+}
+
 #[test]
 fn test_render_result_off() {
     let (renderer, out, _) = create_renderer();
