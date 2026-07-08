@@ -45,6 +45,16 @@ pub(crate) enum Error {
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 
+    /// The inquiry model override (`conversation.inquiry.assistant.model`)
+    /// could not be used.
+    ///
+    /// A dedicated variant so the failure is attributed to the override: the
+    /// underlying LLM error (e.g. a missing API key environment variable)
+    /// would otherwise be indistinguishable from a main-model failure and
+    /// point the user at the wrong config.
+    #[error("Inquiry model override '{model}' is unusable")]
+    InquiryModelOverride { model: String, source: jp_llm::Error },
+
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
 
