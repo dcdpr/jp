@@ -5078,7 +5078,9 @@ fn inquiry_model_override_error_names_the_override() {
         "Inquiry model override 'openrouter/foo/bar' is unusable"
     );
     assert_eq!(
-        std::error::Error::source(&error).expect("source").to_string(),
+        std::error::Error::source(&error)
+            .expect("source")
+            .to_string(),
         "Missing environment variable: OPENROUTER_API_KEY"
     );
 

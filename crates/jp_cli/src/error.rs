@@ -53,7 +53,10 @@ pub(crate) enum Error {
     /// otherwise be indistinguishable from a main-model failure and point the
     /// user at the wrong config.
     #[error("Inquiry model override '{model}' is unusable")]
-    InquiryModelOverride { model: String, source: jp_llm::Error },
+    InquiryModelOverride {
+        model: String,
+        source: jp_llm::Error,
+    },
 
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
