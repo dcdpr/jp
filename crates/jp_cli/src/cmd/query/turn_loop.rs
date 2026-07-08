@@ -829,12 +829,25 @@ async fn build_inquiry_backend(
     // merged with the parent assistant config.
     let default_config = if let Some(inquiry_model_cfg) = inquiry_override.model.as_ref() {
         let inquiry_model_id = inquiry_model_cfg.id.resolved();
-        let inquiry_provider: Arc<dyn Provider> =
-            Arc::from(get_provider(inquiry_model_id.provider, &cfg.providers.llm)?);
+        // Attribute failures to the override: without this, e.g. a missing
+        // API key environment variable renders identically to a main-model
+        // failure and points the user at the wrong config.
+        let inquiry_provider: Arc<dyn Provider> = Arc::from(
+            get_provider(inquiry_model_id.provider, &cfg.providers.llm).map_err(|source| {
+                Error::InquiryModelOverride {
+                    model: inquiry_model_id.to_string(),
+                    source,
+                }
+            })?,
+        );
         debug!(model = %inquiry_model_id, "Fetching inquiry model details.");
         let inquiry_model = inquiry_provider
             .model_details(&inquiry_model_id.name)
-            .await?;
+            .await
+            .map_err(|source| Error::InquiryModelOverride {
+                model: inquiry_model_id.to_string(),
+                source,
+            })?;
 
         if inquiry_model.structured_output == Some(false) {
             warn!(
@@ -906,16 +919,28 @@ async fn build_inquiry_overrides(
                     .resolve(&cfg.providers.llm.aliases)
                     .map_err(|e| Error::CliConfig(e.to_string()))?;
 
+                // Attribute failures to the per-question override: without
+                // this, e.g. a missing API key environment variable renders
+                // identically to a main-model failure and points the user at
+                // the wrong config.
+                let wrap_err = |source| Error::InquiryQuestionModelOverride {
+                    tool: tool_name.to_owned(),
+                    question: question_id.clone(),
+                    model: model_id.to_string(),
+                    source: Box::new(source),
+                };
+
                 let prov = if let Some(p) = providers.get(&model_id.provider) {
                     Arc::clone(p)
                 } else {
-                    let p: Arc<dyn Provider> =
-                        Arc::from(get_provider(model_id.provider, &cfg.providers.llm)?);
+                    let p: Arc<dyn Provider> = Arc::from(
+                        get_provider(model_id.provider, &cfg.providers.llm).map_err(wrap_err)?,
+                    );
                     providers.insert(model_id.provider, Arc::clone(&p));
                     p
                 };
 
-                let details = prov.model_details(&model_id.name).await?;
+                let details = prov.model_details(&model_id.name).await.map_err(wrap_err)?;
 
                 if details.structured_output == Some(false) {
                     warn!(

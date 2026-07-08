@@ -461,6 +461,13 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
             "Error running command. Disabling workspace persistence."
         );
         ctx.workspace.disable_persistence();
+
+        // The state this run produced is being discarded, so background work
+        // derived from it (e.g. generating a title for a conversation that
+        // won't survive) is wasted. Fire the soft-cancellation token now:
+        // the drain below then skips its soft wait and goes straight to the
+        // 2s grace pass instead of waiting up to 10s for doomed tasks.
+        ctx.task_handler.cancel_token().cancel();
     }
 
     // Flush the printer to ensure all queued typewriter output is fully written

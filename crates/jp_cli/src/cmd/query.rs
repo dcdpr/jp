@@ -386,6 +386,21 @@ impl Query {
                 .update_events(|events| events.add_config_delta(delta));
         }
 
+        // Fail fast on provider misconfiguration (e.g. a missing API key
+        // environment variable) before any side-effectful work below:
+        // pre-query compaction can run a full summary LLM round-trip, MCP
+        // servers boot in background tasks, the editor may open to compose
+        // the request, and title generation and attachment loading are all
+        // wasted — and the title task alone can hold the run open for
+        // seconds at teardown — when the request can never be sent.
+        // `handle_turn` repeats this check implicitly when it constructs
+        // the live provider.
+        provider::preflight(
+            cfg.assistant.model.id.resolved().provider,
+            &cfg.providers.llm,
+        )
+        .map_err(Error::from)?;
+
         // Compact the conversation before querying, if requested.
         if self.compact.should_compact() {
             self.apply_pre_query_compaction(&lock, &cfg).await?;
@@ -493,12 +508,15 @@ impl Query {
                     debug!("Generating title for new conversation");
                     let mut stream = stream.clone();
                     stream.start_turn(chat_request.clone());
-                    ctx.task_handler.spawn(TitleGeneratorTask::new(
-                        cid,
-                        stream,
-                        &cfg,
-                        ctx.term.is_tty,
-                    )?);
+                    // A misconfigured title model must not fail the query —
+                    // the turn itself runs on the (already preflighted)
+                    // assistant model. Skip the title instead of spawning a
+                    // task that is doomed to fail after holding teardown
+                    // open.
+                    match TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty) {
+                        Ok(task) => ctx.task_handler.spawn(task),
+                        Err(error) => warn!(%error, "Skipping title generation."),
+                    }
                 }
                 NewTitle::Skip => {}
             }

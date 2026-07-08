@@ -388,6 +388,42 @@ impl From<crate::error::Error> for Error {
                 ("uri", uri.to_string()),
             ]
             .into(),
+            InquiryModelOverride { model, source } => {
+                let mut meta = with_cause(&source, "Inquiry model override is unusable");
+                meta.insert(1, ("model", model));
+                meta.push((
+                    "suggestion",
+                    "Fix the provider credentials, or remove \
+                     `conversation.inquiry.assistant.model` to run inquiries on the main \
+                     assistant model."
+                        .to_owned(),
+                ));
+                meta
+            }
+            InquiryQuestionModelOverride {
+                tool,
+                question,
+                model,
+                source,
+            } => {
+                let mut meta = with_cause(
+                    source.as_ref(),
+                    "Inquiry model override for a tool question is unusable",
+                );
+                meta.insert(1, ("model", model));
+                meta.insert(2, ("tool", tool.clone()));
+                meta.insert(3, ("question", question.clone()));
+                meta.push((
+                    "suggestion",
+                    format!(
+                        "Fix the provider credentials, or remove the model override for question \
+                         '{question}' of tool '{tool}' (under \
+                         `conversation.tools.{tool}.questions.{question}`) to run this inquiry on \
+                         the default inquiry model."
+                    ),
+                ));
+                meta
+            }
             Editor(error) => [("message", "Editor error".into()), ("error", error.clone())].into(),
             Task(error) => with_cause(error.as_ref(), "Task error"),
             TemplateUndefinedVariable(var) => [
