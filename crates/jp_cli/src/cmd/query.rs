@@ -464,6 +464,19 @@ impl Query {
 
         let stream = lock.events().clone();
 
+        // Fail fast on provider misconfiguration (e.g. a missing API key
+        // environment variable) before any side-effectful work below:
+        // spawning title generation, waiting for MCP servers, and loading
+        // attachments are all wasted — and the title task alone can hold the
+        // run open for seconds at teardown — when the request can never be
+        // sent. `handle_turn` repeats this check implicitly when it
+        // constructs the live provider.
+        provider::preflight(
+            cfg.assistant.model.id.resolved().provider,
+            &cfg.providers.llm,
+        )
+        .map_err(Error::from)?;
+
         // Set the title for new or empty conversations (including forks).
         // Skip when `--title` or `--no-title` was provided (the user already
         // expressed an intent for the title).
@@ -493,12 +506,15 @@ impl Query {
                     debug!("Generating title for new conversation");
                     let mut stream = stream.clone();
                     stream.start_turn(chat_request.clone());
-                    ctx.task_handler.spawn(TitleGeneratorTask::new(
-                        cid,
-                        stream,
-                        &cfg,
-                        ctx.term.is_tty,
-                    )?);
+                    // A misconfigured title model must not fail the query —
+                    // the turn itself runs on the (already preflighted)
+                    // assistant model. Skip the title instead of spawning a
+                    // task that is doomed to fail after holding teardown
+                    // open.
+                    match TitleGeneratorTask::new(cid, stream, &cfg, ctx.term.is_tty) {
+                        Ok(task) => ctx.task_handler.spawn(task),
+                        Err(error) => warn!(%error, "Skipping title generation."),
+                    }
                 }
                 NewTitle::Skip => {}
             }

@@ -63,6 +63,12 @@ impl TitleGeneratorTask {
 
         let model_id = model.id.resolved().clone();
 
+        // Fail fast on a misconfigured title provider (e.g. a missing API
+        // key environment variable). Without this, the failure only surfaces
+        // inside the spawned task, after the query has already committed to
+        // waiting for it at teardown.
+        provider::preflight(model_id.provider, &config.providers.llm)?;
+
         // If reasoning is explicitly enabled for title generation, use it,
         // otherwise limit it to low effort.
         if model.parameters.reasoning.is_none() {
