@@ -380,7 +380,7 @@
     "summary": "Extend reasoning-region background shading across tool calls to visually represent continuous reasoning despite interleaved tool execution."
   },
   "097-stable-event-identifiers.md": {
-    "hash": "5be402913bbabb1d6c7d95c583f20f37aa2fecb5b08335cd5e439848f9f9defa",
+    "hash": "4ace566042d5af0b07a9f184763291dbea402da95d58d513ab107b4d7c2292f5",
     "summary": "Assign stable, stream-unique identifiers to every conversation event for safe manual editing and future reference features."
   }
 }

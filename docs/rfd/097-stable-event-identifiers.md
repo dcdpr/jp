@@ -52,8 +52,7 @@ becomes a *detectable* mismatch — never a silent positional aliasing.
 ### Future features need stable references
 
 Several proposed designs need to point at specific stream entries:
-request/response event linking, branching, undo, and plugin event
-subscriptions.
+request/response event linking, branching, undo, and plugin event subscriptions.
 Future sub-agent designs that need event-level provenance may also consume event
 IDs; [RFD 051] as written works at conversation granularity and does not require
 them.
