@@ -1016,12 +1016,16 @@ fn no_title_does_not_persist_into_partial_config() {
 }
 
 #[test]
-fn echo_request_when_from_editor_or_replay() {
+fn echo_request_unless_inline() {
     // Editor-composed query: the editor took over the screen, so echo.
-    assert!(Query::default().should_echo_request(true));
+    assert!(Query::default().should_echo_request(QuerySource::Editor));
 
     // Plain inline query, no editor: the user already sees their input.
-    assert!(!Query::default().should_echo_request(false));
+    assert!(!Query::default().should_echo_request(QuerySource::Inline));
+
+    // Synthesized query (`--no-edit` without a query): the user never typed
+    // or saw the resulting message, so it must be echoed.
+    assert!(Query::default().should_echo_request(QuerySource::Synthesized));
 
     // Replay without an editor: the message comes from history and isn't
     // otherwise visible on the terminal, so it must be echoed.
@@ -1029,7 +1033,7 @@ fn echo_request_when_from_editor_or_replay() {
         replay: true,
         ..Default::default()
     };
-    assert!(replay.should_echo_request(false));
+    assert!(replay.should_echo_request(QuerySource::Inline));
 }
 
 #[test]
