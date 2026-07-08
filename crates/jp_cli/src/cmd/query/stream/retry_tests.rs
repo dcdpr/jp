@@ -330,7 +330,7 @@ async fn retry_without_partial_content_still_works() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn interrupt_during_backoff_cuts_wait_short() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
@@ -353,11 +353,12 @@ async fn interrupt_during_backoff_cuts_wait_short() {
 
     let (router, signals) = test_router();
     let router = std::sync::Arc::new(router);
-    // Unlike the turn-loop tests, there is no setup between spawning this
-    // task and `handle_stream_error` registering its handler at entry, so a
-    // short sleep reliably lands the press inside the backoff wait.
+    // On the current-thread runtime this task first runs only after the test
+    // task yields, and `handle_stream_error` has no await points before its
+    // backoff select! — so the temporary backoff handler is registered before
+    // this send can happen. The ordering is a scheduler guarantee, not a
+    // wall-clock bet.
     let signal_handle = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
         signals.interrupt().await;
     });
 
