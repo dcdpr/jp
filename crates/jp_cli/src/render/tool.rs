@@ -664,6 +664,10 @@ fn is_display_empty(value: &Value) -> bool {
 /// unescaped `&` or `<`.
 /// Detecting the envelope instead of parsing the full document keeps language
 /// detection independent of the embedded content.
+///
+/// The opening tag must be terminated with `>` before any nested tag starts:
+/// either immediately after the root name, or — when the name is followed by
+/// whitespace and attributes — before the next `<`.
 fn has_xml_envelope(content: &str) -> bool {
     let Some(rest) = content.strip_prefix('<') else {
         return false;
@@ -674,9 +678,21 @@ fn has_xml_envelope(content: &str) -> bool {
         .unwrap_or(rest.len());
     let name = &rest[..end];
 
-    !name.is_empty()
-        && rest[end..].starts_with(['>', ' ', '\t', '\n', '\r'])
-        && content.ends_with(&format!("</{name}>"))
+    let after = &rest[end..];
+    let has_open_tag_end = match after.chars().next() {
+        Some('>') => true,
+        Some(c) if c.is_ascii_whitespace() => {
+            // Attributes allowed, but the opening tag must be terminated
+            // before any other tag (`<`) starts.
+            matches!(
+                after.find(['<', '>']).map(|i| after.as_bytes()[i]),
+                Some(b'>')
+            )
+        }
+        _ => false,
+    };
+
+    !name.is_empty() && has_open_tag_end && content.ends_with(&format!("</{name}>"))
 }
 
 /// Render a JSON representation of the arguments.

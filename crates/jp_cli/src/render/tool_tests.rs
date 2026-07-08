@@ -286,6 +286,7 @@ fn test_has_xml_envelope() {
     assert!(has_xml_envelope("<git_blame>\nfoo & <bar\n</git_blame>"));
     assert!(has_xml_envelope("<result>ok</result>"));
     assert!(has_xml_envelope("<root attr=\"1\">\n</root>"));
+    assert!(has_xml_envelope("<root attr=\"1\"\n>body</root>"));
 
     // Mismatched or missing envelope.
     assert!(!has_xml_envelope("plain text"));
@@ -293,6 +294,11 @@ fn test_has_xml_envelope() {
     assert!(!has_xml_envelope("<a>foo</b>"));
     assert!(!has_xml_envelope("< 5 and > 3"));
     assert!(!has_xml_envelope("</closed>"));
+
+    // Opening tag never terminated with `>`: whitespace after the root name
+    // must not be enough on its own.
+    assert!(!has_xml_envelope("<root\nbody\n</root>"));
+    assert!(!has_xml_envelope("<root attr=\"1\"\n</root>"));
 }
 
 #[test]
