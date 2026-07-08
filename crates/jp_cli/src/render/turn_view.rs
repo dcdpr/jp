@@ -20,6 +20,7 @@ use std::sync::{
 
 use jp_config::style::StyleConfig;
 use jp_conversation::event::{ChatRequest, ChatResponse};
+use jp_md::format::DefaultBackground;
 use jp_printer::Printer;
 
 use super::{ChatRenderer, StructuredRenderer};
@@ -161,23 +162,35 @@ impl TurnView {
         }
     }
 
-    /// Mark a tool call boundary in the chat renderer.
+    /// Resolve the tool-call boundary, returning the background the tool's
+    /// chrome should be filled with to keep a reasoning region continuous.
     ///
-    /// Emits the assistant header if not already shown, then flushes the chat
-    /// buffer so surrounding messages render as distinct paragraphs.
-    /// Also closes any open structured fence — a tool call after structured
-    /// output is a content boundary that must not stay inside the `json` block.
+    /// `chrome_visible` is whether the tool's chrome will be rendered.
+    /// Both the live and replay paths compute it the same way (`show && !json
+    /// && !hidden`); the caller owns the config needed to evaluate it.
+    /// Either way the assistant header is emitted if needed, the structured
+    /// fence is closed, and the chat buffer is drained so blocks before the
+    /// tool commit.
     ///
-    /// `hidden` controls whether the chat renderer transitions into the
-    /// `ToolCall` content kind: passing `true` keeps the boundary invisible
-    /// (suitable for hidden tool calls so the next message doesn't pick up an
-    /// extra blank line); `false` is the normal case where tool UI follows.
-    pub fn enter_tool_call(&mut self, hidden: bool) {
+    /// When the chrome is visible, the chat renderer also resolves the
+    /// reasoning-region separator and transitions into tool-call mode,
+    /// returning the region background (or `None` when the tool call doesn't
+    /// continue a shaded reasoning region).
+    /// When the chrome is not visible, the reasoning separator is left for the
+    /// next visible content and no transition occurs — a reasoning region
+    /// stays continuous across the invisible tool — and `None` is returned,
+    /// since there is no chrome to shade.
+    pub(crate) fn enter_tool_call_region(
+        &mut self,
+        chrome_visible: bool,
+    ) -> Option<DefaultBackground> {
         self.ensure_assistant_header();
         self.structured.flush();
-        self.chat.flush();
-        if !hidden {
-            self.chat.transition_to_tool_call();
+        if chrome_visible {
+            self.chat.enter_tool_call()
+        } else {
+            self.chat.skip_tool_call();
+            None
         }
     }
 

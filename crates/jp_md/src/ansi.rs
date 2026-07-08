@@ -81,40 +81,86 @@ impl AnsiState {
             || self.background.is_some()
     }
 
-    /// Update the tracked state from a complete ANSI escape sequence (e.g.
-    /// `"\x1b[1m"`).
-    pub(crate) fn update(&mut self, esc: &str) {
-        match esc {
-            BOLD_START => self.bold = true,
-            BOLD_END => self.bold = false,
-            ITALIC_START => self.italic = true,
-            ITALIC_END => self.italic = false,
-            UNDERLINE_START => self.underline = true,
-            UNDERLINE_END => self.underline = false,
-            STRIKETHROUGH_START => self.strikethrough = true,
-            STRIKETHROUGH_END => self.strikethrough = false,
-            BG_END => self.background = None,
-            FG_END => self.foreground = None,
-            RESET => *self = Self::default(),
-            _ => {
-                // Dynamic color escapes: extract the param between
-                // "\x1b[" and "m".
-                if let Some(param) = esc.strip_prefix("\x1b[").and_then(|s| s.strip_suffix('m')) {
-                    if param.starts_with("48;") {
-                        self.background = Some(param.to_string());
-                    } else if param.starts_with("38;") {
-                        self.foreground = Some(param.to_string());
+    /// Update the tracked state from a complete ANSI SGR escape (e.g.
+    /// `"\x1b[1m"` or the compound `"\x1b[1;48;5;236m"`).
+    ///
+    /// Each `;`-separated SGR sub-parameter is parsed, so attributes combined
+    /// into one escape (`\x1b[1;48;5;236m`, `\x1b[0;48;5;236m`, `\x1b[39;49m`)
+    /// are all tracked — matching only the leading sub-parameter would miss
+    /// every attribute after the first.
+    /// Non-SGR escapes (anything not of the form `\x1b[…m`) leave the state
+    /// untouched.
+    ///
+    /// Returns `true` when the escape resets all attributes or sets/clears the
+    /// background — the signal a default-background overlay uses to know it
+    /// must re-assert its fill after the escape is forwarded.
+    pub(crate) fn update(&mut self, esc: &str) -> bool {
+        let Some(params) = esc.strip_prefix("\x1b[").and_then(|s| s.strip_suffix('m')) else {
+            return false;
+        };
+
+        // An empty parameter list (`\x1b[m`) is shorthand for a full reset.
+        if params.is_empty() {
+            *self = Self::default();
+            return true;
+        }
+
+        let mut touched_background = false;
+        let mut tokens = params.split(';');
+        while let Some(code) = tokens.next() {
+            match code {
+                "0" => {
+                    *self = Self::default();
+                    touched_background = true;
+                }
+                "1" => self.bold = true,
+                "22" => self.bold = false,
+                "3" => self.italic = true,
+                "23" => self.italic = false,
+                "4" => self.underline = true,
+                "24" => self.underline = false,
+                "9" => self.strikethrough = true,
+                "29" => self.strikethrough = false,
+                "39" => self.foreground = None,
+                "49" => {
+                    self.background = None;
+                    touched_background = true;
+                }
+                "38" => {
+                    if let Some(color) = consume_color("38", &mut tokens) {
+                        self.foreground = Some(color);
                     }
                 }
+                "48" => {
+                    if let Some(color) = consume_color("48", &mut tokens) {
+                        self.background = Some(color);
+                    }
+                    touched_background = true;
+                }
+                // Simple (40–47) and bright (100–107) background codes — the
+                // form crossterm's named-color helpers (`on_red()`, …) emit.
+                "40" | "41" | "42" | "43" | "44" | "45" | "46" | "47" | "100" | "101" | "102"
+                | "103" | "104" | "105" | "106" | "107" => {
+                    self.background = Some(code.to_string());
+                    touched_background = true;
+                }
+                // Simple (30–37) and bright (90–97) foreground codes.
+                "30" | "31" | "32" | "33" | "34" | "35" | "36" | "37" | "90" | "91" | "92"
+                | "93" | "94" | "95" | "96" | "97" => {
+                    self.foreground = Some(code.to_string());
+                }
+                _ => {}
             }
         }
+
+        touched_background
     }
 
     /// Update state by scanning all ANSI escape sequences in `s`.
     pub(crate) fn update_from_str(&mut self, s: &str) {
         for segment in segments(s) {
             if let Segment::Escape(esc) = segment {
-                self.update(esc);
+                let _affects_background = self.update(esc);
             }
         }
     }
@@ -145,6 +191,31 @@ impl AnsiState {
             s.push('m');
         }
         s
+    }
+}
+
+/// Read the operands of a `38` (foreground) or `48` (background) SGR color
+/// introducer, returning the full parameter string (e.g. `"48;5;236"` or
+/// `"48;2;80;73;69"`).
+///
+/// `38`/`48` are followed by either `5;<index>` (8-bit) or `2;<r>;<g>;<b>`
+/// (24-bit); those operands are consumed from `tokens` so the surrounding
+/// parser resumes at the next attribute.
+/// Returns `None` for a malformed introducer, having consumed whatever operands
+/// it did read.
+fn consume_color<'a, I: Iterator<Item = &'a str>>(prefix: &str, tokens: &mut I) -> Option<String> {
+    match tokens.next()? {
+        "5" => {
+            let index = tokens.next()?;
+            Some(format!("{prefix};5;{index}"))
+        }
+        "2" => {
+            let r = tokens.next()?;
+            let g = tokens.next()?;
+            let b = tokens.next()?;
+            Some(format!("{prefix};2;{r};{g};{b}"))
+        }
+        _ => None,
     }
 }
 
@@ -185,6 +256,16 @@ impl<'a> Iterator for Segments<'a> {
         }
 
         if let Some(after_esc) = self.rest.strip_prefix('\x1b') {
+            // OSC string sequences (`\x1b]…`) run to their BEL/ST terminator,
+            // not the first letter — so an OSC 8 hyperlink stays a single escape
+            // instead of being split across the URL.
+            if let Some(body) = after_esc.strip_prefix(']') {
+                let end = osc_terminator_end(body).map_or(self.rest.len(), |term| 2 + term);
+                let (escape, rest) = self.rest.split_at(end);
+                self.rest = rest;
+                return Some(Segment::Escape(escape));
+            }
+
             let end = after_esc
                 .char_indices()
                 .find(|&(_, c)| c.is_ascii_alphabetic() || c == '~')
@@ -199,6 +280,26 @@ impl<'a> Iterator for Segments<'a> {
         self.rest = rest;
         Some(Segment::Text(text))
     }
+}
+
+/// Find the end (exclusive byte offset) of an OSC string terminator within an
+/// OSC body — the bytes following `\x1b]`.
+///
+/// OSC sequences end with either BEL (`\x07`) or ST (`\x1b\\`).
+/// Returns `None` when the body holds no terminator yet (an OSC split across a
+/// write boundary), so the caller treats the remainder as one unterminated
+/// escape.
+fn osc_terminator_end(body: &str) -> Option<usize> {
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            0x07 => return Some(i + 1),
+            0x1b if bytes.get(i + 1) == Some(&b'\\') => return Some(i + 2),
+            _ => i += 1,
+        }
+    }
+    None
 }
 
 /// Calculate the visual width of a string, ignoring ANSI escape sequences.

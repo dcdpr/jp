@@ -512,8 +512,16 @@ pub(super) async fn run_turn_loop(
                                 ..
                             } = &event
                             {
-                                turn_coordinator.flush_renderer();
-                                turn_coordinator.transition_to_tool_call();
+                                // The tool-call boundary is owned here: only the
+                                // turn loop holds the per-tool config and
+                                // renderer needed to decide whether this tool's
+                                // chrome is visible, which decides whether the
+                                // reasoning region extends across it.
+                                let tool_chrome_visible = cfg.style.tool_call.show
+                                    && !printer.format().is_json()
+                                    && !tool_coordinator.is_hidden(name);
+                                let region = turn_coordinator.enter_tool_call(tool_chrome_visible);
+                                tool_renderer.set_region(id, region);
 
                                 tool_renderer.register(id, name, &tick_tx);
                                 tool_coordinator

@@ -1,7 +1,6 @@
 use std::{
-    env,
-    fmt::Write as _,
-    fs,
+    collections::HashMap,
+    env, fmt, fs,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -21,7 +20,10 @@ use jp_config::{
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_llm::{CommandResult, run_tool_command, tool::InvocationContext};
-use jp_md::format::Formatter;
+use jp_md::{
+    format::{DefaultBackground, Formatter},
+    shade::ShadedWriter,
+};
 use jp_printer::ErrChannel;
 use jp_term::osc::hyperlink;
 use serde_json::{Map, Value};
@@ -110,6 +112,25 @@ pub struct ToolRenderer {
     ///
     /// [`TurnView`]: super::TurnView
     separator: Arc<AtomicBool>,
+
+    /// Reasoning-region background captured per tool-call ID.
+    ///
+    /// Populated at the tool-call boundary (via [`set_region`]) when a tool
+    /// continues a reasoning region; the tool's permanent header and result are
+    /// shaded with it.
+    /// Empty in replay and when no region is active.
+    ///
+    /// [`set_region`]: Self::set_region
+    regions: HashMap<String, DefaultBackground>,
+
+    /// The region background for the chrome being written right now.
+    ///
+    /// Tracks the most recently entered tool-call region, which the live
+    /// aggregate temp/progress line uses; [`complete`] realigns it to a tool's
+    /// captured region just before that tool's permanent header is rendered.
+    ///
+    /// [`complete`]: Self::complete
+    current_region: Option<DefaultBackground>,
 }
 
 impl ToolRenderer {
@@ -137,6 +158,8 @@ impl ToolRenderer {
             is_tty,
             timer_token: None,
             separator: Arc::new(AtomicBool::new(false)),
+            regions: HashMap::new(),
+            current_region: None,
         }
     }
 
@@ -148,12 +171,65 @@ impl ToolRenderer {
         Arc::clone(&self.separator)
     }
 
+    /// Record the reasoning-region background captured for a tool call at the
+    /// tool-call boundary.
+    ///
+    /// `region` is `Some` when the tool continues a reasoning region (the live
+    /// boundary returned a background), `None` otherwise.
+    /// The value keys the tool's permanent header and result shading by `id`,
+    /// and also becomes the currently-active region for the live temp/progress
+    /// line.
+    pub(crate) fn set_region(&mut self, id: &str, region: Option<DefaultBackground>) {
+        match &region {
+            Some(bg) => {
+                self.regions.insert(id.to_owned(), bg.clone());
+            }
+            None => {
+                self.regions.remove(id);
+            }
+        }
+        self.current_region = region;
+    }
+
+    /// Run `write` against the chrome channel, shading its output with `region`
+    /// when one is active.
+    ///
+    /// With `region` set, the writes flow through a [`ShadedWriter`] so the
+    /// chrome carries the reasoning-region background to the right edge,
+    /// preserving any background the content sets itself; with `None` they go
+    /// straight to the channel unchanged.
+    /// Write errors on the chrome channel are swallowed, matching the
+    /// renderer's other best-effort writes.
+    fn write_chrome<F>(&self, region: Option<&DefaultBackground>, write: F)
+    where
+        F: FnOnce(&mut dyn fmt::Write) -> fmt::Result,
+    {
+        let mut channel = self.channel.writer();
+        if let Some(bg) = region {
+            let mut shaded = ShadedWriter::new(&mut channel, bg);
+            let _ = write(&mut shaded);
+            let _ = shaded.finish();
+        } else {
+            let _ = write(&mut channel);
+        }
+    }
+
+    /// Write cursor-relative chrome (the temp/progress line) shaded with the
+    /// currently-active region.
+    fn write_current_region(&self, content: &str) {
+        self.write_chrome(self.current_region.as_ref(), |w| write!(w, "{content}"));
+    }
+
     /// Emit the blank-line separator owed by a preceding tool result or custom
     /// argument block, if any, then clear the debt.
-    fn emit_separator(&self) {
+    ///
+    /// Writes to `w` so callers can route the separator through the same shaded
+    /// burst as the chrome that follows it.
+    fn emit_separator_to(&self, w: &mut dyn fmt::Write) -> fmt::Result {
         if self.separator.swap(false, Ordering::Relaxed) {
-            let _ = writeln!(self.channel.writer());
+            writeln!(w)?;
         }
+        Ok(())
     }
 
     /// Renders header + arguments for a tool call.
@@ -166,11 +242,13 @@ impl ToolRenderer {
         arguments: &Map<String, Value>,
         style: &ParametersStyle,
     ) {
-        self.emit_separator();
         let styled_name = name.yellow().bold();
         let args = format_args(arguments, style);
 
-        let _ = writeln!(self.channel.writer(), "Calling tool {styled_name}{args}");
+        self.write_chrome(self.current_region.as_ref(), |w| {
+            self.emit_separator_to(w)?;
+            writeln!(w, "Calling tool {styled_name}{args}")
+        });
     }
 
     /// Renders a tool call with all styles, printing header and arguments
@@ -217,9 +295,11 @@ impl ToolRenderer {
     ) -> RenderOutcome {
         match format_args_custom(name, arguments, cmd, &self.root, &self.invocation).await {
             Ok(content) if !content.is_empty() => {
-                self.emit_separator();
                 let styled_name = name.yellow().bold();
-                let _ = writeln!(self.channel.writer(), "Calling tool {styled_name}");
+                self.write_chrome(self.current_region.as_ref(), |w| {
+                    self.emit_separator_to(w)?;
+                    writeln!(w, "Calling tool {styled_name}")
+                });
                 self.render_formatted_arguments(&content);
                 RenderOutcome::Rendered {
                     content: Some(content),
@@ -227,9 +307,11 @@ impl ToolRenderer {
             }
             Ok(_) => {
                 // Custom formatter returned empty — just show the header.
-                self.emit_separator();
                 let styled_name = name.yellow().bold();
-                let _ = writeln!(self.channel.writer(), "Calling tool {styled_name}");
+                self.write_chrome(self.current_region.as_ref(), |w| {
+                    self.emit_separator_to(w)?;
+                    writeln!(w, "Calling tool {styled_name}")
+                });
                 RenderOutcome::Rendered { content: None }
             }
             Err(error) => {
@@ -246,20 +328,21 @@ impl ToolRenderer {
     ///
     /// [`render_approved`]: Self::render_approved
     pub fn render_formatted_arguments(&self, content: &str) {
-        let _ = writeln!(self.channel.writer(), "\n{}", content.trim());
+        let trimmed = content.trim();
+        self.write_chrome(self.current_region.as_ref(), |w| writeln!(w, "\n{trimmed}"));
         self.separator.store(true, Ordering::Relaxed);
     }
 
     /// Renders elapsed time for a long-running tool.
     pub fn render_progress(&self, elapsed: Duration) {
         let secs = elapsed.as_secs_f64();
-        let _ = write!(self.channel.writer(), "\r\x1b[K⏱ Running… {secs:.1}s");
+        self.write_current_region(&format!("\r\x1b[K⏱ Running… {secs:.1}s"));
     }
 
     /// Clears the current progress line.
     pub fn clear_progress(&self) {
         // Carriage return + ANSI escape to clear to end of line
-        let _ = write!(self.channel.writer(), "\r\x1b[K");
+        self.write_current_region("\r\x1b[K");
     }
 
     /// Returns the progress configuration.
@@ -297,6 +380,11 @@ impl ToolRenderer {
             return;
         }
 
+        // This tool's captured reasoning-region background, if it continued one.
+        // The whole result (inline body and file links, OSC 8 hyperlinks
+        // included) is shaded with it.
+        let region = self.regions.get(&response.id);
+
         // Get content, handling both Ok and Err results
         let raw_content = response.content();
 
@@ -327,7 +415,9 @@ impl ToolRenderer {
 
         if ext.is_none() {
             let trimmed = content.trim();
-            if trimmed.starts_with('<') && quick_xml::de::from_str::<Value>(trimmed).is_ok() {
+            if trimmed.starts_with('<')
+                && (has_xml_envelope(trimmed) || quick_xml::de::from_str::<Value>(trimmed).is_ok())
+            {
                 ext = Some("xml".to_owned());
             } else if trimmed.starts_with('{') && serde_json::from_str::<Value>(trimmed).is_ok() {
                 ext = Some("json".to_owned());
@@ -399,29 +489,31 @@ impl ToolRenderer {
                 output.push('\n');
             }
 
-            let _ = write!(self.channel.writer(), "{output}");
+            self.write_chrome(region, |w| write!(w, "{output}"));
         }
 
         // Render file links
         let wrote_link = match results_file_link {
             LinkStyle::Off => false,
             LinkStyle::Full => {
-                let _ = writeln!(self.channel.writer(), "see: {}", path.display());
+                self.write_chrome(region, |w| writeln!(w, "see: {}", path.display()));
                 true
             }
             LinkStyle::Osc8 => {
-                let _ = writeln!(
-                    self.channel.writer(),
-                    "[{}] [{}]",
-                    hyperlink(
-                        format!("file://{}", path.display()),
-                        "open in editor".red().to_string()
-                    ),
-                    hyperlink(
-                        format!("copy://{}", path.display()),
-                        "copy to clipboard".red().to_string()
+                self.write_chrome(region, |w| {
+                    writeln!(
+                        w,
+                        "[{}] [{}]",
+                        hyperlink(
+                            format!("file://{}", path.display()),
+                            "open in editor".red().to_string()
+                        ),
+                        hyperlink(
+                            format!("copy://{}", path.display()),
+                            "copy to clipboard".red().to_string()
+                        )
                     )
-                );
+                });
                 true
             }
         };
@@ -475,13 +567,19 @@ impl ToolRenderer {
     pub fn complete(&mut self, id: &str) {
         self.pending.retain(|t| t.id != id);
 
+        // The completed tool's permanent header is rendered immediately after
+        // this returns and uses the currently-active region, so realign that
+        // region to this tool's captured one (a no-op for a single tool, but
+        // correct when parallel tools sit in different regions).
+        self.current_region = self.regions.get(id).cloned();
+
         // Clear the temp line but don't redraw it for the still-pending tools.
         // The caller prints the completed tool's permanent header immediately
         // after this returns; a redraw here would land on the same line and the
         // header would overwrite it, producing a glued "…toolCalling tool…"
         // line. Remaining tools get a fresh temp line on the next tick.
         if self.line_active {
-            let _ = write!(self.channel.writer(), "\r\x1b[K");
+            self.write_current_region("\r\x1b[K");
             self.line_active = false;
         }
     }
@@ -496,10 +594,9 @@ impl ToolRenderer {
 
         let content = self.temp_line_content();
         let secs = elapsed.as_secs_f64();
-        let _ = write!(
-            self.channel.writer(),
-            "\r\x1b[K{content} (receiving arguments… {secs:.1}s)",
-        );
+        self.write_current_region(&format!(
+            "\r\x1b[K{content} (receiving arguments… {secs:.1}s)"
+        ));
         // The tick now owns the temp line, so a later `complete` knows to clear
         // it.
         self.line_active = true;
@@ -519,7 +616,7 @@ impl ToolRenderer {
         if !self.line_active {
             return;
         }
-        let _ = write!(self.channel.writer(), "\r\x1b[K");
+        self.write_current_region("\r\x1b[K");
     }
 
     /// Clears the temp line and all pending state.
@@ -528,7 +625,7 @@ impl ToolRenderer {
         self.stop_timer();
 
         if self.line_active {
-            let _ = write!(self.channel.writer(), "\r\x1b[K");
+            self.write_current_region("\r\x1b[K");
             self.line_active = false;
         }
 
@@ -567,14 +664,19 @@ impl ToolRenderer {
         // separator. The permanent header that replaces it later finds the debt
         // already cleared, and the blank line above survives the in-place
         // `complete`/header rewrite.
-        self.emit_separator();
+        // The trailing erase fills the row to the right edge with the active
+        // background, so a shaded region covers the whole line while it waits
+        // for the first tick to rewrite it.
         let content = self.temp_line_content();
-        let _ = write!(self.channel.writer(), "{content}");
+        self.write_chrome(self.current_region.as_ref(), |w| {
+            self.emit_separator_to(w)?;
+            write!(w, "{content}\x1b[K")
+        });
     }
 
     fn rewrite_temp_line(&self) {
         let content = self.temp_line_content();
-        let _ = write!(self.channel.writer(), "\r{content}\x1b[K");
+        self.write_current_region(&format!("\r{content}\x1b[K"));
     }
 
     fn ensure_timer(&mut self, tick_tx: &Sender<Duration>) {
@@ -652,6 +754,45 @@ fn is_display_empty(value: &Value) -> bool {
         Value::Array(a) => a.is_empty(),
         _ => false,
     }
+}
+
+/// Returns `true` when the content is wrapped in a matching pair of root tags
+/// (e.g. `<git_blame>...</git_blame>`).
+///
+/// Tool results commonly use an XML-like envelope whose body is not guaranteed
+/// to be well-formed XML: it may embed raw source code or diff content with
+/// unescaped `&` or `<`.
+/// Detecting the envelope instead of parsing the full document keeps language
+/// detection independent of the embedded content.
+///
+/// The opening tag must be terminated with `>` before any nested tag starts:
+/// either immediately after the root name, or — when the name is followed by
+/// whitespace and attributes — before the next `<`.
+fn has_xml_envelope(content: &str) -> bool {
+    let Some(rest) = content.strip_prefix('<') else {
+        return false;
+    };
+
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | ':')))
+        .unwrap_or(rest.len());
+    let name = &rest[..end];
+
+    let after = &rest[end..];
+    let has_open_tag_end = match after.chars().next() {
+        Some('>') => true,
+        Some(c) if c.is_ascii_whitespace() => {
+            // Attributes allowed, but the opening tag must be terminated
+            // before any other tag (`<`) starts.
+            matches!(
+                after.find(['<', '>']).map(|i| after.as_bytes()[i]),
+                Some(b'>')
+            )
+        }
+        _ => false,
+    };
+
+    !name.is_empty() && has_open_tag_end && content.ends_with(&format!("</{name}>"))
 }
 
 /// Render a JSON representation of the arguments.
