@@ -5105,6 +5105,56 @@ fn inquiry_model_override_error_names_the_override() {
     );
 }
 
+/// A misconfigured per-question inquiry model override must be attributed to
+/// the specific tool question: like the global override, the underlying cause
+/// (e.g. a missing API key environment variable) is otherwise indistinguishable
+/// from a main-model failure and points the user at the wrong config.
+#[test]
+fn inquiry_question_model_override_error_names_the_override() {
+    let error = Error::InquiryQuestionModelOverride {
+        tool: "my_tool".to_owned(),
+        question: "q1".to_owned(),
+        model: "openrouter/foo/bar".to_owned(),
+        source: Box::new(LlmError::MissingEnv("OPENROUTER_API_KEY".to_owned())),
+    };
+
+    // The variant names the tool and question, and keeps the cause chain
+    // intact.
+    assert_eq!(
+        error.to_string(),
+        "Inquiry model override for question 'q1' of tool 'my_tool' is unusable"
+    );
+    assert_eq!(
+        std::error::Error::source(&error)
+            .expect("source")
+            .to_string(),
+        "Missing environment variable: OPENROUTER_API_KEY"
+    );
+
+    // The user-facing rendering carries the tool, question, model id, the
+    // underlying cause, and an actionable suggestion naming the per-question
+    // config path.
+    let rendered = cmd::Error::from(error).to_string();
+    assert!(
+        rendered.contains("Inquiry model override for a tool question is unusable"),
+        "missing attribution: {rendered}"
+    );
+    assert!(rendered.contains("my_tool"), "missing tool: {rendered}");
+    assert!(rendered.contains("q1"), "missing question: {rendered}");
+    assert!(
+        rendered.contains("openrouter/foo/bar"),
+        "missing model id: {rendered}"
+    );
+    assert!(
+        rendered.contains("OPENROUTER_API_KEY"),
+        "missing cause: {rendered}"
+    );
+    assert!(
+        rendered.contains("conversation.tools.my_tool.questions.q1"),
+        "missing suggestion: {rendered}"
+    );
+}
+
 /// Regression for live/replay parity on the role-header model id.
 ///
 /// The live header must use `cfg.assistant.model.id.resolved()`, not the

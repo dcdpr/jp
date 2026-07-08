@@ -58,6 +58,22 @@ pub(crate) enum Error {
         source: jp_llm::Error,
     },
 
+    /// A per-question inquiry model override (a `QuestionTarget::Assistant`
+    /// model under `conversation.tools.<tool>.questions.<id>`) could not be
+    /// used.
+    ///
+    /// A dedicated variant so the failure is attributed to the specific tool
+    /// question: the underlying LLM error (e.g. a missing API key environment
+    /// variable) would otherwise be indistinguishable from a main-model failure
+    /// and point the user at the wrong config.
+    #[error("Inquiry model override for question '{question}' of tool '{tool}' is unusable")]
+    InquiryQuestionModelOverride {
+        tool: String,
+        question: String,
+        model: String,
+        source: Box<jp_llm::Error>,
+    },
+
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
 

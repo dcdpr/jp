@@ -886,16 +886,28 @@ async fn build_inquiry_overrides(
                     .resolve(&cfg.providers.llm.aliases)
                     .map_err(|e| Error::CliConfig(e.to_string()))?;
 
+                // Attribute failures to the per-question override: without
+                // this, e.g. a missing API key environment variable renders
+                // identically to a main-model failure and points the user at
+                // the wrong config.
+                let wrap_err = |source| Error::InquiryQuestionModelOverride {
+                    tool: tool_name.to_owned(),
+                    question: question_id.clone(),
+                    model: model_id.to_string(),
+                    source: Box::new(source),
+                };
+
                 let prov = if let Some(p) = providers.get(&model_id.provider) {
                     Arc::clone(p)
                 } else {
-                    let p: Arc<dyn Provider> =
-                        Arc::from(get_provider(model_id.provider, &cfg.providers.llm)?);
+                    let p: Arc<dyn Provider> = Arc::from(
+                        get_provider(model_id.provider, &cfg.providers.llm).map_err(wrap_err)?,
+                    );
                     providers.insert(model_id.provider, Arc::clone(&p));
                     p
                 };
 
-                let details = prov.model_details(&model_id.name).await?;
+                let details = prov.model_details(&model_id.name).await.map_err(wrap_err)?;
 
                 if details.structured_output == Some(false) {
                     warn!(

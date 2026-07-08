@@ -386,6 +386,21 @@ impl Query {
                 .update_events(|events| events.add_config_delta(delta));
         }
 
+        // Fail fast on provider misconfiguration (e.g. a missing API key
+        // environment variable) before any side-effectful work below:
+        // pre-query compaction can run a full summary LLM round-trip, MCP
+        // servers boot in background tasks, the editor may open to compose
+        // the request, and title generation and attachment loading are all
+        // wasted — and the title task alone can hold the run open for
+        // seconds at teardown — when the request can never be sent.
+        // `handle_turn` repeats this check implicitly when it constructs
+        // the live provider.
+        provider::preflight(
+            cfg.assistant.model.id.resolved().provider,
+            &cfg.providers.llm,
+        )
+        .map_err(Error::from)?;
+
         // Compact the conversation before querying, if requested.
         if self.compact.should_compact() {
             self.apply_pre_query_compaction(&lock, &cfg).await?;
@@ -463,19 +478,6 @@ impl Query {
         }
 
         let stream = lock.events().clone();
-
-        // Fail fast on provider misconfiguration (e.g. a missing API key
-        // environment variable) before any side-effectful work below:
-        // spawning title generation, waiting for MCP servers, and loading
-        // attachments are all wasted — and the title task alone can hold the
-        // run open for seconds at teardown — when the request can never be
-        // sent. `handle_turn` repeats this check implicitly when it
-        // constructs the live provider.
-        provider::preflight(
-            cfg.assistant.model.id.resolved().provider,
-            &cfg.providers.llm,
-        )
-        .map_err(Error::from)?;
 
         // Set the title for new or empty conversations (including forks).
         // Skip when `--title` or `--no-title` was provided (the user already
