@@ -29,6 +29,11 @@ Anchoring rules:
 - `start_line` (optional): first line of a multi-line range. Must be `<=
   line`.
 - `start_side` (optional): side for the start line; defaults to `side`.
+- Anchors must land inside the PR's diff: `line` and `start_line` must fall
+  within a diff hunk (changed lines plus the few context lines around them)
+  on their side. GitHub silently accepts out-of-diff anchors but never
+  displays the comment, so the tool rejects such calls up front and reports
+  the commentable line ranges plus the nearest valid line.
 
 The `body` is rendered as GitHub-flavored Markdown.
 """

@@ -192,6 +192,23 @@ pub mod pulls {
         #[serde(skip_serializing_if = "Option::is_none")]
         pub start_side: Option<Side>,
     }
+
+    /// The thread created by an `addPullRequestReviewThread` mutation.
+    #[derive(Debug, Clone)]
+    pub struct CreatedReviewThread {
+        /// GraphQL node ID of the created thread.
+        pub id: String,
+
+        /// The diff line the thread resolved to in the PR's current diff.
+        ///
+        /// `None` means GitHub accepted the mutation but could not place the
+        /// thread in the diff it renders (the anchor lies outside the diff's
+        /// hunks): the thread exists, yet the review UI never displays it.
+        pub line: Option<u64>,
+
+        /// GitHub's authoritative "outdated" flag for the thread.
+        pub is_outdated: bool,
+    }
 }
 
 pub mod repos {
