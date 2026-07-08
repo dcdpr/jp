@@ -703,18 +703,7 @@ rfd-draft CATEGORY +TITLE:
     esac
 
     # Find the first available draft number (D01–D99).
-    next=1
-    while [ "$next" -le 99 ]; do
-        draft_id=$(printf "D%02d" "$next")
-        if ! ls docs/rfd/drafts/${draft_id}-*.md >/dev/null 2>&1; then
-            break
-        fi
-        next=$((next + 1))
-    done
-    if [ "$next" -gt 99 ]; then
-        echo "No draft slots available (D01–D99 all in use)." >&2; exit 1
-    fi
-    draft_id=$(printf "D%02d" "$next")
+    draft_id=$(just _rfd-next-draft-slot) || exit 1
 
     # Resolve the author from git config, falling back to $USER.
     git_name=$(git config user.name 2>/dev/null || true)
@@ -1157,19 +1146,7 @@ rfd-promote NNN: _install-jp _install-comfort
         slug=$(echo "$basename_f" | sed 's/^[A-Z]*[0-9]*-//; s/\.md$//')
 
         # Assign next available permanent number.
-        existing=$(ls docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null \
-            | sed 's|.*/||; s|-.*||' \
-            | sort -n)
-
-        next_num=1
-        for num_iter in $existing; do
-            n=$(echo "$num_iter" | sed 's/^0*//')
-            n=${n:-0}
-            [ "$n" -lt "$next_num" ] && continue
-            [ "$n" -gt "$next_num" ] && break
-            next_num=$((next_num + 1))
-        done
-        num=$(printf "%03d" "$next_num")
+        num=$(just _rfd-next-number) || exit 1
         new_basename="${num}-${slug}.md"
         new_file="docs/rfd/${new_basename}"
         final_file="$new_file"
@@ -1187,27 +1164,18 @@ rfd-promote NNN: _install-jp _install-comfort
             "$file" > "$new_file"
         rm "$file"
 
-        # Carry the board position across renumbering: `priority.json` stores
-        # RFD ids, so rewrite the draft id to its new permanent number wherever
-        # it appears (the `planned` milestone groups, `backlog`, or
-        # `in_development`; the legacy flat `order` is handled too).
-        priority_file="docs/rfd/priority.json"
-        if [ -f "$priority_file" ]; then
-            jq --arg old "$old_draft_id" --arg new "$num" '
-                def sub_id: map(if . == $old then $new else . end);
-                (if .planned then .planned |= map(.ids |= sub_id) else . end)
-                | (if .order then .order |= sub_id else . end)
-                | .backlog = ((.backlog // []) | sub_id)
-                | .in_development = ((.in_development // []) | sub_id)
-            ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
-        fi
+        # Carry the board position across renumbering.
+        just _rfd-priority-rewrite "$old_draft_id" "$num"
 
-        # Update cross-references in other RFDs: replace `RFD DNN` with
-        # `RFD NNN` in prose, `DNN-slug.md` with the correct relative
-        # path to `NNN-slug.md` in link targets, and standalone short
-        # mentions like `DNN` (e.g. "D27 also widens the scope") with
-        # the bare number `NNN`. Drafts under `drafts/` need a `../`
-        # prefix because the promoted file moved up a directory.
+        # Update cross-references in every RFD, including the promoted file
+        # itself: its prose can self-reference by draft id ("once D24
+        # lands"), and the initial rewrite above only covers the heading,
+        # status, and link prefixes. Replace `RFD DNN` with `RFD NNN` in
+        # prose, `DNN-slug.md` with the correct relative path to
+        # `NNN-slug.md` in link targets, and standalone short mentions like
+        # `DNN` (e.g. "D27 also widens the scope") with the bare number
+        # `NNN`. Drafts under `drafts/` need a `../` prefix because the
+        # promoted file moved up a directory.
         #
         # The short-form pass runs last so the long-form and basename
         # rewrites get first crack at their specific shapes (the
@@ -1219,7 +1187,6 @@ rfd-promote NNN: _install-jp _install-comfort
         updated=0
         for other in docs/rfd/*.md docs/rfd/drafts/*.md; do
             [ -f "$other" ] || continue
-            [ "$other" = "$new_file" ] && continue
             if ! grep -qE \
                     -e "RFD ${old_draft_id}" \
                     -e "${basename_f}" \
@@ -1317,7 +1284,7 @@ rfd-promote NNN: _install-jp _install-comfort
 
         echo "${new_file}: Draft -> Discussion (assigned ${num})"
         if [ "$updated" -gt 0 ]; then
-            echo "Updated ${updated} cross-reference(s) in other RFDs."
+            echo "Updated ${updated} cross-reference(s) in RFD files."
         fi
 
     # --- Discussion -> Accepted: create tracking issue via jp ---
@@ -1472,6 +1439,213 @@ rfd-promote NNN: _install-jp _install-comfort
     # consolidate reference-style link definitions at the bottom, matching the
     # markdown formatting CI enforces (`fmt-markdown-ci`).
     comfort --language markdown --format-markdown --reference-links "$final_file"
+
+# Renumber an RFD to a new id, updating every cross-reference.
+#
+# NNN is the RFD to renumber: a permanent number (95, 095) or a draft ID
+# (D24). MMM is the target id and must live in the same id-space as NNN
+# (drafts renumber to another draft slot, published RFDs to another permanent
+# number; moving between spaces is `rfd-promote`'s job). When MMM is omitted,
+# the next available id in that space is used. The scan only sees local
+# files, so a number taken on another branch must be avoided by passing MMM
+# explicitly.
+#
+# Rewrites the file name, the document heading, `RFD <old>` mentions and
+# `<old>-slug.md` link targets across all RFDs (including the renumbered file
+# itself), bare `DNN` tokens for draft-space renumbers, and the id in
+# `priority.json`. The file stays in its directory, so existing link prefixes
+# (`../`, `./`) remain correct and only the basename is substituted.
+# References outside `docs/rfd/` (code comments, other docs) are reported but
+# not rewritten.
+#
+# Renumbering a published RFD changes its site URL and invalidates its
+# summary-cache entry; run `just rfd-summaries` afterwards.
+[group('rfd')]
+rfd-renumber NNN MMM="":
+    #!/usr/bin/env sh
+    set -eu
+
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    old_id="${out%% *}"
+    file="${out#* }"
+
+    if [ "$old_id" = "000" ]; then
+        echo "Refusing to renumber a template." >&2; exit 1
+    fi
+
+    dir=$(dirname "$file")
+    old_basename=$(basename "$file")
+    slug=$(echo "$old_basename" | sed 's/^[A-Z]*[0-9]*-//; s/\.md$//')
+
+    case "$old_id" in
+        D*) is_draft=true ;;
+        *)  is_draft=false ;;
+    esac
+
+    # --- Determine and validate the target id ---
+    target="{{MMM}}"
+    if [ -n "$target" ]; then
+        if [ "$is_draft" = true ]; then
+            if ! echo "$target" | grep -qiE '^D[0-9]{1,2}$'; then
+                echo "Target for a draft must be a draft slot (D01-D99), got '${target}'." >&2
+                exit 1
+            fi
+            n=$(echo "$target" | sed 's/^[Dd]0*//')
+            new_id=$(printf "D%02d" "${n:-0}")
+        else
+            if ! echo "$target" | grep -qE '^[0-9]+$'; then
+                echo "Target for a published RFD must be a number, got '${target}'." >&2
+                exit 1
+            fi
+            n=$(echo "$target" | sed 's/^0*//')
+            new_id=$(printf "%03d" "${n:-0}")
+        fi
+        if [ "${n:-0}" -eq 0 ]; then
+            echo "Target id must be greater than zero." >&2; exit 1
+        fi
+    else
+        if [ "$is_draft" = true ]; then
+            new_id=$(just _rfd-next-draft-slot) || exit 1
+        else
+            new_id=$(just _rfd-next-number) || exit 1
+        fi
+    fi
+
+    if [ "$new_id" = "$old_id" ]; then
+        echo "RFD ${old_id} already has that id; nothing to do." >&2; exit 1
+    fi
+
+    if [ "$is_draft" = true ]; then
+        taken=$(ls "docs/rfd/drafts/${new_id}-"*.md 2>/dev/null | head -1)
+    else
+        taken=$(ls "docs/rfd/${new_id}-"*.md 2>/dev/null | head -1)
+    fi
+    if [ -n "$taken" ]; then
+        echo "Target id ${new_id} is taken by $(basename "$taken")." >&2; exit 1
+    fi
+
+    # --- Rename the file and rewrite its heading ---
+    new_basename="${new_id}-${slug}.md"
+    new_file="${dir}/${new_basename}"
+    sed "s/^# RFD [A-Z]*[0-9]*:/# RFD ${new_id}:/" "$file" > "$new_file"
+    rm "$file"
+
+    # --- Carry the board position across renumbering ---
+    just _rfd-priority-rewrite "$old_id" "$new_id"
+
+    # --- Cross-references in every RFD, including the renumbered file ---
+    # Bare-token rewriting is draft-space only: `D24` is a distinctive
+    # token, a bare `095` is not. The bare-token rule runs twice because
+    # sed's `g` flag consumes the leading boundary character of a match,
+    # hiding the second of two back-to-back mentions.
+    updated=0
+    for other in docs/rfd/*.md docs/rfd/drafts/*.md; do
+        [ -f "$other" ] || continue
+        if [ "$is_draft" = true ]; then
+            sed -E \
+                -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g" \
+                -e "s|${old_basename}|${new_basename}|g" \
+                -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
+                -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
+                "$other" > "${other}.tmp"
+        else
+            sed -E \
+                -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g" \
+                -e "s|${old_basename}|${new_basename}|g" \
+                "$other" > "${other}.tmp"
+        fi
+        if cmp -s "$other" "${other}.tmp"; then
+            rm "${other}.tmp"
+            continue
+        fi
+        mv "${other}.tmp" "$other"
+        echo "  updated ${old_id} -> ${new_id} references in ${other}"
+        updated=$((updated + 1))
+    done
+
+    echo "${old_basename} -> ${new_file} (${old_id} -> ${new_id})"
+    if [ "$updated" -gt 0 ]; then
+        echo "Updated ${updated} file(s) with cross-references."
+    fi
+
+    # --- Report references the rewrite does not touch ---
+    leftovers=$(rg -l -e "RFD ${old_id}\b" -e "${old_basename}" \
+        --glob '!docs/rfd/**' . 2>/dev/null || true)
+    if [ -n "$leftovers" ]; then
+        echo "" >&2
+        echo "Warning: references outside docs/rfd/ still mention ${old_id}:" >&2
+        echo "$leftovers" | sed 's/^/  /' >&2
+    fi
+
+    if [ "$is_draft" = false ]; then
+        echo "Run \`just rfd-summaries\` to refresh the summary cache." >&2
+    fi
+
+# Internal: print the first available draft slot id (D01–D99).
+#
+# Exits 1 when all 99 slots are in use. Callers should propagate the exit
+# status with `|| exit 1`.
+[no-exit-message]
+[private]
+_rfd-next-draft-slot:
+    #!/usr/bin/env sh
+    set -eu
+
+    next=1
+    while [ "$next" -le 99 ]; do
+        draft_id=$(printf "D%02d" "$next")
+        if ! ls docs/rfd/drafts/${draft_id}-*.md >/dev/null 2>&1; then
+            break
+        fi
+        next=$((next + 1))
+    done
+    if [ "$next" -gt 99 ]; then
+        echo "No draft slots available (D01–D99 all in use)." >&2; exit 1
+    fi
+    printf "D%02d\n" "$next"
+
+# Internal: print the next available permanent RFD number, zero-padded.
+#
+# Walks the sorted existing numbers under `docs/rfd/` and takes the first gap
+# (max + 1 when there are none). Only local files are visible: a number taken
+# on another branch is not detected.
+[private]
+_rfd-next-number:
+    #!/usr/bin/env sh
+    set -eu
+
+    existing=$(ls docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null \
+        | sed 's|.*/||; s|-.*||' \
+        | sort -n)
+    next_num=1
+    for num_iter in $existing; do
+        n=$(echo "$num_iter" | sed 's/^0*//')
+        n=${n:-0}
+        [ "$n" -lt "$next_num" ] && continue
+        [ "$n" -gt "$next_num" ] && break
+        next_num=$((next_num + 1))
+    done
+    printf "%03d\n" "$next_num"
+
+# Internal: rewrite an RFD id in the priority board.
+#
+# `priority.json` stores RFD ids; substitute OLD for NEW wherever the id
+# appears (the `planned` milestone groups, `backlog`, `in_development`, and
+# the legacy flat `order`). A missing board file is a no-op.
+[private]
+_rfd-priority-rewrite OLD NEW:
+    #!/usr/bin/env sh
+    set -eu
+
+    priority_file="docs/rfd/priority.json"
+    [ -f "$priority_file" ] || exit 0
+    jq --arg old "{{OLD}}" --arg new "{{NEW}}" '
+        def sub_id: map(if . == $old then $new else . end);
+        (if .planned then .planned |= map(.ids |= sub_id) else . end)
+        | (if .order then .order |= sub_id else . end)
+        | .backlog = ((.backlog // []) | sub_id)
+        | .in_development = ((.in_development // []) | sub_id)
+    ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
 
 # Mark an RFD as abandoned with the given reason.
 [group('rfd')]
