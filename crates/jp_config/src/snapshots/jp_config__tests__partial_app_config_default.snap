@@ -55,6 +55,7 @@ PartialAppConfig {
                 run: None,
                 format: None,
                 result: None,
+                cancellation_response: None,
                 style: PartialDisplayStyleConfig {
                     hidden: None,
                     inline_results: None,

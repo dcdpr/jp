@@ -111,6 +111,9 @@ Ok(
                         run: None,
                         format: None,
                         result: None,
+                        cancellation_response: Some(
+                            "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+                        ),
                         style: PartialDisplayStyleConfig {
                             hidden: Some(
                                 false,

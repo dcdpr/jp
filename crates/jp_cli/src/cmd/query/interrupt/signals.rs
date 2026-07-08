@@ -207,9 +207,17 @@ pub enum ToolInterruptResult {
     /// The caller should wait for cancellation to complete, then re-execute.
     Restart,
 
-    /// Cancel current execution and override cancelled tool responses with the
-    /// user-supplied message.
-    Cancelled { response: String },
+    /// Cancel current execution and override cancelled tool responses.
+    Cancelled {
+        /// The user-supplied message, or `None` to answer each cancelled tool
+        /// with its configured `cancellation_response`.
+        response: Option<String>,
+
+        /// Whether to end the turn after recording the cancelled responses,
+        /// instead of sending them back to the assistant in a follow-up
+        /// request.
+        exit: bool,
+    },
 
     /// Cancel current execution and begin a graceful shutdown: the user
     /// cancelled the interrupt menu itself with Ctrl-C.
@@ -259,9 +267,9 @@ pub fn handle_tool_interrupt(
             cancellation_token.cancel();
             ToolInterruptResult::Restart
         }
-        InterruptAction::ToolCancelled { response } => {
+        InterruptAction::ToolCancelled { response, exit } => {
             cancellation_token.cancel();
-            ToolInterruptResult::Cancelled { response }
+            ToolInterruptResult::Cancelled { response, exit }
         }
         InterruptAction::Escalate => {
             info!("Escalating past the tool interrupt menu");

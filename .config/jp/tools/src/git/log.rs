@@ -34,6 +34,8 @@ struct LogEntry {
 pub(crate) async fn git_log(
     root: Utf8PathBuf,
     query: Option<String>,
+    content: Option<String>,
+    content_regex: Option<bool>,
     paths: Option<OneOrMany<String>>,
     count: Option<usize>,
     since: Option<String>,
@@ -47,6 +49,8 @@ pub(crate) async fn git_log(
     git_log_impl(
         &root,
         query.as_deref(),
+        content.as_deref(),
+        content_regex.unwrap_or(false),
         &paths,
         count,
         since.as_deref(),
@@ -58,15 +62,32 @@ pub(crate) async fn git_log(
 fn git_log_impl<R: ProcessRunner>(
     root: &Utf8Path,
     query: Option<&str>,
+    content: Option<&str>,
+    content_regex: bool,
     paths: &[&str],
     count: usize,
     since: Option<&str>,
     runner: &R,
     env: &[(&str, &str)],
 ) -> ToolResult {
+    if content_regex && content.is_none() {
+        return error("`content_regex` requires the `content` parameter to be set.");
+    }
+
     let format_arg = format!("--format={LOG_FORMAT}");
     let count_str = count.to_string();
     let grep_arg = query.map(|q| format!("--grep={q}"));
+    let pickaxe_arg = content.map(|c| {
+        if content_regex {
+            // Regex mode: match commits where an added or removed diff line
+            // matches the pattern.
+            format!("-G{c}")
+        } else {
+            // Literal mode: match commits where the number of occurrences of
+            // the string changes.
+            format!("-S{c}")
+        }
+    });
     let since_arg = since.map(|s| format!("--since={s}"));
 
     let mut args: Vec<&str> = vec!["log", &format_arg, "-n", &count_str];
@@ -74,6 +95,10 @@ fn git_log_impl<R: ProcessRunner>(
     if let Some(ref g) = grep_arg {
         args.push("--fixed-strings");
         args.push(g);
+    }
+
+    if let Some(ref p) = pickaxe_arg {
+        args.push(p);
     }
 
     if let Some(ref s) = since_arg {
@@ -94,10 +119,25 @@ fn git_log_impl<R: ProcessRunner>(
     let entries = parse_log_entries(&output.stdout);
 
     if entries.is_empty() {
-        return Ok("No commits found matching the query.".into());
+        return Ok(empty_result_message(query, content).into());
     }
 
     Ok(format_log_entries(&entries)?.into())
+}
+
+/// Message returned when no commits match.
+/// When the caller used `query` without `content`, remind them that `query`
+/// only searches commit messages, since callers commonly expect it to search
+/// diff contents.
+fn empty_result_message(query: Option<&str>, content: Option<&str>) -> String {
+    let mut msg = String::from("No commits found matching the given filters.");
+    if query.is_some() && content.is_none() {
+        msg.push_str(
+            " Note: `query` matches commit *messages* only. To find commits whose *diff* adds or \
+             removes a string, use the `content` parameter instead.",
+        );
+    }
+    msg
 }
 
 fn format_log_entries(entries: &[LogEntry]) -> Result<String> {

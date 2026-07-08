@@ -52,6 +52,7 @@ expression: v
         "*": {
           "run": "ask",
           "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
           "style": {
             "hidden": false,
             "inline_results": {

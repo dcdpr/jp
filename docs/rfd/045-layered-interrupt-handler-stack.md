@@ -288,6 +288,38 @@ Any code awaiting the token (or checking `is_cancelled()`) can clean up.
 The existing cleanup in `Ctx::drop` (printer shutdown, workspace persistence)
 runs as part of normal process teardown.
 
+### Tool Interrupt Actions
+
+The tool interrupt menu offers four choices:
+
+| Key | Action               | Effect                                     |
+| --- | -------------------- | ------------------------------------------ |
+| `c` | Continue             | Resume waiting for the running tools.      |
+| `r` | Stop & respond       | Cancel the running tools and compose a     |
+|     |                      | message sent to the assistant in place of  |
+|     |                      | their results.                             |
+| `s` | Stop (cancel & exit) | Cancel the running tools, record their     |
+|     |                      | cancellation responses, and end the turn   |
+|     |                      | without a follow-up request.               |
+| `t` | Restart              | Cancel the running tools and run the batch |
+|     |                      | again.                                     |
+
+Every cancelled tool call still records a response, so the conversation stream
+stays consistent (each tool call has a matching result).
+When the user supplies a message via "Stop & respond", that message is recorded
+for each cancelled call.
+When no message is supplied — an empty "Stop & respond" reply, a menu-less
+`Ctrl+C` during reply composition, or "Stop (cancel & exit)" — each tool
+answers with its configured cancellation response instead:
+`conversation.tools.defaults.cancellation_response` sets the global default (a
+canned rejection notice asking the assistant to reflect on why the call was
+cancelled), and `conversation.tools.<name>.cancellation_response` overrides it
+per tool.
+
+The menu can be skipped entirely by setting `interrupt.tool_call.action` to
+`continue`, `restart`, `respond`, or `stop`; the configured action then runs as
+if the corresponding menu entry had been chosen.
+
 ### Handler Nesting During a Turn
 
 ```txt
@@ -308,7 +340,7 @@ CLI starts:
     ├── Tool execution:
     │     push ToolInterruptHandler        ← topmost
     │     ... tools run ...
-    │     Ctrl-C → tool menu (Continue/Stop & respond/Restart)
+    │     Ctrl-C → tool menu (Continue/Stop & respond/Stop (cancel & exit)/Restart)
     │     drop ToolInterruptHandler
     ├── (gap: response processing)
     │     TurnInterruptHandler is topmost
