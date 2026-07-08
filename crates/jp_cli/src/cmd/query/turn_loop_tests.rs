@@ -5353,6 +5353,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
             questions: IndexMap::new(),
             options: IndexMap::default(),
             access: None,
+            cancellation_response: None,
         });
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));

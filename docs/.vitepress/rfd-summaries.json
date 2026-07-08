@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "735c84313996d54bf108e8694c9d313c46bc9d3d40336592c5759b18bb19cd04",
+    "hash": "96dd79828f0cc576735b9e624e31f064d6668d09017f40f75841db3eb14f6340",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
