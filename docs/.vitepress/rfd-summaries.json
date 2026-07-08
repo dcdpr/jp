@@ -380,7 +380,7 @@
     "summary": "Extend reasoning-region background shading across tool calls to visually represent continuous reasoning despite interleaved tool execution."
   },
   "096-terminal-output-sanitization-for-untrusted-content.md": {
-    "hash": "0059afdf57dd6b4434187f5ed7dcb4ba507bba64aff8a8bf0096a3cedf8d6442",
+    "hash": "10bedc94a7d1454fffef85238fbe8f7d2216ca9969aef50abb90d9c50feaed06",
     "summary": "Sanitize terminal output by allowlisting safe ANSI sequences (colors) and dropping dangerous ones (cursor, erase, OSC) to prevent escape injection attacks from untrusted content."
   }
 }
