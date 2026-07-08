@@ -52,8 +52,8 @@ becomes a *detectable* mismatch — never a silent positional aliasing.
 ### Future features need stable references
 
 Several proposed designs need to point at specific stream entries:
-request/response event linking ([RFD D52]), branching, undo, and plugin event
-subscriptions ([RFD D18]).
+request/response event linking, branching, undo, and plugin event
+subscriptions.
 Future sub-agent designs that need event-level provenance may also consume event
 IDs; [RFD 051] as written works at conversation granularity and does not require
 them.
@@ -597,10 +597,6 @@ That is out of scope here.
 - [RFD 067] — Resource Deduplication (related but distinct concern)
 - [RFD 072] — Command Plugin System (governs plugin-protocol exposure of
   `ConversationEvent` JSON)
-- [RFD D18] — Plugin Event Subscriptions (future consumer)
-- [RFD D21] — Interactive Conversation Stream Editing (future consumer)
-- [RFD D52] — Request-Response Event Linking (future consumer; links responses
-  to requests by `event_id`)
 
 [RFD 047]: 047-editor-and-path-access-for-conversations.md
 [RFD 051]: 051-sub-agent-workflows.md
@@ -608,6 +604,3 @@ That is out of scope here.
 [RFD 064]: 064-non-destructive-conversation-compaction.md
 [RFD 067]: 067-resource-deduplication-for-token-efficiency.md
 [RFD 072]: 072-command-plugin-system.md
-[RFD D18]: D18-plugin-event-subscriptions-and-query-delegation.md
-[RFD D21]: D21-interactive-conversation-stream-editing.md
-[RFD D52]: D52-request-response-event-linking.md
