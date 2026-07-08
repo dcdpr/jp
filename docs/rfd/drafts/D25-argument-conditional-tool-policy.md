@@ -63,7 +63,7 @@ the user is prompted* before the tool runs.
 | **Config key**  | `access`                              | `policy.run`                       |
 
 The two systems are complementary.
-A tool may have broad access rights (D24) but still require approval for
+A tool may have broad access rights (095) but still require approval for
 sensitive arguments (this RFD).
 Or a tool may have restricted access but run unattended because the access
 policy already constrains it sufficiently.
@@ -415,7 +415,7 @@ The evaluation model, argument paths, matchers, and validation are identical.
 
 - **Ordering burden.** First-match-wins requires users to order rules from most
   specific to least specific.
-  Users familiar with specificity-based systems (CSS, D24's
+  Users familiar with specificity-based systems (CSS, 095's
   longest-prefix-match) may find this counterintuitive.
   Config error detection for shadowed rules mitigates this, but the user must
   still understand the ordering model.
@@ -460,9 +460,9 @@ The cost is that users must order rules correctly, but config error detection
 catches the most common mistake (shorter prefix before longer prefix on the same
 parameter).
 
-### Embed run mode in D24's `FsRule`
+### Embed run mode in 095's `FsRule`
 
-Attach a `run` field to `access.fs` rules, sharing D24's configuration surface
+Attach a `run` field to `access.fs` rules, sharing 095's configuration surface
 entirely.
 
 Rejected because access grants and run policy are different concerns.

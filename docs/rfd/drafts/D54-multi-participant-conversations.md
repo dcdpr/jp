@@ -14,7 +14,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
-- **Requires**: [RFD D24], [RFD 070], [RFD D51], [RFD D52], [RFD D53]
+- **Requires**: [RFD 097], [RFD 070], [RFD D51], [RFD D52], [RFD D53]
 
 ## Summary
 
@@ -36,7 +36,7 @@ First, multi-participant conversations rest on several capabilities that are
 valuable on their own and should land first: assistant-scoped tool
 configuration, explicit request-to-response event linking, inline attachment URI
 parsing (which frees the `@` prefix this design needs for addressing), stable
-event identifiers (RFD D24), and negative config deltas (RFD 070).
+event identifiers (RFD 097), and negative config deltas (RFD 070).
 Each is independently useful to single-assistant JP and is being written as its
 own RFD.
 Second, once those exist — negative deltas in particular — a blank-sheet
@@ -112,7 +112,7 @@ API calls), include a brief quantitative estimate.
 Links to related RFDs, issues, documentation, or external resources.
 
 [RFD 070]: ../070-negative-config-deltas.md
-[RFD D24]: D24-stable-event-identifiers.md
+[RFD 097]: ../097-stable-event-identifiers.md
 [RFD D51]: D51-assistant-scoped-tool-configuration.md
 [RFD D52]: D52-request-response-event-linking.md
 [RFD D53]: D53-inline-attachment-uri-parsing.md

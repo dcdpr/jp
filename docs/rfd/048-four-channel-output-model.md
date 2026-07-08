@@ -5,7 +5,6 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-17
 - **Tracking Issue**: [\#518]
-- **Required by**: [RFD 029], [RFD 049], [RFD 051]
 - **Extended by**: [RFD 086], [RFD 088], [RFD 091], [RFD 095]
 
 ## Summary
