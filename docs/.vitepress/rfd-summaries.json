@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "96dd79828f0cc576735b9e624e31f064d6668d09017f40f75841db3eb14f6340",
+    "hash": "38f68ad549fbc9416b3014ddc5b67b17da4aea9d2b15a61e4d621d8faf647f3f",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -378,5 +378,9 @@
   "095-reasoning-region-shading-across-tool-calls.md": {
     "hash": "f6113fe44ee1710d8cff4b6064e35d4f57a6673df23a524c922c17330c8aec4c",
     "summary": "Extend reasoning-region background shading across tool calls to visually represent continuous reasoning despite interleaved tool execution."
+  },
+  "097-stable-event-identifiers.md": {
+    "hash": "32a5e9a2a4ceb2070eaafbb1a8f376824b9ae1ae6c13aa9209c741febe8b3f6b",
+    "summary": "Assign stable, stream-unique identifiers to every conversation event for safe manual editing and future reference features."
   }
 }
