@@ -379,6 +379,10 @@
     "hash": "f6113fe44ee1710d8cff4b6064e35d4f57a6673df23a524c922c17330c8aec4c",
     "summary": "Extend reasoning-region background shading across tool calls to visually represent continuous reasoning despite interleaved tool execution."
   },
+  "096-terminal-output-sanitization-for-untrusted-content.md": {
+    "hash": "10bedc94a7d1454fffef85238fbe8f7d2216ca9969aef50abb90d9c50feaed06",
+    "summary": "Sanitize terminal output by allowlisting safe ANSI sequences (colors) and dropping dangerous ones (cursor, erase, OSC) to prevent escape injection attacks from untrusted content."
+  },
   "097-stable-event-identifiers.md": {
     "hash": "4ace566042d5af0b07a9f184763291dbea402da95d58d513ab107b4d7c2292f5",
     "summary": "Assign stable, stream-unique identifiers to every conversation event for safe manual editing and future reference features."
