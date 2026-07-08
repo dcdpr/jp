@@ -12,7 +12,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use crossterm::style::{ContentStyle, Stylize as _};
+use crossterm::style::{Color, ContentStyle, Stylize as _};
 use fancy_regex::RegexBuilder;
 use jp_tool::{Capability, Outcome, Question};
 use serde::Deserialize;
@@ -919,6 +919,16 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
                     ChangeTag::Equal => (" ", ContentStyle::new().dim()),
                 };
 
+                // Emphasized (word-level) spans keep the line's foreground and
+                // add a dark background in the same hue (256-color cube: 52 =
+                // dark red, 22 = dark green), so changed words read as a
+                // highlight of the line's own color on any terminal theme.
+                let em = match change.tag() {
+                    ChangeTag::Delete => s.on(Color::AnsiValue(52)),
+                    ChangeTag::Insert => s.on(Color::AnsiValue(22)),
+                    ChangeTag::Equal => s,
+                };
+
                 let old = fmt_line_num(change.old_index(), nw);
                 let new = fmt_line_num(change.new_index(), nw);
 
@@ -932,7 +942,7 @@ fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
                 );
                 for (emphasized, value) in change.iter_strings_lossy() {
                     if emphasized {
-                        let _ = write!(&mut buf, "{}", s.apply(value).underlined().on_black());
+                        let _ = write!(&mut buf, "{}", em.apply(value));
                     } else {
                         let _ = write!(&mut buf, "{}", s.apply(value));
                     }

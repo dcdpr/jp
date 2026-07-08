@@ -23,6 +23,7 @@ expression: "AppConfig::fields()"
     "style.streaming.progress.show",
     "style.reasoning.background",
     "style.reasoning.display",
+    "style.reasoning.extend_across_tool_calls",
     "style.reasoning.summary_model",
     "style.markdown.hr_style",
     "style.markdown.table_max_column_width",

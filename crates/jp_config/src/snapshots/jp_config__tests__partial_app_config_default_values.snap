@@ -211,6 +211,9 @@ Ok(
                             236,
                         ),
                     ),
+                    extend_across_tool_calls: Some(
+                        true,
+                    ),
                 },
                 streaming: PartialStreamingConfig {
                     progress: PartialProgressConfig {

@@ -5319,3 +5319,113 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
 
     assert!(test_result.is_ok(), "Test timed out");
 }
+
+/// End-to-end: a tool call that follows a reasoning block continues the
+/// reasoning region, so its chrome (on stderr) carries the reasoning
+/// background.
+/// `AppConfig::new_test()` defaults `style.reasoning.background` to ANSI 236
+/// and `display` to `full`, so the boundary returns a region for the tool and
+/// `ToolRenderer` shades the header.
+#[tokio::test]
+async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.style.tool_call.show = true;
+    config.conversation.tools.defaults.run = RunMode::Unattended;
+    config
+        .conversation
+        .tools
+        .insert("mock_tool".to_string(), ToolConfig {
+            source: ToolSource::Local { tool: None },
+            command: None,
+            run: Some(RunMode::Unattended),
+            format: None,
+            enable: None,
+            summary: None,
+            description: None,
+            examples: None,
+            parameters: IndexMap::new(),
+            result: None,
+            style: None,
+            questions: IndexMap::new(),
+            options: IndexMap::default(),
+            access: None,
+            cancellation_response: None,
+        });
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+        .unwrap();
+
+    // First response: reasoning, then a tool call that continues the region.
+    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        responses: vec![
+            vec![
+                Event::reasoning(0, "Thinking about it.\n\n"),
+                Event::flush(0),
+                Event::tool_call_start(1, "call_mock".to_string(), "mock_tool".to_string()),
+                Event::flush(1),
+                Event::Finished(FinishReason::Completed),
+            ],
+            final_message_events("Done."),
+        ],
+        call_index: AtomicUsize::new(0),
+        model: ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: "reasoning-tool-mock".parse().expect("valid name"),
+        }),
+    });
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let router = SignalRouter::detached();
+
+    let executor_source = TestExecutorSource::new().with_executor("mock_tool", |req| {
+        Box::new(MockExecutor::completed(&req.id, &req.name, "tool output"))
+    });
+    let tool_defs = executor_source.tool_definitions();
+
+    run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &tool_defs,
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+        ChatRequest::from("use the tool"),
+        InvocationContext::default(),
+    )
+    .await
+    .unwrap();
+
+    printer.flush();
+    let chrome = err.lock().clone();
+    assert!(
+        chrome.contains("\x1b[48;5;236m"),
+        "the tool chrome should carry the reasoning-region background.\nChrome:\n{chrome:?}"
+    );
+    assert!(
+        strip_ansi_escapes::strip(&chrome)
+            .windows(b"Calling tool".len())
+            .any(|w| w == b"Calling tool"),
+        "the shaded header text should still be present.\nChrome:\n{chrome:?}"
+    );
+}

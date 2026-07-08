@@ -6,10 +6,19 @@ use jp_config::{
     conversation::tool::{CommandConfigOrString, style::ParametersStyle},
 };
 use jp_conversation::event::ToolCallResponse;
+use jp_md::format::{BackgroundFill, DefaultBackground};
 use jp_printer::{ErrChannel, OutputFormat, Printer, SharedBuffer};
 use serde_json::{Map, Value};
 
 use super::*;
+
+/// A full-width reasoning-region background for the shaded-chrome tests.
+fn terminal_region() -> DefaultBackground {
+    DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    }
+}
 
 /// Strip ANSI escape codes for readable snapshots.
 fn strip_ansi(s: &str) -> String {
@@ -727,5 +736,112 @@ fn test_format_args_keeps_nonempty_array_value() {
     assert!(
         plain.contains("tags"),
         "non-empty array should be shown: {plain}"
+    );
+}
+
+#[test]
+fn set_region_shades_the_tool_call_header() {
+    let (mut renderer, chrome, _) = create_renderer();
+    renderer.set_region("id1", Some(terminal_region()));
+
+    let mut args = Map::new();
+    args.insert("path".into(), Value::String("/tmp/x".into()));
+    renderer.render_tool_call("fs_read_file", &args, &ParametersStyle::FunctionCall);
+    renderer.channel.flush();
+
+    let raw = chrome.lock().clone();
+    assert!(
+        raw.contains("\x1b[48;5;236m"),
+        "header carries the region background: {raw:?}"
+    );
+    assert!(raw.contains("\x1b[49m"), "region is closed: {raw:?}");
+    assert!(
+        strip_ansi(&raw).contains("Calling tool fs_read_file"),
+        "header text is preserved: {raw:?}"
+    );
+}
+
+#[test]
+fn set_region_shades_the_result() {
+    let (mut renderer, chrome, _) = create_renderer();
+    renderer.set_region("call_1", Some(terminal_region()));
+
+    let response = ToolCallResponse {
+        id: "call_1".into(),
+        result: Ok("done".into()),
+    };
+    renderer.render_result(&response, &InlineResults::Full, &LinkStyle::Off);
+    renderer.channel.flush();
+
+    let raw = chrome.lock().clone();
+    assert!(
+        raw.contains("\x1b[48;5;236m"),
+        "result carries the region background: {raw:?}"
+    );
+    assert!(
+        strip_ansi(&raw).contains("done"),
+        "result text is preserved: {raw:?}"
+    );
+}
+
+#[test]
+fn result_uses_its_own_tool_region_keyed_by_id() {
+    // The region is captured per tool-call ID: a result for a tool that never
+    // entered a region stays unshaded even while another tool's region is set
+    // as the current one.
+    let (mut renderer, chrome, _) = create_renderer();
+    renderer.set_region("shaded", Some(terminal_region()));
+
+    let response = ToolCallResponse {
+        id: "plain".into(),
+        result: Ok("done".into()),
+    };
+    renderer.render_result(&response, &InlineResults::Full, &LinkStyle::Off);
+    renderer.channel.flush();
+
+    let raw = chrome.lock().clone();
+    assert!(
+        !raw.contains("\x1b[48;5;236m"),
+        "a result for an unshaded tool must stay plain: {raw:?}"
+    );
+}
+
+#[test]
+fn clearing_a_region_with_none_unshades_following_chrome() {
+    let (mut renderer, chrome, _) = create_renderer();
+    renderer.set_region("id1", Some(terminal_region()));
+    renderer.set_region("id1", None);
+
+    let args = Map::new();
+    renderer.render_tool_call("foo", &args, &ParametersStyle::FunctionCall);
+    renderer.channel.flush();
+
+    let raw = chrome.lock().clone();
+    assert!(
+        !raw.contains("\x1b[48;5;236m"),
+        "a None region must leave the header unshaded: {raw:?}"
+    );
+}
+
+#[test]
+fn preparing_line_fills_to_the_edge_under_a_region() {
+    // The initial temp line can sit on screen for seconds before the first
+    // tick rewrites it; under a reasoning region it must erase to the right
+    // edge so the whole row is shaded, not just the span behind the text.
+    let (mut renderer, err) = create_renderer_with_show(true);
+    renderer.set_region("id1", Some(terminal_region()));
+
+    let (tick_tx, _tick_rx) = tokio::sync::mpsc::channel(1);
+    renderer.register("id1", "fs_read_file", &tick_tx);
+    renderer.channel.flush();
+
+    let raw = err.lock().clone();
+    assert!(
+        raw.contains("\x1b[48;5;236m"),
+        "the preparing line carries the region background: {raw:?}"
+    );
+    assert!(
+        raw.ends_with("\x1b[K\x1b[49m"),
+        "the preparing line must erase to the edge before the region closes: {raw:?}"
     );
 }

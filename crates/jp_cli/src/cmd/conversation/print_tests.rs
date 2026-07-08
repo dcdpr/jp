@@ -1611,3 +1611,203 @@ fn style_full_shows_reasoning_and_untruncated_results() {
         "message should still show, got: {output}"
     );
 }
+
+/// A tool call replayed after a reasoning block continues the reasoning region,
+/// so its chrome (stderr) carries the reasoning background.
+/// `AppConfig::new_test` defaults `style.reasoning.background` to ANSI 236 and
+/// `display` to `full`.
+#[test]
+fn replay_shades_tool_chrome_after_reasoning() {
+    let (mut ctx, id, _out, err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me check the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        chrome.contains("\x1b[48;5;236m"),
+        "replayed tool chrome should carry the reasoning background, got: {chrome:?}"
+    );
+}
+
+/// With `style.reasoning.extend_across_tool_calls` disabled, replay restores
+/// the per-block behaviour: the tool chrome is not shaded even when it follows
+/// reasoning.
+#[test]
+fn replay_does_not_shade_tool_chrome_when_extension_disabled() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.extend_across_tool_calls = false;
+    let (mut ctx, id, _out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me check the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        !chrome.contains("\x1b[48;5;236m"),
+        "tool chrome must stay unshaded with the extension disabled, got: {chrome:?}"
+    );
+}
+
+/// With `style.tool_call.show = false`, replay suppresses tool chrome entirely,
+/// matching the live path.
+/// Before the predicate was wired into `TurnRenderer`, `jp conversation print`
+/// ignored `show` and always rendered the chrome.
+#[test]
+fn replay_suppresses_tool_chrome_when_show_disabled() {
+    let mut config = AppConfig::new_test();
+    config.style.tool_call.show = false;
+    let (mut ctx, id, _out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me check the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        !chrome.contains("Calling tool"),
+        "tool chrome must be suppressed when style.tool_call.show is false, got: {chrome:?}"
+    );
+}
+
+/// A reasoning region must not leak across turns.
+/// `--current-config` (`ConfigSource::Fixed`) skips the per-turn renderer
+/// rebuild, so a single `ChatRenderer` persists across turns: a turn that ends
+/// with reasoning followed by a turn that opens with a tool call must still
+/// render that tool's chrome unshaded.
+#[test]
+fn replay_does_not_leak_reasoning_region_across_turns() {
+    let (mut ctx, id, _out, err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("think about it"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::reasoning("Deep thought.\n\n"), ts(0, 0, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 0, 3)),
+        ConversationEvent::new(ChatRequest::from("now act"), ts(0, 0, 4)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 5),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 6),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(Some(2), None),
+        current_config: true,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        chrome.contains("Calling tool"),
+        "the tool chrome itself should render, got: {chrome:?}"
+    );
+    assert!(
+        !chrome.contains("\x1b[48;5;236m"),
+        "a tool call opening a new turn must not carry the previous turn's reasoning background, \
+         got: {chrome:?}"
+    );
+}

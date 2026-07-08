@@ -48,6 +48,21 @@ pub struct ReasoningConfig {
     /// (e.g. `"#1d2021"`).
     #[setting(default = default_reasoning_background)]
     pub background: Option<Color>,
+
+    /// Extend the reasoning background across tool calls made while reasoning.
+    ///
+    /// Defaults to `true`.
+    /// When the assistant interleaves reasoning with tool calls, each tool
+    /// call's chrome (the `Calling tool …` header, arguments, progress, and
+    /// result) is shaded with `background` so the reasoning region reads as one
+    /// continuous span, instead of the background switching off for every tool
+    /// call and back on for the next reasoning block.
+    ///
+    /// Has no effect when `background` is unset.
+    /// Set to `false` to keep each reasoning block and tool call on its own
+    /// background.
+    #[setting(default = true)]
+    pub extend_across_tool_calls: bool,
 }
 
 /// The default reasoning background color.
@@ -62,6 +77,9 @@ impl AssignKeyValue for PartialReasoningConfig {
             "" => kv.try_merge_object(self)?,
             "display" => self.display = kv.try_some_from_str()?,
             "background" => self.background = kv.try_some_number_or_from_str()?,
+            "extend_across_tool_calls" => {
+                self.extend_across_tool_calls = kv.try_some_bool()?;
+            }
             _ if kv.p("summary_model") => self.summary_model.assign(kv)?,
             _ => return missing_key(&kv),
         }
@@ -76,6 +94,10 @@ impl PartialConfigDelta for PartialReasoningConfig {
             display: delta_opt(self.display.as_ref(), next.display),
             summary_model: delta_opt_partial(self.summary_model.as_ref(), next.summary_model),
             background: delta_opt(self.background.as_ref(), next.background),
+            extend_across_tool_calls: delta_opt(
+                self.extend_across_tool_calls.as_ref(),
+                next.extend_across_tool_calls,
+            ),
         }
     }
 }
@@ -86,6 +108,9 @@ impl FillDefaults for PartialReasoningConfig {
             display: self.display.or(defaults.display),
             summary_model: fill_opt(self.summary_model, defaults.summary_model),
             background: self.background.or(defaults.background),
+            extend_across_tool_calls: self
+                .extend_across_tool_calls
+                .or(defaults.extend_across_tool_calls),
         }
     }
 }
@@ -98,6 +123,10 @@ impl ToPartial for ReasoningConfig {
             display: partial_opt(&self.display, defaults.display),
             summary_model: partial_opt_config(self.summary_model.as_ref(), defaults.summary_model),
             background: partial_opts(self.background.as_ref(), defaults.background),
+            extend_across_tool_calls: partial_opt(
+                &self.extend_across_tool_calls,
+                defaults.extend_across_tool_calls,
+            ),
         }
     }
 }

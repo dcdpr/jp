@@ -439,22 +439,16 @@ fn test_buffered_markdown_flushed_before_tool_call() {
         *out.lock()
     );
 
-    // LLM immediately follows with a tool call (no newline in between)
-    let tool_call = ToolCallRequest {
-        id: "call_1".into(),
-        name: "fs_read_file".into(),
-        arguments: serde_json::Map::new(),
-    };
-    coordinator.handle_event(
-        &mut stream,
-        Event::tool_call_start(1, tool_call.id.clone(), tool_call.name.clone()),
-    );
+    // The turn loop resolves the tool-call boundary before dispatching a tool
+    // start; the boundary drains the buffered markdown so it lands before the
+    // tool header.
+    coordinator.enter_tool_call(true);
 
     // The buffered markdown should now be flushed
     printer.flush();
     assert!(
         out.lock().contains("Now wire the config"),
-        "Expected buffered markdown to be flushed before tool call, got: {:?}",
+        "Expected buffered markdown to be flushed at the tool-call boundary, got: {:?}",
         *out.lock()
     );
 }

@@ -1121,3 +1121,205 @@ fn test_streaming_byte_identity_documents() {
         );
     }
 }
+
+#[test]
+fn test_enter_tool_call_after_reasoning_shades_separator_and_returns_background() {
+    // A tool call whose immediately preceding chat response was reasoning
+    // continues the reasoning region: the deferred separator before it is
+    // shaded, and the region background is returned for the chrome to extend.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    let background = renderer.enter_tool_call();
+    renderer.printer.flush();
+
+    assert!(
+        background.is_some(),
+        "a tool call after reasoning continues the shaded region"
+    );
+    let output = out.lock().clone();
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        1,
+        "the deferred separator before the tool call should be shaded, got: {output:?}"
+    );
+}
+
+#[test]
+fn test_enter_tool_call_after_message_returns_none_and_stays_unshaded() {
+    // A tool call after ordinary message content does not continue a reasoning
+    // region, so there is nothing to shade and no background to extend.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer\n\n".into(),
+    });
+    let background = renderer.enter_tool_call();
+    renderer.printer.flush();
+
+    assert!(
+        background.is_none(),
+        "a tool call after a message does not continue a reasoning region"
+    );
+    let output = out.lock().clone();
+    assert!(
+        !output.contains("\x1b[48;5;236m"),
+        "a message and the following tool boundary must not be shaded, got: {output:?}"
+    );
+}
+
+#[test]
+fn test_reasoning_region_survives_tool_call_for_following_tool() {
+    // Entering tool-call mode must not erase the memory that the region is
+    // reasoning: a second back-to-back tool call still continues the region.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, _out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    let first = renderer.enter_tool_call();
+    let second = renderer.enter_tool_call();
+
+    assert!(
+        first.is_some(),
+        "first tool call continues the reasoning region"
+    );
+    assert!(
+        second.is_some(),
+        "a second tool call still continues the region; the transition into tool-call mode must \
+         not clobber the last chat-response kind"
+    );
+}
+
+#[test]
+fn test_enter_tool_call_after_reasoning_without_background_returns_none() {
+    // With no reasoning background configured there is no fill to extend, even
+    // though the tool call follows reasoning.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+    let (mut renderer, _out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+
+    assert!(
+        renderer.enter_tool_call().is_none(),
+        "no reasoning background means no region fill to extend"
+    );
+}
+
+#[test]
+fn test_gap_between_tool_call_and_next_reasoning_is_shaded() {
+    // Reasoning → tool call → reasoning: the blank line separating the tool
+    // chrome from the resumed reasoning sits inside the region, so it must
+    // carry the reasoning background just like the separator before the tool
+    // call.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "More\n\n".into(),
+    });
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        2,
+        "both the separator before the tool call and the gap after it stay inside the region, \
+         got: {output:?}"
+    );
+}
+
+#[test]
+fn test_role_header_ends_the_reasoning_region() {
+    // A role boundary (a new turn's header, or a user header) ends any
+    // reasoning region: a tool call at the start of the next turn must not
+    // continue the previous turn's reasoning.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, _out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.render_role_header("alice", None, None);
+
+    assert!(
+        renderer.enter_tool_call().is_none(),
+        "a reasoning region must not survive a role boundary"
+    );
+}
+
+#[test]
+fn test_user_request_ends_the_reasoning_region() {
+    // A user message ends any reasoning region, even on the headerless echo
+    // path that renders the request without a preceding role header.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, _out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.render_request("now act");
+
+    assert!(
+        renderer.enter_tool_call().is_none(),
+        "a reasoning region must not survive a user request"
+    );
+}
+
+#[test]
+fn test_extend_across_tool_calls_disabled_ends_the_region_at_the_tool_call() {
+    // With the flag off, a tool call after reasoning does not continue the
+    // region: the separator before it is unshaded and no chrome background is
+    // returned, restoring the per-block behaviour. The reasoning content itself
+    // stays shaded — only the *extension* is gated.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    config.style.reasoning.extend_across_tool_calls = false;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    let background = renderer.enter_tool_call();
+    renderer.printer.flush();
+
+    assert!(
+        background.is_none(),
+        "with the extension disabled the tool call does not continue the region"
+    );
+    let output = out.lock().clone();
+    assert!(
+        output.contains("\x1b[48;5;236m"),
+        "the reasoning content itself is still shaded, got: {output:?}"
+    );
+    assert!(
+        !output.contains("\x1b[48;5;236m\x1b[K\x1b[49m"),
+        "the separator before the tool call must be unshaded, got: {output:?}"
+    );
+}
