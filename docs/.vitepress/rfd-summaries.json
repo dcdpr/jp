@@ -378,5 +378,9 @@
   "095-reasoning-region-shading-across-tool-calls.md": {
     "hash": "f6113fe44ee1710d8cff4b6064e35d4f57a6673df23a524c922c17330c8aec4c",
     "summary": "Extend reasoning-region background shading across tool calls to visually represent continuous reasoning despite interleaved tool execution."
+  },
+  "096-terminal-output-sanitization-for-untrusted-content.md": {
+    "hash": "0059afdf57dd6b4434187f5ed7dcb4ba507bba64aff8a8bf0096a3cedf8d6442",
+    "summary": "Sanitize terminal output by allowlisting safe ANSI sequences (colors) and dropping dangerous ones (cursor, erase, OSC) to prevent escape injection attacks from untrusted content."
   }
 }
