@@ -611,4 +611,3 @@ That is out of scope here.
 [RFD D18]: D18-plugin-event-subscriptions-and-query-delegation.md
 [RFD D21]: D21-interactive-conversation-stream-editing.md
 [RFD D52]: D52-request-response-event-linking.md
-[RFD D54]: D54-multi-participant-conversations.md

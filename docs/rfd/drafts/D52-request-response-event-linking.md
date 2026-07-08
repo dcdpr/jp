@@ -15,7 +15,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
 - **Required by**: [RFD D54]
-- **Requires**: [RFD 097](../097-stable-event-identifiers.md)
+- **Requires**: [RFD 097]
 
 ## Summary
 
@@ -110,4 +110,5 @@ API calls), include a brief quantitative estimate.
 
 Links to related RFDs, issues, documentation, or external resources.
 
+[RFD 097]: ../097-stable-event-identifiers.md
 [RFD D54]: D54-multi-participant-conversations.md
