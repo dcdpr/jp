@@ -250,9 +250,9 @@ control characters — and ships even when `sanitize = "off"`.
 - Protecting the `serve-web` HTML view — it needs HTML-escaping, a different
   mechanism with its own existing handling.
 - Defending against a hostile terminal emulator itself.
-- Redesigning styling; the sanitizer is formatter-agnostic and slots in front
-  of whatever formatter the render pipeline uses, today or after any future
-  styling redesign.
+- Redesigning styling; the sanitizer is formatter-agnostic and slots in front of
+  whatever formatter the render pipeline uses, today or after any future styling
+  redesign.
 - Capability adaptation of styling (color downgrading, `NO_COLOR`, non-TTY
   stripping); that is the terminal sink's job, downstream of rendering.
   The seam: this RFD neutralizes untrusted content where it enters the render
