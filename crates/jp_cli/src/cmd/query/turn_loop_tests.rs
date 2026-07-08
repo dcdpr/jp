@@ -57,7 +57,7 @@ use tokio_util::sync::CancellationToken;
 use super::*;
 use crate::{
     cmd::query::tool::{ToolCoordinator, executor::TerminalExecutorSource},
-    signals::SignalRouter,
+    signals::testing::{detached_router, test_router},
 };
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
@@ -194,6 +194,10 @@ impl Provider for AlwaysPrematureProvider {
 struct StallingMockProvider {
     events: Vec<Event>,
     model: ModelDetails,
+
+    /// Notified on the first poll of the stream's pending tail; see
+    /// [`Self::notify_when_stalled`].
+    stalled: Option<Arc<Notify>>,
 }
 
 impl StallingMockProvider {
@@ -205,7 +209,19 @@ impl StallingMockProvider {
                 provider: ProviderId::Test,
                 name: "stalling-mock".parse().expect("valid name"),
             }),
+            stalled: None,
         }
+    }
+
+    /// Notify `stalled` when the stream's pending tail is first polled.
+    ///
+    /// That poll can only come from the streaming event loop after it has
+    /// consumed every scripted event, so it doubles as a synchronization point
+    /// at which the loop — and its registered interrupt handler — is known to
+    /// be live.
+    fn notify_when_stalled(mut self, stalled: &Arc<Notify>) -> Self {
+        self.stalled = Some(Arc::clone(stalled));
+        self
     }
 }
 
@@ -227,7 +243,22 @@ impl Provider for StallingMockProvider {
         _query: ChatQuery,
     ) -> Result<EventStream, LlmError> {
         let events: Vec<Result<Event, StreamError>> = self.events.iter().cloned().map(Ok).collect();
-        Ok(Box::pin(stream::iter(events).chain(stream::pending())))
+
+        // The tail is polled only after every scripted event above has been
+        // consumed, i.e. from inside the streaming event loop.
+        let stalled = self.stalled.clone();
+        let mut notified = false;
+        let tail = stream::poll_fn(move |_| {
+            if !notified {
+                notified = true;
+                if let Some(stalled) = &stalled {
+                    stalled.notify_one();
+                }
+            }
+            std::task::Poll::Pending
+        });
+
+        Ok(Box::pin(stream::iter(events).chain(tail)))
     }
 }
 
@@ -253,8 +284,12 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
         let chat_request = ChatRequest::from("What is 2+2?");
 
         // The stream commits partial content, then stalls until interrupted.
-        let provider: Arc<dyn Provider> =
-            Arc::new(StallingMockProvider::with_message("The answer is 4."));
+        // `stalled` fires once the stream is parked inside the streaming
+        // event loop; see the Ctrl-C task below.
+        let stalled = Arc::new(Notify::new());
+        let provider: Arc<dyn Provider> = Arc::new(
+            StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
+        );
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -263,16 +298,24 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // Mock user selecting 's' (Stop) from the interrupt menu.
         let backend = MockPromptBackend::new().with_inline_responses(['s']);
 
-        // Press Ctrl-C once the streaming handler is registered and polling.
-        let signal_router = Arc::clone(&router);
-        let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            signal_router.simulate_interrupt();
+        // Press Ctrl-C once the stream has stalled: the notification fires on
+        // the first poll of the stream's pending tail, from inside the
+        // streaming event loop, so the loop's interrupt handler is registered
+        // by then. A fixed sleep raced handler registration on slow runners
+        // (seen on Windows CI): a press routed while the handler stack is
+        // empty skips the menu and cancels the shutdown token directly.
+        let signal_handle = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            async move {
+                stalled.notified().await;
+                signals.interrupt().await;
+            }
         });
 
         let result = run_turn_loop(
@@ -341,8 +384,12 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
         let chat_request = ChatRequest::from("What is 2+2?");
 
         // The stream commits partial content, then stalls until interrupted.
-        let provider: Arc<dyn Provider> =
-            Arc::new(StallingMockProvider::with_message("The answer is 4."));
+        // `stalled` fires once the stream is parked inside the streaming
+        // event loop; see the Ctrl-C task below.
+        let stalled = Arc::new(Notify::new());
+        let provider: Arc<dyn Provider> = Arc::new(
+            StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
+        );
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -351,17 +398,25 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // No pre-loaded prompt responses: opening the interrupt menu and
         // cancelling it (as a second Ctrl-C would) escalates.
         let backend = MockPromptBackend::new();
 
-        // Press Ctrl-C once the streaming handler is registered and polling.
-        let signal_router = Arc::clone(&router);
-        let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            signal_router.simulate_interrupt();
+        // Press Ctrl-C once the stream has stalled: the notification fires on
+        // the first poll of the stream's pending tail, from inside the
+        // streaming event loop, so the loop's interrupt handler is registered
+        // by then. A fixed sleep raced handler registration on slow runners
+        // (seen on Windows CI): a press routed while the handler stack is
+        // empty skips the menu and cancels the shutdown token directly.
+        let signal_handle = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            async move {
+                stalled.notified().await;
+                signals.interrupt().await;
+            }
         });
 
         let result = run_turn_loop(
@@ -444,7 +499,7 @@ async fn test_normal_completion_persists_content() {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -525,7 +580,7 @@ async fn premature_stream_end_without_finished_returns_error() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     // Without the backstop the loop pends forever, so cap the whole run.
     let result = timeout(
@@ -588,7 +643,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     let result = timeout(
         Duration::from_secs(5),
@@ -684,7 +739,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -767,7 +822,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     let result = run_turn_loop(
         Arc::clone(&provider),
@@ -1022,7 +1077,8 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // No pre-loaded prompt responses: opening the interrupt menu and
         // cancelling it (as a second Ctrl-C would) escalates.
@@ -1044,10 +1100,9 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
 
         // Press Ctrl-C once the tool is executing, which guarantees the tool
         // interrupt handler is topmost.
-        let signal_router = Arc::clone(&router);
         let signal_handle = tokio::spawn(async move {
             tool_started.notified().await;
-            signal_router.simulate_interrupt();
+            signals.interrupt().await;
         });
 
         let result = run_turn_loop(
@@ -1160,7 +1215,8 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // The question prompt stalls for 400ms before answering 'y'. While it
         // is pending, the execution event loop declines interrupts.
@@ -1183,10 +1239,9 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
         // Press Ctrl-C once the 400ms prompt is active. The tool handler
         // declines it (a prompt is active); the turn-level handler picks it
         // up after the tool completes.
-        let signal_router = Arc::clone(&router);
         let signal_handle = tokio::spawn(async move {
             prompt_started.notified().await;
-            signal_router.simulate_interrupt();
+            signals.interrupt().await;
         });
 
         let result = run_turn_loop(
@@ -1297,7 +1352,7 @@ async fn test_multiple_tool_calls_in_sequence() {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     let result = run_turn_loop(
         Arc::clone(&provider),
@@ -1386,7 +1441,7 @@ async fn test_empty_tool_response_continues_cycle() {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     let result = run_turn_loop(
         Arc::clone(&provider),
@@ -1493,7 +1548,8 @@ async fn test_tool_restart_on_interrupt() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // Mock user selecting 't' (Restart) when interrupted.
         // Provide extra 'c' (continue) responses in case of unexpected prompts.
@@ -1525,10 +1581,9 @@ async fn test_tool_restart_on_interrupt() {
         // Press Ctrl-C once the first execution is running. The tool handler
         // registered by the executing phase receives the press and shows the
         // restart menu.
-        let signal_router = Arc::clone(&router);
         let signal_handle = tokio::spawn(async move {
             tool_started.notified().await;
-            signal_router.simulate_interrupt();
+            signals.interrupt().await;
         });
 
         let result = run_turn_loop(
@@ -1646,7 +1701,7 @@ async fn test_merged_stream_exits_after_tool_response() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // No signals sent - the turn loop should complete naturally after
         // the tool executes and the follow-up LLM response is received.
@@ -1754,7 +1809,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // Mock: user presses 'y' to approve
         let backend = MockPromptBackend::new().with_inline_responses(['y']);
@@ -1895,7 +1950,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // Mock: user presses 'n' to skip
         let backend = MockPromptBackend::new().with_inline_responses(['n']);
@@ -2043,7 +2098,7 @@ async fn test_tool_call_with_run_mode_unattended() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // No prompt responses needed - tool runs without asking
         let backend = MockPromptBackend::new();
@@ -2179,7 +2234,7 @@ async fn test_tool_call_with_run_mode_skip() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // No prompt responses needed - tool is skipped automatically
         let backend = MockPromptBackend::new();
@@ -2376,7 +2431,7 @@ async fn test_multiple_tools_with_different_run_modes() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // User presses 'y' to approve the Ask tool
         let backend = MockPromptBackend::new().with_inline_responses(['y']);
@@ -2536,7 +2591,7 @@ async fn test_tool_call_returns_error() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let backend = MockPromptBackend::new();
 
@@ -2777,7 +2832,7 @@ async fn test_waiting_indicator_shows_during_delay() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -2876,7 +2931,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -2989,7 +3044,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -3073,7 +3128,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -3148,7 +3203,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -3326,7 +3381,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -3412,7 +3467,7 @@ async fn test_turn_start_event_is_emitted() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -3474,7 +3529,7 @@ async fn test_turn_start_index_increments_across_turns() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -3508,7 +3563,7 @@ async fn test_turn_start_index_increments_across_turns() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -3600,7 +3655,7 @@ async fn test_markdown_flushed_before_tool_header() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -3767,7 +3822,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new()
             .with_executor("tool_a", |req| {
@@ -3931,7 +3986,7 @@ async fn test_single_tool_call_rendered_with_args() {
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("fs_read_file", |req| {
             Box::new(
@@ -4184,7 +4239,7 @@ async fn test_tool_with_single_inquiry() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("inquiry_tool", |req| {
             Box::new(InquiryMockExecutor::new(
@@ -4318,7 +4373,7 @@ async fn test_tool_with_multiple_inquiries() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("multi_q_tool", |req| {
             Box::new(InquiryMockExecutor::new(
@@ -4467,7 +4522,7 @@ async fn test_parallel_tools_one_with_inquiry() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new()
             .with_executor("inquiry_tool", |req| {
@@ -4599,7 +4654,7 @@ async fn test_parallel_tools_both_with_inquiries() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new()
             .with_executor("tool_a", |req| {
@@ -4767,7 +4822,7 @@ async fn test_retry_counter_resets_on_successful_event() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -4896,7 +4951,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // Only `ok_tool` is registered with the executor source; the
         // `missing_tool` tool call has no executor and falls through to
@@ -5003,7 +5058,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("inquiry_tool", |req| {
             Box::new(InquiryMockExecutor::new(
@@ -5111,7 +5166,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
