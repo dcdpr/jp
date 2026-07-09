@@ -337,6 +337,7 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -438,6 +439,7 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -520,6 +522,7 @@ async fn test_normal_completion_persists_content() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -604,6 +607,7 @@ async fn premature_stream_end_without_finished_returns_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         ),
     )
     .await
@@ -666,6 +670,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         ),
     )
     .await
@@ -760,6 +765,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("new query"),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -843,6 +849,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await;
 
@@ -1125,6 +1132,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1273,6 +1281,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
                 .with_interrupt(config.interrupt.tool_call.clone()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1414,6 +1423,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1524,6 +1534,7 @@ async fn test_multiple_tool_calls_in_sequence() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await;
 
@@ -1613,6 +1624,7 @@ async fn test_empty_tool_response_continues_cycle() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await;
 
@@ -1757,6 +1769,7 @@ async fn test_tool_restart_on_interrupt() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1877,6 +1890,7 @@ async fn test_merged_stream_exits_after_tool_response() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2003,6 +2017,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2144,6 +2159,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2289,6 +2305,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2435,6 +2452,7 @@ async fn test_tool_call_with_run_mode_skip() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2637,6 +2655,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2784,6 +2803,7 @@ async fn test_tool_call_returns_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -3013,6 +3033,7 @@ async fn test_waiting_indicator_shows_during_delay() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3112,6 +3133,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3225,6 +3247,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3309,6 +3332,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3384,6 +3408,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3562,6 +3587,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -3648,6 +3674,7 @@ async fn test_turn_start_event_is_emitted() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -3710,6 +3737,7 @@ async fn test_turn_start_index_increments_across_turns() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -3744,6 +3772,7 @@ async fn test_turn_start_index_increments_across_turns() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -3837,6 +3866,7 @@ async fn test_markdown_flushed_before_tool_header() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -4020,6 +4050,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -4178,6 +4209,7 @@ async fn test_single_tool_call_rendered_with_args() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -4434,6 +4466,7 @@ async fn test_tool_with_single_inquiry() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4571,6 +4604,7 @@ async fn test_tool_with_multiple_inquiries() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4722,6 +4756,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4859,6 +4894,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -5008,6 +5044,7 @@ async fn test_retry_counter_resets_on_successful_event() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -5146,6 +5183,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -5255,6 +5293,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -5447,6 +5486,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -5561,6 +5601,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
         ChatRequest::from("use the tool"),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();

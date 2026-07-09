@@ -348,6 +348,7 @@ fn query_model_override_persists_config_delta_through_run_inner() {
 
     unsafe { env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
     unsafe { env::set_var("JP_USER_DATA_DIR", user_data.as_str()) };
+    unsafe { env::set_var("JP_TEST_DUMMY_OPENAI_API_KEY", "dummy") };
     unsafe { env::remove_var("JP_EDITOR") };
     unsafe { env::remove_var("VISUAL") };
     unsafe { env::remove_var("EDITOR") };
@@ -379,6 +380,20 @@ fn query_model_override_persists_config_delta_through_run_inner() {
         &conversation_id.to_string(),
         "--model",
         "openai/gpt-4o",
+        // An inline query so the request builds without an editor and the
+        // failure happens at the LLM stage: the CLI config delta is only
+        // recorded once a non-empty request exists, so a query aborted
+        // before that point (e.g. by the credential preflight) deliberately
+        // leaves no config event behind.
+        "hello",
+        // Pass the credential preflight with a dummy key, then fail at the
+        // request stage against an unroutable loopback address so the test
+        // never touches the network, even on machines where a real
+        // `OPENAI_API_KEY` is set.
+        "--cfg",
+        "providers.llm.openai.api_key_env=JP_TEST_DUMMY_OPENAI_API_KEY",
+        "--cfg",
+        "providers.llm.openai.base_url=http://127.0.0.1:9",
     ]);
 
     let result = run_inner(cli, OutputFormat::TextPretty);
@@ -415,6 +430,7 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     env::set_current_dir(previous_cwd).unwrap();
     unsafe { env::remove_var("JP_GLOBAL_CONFIG_DIR") };
     unsafe { env::remove_var("JP_USER_DATA_DIR") };
+    unsafe { env::remove_var("JP_TEST_DUMMY_OPENAI_API_KEY") };
 
     match previous_jp_editor {
         Some(value) => unsafe { env::set_var("JP_EDITOR", value) },
@@ -447,6 +463,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     unsafe { env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
     unsafe { env::set_var("JP_USER_DATA_DIR", user_data.as_str()) };
     unsafe { env::set_var("JP_SESSION", "jp-cli-test-session") };
+    unsafe { env::set_var("JP_TEST_DUMMY_OPENAI_API_KEY", "dummy") };
     unsafe { env::remove_var("JP_EDITOR") };
     unsafe { env::remove_var("VISUAL") };
     unsafe { env::remove_var("EDITOR") };
@@ -493,6 +510,15 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
         "query",
         "--model",
         "openai/gpt-4o",
+        // See the run_inner variant above: an inline query moves the failure
+        // past the turn-start commit point so the delta is persisted, and
+        // the dummy key plus unroutable base URL make the LLM stage fail
+        // without touching the network.
+        "hello",
+        "--cfg",
+        "providers.llm.openai.api_key_env=JP_TEST_DUMMY_OPENAI_API_KEY",
+        "--cfg",
+        "providers.llm.openai.base_url=http://127.0.0.1:9",
     ]);
 
     let result = run_inner(cli, OutputFormat::TextPretty);
@@ -529,6 +555,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     env::set_current_dir(previous_cwd).unwrap();
     unsafe { env::remove_var("JP_GLOBAL_CONFIG_DIR") };
     unsafe { env::remove_var("JP_USER_DATA_DIR") };
+    unsafe { env::remove_var("JP_TEST_DUMMY_OPENAI_API_KEY") };
 
     match previous_jp_session {
         Some(value) => unsafe { env::set_var("JP_SESSION", value) },
