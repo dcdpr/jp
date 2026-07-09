@@ -65,10 +65,11 @@ fn renders_report_from_json_format_marker_line() {
 
     let trace_log = root.join("trace-src.jsonl");
     std::fs::write(&trace_log, "").unwrap();
-    let launcher = MockLauncher::returning(launched(
-        format!("{{\"trace_log\":\"{trace_log}\"}}\n"),
-        Termination::Exited,
-    ));
+    // Built via `serde_json::json!` (like the real jp code) rather than
+    // string interpolation, so the path's backslashes on Windows get
+    // properly JSON-escaped.
+    let marker = serde_json::json!({ "trace_log": trace_log.as_str() });
+    let launcher = MockLauncher::returning(launched(format!("{marker}\n"), Termination::Exited));
 
     let outcome = execute(
         root,
