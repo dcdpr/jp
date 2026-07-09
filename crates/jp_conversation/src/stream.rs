@@ -645,13 +645,13 @@ impl ConversationStream {
     /// valid as-is.
     /// From the earliest removed turn onward a turn may be renumbered or have
     /// lost a covered event, and an overlay there can't be rebased or (for
-    /// summaries) re-clipped while anchors are positional ([RFD D24]), so it is
+    /// summaries) re-clipped while anchors are positional ([RFD 097]), so it is
     /// dropped.
     /// This is the single enforcement point for that invariant, so
     /// turn-truncation helpers and the `fork` time filter inherit it without
     /// each tracking overlay validity themselves.
     ///
-    /// [RFD D24]: https://github.com/dcdpr/jp/blob/main/docs/rfd/drafts/D24-stable-event-identifiers.md
+    /// [RFD 097]: https://github.com/dcdpr/jp/blob/main/docs/rfd/097-stable-event-identifiers.md
     pub fn retain(&mut self, mut f: impl FnMut(&ConversationEvent) -> bool) {
         // Fast path: with no overlays present there's nothing to invalidate, so
         // skip the turn-index bookkeeping.

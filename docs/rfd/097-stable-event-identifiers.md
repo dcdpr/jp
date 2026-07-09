@@ -1,10 +1,9 @@
-# RFD D24: Stable Event Identifiers
+# RFD 097: Stable Event Identifiers
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-03
-- **Required by**: [RFD D54]
 
 ## Summary
 
@@ -52,12 +51,14 @@ becomes a *detectable* mismatch — never a silent positional aliasing.
 
 ### Future features need stable references
 
-Several proposed designs need to point at specific stream entries: sub-agent
-workflows ([RFD 051]), branching, undo, and plugin event subscriptions ([RFD
-D18]).
+Several proposed designs need to point at specific stream entries:
+request/response event linking, branching, undo, and plugin event subscriptions.
+Future sub-agent designs that need event-level provenance may also consume event
+IDs; [RFD 051] as written works at conversation granularity and does not require
+them.
 Conversation compaction ([RFD 064]) currently anchors ranges by turn index; once
-D24 lands, event-ID anchors are a candidate replacement, though that migration
-is compaction's call, not D24's.
+this RFD lands, event-ID anchors are a candidate replacement, though that
+migration is compaction's call, not this RFD's.
 That migration also splits along the policy kind, which is worth recording now
 so it isn't re-derived later.
 A **mechanical** overlay (reasoning/tool-call stripping) carries no derived
@@ -70,9 +71,11 @@ set is no longer fully present) but not a content fix.
 The only sound responses to a stale summary are drop or regenerate, and
 regeneration is effectful (provider, model config, async), so it must live in
 the imperative shell, never in the pure projection layer.
-Until that migration lands, every event-removing transformation drops overlays
-wholesale (see `ConversationStream::retain`); this is the conservative,
-positional-safe behavior the by-ID design later refines for mechanical overlays.
+Until that migration lands, an event-removing transformation preserves
+compaction overlays whose ranges lie entirely before the earliest removed turn
+and drops overlays whose positional anchors may have shifted or lost covered
+content (see `ConversationStream::retain`); by-ID anchoring later refines the
+drop side of that rule for mechanical overlays.
 
 Without stable IDs, each of these features either reinvents positional
 references and inherits the same mutation hazards, or builds a parallel ID
@@ -90,8 +93,8 @@ For users who edit `events.json` by hand:
 - Each stream entry has a short opaque `event_id` field.
 - Editing an entry's content keeps its ID; existing references stay valid.
 - Duplicating an entry produces two entries with the same ID.
-  Storage's load-time repair detects the collision and regenerates the ID on the
-  later occurrence, so the file again has unique IDs.
+  Load-time repair restores uniqueness in memory by regenerating the ID on the
+  later occurrence; the repaired IDs are persisted on the next save.
   A reference that pointed at the duplicated ID is now ambiguous, and reference
   resolution treats it as unresolved rather than silently binding to one of the
   copies.
@@ -118,6 +121,7 @@ enum EventPayload {
     Event(Box<ConversationEvent>),
     ConfigDelta(ConfigDelta),
     Compaction(Compaction),
+    Unknown(Value),
 }
 ```
 
@@ -128,6 +132,21 @@ overlay is covered for free.
 The point of stable IDs is that *any* item in the event array is addressable by
 a stable ID instead of by position, whether or not a consumer needs that ID
 today.
+
+Programmatic exposure is narrower than addressability: the existing
+conversation-event iterators expose `event_id` for the `ConversationEvent`s they
+already yield.
+Config deltas, compactions, and unknown entries have IDs but gain no new
+programmatic surface; the persisted JSON is where every entry is addressable by
+ID until a consumer RFD defines the raw-entry view it needs.
+
+`Unknown` keeps its existing forward-compatibility contract: entries with an
+unrecognized `type` tag stay invisible to event iteration, config resolution,
+and providers, and they participate in uniqueness repair like every other entry.
+Because `Unknown` retains the raw JSON object verbatim, deserialization extracts
+`event_id` from that object into the wrapper and stores the remaining payload
+without it, so serialization writes exactly one `event_id` and the entry still
+round-trips losslessly.
 
 The `timestamp` stays on each payload variant.
 `event_id` is identity the stream assigns at insertion; `timestamp` is reported
@@ -176,6 +195,9 @@ One interaction is worth naming: a legacy conversation that has never been
 re-saved gets fresh random IDs at each load (see Drawbacks), so a read-only
 plugin can observe different `event_id` values for the same legacy entry across
 invocations until the stream is persisted.
+`event_id` is host-owned: a future write API (such as RFD 072's `push_events`)
+appends payloads and the stream assigns IDs at insertion, so a supplied
+`event_id` on a new event is ignored.
 The stability contract for that exposure is governed by RFD 072, not by this
 RFD.
 
@@ -214,8 +236,13 @@ impl ConversationStream {
 }
 ```
 
-`push`, `add_config_delta`, `extend`, and `start_turn` (which goes through
-`push`) all wrap their payload this way.
+The invariant: every path that creates or inserts an `InternalEvent` goes
+through this wrap constructor; deserialization is the only path that preserves
+an existing ID.
+The known call sites are `push`, `add_config_delta`, `add_compaction`, `extend`,
+`TurnMut::build`, `start_turn`, the synthetic insertions in
+`normalize_turn_starts` and `sanitize_orphaned_tool_calls`, and projection's
+injected entries (ephemeral; see [Projection views](#projection-views)).
 Because generation happens where stream context exists, "unique within its
 stream" holds at insertion, not merely after a load-time pass.
 A fixture or test that needs a deterministic ID constructs the `InternalEvent`
@@ -238,6 +265,17 @@ time and held in memory.
 Re-saving the stream persists the assigned IDs; from then on they behave like
 any other ID.
 
+### Projection views
+
+`event_id` stability is a property of the persisted raw stream.
+Compaction projection builds an ephemeral provider view by transforming a copy
+of the stream, injecting synthetic entries (for example the summary
+`ChatRequest` / `ChatResponse` pair) that exist only in that view.
+Those entries are wrapped like any other and receive fresh IDs, but the IDs are
+ephemeral: they carry no stability contract across projections, are never
+persisted or exposed through storage or plugin APIs, and MUST NOT be used as
+references into `events.json`.
+
 ### Dependency
 
 `EventId::random()` requires a source of randomness, which the workspace does
@@ -251,6 +289,14 @@ Heavier alternatives (`rand`, `uuid`, `ulid`, `nanoid`) are unnecessary; their
 additional surface area buys properties (distributions, time-sortability,
 universal uniqueness) that have no consumer here.
 
+OS RNG failure is treated as fatal: `EventId::random()` panics with a clear
+message rather than returning a `Result`.
+`getrandom` fails only when the OS entropy source is broken, a state in which
+far more than JP is unusable, and threading a `Result` through every append API
+(including `Extend`, which cannot return one) would poison the call graph for an
+unrecoverable condition.
+The append APIs stay infallible.
+
 ### Storage-layer repair
 
 ID-uniqueness repair runs inside `ConversationStream::from_parts` and
@@ -262,7 +308,7 @@ responses, leading non-user events, turn-start normalization).
 
 ```txt
 collect ids; for each duplicate id, regenerate it on the later occurrence(s)
-so the file again has unique ids; record which ids were duplicated.
+so the stream again has unique ids; record which ids were duplicated.
 ```
 
 Repair restores the *uniqueness* invariant, but it cannot restore reference
@@ -270,9 +316,10 @@ Repair restores the *uniqueness* invariant, but it cannot restore reference
 A manual edit that duplicates an ID (a copy-paste, or a reorder that moves a
 copy ahead of the original) makes any reference to that ID inherently ambiguous:
 there is no way to know which occurrence a pre-existing reference meant.
-Regenerating the later occurrence keeps the file well-formed, but it does not
-make a stale reference correct, and keeping the earliest occurrence's ID does
-**not** by itself preserve reference validity in the reorder case.
+Regenerating the later occurrence restores uniqueness in memory (persisted on
+the next save), but it does not make a stale reference correct, and keeping the
+earliest occurrence's ID does **not** by itself preserve reference validity in
+the reorder case.
 
 So a duplicated ID is treated as an ambiguous condition, not merely a missing
 one.
@@ -283,8 +330,22 @@ This is what makes the Motivation's claim hold: a copy, reorder, or delete
 produces a *detectable* mismatch, never a silent positional rebind to the wrong
 entry.
 
-Repair logs a warning per regenerated ID but does not return a structured
-report.
+The set of duplicated IDs is retained as private, load-scoped state on
+`ConversationStream`, populated by the repair pass and consulted by future
+reference resolution to classify a reference as ambiguous.
+Once the repaired stream is saved and reloaded, the file has unique IDs and the
+set is empty.
+No public accessor is added until a consumer exists, consistent with the
+`event_ids()` stance below.
+
+RFDs that introduce reference-bearing entries must consume this recorded
+ambiguity in the same load cycle, before the stream is persisted: resolve or
+drop ambiguous references prior to any save, or refuse the write.
+Persisting a repaired stream without that cleanup discards the ambiguity signal,
+and a stale reference to the surviving ID would resolve silently on the next
+load.
+
+Repair logs a warning per regenerated ID but returns no caller-facing report.
 Surfacing repair to the user or to overlays is out of scope for this RFD; future
 overlay-specific RFDs that anchor by ID define their own surfacing for ambiguous
 and orphaned references.
@@ -301,8 +362,9 @@ if overlay.anchor_id was duplicated at load, or
 
 This RFD does not add a public `event_ids()` accessor; there is no consumer yet.
 The ID set is an internal notion the repair pass already computes, and the
-public API can grow an accessor when a real consumer (compaction, sub-agents,
-plugin subscriptions, interactive editing) defines the shape it needs.
+public API can grow an accessor when a real consumer (compaction, future
+sub-agent provenance features, plugin subscriptions, interactive editing)
+defines the shape it needs.
 
 ### Storage
 
@@ -413,6 +475,9 @@ when a concrete third shared field forces it.
   scope.
 - **Time-sortability.** Stream order is the array order.
   IDs do not encode time, and code MUST NOT use them for ordering.
+- **Stable identity for projected views.** Projection-created synthetic entries
+  receive fresh ephemeral IDs with no stability contract; nothing may reference
+  them (see [Projection views](#projection-views)).
 - **Content-addressing or deduplication.** Two entries with identical content
   get distinct IDs.
   [RFD 067] covers deduplication separately.
@@ -423,8 +488,9 @@ when a concrete third shared field forces it.
   Per-overlay surfacing for orphaned references is the responsibility of
   overlay-specific RFDs.
 - **Refactoring existing reference sites.** Future features that want to use
-  event IDs (compaction, sub-agent workflows, plugin event subscriptions,
-  interactive stream editing) migrate their reference layout themselves.
+  event IDs (compaction, future sub-agent provenance features, plugin event
+  subscriptions, interactive stream editing) migrate their reference layout
+  themselves.
 - **Plugin-visible event-identity semantics beyond JSON exposure.** RFD 072
   governs what plugins see in `read_events`; this RFD just adds a field to the
   same JSON format.
@@ -460,15 +526,21 @@ Mergeable on its own.
 ### Phase 2 — `InternalEvent` wrapper and stream-assigned IDs
 
 - Make `InternalEvent` a struct: `event_id: EventId` plus a flattened
-  `EventPayload` enum (`Event` / `ConfigDelta` / `Compaction`).
+  `EventPayload` enum (`Event` / `ConfigDelta` / `Compaction` / `Unknown`).
 - Rewrite `InternalEvent`'s `Serialize` / `Deserialize` to the struct+flatten
-  shape, preserving the `type` tag and the base64 encode/decode hooks.
+  shape, preserving the `type` tag, the base64 encode/decode hooks, and the
+  lossless round-trip of `Unknown` entries (extract `event_id` from the raw
+  object on load; write exactly one `event_id` on save).
   Confirm a byte-for-byte round-trip against existing fixtures, modulo the new
   key.
-- Assign `event_id` on insertion: `push`, `add_config_delta`, `extend`, and
-  `start_turn` wrap their payload via a `fresh_event_id()` that avoids collision
-  with IDs already in the stream.
-- Expose `event_id` on the iteration views.
+- Assign `event_id` on insertion: route every `InternalEvent` creation through
+  the wrap constructor (`push`, `add_config_delta`, `add_compaction`, `extend`,
+  `TurnMut::build`, `start_turn`, and the synthetic insertions in
+  `normalize_turn_starts` / `sanitize_orphaned_tool_calls`), backed by a
+  `fresh_event_id()` that avoids collision with IDs already in the stream.
+- Expose `event_id` on the iteration views, for the `ConversationEvent`s they
+  already yield; config deltas, compactions, and unknown entries gain no new
+  programmatic surface (they remain ID-addressable in the persisted JSON).
 - On deserialize, treat a missing or empty `event_id` as "assign a fresh ID at
   load"; `EventId` itself stays strict.
 - Regenerate the snapshots and fixtures that gain an `event_id` key in this same
@@ -482,12 +554,13 @@ part.
 ### Phase 3 — Storage-layer uniqueness repair
 
 - Add `ensure_unique_event_ids` in `ConversationStream`, recording which IDs
-  were duplicated.
+  were duplicated in a private, load-scoped field on the stream (no public
+  accessor until a consumer exists).
 - Call it from `from_parts` and `from_legacy_events` after deserialization,
   before the stream is returned.
   **Not** part of `sanitize()`.
 - Test: a stream with two entries sharing an explicit fixed ID; repair
-  regenerates the later occurrence and the file again has unique IDs.
+  regenerates the later occurrence and the in-memory stream has unique IDs.
 - Test: a legacy file with no `event_id` fields; entries get IDs assigned at
   load.
 - Test: a live insertion path never exposes a duplicate ID; force a collision in
@@ -505,16 +578,17 @@ Depends on Phase 2.
 
 Can land alongside Phase 3.
 
-Future RFDs that want to reference entries by ID (compaction, sub-agents, plugin
-event subscriptions, interactive stream editing) migrate their reference layout
-in their own implementation work.
+Future RFDs that want to reference entries by ID (compaction, future sub-agent
+provenance features, plugin event subscriptions, interactive stream editing)
+migrate their reference layout in their own implementation work.
 That is out of scope here.
 
 ## References
 
 - [RFD 047] — Editor and Path Access for Conversations (motivates manual
   editing of `events.json`)
-- [RFD 051] — Sub-Agent Workflows (future consumer)
+- [RFD 051] — Sub-Agent Workflows (conversation-level as written; not an
+  event-ID consumer)
 - [RFD 054] — Split Conversation Config and Events (storage shape this RFD
   modifies)
 - [RFD 064] — Non-Destructive Conversation Compaction (potential future
@@ -522,15 +596,10 @@ That is out of scope here.
 - [RFD 067] — Resource Deduplication (related but distinct concern)
 - [RFD 072] — Command Plugin System (governs plugin-protocol exposure of
   `ConversationEvent` JSON)
-- [RFD D18] — Plugin Event Subscriptions (future consumer)
-- [RFD D21] — Interactive Conversation Stream Editing (future consumer)
 
-[RFD 047]: ../047-editor-and-path-access-for-conversations.md
-[RFD 051]: ../051-sub-agent-workflows.md
-[RFD 054]: ../054-split-conversation-config-and-events.md
-[RFD 064]: ../064-non-destructive-conversation-compaction.md
-[RFD 067]: ../067-resource-deduplication-for-token-efficiency.md
-[RFD 072]: ../072-command-plugin-system.md
-[RFD D18]: D18-plugin-event-subscriptions-and-query-delegation.md
-[RFD D21]: D21-interactive-conversation-stream-editing.md
-[RFD D54]: D54-multi-participant-conversations.md
+[RFD 047]: 047-editor-and-path-access-for-conversations.md
+[RFD 051]: 051-sub-agent-workflows.md
+[RFD 054]: 054-split-conversation-config-and-events.md
+[RFD 064]: 064-non-destructive-conversation-compaction.md
+[RFD 067]: 067-resource-deduplication-for-token-efficiency.md
+[RFD 072]: 072-command-plugin-system.md
