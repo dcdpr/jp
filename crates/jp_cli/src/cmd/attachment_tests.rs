@@ -26,6 +26,7 @@ fn empty_ctx() -> (Ctx, Runtime) {
     let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
     let runtime = Runtime::new().unwrap();
     let ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),

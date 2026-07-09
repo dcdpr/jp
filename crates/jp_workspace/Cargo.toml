@@ -17,7 +17,7 @@ jp_config = { workspace = true }
 jp_conversation = { workspace = true }
 jp_storage = { workspace = true }
 
-camino = { workspace = true }
+camino = { workspace = true, features = ["serde1"] }
 camino-tempfile = { workspace = true }
 chrono = { workspace = true }
 directories = { workspace = true }

@@ -481,7 +481,7 @@ fn mapping_from_value(mut value: Value, fallback_id: &str) -> Option<SessionMapp
 }
 
 /// Result of checking whether the session's originating process is still alive.
-enum Liveness {
+pub(crate) enum Liveness {
     /// The process is confirmed alive — do not delete the session.
     Alive,
 
@@ -499,7 +499,7 @@ enum Liveness {
 /// `SessionId::as_hwnd` — the inverse of the encoding in [`Session::getsid`] /
 /// [`Session::hwnd`].
 /// A non-decodable id (or `Env` source) yields `Unknown`.
-fn is_session_process_liveness(id: &SessionId, source: &SessionSource) -> Liveness {
+pub(crate) fn is_session_process_liveness(id: &SessionId, source: &SessionSource) -> Liveness {
     match source {
         SessionSource::Getsid => id.as_pid().map_or(Liveness::Unknown, pid_liveness),
         SessionSource::Hwnd => id.as_hwnd().map_or(Liveness::Unknown, hwnd_liveness),

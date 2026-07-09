@@ -42,11 +42,15 @@ use crate::{Ctx, cmd, signals::SignalRouter};
 ///
 /// `binary` is the path to the plugin executable.
 /// `args` are the remaining CLI arguments to forward.
+/// `child_cwd` is the bootstrap-resolved working directory for the child (RFD
+/// 087): `Some` when JP operates on a workspace other than the launch cwd's
+/// own, `None` to inherit the process cwd.
 pub(crate) fn run_plugin(
     name: &str,
     binary: &Utf8Path,
     args: &[String],
     workspace: &Workspace,
+    child_cwd: Option<&Utf8Path>,
     storage_path: Option<&Utf8Path>,
     user_storage_path: Option<&Utf8Path>,
     config: &Arc<AppConfig>,
@@ -93,6 +97,13 @@ pub(crate) fn run_plugin(
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // The root-as-working-directory invariant (RFD 087): when JP operates on
+    // a workspace other than the launch cwd's own, plugins run as if launched
+    // from the selected workspace root.
+    if let Some(cwd) = child_cwd {
+        cmd.current_dir(cwd);
+    }
 
     // Prevent the child from receiving SIGINT/SIGTERM directly. The host
     // sends `Shutdown` over the protocol instead, giving the plugin a
@@ -894,6 +905,7 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
         &binary,
         plugin_args,
         &ctx.workspace,
+        ctx.exec.child_cwd(),
         ctx.storage_path(),
         ctx.user_storage_path(),
         &config,

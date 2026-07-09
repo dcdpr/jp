@@ -1,4 +1,5 @@
 mod access;
+mod bootstrap;
 mod cmd;
 mod config_pipeline;
 mod ctx;
@@ -28,14 +29,13 @@ use std::{
     time::Duration,
 };
 
-use camino::{FromPathBufError, Utf8PathBuf, absolute_utf8};
+use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
 use clap::{
     ArgAction, Parser,
     builder::{BoolValueParser, TypedValueParser as _},
 };
-use cmd::Commands;
-use crossterm::style::Stylize as _;
+use cmd::{Commands, workspace::target::WorkspaceTarget};
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
@@ -50,13 +50,14 @@ use jp_config::{
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
 use jp_term::table::{DetailRow, details, details_markdown};
-use jp_workspace::{Workspace, user_data_dir};
+use jp_workspace::{Workspace, roots, session_store::WorkspaceSessionStore, user_data_dir};
 use relative_path::RelativePath;
 use serde_json::Value;
 use tokio::runtime::{self, Runtime};
 use tracing::{debug, info, trace, warn};
 
 use crate::{
+    bootstrap::WorkspaceRequirement,
     cmd::{
         plugin::dispatch::{describe_plugin, discover_plugins},
         target::resolve_request,
@@ -68,6 +69,10 @@ use crate::{
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
 
 const DEFAULT_STORAGE_DIR: &str = ".jp";
+
+/// The per-user data subdirectory holding one directory per known workspace
+/// (`<slug>-<id>`), each with its roots registry (RFD 087).
+const USER_WORKSPACES_DIR: &str = "workspace";
 
 #[expect(dead_code)]
 const DEFAULT_VARIABLE_PREFIX: &str = "JP_";
@@ -157,9 +162,15 @@ struct Globals {
 
     /// The workspace to use for the command.
     ///
-    /// This can be either a path to a workspace directory, or a workspace ID.
+    /// Accepts the workspace targeting grammar (see `jp w use help`): a
+    /// workspace ID, a path, `cwd` / `.`, or `-` to read an ID from stdin.
+    /// Interactive runs can also use the session keywords (`s`, `?s`), the
+    /// pickers (`?`), and free-text matching.
+    ///
+    /// Selects the workspace for this invocation only; it does not change the
+    /// session's active workspace (that is `jp w use`).
     #[arg(short = 'w', long, global = true)]
-    workspace: Option<WorkspaceIdOrPath>,
+    workspace: Option<WorkspaceTarget>,
 
     /// The format of the log output written to stderr.
     ///
@@ -245,24 +256,6 @@ impl FromStr for KeyValueOrPath {
 
         // Anything else is parsed as a key-value pair.
         s.parse().map(Self::KeyValue).map_err(Into::into)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum WorkspaceIdOrPath {
-    Id(jp_workspace::Id),
-    Path(Utf8PathBuf),
-}
-
-impl FromStr for WorkspaceIdOrPath {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        if Utf8PathBuf::from(s).exists() {
-            return Ok(Self::Path(Utf8PathBuf::from(s)));
-        }
-
-        Ok(Self::Id(jp_workspace::Id::from_str(s)?))
     }
 }
 
@@ -385,34 +378,78 @@ pub fn run() -> ExitCode {
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let printer = Printer::terminal(format);
 
-    // `jp init` is a special case that doesn't need the full startup pipeline.
-    if let Commands::Init(args) = &cli.command {
+    // `jp workspace` runs on a dedicated pre-workspace path: selecting or
+    // inspecting a workspace must work from outside every workspace —
+    // including resolving to *no* workspace — so its subcommands never
+    // construct a `Ctx`. Each declares what it pays for through
+    // `workspace_requirement` (`ls`: registries only; `use`: resolve and
+    // validate a target root; `show`: additionally loads conversation
+    // indexes).
+    if let Commands::Workspace(args) = cli.command {
+        trace!("Resolving session identity.");
+        let session = session::resolve();
+
+        let output = args
+            .run(&printer, session.as_ref(), cli.globals.persist)
+            .map_err(Into::into);
+
+        // `jp w use` and friends mutate the user-global records, so they get
+        // the same hygiene pass as a workspace-consuming run.
+        cleanup_workspace_session_records();
+
+        return output;
+    }
+
+    // The per-command workspace bootstrap requirement (RFD 087): commands
+    // declaring `None` run without any workspace resolution or construction,
+    // so the downstream consumers that assume a root do not run.
+    let requirement = cli.command.workspace_requirement();
+    if requirement == WorkspaceRequirement::None {
+        let Commands::Init(args) = &cli.command else {
+            unreachable!("every workspace-free command has a dedicated run path");
+        };
+
         return args.run(&printer).map_err(Into::into);
     }
 
-    let (mut workspace, fs_backend) =
-        load_workspace(cli.globals.workspace.as_ref(), cli.globals.persist)?;
-
-    trace!("Sanitizing workspace.");
-    let report = workspace.sanitize()?;
-    if report.has_repairs() {
-        for trashed in &report.trashed {
-            warn!(
-                dirname = trashed.dirname,
-                error = %trashed.error,
-                "Trashed corrupt conversation"
-            );
-        }
-    }
-
+    // The pre-workspace bootstrap (RFD 087): session identity and the
+    // execution context — launch cwd, selected checkout root, child cwd —
+    // are resolved once, before any `Workspace` is constructed, and passed
+    // explicitly to their consumers below.
     trace!("Resolving session identity.");
     let session = session::resolve();
 
-    // Populate the conversation index. This does NOT load the contents of
-    // individual conversations, this is done lazily as needed.
-    workspace.load_conversation_index();
+    let exec = bootstrap::resolve(cli.globals.workspace.as_ref(), session.as_ref())?;
+    trace!(
+        root = %exec.root,
+        source = ?exec.source,
+        child_cwd = ?exec.child_cwd(),
+        "Bootstrapped workspace selection."
+    );
 
-    let base = load_base_partial(fs_backend.as_deref())?;
+    let (mut workspace, fs_backend) = load_workspace(&exec.root, cli.globals.persist)?;
+
+    // `Resolve` commands stop at a validated root; only `Load` commands pay
+    // for sanitization and the conversation index.
+    if requirement == WorkspaceRequirement::Load {
+        trace!("Sanitizing workspace.");
+        let report = workspace.sanitize()?;
+        if report.has_repairs() {
+            for trashed in &report.trashed {
+                warn!(
+                    dirname = trashed.dirname,
+                    error = %trashed.error,
+                    "Trashed corrupt conversation"
+                );
+            }
+        }
+
+        // Populate the conversation index. This does NOT load the contents of
+        // individual conversations, this is done lazily as needed.
+        workspace.load_conversation_index();
+    }
+
+    let base = load_base_partial(fs_backend.as_deref(), exec.config_cwd().to_owned())?;
     let (config, handles, start_new) = resolve_config(
         &cli.command,
         base,
@@ -424,6 +461,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let config = Arc::new(config);
     let runtime = build_runtime(cli.root.threads, "jp-worker")?;
     let mut ctx = Ctx::new(
+        exec,
         workspace,
         fs_backend,
         runtime,
@@ -482,7 +520,30 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // Remove orphaned lock files and stale session mappings.
     ctx.workspace.cleanup_stale_files(ctx.fs_backend.as_deref());
 
+    // Bootstrap cleanup (RFD 087): the user-global session → workspace
+    // records are owned by this layer, not `Workspace` — they exist before
+    // any workspace is selected and can reference workspaces this run never
+    // touched. The source-split rules live in
+    // `WorkspaceSessionStore::cleanup`.
+    cleanup_workspace_session_records();
+
     output.map_err(Into::into)
+}
+
+/// Source-split cleanup of the user-global session → active-workspace store.
+///
+/// A workspace ID counts as live while any registered checkout of it still
+/// resolves to a workspace with that ID; expanding an ID also prunes its dead
+/// registry entries opportunistically (RFD 087).
+fn cleanup_workspace_session_records() {
+    let Ok(data_dir) = user_data_dir() else {
+        return;
+    };
+
+    let workspaces_dir = data_dir.join(USER_WORKSPACES_DIR);
+    WorkspaceSessionStore::at_user_data_dir(&data_dir).cleanup(&|id| {
+        !roots::resolve_live_roots(&workspaces_dir, id, DEFAULT_STORAGE_DIR).is_empty()
+    });
 }
 
 /// Drain background tasks at end of run, with interrupt-aware cancellation.
@@ -734,9 +795,14 @@ pub(crate) fn resolve_config(
 /// [`ConfigPipeline`].
 /// No `--cfg` args or per-conversation config.
 ///
+/// `cwd` is the bootstrap-resolved invocation directory for the `.jp.toml`
+/// chain ([`bootstrap::ExecutionContext::config_cwd`]): the launch cwd, or the
+/// workspace root when JP operates on a workspace other than the launch cwd's
+/// own (RFD 087).
+///
 /// See: <https://jp.computer/configuration>
-fn load_base_partial(fs: Option<&FsStorageBackend>) -> Result<PartialAppConfig> {
-    let partials = load_partial_configs_from_files(fs, absolute_utf8(".").ok())?;
+fn load_base_partial(fs: Option<&FsStorageBackend>, cwd: Utf8PathBuf) -> Result<PartialAppConfig> {
+    let partials = load_partial_configs_from_files(fs, Some(cwd))?;
     let partial = load_partials_with_inheritance(partials)?;
 
     load_envs(partial).map_err(|error| Error::CliConfig(error.to_string()))
@@ -794,46 +860,19 @@ fn load_partial_configs_from_files(
     Ok(partials)
 }
 
-/// Find the workspace for the current directory.
+/// Construct the workspace at the given, bootstrap-selected checkout root.
+///
+/// Root selection lives in [`bootstrap::resolve`]; this only builds the storage
+/// backend and [`Workspace`] on top of it.
 ///
 /// When `persist` is `false` (`--no-persist`), the persist backend is swapped
 /// to [`NullPersistBackend`] and the lock backend to [`NullLockBackend`] so
 /// that ephemeral queries never write to disk and never block on lock
 /// contention.
 fn load_workspace(
-    workspace: Option<&WorkspaceIdOrPath>,
+    root: &Utf8Path,
     persist: bool,
 ) -> Result<(Workspace, Option<Arc<FsStorageBackend>>)> {
-    let cwd = match workspace {
-        None => absolute_utf8(".")?,
-        Some(WorkspaceIdOrPath::Path(path)) => path.clone(),
-
-        // TODO: Centralize this in a new `UserStorage` struct.
-        Some(WorkspaceIdOrPath::Id(id)) => user_data_dir()?
-            .join("workspace")
-            .read_dir()?
-            .map(|dir| dir.ok().map(|dir| dir.path().clone()))
-            .find_map(|path| {
-                path.filter(|dir| {
-                    dir.file_name()
-                        .and_then(|v| v.to_str())
-                        .is_some_and(|v| v.ends_with(&id.to_string()))
-                })
-            })
-            .ok_or(jp_workspace::Error::MissingStorage)?
-            .join("storage")
-            .canonicalize()?
-            .try_into()
-            .map_err(FromPathBufError::into_io_error)?,
-    };
-    trace!(cwd = %cwd, "Finding workspace.");
-
-    let root = Workspace::find_root(cwd, DEFAULT_STORAGE_DIR).ok_or(cmd::Error::from(format!(
-        "Could not locate workspace. Use `{}` to create a new workspace.",
-        "jp init".bold().yellow()
-    )))?;
-    trace!(root = %root, "Found workspace root.");
-
     let storage = root.join(DEFAULT_STORAGE_DIR);
     trace!(storage = %storage, "Initializing workspace storage.");
 
@@ -847,16 +886,27 @@ fn load_workspace(
 
     let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
 
-    let user_root = user_data_dir()?.join("workspace");
-    // The workspace directory name slugs a freshly created silo so users can
-    // recognize it; an existing silo is reused by ID regardless of its slug.
+    let workspaces_dir = user_data_dir()?.join("workspace");
+    // The workspace directory name slugs a freshly created user-workspace
+    // directory so users can recognize it; an existing one is reused by ID
+    // regardless of its slug.
     let slug = root.file_name();
     let fs = fs
-        .with_user_storage(&user_root, slug, id.to_string())
+        .with_user_storage(&workspaces_dir, slug, id.to_string())
         .map_err(jp_workspace::Error::from)?;
 
+    // Register this checkout in the workspace's roots registry so `-w <id>`
+    // can target it from anywhere, folding in any pre-registry `storage`
+    // symlink first (see RFD 087).
+    if let Some(dir) = fs.user_storage_path() {
+        roots::migrate_legacy_symlink(dir, &id, DEFAULT_STORAGE_DIR);
+        if let Err(error) = roots::upsert_root(dir, root) {
+            warn!(%error, "Failed to record the checkout in the workspace roots registry.");
+        }
+    }
+
     let fs = Arc::new(fs);
-    let mut workspace = Workspace::new_with_id(root, id).with_backend(fs.clone());
+    let mut workspace = Workspace::new_with_id(root.to_owned(), id).with_backend(fs.clone());
     if !persist {
         workspace = workspace
             .with_persist(Arc::new(NullPersistBackend))
