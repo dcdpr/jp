@@ -861,9 +861,9 @@ impl Query {
         };
 
         // If a query is provided, and editing is not explicitly requested, or
-        // in addition to the query, stdin contains data, we omit opening the
-        // editor.
-        if (self.query.as_ref().is_some_and(|v| !v.is_empty()) || !piped)
+        // in addition to the query, stdin contains data, or editing was
+        // explicitly suppressed with `--no-edit`, we omit opening the editor.
+        if (self.query.as_ref().is_some_and(|v| !v.is_empty()) || !piped || self.force_no_edit())
             && !self.force_edit()
             && !request.is_empty()
         {
