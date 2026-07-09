@@ -1136,9 +1136,17 @@ fn edit_message_skips_editor_when_no_edit_with_piped_stdin() {
     };
 
     let mut request = ChatRequest::from("hi");
-    let mut stream = ConversationStream::new_test();
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
     let (source, partial) = query
-        .edit_message(&mut request, &mut stream, true, &config, root)
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            true,
+            &config,
+            root,
+        )
         .unwrap();
 
     assert_eq!(source, QuerySource::Inline);
