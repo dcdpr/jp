@@ -384,7 +384,11 @@
     "summary": "Sanitize terminal output by allowlisting safe ANSI sequences (colors) and dropping dangerous ones (cursor, erase, OSC) to prevent escape injection attacks from untrusted content."
   },
   "097-stable-event-identifiers.md": {
-    "hash": "4ace566042d5af0b07a9f184763291dbea402da95d58d513ab107b4d7c2292f5",
+    "hash": "2310623e9dc1f4d82e3c2ed79d48b2ba6a7ba6a8731b5a658bf17b17a3b6b82d",
     "summary": "Assign stable, stream-unique identifiers to every conversation event for safe manual editing and future reference features."
+  },
+  "098-request-response-event-linking.md": {
+    "hash": "9e4099d9ae5835c978c66ac78fde41f8ce24313d59f33abde3e555fd3651f236",
+    "summary": "Request-response linking via persistent event IDs detects answer scope under structural edits."
   }
 }
