@@ -481,6 +481,9 @@ Run `just --list --group rfd` to see them.
 |                                 | updating both.                           |
 | `just rfd-abandon NNN REASON`   | Mark RFD NNN as abandoned with the given |
 |                                 | reason.                                  |
+| `just rfd-renumber NNN [MMM]`   | Renumber an RFD (draft or published) to  |
+|                                 | `MMM`, or the next available id, and     |
+|                                 | rewrite all cross-references.            |
 | `just rfd-grep TERM`            | Search across all RFD documents using    |
 |                                 | `rg`.                                    |
 | `just rfd-list [CATEGORY]`      | List all RFDs (including DNN-prefixed    |
