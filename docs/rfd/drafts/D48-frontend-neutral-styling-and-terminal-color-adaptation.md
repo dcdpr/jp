@@ -430,6 +430,10 @@ exercises the shared boundary.
 - [RFD 084]: configurable markdown element coloring.
   This RFD reuses the markdown scope direction and moves shared style values
   into `jp_style`.
+- [RFD 096]: terminal output sanitization for untrusted content.
+  Its sanitizer neutralizes untrusted content at render-pipeline ingress,
+  upstream of any formatter this RFD proposes; this RFD's design owes it no
+  changes.
 - [color256]: an informative writeup on generating 256-color palettes from
   base16 themes.
 
@@ -437,4 +441,5 @@ exercises the shared boundary.
 [RFD 048]: ../048-four-channel-output-model.md
 [RFD 075]: ../075-tool-sandbox-and-access-policy.md
 [RFD 084]: ../084-configurable-markdown-element-coloring.md
+[RFD 096]: ../096-terminal-output-sanitization-for-untrusted-content.md
 [color256]: https://gist.github.com/jake-stewart/0a8ea46159a7da2c808e5be2177e1783

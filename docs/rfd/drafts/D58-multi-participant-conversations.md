@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-06
-- **Requires**: [RFD D24]
+- **Requires**: [RFD 097]
 - **Extends**: [RFD 076], [RFD 078]
 
 > [!WARNING]
@@ -609,7 +609,7 @@ alone.
 This keeps provider-generated IDs scoped to the participant that produced them
 and lets projection distinguish own tool/inquiry events from peer events.
 
-`request_id` depends on stable event identifiers from [RFD D24].
+`request_id` depends on stable event identifiers from [RFD 097].
 
 ### Assistant-scoped CLI flags
 
@@ -925,7 +925,7 @@ jp c participant refresh dev
    `assistant` branch.
    Depends on nothing.
 
-2. **Stable event identifiers.** Implement or require [RFD D24], so
+2. **Stable event identifiers.** Implement or require [RFD 097], so
    `ChatRequest` entries can be referenced by stable `event_id`.
    Depends on nothing in this RFD.
 
@@ -989,7 +989,7 @@ jp c participant refresh dev
 - [RFD 076]: tool access grants, extended by participant-scoped tool paths.
 - [RFD 078]: tool config mutation, extended by participant-relative config
   paths.
-- [RFD D24]: stable event identifiers, required for `request_id` references.
+- [RFD 097]: stable event identifiers, required for `request_id` references.
 
 [RFD 020]: ../020-parallel-conversations.md
 [RFD 031]: ../031-durable-conversation-storage-with-workspace-projection.md
@@ -999,7 +999,7 @@ jp c participant refresh dev
 [RFD 072]: ../072-command-plugin-system.md
 [RFD 076]: ../076-tool-access-grants.md
 [RFD 078]: ../078-tool-config-mutation.md
-[RFD D24]: D24-stable-event-identifiers.md
+[RFD 097]: ../097-stable-event-identifiers.md
 [RFD D51]: ./D51-assistant-scoped-tool-configuration.md
 [RFD D52]: ./D52-request-response-event-linking.md
 [RFD D53]: ./D53-inline-attachment-uri-parsing.md

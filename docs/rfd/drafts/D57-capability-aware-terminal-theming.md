@@ -476,6 +476,11 @@ strings); we deliberately do not pull `tinted-builder` (GPL-3.0) or
   SGR-emission boundary to the sink, drops the alias phase, and shares the
   node-major `style` shape.
   The `Extended by` back-link on 084 is filled when this draft is promoted.
+- [RFD 096]: terminal output sanitization for untrusted content.
+  It neutralizes untrusted content where it enters the render pipeline; this
+  draft's terminal sink adapts already-trusted styling downstream of it.
+  The untrusted-content SGR allowlist is owned by RFD 096, not the sink, so the
+  sink must not grow a second untrusted-content policy.
 - [color256]: terminal 256-color palette generation from base16 (informative).
 - [`anstyle`], [`termbg`]: the crates this RFD reuses or adds.
 - [base16 styling spec]: the palette role vocabulary and file format.
@@ -486,6 +491,7 @@ strings); we deliberately do not pull `tinted-builder` (GPL-3.0) or
 [RFD 048]: ../048-four-channel-output-model.md
 [RFD 075]: ../075-tool-sandbox-and-access-policy.md
 [RFD 084]: ../084-configurable-markdown-element-coloring.md
+[RFD 096]: ../096-terminal-output-sanitization-for-untrusted-content.md
 [`anstyle`]: https://crates.io/crates/anstyle
 [`termbg`]: https://crates.io/crates/termbg
 [base16 styling spec]: https://github.com/tinted-theming/home/blob/main/styling.md

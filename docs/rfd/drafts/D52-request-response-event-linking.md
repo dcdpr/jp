@@ -15,13 +15,14 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
 - **Required by**: [RFD D54]
+- **Requires**: [RFD 097]
 
 ## Summary
 
 Response events in a conversation stream carry no explicit reference to the
 request they answer; the relationship is inferred from position within a turn.
 This RFD adds an explicit link from each response event to the request event it
-answers, keyed by the stable `event_id` introduced in RFD D24.
+answers, keyed by the stable `event_id` introduced in RFD 097.
 It defines which event pairs are linked and how a dangling link is resolved.
 
 ## Motivation
@@ -41,7 +42,7 @@ Several proposed capabilities — branching, undo, compaction anchoring, and
 faithful turn reconstruction — need to know unambiguously which request a given
 response answers, and cannot rely on position surviving a structural edit.
 
-RFD D24 gives every stream entry a stable `event_id` but deliberately leaves
+RFD 097 gives every stream entry a stable `event_id` but deliberately leaves
 reference semantics to its consumers.
 This RFD is one such consumer: it records the response-to-request relationship
 as an explicit `event_id` reference, so the link survives reordering and
@@ -109,4 +110,5 @@ API calls), include a brief quantitative estimate.
 
 Links to related RFDs, issues, documentation, or external resources.
 
+[RFD 097]: ../097-stable-event-identifiers.md
 [RFD D54]: D54-multi-participant-conversations.md

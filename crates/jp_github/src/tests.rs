@@ -272,7 +272,7 @@ async fn pulls_add_review_thread_posts_graphql_mutation() {
             then.status(200).json_body(json!({
                 "data": {
                     "addPullRequestReviewThread": {
-                        "thread": { "id": "PRRT_abc123" }
+                        "thread": { "id": "PRRT_abc123", "line": 12, "isOutdated": false }
                     }
                 }
             }));
@@ -280,7 +280,7 @@ async fn pulls_add_review_thread_posts_graphql_mutation() {
         .await;
 
     let client = test_client(&server.base_url(), None);
-    client
+    let thread = client
         .pulls("acme", "widgets")
         .add_review_thread("R_kgDOABCDEFG", &DraftReviewComment {
             path: "src/lib.rs".to_owned(),
@@ -293,6 +293,93 @@ async fn pulls_add_review_thread_posts_graphql_mutation() {
         .await
         .expect("add review thread");
 
+    assert_eq!(thread.id, "PRRT_abc123");
+    assert_eq!(thread.line, Some(12));
+    assert!(!thread.is_outdated);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_add_review_thread_reports_unanchored_thread() {
+    use crate::models::pulls::DraftReviewComment;
+
+    // GitHub accepts anchors outside the PR's diff without a GraphQL error;
+    // the created thread comes back with `line: null` and is never rendered
+    // in the review UI. The caller must be able to see that, so `line` maps
+    // to `None` instead of being swallowed.
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/graphql");
+            then.status(200).json_body(json!({
+                "data": {
+                    "addPullRequestReviewThread": {
+                        "thread": { "id": "PRRT_ghost", "line": null, "isOutdated": false }
+                    }
+                }
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let thread = client
+        .pulls("acme", "widgets")
+        .add_review_thread("R_kgDOABCDEFG", &DraftReviewComment {
+            path: "src/lib.rs".to_owned(),
+            body: "x".to_owned(),
+            line: 751,
+            side: None,
+            start_line: None,
+            start_side: None,
+        })
+        .await
+        .expect("mutation succeeded");
+
+    assert_eq!(thread.id, "PRRT_ghost");
+    assert_eq!(thread.line, None);
+    mock.assert();
+}
+
+#[tokio::test]
+async fn pulls_add_review_thread_errors_on_missing_thread() {
+    use crate::{Error, models::pulls::DraftReviewComment};
+
+    // A null `thread` without an accompanying `errors` array must not be
+    // reported as success: nothing was created.
+    let server = MockServer::start_async().await;
+    let mock = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/graphql");
+            then.status(200).json_body(json!({
+                "data": { "addPullRequestReviewThread": { "thread": null } }
+            }));
+        })
+        .await;
+
+    let client = test_client(&server.base_url(), None);
+    let err = client
+        .pulls("acme", "widgets")
+        .add_review_thread("R_kgDOABCDEFG", &DraftReviewComment {
+            path: "src/lib.rs".to_owned(),
+            body: "x".to_owned(),
+            line: 1,
+            side: None,
+            start_line: None,
+            start_side: None,
+        })
+        .await
+        .expect_err("null thread must not be reported as success");
+
+    match err {
+        Error::GitHub { source, .. } => {
+            assert!(
+                source.message.contains("returned no thread"),
+                "unexpected error message: {}",
+                source.message
+            );
+        }
+        other => panic!("unexpected error variant: {other:?}"),
+    }
     mock.assert();
 }
 
