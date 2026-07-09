@@ -238,7 +238,8 @@ pub(crate) struct Query {
     /// message.
     ///
     /// Forces the editor open by default; respects `--no-edit` / `--edit=false`
-    /// if explicitly suppressed, in which case the quoted text is sent as-is.
+    /// if explicitly suppressed, in which case the quoted text is sent as-is
+    /// and echoed to the terminal before the turn runs.
     /// Composes with `--replay`: the quote is taken from the stream *after* the
     /// replayed turn has been trimmed, i.e. the assistant message preceding the
     /// turn being replayed.
@@ -781,6 +782,16 @@ impl Query {
             return Ok((QuerySource::Synthesized, PartialAppConfig::empty()));
         }
 
+        // The remaining non-editor paths send the request text as-is. With
+        // `--quote` that text was assembled from the quoted assistant message
+        // rather than typed by the user, so it is synthesized too (and
+        // therefore echoed); anything else was typed or piped inline.
+        let source = if self.quote {
+            QuerySource::Synthesized
+        } else {
+            QuerySource::Inline
+        };
+
         // If a query is provided, and editing is not explicitly requested, or
         // in addition to the query, stdin contains data, we omit opening the
         // editor.
@@ -788,12 +799,12 @@ impl Query {
             && !self.force_edit()
             && !request.is_empty()
         {
-            return Ok((QuerySource::Inline, PartialAppConfig::empty()));
+            return Ok((source, PartialAppConfig::empty()));
         }
 
         let backend = match editor::build_editor_backend(&config.editor) {
             None if !request.is_empty() => {
-                return Ok((QuerySource::Inline, PartialAppConfig::empty()));
+                return Ok((source, PartialAppConfig::empty()));
             }
             None => return Err(Error::MissingEditor),
             Some(backend) => backend,
@@ -879,8 +890,9 @@ impl Query {
     ///
     /// Echo when the user can't already see what's being sent: a query composed
     /// in an editor (the editor took over the screen), a request synthesized by
-    /// `--no-edit` (the user never typed it), or a `--replay` (the message is
-    /// pulled from history, not typed on the command line).
+    /// `--no-edit` or `--quote` (the user never typed or saw the final text),
+    /// or a `--replay` (the message is pulled from history, not typed on the
+    /// command line).
     /// A plain inline query needs no echo — the user just typed it.
     fn should_echo_request(&self, source: QuerySource) -> bool {
         source != QuerySource::Inline || self.replay
@@ -1202,9 +1214,11 @@ enum QuerySource {
     /// replayed message — anything already final without an editor round-trip.
     Inline,
 
-    /// Synthesized because `--no-edit` was given without a query: either the
-    /// conversation's trailing request is re-sent, or a default "continue"
-    /// message is used.
+    /// Synthesized without the user typing or seeing the final text:
+    /// `--no-edit` was given without a query (the conversation's trailing
+    /// request is re-sent, or a default "continue" message is used), or
+    /// `--quote` assembled the request from the quoted assistant message
+    /// without an editor round-trip.
     Synthesized,
 }
 

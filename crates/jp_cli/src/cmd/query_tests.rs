@@ -1037,6 +1037,72 @@ fn echo_request_unless_inline() {
 }
 
 #[test]
+fn edit_message_synthesizes_when_no_edit_without_query() {
+    let config = AppConfig::new_test();
+    let root = Utf8Path::new("/tmp");
+    let query = Query {
+        no_edit: true,
+        ..Default::default()
+    };
+
+    // Empty request and empty stream: a default "continue" message is
+    // synthesized, so the caller must echo it.
+    let mut request = ChatRequest::default();
+    let mut stream = ConversationStream::new_test();
+    let (source, partial) = query
+        .edit_message(&mut request, &mut stream, false, &config, root)
+        .unwrap();
+    assert_eq!(source, QuerySource::Synthesized);
+    assert_eq!(request.content, "continue");
+    assert!(partial.is_empty());
+
+    // Empty request with the stream's trailing event being a chat request:
+    // that request is consumed and re-sent verbatim, also synthesized.
+    let mut request = ChatRequest::default();
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("earlier text");
+    let (source, _) = query
+        .edit_message(&mut request, &mut stream, false, &config, root)
+        .unwrap();
+    assert_eq!(source, QuerySource::Synthesized);
+    assert_eq!(request.content, "earlier text");
+    // The trailing request was popped from the stream so the re-sent message
+    // isn't duplicated.
+    assert!(stream.pop_if(ConversationEvent::is_chat_request).is_none());
+}
+
+#[test]
+fn edit_message_quote_without_editor_is_synthesized() {
+    // `--quote --no-edit`: `build_conversation` seeds the request with the
+    // quoted assistant message before `edit_message` runs, so the request is
+    // non-empty here even though the user never typed or saw the final text.
+    // It must be classified as synthesized (and therefore echoed), not
+    // inline.
+    let config = AppConfig::new_test();
+    let query = Query {
+        quote: true,
+        no_edit: true,
+        ..Default::default()
+    };
+
+    let mut request = ChatRequest::from(" >  quoted reply");
+    let mut stream = ConversationStream::new_test();
+    let (source, partial) = query
+        .edit_message(
+            &mut request,
+            &mut stream,
+            false,
+            &config,
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap();
+    assert_eq!(source, QuerySource::Synthesized);
+    // The seeded content is sent as-is.
+    assert_eq!(request.content, " >  quoted reply");
+    assert!(partial.is_empty());
+}
+
+#[test]
 fn picker_new_item_gated_by_new_incompatible_flags() {
     // The picker may only offer "start a new conversation" when `--new` would
     // itself be a legal flag. `--fork` and `--replay` both conflict with
