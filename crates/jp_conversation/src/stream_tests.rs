@@ -898,10 +898,267 @@ fn test_roundtrip_delta_strip_unknown_field_preserves_rest() {
     json["delta"]["style"]["code"]["removed_field"] = serde_json::json!("stale");
 
     let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
-    let InternalEvent::ConfigDelta(result) = deserialized else {
-        panic!("expected ConfigDelta");
+    let InternalEvent::ConfigDelta(ConfigDelta::Apply(result)) = deserialized else {
+        panic!("expected Apply config delta");
     };
     assert_eq!(result.delta.style.code.color, Some(false));
+}
+
+#[test]
+fn test_internal_event_config_delta_reset_roundtrip() {
+    let reset = ConfigDelta::Reset(ResetDelta {
+        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    });
+
+    let event = InternalEvent::ConfigDelta(reset.clone());
+    let json = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "type": "config_delta",
+            "op": "reset",
+            "timestamp": "2020-01-01 00:00:00.0",
+        })
+    );
+
+    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
+    assert_eq!(deserialized, InternalEvent::ConfigDelta(reset));
+}
+
+#[test]
+fn test_internal_event_config_delta_apply_shape_has_no_op_field() {
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.style.code.color = Some(false);
+
+    let event = InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta {
+        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        delta: Box::new(partial),
+    }));
+
+    let json = serde_json::to_value(&event).unwrap();
+    let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+
+    assert_eq!(keys, ["delta", "timestamp", "type"]);
+    assert_eq!(json["type"], "config_delta");
+    assert_eq!(json["timestamp"], "2020-01-01 00:00:00.0");
+    assert_eq!(json["delta"]["style"]["code"]["color"], false);
+}
+
+#[test]
+fn test_legacy_config_delta_without_op_decodes_as_apply() {
+    // Every config delta written before the reset variant existed lacks an
+    // `op` field; those must keep decoding as `Apply`.
+    let raw = serde_json::json!({
+        "type": "config_delta",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "delta": { "style": { "code": { "color": false } } }
+    });
+
+    let internal: InternalEvent = serde_json::from_value(raw).unwrap();
+    let InternalEvent::ConfigDelta(ConfigDelta::Apply(apply)) = internal else {
+        panic!("expected Apply config delta");
+    };
+    assert_eq!(apply.delta.style.code.color, Some(false));
+}
+
+#[test]
+fn test_config_delta_with_explicit_apply_op_decodes_as_apply() {
+    let raw = serde_json::json!({
+        "type": "config_delta",
+        "op": "apply",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "delta": { "style": { "code": { "color": false } } }
+    });
+
+    let internal: InternalEvent = serde_json::from_value(raw).unwrap();
+    let InternalEvent::ConfigDelta(ConfigDelta::Apply(apply)) = internal else {
+        panic!("expected Apply config delta");
+    };
+    assert_eq!(apply.delta.style.code.color, Some(false));
+}
+
+#[test]
+fn test_config_delta_with_unknown_op_fails_deserialization() {
+    // An op added by a newer jp must fail loudly instead of being misread as
+    // an apply.
+    let raw = serde_json::json!({
+        "type": "config_delta",
+        "op": "unset",
+        "timestamp": "2025-01-01 00:00:00.0",
+    });
+    assert!(serde_json::from_value::<InternalEvent>(raw).is_err());
+
+    // Non-string values are rejected too.
+    let raw = serde_json::json!({
+        "type": "config_delta",
+        "op": 42,
+        "timestamp": "2025-01-01 00:00:00.0",
+    });
+    assert!(serde_json::from_value::<InternalEvent>(raw).is_err());
+}
+
+#[test]
+fn test_add_config_delta_reset_always_appends() {
+    let mut stream = ConversationStream::new_test();
+    let delta_count = |s: &ConversationStream| {
+        s.events
+            .iter()
+            .filter(|e| matches!(e, InternalEvent::ConfigDelta(_)))
+            .count()
+    };
+
+    // An `Apply` whose diff against the current config is empty is suppressed.
+    stream.add_config_delta(jp_config::PartialAppConfig::empty());
+    assert_eq!(delta_count(&stream), 0);
+
+    // A `Reset` always lands, even though it carries no diff.
+    stream.add_config_delta(ResetDelta {
+        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    });
+    assert_eq!(delta_count(&stream), 1);
+}
+
+#[test]
+fn test_add_config_reset_appends_reset_then_nonempty_layers() {
+    let mut stream = ConversationStream::new_test();
+
+    let mut layer = jp_config::PartialAppConfig::empty();
+    layer.style.code.color = Some(false);
+
+    stream.add_config_reset(
+        ResetDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        },
+        [
+            // Empty layers are skipped: they would resolve to a no-op `Apply`.
+            ApplyDelta {
+                timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                delta: Box::new(jp_config::PartialAppConfig::empty()),
+            },
+            ApplyDelta {
+                timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                delta: Box::new(layer),
+            },
+        ],
+    );
+
+    // The reset lands first, followed by the single non-empty layer —
+    // verbatim, without diff-suppression (the delta is written as given, not
+    // reduced against the stream's current config).
+    let deltas: Vec<_> = stream
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            InternalEvent::ConfigDelta(delta) => Some(delta),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(deltas.len(), 2, "expected [Reset, Apply], got {deltas:?}");
+    assert!(matches!(deltas[0], ConfigDelta::Reset(_)));
+    let ConfigDelta::Apply(apply) = deltas[1] else {
+        panic!("expected Apply config delta");
+    };
+    assert_eq!(apply.delta.style.code.color, Some(false));
+}
+
+#[test]
+fn test_config_fold_reset_discards_accumulated_state() {
+    use jp_config::model::id::{Name, PartialModelIdConfig, ProviderId};
+
+    let mut stream = ConversationStream::new_test();
+
+    // Diverge from the program default (`style.code.color` defaults to
+    // `true`). The test base config also carries
+    // `conversation.title.generate.auto = false` (default `true`).
+    let mut dev = jp_config::PartialAppConfig::empty();
+    dev.style.code.color = Some(false);
+
+    // The post-reset state starts from program defaults, which lack the
+    // required model id and tool run mode, so `fresh` must supply both for
+    // the stream config to be valid.
+    let mut fresh = jp_config::PartialAppConfig::empty();
+    fresh.conversation.tools.defaults.run = Some(RunMode::Ask);
+    fresh.assistant.model.id = PartialModelIdConfig {
+        provider: Some(ProviderId::Anthropic),
+        name: Some(Name("fresh".to_owned())),
+    }
+    .into();
+
+    for delta in [
+        ConfigDelta::Apply(ApplyDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+            delta: Box::new(dev),
+        }),
+        ConfigDelta::Reset(ResetDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+        }),
+        ConfigDelta::Apply(ApplyDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+            delta: Box::new(fresh),
+        }),
+    ] {
+        stream.events.push(InternalEvent::ConfigDelta(delta));
+    }
+
+    let config = stream.config().unwrap();
+
+    // dev's change is behind the reset; the program default is restored.
+    assert!(config.style.code.color);
+    // The base config's contribution is discarded too.
+    assert!(config.conversation.title.generate.auto);
+    // fresh applies on top of program defaults.
+    assert_eq!(config.assistant.model.id.resolved().name.0, "fresh");
+}
+
+#[test]
+fn test_iter_config_reflects_reset() {
+    let mut dev = jp_config::PartialAppConfig::empty();
+    dev.style.code.color = Some(false);
+
+    let mut fresh = jp_config::PartialAppConfig::empty();
+    fresh.user.name = Some("fresh".to_owned());
+
+    let mut stream = ConversationStream::new_test();
+    stream
+        .events
+        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+            delta: Box::new(dev),
+        })));
+    stream.push(ConversationEvent::new(
+        ChatRequest::from("before reset"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+    stream
+        .events
+        .push(InternalEvent::ConfigDelta(ConfigDelta::Reset(ResetDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+        })));
+    stream
+        .events
+        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+            delta: Box::new(fresh),
+        })));
+    stream.push(ConversationEvent::new(
+        ChatRequest::from("after reset"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 4).unwrap(),
+    ));
+
+    let events: Vec<_> = stream.iter().collect();
+    assert_eq!(events.len(), 2);
+
+    // Before the reset: dev's change plus the base config's fields.
+    assert_eq!(events[0].config.style.code.color, Some(false));
+
+    // After the reset: only fresh's fields remain; both dev's change and the
+    // base config's contribution are gone.
+    assert_eq!(events[1].config.style.code.color, None);
+    assert_eq!(events[1].config.user.name, Some("fresh".to_owned()));
+    assert!(events[1].config.conversation.title.generate.auto.is_none());
 }
 
 // --- deserialize_config_delta tests ---
@@ -915,9 +1172,12 @@ fn test_deserialize_config_delta_extracts_timestamp_and_delta() {
         }
     });
 
-    let delta = deserialize_config_delta(&value);
-    assert_eq!(delta.timestamp.to_string(), "2025-01-01 00:00:00 UTC");
-    assert_eq!(delta.delta.style.code.color, Some(false));
+    let delta = deserialize_config_delta(&value).unwrap();
+    assert_eq!(delta.timestamp().to_string(), "2025-01-01 00:00:00 UTC");
+    let ConfigDelta::Apply(apply) = delta else {
+        panic!("expected Apply config delta");
+    };
+    assert_eq!(apply.delta.style.code.color, Some(false));
 }
 
 #[test]
@@ -927,9 +1187,12 @@ fn test_deserialize_config_delta_preserves_timestamp_on_bad_delta() {
         "delta": "not an object at all"
     });
 
-    let delta = deserialize_config_delta(&value);
-    assert_eq!(delta.timestamp.to_string(), "2024-12-25 18:30:00 UTC");
-    assert!(delta.delta.is_empty());
+    let delta = deserialize_config_delta(&value).unwrap();
+    assert_eq!(delta.timestamp().to_string(), "2024-12-25 18:30:00 UTC");
+    let ConfigDelta::Apply(apply) = delta else {
+        panic!("expected Apply config delta");
+    };
+    assert!(apply.delta.is_empty());
 }
 
 // --- from_parts / to_parts stream-level compat tests ---
@@ -1609,7 +1872,7 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
 
     // Build a source stream with two turns and a config delta before each.
     let mut source = ConversationStream::new_test();
-    source.add_config_delta(ConfigDelta {
+    source.add_config_delta(ApplyDelta {
         delta: Box::new(partial1),
         timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     });
@@ -1625,7 +1888,7 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
         ChatResponse::message("A1"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
     ));
-    source.add_config_delta(ConfigDelta {
+    source.add_config_delta(ApplyDelta {
         delta: Box::new(partial2),
         timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
     });

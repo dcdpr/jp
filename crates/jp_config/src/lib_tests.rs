@@ -28,7 +28,11 @@ fn test_app_config_fields() {
 #[test]
 fn test_ensure_no_missing_assignments() {
     // Some fields cannot be assigned via CLI.
-    let skip_fields = ["extends"];
+    //
+    // `loader.reset` is load-time metadata steering how the declaring file is
+    // loaded ([RFD 038]): it counts only in a file's own `[loader]` section
+    // and never becomes part of the resolved application config.
+    let skip_fields = ["extends", "loader.reset"];
 
     for field in AppConfig::fields() {
         if skip_fields.contains(&field.as_str()) {

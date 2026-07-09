@@ -196,7 +196,7 @@
     "summary": "Adds scripting ergonomics: shared config structs, `conversation new` command, `--no-activate` flag, and `--root-id` ancestry constraint."
   },
   "051-sub-agent-workflows.md": {
-    "hash": "dfda328626635792c345489714f59ff6d07b4e010c9da37e0b5e028713d689e6",
+    "hash": "75cefb8d7ca2579b9f1371ac230a9205635ed53543e827cb1d38030f9647095b",
     "summary": "Guide for building sub-agent workflows using local tools, config overlays, and conversation trees to delegate scoped tasks cheaply."
   },
   "052-workspace-data-store-sanitization.md": {
@@ -288,11 +288,11 @@
     "summary": "Adds conversation archiving to JP, moving inactive conversations to a hidden partition while preserving them."
   },
   "038-config-reset-keywords.md": {
-    "hash": "9e3ec573727ac4dd94589dd82904fd0b6946eecd2da45bc354d92c71ce698984",
+    "hash": "0492ca03e690477c1a5c63a9beaa1f138c7cc964f4d3c3ccaf968dbed9dd3a73",
     "summary": "UPPERCASE keywords NONE and WORKSPACE reset config state; loader.reset entry setting provides local resets; ConfigDelta becomes enum to persist resets."
   },
   "079-config-sources-and-load-order.md": {
-    "hash": "5e5c78898d1ba2ac5de5ef86ebad0da886c8ca608beaa6fd202e75ba6db670fc",
+    "hash": "2ba304ffd0f14f3f1830aaaac43820461da856920d708e9b0192815a47aee687",
     "summary": "JP loads config from four implicit sources plus environment variables, with extends directives and inherit flags controlling precedence."
   },
   "074-eager-loading-with-command-declared-data-requirements.md": {

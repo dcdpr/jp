@@ -13,7 +13,7 @@ use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig, TransformR
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    AppConfig, BoxedError, PartialAppConfig, error::Error,
+    AppConfig, BoxedError, PartialAppConfig, error::Error, loader::PartialLoaderConfig,
     types::extending_path::ExtendingRelativePath,
 };
 
@@ -200,6 +200,25 @@ fn load_partial_at_path_with_max_depth<P: Into<PathBuf>>(
     }
 
     loader.load_partial(&()).map(Some).map_err(Into::into)
+}
+
+/// Read the `[loader]` section from the config file at `path`, without
+/// resolving its `extends` tree.
+///
+/// Loader directives steer how the declaring entry itself is loaded, so only
+/// the file's own section counts: a `[loader]` section in a file reached
+/// through `extends` must not affect the entry ([RFD 038]).
+///
+/// # Errors
+///
+/// Can error if the file cannot be read or parsed.
+///
+/// [RFD 038]: https://jp.computer/rfd/038
+pub fn load_loader_directives<P: AsRef<Path>>(path: P) -> Result<PartialLoaderConfig, Error> {
+    Ok(ConfigLoader::<AppConfig>::new()
+        .file(path.as_ref())?
+        .load_partial(&())?
+        .loader)
 }
 
 /// Load a partial configuration from a file at `path`, walking upwards until

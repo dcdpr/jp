@@ -111,7 +111,7 @@ fn build_query_config(
     query: &Query,
     handle: Option<&ConversationHandle>,
 ) -> AppConfig {
-    let pipeline = ConfigPipeline::new(base, cfg_args, Some(workspace), None).unwrap();
+    let pipeline = ConfigPipeline::new(cfg_args, Some(workspace), None, || Ok(base)).unwrap();
 
     let conversation_partial = handle.map(|handle| {
         query
@@ -751,6 +751,141 @@ fn query_cfg_sourced_compaction_persists_as_config_delta() {
     assert!(
         !delta.conversation.compaction.rules.is_empty(),
         "compaction config from the config layers must persist as a conversation delta",
+    );
+}
+
+/// The `config_delta` events of a stream's serialized `events.json`.
+fn serialized_config_deltas(events: &ConversationStream) -> Vec<Value> {
+    let (_base, serialized) = events.clone().to_parts().unwrap();
+    serialized
+        .into_iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("config_delta"))
+        .collect()
+}
+
+#[test]
+fn cfg_reset_none_appends_reset_then_post_apply() {
+    // `jp q --cfg=NONE --cfg=<post>` on a continuing conversation ([RFD 038]):
+    // the stream records `[Reset, Apply(post)]`, where `post` restores the
+    // required fields on top of program defaults.
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(3000);
+
+    let mut workspace = Workspace::new("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let post = config_with_model(ProviderId::Openai, "fresh-model").to_partial();
+    let reset = ConfigResetEvents {
+        reset: ConfigReset::Defaults,
+        post: Box::new(post),
+    };
+
+    lock.as_mut()
+        .update_events(|events| persist_config_reset(events, reset, DateTime::<Utc>::UNIX_EPOCH));
+
+    let events = lock.events().clone();
+
+    // The stream resolves to the post-reset state, not the pre-reset base.
+    let merged = events.config().unwrap();
+    let model_id = merged.assistant.model.id.resolved();
+    assert_eq!(model_id.provider, ProviderId::Openai);
+    assert_eq!(model_id.name.as_ref(), "fresh-model");
+
+    // Wire shape: a `Reset` marker followed by a plain `Apply` (no `op`).
+    let deltas = serialized_config_deltas(&events);
+    assert_eq!(deltas.len(), 2, "expected [Reset, Apply], got {deltas:?}");
+    assert_eq!(deltas[0].get("op").and_then(Value::as_str), Some("reset"));
+    assert!(
+        deltas[1].get("op").is_none(),
+        "`Apply` writes no `op` field"
+    );
+}
+
+#[test]
+fn cfg_reset_workspace_appends_reset_then_workspace_apply() {
+    // `jp q --cfg=WORKSPACE` on a continuing conversation ([RFD 038]): the
+    // stream records `[Reset, Apply(workspace)]`, re-adopting the workspace's
+    // resolved config as of this invocation. No further `Apply` is written
+    // when nothing is layered on top.
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(3001);
+
+    let mut workspace = Workspace::new("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let workspace_partial = config_with_model(ProviderId::Openai, "ws-model").to_partial();
+    let reset = ConfigResetEvents {
+        reset: ConfigReset::Workspace(Box::new(workspace_partial)),
+        post: Box::new(PartialAppConfig::default()),
+    };
+
+    lock.as_mut()
+        .update_events(|events| persist_config_reset(events, reset, DateTime::<Utc>::UNIX_EPOCH));
+
+    let events = lock.events().clone();
+
+    let merged = events.config().unwrap();
+    let model_id = merged.assistant.model.id.resolved();
+    assert_eq!(model_id.provider, ProviderId::Openai);
+    assert_eq!(model_id.name.as_ref(), "ws-model");
+
+    let deltas = serialized_config_deltas(&events);
+    assert_eq!(
+        deltas.len(),
+        2,
+        "empty post-reset state must not write a third event: {deltas:?}"
+    );
+    assert_eq!(deltas[0].get("op").and_then(Value::as_str), Some("reset"));
+    assert!(deltas[1].get("op").is_none());
+}
+
+#[test]
+fn cfg_reset_none_without_post_leaves_unresolvable_config() {
+    // A bare `jp q --cfg=NONE` on a continuing conversation records only the
+    // `Reset`. Program defaults lack required fields (`assistant.model.id`),
+    // so resolving the stream's config fails until a later `Apply` restores
+    // them — the intended escape-hatch semantics from [RFD 038].
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(3002);
+
+    let mut workspace = Workspace::new("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let reset = ConfigResetEvents {
+        reset: ConfigReset::Defaults,
+        post: Box::new(PartialAppConfig::default()),
+    };
+
+    lock.as_mut()
+        .update_events(|events| persist_config_reset(events, reset, DateTime::<Utc>::UNIX_EPOCH));
+
+    let events = lock.events().clone();
+
+    let deltas = serialized_config_deltas(&events);
+    assert_eq!(deltas.len(), 1, "expected only the Reset: {deltas:?}");
+    assert_eq!(deltas[0].get("op").and_then(Value::as_str), Some("reset"));
+
+    assert!(
+        events.config().is_err(),
+        "program defaults alone must fail validation"
     );
 }
 

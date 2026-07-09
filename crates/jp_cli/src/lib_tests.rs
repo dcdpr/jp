@@ -60,7 +60,7 @@ fn build_cfg(
     overrides: &[KeyValueOrPath],
     workspace: Option<&Workspace>,
 ) -> Result<PartialAppConfig> {
-    let pipeline = config_pipeline::ConfigPipeline::new(base, overrides, workspace, None)?;
+    let pipeline = config_pipeline::ConfigPipeline::new(overrides, workspace, None, || Ok(base))?;
     pipeline.partial_without_conversation()
 }
 
@@ -565,9 +565,9 @@ fn resolve_config_consumes_default_id() {
     base.conversation.default_id = Some(DefaultConversationId::LastActivated);
 
     let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
-    let (config, _handles, _start_new) = resolve_config(
+    let (config, _handles, _start_new, _config_reset) = resolve_config(
         &cli.command,
-        base,
+        || Ok(base),
         &cli.globals.config,
         &mut workspace,
         None,
@@ -580,4 +580,201 @@ fn resolve_config_consumes_default_id() {
         "default_id should be consumed by resolve_config, got: {:?}",
         config.conversation.default_id,
     );
+}
+
+fn kv(s: &str) -> KeyValueOrPath {
+    KeyValueOrPath::KeyValue(s.parse().unwrap())
+}
+
+/// `--no-cfg` expands to a leading `NONE` keyword for config resolution only;
+/// the raw `--cfg` args stay as typed, so commands that re-consume them (e.g.
+/// `config set`, which rejects reset keywords) don't see a synthetic keyword
+/// ([RFD 038]).
+#[test]
+fn no_cfg_shorthand_does_not_leak_into_raw_cfg_args() {
+    let cli = Cli::try_parse_from(["jp", "--no-cfg", "conversation", "ls"]).unwrap();
+
+    let overrides = effective_cfg_overrides(&cli.globals);
+    assert!(
+        matches!(overrides.as_slice(), [KeyValueOrPath::Keyword(
+            CfgKeyword::None
+        )]),
+        "expected a single synthetic NONE keyword, got: {overrides:?}",
+    );
+
+    // The raw args are untouched — `config set` and friends never see the
+    // synthetic keyword.
+    assert!(cli.globals.config.is_empty(), "{:?}", cli.globals.config);
+
+    // Without `--no-cfg`, the list passes through unchanged.
+    let cli = Cli::try_parse_from(["jp", "--cfg", "user.name=x", "conversation", "ls"]).unwrap();
+    let overrides = effective_cfg_overrides(&cli.globals);
+    assert_eq!(overrides.len(), 1);
+    assert!(matches!(&overrides[0], KeyValueOrPath::KeyValue(_)));
+}
+
+/// A `--cfg` reset point must not resolve the targeted conversation's config:
+/// the reset discards that layer, and resolving it can fail outright —
+/// recovering a conversation with broken config is a reset use case ([RFD
+/// 038]).
+#[test]
+fn resolve_config_reset_skips_broken_conversation_config() {
+    use jp_conversation::stream::ResetDelta;
+
+    let tmp = tempdir().unwrap();
+    let mut workspace = Workspace::new(tmp.path());
+    workspace.load_conversation_index();
+
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(4000);
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+
+    // Break the conversation's config resolution: a bare `Reset` with no
+    // restoring `Apply` leaves the stream at program defaults, which lack
+    // required fields, so `events.config()` fails.
+    {
+        let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+        let lock = workspace.test_lock(handle);
+        lock.as_mut().update_events(|events| {
+            events.add_config_delta(ResetDelta {
+                timestamp: chrono::DateTime::<chrono::Utc>::UNIX_EPOCH,
+            });
+        });
+    }
+
+    let id = conversation_id.to_string();
+    let cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello"]).unwrap();
+
+    // Without a reset point, the conversation layer is resolved and fails.
+    let result = resolve_config(
+        &cli.command,
+        || Ok(base_config.to_partial()),
+        &[],
+        &mut workspace,
+        None,
+        None,
+    );
+    assert!(result.is_err(), "broken conversation config must propagate");
+
+    // With `--cfg=NONE` (+ the required fields), the conversation layer is
+    // skipped and resolution succeeds — the escape hatch works.
+    let (config, _handles, _start_new, config_reset) = resolve_config(
+        &cli.command,
+        || Ok(base_config.to_partial()),
+        &[
+            KeyValueOrPath::Keyword(CfgKeyword::None),
+            kv("assistant.model.id=openai/fresh-model"),
+            kv("conversation.tools.*.run=ask"),
+        ],
+        &mut workspace,
+        None,
+        None,
+    )
+    .expect("--cfg=NONE must recover a broken conversation config");
+
+    assert_eq!(
+        config.assistant.model.id.resolved().name.as_ref(),
+        "fresh-model"
+    );
+    assert!(config_reset.is_some());
+}
+
+/// Reset layers are persisted into conversation streams, so they must contain
+/// resolved model IDs ([`PartialAppConfig::resolve_model_aliases`]): the
+/// stream's own config resolution never resolves aliases ([RFD 038]).
+#[test]
+fn resolve_config_reset_workspace_layer_contains_resolved_model_ids() {
+    use jp_config::model::id::PartialModelIdOrAliasConfig;
+
+    let tmp = tempdir().unwrap();
+    let mut workspace = Workspace::new(tmp.path());
+    workspace.load_conversation_index();
+
+    // The workspace config defines an alias and references it.
+    let mut base = AppConfig::new_test().to_partial();
+    base.providers.llm.aliases.insert(
+        "fast".to_owned(),
+        PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+            provider: Some(ProviderId::Openai),
+            name: "gpt-4".parse().ok(),
+        }),
+    );
+    base.assistant.model.id = PartialModelIdOrAliasConfig::Alias("fast".to_owned());
+
+    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let (_config, _handles, _start_new, config_reset) = resolve_config(
+        &cli.command,
+        || Ok(base),
+        &[KeyValueOrPath::Keyword(CfgKeyword::Workspace)],
+        &mut workspace,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let reset_events = config_reset.expect("WORKSPACE keyword produces a reset");
+    let ConfigReset::Workspace(layer) = &reset_events.reset else {
+        panic!("expected a WORKSPACE reset, got: {:?}", reset_events.reset);
+    };
+
+    match &layer.assistant.model.id {
+        PartialModelIdOrAliasConfig::Id(id) => {
+            assert_eq!(id.provider, Some(ProviderId::Openai));
+        }
+        PartialModelIdOrAliasConfig::Alias(alias) => {
+            panic!("alias `{alias}` persisted unresolved in the workspace layer");
+        }
+    }
+
+    // The post layer is the diff between two resolved states; it must not
+    // carry an alias either.
+    assert!(
+        !matches!(
+            reset_events.post.assistant.model.id,
+            PartialModelIdOrAliasConfig::Alias(_)
+        ),
+        "alias persisted unresolved in the post layer",
+    );
+}
+
+/// Post-reset `--cfg` directives referencing an alias must persist the resolved
+/// model ID, not the alias ([RFD 038]).
+#[test]
+fn resolve_config_reset_post_layer_contains_resolved_model_ids() {
+    use jp_config::model::id::PartialModelIdOrAliasConfig;
+
+    let tmp = tempdir().unwrap();
+    let mut workspace = Workspace::new(tmp.path());
+    workspace.load_conversation_index();
+
+    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let (_config, _handles, _start_new, config_reset) = resolve_config(
+        &cli.command,
+        || unreachable!("NONE skips implicit loading"),
+        &[
+            KeyValueOrPath::Keyword(CfgKeyword::None),
+            kv("providers.llm.aliases.fast=openai/gpt-4"),
+            kv("assistant.model.id=fast"),
+            kv("conversation.tools.*.run=ask"),
+        ],
+        &mut workspace,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let reset_events = config_reset.expect("NONE keyword produces a reset");
+    match &reset_events.post.assistant.model.id {
+        PartialModelIdOrAliasConfig::Id(id) => {
+            assert_eq!(id.provider, Some(ProviderId::Openai));
+            assert_eq!(id.name.as_ref().unwrap().to_string(), "gpt-4");
+        }
+        PartialModelIdOrAliasConfig::Alias(alias) => {
+            panic!("alias `{alias}` persisted unresolved in the post layer");
+        }
+    }
 }
