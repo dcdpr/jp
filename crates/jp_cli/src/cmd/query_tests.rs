@@ -1123,6 +1123,38 @@ fn edit_message_quote_without_editor_is_synthesized() {
 }
 
 #[test]
+fn edit_message_skips_editor_when_no_edit_with_piped_stdin() {
+    // Regression: `--no-edit` must skip the editor even when piped stdin
+    // content makes the request non-empty. Previously the explicit override
+    // was only checked when the request was still empty, so `--no-edit` was
+    // silently ignored whenever stdin was piped without a query argument.
+    let config = AppConfig::new_test();
+    let root = Utf8Path::new("/tmp");
+    let query = Query {
+        no_edit: true,
+        ..Default::default()
+    };
+
+    let mut request = ChatRequest::from("hi");
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let (source, partial) = query
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            true,
+            &config,
+            root,
+        )
+        .unwrap();
+
+    assert_eq!(source, QuerySource::Inline);
+    assert_eq!(request.content, "hi");
+    assert!(partial.is_empty());
+}
+
+#[test]
 fn picker_new_item_gated_by_new_incompatible_flags() {
     // The picker may only offer "start a new conversation" when `--new` would
     // itself be a legal flag. `--fork` and `--replay` both conflict with
