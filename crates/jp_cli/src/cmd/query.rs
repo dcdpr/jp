@@ -238,7 +238,8 @@ pub(crate) struct Query {
     /// message.
     ///
     /// Forces the editor open by default; respects `--no-edit` / `--edit=false`
-    /// if explicitly suppressed, in which case the quoted text is sent as-is.
+    /// if explicitly suppressed, in which case the quoted text is sent as-is
+    /// and echoed to the terminal before the turn runs.
     /// Composes with `--replay`: the quote is taken from the stream *after* the
     /// replayed turn has been trimmed, i.e. the assistant message preceding the
     /// turn being replayed.
@@ -428,13 +429,13 @@ impl Query {
             |fs| fs.build_conversation_dir(&cid, conv_title.as_deref(), true),
         );
 
-        let (query_from_editor, mut editor_provided_config, chat_request) = lock
+        let (query_source, mut editor_provided_config, chat_request) = lock
             .as_mut()
             .update_events(|stream| self.build_conversation(stream, &cfg, &conversation_path))?;
 
         let Some(mut chat_request) = chat_request else {
             // Empty query, early exit. Auto-persist happens on lock drop.
-            if query_from_editor {
+            if query_source == QuerySource::Editor {
                 cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
             }
             ctx.printer.println("Query is empty, ignoring.");
@@ -459,7 +460,7 @@ impl Query {
         // and the forthcoming assistant response is visually clear. Render
         // this before any post-edit work (MCP init, attachments, tools) so
         // that failures in those stages don't swallow the user's message.
-        if self.should_echo_request(query_from_editor) {
+        if self.should_echo_request(query_source) {
             let mut echo = TurnView::new(
                 ctx.printer.clone(),
                 cfg.style.clone(),
@@ -591,7 +592,7 @@ impl Query {
         // directory may have been renamed mid-turn (e.g. a heading-derived
         // title), so re-resolve the live directories rather than trusting the
         // path captured before the turn ran.
-        if query_from_editor && turn_result.is_ok() {
+        if query_source == QuerySource::Editor && turn_result.is_ok() {
             cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
         }
 
@@ -609,7 +610,8 @@ impl Query {
 
     /// Build the chat request for this query.
     ///
-    /// Returns the editor details and the [`ChatRequest`], if non-empty.
+    /// Returns the request's [`QuerySource`], any editor-provided config, and
+    /// the [`ChatRequest`], if non-empty.
     /// The request is **not** added to the stream — that is the responsibility
     /// of [`TurnCoordinator::start_turn`].
     ///
@@ -619,7 +621,7 @@ impl Query {
         stream: &mut ConversationStream,
         config: &AppConfig,
         conversation_root: &Utf8Path,
-    ) -> Result<(bool, PartialAppConfig, Option<ChatRequest>)> {
+    ) -> Result<(QuerySource, PartialAppConfig, Option<ChatRequest>)> {
         // If replaying, remove all events up-to-and-including the last
         // `ChatRequest` event, which we'll replay.
         //
@@ -672,7 +674,7 @@ impl Query {
             }
         }
 
-        let (query_from_editor, editor_provided_config) = self.edit_message(
+        let (query_source, editor_provided_config) = self.edit_message(
             &mut chat_request,
             stream,
             !piped.is_empty(),
@@ -699,7 +701,7 @@ impl Query {
         }
 
         Ok((
-            query_from_editor,
+            query_source,
             editor_provided_config,
             (!chat_request.is_empty()).then_some(chat_request),
         ))
@@ -754,7 +756,7 @@ impl Query {
         piped: bool,
         config: &AppConfig,
         conversation_root: &Utf8Path,
-    ) -> Result<(bool, PartialAppConfig)> {
+    ) -> Result<(QuerySource, PartialAppConfig)> {
         // If there is no query provided, but the user explicitly requested not
         // to open the editor, we populate the query with a default message,
         // since most LLM providers do not support empty queries.
@@ -773,7 +775,22 @@ impl Query {
             } else {
                 "continue".clone_into(request);
             }
+
+            // Nothing below applies: the editor is suppressed and the request
+            // is fully synthesized, so report that to the caller (which echoes
+            // it — the user never typed or saw this text).
+            return Ok((QuerySource::Synthesized, PartialAppConfig::empty()));
         }
+
+        // The remaining non-editor paths send the request text as-is. With
+        // `--quote` that text was assembled from the quoted assistant message
+        // rather than typed by the user, so it is synthesized too (and
+        // therefore echoed); anything else was typed or piped inline.
+        let source = if self.quote {
+            QuerySource::Synthesized
+        } else {
+            QuerySource::Inline
+        };
 
         // If a query is provided, and editing is not explicitly requested, or
         // in addition to the query, stdin contains data, we omit opening the
@@ -782,11 +799,13 @@ impl Query {
             && !self.force_edit()
             && !request.is_empty()
         {
-            return Ok((false, PartialAppConfig::empty()));
+            return Ok((source, PartialAppConfig::empty()));
         }
 
         let backend = match editor::build_editor_backend(&config.editor) {
-            None if !request.is_empty() => return Ok((false, PartialAppConfig::empty())),
+            None if !request.is_empty() => {
+                return Ok((source, PartialAppConfig::empty()));
+            }
             None => return Err(Error::MissingEditor),
             Some(backend) => backend,
         };
@@ -801,7 +820,7 @@ impl Query {
         )?;
         request.content = content;
 
-        Ok((true, editor_provided_config))
+        Ok((QuerySource::Editor, editor_provided_config))
     }
 
     /// Handle a single turn of conversation with the LLM.
@@ -870,11 +889,13 @@ impl Query {
     /// turn starts.
     ///
     /// Echo when the user can't already see what's being sent: a query composed
-    /// in an editor (the editor took over the screen) or a `--replay` (the
-    /// message is pulled from history, not typed on the command line).
+    /// in an editor (the editor took over the screen), a request synthesized by
+    /// `--no-edit` or `--quote` (the user never typed or saw the final text),
+    /// or a `--replay` (the message is pulled from history, not typed on the
+    /// command line).
     /// A plain inline query needs no echo — the user just typed it.
-    fn should_echo_request(&self, query_from_editor: bool) -> bool {
-        query_from_editor || self.replay
+    fn should_echo_request(&self, source: QuerySource) -> bool {
+        source != QuerySource::Inline || self.replay
     }
 
     /// Returns `true` if editing is explicitly disabled.
@@ -1181,6 +1202,24 @@ fn fork_conversation(
             events.retain_last_turns(n);
         }
     })
+}
+
+/// Where the outgoing chat request's content came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuerySource {
+    /// Composed in the interactive editor.
+    Editor,
+
+    /// Provided inline: as a command-line argument, piped on stdin, or a
+    /// replayed message — anything already final without an editor round-trip.
+    Inline,
+
+    /// Synthesized without the user typing or seeing the final text:
+    /// `--no-edit` was given without a query (the conversation's trailing
+    /// request is re-sent, or a default "continue" message is used), or
+    /// `--quote` assembled the request from the quoted assistant message
+    /// without an editor round-trip.
+    Synthesized,
 }
 
 /// How a new conversation's title is set from its first prompt, before the turn

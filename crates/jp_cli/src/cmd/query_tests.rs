@@ -1016,12 +1016,16 @@ fn no_title_does_not_persist_into_partial_config() {
 }
 
 #[test]
-fn echo_request_when_from_editor_or_replay() {
+fn echo_request_unless_inline() {
     // Editor-composed query: the editor took over the screen, so echo.
-    assert!(Query::default().should_echo_request(true));
+    assert!(Query::default().should_echo_request(QuerySource::Editor));
 
     // Plain inline query, no editor: the user already sees their input.
-    assert!(!Query::default().should_echo_request(false));
+    assert!(!Query::default().should_echo_request(QuerySource::Inline));
+
+    // Synthesized query (`--no-edit` without a query): the user never typed
+    // or saw the resulting message, so it must be echoed.
+    assert!(Query::default().should_echo_request(QuerySource::Synthesized));
 
     // Replay without an editor: the message comes from history and isn't
     // otherwise visible on the terminal, so it must be echoed.
@@ -1029,7 +1033,73 @@ fn echo_request_when_from_editor_or_replay() {
         replay: true,
         ..Default::default()
     };
-    assert!(replay.should_echo_request(false));
+    assert!(replay.should_echo_request(QuerySource::Inline));
+}
+
+#[test]
+fn edit_message_synthesizes_when_no_edit_without_query() {
+    let config = AppConfig::new_test();
+    let root = Utf8Path::new("/tmp");
+    let query = Query {
+        no_edit: true,
+        ..Default::default()
+    };
+
+    // Empty request and empty stream: a default "continue" message is
+    // synthesized, so the caller must echo it.
+    let mut request = ChatRequest::default();
+    let mut stream = ConversationStream::new_test();
+    let (source, partial) = query
+        .edit_message(&mut request, &mut stream, false, &config, root)
+        .unwrap();
+    assert_eq!(source, QuerySource::Synthesized);
+    assert_eq!(request.content, "continue");
+    assert!(partial.is_empty());
+
+    // Empty request with the stream's trailing event being a chat request:
+    // that request is consumed and re-sent verbatim, also synthesized.
+    let mut request = ChatRequest::default();
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("earlier text");
+    let (source, _) = query
+        .edit_message(&mut request, &mut stream, false, &config, root)
+        .unwrap();
+    assert_eq!(source, QuerySource::Synthesized);
+    assert_eq!(request.content, "earlier text");
+    // The trailing request was popped from the stream so the re-sent message
+    // isn't duplicated.
+    assert!(stream.pop_if(ConversationEvent::is_chat_request).is_none());
+}
+
+#[test]
+fn edit_message_quote_without_editor_is_synthesized() {
+    // `--quote --no-edit`: `build_conversation` seeds the request with the
+    // quoted assistant message before `edit_message` runs, so the request is
+    // non-empty here even though the user never typed or saw the final text.
+    // It must be classified as synthesized (and therefore echoed), not
+    // inline.
+    let config = AppConfig::new_test();
+    let query = Query {
+        quote: true,
+        no_edit: true,
+        ..Default::default()
+    };
+
+    let mut request = ChatRequest::from(" >  quoted reply");
+    let mut stream = ConversationStream::new_test();
+    let (source, partial) = query
+        .edit_message(
+            &mut request,
+            &mut stream,
+            false,
+            &config,
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap();
+    assert_eq!(source, QuerySource::Synthesized);
+    // The seeded content is sent as-is.
+    assert_eq!(request.content, " >  quoted reply");
+    assert!(partial.is_empty());
 }
 
 #[test]
