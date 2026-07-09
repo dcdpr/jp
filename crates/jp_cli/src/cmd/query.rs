@@ -56,7 +56,7 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     env, fs,
-    io::{self, BufRead as _, IsTerminal},
+    io::{self, IsTerminal},
     sync::Arc,
     time::Duration,
 };
@@ -699,11 +699,18 @@ impl Query {
         let piped = if stdin.is_terminal() {
             String::new()
         } else {
-            stdin
-                .lock()
-                .lines()
-                .map_while(std::result::Result::ok)
-                .collect::<String>()
+            // Read the payload verbatim: interior newlines (fenced code
+            // blocks, paragraph breaks, ...) are part of the message. Only
+            // the final line terminator is dropped; the composition below
+            // adds its own separators.
+            let mut piped = io::read_to_string(stdin.lock())?;
+            if piped.ends_with('\n') {
+                piped.pop();
+                if piped.ends_with('\r') {
+                    piped.pop();
+                }
+            }
+            piped
         };
 
         if !piped.is_empty() {
