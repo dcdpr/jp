@@ -331,9 +331,25 @@ fn split_code_span_cases() {
             ],
         },
         Case {
-            name: "run length mismatch is not a closer",
+            name: "mismatched run is skipped; whitespace then disarms",
             input: vec![pc("opens `alpha-", true), pc("beta`` rest", true)],
             want: vec![pc("opens `alpha-", true), pc("beta`` rest", true)],
+        },
+        Case {
+            name: "lone backtick inside a double-backtick split is skipped, closer repaired",
+            input: vec![
+                pc("opens ``alpha-", true),
+                pc("be`ta`` rest ``x`` end", true),
+            ],
+            want: vec![
+                pc("opens ``alpha-", true),
+                pc("be`ta\\`\\` rest ``x`` end", true),
+            ],
+        },
+        Case {
+            name: "double backticks inside a single-backtick split are skipped, closer repaired",
+            input: vec![pc("opens `alpha-", true), pc("be``ta` rest", true)],
+            want: vec![pc("opens `alpha-", true), pc("be``ta\\` rest", true)],
         },
         Case {
             name: "double-backtick split repaired with matching run",
@@ -379,9 +395,14 @@ fn split_code_span_cases() {
             ],
         },
         Case {
-            name: "flush disarms and passes through",
+            name: "flush carrying the following paragraph is repaired",
             input: vec![pc("opens `alpha-", true), Event::flush("beta` tail")],
-            want: vec![pc("opens `alpha-", true), Event::flush("beta` tail")],
+            want: vec![pc("opens `alpha-", true), Event::flush("beta\\` tail")],
+        },
+        Case {
+            name: "flush is a region boundary: it does not arm",
+            input: vec![Event::flush("opens `alpha-"), pc("beta` rest", true)],
+            want: vec![Event::flush("opens `alpha-"), pc("beta` rest", true)],
         },
         Case {
             name: "closer prefix split across chunks still repaired",
@@ -517,6 +538,39 @@ fn split_code_span_through_buffer_pipeline() {
         paragraphs[1].contains("`_rfd-priority-rewrite`"),
         "later spans must pair correctly again: {:?}",
         paragraphs[1]
+    );
+}
+
+/// The split-paragraph quirk when the stream ends without a trailing blank
+/// line: the following paragraph reaches the fixup either as a terminal
+/// [`Event::ParagraphChunk`] (if it began streaming) or as an [`Event::Flush`]
+/// (if it did not), and the orphaned closer must be repaired on both paths.
+#[test]
+fn split_code_span_repaired_at_end_of_stream_without_blank_line() {
+    let input = "opens `_rfd-next-\n\nnumber` tail";
+
+    let mut buf = Buffer::new();
+    buf.push(input);
+    let mut fixups = Fixups::llm_quirks();
+    let mut events: Vec<Event> = buf
+        .by_ref()
+        .filter_map(|event| fixups.apply(event))
+        .collect();
+    events.extend(
+        buf.flush_events()
+            .into_iter()
+            .filter_map(|event| fixups.apply(event)),
+    );
+
+    let repaired = events.iter().any(|event| match event {
+        Event::ParagraphChunk { content, .. }
+        | Event::Block { content, .. }
+        | Event::Flush { content, .. } => content.contains("number\\`"),
+        _ => false,
+    });
+    assert!(
+        repaired,
+        "orphaned closer must be escaped even without a trailing blank line, events: {events:#?}"
     );
 }
 

@@ -262,10 +262,11 @@ const MAX_CLOSER_PREFIX: usize = 64;
 ///
 /// Misfire guards, in rough order of selectivity:
 ///
-/// - Only the immediately following paragraph-like event ([`Event::Block`] or
-///   the first [`Event::ParagraphChunk`]s of a paragraph) participates; any
-///   other event disarms the state.
-/// - The closer run must match the opener's run length exactly.
+/// - Only the immediately following paragraph-like event ([`Event::Block`],
+///   [`Event::Flush`], or the first [`Event::ParagraphChunk`]s of a paragraph)
+///   participates; fenced-code events disarm the state.
+/// - The closer run must match the opener's run length exactly; shorter or
+///   longer runs are literal content of the split span and are skipped.
 /// - It must appear before any whitespace, within [`MAX_CLOSER_PREFIX`] bytes
 ///   of the paragraph start.
 /// - A run at offset zero is only treated as a closer when followed by
@@ -370,6 +371,25 @@ impl EventFixup for SplitCodeSpanFixup {
                 self.armed = scan_code_spans(&content, None);
                 Some(Event::Block { content, indent })
             }
+            Event::Flush {
+                mut content,
+                indent,
+            } => {
+                // A short trailing paragraph that never began streaming
+                // reaches the consumer as a `Flush` (`flush_events` only
+                // emits a terminal chunk for a paragraph that already
+                // streamed), so the orphaned closer is repaired here too.
+                // A flush is a region boundary, though: nothing after it
+                // continues this content, so it never arms the fixup.
+                self.in_paragraph = false;
+                self.open = None;
+                self.search = Search::Off;
+                if let Some(run) = self.armed.take() {
+                    let mut seen = 0;
+                    let _ = repair_orphaned_closer(&mut content, run, &mut seen);
+                }
+                Some(Event::Flush { content, indent })
+            }
             // Any other event breaks the paragraph continuation.
             other => {
                 self.armed = None;
@@ -385,8 +405,11 @@ impl EventFixup for SplitCodeSpanFixup {
 /// Search `content` (a leading portion of a paragraph) for the orphaned closer
 /// of a dangling `run`-length opener, escaping it in place when found.
 ///
-/// Returns `true` when the search resolved — a backtick run, whitespace, or
-/// the prefix cap was reached — whether or not a repair was made.
+/// Returns `true` when the search resolved — a *matching* backtick run,
+/// whitespace, or the prefix cap was reached — whether or not a repair was
+/// made.
+/// A mismatched run is literal content of the split span (a `run`-length span
+/// closes only on an exact-length run), so the search skips it and continues.
 /// Returns `false` when `content` ended while still inside the whitespace-free
 /// prefix, in which case the search continues in the next chunk with `seen`
 /// advanced.
@@ -399,16 +422,23 @@ fn repair_orphaned_closer(content: &mut String, run: usize, seen: &mut usize) ->
         let b = content.as_bytes()[i];
         if b == b'`' {
             let len = backtick_run(content.as_bytes(), i);
-            // A run at offset zero is ambiguous with a legitimate span
-            // opener; only a following whitespace marks it as a closer.
-            let followed_by_ws = content[i + len..]
-                .chars()
-                .next()
-                .is_none_or(char::is_whitespace);
-            if len == run && (*seen + i > 0 || followed_by_ws) {
-                content.replace_range(i..i + len, &"\\`".repeat(len));
+            if len == run {
+                // A run at offset zero is ambiguous with a legitimate span
+                // opener; only a following whitespace marks it as a closer.
+                // Either way a matching run resolves the search: scanning
+                // past a declined match could escape the true closer of a
+                // legitimate leading span.
+                let followed_by_ws = content[i + len..]
+                    .chars()
+                    .next()
+                    .is_none_or(char::is_whitespace);
+                if *seen + i > 0 || followed_by_ws {
+                    content.replace_range(i..i + len, &"\\`".repeat(len));
+                }
+                return true;
             }
-            return true;
+            i += len;
+            continue;
         }
         if b == b'\\' {
             // A backslash-escaped character is ordinary prefix content.
