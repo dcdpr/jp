@@ -1084,6 +1084,23 @@ rfd-promote NNN: _install-jp _install-comfort
                 exit 1
             fi
         done
+
+        # The docs build also rejects `DNN` tokens anywhere in a published
+        # RFD's body, so refuse while the document references other drafts.
+        # Exempt: this draft's own id (the cross-reference pass below
+        # rewrites it to the permanent number) and the `Required by` /
+        # `Extended by` metadata lines (draft back-links are stripped
+        # automatically further down).
+        stray=$(grep -v -e '^- \*\*Required by\*\*: ' -e '^- \*\*Extended by\*\*: ' "$file" \
+            | grep -oE '(^|[^A-Za-z0-9_])D[0-9][0-9]([^A-Za-z0-9_]|$)' \
+            | grep -oE 'D[0-9][0-9]' | sort -u | grep -v "^${rfd_id}\$" || true)
+        if [ -n "$stray" ]; then
+            echo "Cannot promote: $(basename "$file") references other drafts in its body:" >&2
+            echo "$stray" | sed 's/^/  RFD /' >&2
+            echo "Published RFDs must not reference drafts (the docs build rejects DNN tokens)." >&2
+            echo "Promote those drafts first, or reword the references." >&2
+            exit 1
+        fi
     fi
 
     # --- Promotion gate (Discussion -> Accepted, Accepted -> Implemented):
