@@ -57,6 +57,38 @@ fn renders_report_from_launched_trace_log() {
 }
 
 #[test]
+fn renders_report_from_json_format_marker_line() {
+    // `--format json` / `json-pretty` makes jp emit a `{"trace_log": ...}`
+    // object on stderr instead of the text marker line.
+    let workspace = camino_tempfile::tempdir().unwrap();
+    let root = workspace.path();
+
+    let trace_log = root.join("trace-src.jsonl");
+    std::fs::write(&trace_log, "").unwrap();
+    let launcher = MockLauncher::returning(launched(
+        format!("{{\"trace_log\":\"{trace_log}\"}}\n"),
+        Termination::Exited,
+    ));
+
+    let outcome = execute(
+        root,
+        &spec(root),
+        Level::Info,
+        None,
+        None,
+        &launcher,
+        Timeouts::DEFAULT,
+    )
+    .unwrap();
+
+    let Outcome::Success { content } = outcome else {
+        panic!("expected a success outcome");
+    };
+    assert!(!content.is_empty());
+    assert!(root.join("tmp/profiling").exists());
+}
+
+#[test]
 fn renders_combined_report_for_command_sequence() {
     let workspace = camino_tempfile::tempdir().unwrap();
     let root = workspace.path();

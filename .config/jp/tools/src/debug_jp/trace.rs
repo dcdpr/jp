@@ -2,7 +2,9 @@
 //!
 //! Launches `jp` inside the sandbox with `JP_DEBUG=1` set.
 //! `jp_cli` persists its tracing-subscriber output to a system temp file and
-//! prints `Full trace log written to: <path>` on stderr at exit.
+//! announces the path on stderr at exit, either as a `Full trace log written
+//! to: <path>` line (text output) or a `{"trace_log": "<path>"}` object (JSON
+//! output).
 //! We parse that line, copy the file out to the real workspace so it survives
 //! sandbox cleanup, filter the events by level/target/grep, and render the
 //! result in a compact logfmt-like format.
@@ -22,16 +24,12 @@ use crate::{
         build::{self, BuildSpec},
         launch::{LaunchResult, LaunchSpec, Launcher, RealLauncher, Timeouts},
         sandbox::{Sandbox, SandboxOpts},
-        trace_parse::{self, Level, TraceEvent},
+        trace_parse::{self, Level, TRACE_PATH_PREFIX, TraceEvent},
         trace_render::{self, CommandRun, OutputPaths},
         with_termination_note,
     },
     util::{ToolResult, error, runner::DuctProcessRunner},
 };
-
-/// Marker line `jp_cli::run` writes to stderr when `JP_DEBUG=1` and the output
-/// format is text (we never pass `--format=json`, so this is what we get).
-const TRACE_PATH_PREFIX: &str = "Full trace log written to: ";
 
 /// Tool entrypoint.
 /// Dispatches between the format-args preview and the live execution.
@@ -386,28 +384,26 @@ fn run_one(
 ) -> Result<CommandArtifacts, Error> {
     let launch_result = launcher.run(spec, timeouts, &mut |_| {})?;
 
-    // jp prints `Full trace log written to: <path>` on stderr right before
-    // exit. The path is in the system temp dir (e.g. `/var/folders/...`),
-    // outside the sandbox. A force-killed jp never flushes, so fold the
-    // termination note into the error when the marker is absent.
-    let Some(trace_line) = launch_result
-        .stderr
-        .lines()
-        .find_map(|line| line.strip_prefix(TRACE_PATH_PREFIX))
-    else {
+    // jp announces the trace path on stderr right before exit, either as a
+    // text marker line or a `trace_log` JSON field (depending on
+    // `--format`). The path is in the system temp dir (e.g.
+    // `/var/folders/...`), outside the sandbox. A force-killed jp never
+    // flushes, so fold the termination note into the error when the marker
+    // is absent.
+    let Some(trace_path) = trace_parse::extract_trace_path(&launch_result.stderr) else {
         let note = launch_result
             .note()
             .map(|n| format!("{n}\n\n"))
             .unwrap_or_default();
         return Err(format!(
-            "{note}Did not find `{TRACE_PATH_PREFIX}<path>` in jp's stderr. jp may have exited \
-             before the tracing layer flushed, or stderr was redirected. Last 20 lines of \
-             stderr:\n{}",
+            "{note}Did not find a `{TRACE_PATH_PREFIX}<path>` line or a `trace_log` JSON field in \
+             jp's stderr. jp may have exited before the tracing layer flushed, or stderr was \
+             redirected. Last 20 lines of stderr:\n{}",
             tail_lines(&launch_result.stderr, 20)
         )
         .into());
     };
-    let trace_src = Utf8PathBuf::from(trace_line.trim());
+    let trace_src = Utf8PathBuf::from(trace_path);
 
     // Copy the trace log into the real workspace so it survives the system
     // temp dir's eventual cleanup and stays alongside other profile output.
