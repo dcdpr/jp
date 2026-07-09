@@ -53,6 +53,7 @@ mod turn;
 mod turn_loop;
 
 use std::{
+    borrow::Cow,
     collections::HashSet,
     env, fs,
     io::{self, BufRead as _, IsTerminal},
@@ -382,11 +383,6 @@ impl Query {
             warn!(%error, "Failed to record activation.");
         }
 
-        if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
-            lock.as_mut()
-                .update_events(|events| events.add_config_delta(delta));
-        }
-
         // Fail fast on provider misconfiguration (e.g. a missing API key
         // environment variable) before any side-effectful work below:
         // pre-query compaction can run a full summary LLM round-trip, MCP
@@ -429,12 +425,21 @@ impl Query {
             |fs| fs.build_conversation_dir(&cid, conv_title.as_deref(), true),
         );
 
-        let (query_source, mut editor_provided_config, chat_request) = lock
-            .as_mut()
-            .update_events(|stream| self.build_conversation(stream, &cfg, &conversation_path))?;
+        // Build the request read-only: replay resolution, quote seeding, and
+        // the editor session all operate on (a view of) the stream without
+        // mutating it. The destructive replay trim is described by
+        // `pending_trim` and committed at the turn-start commit point,
+        // atomically with appending the new request.
+        let BuiltConversation {
+            query_source,
+            mut editor_provided_config,
+            pending_trim,
+            chat_request,
+        } = lock.with_events(|stream| self.build_conversation(stream, &cfg, &conversation_path))?;
 
         let Some(mut chat_request) = chat_request else {
-            // Empty query, early exit. Auto-persist happens on lock drop.
+            // Empty query, early exit. Nothing was mutated and nothing is
+            // dirty: the persisted stream is untouched, even for `--replay`.
             if query_source == QuerySource::Editor {
                 cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
             }
@@ -454,6 +459,30 @@ impl Query {
             chat_request.schema = schema.as_object().cloned();
         }
 
+        // Preserve the composed request in the conversation's user-local
+        // scratch file so a pre-turn interrupt (Ctrl-C during MCP boot,
+        // attachment loading, model resolution, ...) never silently discards
+        // it: the next `jp q --edit` session seeds its buffer from this file.
+        // An editor-composed query is already on disk (the editor session
+        // wrote it and the guard was disarmed); only inline, piped, and
+        // replayed requests need the explicit write. The file is removed once
+        // the turn completes successfully.
+        //
+        // Only preserve when user-local storage is configured: without it,
+        // `conversation_path` has fallen back to the workspace conversation
+        // directory, where `cleanup_query_message_file` (which resolves
+        // exclusively through the user-local store) could never remove the
+        // file again — the scratch file must never land in the committed
+        // workspace tree.
+        if query_source != QuerySource::Editor
+            && ctx
+                .fs_backend
+                .as_deref()
+                .is_some_and(|fs| fs.user_storage_path().is_some())
+        {
+            preserve_query_message_file(&conversation_path, &chat_request.content);
+        }
+
         // Echo the request back through the same role-aware rendering
         // machinery used by replay and live streaming — a labeled user header
         // followed by the request body — so the boundary between user input
@@ -470,6 +499,15 @@ impl Query {
             echo.render_user_request(&chat_request);
         }
 
+        // Record the CLI-provided config delta (`--cfg`) now that the query is
+        // known to be non-empty. Recording it before the empty-query check
+        // would leave a config event behind for a query that was ultimately
+        // ignored.
+        if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
+            lock.as_mut()
+                .update_events(|events| events.add_config_delta(delta));
+        }
+
         if !editor_provided_config.is_empty() {
             // Resolve any model aliases before storing in the stream so
             // that per-event configs always contain concrete model IDs.
@@ -478,7 +516,16 @@ impl Query {
                 .update_events(|events| events.add_config_delta(editor_provided_config));
         }
 
-        let stream = lock.events().clone();
+        // Snapshot the stream for title generation and thread assembly. The
+        // snapshot reflects what the durable stream will contain once the turn
+        // starts: the pending replay trim applied (on the clone — the durable
+        // stream is only trimmed at the turn-start commit point), the new
+        // request not yet appended.
+        let stream = {
+            let mut stream = lock.events().clone();
+            pending_trim.apply(&mut stream);
+            stream
+        };
 
         // Set the title for new or empty conversations (including forks).
         // Skip when `--title` or `--no-title` was provided (the user already
@@ -570,6 +617,7 @@ impl Query {
                 approvals,
                 chat_request,
                 invocation,
+                pending_trim,
             )
             .await
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
@@ -588,11 +636,12 @@ impl Query {
             }
         }
 
-        // Clean up the query file, unless we got an error. The conversation
+        // Clean up the query file, unless we got an error — on failure the
+        // file is the recovery copy of the request. The conversation
         // directory may have been renamed mid-turn (e.g. a heading-derived
         // title), so re-resolve the live directories rather than trusting the
         // path captured before the turn ran.
-        if query_source == QuerySource::Editor && turn_result.is_ok() {
+        if turn_result.is_ok() {
             cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
         }
 
@@ -610,29 +659,40 @@ impl Query {
 
     /// Build the chat request for this query.
     ///
-    /// Returns the request's [`QuerySource`], any editor-provided config, and
-    /// the [`ChatRequest`], if non-empty.
-    /// The request is **not** added to the stream — that is the responsibility
-    /// of [`TurnCoordinator::start_turn`].
+    /// Returns the request's [`QuerySource`], any editor-provided config, the
+    /// stream edits deferred to the turn-start commit point, and the
+    /// [`ChatRequest`], if non-empty.
+    /// The stream is **not** mutated here: the request is added — and any
+    /// pending replay trim applied — by [`TurnCoordinator::start_turn`].
     ///
     /// [`TurnCoordinator::start_turn`]: turn::TurnCoordinator::start_turn
     fn build_conversation(
         &self,
-        stream: &mut ConversationStream,
+        stream: &ConversationStream,
         config: &AppConfig,
         conversation_root: &Utf8Path,
-    ) -> Result<(QuerySource, PartialAppConfig, Option<ChatRequest>)> {
-        // If replaying, remove all events up-to-and-including the last
-        // `ChatRequest` event, which we'll replay.
+    ) -> Result<BuiltConversation> {
+        let mut pending_trim = PendingStreamTrim::default();
+
+        // If replaying, the events up-to-and-including the last `ChatRequest`
+        // are logically removed and the request is replayed. The removal is
+        // computed on a clone (`view`) and only committed to the durable
+        // stream at the turn-start commit point (see [`PendingStreamTrim`]):
+        // an empty query, an interrupt, or an error before the turn starts
+        // leaves the persisted stream untouched.
         //
         // If not replaying (or replaying but no chat request event exists), we
         // create a new `ChatRequest` event, to populate with either the
         // provided query, or the contents of the text editor.
-        let mut chat_request = self
-            .replay
-            .then(|| stream.trim_chat_request())
-            .flatten()
-            .unwrap_or_default();
+        let (view, mut chat_request) = if self.replay {
+            pending_trim.replay_turn = true;
+            let mut view = stream.clone();
+            let chat_request = view.trim_chat_request().unwrap_or_default();
+            (Cow::Owned(view), chat_request)
+        } else {
+            (Cow::Borrowed(stream), ChatRequest::default())
+        };
+        let view = view.as_ref();
 
         // If stdin contains data, we prepend it to the chat request.
         let stdin = io::stdin();
@@ -666,7 +726,7 @@ impl Query {
         // reply). Missing message (e.g. brand new conversation) degrades to a
         // warning and the editor opens with whatever else was seeded.
         if self.quote {
-            if let Some(message) = last_assistant_message(stream) {
+            if let Some(message) = last_assistant_message(view) {
                 let quoted = blockquote(message);
                 *chat_request = format!("{quoted}\n\n{chat_request}");
             } else {
@@ -676,7 +736,8 @@ impl Query {
 
         let (query_source, editor_provided_config) = self.edit_message(
             &mut chat_request,
-            stream,
+            view,
+            &mut pending_trim,
             !piped.is_empty(),
             config,
             conversation_root,
@@ -700,11 +761,12 @@ impl Query {
             *chat_request = tmpl.render(&config.template.values)?;
         }
 
-        Ok((
+        Ok(BuiltConversation {
             query_source,
             editor_provided_config,
-            (!chat_request.is_empty()).then_some(chat_request),
-        ))
+            pending_trim,
+            chat_request: (!chat_request.is_empty()).then_some(chat_request),
+        })
     }
 
     /// Create a new conversation and return an exclusive lock.
@@ -752,7 +814,8 @@ impl Query {
     fn edit_message(
         &self,
         request: &mut ChatRequest,
-        stream: &mut ConversationStream,
+        stream: &ConversationStream,
+        pending_trim: &mut PendingStreamTrim,
         piped: bool,
         config: &AppConfig,
         conversation_root: &Utf8Path,
@@ -765,13 +828,18 @@ impl Query {
         if request.is_empty() && self.force_no_edit() {
             // If the last event in the stream is a `ChatRequest`, we don't add
             // anything, and simply "replay" the last message in the
-            // conversation.
+            // conversation. The event itself is only removed at the turn-start
+            // commit point (the request re-enters the stream as part of the
+            // new turn); until then the persisted stream stays untouched.
             //
             // Otherwise we add a default "continue" message.
-            if let Some(last) = stream.pop_if(ConversationEvent::is_chat_request)
-                && let Some(req) = last.into_inner().into_chat_request()
-            {
-                *request = req;
+            let last_request = stream
+                .last_turn_event()
+                .and_then(ConversationEvent::as_chat_request);
+
+            if let Some(req) = last_request {
+                *request = req.clone();
+                pending_trim.pop_request = true;
             } else {
                 "continue".clone_into(request);
             }
@@ -840,6 +908,7 @@ impl Query {
         approvals: Arc<ApprovalStore>,
         chat_request: ChatRequest,
         invocation: InvocationContext,
+        pending_trim: PendingStreamTrim,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
@@ -881,6 +950,7 @@ impl Query {
             tool_coordinator,
             chat_request,
             invocation,
+            pending_trim,
         )
         .await
     }
@@ -1885,6 +1955,87 @@ fn load_approval_store(
         .as_deref()
         .map(ApprovalStore::load)
         .unwrap_or_default()
+}
+
+/// Output of [`Query::build_conversation`].
+struct BuiltConversation {
+    /// Where the request's content came from.
+    query_source: QuerySource,
+    /// Config assignments parsed from the editor buffer's front matter.
+    editor_provided_config: PartialAppConfig,
+    /// Stream edits deferred to the turn-start commit point.
+    pending_trim: PendingStreamTrim,
+    /// The composed request, if non-empty.
+    chat_request: Option<ChatRequest>,
+}
+
+/// Destructive stream edits computed while building a request, deferred to the
+/// turn-start commit point.
+///
+/// `--replay` (and the bare `--no-edit` replay-last-request path) logically
+/// removes trailing events before re-sending a request.
+/// Applying that removal eagerly would persist a stream missing its last turn
+/// while the editor is open and during MCP boot / attachment loading — an
+/// interrupt (or an empty query) in that window would make the removal
+/// permanent without the replacement request ever landing.
+/// Instead the removal is described here and applied inside the same
+/// `update_events` scope that appends the new turn
+/// ([`TurnCoordinator::start_turn`] via [`run_turn_loop`]), so the persisted
+/// stream goes from "old turn present" to "old turn replaced" in a single
+/// write.
+///
+/// [`TurnCoordinator::start_turn`]: turn::TurnCoordinator::start_turn
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PendingStreamTrim {
+    /// Remove all trailing events up-to-and-including the last [`ChatRequest`]
+    /// event (`--replay`).
+    replay_turn: bool,
+    /// Remove the trailing [`ChatRequest`] event (bare `--no-edit` replaying
+    /// the last request).
+    pop_request: bool,
+}
+
+impl PendingStreamTrim {
+    /// Apply the deferred removals to the stream.
+    pub(crate) fn apply(self, stream: &mut ConversationStream) {
+        if self.replay_turn {
+            drop(stream.trim_chat_request());
+        }
+        if self.pop_request {
+            drop(stream.pop_if(ConversationEvent::is_chat_request));
+        }
+
+        // Both trims strip a turn's request but leave the [`TurnStart`] that
+        // opened it. Remove the now-empty turn marker so the replacement
+        // request doesn't open a second turn right behind it — the later
+        // stream sanitization only collapses duplicate `TurnStart`s before
+        // the *first* request, so a stale middle marker would survive in
+        // multi-turn conversations.
+        //
+        // Gated on a trim having run so a default (no-op) `PendingStreamTrim`
+        // never mutates the stream.
+        //
+        // [`TurnStart`]: jp_conversation::event::TurnStart
+        if self.replay_turn || self.pop_request {
+            stream.trim_trailing_empty_turn();
+        }
+    }
+}
+
+/// Write the pending request text to the conversation's user-local
+/// query-message file, so an interrupt before the turn starts never discards
+/// the composed request: the next `jp q --edit` session seeds its buffer from
+/// this file.
+///
+/// Best-effort: failing to preserve a recovery copy must not fail the query
+/// itself, so errors are logged and swallowed.
+fn preserve_query_message_file(conversation_dir: &Utf8Path, content: &str) {
+    let path = conversation_dir.join(editor::QUERY_FILENAME);
+    if let Err(error) =
+        fs::create_dir_all(conversation_dir).and_then(|()| fs::write(&path, content))
+    {
+        warn!(path = %path, %error, "Failed to preserve query message file.");
+    }
 }
 
 /// Remove the editor's query-message file from a conversation's user-local

@@ -588,26 +588,36 @@ impl ConversationStream {
             .map(|event| ConversationEventWithConfig { event, config })
     }
 
-    /// Similar to [`Self::pop`], but only pops if the predicate returns `true`.
+    /// Returns the last turn-scoped [`ConversationEvent`] in the stream,
+    /// skipping trailing `ConfigDelta`/`Compaction` overlays — the event
+    /// [`Self::pop`] would remove, without removing it.
+    ///
+    /// Read-only counterpart of [`Self::pop`] and [`Self::pop_if`].
+    /// Callers that intend to replay an event peek here and defer the
+    /// destructive pop to a later commit point, so an abandoned operation never
+    /// mutates the stream.
+    #[must_use]
+    pub fn last_turn_event(&self) -> Option<&ConversationEvent> {
+        self.events
+            .iter()
+            .rev()
+            .find_map(|event| match event.scope() {
+                EventScope::Turn => event.as_event(),
+                EventScope::Global => None,
+            })
+    }
+
+    /// Similar to [`Self::pop`], but only pops if the predicate returns `true`
+    /// for the event [`Self::last_turn_event`] returns.
     pub fn pop_if(
         &mut self,
         f: impl Fn(&ConversationEvent) -> bool,
     ) -> Option<ConversationEventWithConfig> {
-        let last_turn_event_matches = self
-            .events
-            .iter()
-            .rev()
-            .find_map(|event| match event.scope() {
-                EventScope::Turn => event.as_event().map(&f),
-                EventScope::Global => None,
-            })
-            .unwrap_or(false);
-
-        if !last_turn_event_matches {
-            return None;
+        if self.last_turn_event().is_some_and(f) {
+            self.pop()
+        } else {
+            None
         }
-
-        self.pop()
     }
 
     /// Pop trailing events while `f` returns `true`, returning the removed

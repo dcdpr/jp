@@ -134,6 +134,22 @@ fn test_trim_trailing_empty_turn_removes_lone_turn_start() {
 }
 
 #[test]
+fn last_turn_event_skips_trailing_overlays() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("hello");
+    stream.add_compaction(Compaction::new(0, 0));
+
+    // The trailing compaction is an overlay; the peek must skip it and find
+    // the chat request.
+    assert!(
+        stream
+            .last_turn_event()
+            .is_some_and(ConversationEvent::is_chat_request),
+        "peek must skip the trailing overlay and find the chat request"
+    );
+}
+
+#[test]
 fn pop_if_preserves_trailing_compaction() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn("hello");

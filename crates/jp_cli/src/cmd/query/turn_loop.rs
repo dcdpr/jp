@@ -43,7 +43,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
 
 use super::{
-    build_sections, build_thread,
+    PendingStreamTrim, build_sections, build_thread,
     interrupt::{
         LoopAction, StreamingInterruptResult, handle_llm_event, handle_streaming_interrupt,
         reply_edit_mode,
@@ -191,6 +191,7 @@ pub(super) async fn run_turn_loop(
     mut tool_coordinator: ToolCoordinator,
     chat_request: ChatRequest,
     invocation: InvocationContext,
+    pending_trim: PendingStreamTrim,
 ) -> Result<(), Error> {
     // The turn-level interrupt handler (RFD 045) is the outermost handler
     // scope within the turn: it owns the gaps between phases (persistence,
@@ -270,7 +271,13 @@ pub(super) async fn run_turn_loop(
 
         match turn_coordinator.current_phase() {
             TurnPhase::Idle => {
+                // The turn-start commit point: any replay trim deferred while
+                // building the request (see [`PendingStreamTrim`]) is applied
+                // in the same `update_events` scope that appends the new
+                // request, so the durable stream never persists the removal
+                // without its replacement.
                 lock.as_mut().update_events(|stream| {
+                    pending_trim.apply(stream);
                     turn_coordinator.start_turn(stream, chat_request.clone());
                 });
             }

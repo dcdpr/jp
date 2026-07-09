@@ -166,6 +166,7 @@ async fn run_mock_turn(
         tool::ToolCoordinator::new(cfg.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from(prompt),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -1048,27 +1049,44 @@ fn edit_message_synthesizes_when_no_edit_without_query() {
     // Empty request and empty stream: a default "continue" message is
     // synthesized, so the caller must echo it.
     let mut request = ChatRequest::default();
-    let mut stream = ConversationStream::new_test();
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
     let (source, partial) = query
-        .edit_message(&mut request, &mut stream, false, &config, root)
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            &config,
+            root,
+        )
         .unwrap();
     assert_eq!(source, QuerySource::Synthesized);
     assert_eq!(request.content, "continue");
     assert!(partial.is_empty());
 
     // Empty request with the stream's trailing event being a chat request:
-    // that request is consumed and re-sent verbatim, also synthesized.
+    // that request is peeked and re-sent verbatim, also synthesized.
     let mut request = ChatRequest::default();
     let mut stream = ConversationStream::new_test();
     stream.start_turn("earlier text");
+    let mut pending_trim = PendingStreamTrim::default();
     let (source, _) = query
-        .edit_message(&mut request, &mut stream, false, &config, root)
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            &config,
+            root,
+        )
         .unwrap();
     assert_eq!(source, QuerySource::Synthesized);
     assert_eq!(request.content, "earlier text");
-    // The trailing request was popped from the stream so the re-sent message
-    // isn't duplicated.
-    assert!(stream.pop_if(ConversationEvent::is_chat_request).is_none());
+    // The trailing request is not popped here; its removal is deferred to the
+    // turn-start commit point via `pending_trim`, so the stream is untouched.
+    assert!(pending_trim.pop_request);
+    assert!(stream.pop_if(ConversationEvent::is_chat_request).is_some());
 }
 
 #[test]
@@ -1086,11 +1104,13 @@ fn edit_message_quote_without_editor_is_synthesized() {
     };
 
     let mut request = ChatRequest::from(" >  quoted reply");
-    let mut stream = ConversationStream::new_test();
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
     let (source, partial) = query
         .edit_message(
             &mut request,
-            &mut stream,
+            &stream,
+            &mut pending_trim,
             false,
             &config,
             Utf8Path::new("/tmp"),
@@ -1212,4 +1232,96 @@ fn last_assistant_message_returns_none_when_only_reasoning_present() {
         .unwrap();
 
     assert_eq!(last_assistant_message(&stream), None);
+}
+
+/// Count the `TurnStart` events in a stream.
+fn turn_start_count(stream: &ConversationStream) -> usize {
+    stream.iter().filter(|e| e.event.is_turn_start()).count()
+}
+
+/// Assert that no `TurnStart` is immediately followed by another `TurnStart`
+/// (an empty middle turn).
+fn assert_no_adjacent_turn_starts(stream: &ConversationStream) {
+    let mut previous_was_turn_start = false;
+    for e in stream.iter() {
+        assert!(
+            !(previous_was_turn_start && e.event.is_turn_start()),
+            "stream contains adjacent TurnStart events (empty middle turn)"
+        );
+        previous_was_turn_start = e.event.is_turn_start();
+    }
+}
+
+#[test]
+fn pending_trim_replay_removes_stale_turn_start() {
+    // Multi-turn conversation: the stale `TurnStart` sits *after* the first
+    // `ChatRequest`, where `sanitize`'s `normalize_turn_starts` would not
+    // collapse it.
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("first question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("first answer"))
+        .build()
+        .unwrap();
+    stream.start_turn("second question");
+
+    let trim = PendingStreamTrim {
+        replay_turn: true,
+        pop_request: false,
+    };
+    trim.apply(&mut stream);
+
+    // The replayed request re-enters the stream as a fresh turn.
+    stream.start_turn("second question, revised");
+
+    assert_eq!(
+        turn_start_count(&stream),
+        2,
+        "replay must replace the trimmed turn, not open an extra one"
+    );
+    assert_no_adjacent_turn_starts(&stream);
+}
+
+#[test]
+fn pending_trim_pop_request_removes_stale_turn_start() {
+    // Bare `--no-edit` replay: the last turn holds only its request.
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("first question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("first answer"))
+        .build()
+        .unwrap();
+    stream.start_turn("replayed question");
+
+    let trim = PendingStreamTrim {
+        replay_turn: false,
+        pop_request: true,
+    };
+    trim.apply(&mut stream);
+
+    stream.start_turn("replayed question");
+
+    assert_eq!(
+        turn_start_count(&stream),
+        2,
+        "pop_request must replace the trimmed turn, not open an extra one"
+    );
+    assert_no_adjacent_turn_starts(&stream);
+}
+
+#[test]
+fn pending_trim_default_is_noop() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    let before = stream.len();
+
+    PendingStreamTrim::default().apply(&mut stream);
+
+    assert_eq!(
+        stream.len(),
+        before,
+        "a default PendingStreamTrim must not mutate the stream"
+    );
 }
