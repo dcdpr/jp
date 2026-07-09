@@ -1,6 +1,6 @@
 # RFD 087: Session-Scoped Active Workspace
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-01
