@@ -310,10 +310,15 @@ pr-triage NNN *ARGS: _install-jp _install-tools
             $args
     fi
 
-# Review the current diff with revdiff and send the annotations back to the
-# active jp conversation. ARGS before a `--` are forwarded to revdiff (see
-# `revdiff --help`); ARGS after a `--` are forwarded to the `jp query` that
-# receives the annotations:
+# Review the current diff with revdiff and send the annotations to jp for
+# triage. The assistant (personas/review-triager: dev/architect knowledge,
+# no edit tools) grounds each note against the code and responds note by
+# note with a verdict (accept / amend / dismiss / defer) and a concrete
+# recommendation — it does not edit files. To act on the verdicts, follow
+# up with a dev persona, e.g. `jp q --cfg=personas/dev "apply the accepted
+# items"`. ARGS before a `--` are forwarded to revdiff (see `revdiff
+# --help`); ARGS after a `--` are forwarded to the `jp query` that receives
+# the annotations:
 #
 #   just review                     # uncommitted changes (default)
 #   just review HEAD~3              # last 3 commits
@@ -324,8 +329,12 @@ pr-triage NNN *ARGS: _install-jp _install-tools
 # Exits silently if revdiff produces no annotations (e.g. you quit with `q`
 # without leaving notes, or `Q` to discard). The matching `git diff` is
 # attached so the assistant can resolve line-anchored notes against the same
-# context revdiff showed you. Sends to the active conversation; use
-# `jp conversation use <ID>` first to target a specific one.
+# context revdiff showed you.
+#
+# When the current session has an active conversation, prompts (before the
+# review starts) whether to send the annotations there, to a new
+# conversation, or to quit. Without a TTY, or without an active
+# conversation, sends to whatever conversation `jp query` resolves to.
 [group('jp')]
 [positional-arguments]
 review *ARGS: _install-jp
@@ -337,6 +346,25 @@ review *ARGS: _install-jp
         echo "Install via 'brew install umputun/apps/revdiff' or see" >&2
         echo "https://github.com/umputun/revdiff/releases for binaries." >&2
         exit 1
+    fi
+
+    # Decide where the annotations go before launching the review, mirroring
+    # the pr-triage/rfd-triage pre-run prompt. Asking up front avoids fighting
+    # over the terminal with revdiff's TUI, and avoids discarding a finished
+    # review because the target was wrong.
+    target=""
+    active_id=$(jp -F json conversation ls +s 2>/dev/null \
+        | jq -r '.[-1].ID // empty' 2>/dev/null || true)
+    if [ -n "$active_id" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "This session's active conversation is %s.\n" "$active_id" > /dev/tty
+        printf "  Review in the [a]ctive conversation / [n]ew conversation / [q]uit: " > /dev/tty
+        IFS= read -r ans < /dev/tty
+        case "$ans" in
+            ""|a|A) target="--id $active_id" ;;
+            n|N)    target="--new" ;;
+            q|Q)    exit 0 ;;
+            *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
+        esac
     fi
 
     # Split ARGS at the first `--`: everything before it is for revdiff,
@@ -396,14 +424,68 @@ review *ARGS: _install-jp
         esac
     done
 
-    preamble="Below are my review notes from \`revdiff\` on the diff you just produced. \
-    Each entry header is \`## path:line[-line] (+|-)\` (anchored to a specific position) \
-    or \`## path (file-level)\` (whole file). The matching \`git diff\` is attached so you \
-    can resolve those positions. Address each note with targeted edits only — no wholesale \
-    re-generation, no unrelated cleanup."
+    preamble="Below are my review notes from \`revdiff\`, in the fenced block. Each record \
+    header is \`## path:line[-line] (+|-| )\` (anchored to a position in the reviewed \
+    content) or \`## path (file-level)\` (whole file); the reviewed content is attached so \
+    you can resolve the anchors. Triage the notes per your instructions: one numbered item \
+    per note, verdict plus reasoning plus recommendation. Do NOT edit any files."
 
-    printf '%s\n\n%s\n' "$preamble" "$annotations" \
-        | jp query --attach "$diff_attach" $jp_args
+    printf '%s\n\n```markdown\n%s\n```\n' "$preamble" "$annotations" \
+        | jp query $target --cfg=personas/review-triager --attach "$diff_attach" $jp_args
+
+# Review file(s) with revdiff, even when they have no diff, and send the
+# annotations to jp for triage. Uses revdiff's context-only file review
+# mode (`--only`): files without VCS changes are read from disk and shown
+# in full, with annotation support. Delegates to `just review`, so it
+# shares its conversation prompt, triage persona, and annotation handling.
+# Each file is attached to the `jp query` so the assistant sees the full
+# content despite the empty diff. ARGS after a `--` are forwarded to
+# `jp query`:
+#
+#   just review-file docs/rfd/001-jp-rfd-process.md
+#   just review-file path/a.rs path/b.rs -- --edit
+[group('jp')]
+[positional-arguments]
+review-file *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    files=()
+    jp_args=()
+    after_sep=false
+
+    for arg in "$@"; do
+        if [ "$after_sep" = true ]; then
+            jp_args+=("$arg")
+        elif [ "$arg" = "--" ]; then
+            after_sep=true
+        else
+            files+=("$arg")
+        fi
+    done
+
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "Usage: just review-file FILE [FILE ...] [-- JP_ARGS ...]" >&2
+        exit 1
+    fi
+
+    rev_args=()
+    attach_args=()
+
+    for file in "${files[@]}"; do
+        if [ ! -f "$file" ]; then
+            echo "No such file: $file" >&2
+            exit 1
+        fi
+
+        # `--only` shows files without VCS changes in context-only mode
+        # (full content, annotatable). Files that DO have uncommitted
+        # changes show their diff instead, which is also what you'd want.
+        rev_args+=(--only="$file")
+        attach_args+=(--attach "$file")
+    done
+
+    just review "${rev_args[@]}" -- "${attach_args[@]}" "${jp_args[@]:-}"
 
 # Review an RFD. Accepts a permanent number (41, 041) or a draft ID (D01).
 #
