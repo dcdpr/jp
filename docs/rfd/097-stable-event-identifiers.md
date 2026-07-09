@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-03
+- **Extended by**: [RFD 098]
 
 ## Summary
 
@@ -603,3 +604,4 @@ That is out of scope here.
 [RFD 064]: 064-non-destructive-conversation-compaction.md
 [RFD 067]: 067-resource-deduplication-for-token-efficiency.md
 [RFD 072]: 072-command-plugin-system.md
+[RFD 098]: 098-request-response-event-linking.md

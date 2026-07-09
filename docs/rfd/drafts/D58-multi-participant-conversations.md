@@ -12,7 +12,7 @@
 > valuable on their own and independently implementable:
 >
 > - [RFD D51]: migrating `conversation.tools.*` to `assistant.tools.*`
-> - [RFD D52]: explicit `event_id` reference from each response to request event
+> - [RFD 098]: explicit `event_id` reference from each response to request event
 > - [RFD D53]: parse inline URIs from query prompts
 > - [RFD D54]: The main RFD implementing multi-participant conversations
 >
@@ -1000,7 +1000,7 @@ jp c participant refresh dev
 [RFD 076]: ../076-tool-access-grants.md
 [RFD 078]: ../078-tool-config-mutation.md
 [RFD 097]: ../097-stable-event-identifiers.md
+[RFD 098]: ./../098-request-response-event-linking.md
 [RFD D51]: ./D51-assistant-scoped-tool-configuration.md
-[RFD D52]: ./D52-request-response-event-linking.md
 [RFD D53]: ./D53-inline-attachment-uri-parsing.md
 [RFD D54]: ./D54-multi-participant-conversations.md

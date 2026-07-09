@@ -14,7 +14,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-07
-- **Requires**: [RFD 097], [RFD 070], [RFD D51], [RFD D52], [RFD D53]
+- **Requires**: [RFD 097], [RFD 070], [RFD D51], [RFD 098], [RFD D53]
 
 ## Summary
 
@@ -113,6 +113,6 @@ Links to related RFDs, issues, documentation, or external resources.
 
 [RFD 070]: ../070-negative-config-deltas.md
 [RFD 097]: ../097-stable-event-identifiers.md
+[RFD 098]: ../098-request-response-event-linking.md
 [RFD D51]: D51-assistant-scoped-tool-configuration.md
-[RFD D52]: D52-request-response-event-linking.md
 [RFD D53]: D53-inline-attachment-uri-parsing.md
