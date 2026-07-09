@@ -8,9 +8,9 @@
 //! ```
 //!
 //! The store mirrors the per-workspace session-to-conversation mapping (RFD
-//! 020, [`session_mapping`]): a most-recent-first `history` of selections
-//! (active = `history[0]`, previous = `history[1]`), the session identity for
-//! stale detection, and a session-level `sticky` flag (the precedence ladder's
+//! 020, `session_mapping`): a most-recent-first `history` of selections (active
+//! = `history[0]`, previous = `history[1]`), the session identity for stale
+//! detection, and a session-level `sticky` flag (the precedence ladder's
 //! persisted `A` choice).
 //! Filenames reuse [`Session::storage_key`], so an automatic `getsid` / `Hwnd`
 //! session can never alias an `Env` session sharing the same numeric value.
@@ -20,8 +20,6 @@
 //! is what makes recovery possible after a recorded root is deleted.
 //!
 //! See: `docs/rfd/087-session-scoped-active-workspace.md`
-//!
-//! [`session_mapping`]: crate::session_mapping
 
 use std::{fs, str::FromStr as _};
 
