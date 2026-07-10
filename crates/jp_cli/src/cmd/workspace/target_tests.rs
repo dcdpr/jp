@@ -72,9 +72,21 @@ fn env_session() -> Session {
     }
 }
 
-/// Render an error via `Debug`, which includes wrapped messages and sources.
-fn message_of(error: &impl std::fmt::Debug) -> String {
-    format!("{error:?}")
+/// Render an error with its full source chain, so assertions can match the
+/// message of a wrapped `cmd::Error`.
+///
+/// Uses `Display`, not `Debug`: `Debug` escapes every backslash in Windows
+/// paths, which breaks `contains()` assertions on messages listing candidate
+/// roots.
+fn message_of(error: &crate::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(inner) = source {
+        message.push_str(": ");
+        message.push_str(&inner.to_string());
+        source = inner.source();
+    }
+    message
 }
 
 #[test]

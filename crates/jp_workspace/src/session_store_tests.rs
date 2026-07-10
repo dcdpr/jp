@@ -292,6 +292,11 @@ fn cleanup_removes_env_record_with_no_live_workspace_at_all() {
     assert!(t.store.load(&session).is_none());
 }
 
+/// PID liveness is only checkable on unix — `pid_liveness` returns `Unknown`
+/// everywhere else — so the "confirmed alive" guarantee this test pins is
+/// unix-only.
+/// The non-unix fallback is pinned below.
+#[cfg(unix)]
 #[test]
 fn cleanup_keeps_record_of_a_live_getsid_process_unconditionally() {
     let t = store();
@@ -307,6 +312,26 @@ fn cleanup_keeps_record_of_a_live_getsid_process_unconditionally() {
     t.store.cleanup(&|_| false);
 
     assert_eq!(t.store.load(&session).unwrap().history.len(), 1);
+}
+
+/// Without a PID check (non-unix), a `getsid` record cannot be confirmed alive:
+/// its liveness is `Unknown`, so it degrades to the existence rule — no live
+/// workspace in the history prunes the record, even while the recording process
+/// (this test) is still running.
+#[cfg(not(unix))]
+#[test]
+fn cleanup_prunes_getsid_record_without_pid_check() {
+    let t = store();
+    #[expect(clippy::cast_possible_wrap, reason = "test PIDs fit in i32")]
+    let session = Session::getsid(std::process::id() as i32);
+
+    t.store
+        .record_selection(&session, &id("dead1"), Utf8Path::new("/gone"), at(1_000))
+        .unwrap();
+
+    t.store.cleanup(&|_| false);
+
+    assert!(t.store.load(&session).is_none());
 }
 
 #[test]

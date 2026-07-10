@@ -323,9 +323,11 @@ Examples below use `jp w` for brevity.
   durable store and every live root's workspace `.jp/conversations/`, so it
   includes external (`ext`) conversations that live only in one checkout (see
   [RFD 031]).
-  `jp w show <id>` therefore loads the conversation index (index only, not event
-  contents) for each live root and deduplicates by ID — the one place `show`
-  does a multi-root read, chosen so the count is accurate rather than cheap.
+  `jp w show <id>` therefore loads the conversation index (index only, not
+  event contents) for one live root — which already merges the user-local
+  store — and scans each sibling root's conversation directory for the IDs
+  that live there alone, deduplicating by ID: the one place `show` does a
+  multi-root read, accurate without paying a full workspace load per root.
   When the target resolves to a single concrete root — a path, or an `<id>`
   with one live root — the readout shows that root.
   When an `<id>` has several live roots, `jp w show` lists every live root and

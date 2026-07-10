@@ -53,9 +53,19 @@ fn stdout_of(printer: &Printer, buffer: &jp_printer::SharedBuffer) -> String {
     buffer.lock().clone()
 }
 
-/// Render an error via `Debug`, which includes wrapped messages and sources.
-fn message_of(error: &impl std::fmt::Debug) -> String {
-    format!("{error:?}")
+/// Render an error with its full source chain via `Display`.
+///
+/// `Debug` would escape every backslash in Windows paths, breaking `contains()`
+/// assertions on messages that list filesystem roots.
+fn message_of(error: &crate::cmd::Error) -> String {
+    let mut message = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(inner) = source {
+        message.push_str(": ");
+        message.push_str(&inner.to_string());
+        source = inner.source();
+    }
+    message
 }
 
 #[test]
