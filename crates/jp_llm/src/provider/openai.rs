@@ -57,6 +57,24 @@ const TEMP_REQUIRES_NO_REASONING: &str = "temp_requires_no_reasoning";
 /// Feature flag: the model only supports non-streaming Responses API requests.
 const STREAMING_UNSUPPORTED: &str = "streaming_unsupported";
 
+/// Feature flag: the model accepts `reasoning.mode: "pro"` in the Responses
+/// API.
+/// Models without this flag reject the field, so pro mode is skipped (with a
+/// warning) when configured.
+const REASONING_PRO_MODE: &str = "reasoning_pro_mode";
+
+/// Feature flag: the model supports persisted reasoning via
+/// `reasoning.context`.
+/// When set, requests ask for `all_turns` so the model renders the replayed
+/// encrypted reasoning items from earlier turns into the next sample.
+const PERSISTED_REASONING: &str = "persisted_reasoning";
+
+/// Feature flag: the model accepts explicit prompt-cache fields
+/// (`prompt_cache_options`, `prompt_cache_breakpoint`).
+/// Models without this flag reject the fields with a 400, so they are only sent
+/// when the flag is present.
+const EXPLICIT_PROMPT_CACHING: &str = "explicit_prompt_caching";
+
 /// How often to inject a synthetic keep-alive while a tool call is streaming.
 ///
 /// OpenAI emits the `function_call_arguments` deltas for a large tool call as a
@@ -316,7 +334,14 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         tool_choice,
     } = query;
 
-    let parameters = thread.events.config()?.assistant.model.parameters;
+    let config = thread.events.config()?;
+    let cache_policy = config.assistant.request.cache;
+    let parameters = config.assistant.model.parameters;
+
+    // Stable cache identity for this conversation. The creation timestamp
+    // doesn't change for the conversation's lifetime and is shared by forks,
+    // which share the cached prefix.
+    let conversation_created_at = thread.events.created_at;
 
     // Parse verbosity from the catch-all parameters map.
     let verbosity = parameters
@@ -332,6 +357,15 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
                 None
             }
         });
+
+    // Parse the OpenAI-specific reasoning execution mode from the catch-all
+    // parameters map. `pro` performs more model work before returning a
+    // single final answer, at the cost of latency and token usage.
+    let reasoning_mode = parameters
+        .other
+        .get("reasoning_mode")
+        .and_then(|v| v.as_str())
+        .and_then(|s| parse_reasoning_mode(s, model));
 
     // Build the text config from structured output schema and/or verbosity.
     // Transform the schema for OpenAI's strict structured output mode.
@@ -359,8 +393,8 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     let supports_reasoning = model
         .reasoning
         .is_some_and(|v| !matches!(v, ReasoningDetails::Unsupported));
-    let reasoning = match model.custom_reasoning_config(parameters.reasoning) {
-        Some(r) => Some(convert_reasoning(r, model.max_output_tokens)),
+    let mut reasoning = match model.custom_reasoning_config(parameters.reasoning) {
+        Some(r) => Some(convert_reasoning(r, model)),
         // Explicitly disable reasoning for models that support it when the
         // user has turned it off. Sending `null` lets the model use its
         // default (which may include reasoning).
@@ -378,7 +412,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
                     effort,
                     exclude: true,
                 },
-                model.max_output_tokens,
+                model,
             ))
         }
         None => None,
@@ -386,17 +420,35 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     let reasoning_enabled = model
         .custom_reasoning_config(parameters.reasoning)
         .is_some();
+
+    if reasoning_enabled && let Some(r) = reasoning.as_mut() {
+        r.mode = reasoning_mode;
+
+        // JP replays the complete event history — including encrypted
+        // reasoning items — on every request, so ask supporting models to
+        // render reasoning from earlier turns into the next sample.
+        if model.features.contains(&PERSISTED_REASONING) {
+            r.context = Some(types::ReasoningContext::AllTurns);
+        }
+    }
+
+    let cache_enabled = !cache_policy.is_off();
+    let explicit_cache = cache_enabled && model.features.contains(&EXPLICIT_PROMPT_CACHING);
+
     let parts = thread.into_parts();
 
     let mut messages = vec![];
-    messages.push(to_system_messages(parts.system_parts).0);
+    messages.push(to_system_messages(parts.system_parts, explicit_cache).0);
 
     // All attachments go in a user message before conversation events.
     let mut attachment_items = vec![];
 
     // Text attachments as XML to preserve source metadata.
     if let Some(xml) = text_attachments_to_xml(&parts.attachments)? {
-        attachment_items.push(types::ContentItem::Text { text: xml });
+        attachment_items.push(types::ContentItem::Text {
+            text: xml,
+            prompt_cache_breakpoint: None,
+        });
     }
 
     // Binary attachments, each preceded by a label.
@@ -406,6 +458,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
 
             attachment_items.push(types::ContentItem::Text {
                 text: format!("[Attached file: {}]", attachment.source),
+                prompt_cache_breakpoint: None,
             });
 
             if media_type.starts_with("image/") {
@@ -413,12 +466,14 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
                     detail: types::ImageDetail::Auto,
                     file_id: None,
                     image_url: Some(format!("data:{media_type};base64,{b64}")),
+                    prompt_cache_breakpoint: None,
                 });
             } else if media_type == "application/pdf" {
                 attachment_items.push(types::ContentItem::File {
                     file_data: Some(format!("data:{media_type};base64,{b64}")),
                     file_id: None,
                     filename: Some(attachment.source.clone()),
+                    prompt_cache_breakpoint: None,
                 });
             } else {
                 warn!(
@@ -431,6 +486,12 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     }
 
     if !attachment_items.is_empty() {
+        // Extend the cached stable prefix (system prompt + attachments) up to
+        // the last attachment block.
+        if explicit_cache && let Some(item) = attachment_items.last_mut() {
+            set_cache_breakpoint(item);
+        }
+
         messages.push(types::InputListItem::Message(types::InputMessage {
             role: types::Role::User,
             content: types::ContentInput::List(attachment_items),
@@ -481,6 +542,25 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         truncation: Some(types::Truncation::Auto),
         top_p,
         text,
+        // OpenAI routes requests by prompt prefix; a stable per-conversation
+        // key improves cache-hit rates, and GPT-5.6+ models require it for
+        // reliable cache matching.
+        prompt_cache_key: cache_enabled.then(|| {
+            format!(
+                "jp:conversation:{}",
+                conversation_created_at.timestamp_micros()
+            )
+        }),
+        // Explicit mode with no marked breakpoints disables cache reads and
+        // writes; the only way to opt out of caching on models that bill
+        // cache writes. Models without the feature flag cache automatically
+        // and at no extra cost, so there is nothing to disable for them.
+        prompt_cache_options: (cache_policy.is_off()
+            && model.features.contains(&EXPLICIT_PROMPT_CACHING))
+        .then_some(types::PromptCacheOptions {
+            mode: Some(types::PromptCacheMode::Explicit),
+            ttl: None,
+        }),
         ..Default::default()
     };
 
@@ -496,13 +576,68 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
 #[expect(clippy::too_many_lines)]
 fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
+        "gpt-5.6" | "gpt-5.6-sol" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5.6 Sol".to_owned()),
+            context_window: Some(1_050_000),
+            max_output_tokens: Some(128_000),
+            // Reasoning.effort supports: none, low, medium, high, xhigh, max.
+            reasoning: Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true, true,
+            )),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 2, 16).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
+            features: vec![
+                TEMP_REQUIRES_NO_REASONING,
+                REASONING_PRO_MODE,
+                PERSISTED_REASONING,
+                EXPLICIT_PROMPT_CACHING,
+            ],
+        },
+        "gpt-5.6-terra" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5.6 Terra".to_owned()),
+            context_window: Some(1_050_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true, true,
+            )),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 2, 16).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
+            features: vec![
+                TEMP_REQUIRES_NO_REASONING,
+                REASONING_PRO_MODE,
+                PERSISTED_REASONING,
+                EXPLICIT_PROMPT_CACHING,
+            ],
+        },
+        "gpt-5.6-luna" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5.6 Luna".to_owned()),
+            context_window: Some(1_050_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true, true,
+            )),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 2, 16).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
+            features: vec![
+                TEMP_REQUIRES_NO_REASONING,
+                REASONING_PRO_MODE,
+                PERSISTED_REASONING,
+                EXPLICIT_PROMPT_CACHING,
+            ],
+        },
         "gpt-5.5" | "gpt-5.5-2026-04-23" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some("GPT-5.5".to_owned()),
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true,
+                true, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 12, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -515,7 +650,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, true, true, true,
+                false, false, false, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 12, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -528,7 +663,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true,
+                true, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -541,7 +676,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, true, true, true,
+                false, false, false, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -554,7 +689,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true,
+                true, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -567,7 +702,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true,
+                true, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -580,7 +715,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, true, true, true,
+                false, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -593,7 +728,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, true, true, true,
+                false, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -607,7 +742,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: low, medium, high, xhigh (no none)
             reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, true, true, true,
+                false, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -620,7 +755,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, true, true, true,
+                false, false, false, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -634,7 +769,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: none (default), low, medium, high, xhigh
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true,
+                true, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -647,7 +782,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true,
+                true, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -694,7 +829,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: none (default), low, medium, high
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, false,
+                true, false, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -707,7 +842,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, false,
+                true, false, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -732,7 +867,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: minimal, low, medium, high
             reasoning: Some(ReasoningDetails::leveled(
-                false, true, true, true, true, false,
+                false, true, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -745,7 +880,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, false, true, false,
+                false, false, false, false, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -758,7 +893,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::leveled(
-                false, true, true, true, true, false,
+                false, true, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -1668,20 +1803,53 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
         .collect()
 }
 
+/// Parse an OpenAI reasoning execution mode value (`standard` or `pro`).
+///
+/// `pro` is returned only when the model supports it; unsupported models fall
+/// back to standard mode, with a warning.
+/// `standard` returns `None`, since it is the API default.
+fn parse_reasoning_mode(value: &str, model: &ModelDetails) -> Option<types::ReasoningMode> {
+    match value {
+        "standard" => None,
+        "pro" if model.features.contains(&REASONING_PRO_MODE) => Some(types::ReasoningMode::Pro),
+        "pro" => {
+            warn!(
+                model = %model.id,
+                "Model does not support pro reasoning mode; using standard mode."
+            );
+            None
+        }
+        _ => {
+            warn!(
+                reasoning_mode = value,
+                "Unknown reasoning_mode value, ignoring."
+            );
+            None
+        }
+    }
+}
+
+/// Convert the reasoning configuration to the OpenAI wire format.
+///
+/// The `max` effort is only sent to models that support it; others degrade to
+/// `xhigh`.
 fn convert_reasoning(
     reasoning: CustomReasoningConfig,
-    max_tokens: Option<u32>,
+    model: &ModelDetails,
 ) -> types::ReasoningConfig {
+    let supports_max = model.reasoning.is_some_and(|r| r.supports_max_effort());
+
     // Always request reasoning summaries so they're captured in the
     // conversation. The display layer handles visibility.
     types::ReasoningConfig {
         summary: Some(SummaryConfig::Auto),
         effort: match reasoning
             .effort
-            .abs_to_rel(max_tokens)
+            .abs_to_rel(model.max_output_tokens)
             .unwrap_or(ReasoningEffort::Auto)
         {
             ReasoningEffort::None => Some(types::ReasoningEffort::None),
+            ReasoningEffort::Max if supports_max => Some(types::ReasoningEffort::Max),
             ReasoningEffort::Max | ReasoningEffort::XHigh => Some(types::ReasoningEffort::XHigh),
             ReasoningEffort::High => Some(types::ReasoningEffort::High),
             ReasoningEffort::Auto | ReasoningEffort::Medium => Some(types::ReasoningEffort::Medium),
@@ -1692,6 +1860,8 @@ fn convert_reasoning(
                 None
             }
         },
+        mode: None,
+        context: None,
     }
 }
 
@@ -1706,17 +1876,50 @@ impl IntoIterator for ListItem {
     }
 }
 
-fn to_system_messages(parts: Vec<String>) -> ListItem {
+fn to_system_messages(parts: Vec<String>, cache_breakpoint: bool) -> ListItem {
+    let mut items: Vec<_> = parts
+        .into_iter()
+        .map(|text| types::ContentItem::Text {
+            text,
+            prompt_cache_breakpoint: None,
+        })
+        .collect();
+
+    // Cache the system-prompt prefix. The growing conversation tail is
+    // covered by the implicit breakpoint on the latest message.
+    if cache_breakpoint && let Some(item) = items.last_mut() {
+        set_cache_breakpoint(item);
+    }
+
     ListItem(types::InputListItem::Message(types::InputMessage {
         role: types::Role::System,
-        content: types::ContentInput::List(
-            parts
-                .into_iter()
-                .map(|text| types::ContentItem::Text { text })
-                .collect(),
-        ),
+        content: types::ContentInput::List(items),
         phase: None,
     }))
+}
+
+/// Mark a content block as the end of a cacheable prompt prefix.
+///
+/// The breakpoint covers the block itself and all prompt content rendered
+/// before it; content after it can change without invalidating the cached
+/// prefix.
+fn set_cache_breakpoint(item: &mut types::ContentItem) {
+    let (types::ContentItem::Text {
+        prompt_cache_breakpoint,
+        ..
+    }
+    | types::ContentItem::Image {
+        prompt_cache_breakpoint,
+        ..
+    }
+    | types::ContentItem::File {
+        prompt_cache_breakpoint,
+        ..
+    }) = item;
+
+    *prompt_cache_breakpoint = Some(types::PromptCacheBreakpoint {
+        mode: types::PromptCacheBreakpointMode::Explicit,
+    });
 }
 
 /// Parse a phase string from metadata into the API type.

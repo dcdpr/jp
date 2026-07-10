@@ -228,7 +228,7 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             context_window: Some(131_072),
             max_output_tokens: Some(40_960),
             reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, true, true, false,
+                false, false, true, true, true, false, false,
             )),
             knowledge_cutoff: None,
             deprecated: None,
@@ -242,7 +242,7 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             max_output_tokens: Some(40_960),
             // Reasoning is enabled by default; only `none` disables it.
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, false, false, false, false,
+                true, false, false, false, false, false, false,
             )),
             knowledge_cutoff: None,
             deprecated: None,

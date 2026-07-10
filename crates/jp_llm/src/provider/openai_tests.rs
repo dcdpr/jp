@@ -742,7 +742,8 @@ mod map_model {
     use chrono::{TimeZone as _, Utc};
 
     use super::super::{
-        ModelResponse, STREAMING_UNSUPPORTED, TEMP_REQUIRES_NO_REASONING, map_model,
+        EXPLICIT_PROMPT_CACHING, ModelResponse, PERSISTED_REASONING, REASONING_PRO_MODE,
+        STREAMING_UNSUPPORTED, TEMP_REQUIRES_NO_REASONING, map_model,
     };
     use crate::model::{ModelDeprecation, ReasoningDetails};
 
@@ -756,6 +757,83 @@ mod map_model {
     }
 
     #[test]
+    fn gpt_5_6_sol_uses_latest_metadata() {
+        let details = map_model(model("gpt-5.6-sol")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Sol"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true, true,
+            ))
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2026, 2, 16)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
+    fn gpt_5_6_alias_resolves_to_sol_metadata() {
+        let details = map_model(model("gpt-5.6")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Sol"));
+    }
+
+    #[test]
+    fn gpt_5_6_terra_uses_latest_metadata() {
+        let details = map_model(model("gpt-5.6-terra")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Terra"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true, true,
+            ))
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
+    fn gpt_5_6_luna_uses_latest_metadata() {
+        let details = map_model(model("gpt-5.6-luna")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Luna"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true, true,
+            ))
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
     fn gpt_5_5_uses_latest_metadata() {
         let details = map_model(model("gpt-5.5")).unwrap();
 
@@ -765,7 +843,7 @@ mod map_model {
         assert_eq!(
             details.reasoning,
             Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true,
+                true, false, true, true, true, true, false,
             ))
         );
         assert_eq!(
@@ -786,7 +864,7 @@ mod map_model {
         assert_eq!(
             details.reasoning,
             Some(ReasoningDetails::leveled(
-                false, false, false, true, true, true,
+                false, false, false, true, true, true, false,
             ))
         );
         assert_eq!(
@@ -798,6 +876,87 @@ mod map_model {
             TEMP_REQUIRES_NO_REASONING,
             STREAMING_UNSUPPORTED
         ]);
+    }
+}
+
+mod convert_reasoning {
+    use jp_config::model::parameters::{CustomReasoningConfig, ReasoningEffort};
+    use openai_responses::types;
+
+    use super::super::convert_reasoning;
+    use crate::model::{ModelDetails, ReasoningDetails};
+
+    fn model(reasoning: ReasoningDetails) -> ModelDetails {
+        let mut details = ModelDetails::empty("openai/test-model".parse().unwrap());
+        details.max_output_tokens = Some(128_000);
+        details.reasoning = Some(reasoning);
+        details
+    }
+
+    #[test]
+    fn max_effort_is_sent_when_supported() {
+        let details = model(ReasoningDetails::leveled(
+            true, false, true, true, true, true, true,
+        ));
+        let config = convert_reasoning(
+            CustomReasoningConfig {
+                effort: ReasoningEffort::Max,
+                exclude: false,
+            },
+            &details,
+        );
+
+        assert_eq!(config.effort, Some(types::ReasoningEffort::Max));
+    }
+
+    #[test]
+    fn max_effort_degrades_to_xhigh_when_unsupported() {
+        let details = model(ReasoningDetails::leveled(
+            true, false, true, true, true, true, false,
+        ));
+        let config = convert_reasoning(
+            CustomReasoningConfig {
+                effort: ReasoningEffort::Max,
+                exclude: false,
+            },
+            &details,
+        );
+
+        assert_eq!(config.effort, Some(types::ReasoningEffort::XHigh));
+    }
+}
+
+mod parse_reasoning_mode {
+    use openai_responses::types;
+
+    use super::super::{REASONING_PRO_MODE, parse_reasoning_mode};
+    use crate::model::ModelDetails;
+
+    fn model(features: Vec<&'static str>) -> ModelDetails {
+        let mut details = ModelDetails::empty("openai/test-model".parse().unwrap());
+        details.features = features;
+        details
+    }
+
+    #[test]
+    fn pro_is_sent_when_supported() {
+        assert_eq!(
+            parse_reasoning_mode("pro", &model(vec![REASONING_PRO_MODE])),
+            Some(types::ReasoningMode::Pro)
+        );
+    }
+
+    #[test]
+    fn pro_is_skipped_when_unsupported() {
+        assert_eq!(parse_reasoning_mode("pro", &model(vec![])), None);
+    }
+
+    #[test]
+    fn standard_and_unknown_values_are_ignored() {
+        let details = model(vec![REASONING_PRO_MODE]);
+
+        assert_eq!(parse_reasoning_mode("standard", &details), None);
+        assert_eq!(parse_reasoning_mode("turbo", &details), None);
     }
 }
 
