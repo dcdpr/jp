@@ -15,7 +15,7 @@ mod signals;
 mod timer;
 
 use std::{
-    env, fmt,
+    env, fmt, fs,
     io::{self, IsTerminal as _, Write as _, stderr, stdout},
     num::{self, NonZeroUsize},
     process::ExitCode,
@@ -170,10 +170,11 @@ struct Globals {
     #[arg(long, global = true, value_enum, default_value_t = LogFormat::Auto)]
     log_format: LogFormat,
 
-    /// Write tracing logs to an additional destination.
+    /// Write the full tracing log to the given file.
     ///
-    /// Use `-` to write to stderr.
-    /// Tracing is always written to a log file regardless of this flag.
+    /// Use `-` to stream logs to stderr instead.
+    /// When unset, the log is written to a temporary file whose path is printed
+    /// when a run fails or `JP_DEBUG=1` is set.
     #[arg(long, global = true, value_name = "PATH")]
     log_file: Option<String>,
 
@@ -907,14 +908,25 @@ const JP_CRATES: &[&str] = &[
 ];
 
 pub struct TracingGuard {
-    file: Option<NamedUtf8TempFile>,
+    sink: Option<TraceSink>,
+}
+
+/// Where the full trace log is written.
+enum TraceSink {
+    /// A delete-on-drop temp file, kept only when [`TracingGuard::persist`] is
+    /// called (a failed run, or `JP_DEBUG=1`).
+    Temp(NamedUtf8TempFile),
+    /// A caller-chosen path (`--log-file <path>`).
+    /// The file always persists.
+    Path(Utf8PathBuf),
 }
 
 impl TracingGuard {
     fn persist(mut self) -> Option<Utf8PathBuf> {
-        self.file
-            .take()
-            .and_then(|file| file.keep().ok().map(|(_file, path)| path))
+        match self.sink.take()? {
+            TraceSink::Temp(file) => file.keep().ok().map(|(_file, path)| path),
+            TraceSink::Path(path) => Some(path),
+        }
     }
 }
 
@@ -963,8 +975,21 @@ fn configure_logging(
     file_filter.push("plugin=trace".to_owned());
     let file_env_filter = tracing_subscriber::EnvFilter::new(file_filter.join(","));
 
-    let file = NamedUtf8TempFile::new().ok()?;
-    let file_writer = file.as_file().try_clone().ok()?;
+    // An explicit `--log-file <path>` pins the trace log to that path;
+    // otherwise it goes to a delete-on-drop temp file that is only kept when
+    // the run fails or `JP_DEBUG=1` is set. (`-` selects the stderr layer
+    // below, not a file path.)
+    let (file_writer, sink) = match log_file {
+        Some(path) if path != "-" => {
+            let file = fs::File::create(path).ok()?;
+            (file, TraceSink::Path(Utf8PathBuf::from(path)))
+        }
+        _ => {
+            let file = NamedUtf8TempFile::new().ok()?;
+            let writer = file.as_file().try_clone().ok()?;
+            (writer, TraceSink::Temp(file))
+        }
+    };
 
     let file_layer = fmt::layer()
         .json()
@@ -1042,7 +1067,7 @@ fn configure_logging(
         registry.init();
     }
 
-    Some(TracingGuard { file: Some(file) })
+    Some(TracingGuard { sink: Some(sink) })
 }
 
 /// Get the number of worker threads to use.

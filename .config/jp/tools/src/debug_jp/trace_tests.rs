@@ -148,6 +148,65 @@ fn renders_combined_report_for_command_sequence() {
     assert!(profiling.exists());
 }
 
+/// A launcher that emulates jp's `--log-file` handling: it writes `content` to
+/// the path named by the injected flag, then returns a canned result.
+/// Panics when the tool did not inject the flag, pinning the injection itself.
+struct LogFileWritingLauncher {
+    content: &'static str,
+    result: LaunchResult,
+}
+
+impl Launcher for LogFileWritingLauncher {
+    fn run(
+        &self,
+        spec: &LaunchSpec,
+        _timeouts: Timeouts,
+        on_spawn: &mut dyn FnMut(u32),
+    ) -> Result<LaunchResult, Error> {
+        on_spawn(0);
+        assert_eq!(
+            spec.args.first().map(String::as_str),
+            Some("--log-file"),
+            "expected `--log-file` to be injected before the user args"
+        );
+        std::fs::write(&spec.args[1], self.content).unwrap();
+        Ok(self.result.clone())
+    }
+}
+
+#[test]
+fn force_killed_run_still_renders_from_pinned_log_file() {
+    // A force-killed jp prints no trace-path marker on stderr, but the log
+    // pinned via `--log-file` holds every event written up to the kill.
+    // The run must succeed from that file alone, with the force-kill banner.
+    let workspace = camino_tempfile::tempdir().unwrap();
+    let root = workspace.path();
+    let launcher = LogFileWritingLauncher {
+        content: "{\"timestamp\":\"2026-07-10T10:00:00.000Z\",\"level\":\"INFO\",\"fields\":{\"\
+                  message\":\"event before kill\"},\"target\":\"jp_cli\"}\n",
+        result: launched("no marker here\n", Termination::Forced),
+    };
+
+    let outcome = execute(
+        root,
+        &spec(root),
+        Level::Info,
+        None,
+        None,
+        &launcher,
+        Timeouts::DEFAULT,
+    )
+    .unwrap();
+
+    let Outcome::Success { content } = outcome else {
+        panic!("expected a success outcome");
+    };
+    assert!(content.contains("[!WARNING]"), "got:\n{content}");
+    assert!(content.contains("force-killed"), "got:\n{content}");
+    // The event came from the pinned log file, not the (absent) marker path.
+    assert!(content.contains("event before kill"), "got:\n{content}");
+}
+
 #[test]
 fn force_killed_without_marker_reports_note() {
     let workspace = camino_tempfile::tempdir().unwrap();
