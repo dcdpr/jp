@@ -65,6 +65,30 @@ fn build_cfg(
 }
 
 #[test]
+fn tracing_guard_persist_returns_explicit_log_file_path() {
+    // `--log-file <path>`: the file lives wherever the caller put it; persist
+    // just hands the path back.
+    let guard = TracingGuard {
+        sink: Some(TraceSink::Path(Utf8PathBuf::from("/tmp/x.jsonl"))),
+    };
+    assert_eq!(guard.persist(), Some(Utf8PathBuf::from("/tmp/x.jsonl")));
+}
+
+#[test]
+fn tracing_guard_persist_keeps_temp_file_on_disk() {
+    // Without `--log-file`, persist disarms the temp file's delete-on-drop
+    // and returns its path.
+    let file = NamedUtf8TempFile::new().unwrap();
+    let guard = TracingGuard {
+        sink: Some(TraceSink::Temp(file)),
+    };
+
+    let path = guard.persist().unwrap();
+    assert!(path.exists());
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn test_cli() {
     Cli::command().debug_assert();
 }

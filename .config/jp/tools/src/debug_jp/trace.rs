@@ -1,11 +1,15 @@
 //! `debug_jp_trace` — capture and render `JP_DEBUG=1` trace logs.
 //!
-//! Launches `jp` inside the sandbox with `JP_DEBUG=1` set.
-//! `jp_cli` persists its tracing-subscriber output to a system temp file and
-//! prints `Full trace log written to: <path>` on stderr at exit.
-//! We parse that line, copy the file out to the real workspace so it survives
-//! sandbox cleanup, filter the events by level/target/grep, and render the
-//! result in a compact logfmt-like format.
+//! Launches `jp` inside the sandbox with `JP_DEBUG=1` set and `--log-file`
+//! pointing at a path in the real workspace, so the trace log lands at a known
+//! location that survives sandbox cleanup — even when jp is force-killed,
+//! since the file layer writes events as they happen.
+//! When the file is missing (jp exited before logging was configured), we fall
+//! back to the path jp announces on stderr at exit: a `Full trace log written
+//! to: <path>` line (text output) or a `{"trace_log": "<path>"}` object (JSON
+//! output).
+//! The events are then filtered by level/target/grep and rendered in a compact
+//! logfmt-like format.
 
 use std::{
     fs,
@@ -22,16 +26,12 @@ use crate::{
         build::{self, BuildSpec},
         launch::{LaunchResult, LaunchSpec, Launcher, RealLauncher, Timeouts},
         sandbox::{Sandbox, SandboxOpts},
-        trace_parse::{self, Level, TraceEvent},
+        trace_parse::{self, Level, TRACE_PATH_PREFIX, TraceEvent},
         trace_render::{self, CommandRun, OutputPaths},
         with_termination_note,
     },
     util::{ToolResult, error, runner::DuctProcessRunner},
 };
-
-/// Marker line `jp_cli::run` writes to stderr when `JP_DEBUG=1` and the output
-/// format is text (we never pass `--format=json`, so this is what we get).
-const TRACE_PATH_PREFIX: &str = "Full trace log written to: ";
 
 /// Tool entrypoint.
 /// Dispatches between the format-args preview and the live execution.
@@ -109,14 +109,17 @@ fn format_preview(
     out.push_str("cargo build --profile profiling -p jp_cli --bin jp\n");
     if let [command] = commands {
         out.push_str(&format!(
-            "JP_DEBUG=1 target/profiling/jp {}    # invoked by absolute path\n",
+            "JP_DEBUG=1 target/profiling/jp --log-file tmp/profiling/trace-<ts>.jsonl {}    # \
+             invoked by absolute path\n",
             command.join(" ")
         ));
     } else {
         out.push_str("# commands run in sequence in one sandbox (state persists between them):\n");
         for (i, command) in commands.iter().enumerate() {
             out.push_str(&format!(
-                "JP_DEBUG=1 target/profiling/jp {}    # command {}\n",
+                "JP_DEBUG=1 target/profiling/jp --log-file tmp/profiling/trace-<ts>-cmd{}.jsonl \
+                 {}    # command {}\n",
+                i + 1,
                 command.join(" "),
                 i + 1
             ));
@@ -363,12 +366,13 @@ struct CommandArtifacts {
     stderr_dst: Utf8PathBuf,
 }
 
-/// Launch jp via `launcher`, copy its trace log and streams into `out_dir`
+/// Launch jp via `launcher`, collect its trace log and streams into `out_dir`
 /// (keyed by `<ts><label>`), and return the filtered events.
 ///
 /// `label` distinguishes a command's files within a sequence (e.g. `-cmd1`); it
 /// is empty for a single-command run, preserving the standalone file names.
-/// Returns an error when jp exits without flushing its trace log.
+/// Returns an error when no trace log was produced (jp exited before its
+/// logging was configured, and announced no path on stderr).
 #[allow(
     clippy::too_many_arguments,
     reason = "thin internal seam over the launch+copy step"
@@ -384,40 +388,49 @@ fn run_one(
     ts: u64,
     label: &str,
 ) -> Result<CommandArtifacts, Error> {
-    let launch_result = launcher.run(spec, timeouts, &mut |_| {})?;
-
-    // jp prints `Full trace log written to: <path>` on stderr right before
-    // exit. The path is in the system temp dir (e.g. `/var/folders/...`),
-    // outside the sandbox. A force-killed jp never flushes, so fold the
-    // termination note into the error when the marker is absent.
-    let Some(trace_line) = launch_result
-        .stderr
-        .lines()
-        .find_map(|line| line.strip_prefix(TRACE_PATH_PREFIX))
-    else {
-        let note = launch_result
-            .note()
-            .map(|n| format!("{n}\n\n"))
-            .unwrap_or_default();
-        return Err(format!(
-            "{note}Did not find `{TRACE_PATH_PREFIX}<path>` in jp's stderr. jp may have exited \
-             before the tracing layer flushed, or stderr was redirected. Last 20 lines of \
-             stderr:\n{}",
-            tail_lines(&launch_result.stderr, 20)
-        )
-        .into());
-    };
-    let trace_src = Utf8PathBuf::from(trace_line.trim());
-
-    // Copy the trace log into the real workspace so it survives the system
-    // temp dir's eventual cleanup and stays alongside other profile output.
-    // Stdout/stderr are dumped alongside so each command's trace + streams are
-    // one cohesive set of files keyed by `<ts><label>`.
+    // Each command's trace + streams are one cohesive set of files keyed by
+    // `<ts><label>`.
     let trace_dst = out_dir.join(format!("trace-{ts}{label}.jsonl"));
     let stdout_dst = out_dir.join(format!("trace-{ts}{label}-stdout.txt"));
     let stderr_dst = out_dir.join(format!("trace-{ts}{label}-stderr.txt"));
-    fs::copy(&trace_src, &trace_dst)
-        .map_err(|e| format!("Failed to copy trace log from {trace_src} to {trace_dst}: {e}"))?;
+
+    // Pin the trace log to `trace_dst` via `--log-file`, so its location is
+    // known without a clean exit. jp's file layer writes events as they
+    // happen, so even a force-killed run leaves a partial-but-parseable log
+    // there. The flag goes on a copy: `spec.args` is also the user-visible
+    // command line in reports and error messages.
+    let mut launch_spec = spec.clone();
+    launch_spec.args = ["--log-file".to_owned(), trace_dst.to_string()]
+        .into_iter()
+        .chain(spec.args.iter().cloned())
+        .collect();
+
+    let launch_result = launcher.run(&launch_spec, timeouts, &mut |_| {})?;
+
+    // Fallback: jp exited before creating `trace_dst` (or ignored the flag).
+    // Locate the trace via the path jp announces on stderr at exit — a text
+    // marker line or a `trace_log` JSON field, depending on `--format` — and
+    // copy it out of the system temp dir into the real workspace.
+    if !trace_dst.exists() {
+        let Some(trace_path) = trace_parse::extract_trace_path(&launch_result.stderr) else {
+            let note = launch_result
+                .note()
+                .map(|n| format!("{n}\n\n"))
+                .unwrap_or_default();
+            return Err(format!(
+                "{note}No trace log was written to {trace_dst}, and jp's stderr contains neither \
+                 a `{TRACE_PATH_PREFIX}<path>` line nor a `trace_log` JSON field. jp may have \
+                 exited before its logging was configured. Last 20 lines of stderr:\n{}",
+                tail_lines(&launch_result.stderr, 20)
+            )
+            .into());
+        };
+        let trace_src = Utf8PathBuf::from(trace_path);
+        fs::copy(&trace_src, &trace_dst).map_err(|e| {
+            format!("Failed to copy trace log from {trace_src} to {trace_dst}: {e}")
+        })?;
+    }
+
     fs::write(&stdout_dst, &launch_result.stdout)
         .map_err(|e| format!("Failed to write stdout capture to {stdout_dst}: {e}"))?;
     fs::write(&stderr_dst, &launch_result.stderr)

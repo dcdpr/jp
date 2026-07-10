@@ -82,6 +82,34 @@ fn parse_drops_lines_with_unknown_level() {
 }
 
 #[test]
+fn extract_trace_path_reads_text_marker_line() {
+    let stderr = "some noise\nFull trace log written to: /tmp/x.jsonl\n";
+    assert_eq!(extract_trace_path(stderr), Some("/tmp/x.jsonl".to_owned()));
+}
+
+#[test]
+fn extract_trace_path_reads_json_marker_line() {
+    // jp emits this shape instead of the text marker when `--format` is
+    // json or json-pretty.
+    let stderr = "some noise\n{\"trace_log\":\"/tmp/x.jsonl\"}\n";
+    assert_eq!(extract_trace_path(stderr), Some("/tmp/x.jsonl".to_owned()));
+}
+
+#[test]
+fn extract_trace_path_returns_none_without_a_marker() {
+    assert_eq!(extract_trace_path("nothing relevant here\n"), None);
+}
+
+#[test]
+fn is_trace_path_marker_line_matches_both_formats() {
+    assert!(is_trace_path_marker_line(
+        "Full trace log written to: /tmp/x.jsonl"
+    ));
+    assert!(is_trace_path_marker_line(r#"{"trace_log":"/tmp/x.jsonl"}"#));
+    assert!(!is_trace_path_marker_line("some real error"));
+}
+
+#[test]
 fn parse_preserves_field_insertion_order() {
     // serde_json's `preserve_order` feature is enabled at the workspace level.
     // Field order in the JSON should be preserved through the parse step.
