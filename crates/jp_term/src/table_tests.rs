@@ -100,69 +100,21 @@ fn markdown_details_list_expands_to_one_row_per_item() {
 }
 
 #[test]
-fn json_details_list_of_plain_items_is_string_array() {
-    let json = details_json(None, vec![DetailRow::list("Attachments", vec![
-        DetailItem::plain("a://x"),
-        DetailItem::plain("b://y"),
-    ])]);
-
-    assert_eq!(
-        json["details"]["Attachments"],
-        serde_json::json!(["a://x", "b://y"])
-    );
-}
-
-#[test]
 fn list_item_text_and_json_forms_can_differ() {
     let item = DetailItem::new(
         "cmd (Desc): cmd://x",
         serde_json::json!({ "scheme": "cmd", "url": "cmd://x" }),
     );
-    let rows = vec![DetailRow::list("Attachments", vec![item])];
 
-    // Pretty uses the text form.
+    // Pretty uses the text form; the structured form rides along for callers
+    // assembling machine-readable payloads.
+    let rows = vec![DetailRow::list("Attachments", vec![item.clone()])];
     assert!(
-        details(None, rows.clone()).contains("- cmd (Desc): cmd://x"),
+        details(None, rows).contains("- cmd (Desc): cmd://x"),
         "text form should drive the pretty view"
     );
-
-    // JSON uses the structured form.
-    let json = details_json(None, rows);
-    assert_eq!(json["details"]["Attachments"][0]["scheme"], "cmd");
-    assert_eq!(json["details"]["Attachments"][0]["url"], "cmd://x");
-}
-
-#[test]
-fn json_details_bare_row_uses_value_as_key() {
-    let json = details_json(None, vec![DetailRow::bare("a://x")]);
-    assert_eq!(json["details"]["a://x"], "");
-}
-
-#[test]
-fn json_list() {
-    let json = list_json(header(), rows());
-    let arr = json.as_array().unwrap();
-    assert_eq!(arr.len(), 2);
-    assert_eq!(arr[0]["Name"], "Alice");
-    assert_eq!(arr[0]["Age"], "30");
-    assert_eq!(arr[1]["Name"], "Bob");
-    assert_eq!(arr[1]["Age"], "7");
-}
-
-#[test]
-fn json_details() {
-    let json = details_json(Some("title"), vec![DetailRow::scalar("ID", "jp-c123")]);
-    assert_eq!(json["title"], "title");
-    assert_eq!(json["details"]["ID"], "jp-c123");
-}
-
-#[test]
-fn json_details_strips_ansi() {
-    let json = details_json(None, vec![DetailRow::scalar(
-        "\x1b[1mKey\x1b[0m",
-        "\x1b[32mVal\x1b[0m",
-    )]);
-    assert_eq!(json["details"]["Key"], "Val");
+    assert_eq!(item.json["scheme"], "cmd");
+    assert_eq!(item.json["url"], "cmd://x");
 }
 
 #[test]

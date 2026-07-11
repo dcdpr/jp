@@ -3,6 +3,7 @@ use std::str::FromStr as _;
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::tempdir;
 use chrono::Utc;
+use jp_conversation::ConversationId;
 use jp_printer::{OutputFormat, Printer};
 use jp_workspace::{
     session::{Session, SessionId, SessionSource},
@@ -111,6 +112,58 @@ fn ambiguous_fuzzy_match_errors_with_candidates() {
     assert!(
         message.contains("matches multiple workspaces"),
         "unexpected error: {message}"
+    );
+}
+
+#[test]
+fn conversation_count_unions_sibling_checkout_scans() {
+    let tmp = tempdir().unwrap();
+
+    // Two live checkouts of the same workspace ID. The most recently used one
+    // pays the full workspace load; its sibling is only directory-scanned.
+    let first = make_workspace(tmp.path(), "first", "ws123");
+    let second = make_workspace(tmp.path(), "second", "ws123");
+
+    let env = env_at(tmp.path().to_owned(), tmp.path(), None);
+    let user_dir = env.workspaces_dir.join("proj-ws123");
+    let id = Id::from_str("ws123").unwrap();
+    // `first` is upserted last, so it is the most recently used checkout and
+    // takes the full load; `second` stays a scanned sibling. A full load
+    // would sanitize the bare (event-less) directory below away — the scan
+    // must not, since it merely lists projected IDs.
+    jp_workspace::roots::upsert_root(&user_dir, &second).unwrap();
+    jp_workspace::roots::upsert_root(&user_dir, &first).unwrap();
+
+    // A checkout-only conversation in the *second* root: present only as a
+    // projection directory, invisible to the first root's full load.
+    let conversation = ConversationId::from_str("jp-c17636257521").unwrap();
+    std::fs::create_dir_all(
+        second
+            .join(crate::DEFAULT_STORAGE_DIR)
+            .join("conversations")
+            .join(conversation.to_dirname(None))
+            .as_std_path(),
+    )
+    .unwrap();
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::Json);
+    Show {
+        target: Some(WorkspaceTarget::Id(id)),
+    }
+    .run(&printer, &env, false)
+    .unwrap();
+
+    let stdout = stdout_of(&printer, &out);
+    let json: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(
+        json["conversations"],
+        serde_json::json!(1),
+        "checkout-only conversation should be counted: {stdout}"
+    );
+    assert_eq!(
+        json["checkouts"].as_array().map(Vec::len),
+        Some(2),
+        "both live checkouts should be listed: {stdout}"
     );
 }
 

@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::Printer;
@@ -13,6 +13,8 @@ use crate::{
         Output,
         workspace::target::{self, ResolvedTarget, TargetEnv, WorkspaceTarget},
     },
+    format::workspace::{DetailsFmt, checkout_detail_item},
+    output::print_details,
 };
 
 /// Show a workspace: identity, checkouts, and how it resolves.
@@ -36,8 +38,8 @@ pub(crate) struct Show {
 struct Subject {
     id: Id,
     slug: Option<String>,
-    /// Live checkout roots, most recently used first.
-    roots: Vec<Utf8PathBuf>,
+    /// Live checkouts, most recently used first.
+    roots: Vec<roots::RootEntry>,
     /// How the subject was resolved, for the readout.
     resolved: &'static str,
 }
@@ -212,10 +214,7 @@ fn subject_for(env: &TargetEnv<'_>, id: Id, resolved: &'static str) -> Subject {
         .into_iter()
         .find(|workspace| workspace.id == id)
         .and_then(|workspace| workspace.slug);
-    let roots = roots::resolve_live_roots(&env.workspaces_dir, &id, DEFAULT_STORAGE_DIR)
-        .into_iter()
-        .map(|entry| entry.path)
-        .collect();
+    let roots = roots::resolve_live_roots(&env.workspaces_dir, &id, DEFAULT_STORAGE_DIR);
 
     Subject {
         id,
@@ -239,12 +238,7 @@ fn render(
     cwd_root: Option<&Utf8Path>,
     persist: bool,
 ) {
-    let name = match &subject.slug {
-        Some(slug) => format!("{} ({})", slug.clone().bold(), subject.id),
-        None => subject.id.to_string().bold().to_string(),
-    };
-    printer.println(format!("Workspace:     {name}"));
-    printer.println(format!("Resolved from: {}", subject.resolved));
+    let pretty = printer.pretty_printing_enabled();
 
     // Sticky is session-level state about the *active* workspace, so it only
     // renders when the subject is the active one.
@@ -253,40 +247,31 @@ fn render(
         && let Some(session) = env.session
         && let Some(mapping) = env.store.load(session)
     {
-        printer.println(format!(
-            "Sticky:        {}",
-            if mapping.sticky { "yes" } else { "no" },
-        ));
-        mapping.sticky
+        Some(mapping.sticky)
     } else {
-        false
+        None
     };
 
-    if subject.roots.is_empty() {
-        printer.println("Checkouts:     (no live checkouts)".to_owned());
-    } else {
-        printer.println("Checkouts:".to_owned());
-        for root in &subject.roots {
-            let marker = if active.is_some_and(|entry| entry.root == *root) {
-                "*"
-            } else {
-                " "
-            };
-            printer.println(format!("  {marker} {root}"));
-        }
-    }
+    let checkouts = subject
+        .roots
+        .iter()
+        .map(|entry| {
+            let is_active = active.is_some_and(|selection| selection.root == entry.path);
+            checkout_detail_item(&entry.path, entry.last_used, is_active, pretty)
+        })
+        .collect();
 
-    // The one multi-root read: union the conversation index across the
-    // user-local durable store and every live checkout, deduplicated by ID —
-    // accurate rather than cheap (RFD 087).
-    if let Some(stats) = conversation_stats(env, &subject.roots, persist) {
-        printer.println(format!("Conversations: {}", stats.count));
+    let stats = conversation_stats(env, &subject.roots, persist);
 
-        if let Some((id, title)) = stats.active {
-            let title = title.map(|t| format!(": {t}")).unwrap_or_default();
-            printer.println(format!("Active conversation: {id}{title}"));
-        }
-    }
+    let details = DetailsFmt::new(subject.id.clone(), subject.resolved)
+        .with_slug(subject.slug.as_deref())
+        .with_sticky(sticky)
+        .with_checkouts(checkouts)
+        .with_conversations(stats.as_ref().map(|stats| stats.count))
+        .with_active_conversation(stats.and_then(|stats| stats.active))
+        .with_pretty_printing(pretty);
+
+    print_details(printer, details.title(), details.rows(), &details.json());
 
     // The cwd-vs-active tension, surfaced instead of silently resolved (RFD
     // 087's precedence ladder): a sticky session keeps the active workspace;
@@ -295,7 +280,7 @@ fn render(
         && let Some(cwd_root) = cwd_root
         && active.is_some_and(|entry| entry.root != cwd_root)
     {
-        let note = if sticky {
+        let note = if sticky.unwrap_or(false) {
             format!(
                 "Note: the current directory resolves to `{cwd_root}`, but this session is sticky \
                  to its active workspace, which takes precedence for commands run here."
@@ -316,21 +301,33 @@ struct ConversationStats {
     active: Option<(ConversationId, Option<String>)>,
 }
 
-/// Load each live root's conversation index (index only, not event contents)
-/// and deduplicate by conversation ID.
+/// Union the conversation IDs across the user-local durable store and every
+/// live checkout, deduplicated by ID — accurate *and* cheap (RFD 087).
+///
+/// Only the first loadable root pays a full workspace load: that load already
+/// merges the user-local durable store, so every sibling checkout can only add
+/// conversations that live in its own projection alone.
+/// Those are picked up with a bare directory scan per sibling — no workspace
+/// construction, no user-local re-merge, and no roots-registry writes, keeping
+/// `show` read-only for the checkouts it merely reports on.
 ///
 /// Roots that fail to load are skipped with a warning; `None` when no root
 /// produced an index.
 fn conversation_stats(
     env: &TargetEnv<'_>,
-    roots: &[Utf8PathBuf],
+    roots: &[roots::RootEntry],
     persist: bool,
 ) -> Option<ConversationStats> {
     let mut ids: BTreeSet<ConversationId> = BTreeSet::new();
     let mut active = None;
-    let mut loaded_any = false;
+    let mut remaining = roots.iter();
 
-    for root in roots {
+    // One full load: user-local union, plus the session's active
+    // conversation. The session → conversation mapping is per workspace ID,
+    // so any loaded checkout answers it.
+    let mut loaded_any = false;
+    for entry in remaining.by_ref() {
+        let root = &entry.path;
         let (mut workspace, _backend) = match crate::load_workspace(root, persist) {
             Ok(loaded) => loaded,
             Err(error) => {
@@ -343,10 +340,7 @@ fn conversation_stats(
         ids.extend(workspace.conversations().map(|(id, _)| *id));
         loaded_any = true;
 
-        // The session → conversation mapping is per workspace ID, so any
-        // loaded checkout answers it; take the first.
-        if active.is_none()
-            && let Some(session) = env.session
+        if let Some(session) = env.session
             && let Some(id) = workspace.session_active_conversation(session)
         {
             let title = workspace
@@ -356,9 +350,22 @@ fn conversation_stats(
                 .and_then(|metadata| metadata.title.clone());
             active = Some((id, title));
         }
+
+        break;
     }
 
-    loaded_any.then_some(ConversationStats {
+    if !loaded_any {
+        return None;
+    }
+
+    // The sibling checkouts: checkout-only conversations via directory scan.
+    for entry in remaining {
+        ids.extend(jp_storage::load::projected_conversation_ids(
+            &entry.path.join(DEFAULT_STORAGE_DIR),
+        ));
+    }
+
+    Some(ConversationStats {
         count: ids.len(),
         active,
     })

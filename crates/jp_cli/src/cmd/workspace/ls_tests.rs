@@ -121,3 +121,56 @@ fn marks_the_session_active_checkout() {
         .any(|line| line.contains('*') && line.contains(canonical.as_str()));
     assert!(marked, "no active marker in output: {stdout}");
 }
+
+#[test]
+fn json_format_nests_checkouts_per_workspace() {
+    let tmp = tempdir().unwrap();
+    let root = make_workspace(tmp.path(), "proj", "ws123");
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session));
+    register(&env, "proj", "ws123", &root);
+
+    let canonical = root.canonicalize_utf8().unwrap();
+    env.store
+        .record_selection(
+            &session,
+            &Id::from_str("ws123").unwrap(),
+            &canonical,
+            Utc::now(),
+        )
+        .unwrap();
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::Json);
+    Ls {}.run(&printer, &env).unwrap();
+
+    let stdout = stdout_of(&printer, &out);
+    let json: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    let workspaces = json.as_array().expect("list output is a JSON array");
+    assert_eq!(workspaces.len(), 1, "one object per workspace: {stdout}");
+
+    // One self-contained object per workspace: identity at the top,
+    // checkouts nested — not one row-shaped object per checkout, and no
+    // display-column keys.
+    let workspace = &workspaces[0];
+    assert_eq!(workspace["id"], serde_json::json!("ws123"));
+    assert_eq!(workspace["slug"], serde_json::json!("proj"));
+
+    let checkouts = workspace["checkouts"]
+        .as_array()
+        .expect("checkouts is a JSON array");
+    assert_eq!(checkouts.len(), 1, "one entry per live checkout: {stdout}");
+
+    let checkout = &checkouts[0];
+    assert_eq!(checkout["path"], serde_json::json!(canonical.as_str()));
+    assert_eq!(
+        checkout["active"],
+        serde_json::json!(true),
+        "session-active checkout flags `active`: {stdout}"
+    );
+    assert!(
+        checkout["last_used"]
+            .as_str()
+            .is_some_and(|v| !v.is_empty()),
+        "last-used timestamp should be present: {stdout}"
+    );
+}

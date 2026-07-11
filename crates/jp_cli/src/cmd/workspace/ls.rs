@@ -6,7 +6,7 @@ use jp_workspace::roots;
 use crate::{
     DEFAULT_STORAGE_DIR,
     cmd::{Output, workspace::target::TargetEnv},
-    output::print_table,
+    output::{print_json, print_table},
 };
 
 /// List known workspaces and their checkouts.
@@ -22,10 +22,16 @@ impl Ls {
     pub(crate) fn run(self, printer: &Printer, env: &TargetEnv<'_>) -> Output {
         let known = roots::known_workspaces(&env.workspaces_dir, DEFAULT_STORAGE_DIR);
         if known.is_empty() {
-            printer.println(
-                "No known workspaces. JP registers a workspace when a command runs from inside it."
-                    .to_owned(),
-            );
+            // Machine-readable formats get an empty payload, not prose.
+            if printer.format().is_json() {
+                print_json(printer, &serde_json::json!([]));
+            } else {
+                printer.println(
+                    "No known workspaces. JP registers a workspace when a command runs from \
+                     inside it."
+                        .to_owned(),
+                );
+            }
             return Ok(());
         }
 
@@ -39,8 +45,30 @@ impl Ls {
         let header = Row::from(vec!["", "ID", "Name", "Checkout", "Last used"]);
         let mut rows = Vec::new();
 
+        // The JSON payload is one self-contained object per workspace with its
+        // checkouts nested, while the display rows are a projection:
+        // continuation rows blank the repeated ID/name, placeholder text marks
+        // checkout-less workspaces, and timestamps are localized.
+        let mut payload = Vec::with_capacity(known.len());
+
         for workspace in known {
             let name = workspace.slug.as_deref().unwrap_or("").to_owned();
+
+            payload.push(serde_json::json!({
+                "id": workspace.id.to_string(),
+                "slug": workspace.slug,
+                "checkouts": workspace
+                    .roots
+                    .iter()
+                    .map(|entry| {
+                        serde_json::json!({
+                            "path": entry.path,
+                            "active": is_active(&workspace.id, &entry.path),
+                            "last_used": entry.last_used,
+                        })
+                    })
+                    .collect::<Vec<_>>(),
+            }));
 
             if workspace.roots.is_empty() {
                 rows.push(Row::from(vec![
@@ -77,7 +105,13 @@ impl Ls {
             }
         }
 
-        print_table(printer, header, rows, false);
+        print_table(
+            printer,
+            header,
+            rows,
+            false,
+            &serde_json::Value::Array(payload),
+        );
         Ok(())
     }
 }
