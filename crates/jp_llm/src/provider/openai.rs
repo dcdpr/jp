@@ -338,9 +338,11 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     let cache_policy = config.assistant.request.cache;
     let parameters = config.assistant.model.parameters;
 
-    // Stable cache identity for this conversation. The creation timestamp
-    // doesn't change for the conversation's lifetime and is shared by forks,
-    // which share the cached prefix.
+    // Stable cache identity for this conversation. On load the stream's
+    // creation timestamp is derived from the conversation ID, so every
+    // request in a conversation produces the same key. A fork is a new
+    // conversation with its own timestamp: its first request misses the
+    // parent's warm cache and starts a cache lineage of its own.
     let conversation_created_at = thread.events.created_at;
 
     // Parse verbosity from the catch-all parameters map.
@@ -390,23 +392,33 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     };
 
     let is_structured = text.is_some();
+
+    // Models with unknown reasoning support (absent from the catalog, e.g.
+    // released after this binary was built) are assumed to support reasoning
+    // request configuration. This lets `reasoning = "off"` send `effort: none`
+    // rather than silently accepting the model's reasoning-on default.
+    // Conversation replay is independent of this flag: namespaced OpenAI item
+    // metadata determines whether a stored event has a native representation.
     let supports_reasoning = model
         .reasoning
-        .is_some_and(|v| !matches!(v, ReasoningDetails::Unsupported));
+        .is_none_or(|v| !matches!(v, ReasoningDetails::Unsupported));
     let mut reasoning = match model.custom_reasoning_config(parameters.reasoning) {
         Some(r) => Some(convert_reasoning(r, model)),
         // Explicitly disable reasoning for models that support it when the
         // user has turned it off. Sending `null` lets the model use its
         // default (which may include reasoning).
         //
-        // For leveled models, use their lowest supported effort. For all
-        // others (budgetted), fall back to `minimal` which is universally
-        // supported across OpenAI reasoning models.
+        // For leveled models, use their lowest supported effort. Budgetted
+        // models fall back to `minimal`, which every cataloged OpenAI
+        // reasoning model accepts. Unknown models are newer than this binary,
+        // and every OpenAI flagship since GPT-5.1 accepts `none`, so honor
+        // "off" literally rather than spending reasoning tokens at the
+        // model's default effort.
         None if supports_reasoning => {
-            let effort = model
-                .reasoning
-                .and_then(|r| r.lowest_effort())
-                .unwrap_or(ReasoningEffort::Xlow);
+            let effort = match model.reasoning {
+                None => ReasoningEffort::None,
+                Some(r) => r.lowest_effort().unwrap_or(ReasoningEffort::Xlow),
+            };
             Some(convert_reasoning(
                 CustomReasoningConfig {
                     effort,
@@ -528,7 +540,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         parameters.top_p
     };
 
-    messages.extend(convert_events(supports_reasoning)(parts.events));
+    messages.extend(convert_events(parts.events));
     let request = Request {
         model: types::Model::Other(model.id.name.to_string()),
         input: types::Input::List(messages),
@@ -731,7 +743,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 false, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 8, 10).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -745,7 +760,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 false, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -785,7 +803,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 true, false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 8, 10).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -796,7 +817,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -807,7 +831,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -818,7 +845,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.4-mini",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -845,7 +875,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 true, false, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -856,7 +889,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -870,11 +906,14 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 false, true, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
-        "gpt-5-pro" => ModelDetails {
+        "gpt-5-pro" | "gpt-5-pro-2025-10-06" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some("GPT-5 pro".to_owned()),
             context_window: Some(400_000),
@@ -883,7 +922,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 false, false, false, false, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5-pro",
+                Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -896,7 +938,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 false, true, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -907,7 +952,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 5, 31).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.4-mini",
+                Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
+            )),
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
@@ -918,7 +966,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 5, 31).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.4-nano",
+                Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
+            )),
             structured_output: None,
             features: vec![],
         },
@@ -929,7 +980,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.4-mini",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![],
         },
@@ -940,20 +994,9 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2023, 10, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: None,
-            features: vec![],
-        },
-        "o1-mini" | "o1-mini-2024-09-12" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some("o1-mini".to_owned()),
-            context_window: Some(128_000),
-            max_output_tokens: Some(65_536),
-            reasoning: Some(ReasoningDetails::budgetted(0, None)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2023, 10, 1).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: o4-mini",
-                Some(NaiveDate::from_ymd_opt(2025, 10, 27).unwrap()),
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
             )),
             structured_output: None,
             features: vec![],
@@ -965,7 +1008,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
+            )),
             structured_output: None,
             features: vec![],
         },
@@ -976,7 +1022,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5-pro",
+                Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
+            )),
             structured_output: None,
             features: vec![],
         },
@@ -987,7 +1036,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2023, 10, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![],
         },
@@ -998,7 +1050,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2023, 10, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5-pro",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![],
         },
@@ -1013,27 +1068,18 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             structured_output: None,
             features: vec![],
         },
-        "gpt-4o" | "gpt-4o-2024-08-06" => ModelDetails {
+        "gpt-4o" | "gpt-4o-2024-08-06" | "gpt-4o-2024-11-20" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some("GPT-4o".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2023, 10, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: None,
-            features: vec![],
-        },
-        "chatgpt-4o" | "chatgpt-4o-latest" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some("ChatGPT-4o".to_owned()),
-            context_window: Some(128_000),
-            max_output_tokens: Some(16_384),
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2023, 10, 1).unwrap()),
+            // Deprecated without an announced retirement date; only the
+            // 2024-05-13 snapshot has a scheduled shutdown (2026-10-23).
             deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gpt-5.1-chat-latest",
-                Some(NaiveDate::from_ymd_opt(2026, 2, 11).unwrap()),
+                &"recommended replacement: gpt-5.5",
+                None,
             )),
             structured_output: None,
             features: vec![],
@@ -1045,7 +1091,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(32_768),
             reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.4-nano",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![],
         },
@@ -1100,7 +1149,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5-pro",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![],
         },
@@ -1111,7 +1163,10 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(100_000),
             reasoning: Some(ReasoningDetails::budgetted(0, None)),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5-pro",
+                Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
+            )),
             structured_output: None,
             features: vec![],
         },
@@ -1935,117 +1990,119 @@ fn parse_phase(metadata: &mut Map<String, Value>) -> Option<types::Phase> {
 }
 
 #[expect(clippy::too_many_lines)]
-fn convert_events(
-    supports_reasoning: bool,
-) -> impl Fn(ConversationStream) -> Vec<types::InputListItem> {
-    move |events| {
-        events
-            .into_iter()
-            .flat_map(|event| {
-                let ConversationEvent {
-                    kind, mut metadata, ..
-                } = event.event;
+fn convert_events(events: ConversationStream) -> Vec<types::InputListItem> {
+    events
+        .into_iter()
+        .flat_map(|event| {
+            let ConversationEvent {
+                kind, mut metadata, ..
+            } = event.event;
 
-                match kind {
-                    EventKind::ChatRequest(request) => {
-                        vec![types::InputListItem::Message(types::InputMessage {
-                            role: types::Role::User,
-                            content: types::ContentInput::Text(request.content),
-                            phase: None,
-                        })]
-                    }
-                    EventKind::ChatResponse(response) => {
-                        let id = metadata
-                            .remove(ITEM_ID_KEY)
-                            .and_then(|v| v.as_str().map(str::to_owned));
+            match kind {
+                EventKind::ChatRequest(request) => {
+                    vec![types::InputListItem::Message(types::InputMessage {
+                        role: types::Role::User,
+                        content: types::ContentInput::Text(request.content),
+                        phase: None,
+                    })]
+                }
+                EventKind::ChatResponse(response) => {
+                    let id = metadata
+                        .remove(ITEM_ID_KEY)
+                        .and_then(|v| v.as_str().map(str::to_owned));
 
-                        let encrypted_content = metadata
-                            .remove(ENCRYPTED_CONTENT_KEY)
-                            .and_then(|v| v.as_str().map(str::to_owned));
+                    let encrypted_content = metadata
+                        .remove(ENCRYPTED_CONTENT_KEY)
+                        .and_then(|v| v.as_str().map(str::to_owned));
 
-                        let phase = parse_phase(&mut metadata);
+                    let phase = parse_phase(&mut metadata);
 
-                        match response {
-                            ChatResponse::Reasoning { reasoning } => {
-                                if supports_reasoning && let Some(id) = id {
-                                    vec![types::InputListItem::Item(types::InputItem::Reasoning(
-                                        types::Reasoning {
-                                            id,
-                                            summary: vec![types::ReasoningSummary::Text {
-                                                text: reasoning,
-                                            }],
-                                            encrypted_content,
-                                            status: None,
-                                        },
-                                    ))]
-                                } else {
-                                    // Unsupported reasoning content - wrap in XML tags
-                                    vec![types::InputListItem::Message(types::InputMessage {
-                                        role: types::Role::Assistant,
-                                        content: types::ContentInput::Text(format!(
-                                            "<think>\n{reasoning}\n</think>\n\n",
-                                        )),
-                                        phase,
-                                    })]
-                                }
-                            }
-                            ChatResponse::Message { message } => {
-                                if let Some(id) = id {
-                                    vec![types::InputListItem::Item(
-                                        types::InputItem::OutputMessage(types::OutputMessage {
-                                            id,
-                                            role: types::Role::Assistant,
-                                            content: vec![types::OutputContent::Text {
-                                                text: message,
-                                                annotations: vec![],
-                                            }],
-                                            status: types::MessageStatus::Completed,
-                                            phase,
-                                        }),
-                                    )]
-                                } else {
-                                    vec![types::InputListItem::Message(types::InputMessage {
-                                        role: types::Role::Assistant,
-                                        content: types::ContentInput::Text(message),
-                                        phase,
-                                    })]
-                                }
-                            }
-                            ChatResponse::Structured { data } => {
+                    match response {
+                        ChatResponse::Reasoning { reasoning } => {
+                            if let Some(id) = id {
+                                // The namespaced OpenAI item id is proof that
+                                // this event originated as a native reasoning
+                                // item. Preserve that representation and let
+                                // the Responses API decide whether it is
+                                // compatible with the target model.
+                                vec![types::InputListItem::Item(types::InputItem::Reasoning(
+                                    types::Reasoning {
+                                        id,
+                                        summary: vec![types::ReasoningSummary::Text {
+                                            text: reasoning,
+                                        }],
+                                        encrypted_content,
+                                        status: None,
+                                    },
+                                ))]
+                            } else {
+                                // Reasoning from another provider has no
+                                // OpenAI-native representation.
                                 vec![types::InputListItem::Message(types::InputMessage {
                                     role: types::Role::Assistant,
-                                    content: types::ContentInput::Text(data.to_string()),
+                                    content: types::ContentInput::Text(format!(
+                                        "<think>\n{reasoning}\n</think>\n\n",
+                                    )),
                                     phase,
                                 })]
                             }
                         }
+                        ChatResponse::Message { message } => {
+                            if let Some(id) = id {
+                                vec![types::InputListItem::Item(types::InputItem::OutputMessage(
+                                    types::OutputMessage {
+                                        id,
+                                        role: types::Role::Assistant,
+                                        content: vec![types::OutputContent::Text {
+                                            text: message,
+                                            annotations: vec![],
+                                        }],
+                                        status: types::MessageStatus::Completed,
+                                        phase,
+                                    },
+                                ))]
+                            } else {
+                                vec![types::InputListItem::Message(types::InputMessage {
+                                    role: types::Role::Assistant,
+                                    content: types::ContentInput::Text(message),
+                                    phase,
+                                })]
+                            }
+                        }
+                        ChatResponse::Structured { data } => {
+                            vec![types::InputListItem::Message(types::InputMessage {
+                                role: types::Role::Assistant,
+                                content: types::ContentInput::Text(data.to_string()),
+                                phase,
+                            })]
+                        }
                     }
-                    EventKind::ToolCallRequest(request) => vec![types::InputListItem::Item(
-                        types::InputItem::FunctionCall(types::FunctionCall {
-                            call_id: request.id,
-                            name: request.name,
-                            arguments: Value::Object(request.arguments).to_string(),
-                            status: None,
-                            id: None,
-                        }),
-                    )],
-                    EventKind::ToolCallResponse(ToolCallResponse { id, result }) => {
-                        vec![types::InputListItem::Item(
-                            types::InputItem::FunctionCallOutput(types::FunctionCallOutput {
-                                call_id: id,
-                                output: match result {
-                                    Ok(content) | Err(content) => content,
-                                },
-                                id: None,
-                                status: None,
-                            }),
-                        )]
-                    }
-                    _ => vec![],
                 }
-            })
-            .collect()
-    }
+                EventKind::ToolCallRequest(request) => vec![types::InputListItem::Item(
+                    types::InputItem::FunctionCall(types::FunctionCall {
+                        call_id: request.id,
+                        name: request.name,
+                        arguments: Value::Object(request.arguments).to_string(),
+                        status: None,
+                        id: None,
+                    }),
+                )],
+                EventKind::ToolCallResponse(ToolCallResponse { id, result }) => {
+                    vec![types::InputListItem::Item(
+                        types::InputItem::FunctionCallOutput(types::FunctionCallOutput {
+                            call_id: id,
+                            output: match result {
+                                Ok(content) | Err(content) => content,
+                            },
+                            id: None,
+                            status: None,
+                        }),
+                    )]
+                }
+                _ => vec![],
+            }
+        })
+        .collect()
 }
 
 impl From<types::response::Error> for Error {

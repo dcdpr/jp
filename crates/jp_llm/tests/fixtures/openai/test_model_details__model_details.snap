@@ -29,7 +29,12 @@ expression: v
             2024-05-31,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-mini",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
         features: [

@@ -1,0 +1,58 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Calculating step by step**\n\nI need to provide the answer step by step for the multiplication of 191 and 7. First, I'll calculate it as: 191 times 7, which equals 1,337. To show decomposition clearly, I might break it down into simpler components or use an explanation format. This approach helps in understanding how the final answer is reached. Let’s proceed with the detailed breakdown to clarify each step involved!",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_07438998cff5a1cf016a5165e62fd481a38d8b499c76ba46ac"),
+                    "openai_encrypted_content": String("gAAAAABqUWXmvywmzdB62euksgvbwO0GqtFusGL2DJtNm3Bl2igW8BkBSVRJpk1081XUBRWe_117fpqB9twkKvYat4Ul9pSGV0r7O48FFyH1GOhAnA0LwSdGwICK7XCvBuiSsfjs03GQ4MeB2AQ2aB_SEJ-Ki8Yq5WhQ2EiQlcnzpyK5Rc1ulnbgcUQWk7BRbyAIDYayrH1SJB0y6G2AHWO5lISWXIpyaNsTSf-uoPmFdZ_yjgpSqHelqBJRtXv09CAKsKLuolIueGinUaA53I5DqRJkhn7cMd_xS0vlY3oQxQqMgHOscCfIuCKk0eMcvkHsuzzrkLt47ZM-MyEh7DF2m7DaGZ4hsECRfvORXt8rdsIQlqtLgK6wwT7W549IMnvGLg8yyjPA2TqLvKkhYkyolTHdzrfmUw6ItWRMHrAA3ofWkbuqJpnKD2Owci6suYMvwUBdxvhDgHgiOknpX7gvjDorsTH3P8pL4ij2--HG9ebYeRcDZ0-tNjBFILA-nIJLwUNlF3EoWyngrhglw6mK5BhQravrv5MHp4lu3uqm7EnZvCW1ruZYESTSCSgiW7NvdK9p88j1gOA6ctmj1-qtwSekkE5cvonD_kfUtYPq2MyzpZbIsZxpigPdqSuaKAPYTjo71uBJO77_NZeaaomFSgu7cuWiEcp_KdVv3iJTHvK6M4p_PzmJZCGWZgpJOPHMwcSrOPFhsAgon5DPJA3rRZv1RyzX9a9KgyL12yPAk9to_aZlACzYl2rIHExGVya-lTHnL06MwDIhYyEarvMAkmFyh7CMUdsKyBRkel1PPkh82g-gZX7af-hBxylwNoRNRq4Dg6ZOTEpwWou_v7x_JCZO58h2eoEXBJ_3YSRDUQ8xIsuNZbVKUzu-E93vUBH1siW6Ec0qJL4ngW6fpVGXWDaAOMGPSizEWr9HOQqX4ezSiSHTDGYPKjWE7jSEjwi1BXgds8D9c6HueSaPDhMRmkrh-8i4vMJROZO-sGQtrzrioLw0bZg5Z-BL8BHq-BbpjvYRfmDn"),
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "\\(191 \\times 7\\)\n\n1. \\(190 \\times 7 = 1330\\)\n2. \\(1 \\times 7 = 7\\)\n3. \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_07438998cff5a1cf016a5165e6fa7481a3b0ae3b0f49f712fa"),
+                    "openai_phase": String("final_answer"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "\\(191 \\times 7\\)\n\n1. \\(190 \\times 7 = 1330\\)\n2. \\(1 \\times 7 = 7\\)\n3. \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_07438998cff5a1cf016a5165eaf1c881a39f7ed918a773df01"),
+                    "openai_phase": String("final_answer"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

@@ -1,0 +1,273 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openai",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
+          },
+          "stop_words": [],
+          "other": {
+            "reasoning_mode": "pro"
+          }
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "What is 7 * 191? Reason it through step by step."
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "name": "gpt-5.6"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Calculating step by step**\n\nI need to provide the answer step by step for the multiplication of 191 and 7. First, I'll calculate it as: 191 times 7, which equals 1,337. To show decomposition clearly, I might break it down into simpler components or use an explanation format. This approach helps in understanding how the final answer is reached. Let’s proceed with the detailed breakdown to clarify each step involved!",
+      "metadata": {
+        "openai_item_id": "cnNfMDc0Mzg5OThjZmY1YTFjZjAxNmE1MTY1ZTYyZmQ0ODFhMzhkOGI0OTljNzZiYTQ2YWM=",
+        "openai_encrypted_content": "Z0FBQUFBQnFVV1htdnl3bXpkQjYyZXVrc2d2YndPMEdxdEZ1c0dMMkRKdE5tM0JsMmlnVzhCa0JTVlJKcGsxMDgxWFVCUldlXzExN2ZwcUI5dHdrS3ZZYXQ0VWw5cFNHVjByN080OEZGeUgxR09oQW5BMEx3U2RHd0lDSzdYQ3ZCdWlTc2ZqczAzR1E0TWVCMkFRMmFCX1NFSi1LaThZcTVXaFEyRWlRbGNuenB5SzVSYzF1bG5iZ2NVUVdrN0JSYnlBSURZYXlySDFTSkIweTZHMkFIV081bElTV1hJcHlhTnNUU2YtdW9QbUZkWl95amdwU3FIZWxxQkpSdFh2MDlDQUtzS0x1b2xJdWVHaW5VYUE1M0k1RHFSSmtobjdjTWRfeFMwdmxZM29ReFFxTWdIT3NjQ2ZJdUNLazBlTWN2a0hzdXp6cmtMdDQ3Wk0tTXlFaDdERjJtN0RhR1o0aHNFQ1Jmdk9SWHQ4cmRzSVFscXRMZ0s2d3dUN1c1NDlJTW52R0xnOHl5alBBMlRxTHZLa2hZa3lvbFRIZHpyZm1VdzZJdFdSTUhyQUEzb2ZXa2J1cUpwbktEMk93Y2k2c3VZTXZ3VUJkeHZoRGdIZ2lPa25wWDdndmpEb3JzVEgzUDhwTDRpajItLUhHOWViWWVSY0RaMC10TmpCRklMQS1uSUpMd1VObEYzRW9XeW5ncmhnbHc2bUs1QmhRcmF2cnY1TUhwNGx1M3VxbTdFblp2Q1cxcnVaWUVTVFNDU2dpVzdOdmRLOXA4OGoxZ09BNmN0bWoxLXF0d1Nla2tFNWN2b25EX2tmVXRZUHEyTXl6cFpiSXNaeHBpZ1BkcVN1YUtBUFlUam83MXVCSk83N19OWmVhYW9tRlNndTdjdVdpRWNwX0tkVnYzaUpUSHZLNk00cF9Qem1KWkNHV1pncEpPUEhNd2NTck9QRmhzQWdvbjVEUEpBM3JSWnYxUnl6WDlhOUtneUwxMnlQQWs5dG9fYVpsQUN6WWwycklIRXhHVnlhLWxUSG5MMDZNd0RJaFl5RWFydk1Ba21GeWg3Q01VZHNLeUJSa2VsMVBQa2g4MmctZ1pYN2FmLWhCeHlsd05vUk5ScTREZzZaT1RFcHdXb3Vfdjd4X0pDWk81OGgyZW9FWEJKXzNZU1JEVVE4eElzdU5aYlZLVXp1LUU5M3ZVQkgxc2lXNkVjMHFKTDRuZ1c2ZnBWR1hXRGFBT01HUFNpekVXcjlIT1FxWDRlelNpU0hUREdZUEtqV0U3alNFandpMUJYZ2RzOEQ5YzZIdWVTYVBEaE1SbWtyaC04aTR2TUpST1pPLXNHUXRyenJpb0x3MGJaZzVaLUJMOEJIcS1CYnBqdllSZm1Ebg=="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "\\(191 \\times 7\\)\n\n1. \\(190 \\times 7 = 1330\\)\n2. \\(1 \\times 7 = 7\\)\n3. \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**",
+      "metadata": {
+        "openai_item_id": "bXNnXzA3NDM4OTk4Y2ZmNWExY2YwMTZhNTE2NWU2ZmE3NDgxYTNiMGFlM2IwZjQ5ZjcxMmZh",
+        "openai_phase": "ZmluYWxfYW5zd2Vy"
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "name": "test"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Repeat your previous answer."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "\\(191 \\times 7\\)\n\n1. \\(190 \\times 7 = 1330\\)\n2. \\(1 \\times 7 = 7\\)\n3. \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**",
+      "metadata": {
+        "openai_item_id": "bXNnXzA3NDM4OTk4Y2ZmNWExY2YwMTZhNTE2NWVhZjFjODgxYTM5ZjdlZDkxOGE3NzNkZjAx",
+        "openai_phase": "ZmluYWxfYW5zd2Vy"
+      }
+    }
+  ]
+}
