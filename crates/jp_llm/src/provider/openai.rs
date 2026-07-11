@@ -512,8 +512,11 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     }
 
     // GPT-5 family models reject temperature/top_p when reasoning is active
-    // (any effort other than `none`). Strip them and warn if configured.
-    let strip_temp = model.features.contains(&TEMP_REQUIRES_NO_REASONING)
+    // (any effort other than `none`). Models absent from the catalog are
+    // newer than this binary and assumed to share the constraint. Strip the
+    // parameters and warn if configured.
+    let strip_temp = (model.features.contains(&TEMP_REQUIRES_NO_REASONING)
+        || model.reasoning.is_none())
         && reasoning
             .as_ref()
             .is_some_and(|r| !matches!(r.effort, Some(types::ReasoningEffort::None)));
