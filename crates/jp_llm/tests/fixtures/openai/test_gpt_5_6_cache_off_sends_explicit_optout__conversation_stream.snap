@@ -1,0 +1,222 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openai",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
+          },
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "cache": false
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "What is 7 * 191?"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "1337",
+      "metadata": {
+        "openai_item_id": "bXNnXzBmMTU5MjQwZDY5ZDgxOWUwMTZhNTNjYWEzYzA3ODgxOTQ5OWZkZThlNmYxNWM0NjFj",
+        "openai_phase": "ZmluYWxfYW5zd2Vy"
+      }
+    }
+  ]
+}

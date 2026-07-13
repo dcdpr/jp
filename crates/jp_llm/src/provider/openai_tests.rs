@@ -742,7 +742,8 @@ mod map_model {
     use chrono::{TimeZone as _, Utc};
 
     use super::super::{
-        ModelResponse, STREAMING_UNSUPPORTED, TEMP_REQUIRES_NO_REASONING, map_model,
+        EXPLICIT_PROMPT_CACHING, ModelResponse, PERSISTED_REASONING, REASONING_PRO_MODE,
+        STREAMING_UNSUPPORTED, TEMP_REQUIRES_NO_REASONING, map_model,
     };
     use crate::model::{ModelDeprecation, ReasoningDetails};
 
@@ -756,6 +757,83 @@ mod map_model {
     }
 
     #[test]
+    fn gpt_5_6_sol_uses_latest_metadata() {
+        let details = map_model(model("gpt-5.6-sol")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Sol"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true, true,
+            ))
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2026, 2, 16)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
+    fn gpt_5_6_alias_resolves_to_sol_metadata() {
+        let details = map_model(model("gpt-5.6")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Sol"));
+    }
+
+    #[test]
+    fn gpt_5_6_terra_uses_latest_metadata() {
+        let details = map_model(model("gpt-5.6-terra")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Terra"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true, true,
+            ))
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
+    fn gpt_5_6_luna_uses_latest_metadata() {
+        let details = map_model(model("gpt-5.6-luna")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-5.6 Luna"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(
+                true, false, true, true, true, true, true,
+            ))
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
     fn gpt_5_5_uses_latest_metadata() {
         let details = map_model(model("gpt-5.5")).unwrap();
 
@@ -765,7 +843,7 @@ mod map_model {
         assert_eq!(
             details.reasoning,
             Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true,
+                true, false, true, true, true, true, false,
             ))
         );
         assert_eq!(
@@ -786,7 +864,7 @@ mod map_model {
         assert_eq!(
             details.reasoning,
             Some(ReasoningDetails::leveled(
-                false, false, false, true, true, true,
+                false, false, false, true, true, true, false,
             ))
         );
         assert_eq!(
@@ -798,6 +876,373 @@ mod map_model {
             TEMP_REQUIRES_NO_REASONING,
             STREAMING_UNSUPPORTED
         ]);
+    }
+
+    /// The retirement notice names only the dated snapshot: the rolling `gpt-5`
+    /// alias carries the migration note without a date, while the snapshot
+    /// carries the announced shutdown date.
+    #[test]
+    fn gpt_5_alias_deprecated_without_retirement_date() {
+        let alias = map_model(model("gpt-5")).unwrap();
+        assert_eq!(
+            alias.deprecated,
+            Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                None,
+            ))
+        );
+
+        let snapshot = map_model(model("gpt-5-2025-08-07")).unwrap();
+        assert_eq!(
+            snapshot.deprecated,
+            Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                chrono::NaiveDate::from_ymd_opt(2026, 12, 11),
+            ))
+        );
+    }
+}
+
+mod unknown_model {
+    use chrono::{TimeZone as _, Utc};
+    use jp_config::{
+        AppConfig,
+        model::{
+            id::{ModelIdConfig, ModelIdOrAliasConfig, ProviderId},
+            parameters::ReasoningConfig,
+        },
+        providers::llm::LlmProviderConfig,
+    };
+    use jp_conversation::{
+        ConversationStream,
+        event::{ChatRequest, ChatResponse, ConversationEvent, TurnStart},
+        thread::ThreadBuilder,
+    };
+
+    use super::super::{ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY};
+    use crate::{
+        model::{ModelDetails, ReasoningDetails},
+        provider::build_request_value,
+        query::ChatQuery,
+    };
+
+    /// A model absent from the catalog (e.g. released after this binary was
+    /// built) replays stored reasoning events that carry OpenAI item ids as
+    /// native reasoning items — not as `<think>` fallback text, which the
+    /// model would mimic in its visible output.
+    #[test]
+    fn replays_reasoning_natively() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-9".parse().unwrap(),
+        });
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("First question"), ts),
+            ConversationEvent::new(ChatResponse::reasoning("Earlier reasoning."), ts)
+                .with_metadata_field(ITEM_ID_KEY, "rs_123")
+                .with_metadata_field(ENCRYPTED_CONTENT_KEY, "encrypted-blob"),
+            ConversationEvent::new(ChatResponse::message("First answer."), ts),
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("Second question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env;
+
+        let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &model,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(
+            !request.contains("<think>"),
+            "reasoning replayed as fallback text: {request}"
+        );
+        assert!(
+            request.contains(r#""type":"reasoning""#) && request.contains("encrypted-blob"),
+            "native reasoning item missing from request: {request}"
+        );
+    }
+
+    /// OpenAI item provenance wins over target-model capability metadata.
+    /// A native reasoning item remains native even when continuing with a model
+    /// cataloged as not supporting reasoning; the API owns compatibility.
+    #[test]
+    fn native_reasoning_replay_ignores_target_capability() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-9".parse().unwrap(),
+        });
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("First question"), ts),
+            ConversationEvent::new(ChatResponse::reasoning("Earlier reasoning."), ts)
+                .with_metadata_field(ITEM_ID_KEY, "rs_123")
+                .with_metadata_field(ENCRYPTED_CONTENT_KEY, "encrypted-blob"),
+            ConversationEvent::new(ChatResponse::message("First answer."), ts),
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("Second question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env;
+
+        let mut model = ModelDetails::empty("openai/gpt-4o".parse().unwrap());
+        model.reasoning = Some(ReasoningDetails::unsupported());
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &model,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(
+            request.contains(r#""type":"reasoning""#) && request.contains("encrypted-blob"),
+            "native reasoning item missing from request: {request}"
+        );
+        assert!(!request.contains("<think>"));
+    }
+
+    /// Active reasoning on a model absent from the catalog strips `temperature`
+    /// and `top_p`: unknown models are newer than this binary, and every
+    /// GPT-5-era model rejects sampling parameters alongside active reasoning.
+    #[test]
+    fn active_reasoning_strips_temperature() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-9".parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Auto);
+        config.assistant.model.parameters.temperature = Some(0.7);
+        config.assistant.model.parameters.top_p = Some(0.9);
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env;
+
+        let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &model,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(
+            request.contains(r#""temperature":null"#),
+            "temperature not stripped alongside active reasoning: {request}"
+        );
+        assert!(
+            request.contains(r#""top_p":null"#),
+            "top_p not stripped alongside active reasoning: {request}"
+        );
+    }
+
+    /// `reasoning = "off"` on a model absent from the catalog disables
+    /// reasoning explicitly with `effort: none`.
+    /// Omitting the field would let the model reason (hidden, and billed) at
+    /// its default effort.
+    #[test]
+    fn reasoning_off_sends_none_effort() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-9".parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env;
+
+        let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &model,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(
+            request.contains(r#""effort":"none""#),
+            "reasoning not explicitly disabled: {request}"
+        );
+    }
+
+    /// Unconfigured reasoning on a model absent from the catalog omits the
+    /// `reasoning` field entirely, keeping the model's default behavior.
+    /// A non-reasoning deployment (e.g. a fine-tuned chat model) may reject the
+    /// field, so it is only sent when the user explicitly configures reasoning.
+    #[test]
+    fn unconfigured_reasoning_omits_field() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-9".parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning = None;
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env;
+
+        let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &model,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(
+            request.contains(r#""reasoning":null"#),
+            "reasoning field sent without explicit configuration: {request}"
+        );
+    }
+}
+
+mod convert_reasoning {
+    use jp_config::model::parameters::{CustomReasoningConfig, ReasoningEffort};
+    use openai_responses::types;
+
+    use super::super::convert_reasoning;
+    use crate::model::{ModelDetails, ReasoningDetails};
+
+    fn model(reasoning: ReasoningDetails) -> ModelDetails {
+        let mut details = ModelDetails::empty("openai/test-model".parse().unwrap());
+        details.max_output_tokens = Some(128_000);
+        details.reasoning = Some(reasoning);
+        details
+    }
+
+    #[test]
+    fn max_effort_is_sent_when_supported() {
+        let details = model(ReasoningDetails::leveled(
+            true, false, true, true, true, true, true,
+        ));
+        let config = convert_reasoning(
+            CustomReasoningConfig {
+                effort: ReasoningEffort::Max,
+                exclude: false,
+            },
+            &details,
+        );
+
+        assert_eq!(config.effort, Some(types::ReasoningEffort::Max));
+    }
+
+    #[test]
+    fn max_effort_degrades_to_xhigh_when_unsupported() {
+        let details = model(ReasoningDetails::leveled(
+            true, false, true, true, true, true, false,
+        ));
+        let config = convert_reasoning(
+            CustomReasoningConfig {
+                effort: ReasoningEffort::Max,
+                exclude: false,
+            },
+            &details,
+        );
+
+        assert_eq!(config.effort, Some(types::ReasoningEffort::XHigh));
+    }
+}
+
+mod parse_reasoning_mode {
+    use openai_responses::types;
+
+    use super::super::{REASONING_PRO_MODE, parse_reasoning_mode};
+    use crate::model::ModelDetails;
+
+    fn model(features: Vec<&'static str>) -> ModelDetails {
+        let mut details = ModelDetails::empty("openai/test-model".parse().unwrap());
+        details.features = features;
+        details
+    }
+
+    #[test]
+    fn pro_is_sent_when_supported() {
+        assert_eq!(
+            parse_reasoning_mode("pro", &model(vec![REASONING_PRO_MODE])),
+            Some(types::ReasoningMode::Pro)
+        );
+    }
+
+    #[test]
+    fn pro_is_skipped_when_unsupported() {
+        assert_eq!(parse_reasoning_mode("pro", &model(vec![])), None);
+    }
+
+    #[test]
+    fn standard_and_unknown_values_are_ignored() {
+        let details = model(vec![REASONING_PRO_MODE]);
+
+        assert_eq!(parse_reasoning_mode("standard", &details), None);
+        assert_eq!(parse_reasoning_mode("turbo", &details), None);
     }
 }
 
@@ -1049,6 +1494,250 @@ mod map_non_streaming_finish_reason {
         .unwrap();
 
         assert_eq!(event, Event::Finished(FinishReason::MaxTokens));
+    }
+}
+
+/// Tests recorded against the real OpenAI API.
+///
+/// Record with a valid `OPENAI_API_KEY`:
+///
+/// ```sh
+/// RECORD=1 cargo test -p jp_llm recorded::
+/// ```
+///
+/// Until the cassettes exist, these tests fail on replay.
+mod recorded {
+    use std::sync::Arc;
+
+    use chrono::{TimeZone as _, Utc};
+    use jp_attachment::Attachment;
+    use jp_config::assistant::request::CachePolicy;
+    use jp_conversation::{ConversationStream, event::ChatResponse};
+    use jp_test::{Result, function_name};
+    use test_log::test;
+
+    use super::super::{ModelResponse, PROVIDER, map_model};
+    use crate::{
+        model::ModelDetails,
+        test::{TestRequest, run_test},
+    };
+
+    /// Catalog `ModelDetails` for a real OpenAI model name, via `map_model` so
+    /// the test cannot drift from the catalog entry.
+    fn catalog_details(name: &str) -> ModelDetails {
+        map_model(ModelResponse {
+            id: name.to_owned(),
+            _object: "model".to_owned(),
+            _created: Utc.with_ymd_and_hms(2026, 4, 23, 0, 0, 0).unwrap(),
+            _owned_by: "openai".to_owned(),
+        })
+        .unwrap()
+    }
+
+    /// Target the request at a real cataloged model: sets the config model id
+    /// and replaces the test-default `ModelDetails` with the catalog entry.
+    fn on_model(request: TestRequest, name: &str) -> TestRequest {
+        let mut request = request.model(format!("openai/{name}").parse().unwrap());
+        if let Some(details) = request.as_model_details_mut() {
+            *details = catalog_details(name);
+        }
+        request
+    }
+
+    /// Set a catch-all parameter (`assistant.model.parameters.<key>`) on the
+    /// request's base config.
+    fn with_parameter(mut request: TestRequest, key: &str, value: &str) -> TestRequest {
+        let Some(thread) = request.as_thread_mut() else {
+            return request;
+        };
+
+        let mut base = (*thread.events.base_config()).clone();
+        base.assistant
+            .model
+            .parameters
+            .other
+            .insert(key.to_owned(), serde_json::Value::from(value).into());
+
+        let placeholder = ConversationStream::new(thread.events.base_config());
+        let stream = std::mem::replace(&mut thread.events, placeholder);
+        thread.events = stream.with_base_config(Arc::new(base));
+
+        request
+    }
+
+    /// Give the request a stable system prompt and text attachment, so the
+    /// recorded body carries both explicit prompt-cache breakpoints: one at the
+    /// end of the system prompt, one at the end of the attachments.
+    fn with_cacheable_prefix(mut request: TestRequest) -> TestRequest {
+        if let Some(thread) = request.as_thread_mut() {
+            thread.system_prompt = Some("You are a concise assistant.".to_owned());
+        }
+
+        request.attachment(Attachment::text(
+            "file:///notes.txt",
+            "The magic number is 42.",
+        ))
+    }
+
+    /// Disable prompt caching (`assistant.request.cache = off`) on the
+    /// request's base config.
+    fn with_cache_off(mut request: TestRequest) -> TestRequest {
+        let Some(thread) = request.as_thread_mut() else {
+            return request;
+        };
+
+        let mut base = (*thread.events.base_config()).clone();
+        base.assistant.request.cache = CachePolicy::Off;
+
+        let placeholder = ConversationStream::new(thread.events.base_config());
+        let stream = std::mem::replace(&mut thread.events, placeholder);
+        thread.events = stream.with_base_config(Arc::new(base));
+
+        request
+    }
+
+    /// GPT-5.6 wire features against the real API: `reasoning.mode: "pro"`,
+    /// `reasoning.context: "all_turns"`, explicit prompt-cache breakpoints
+    /// (after the system prompt and after the attachments), and
+    /// `prompt_cache_key`.
+    /// The second turn replays the first turn's reasoning items natively.
+    ///
+    /// The cassette pins the exact request bodies; the history assertion proves
+    /// the model returned a native reasoning item (`openai_item_id`) that
+    /// survives the round-trip.
+    #[test(tokio::test)]
+    async fn test_gpt_5_6_pro_reasoning_and_explicit_caching() -> Result {
+        let first = with_parameter(
+            with_cacheable_prefix(on_model(
+                TestRequest::chat(PROVIDER)
+                    .enable_reasoning()
+                    .chat_request("What is 7 * 191? Reason it through step by step."),
+                "gpt-5.6",
+            )),
+            "reasoning_mode",
+            "pro",
+        );
+
+        let second = with_parameter(
+            with_cacheable_prefix(on_model(
+                TestRequest::chat(PROVIDER)
+                    .enable_reasoning()
+                    .chat_request("Repeat your previous answer."),
+                "gpt-5.6",
+            )),
+            "reasoning_mode",
+            "pro",
+        )
+        .assert_history(|history| {
+            assert!(
+                history.iter().any(|e| {
+                    e.event
+                        .as_chat_response()
+                        .is_some_and(|r| matches!(r, ChatResponse::Reasoning { .. }))
+                        && e.event.metadata.contains_key("openai_item_id")
+                }),
+                "expected a native reasoning item (openai_item_id) in history"
+            );
+        });
+
+        run_test(PROVIDER, function_name!(), vec![first, second]).await
+    }
+
+    /// Prompt caching with a stable prefix above the 1024-token cacheable
+    /// minimum: turn 1 writes the breakpoint-marked prefix to cache, turn 2
+    /// sends the identical prefix and reads it back.
+    ///
+    /// JP discards `response.usage`, so cache activity cannot be asserted in
+    /// code; the cassette captures the API's usage numbers instead.
+    /// When (re-)recording, verify `cache_write_tokens > 0` in turn 1's
+    /// `response.completed` event and `cached_tokens > 0` in turn 2's.
+    #[test(tokio::test)]
+    async fn test_gpt_5_6_prompt_cache_read_after_write() -> Result {
+        // ~4000 tokens of stable attachment content, well above the minimum.
+        let prefix = |mut request: TestRequest| {
+            if let Some(thread) = request.as_thread_mut() {
+                thread.system_prompt = Some("You are a concise assistant.".to_owned());
+            }
+
+            request.attachment(Attachment::text(
+                "file:///novel.txt",
+                "The quick brown fox jumps over the lazy dog. ".repeat(400),
+            ))
+        };
+
+        let first = prefix(on_model(
+            TestRequest::chat(PROVIDER).chat_request("What animal jumps over the dog?"),
+            "gpt-5.6",
+        ));
+
+        let second = prefix(on_model(
+            TestRequest::chat(PROVIDER).chat_request("And what animal gets jumped over?"),
+            "gpt-5.6",
+        ));
+
+        run_test(PROVIDER, function_name!(), vec![first, second]).await
+    }
+
+    /// `assistant.request.cache = off` on a model that bills cache writes: the
+    /// request carries `prompt_cache_options.mode = "explicit"` with no
+    /// breakpoint markers and no `prompt_cache_key` — the only cache opt-out
+    /// for these models.
+    ///
+    /// The request includes a system prompt and a text attachment, so the
+    /// cassette pins that the markers are absent even when cacheable content is
+    /// present.
+    #[test(tokio::test)]
+    async fn test_gpt_5_6_cache_off_sends_explicit_optout() -> Result {
+        let request = with_cache_off(with_cacheable_prefix(on_model(
+            TestRequest::chat(PROVIDER)
+                .enable_reasoning()
+                .chat_request("What is 7 * 191?"),
+            "gpt-5.6",
+        )));
+
+        run_test(PROVIDER, function_name!(), vec![request]).await
+    }
+
+    /// Whether the Responses API accepts native reasoning items when the target
+    /// model is cataloged as reasoning-unsupported (a conversation switched
+    /// from a reasoning model to gpt-4o mid-conversation).
+    ///
+    /// Replay is provenance-driven: a stored `openai_item_id` always replays as
+    /// a native reasoning item, regardless of the target model's catalog entry.
+    /// If recording fails with a 400 on the second request, the API rejects
+    /// that shape and replay needs a known-unsupported fallback.
+    #[test(tokio::test)]
+    async fn test_reasoning_history_replayed_to_reasoning_unsupported_model() -> Result {
+        // Turn 1 on the default reasoning test model produces native
+        // reasoning items (openai_item_id + encrypted content) in history.
+        let first = TestRequest::chat(PROVIDER)
+            .enable_reasoning()
+            .chat_request("What is 7 * 191?");
+
+        // Turn 2 targets gpt-4o, whose catalog entry says
+        // `ReasoningDetails::Unsupported`. The stored reasoning items are
+        // still sent natively.
+        let second = on_model(
+            TestRequest::chat(PROVIDER).chat_request("Repeat your previous answer."),
+            "gpt-4o",
+        )
+        .assert_history(|history| {
+            let last_message = history
+                .iter()
+                .rev()
+                .filter_map(|e| e.event.as_chat_response())
+                .find_map(|r| match r {
+                    ChatResponse::Message { message } => Some(message.clone()),
+                    _ => None,
+                });
+
+            assert!(
+                last_message.is_some_and(|m| !m.trim().is_empty()),
+                "expected gpt-4o to answer after receiving replayed native reasoning items"
+            );
+        });
+
+        run_test(PROVIDER, function_name!(), vec![first, second]).await
     }
 }
 

@@ -1,0 +1,455 @@
+when:
+  path: /v1/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-5.6",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "You are a concise assistant.",
+              "prompt_cache_breakpoint": {
+                "mode": "explicit"
+              }
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "<documents>\n  <document>\n    <index>0</index>\n    <source>file:///notes.txt</source>\n    <content>The magic number is 42.</content>\n  </document>\n</documents>",
+              "prompt_cache_breakpoint": {
+                "mode": "explicit"
+              }
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "What is 7 * 191? Reason it through step by step."
+        }
+      ],
+      "include": [
+        "reasoning.encrypted_content"
+      ],
+      "instructions": null,
+      "max_output_tokens": null,
+      "metadata": null,
+      "parallel_tool_calls": null,
+      "previous_response_id": null,
+      "prompt_cache_key": "jp:conversation:1577836800000000",
+      "reasoning": {
+        "effort": "low",
+        "summary": "auto",
+        "mode": "pro",
+        "context": "all_turns"
+      },
+      "service_tier": null,
+      "store": false,
+      "stream": true,
+      "temperature": null,
+      "text": null,
+      "tool_choice": "auto",
+      "tools": [],
+      "top_p": null,
+      "truncation": "auto",
+      "user": null
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: response.created
+    data: {"type":"response.created","response":{"id":"resp_06b7a713fe9fcf8e016a53caa2ec6881979a55ce2e4cd53bb1","object":"response","created_at":1783876258,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":"jp:conversation:1577836800000000","prompt_cache_options":{"mode":"implicit","ttl":"30m"},"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"low","mode":"pro","summary":"detailed"},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+    
+    event: response.in_progress
+    data: {"type":"response.in_progress","response":{"id":"resp_06b7a713fe9fcf8e016a53caa2ec6881979a55ce2e4cd53bb1","object":"response","created_at":1783876258,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":"jp:conversation:1577836800000000","prompt_cache_options":{"mode":"implicit","ttl":"30m"},"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"low","mode":"pro","summary":"detailed"},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+    
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","type":"reasoning","content":[],"encrypted_content":"gAAAAABqU8qn0O42KwKiqNP92rmDREYJx-v9j0CoY9cfJLNe240oh8GSSZSi2I4vcSgN7jTkkRj66iHrXt51DJceexKndAaQw4-AOyrw4YjyP8I-ZDkhgBfldFhZPnqapvSBREP1elTrl_gD2SDFmjoFy6HF6gSSMohyAcfrx_jZXJTcwPpvviEamL0Ib61f-wszWQ2I0ZhNIIeOmCMuu_EqVRPX7B6iE8AxDMa2YRBMOrB631AYYvsyg6xCooAt_l7Co6vRtySJiLugpBENWTorjtlEozAVXrr9nH3rO65W6v0poCTHWpWSkdNtzdiaJg5bQipRrVxr0Dwh8-RulutnpdjuC_p8gXu91dkd0amrwhfHblN08oi6Ba385IryaPOMcvHH-0N1fUENOeXr1Y2M8fCXVPhf2ei87euEizrZthLI7zDSa-JJsBa9WN0mvoz_tqf8QrA2obntvHqagYRkFzsSZaY4O4drusgjq4xuRVhzHAaZhSjAA3BamSDIO9E8ezffMzODuX5JDgwfVITAxFCbCWdT2mwerM7oZQ6KmDGkp_9lzoLsWY2FGbwJ-7ES6KR80JJAxTCqYHSjOGC5addm6hfK-FKHP8KuQ65PxavXzqtxoKseILHKzRh0PuN3J8oB3624gsBNoS599H7-SozW7e8Z3TEvdUFK6AVtVrdf0iialw91j8C1p5nWCdviwOxsyLCuEvzqrEDZB7GqS33gIZ8t1cSwcyGcDFxowABDmCohCxDAZdbgDqsWaxOMjHvkDOsGX1TzI7kmjFBqMMNROH1AOW3Yi0o4LW8TvpRjeHpXbHI2Bw1ddi3kPlJ04EgOePN0XgBnYLkH7BvmaqxNRZ-TqxgNOmr7X61obJ7OzEHu6WaNpxLsQ8deK0sTX8gEmAzZZl2PyrYMmWvZTUFjrtQnn7TnVTZLZa7kYkS4j4O2GczqDkL4wzFLWNqMTGZWoDd-qKclkg7JddBI8FrrlioHuuVDJQd7qXTjUYMOcHpXXn850aT27Y5MdtzPCy4bGOi-","summary":[]},"output_index":0,"sequence_number":2}
+    
+    event: response.reasoning_summary_part.added
+    data: {"type":"response.reasoning_summary_part.added","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","output_index":0,"part":{"type":"summary_text","text":""},"sequence_number":3,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":"**Calculating step by step**\n\nAlright","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"If869ThESjW","output_index":0,"sequence_number":4,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":",","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"vL7Fgdg9VY58lGe","output_index":0,"sequence_number":5,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" I","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"U1EewHvDWByA0v","output_index":0,"sequence_number":6,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" need","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"0uJVVKMLBx5","output_index":0,"sequence_number":7,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" to","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"M6qApCaObzJ9A","output_index":0,"sequence_number":8,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" approach","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"fkhntcR","output_index":0,"sequence_number":9,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" this","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"PTMcHz51Hiv","output_index":0,"sequence_number":10,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" systematically","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"T","output_index":0,"sequence_number":11,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":".","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"82QWUGdqaJRMCfW","output_index":0,"sequence_number":12,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" First","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"S7WpzlRcII","output_index":0,"sequence_number":13,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" things","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"HUbnTTxjJ","output_index":0,"sequence_number":14,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" first","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"9KsewCSXi5","output_index":0,"sequence_number":15,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":",","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"8PRjhgdu4wH766L","output_index":0,"sequence_number":16,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" I","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"D0ZofDZfOPCpyf","output_index":0,"sequence_number":17,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" want","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"mK46LZnLZit","output_index":0,"sequence_number":18,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" to","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"Wo5lQwBLZC3dO","output_index":0,"sequence_number":19,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" ignore","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"DKqYo5MKn","output_index":0,"sequence_number":20,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" any","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"9FYPn5SMM5cZ","output_index":0,"sequence_number":21,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" irrelevant","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"QWomN","output_index":0,"sequence_number":22,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" documents","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"HRygwS","output_index":0,"sequence_number":23,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" that","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"opPZ4Mom3ve","output_index":0,"sequence_number":24,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" might","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"1BzDUnjWIt","output_index":0,"sequence_number":25,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" clutter","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"8dTQcOBj","output_index":0,"sequence_number":26,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" my","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"BSFbzo2tjqVBQ","output_index":0,"sequence_number":27,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" thinking","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"lEI13X9","output_index":0,"sequence_number":28,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":".","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"glhEeKwnYEEZjn4","output_index":0,"sequence_number":29,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" I","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"L4l5HpXYvZc9WL","output_index":0,"sequence_number":30,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":"’ll","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"PVnRHaj79Z5X4","output_index":0,"sequence_number":31,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" focus","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"DK8x2wvEM6","output_index":0,"sequence_number":32,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" on","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"OxupTBthDm6Wo","output_index":0,"sequence_number":33,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" the","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"bo1B1NWCvLmA","output_index":0,"sequence_number":34,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" calculation","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"tBVN","output_index":0,"sequence_number":35,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":":","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"5oyV6MVhKxZdu2L","output_index":0,"sequence_number":36,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" 191","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"ML18xuFX6amR","output_index":0,"sequence_number":37,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" multiplied","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"lGop5","output_index":0,"sequence_number":38,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" by","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"ut3EyWzkGBJUq","output_index":0,"sequence_number":39,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" 7","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"eKZsWKFYdoq8wm","output_index":0,"sequence_number":40,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" equals","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"JDBT2AQif","output_index":0,"sequence_number":41,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" 133","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"LJ9tYmqNJRix","output_index":0,"sequence_number":42,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":"7","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"xyK72AzFpGK0BMu","output_index":0,"sequence_number":43,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":".","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"87UUsg42AVT48uF","output_index":0,"sequence_number":44,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" Keeping","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"L7KknqPB","output_index":0,"sequence_number":45,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" it","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"SO06IwCW8oJTB","output_index":0,"sequence_number":46,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" concise","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"MsCVh9eO","output_index":0,"sequence_number":47,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" helps","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"WsbTaGqaXG","output_index":0,"sequence_number":48,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" me","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"ZWWazo3XCn56Y","output_index":0,"sequence_number":49,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" deliver","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"QBnmE5gf","output_index":0,"sequence_number":50,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" the","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"u2kbDLCOJyHR","output_index":0,"sequence_number":51,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" answer","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"vylYjyAOM","output_index":0,"sequence_number":52,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" more","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"3xRkSxIZXUo","output_index":0,"sequence_number":53,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" clearly","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"EgF3pFnq","output_index":0,"sequence_number":54,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":".","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"5Va6PlgGZ2aSeJQ","output_index":0,"sequence_number":55,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" So","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"Ho0cmrFVd4JZf","output_index":0,"sequence_number":56,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":",","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"JFuslDG9ZQwWHEm","output_index":0,"sequence_number":57,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" I","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"un6on3iuPwkT59","output_index":0,"sequence_number":58,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":"’ll","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"DJnOlHdSlGNye","output_index":0,"sequence_number":59,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" summarize","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"eTdZbA","output_index":0,"sequence_number":60,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" it","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"EKsLnbMPtiJ2y","output_index":0,"sequence_number":61,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":":","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"6yBIrkeJa1C5f8r","output_index":0,"sequence_number":62,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" the","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"rdGXwSsYKS65","output_index":0,"sequence_number":63,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" calculation","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"wOTk","output_index":0,"sequence_number":64,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" is","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"BxNwOQX06fa5G","output_index":0,"sequence_number":65,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" straightforward","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"","output_index":0,"sequence_number":66,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" and","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"nLNk9PhrMVzy","output_index":0,"sequence_number":67,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" yields","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"lbGxNn2h8","output_index":0,"sequence_number":68,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" the","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"mt1b4cLAb3jd","output_index":0,"sequence_number":69,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" result","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"gysUfmlRq","output_index":0,"sequence_number":70,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" of","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"lihn4Ric7xqVw","output_index":0,"sequence_number":71,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":" 133","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"8K1P31w1co37","output_index":0,"sequence_number":72,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":"7","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"lkB5T42NNlDGEMo","output_index":0,"sequence_number":73,"summary_index":0}
+    
+    event: response.reasoning_summary_text.delta
+    data: {"type":"response.reasoning_summary_text.delta","delta":".","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","obfuscation":"w4YthEU096krgMM","output_index":0,"sequence_number":74,"summary_index":0}
+    
+    event: response.reasoning_summary_text.done
+    data: {"type":"response.reasoning_summary_text.done","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","output_index":0,"sequence_number":75,"summary_index":0,"text":"**Calculating step by step**\n\nAlright, I need to approach this systematically. First things first, I want to ignore any irrelevant documents that might clutter my thinking. I’ll focus on the calculation: 191 multiplied by 7 equals 1337. Keeping it concise helps me deliver the answer more clearly. So, I’ll summarize it: the calculation is straightforward and yields the result of 1337."}
+    
+    event: response.reasoning_summary_part.done
+    data: {"type":"response.reasoning_summary_part.done","item_id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","output_index":0,"part":{"type":"summary_text","text":"**Calculating step by step**\n\nAlright, I need to approach this systematically. First things first, I want to ignore any irrelevant documents that might clutter my thinking. I’ll focus on the calculation: 191 multiplied by 7 equals 1337. Keeping it concise helps me deliver the answer more clearly. So, I’ll summarize it: the calculation is straightforward and yields the result of 1337."},"sequence_number":76,"summary_index":0}
+    
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","item":{"id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","type":"reasoning","content":[],"encrypted_content":"gAAAAABqU8qodvILz8NAylGDzyKtHddMXWdR7oBjIxLlKYazeZ8hhYPUf6J71xN2LkJlNbqVCr5fG4cCLZEEJs91_2gO5QmgADN-0Z6t_BD23PFUMPOExUyUCgy7exNVFLOKGpRsLq31qaM5xMy_G8oPQ0dyk--x2si2RTIG7pzowDBM9o3TJ-2mtl58tkQ1nK1JNaI056LnPYqmLbuS_G4gsN97ShAOXfLdJqIdn39My9U3BzpHvyWkOjojMDy6_6Hl7B-jrsW4OeMlzlW97iCeq3qAJQ44C4hhHeD2_r2aIqu0eMCzX5U7sqbOc931_CVdjK7_OsqLPyTffRkBy7AuhqbDlrHaCePOV-Eq5rfxQAqU6fUXvsZQ-85W8PF63s9XHPL6dlF89qXr-l75P9JB0lpljs6N-5X5KzHROoxptYHGPhTAisooTL8xgaJzYiypZmI-U-Sk5GB97c4jNsUgBtI7uDlB-4LSUK2Ns5yhTCMDDON9vzsXG71t9dSjscgPVQ67wf3ACqk263zi4tyr42_tJF_aCX6NaOIfqfVoziiQsGvAZfEsbTZmHxxFRq4nM4GEA3VStKYNzFPuuOCe814378q-eTQyCqtNEchDuY87lPRwbO_IFRWp6Y-RnfuxBsAcyQDRs4WNI80wSYRJBeZW_Hgenr8gByztNGxWUxhPPMVSTKj-KtMnB6mdrcyCACVsM-Gy4HDeGU2Sz2_j6_2lPYa4g-EPnA23Fz5n6GRJmWcuohKEESZMvZIWBmBoZUAp_hnAywbPIbdY0e3K8gZ-ClGzi9Pt98nyMF9skW8u_PPx50gxSHb1ombNo5cHhO3WbdCYTzJSK9N6AiqP2WLhQAK3gpM_q1jsm-Y8JN8Jgmrm6io00rhLPl9kdORPBd_cDMjB-LDlwMXsTkkoUeJQmhbmbVKktY3kt5pJ4odcESfRmLoMOxmpTN5VUbos-Z4MmPgXBM1DQHYwt0om12PSo-ivEdlGO10HEpJv6npGL16JIaUoiBHUxklYN_Z9piCyOwCI","summary":[{"type":"summary_text","text":"**Calculating step by step**\n\nAlright, I need to approach this systematically. First things first, I want to ignore any irrelevant documents that might clutter my thinking. I’ll focus on the calculation: 191 multiplied by 7 equals 1337. Keeping it concise helps me deliver the answer more clearly. So, I’ll summarize it: the calculation is straightforward and yields the result of 1337."}]},"output_index":0,"sequence_number":77}
+    
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"msg_06b7a713fe9fcf8e016a53caa8f9648197a020a76ed8036c8d","type":"message","status":"completed","content":[],"phase":"final_answer","role":"assistant"},"output_index":1,"sequence_number":78}
+    
+    event: response.content_part.added
+    data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_06b7a713fe9fcf8e016a53caa8f9648197a020a76ed8036c8d","output_index":1,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":79}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**","item_id":"msg_06b7a713fe9fcf8e016a53caa8f9648197a020a76ed8036c8d","logprobs":[],"obfuscation":"TrLdqFr","output_index":1,"sequence_number":80}
+    
+    event: response.output_text.done
+    data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_06b7a713fe9fcf8e016a53caa8f9648197a020a76ed8036c8d","logprobs":[],"output_index":1,"sequence_number":81,"text":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**"}
+    
+    event: response.content_part.done
+    data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_06b7a713fe9fcf8e016a53caa8f9648197a020a76ed8036c8d","output_index":1,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**"},"sequence_number":82}
+    
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","item":{"id":"msg_06b7a713fe9fcf8e016a53caa8f9648197a020a76ed8036c8d","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**"}],"phase":"final_answer","role":"assistant"},"output_index":1,"sequence_number":83}
+    
+    event: response.completed
+    data: {"type":"response.completed","response":{"id":"resp_06b7a713fe9fcf8e016a53caa2ec6881979a55ce2e4cd53bb1","object":"response","created_at":1783876258,"status":"completed","background":false,"completed_at":1783876265,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[{"id":"rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717","type":"reasoning","content":[],"encrypted_content":"gAAAAABqU8qpaAuITZV6jdWzcuznbyN8qw2iH1zxLiDOPR9wHinHyPpiUEauxqKwnW5potTSuUrhDgAEOEp6rbKrw7miJp-TnPINg9ZuHj7soqAYe-iUuIDPEeJnRjNOaNAqTEFadrz1VcQLhVLozgibOd5MnU0o3RKuC3G92lz4bKuF9U9HHXaLzjyj-t2oJ7PNjTGLIueiaBm9T98gNQCBP-WvJ976J6WwpQg-YEdL5oOi8eldupOrQddKUwOGKFUS2Ve2MTr9DoLaUt1k-XTFUj6331zWknGo5CApPPQdI7uh25dZZaxdqhPEcc9MQNGoX5cpblzchGmXb_MVDct_WVzoklxIM_-voUs_vVvkD_fq82dg5OCtMeTjdqWcfP9eU8gvCuaRGkSfxYaKxpJ6-6XvJbpSGjWUPJIYQcK_t0G1Vi_fKNYIZqtKBjG29EZ8WLnunBrXV2jIRv7HOrOStvpAAq0bxs_1oHpIcjUhTrJJFlFo5aLqY2Svs5Jz1ygn2sL3T-VR2r0x8SaVTjHzZGiZ6JN_V5qyRmLNNkK2WLar4upqugrmNGvXeTccvHAZsTZYOxCVklEKVPs8_cW6jOnhmDtxlCYlL98ixgwlHpHaaWzjD3GCiUO02dLGCtgobdNsJi5z0DmmnQhpE4YaazaqEU3jNaCLjGeQM-xlQv7Rp2PQFCdRBW_fxeQ_nR6RrM8Vn0z5HcfS_JFX1u2Tl9Y_X4QuXK8NPMoP19npCw-f5VxbjrW47o3OwmkhuxsQjte92BCxfW6kAvX696sURWIlImIOPHdRiRQ5FWejiRhdgGnW4OL2gU3OuaIKk9DPOuiyLsnTpSkB7GKzDIOQdahW7Iv6JJjTbdhVXzwRPp1Jh8UJswcCMpVLnzj8n9jmFcl0p-HFhahGH9IS7k7CjBvyBL7Xlmqbuyme6Uzo2owMoZbf_EMnvWlHw6burVXUsJ-QTcbuFm4eGKgeHTIAzk3lUwEFlTDo5VA2FSFYDe2dheAJ4A1qApNDBuJhYYH97PjpzK6f","summary":[{"type":"summary_text","text":"**Calculating step by step**\n\nAlright, I need to approach this systematically. First things first, I want to ignore any irrelevant documents that might clutter my thinking. I’ll focus on the calculation: 191 multiplied by 7 equals 1337. Keeping it concise helps me deliver the answer more clearly. So, I’ll summarize it: the calculation is straightforward and yields the result of 1337."}]},{"id":"msg_06b7a713fe9fcf8e016a53caa8f9648197a020a76ed8036c8d","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**"}],"phase":"final_answer","role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":"jp:conversation:1577836800000000","prompt_cache_options":{"mode":"implicit","ttl":"30m"},"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"low","mode":"pro","summary":"detailed"},"safety_identifier":null,"service_tier":"default","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":{"input_tokens":2010,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":310,"output_tokens_details":{"reasoning_tokens":158},"total_tokens":2320},"user":null,"metadata":{}},"sequence_number":84}
+    
+---
+when:
+  path: /v1/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-5.6",
+      "input": [
+        {
+          "type": "message",
+          "role": "system",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "You are a concise assistant.",
+              "prompt_cache_breakpoint": {
+                "mode": "explicit"
+              }
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "<documents>\n  <document>\n    <index>0</index>\n    <source>file:///notes.txt</source>\n    <content>The magic number is 42.</content>\n  </document>\n</documents>",
+              "prompt_cache_breakpoint": {
+                "mode": "explicit"
+              }
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "What is 7 * 191? Reason it through step by step."
+        },
+        {
+          "type": "reasoning",
+          "id": "rs_06b7a713fe9fcf8e016a53caa7b45481978b021a7ac5812717",
+          "summary": [
+            {
+              "type": "summary_text",
+              "text": "**Calculating step by step**\n\nAlright, I need to approach this systematically. First things first, I want to ignore any irrelevant documents that might clutter my thinking. I’ll focus on the calculation: 191 multiplied by 7 equals 1337. Keeping it concise helps me deliver the answer more clearly. So, I’ll summarize it: the calculation is straightforward and yields the result of 1337."
+            }
+          ],
+          "encrypted_content": "gAAAAABqU8qodvILz8NAylGDzyKtHddMXWdR7oBjIxLlKYazeZ8hhYPUf6J71xN2LkJlNbqVCr5fG4cCLZEEJs91_2gO5QmgADN-0Z6t_BD23PFUMPOExUyUCgy7exNVFLOKGpRsLq31qaM5xMy_G8oPQ0dyk--x2si2RTIG7pzowDBM9o3TJ-2mtl58tkQ1nK1JNaI056LnPYqmLbuS_G4gsN97ShAOXfLdJqIdn39My9U3BzpHvyWkOjojMDy6_6Hl7B-jrsW4OeMlzlW97iCeq3qAJQ44C4hhHeD2_r2aIqu0eMCzX5U7sqbOc931_CVdjK7_OsqLPyTffRkBy7AuhqbDlrHaCePOV-Eq5rfxQAqU6fUXvsZQ-85W8PF63s9XHPL6dlF89qXr-l75P9JB0lpljs6N-5X5KzHROoxptYHGPhTAisooTL8xgaJzYiypZmI-U-Sk5GB97c4jNsUgBtI7uDlB-4LSUK2Ns5yhTCMDDON9vzsXG71t9dSjscgPVQ67wf3ACqk263zi4tyr42_tJF_aCX6NaOIfqfVoziiQsGvAZfEsbTZmHxxFRq4nM4GEA3VStKYNzFPuuOCe814378q-eTQyCqtNEchDuY87lPRwbO_IFRWp6Y-RnfuxBsAcyQDRs4WNI80wSYRJBeZW_Hgenr8gByztNGxWUxhPPMVSTKj-KtMnB6mdrcyCACVsM-Gy4HDeGU2Sz2_j6_2lPYa4g-EPnA23Fz5n6GRJmWcuohKEESZMvZIWBmBoZUAp_hnAywbPIbdY0e3K8gZ-ClGzi9Pt98nyMF9skW8u_PPx50gxSHb1ombNo5cHhO3WbdCYTzJSK9N6AiqP2WLhQAK3gpM_q1jsm-Y8JN8Jgmrm6io00rhLPl9kdORPBd_cDMjB-LDlwMXsTkkoUeJQmhbmbVKktY3kt5pJ4odcESfRmLoMOxmpTN5VUbos-Z4MmPgXBM1DQHYwt0om12PSo-ivEdlGO10HEpJv6npGL16JIaUoiBHUxklYN_Z9piCyOwCI"
+        },
+        {
+          "type": "message",
+          "content": [
+            {
+              "type": "output_text",
+              "text": "\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**",
+              "annotations": []
+            }
+          ],
+          "id": "msg_06b7a713fe9fcf8e016a53caa8f9648197a020a76ed8036c8d",
+          "role": "assistant",
+          "status": "completed",
+          "phase": "final_answer"
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "Repeat your previous answer."
+        }
+      ],
+      "include": [
+        "reasoning.encrypted_content"
+      ],
+      "instructions": null,
+      "max_output_tokens": null,
+      "metadata": null,
+      "parallel_tool_calls": null,
+      "previous_response_id": null,
+      "prompt_cache_key": "jp:conversation:1577836800000000",
+      "reasoning": {
+        "effort": "low",
+        "summary": "auto",
+        "mode": "pro",
+        "context": "all_turns"
+      },
+      "service_tier": null,
+      "store": false,
+      "stream": true,
+      "temperature": null,
+      "text": null,
+      "tool_choice": "auto",
+      "tools": [],
+      "top_p": null,
+      "truncation": "auto",
+      "user": null
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: response.created
+    data: {"type":"response.created","response":{"id":"resp_06b7a713fe9fcf8e016a53caa951708197baeeec34b770aa09","object":"response","created_at":1783876265,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":"jp:conversation:1577836800000000","prompt_cache_options":{"mode":"implicit","ttl":"30m"},"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"low","mode":"pro","summary":"detailed"},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+    
+    event: response.in_progress
+    data: {"type":"response.in_progress","response":{"id":"resp_06b7a713fe9fcf8e016a53caa951708197baeeec34b770aa09","object":"response","created_at":1783876265,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":"jp:conversation:1577836800000000","prompt_cache_options":{"mode":"implicit","ttl":"30m"},"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"low","mode":"pro","summary":"detailed"},"safety_identifier":null,"service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+    
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"msg_06b7a713fe9fcf8e016a53caab1a9c8197abe9f97ae92fd571","type":"message","status":"completed","content":[],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":2}
+    
+    event: response.content_part.added
+    data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_06b7a713fe9fcf8e016a53caab1a9c8197abe9f97ae92fd571","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":3}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**","item_id":"msg_06b7a713fe9fcf8e016a53caab1a9c8197abe9f97ae92fd571","logprobs":[],"obfuscation":"EAfHEa9","output_index":0,"sequence_number":4}
+    
+    event: response.output_text.done
+    data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_06b7a713fe9fcf8e016a53caab1a9c8197abe9f97ae92fd571","logprobs":[],"output_index":0,"sequence_number":5,"text":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**"}
+    
+    event: response.content_part.done
+    data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_06b7a713fe9fcf8e016a53caab1a9c8197abe9f97ae92fd571","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**"},"sequence_number":6}
+    
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","item":{"id":"msg_06b7a713fe9fcf8e016a53caab1a9c8197abe9f97ae92fd571","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**"}],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":7}
+    
+    event: response.completed
+    data: {"type":"response.completed","response":{"id":"resp_06b7a713fe9fcf8e016a53caa951708197baeeec34b770aa09","object":"response","created_at":1783876265,"status":"completed","background":false,"completed_at":1783876267,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-sol","moderation":null,"output":[{"id":"msg_06b7a713fe9fcf8e016a53caab1a9c8197abe9f97ae92fd571","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"\\(191 \\times 7\\):\n\n- \\(190 \\times 7 = 1330\\)\n- \\(1 \\times 7 = 7\\)\n- \\(1330 + 7 = 1337\\)\n\n**Answer: 1337**"}],"phase":"final_answer","role":"assistant"}],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":"jp:conversation:1577836800000000","prompt_cache_options":{"mode":"implicit","ttl":"30m"},"prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"low","mode":"pro","summary":"detailed"},"safety_identifier":null,"service_tier":"default","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"auto","usage":{"input_tokens":2377,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":186,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":2563},"user":null,"metadata":{}},"sequence_number":8}
+    

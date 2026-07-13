@@ -27,6 +27,7 @@ expression: v
                 medium: true,
                 high: true,
                 xhigh: false,
+                max: false,
             },
         ),
         knowledge_cutoff: None,

@@ -147,12 +147,13 @@ impl ModelDetails {
                 medium,
                 high,
                 xhigh,
+                max,
             }) => match config {
                 // Off, so disabled.
                 Some(ReasoningConfig::Off) => None,
 
                 // Auto configured, so use medium effort if the model supports
-                // it, otherwise high or low.
+                // it, otherwise the nearest supported level.
                 None | Some(ReasoningConfig::Auto) => Some(CustomReasoningConfig {
                     effort: if medium {
                         ReasoningEffort::Medium
@@ -162,6 +163,8 @@ impl ModelDetails {
                         ReasoningEffort::XHigh
                     } else if low {
                         ReasoningEffort::Low
+                    } else if max {
+                        ReasoningEffort::Max
                     } else {
                         ReasoningEffort::Xlow
                     },
@@ -262,6 +265,10 @@ pub enum ReasoningDetails {
 
         /// Whether the model supports extremely high effort reasoning.
         xhigh: bool,
+
+        /// Whether the model supports maximum effort reasoning, with no
+        /// constraints on token spending.
+        max: bool,
     },
 
     /// Adaptive reasoning support.
@@ -298,6 +305,7 @@ impl ReasoningDetails {
         medium: bool,
         high: bool,
         xhigh: bool,
+        max: bool,
     ) -> Self {
         Self::Leveled {
             none,
@@ -306,6 +314,7 @@ impl ReasoningDetails {
             medium,
             high,
             xhigh,
+            max,
         }
     }
 
@@ -352,6 +361,7 @@ impl ReasoningDetails {
                 medium,
                 high,
                 xhigh,
+                max,
             } => {
                 if *none {
                     Some(ReasoningEffort::None)
@@ -365,12 +375,23 @@ impl ReasoningDetails {
                     Some(ReasoningEffort::High)
                 } else if *xhigh {
                     Some(ReasoningEffort::XHigh)
+                } else if *max {
+                    Some(ReasoningEffort::Max)
                 } else {
                     None
                 }
             }
             _ => None,
         }
+    }
+
+    /// Returns `true` if the model supports the `max` reasoning effort level.
+    #[must_use]
+    pub fn supports_max_effort(&self) -> bool {
+        matches!(
+            self,
+            Self::Leveled { max: true, .. } | Self::Adaptive { max: true, .. }
+        )
     }
 
     #[must_use]
@@ -393,3 +414,7 @@ impl ReasoningDetails {
         matches!(self, Self::Adaptive { .. })
     }
 }
+
+#[cfg(test)]
+#[path = "model_tests.rs"]
+mod tests;

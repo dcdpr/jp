@@ -245,6 +245,7 @@ fn create_request(
                         medium,
                         high,
                         xhigh: _,
+                        max: _,
                     } => {
                         let level = config
                             .effort
@@ -408,7 +409,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 context_window,
                 max_output_tokens,
                 reasoning: Some(ReasoningDetails::leveled(
-                    false, false, true, true, true, false,
+                    false, false, true, true, true, false, false,
                 )),
                 knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
                 deprecated: Some(ModelDeprecation::Active),
@@ -422,7 +423,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             context_window,
             max_output_tokens,
             reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, false, true, false,
+                false, false, true, false, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
@@ -435,7 +436,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             context_window,
             max_output_tokens,
             reasoning: Some(ReasoningDetails::leveled(
-                false, true, true, true, true, false,
+                false, true, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),

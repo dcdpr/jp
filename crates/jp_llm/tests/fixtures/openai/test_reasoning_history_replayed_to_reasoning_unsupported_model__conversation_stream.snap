@@ -1,0 +1,269 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openai",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json"
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "What is 7 * 191?"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Calculating multiplication**\n\nI'm computing 7 times 191. To simplify, I think of it as 7 times (200 minus 9). That gives me 1400 minus 63, which equals 1337. So the result is 1337! It might be nice to illustrate the quick multiplication, but for now, I'll keep it straightforward and provide the answer succinctly: the final answer is 1337.",
+      "metadata": {
+        "openai_item_id": "cnNfMDE2OTg0NzA2MDRhMGVhMzAxNmE1M2NhYTNmN2JjODE5N2IyOWUyZjQ2Y2NiMWNlZWY=",
+        "openai_encrypted_content": "Z0FBQUFBQnFVOHFtSDFEOFJLeHFBUS1waW1XemZBV1hRa2NFUG5oczN2VEg4UE9yeFJIQUtCRC1vSGpONUNfVER2NVRZRkVIT19XVGs3WEt0MHhIVkF1VHRmSGF3eHRnY2wzV0pPU1B2LUItZVBaOWpubjF1cUFqZ193T05rQzB1b29oTjFrWmtUM0RYb2owNkpnTXJ1eXg5VHB1TVRfdmtJZHZwS3dsUWlSeGJnUWpYTmdpc25ENG9kVkk1NFBZRzZIZGJ2UlhqVWszc2xjV3VYY3FrT2lRbGhKOXdrcXBPT0d6c1JIRG53VUIxdFRCOXYzWmlmdTRzQ2FJZFhzcmhWOEFVcFhabWoyNm52cG51ejVqQ2lTNXdZczQ2YkY3Ulk2QkpwY3dBUFVXZjZNQTBKN0FtX2J3dzFMb2tQY1huWFpERzdqeUtvZ3lETlBETlBqZDNuc3VwN1NOM1luWG4tM29VTWZJYUkzcFhyY2tfSzNiUmRyaXg1TmRGQ0xfbmFiVVFQZzlVTEhFcTdXc0tPUGFkMGhkWnlocUxlTHZzTWRYd3FwN3dNOElUb1BoNk5RYW1WcTlDaEJSQWRUSHc2amJtSXZ0SVNzeGpPaVoxUGhfWXM0eDFQWmpsdjhNclRYdE5mX3NyZkV0LUNfS2VYOU0xVlhtVnEyYmE1LW1qTmJPU3JjRVdBcDJ6eS16eU1pM3BuYXZpY0lWRFJTVTV5VmJaemh2QnRYaHo4dWRXOGlYUFRsNlpuMWp1YWtkcWl3dGRCbDRCRWFvc3Ric3l4XzlBemFEeXpHNk80UkNXbVdIOVZQM2llcHZTSktPdTFnX1hlaGlpWHNHenZXV08wMXFsa1BFSXFHb19YTG1kVTRSZzB4NjEtTjdRYUZ2eTExWHR3dzRjQllBYUJsb2dzMUJaZWtBUDZfLWdmNnNraWtPdk84d19Ya2VIX1ZSYUdDdkVqZkEyTnRMRlRZc3NfT2xMb0tSMlE2eS1ROTFiNGhVOW5KTVl5aUtIZHE5QzhVbW4wZUtUcHM0dmhxaW1JU3lQcDJ3TU1PWElCQ0gtQ0s4dEhsSjZMZVdyNEZJTWRSTm0tT2JSdkxTd1kydnRTYnBoNGlJdFIyZFRtY3I1T29tWF8yalp5eTZXOEFPQUNqb0J4QXpvT1pIcVRQTEJ5LWswMVhLamYtWjVyQ3dCNXVFUlNZRVFWVnh4Y2tQVEZ6dE94UWU2VjFlRjF1Smo0T0N2MW95dFpOeHJrS2k3c3N4R0tVcVctVlp5WjlSNmdZQkpUdl8yYTQ4NDVSLWZMM2RYQ0pxX0xDcS1IWEsxYjhYZktadDAtZVdadVg4eGNvZ2FqVTN6elZlZkp5NVRvdC1JSkNwbnJvWHJFUlhuWjJNblpCa1pBcFRjZUt4cC1RNGV4U3hCNGhzU09FSUstemVSR01zXzZKRi1kSFZaM1dKcVFrR3hBeG4zQW9sN08yZDcxa1JrLVFQNnh0M2p3PT0="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "1337",
+      "metadata": {
+        "openai_item_id": "bXNnXzAxNjk4NDcwNjA0YTBlYTMwMTZhNTNjYWE2MjUxYzgxOTc5NTZhNmMyYTU0YTc4ZGU4"
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Repeat your previous answer."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "1337",
+      "metadata": {
+        "openai_item_id": "bXNnXzAxNjk4NDcwNjA0YTBlYTMwMTZhNTNjYWE3YmQzYzgxOTc4MTZjZjUyODExZTQ3MGQ2"
+      }
+    }
+  ]
+}

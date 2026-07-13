@@ -72,6 +72,7 @@ expression: request
   "metadata": null,
   "parallel_tool_calls": null,
   "previous_response_id": null,
+  "prompt_cache_key": "jp:conversation:1577836800000000",
   "reasoning": {
     "effort": "minimal",
     "summary": "auto"
