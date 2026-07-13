@@ -11,7 +11,7 @@ use jp_config::{
     conversation::tool::{OneOrManyTypes, ToolParameterConfig},
     model::{
         id::{Name, ProviderId},
-        parameters::{CustomReasoningConfig, ReasoningEffort},
+        parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
     },
     providers::llm::openai::OpenaiConfig,
 };
@@ -394,9 +394,11 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     let is_structured = text.is_some();
 
     // Models with unknown reasoning support (absent from the catalog, e.g.
-    // released after this binary was built) are assumed to support reasoning
-    // request configuration. This lets `reasoning = "off"` send `effort: none`
-    // rather than silently accepting the model's reasoning-on default.
+    // released after this binary was built) are assumed to accept reasoning
+    // request configuration, so an explicit `reasoning = "off"` sends
+    // `effort: none` rather than silently accepting the model's reasoning-on
+    // default. Without explicit configuration the field is omitted entirely:
+    // a non-reasoning deployment (e.g. a fine-tuned chat model) may reject it.
     // Conversation replay is independent of this flag: namespaced OpenAI item
     // metadata determines whether a stored event has a native representation.
     let supports_reasoning = model
@@ -414,7 +416,10 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         // and every OpenAI flagship since GPT-5.1 accepts `none`, so honor
         // "off" literally rather than spending reasoning tokens at the
         // model's default effort.
-        None if supports_reasoning => {
+        None if supports_reasoning
+            && (model.reasoning.is_some()
+                || matches!(parameters.reasoning, Some(ReasoningConfig::Off))) =>
+        {
             let effort = match model.reasoning {
                 None => ReasoningEffort::None,
                 Some(r) => r.lowest_effort().unwrap_or(ReasoningEffort::Xlow),
@@ -899,7 +904,26 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             structured_output: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
-        "gpt-5" | "gpt-5-2025-08-07" => ModelDetails {
+        "gpt-5" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5".to_owned()),
+            context_window: Some(400_000),
+            max_output_tokens: Some(128_000),
+            // Reasoning.effort supports: minimal, low, medium, high
+            reasoning: Some(ReasoningDetails::leveled(
+                false, true, true, true, true, false, false,
+            )),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
+            // Deprecated without an announced retirement date; only the
+            // 2025-08-07 snapshot has a scheduled shutdown (2026-12-11).
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                None,
+            )),
+            structured_output: None,
+            features: vec![TEMP_REQUIRES_NO_REASONING],
+        },
+        "gpt-5-2025-08-07" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some("GPT-5".to_owned()),
             context_window: Some(400_000),

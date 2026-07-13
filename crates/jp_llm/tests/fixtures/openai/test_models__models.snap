@@ -1537,9 +1537,7 @@ expression: v
         deprecated: Some(
             Deprecated {
                 note: "recommended replacement: gpt-5.5",
-                retire_at: Some(
-                    2026-12-11,
-                ),
+                retire_at: None,
             },
         ),
         structured_output: None,

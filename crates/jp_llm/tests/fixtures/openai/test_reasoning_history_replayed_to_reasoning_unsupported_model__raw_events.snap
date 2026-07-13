@@ -14,77 +14,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "**Calcul",
+                "**Calculating multiplication**\n\nI'm",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "ating",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " multiplication",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "**\n\nI'm",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " doing",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " some",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " simple",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " multiplication",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " here",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " For",
+                " computing",
             ),
             metadata: {},
         },
@@ -112,63 +49,28 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
+                ".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " To",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " simplify",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
                 ",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " can",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " break",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " it",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " down",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " bit",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ":",
             ),
             metadata: {},
         },
@@ -252,14 +154,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "),",
+                ").",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " which",
+                " That",
             ),
             metadata: {},
         },
@@ -308,35 +210,21 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                ".",
+                ",",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " That",
+                " which",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " brings",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " me",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to",
+                " equals",
             ),
             metadata: {},
         },
@@ -364,112 +252,91 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " It's",
+                " So",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " a",
+                " the",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " straightforward",
+                " result",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " process",
+                " is",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ",",
+                " 133",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " but",
+                "7",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " maybe",
+                "!",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " I",
+                " It",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " should",
+                " might",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " respond",
+                " be",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " conc",
+                " nice",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "is",
+                " to",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "ely",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " just",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " show",
+                " illustrate",
             ),
             metadata: {},
         },
@@ -490,21 +357,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " steps",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " So",
+                " multiplication",
             ),
             metadata: {},
         },
@@ -512,6 +365,111 @@ expression: v
             index: 0,
             part: Reasoning(
                 ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " but",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " for",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " now",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " I'll",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " keep",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " straightforward",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " provide",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " answer",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " succinct",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "ly",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ":",
             ),
             metadata: {},
         },
@@ -560,27 +518,6 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "!",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " All",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " clear",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
                 ".",
             ),
             metadata: {},
@@ -588,8 +525,8 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("rs_001f4b9d057936e2016a5165e2f8bc819c9af35a97327e0104"),
-                "openai_encrypted_content": String("gAAAAABqUWXkcvjhGPriDchepzpKntnehcORIvLvw_q1FQEoimwSDnZ6wtX8WhoXpUGxs7nEx_TOAaqonV6WZE-RDq5RZowcaMEW1BvM0TOomArPEyaCV6cFLb6bib1AyuxOuh61z9TSN6plNLIA4Het-c8Jpg7bn_Fefmn-so_7Ika0kn3gfEAEHeORZ3y9cYmtU0lyOwPTMjbkt7VeS-CSRrpSO3dytDZb80u3PFyrF7u8wlm7zonfBVlqnKyAp77NAFeYG-dz-gyLEXC1AkT_RtlP_i6ORvrpX9FBxgEEt-XLZM-ZF2y7gnshtwj3THlTiYQe0mtYIWhNpc8SKIhwdY16ZKwmPDrpqXfXkfmk0YSQKaT1AGIz0D_2NWWYG1BRAxTekuzS_LVp9rGHx8gOWYIpdsJmbYBCPSrTKfaNyHV3dcZADMPJJRfR0Mu2ZXbExeYm6mWS-TpNq0Yr99Cgt01HmUN7tc5LqZjP_40WdWGilBiKhdAKPJnEGLRqHfbvpKQx3mgq14szyLtdNRoci_oSCa1JrUkyINQAYp6Ce01iRGdQi7085ih0sd6reoVfjUVxq3trp8-LtPiaFKB9Vpn3yMWnKp104vEo2760pP0aMLIdEB2WIdv0XpDDptOBvHaHYYs-iduVbn1h6g7g4yGBfiyyo2t9z6p0IAOORCipFEq6b-PCSiA2QUxndPo0nfCRh5XAsbJi7CSXpF2iQqhr_wMwLAfgL3Z6G4UynCxNX31TdQZQvBn1mBbNfi66M3-c6So7GpRJLlMp_w7lJLKsgDkCkZRwWmwAct2Z5jXS3mqggE1nmnuvd-8aR7LPpQ-fDcIHfaHs_4ATU8UfImLrLhnCxduTTc0OPAcW_SBxNNCBk_YxW7WwU4w8AEctcHCo_2Tqsny_RCbLyY0uWS06-Gmg55WWzq4-c6VEUBtt-EVnnut96b61VsfixzVThnsoAQKcfQ7nvhqu9AQjDKW_YLidNifGJXUJtxa_ATiJpU4Yj-lELRZTCQ-Z6RFCJgl9uvwNefc4_Iw1G_wWSswHCFLc-1nj76ZFv5otHzeaexV7Pf5LyUZISCEAWzULVnyeYqSE7bi0Gxo6XKiT8Q6QP3PDgftoXkwUTvgV82C0cn3RK_A="),
+                "openai_item_id": String("rs_01698470604a0ea3016a53caa3f7bc8197b29e2f46ccb1ceef"),
+                "openai_encrypted_content": String("gAAAAABqU8qmH1D8RKxqAQ-pimWzfAWXQkcEPnhs3vTH8POrxRHAKBD-oHjN5C_TDv5TYFEHO_WTk7XKt0xHVAuTtfHawxtgcl3WJOSPv-B-ePZ9jnn1uqAjg_wONkC0uoohN1kZkT3DXoj06JgMruyx9TpuMT_vkIdvpKwlQiRxbgQjXNgisnD4odVI54PYG6HdbvRXjUk3slcWuXcqkOiQlhJ9wkqpOOGzsRHDnwUB1tTB9v3Zifu4sCaIdXsrhV8AUpXZmj26nvpnuz5jCiS5wYs46bF7RY6BJpcwAPUWf6MA0J7Am_bww1LokPcXnXZDG7jyKogyDNPDNPjd3nsup7SN3YnXn-3oUMfIaI3pXrck_K3bRdrix5NdFCL_nabUQPg9ULHEq7WsKOPad0hdZyhqLeLvsMdXwqp7wM8IToPh6NQamVq9ChBRAdTHw6jbmIvtISsxjOiZ1Ph_Ys4x1PZjlv8MrTXtNf_srfEt-C_KeX9M1VXmVq2ba5-mjNbOSrcEWAp2zy-zyMi3pnavicIVDRSU5yVbZzhvBtXhz8udW8iXPTl6Zn1juakdqiwtdBl4BEaostbsyx_9AzaDyzG6O4RCWmWH9VP3iepvSJKOu1g_XehiiXsGzvWWO01qlkPEIqGo_XLmdU4Rg0x61-N7QaFvy11Xtww4cBYAaBlogs1BZekAP6_-gf6skikOvO8w_XkeH_VRaGCvEjfA2NtLFTYss_OlLoKR2Q6y-Q91b4hU9nJMYyiKHdq9C8Umn0eKTps4vhqimISyPp2wMMOXIBCH-CK8tHlJ6LeWr4FIMdRNm-ObRvLSwY2vtSbph4iItR2dTmcr5OomX_2jZyy6W8AOACjoBxAzoOZHqTPLBy-k01XKjf-Z5rCwB5uERSYEQVVxxckPTFztOxQe6V1eF1uJj4OCv1oytZNxrkKi7ssxGKUqW-VZyZ9R6gYBJTv_2a4845R-fL3dXCJq_LCq-HXK1b8XfKZt0-eWZuX8xcogajU3zzVefJy5Tot-IJCpnroXrERXnZ2MnZBkZApTceKxp-Q4exSxB4hsSOEIK-zeRGMs_6JF-dHVZ3WJqQkGxAxn3Aol7O2d71kRk-QP6xt3jw=="),
             },
         },
         Part {
@@ -616,7 +553,7 @@ expression: v
         Flush {
             index: 1,
             metadata: {
-                "openai_item_id": String("msg_001f4b9d057936e2016a5165e4d3cc819cb0352735f56ff711"),
+                "openai_item_id": String("msg_01698470604a0ea3016a53caa6251c8197956a6c2a54a78de8"),
             },
         },
         Finished(
@@ -648,7 +585,7 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_001f4b9d057936e2016a5165e68a68819c94b7141523ccad32"),
+                "openai_item_id": String("msg_01698470604a0ea3016a53caa7bd3c8197816cf52811e470d6"),
             },
         },
         Finished(

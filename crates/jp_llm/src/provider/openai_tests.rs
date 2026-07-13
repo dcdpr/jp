@@ -877,6 +877,30 @@ mod map_model {
             STREAMING_UNSUPPORTED
         ]);
     }
+
+    /// The retirement notice names only the dated snapshot: the rolling `gpt-5`
+    /// alias carries the migration note without a date, while the snapshot
+    /// carries the announced shutdown date.
+    #[test]
+    fn gpt_5_alias_deprecated_without_retirement_date() {
+        let alias = map_model(model("gpt-5")).unwrap();
+        assert_eq!(
+            alias.deprecated,
+            Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                None,
+            ))
+        );
+
+        let snapshot = map_model(model("gpt-5-2025-08-07")).unwrap();
+        assert_eq!(
+            snapshot.deprecated,
+            Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gpt-5.5",
+                chrono::NaiveDate::from_ymd_opt(2026, 12, 11),
+            ))
+        );
+    }
 }
 
 mod unknown_model {
@@ -1093,6 +1117,50 @@ mod unknown_model {
         assert!(
             request.contains(r#""effort":"none""#),
             "reasoning not explicitly disabled: {request}"
+        );
+    }
+
+    /// Unconfigured reasoning on a model absent from the catalog omits the
+    /// `reasoning` field entirely, keeping the model's default behavior.
+    /// A non-reasoning deployment (e.g. a fine-tuned chat model) may reject the
+    /// field, so it is only sent when the user explicitly configures reasoning.
+    #[test]
+    fn unconfigured_reasoning_omits_field() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-9".parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning = None;
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env;
+
+        let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &model,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(
+            request.contains(r#""reasoning":null"#),
+            "reasoning field sent without explicit configuration: {request}"
         );
     }
 }
@@ -1442,6 +1510,8 @@ mod recorded {
     use std::sync::Arc;
 
     use chrono::{TimeZone as _, Utc};
+    use jp_attachment::Attachment;
+    use jp_config::assistant::request::CachePolicy;
     use jp_conversation::{ConversationStream, event::ChatResponse};
     use jp_test::{Result, function_name};
     use test_log::test;
@@ -1495,8 +1565,40 @@ mod recorded {
         request
     }
 
+    /// Give the request a stable system prompt and text attachment, so the
+    /// recorded body carries both explicit prompt-cache breakpoints: one at the
+    /// end of the system prompt, one at the end of the attachments.
+    fn with_cacheable_prefix(mut request: TestRequest) -> TestRequest {
+        if let Some(thread) = request.as_thread_mut() {
+            thread.system_prompt = Some("You are a concise assistant.".to_owned());
+        }
+
+        request.attachment(Attachment::text(
+            "file:///notes.txt",
+            "The magic number is 42.",
+        ))
+    }
+
+    /// Disable prompt caching (`assistant.request.cache = off`) on the
+    /// request's base config.
+    fn with_cache_off(mut request: TestRequest) -> TestRequest {
+        let Some(thread) = request.as_thread_mut() else {
+            return request;
+        };
+
+        let mut base = (*thread.events.base_config()).clone();
+        base.assistant.request.cache = CachePolicy::Off;
+
+        let placeholder = ConversationStream::new(thread.events.base_config());
+        let stream = std::mem::replace(&mut thread.events, placeholder);
+        thread.events = stream.with_base_config(Arc::new(base));
+
+        request
+    }
+
     /// GPT-5.6 wire features against the real API: `reasoning.mode: "pro"`,
-    /// `reasoning.context: "all_turns"`, explicit prompt-cache breakpoints, and
+    /// `reasoning.context: "all_turns"`, explicit prompt-cache breakpoints
+    /// (after the system prompt and after the attachments), and
     /// `prompt_cache_key`.
     /// The second turn replays the first turn's reasoning items natively.
     ///
@@ -1506,23 +1608,23 @@ mod recorded {
     #[test(tokio::test)]
     async fn test_gpt_5_6_pro_reasoning_and_explicit_caching() -> Result {
         let first = with_parameter(
-            on_model(
+            with_cacheable_prefix(on_model(
                 TestRequest::chat(PROVIDER)
                     .enable_reasoning()
                     .chat_request("What is 7 * 191? Reason it through step by step."),
                 "gpt-5.6",
-            ),
+            )),
             "reasoning_mode",
             "pro",
         );
 
         let second = with_parameter(
-            on_model(
+            with_cacheable_prefix(on_model(
                 TestRequest::chat(PROVIDER)
                     .enable_reasoning()
                     .chat_request("Repeat your previous answer."),
                 "gpt-5.6",
-            ),
+            )),
             "reasoning_mode",
             "pro",
         )
@@ -1539,6 +1641,61 @@ mod recorded {
         });
 
         run_test(PROVIDER, function_name!(), vec![first, second]).await
+    }
+
+    /// Prompt caching with a stable prefix above the 1024-token cacheable
+    /// minimum: turn 1 writes the breakpoint-marked prefix to cache, turn 2
+    /// sends the identical prefix and reads it back.
+    ///
+    /// JP discards `response.usage`, so cache activity cannot be asserted in
+    /// code; the cassette captures the API's usage numbers instead.
+    /// When (re-)recording, verify `cache_write_tokens > 0` in turn 1's
+    /// `response.completed` event and `cached_tokens > 0` in turn 2's.
+    #[test(tokio::test)]
+    async fn test_gpt_5_6_prompt_cache_read_after_write() -> Result {
+        // ~4000 tokens of stable attachment content, well above the minimum.
+        let prefix = |mut request: TestRequest| {
+            if let Some(thread) = request.as_thread_mut() {
+                thread.system_prompt = Some("You are a concise assistant.".to_owned());
+            }
+
+            request.attachment(Attachment::text(
+                "file:///novel.txt",
+                "The quick brown fox jumps over the lazy dog. ".repeat(400),
+            ))
+        };
+
+        let first = prefix(on_model(
+            TestRequest::chat(PROVIDER).chat_request("What animal jumps over the dog?"),
+            "gpt-5.6",
+        ));
+
+        let second = prefix(on_model(
+            TestRequest::chat(PROVIDER).chat_request("And what animal gets jumped over?"),
+            "gpt-5.6",
+        ));
+
+        run_test(PROVIDER, function_name!(), vec![first, second]).await
+    }
+
+    /// `assistant.request.cache = off` on a model that bills cache writes: the
+    /// request carries `prompt_cache_options.mode = "explicit"` with no
+    /// breakpoint markers and no `prompt_cache_key` — the only cache opt-out
+    /// for these models.
+    ///
+    /// The request includes a system prompt and a text attachment, so the
+    /// cassette pins that the markers are absent even when cacheable content is
+    /// present.
+    #[test(tokio::test)]
+    async fn test_gpt_5_6_cache_off_sends_explicit_optout() -> Result {
+        let request = with_cache_off(with_cacheable_prefix(on_model(
+            TestRequest::chat(PROVIDER)
+                .enable_reasoning()
+                .chat_request("What is 7 * 191?"),
+            "gpt-5.6",
+        )));
+
+        run_test(PROVIDER, function_name!(), vec![request]).await
     }
 
     /// Whether the Responses API accepts native reasoning items when the target

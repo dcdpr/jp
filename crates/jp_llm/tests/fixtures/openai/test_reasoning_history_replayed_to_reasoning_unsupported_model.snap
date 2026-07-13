@@ -9,12 +9,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Calculating multiplication**\n\nI'm doing some simple multiplication here. For 7 times 191, I can break it down a bit: I think of it as 7 times (200 minus 9), which gives me 1400 minus 63. That brings me to 1337. It's a straightforward process, but maybe I should respond concisely and just show the quick steps. So, the final answer is 1337! All clear.",
+                        reasoning: "**Calculating multiplication**\n\nI'm computing 7 times 191. To simplify, I think of it as 7 times (200 minus 9). That gives me 1400 minus 63, which equals 1337. So the result is 1337! It might be nice to illustrate the quick multiplication, but for now, I'll keep it straightforward and provide the answer succinctly: the final answer is 1337.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("rs_001f4b9d057936e2016a5165e2f8bc819c9af35a97327e0104"),
-                    "openai_encrypted_content": String("gAAAAABqUWXkcvjhGPriDchepzpKntnehcORIvLvw_q1FQEoimwSDnZ6wtX8WhoXpUGxs7nEx_TOAaqonV6WZE-RDq5RZowcaMEW1BvM0TOomArPEyaCV6cFLb6bib1AyuxOuh61z9TSN6plNLIA4Het-c8Jpg7bn_Fefmn-so_7Ika0kn3gfEAEHeORZ3y9cYmtU0lyOwPTMjbkt7VeS-CSRrpSO3dytDZb80u3PFyrF7u8wlm7zonfBVlqnKyAp77NAFeYG-dz-gyLEXC1AkT_RtlP_i6ORvrpX9FBxgEEt-XLZM-ZF2y7gnshtwj3THlTiYQe0mtYIWhNpc8SKIhwdY16ZKwmPDrpqXfXkfmk0YSQKaT1AGIz0D_2NWWYG1BRAxTekuzS_LVp9rGHx8gOWYIpdsJmbYBCPSrTKfaNyHV3dcZADMPJJRfR0Mu2ZXbExeYm6mWS-TpNq0Yr99Cgt01HmUN7tc5LqZjP_40WdWGilBiKhdAKPJnEGLRqHfbvpKQx3mgq14szyLtdNRoci_oSCa1JrUkyINQAYp6Ce01iRGdQi7085ih0sd6reoVfjUVxq3trp8-LtPiaFKB9Vpn3yMWnKp104vEo2760pP0aMLIdEB2WIdv0XpDDptOBvHaHYYs-iduVbn1h6g7g4yGBfiyyo2t9z6p0IAOORCipFEq6b-PCSiA2QUxndPo0nfCRh5XAsbJi7CSXpF2iQqhr_wMwLAfgL3Z6G4UynCxNX31TdQZQvBn1mBbNfi66M3-c6So7GpRJLlMp_w7lJLKsgDkCkZRwWmwAct2Z5jXS3mqggE1nmnuvd-8aR7LPpQ-fDcIHfaHs_4ATU8UfImLrLhnCxduTTc0OPAcW_SBxNNCBk_YxW7WwU4w8AEctcHCo_2Tqsny_RCbLyY0uWS06-Gmg55WWzq4-c6VEUBtt-EVnnut96b61VsfixzVThnsoAQKcfQ7nvhqu9AQjDKW_YLidNifGJXUJtxa_ATiJpU4Yj-lELRZTCQ-Z6RFCJgl9uvwNefc4_Iw1G_wWSswHCFLc-1nj76ZFv5otHzeaexV7Pf5LyUZISCEAWzULVnyeYqSE7bi0Gxo6XKiT8Q6QP3PDgftoXkwUTvgV82C0cn3RK_A="),
+                    "openai_item_id": String("rs_01698470604a0ea3016a53caa3f7bc8197b29e2f46ccb1ceef"),
+                    "openai_encrypted_content": String("gAAAAABqU8qmH1D8RKxqAQ-pimWzfAWXQkcEPnhs3vTH8POrxRHAKBD-oHjN5C_TDv5TYFEHO_WTk7XKt0xHVAuTtfHawxtgcl3WJOSPv-B-ePZ9jnn1uqAjg_wONkC0uoohN1kZkT3DXoj06JgMruyx9TpuMT_vkIdvpKwlQiRxbgQjXNgisnD4odVI54PYG6HdbvRXjUk3slcWuXcqkOiQlhJ9wkqpOOGzsRHDnwUB1tTB9v3Zifu4sCaIdXsrhV8AUpXZmj26nvpnuz5jCiS5wYs46bF7RY6BJpcwAPUWf6MA0J7Am_bww1LokPcXnXZDG7jyKogyDNPDNPjd3nsup7SN3YnXn-3oUMfIaI3pXrck_K3bRdrix5NdFCL_nabUQPg9ULHEq7WsKOPad0hdZyhqLeLvsMdXwqp7wM8IToPh6NQamVq9ChBRAdTHw6jbmIvtISsxjOiZ1Ph_Ys4x1PZjlv8MrTXtNf_srfEt-C_KeX9M1VXmVq2ba5-mjNbOSrcEWAp2zy-zyMi3pnavicIVDRSU5yVbZzhvBtXhz8udW8iXPTl6Zn1juakdqiwtdBl4BEaostbsyx_9AzaDyzG6O4RCWmWH9VP3iepvSJKOu1g_XehiiXsGzvWWO01qlkPEIqGo_XLmdU4Rg0x61-N7QaFvy11Xtww4cBYAaBlogs1BZekAP6_-gf6skikOvO8w_XkeH_VRaGCvEjfA2NtLFTYss_OlLoKR2Q6y-Q91b4hU9nJMYyiKHdq9C8Umn0eKTps4vhqimISyPp2wMMOXIBCH-CK8tHlJ6LeWr4FIMdRNm-ObRvLSwY2vtSbph4iItR2dTmcr5OomX_2jZyy6W8AOACjoBxAzoOZHqTPLBy-k01XKjf-Z5rCwB5uERSYEQVVxxckPTFztOxQe6V1eF1uJj4OCv1oytZNxrkKi7ssxGKUqW-VZyZ9R6gYBJTv_2a4845R-fL3dXCJq_LCq-HXK1b8XfKZt0-eWZuX8xcogajU3zzVefJy5Tot-IJCpnroXrERXnZ2MnZBkZApTceKxp-Q4exSxB4hsSOEIK-zeRGMs_6JF-dHVZ3WJqQkGxAxn3Aol7O2d71kRk-QP6xt3jw=="),
                 },
             },
         ),
@@ -27,7 +27,7 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_001f4b9d057936e2016a5165e4d3cc819cb0352735f56ff711"),
+                    "openai_item_id": String("msg_01698470604a0ea3016a53caa6251c8197956a6c2a54a78de8"),
                 },
             },
         ),
@@ -45,7 +45,7 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_001f4b9d057936e2016a5165e68a68819c94b7141523ccad32"),
+                    "openai_item_id": String("msg_01698470604a0ea3016a53caa7bd3c8197816cf52811e470d6"),
                 },
             },
         ),

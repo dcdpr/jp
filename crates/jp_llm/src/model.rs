@@ -147,13 +147,13 @@ impl ModelDetails {
                 medium,
                 high,
                 xhigh,
-                max: _,
+                max,
             }) => match config {
                 // Off, so disabled.
                 Some(ReasoningConfig::Off) => None,
 
                 // Auto configured, so use medium effort if the model supports
-                // it, otherwise high or low.
+                // it, otherwise the nearest supported level.
                 None | Some(ReasoningConfig::Auto) => Some(CustomReasoningConfig {
                     effort: if medium {
                         ReasoningEffort::Medium
@@ -163,6 +163,8 @@ impl ModelDetails {
                         ReasoningEffort::XHigh
                     } else if low {
                         ReasoningEffort::Low
+                    } else if max {
+                        ReasoningEffort::Max
                     } else {
                         ReasoningEffort::Xlow
                     },
@@ -412,3 +414,7 @@ impl ReasoningDetails {
         matches!(self, Self::Adaptive { .. })
     }
 }
+
+#[cfg(test)]
+#[path = "model_tests.rs"]
+mod tests;

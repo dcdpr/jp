@@ -28,7 +28,10 @@ expression: v
           "name": "test"
         },
         "parameters": {
-          "reasoning": "off",
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
+          },
           "stop_words": [],
           "other": {}
         }
@@ -38,7 +41,7 @@ expression: v
         "base_backoff_ms": 1000,
         "max_backoff_secs": 60,
         "stream_idle_timeout_secs": 60,
-        "cache": true
+        "cache": false
       }
     },
     "conversation": {
@@ -202,22 +205,6 @@ expression: v
   },
   "events": [
     {
-      "type": "config_delta",
-      "timestamp": "2020-01-01 00:00:00.0",
-      "delta": {
-        "assistant": {
-          "model": {
-            "parameters": {
-              "reasoning": {
-                "effort": "low",
-                "exclude": false
-              }
-            }
-          }
-        }
-      }
-    },
-    {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "What is 7 * 191?"
@@ -225,44 +212,10 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "**Calculating multiplication**\n\nI'm computing 7 times 191. To simplify, I think of it as 7 times (200 minus 9). That gives me 1400 minus 63, which equals 1337. So the result is 1337! It might be nice to illustrate the quick multiplication, but for now, I'll keep it straightforward and provide the answer succinctly: the final answer is 1337.",
-      "metadata": {
-        "openai_item_id": "cnNfMDE2OTg0NzA2MDRhMGVhMzAxNmE1M2NhYTNmN2JjODE5N2IyOWUyZjQ2Y2NiMWNlZWY=",
-        "openai_encrypted_content": "Z0FBQUFBQnFVOHFtSDFEOFJLeHFBUS1waW1XemZBV1hRa2NFUG5oczN2VEg4UE9yeFJIQUtCRC1vSGpONUNfVER2NVRZRkVIT19XVGs3WEt0MHhIVkF1VHRmSGF3eHRnY2wzV0pPU1B2LUItZVBaOWpubjF1cUFqZ193T05rQzB1b29oTjFrWmtUM0RYb2owNkpnTXJ1eXg5VHB1TVRfdmtJZHZwS3dsUWlSeGJnUWpYTmdpc25ENG9kVkk1NFBZRzZIZGJ2UlhqVWszc2xjV3VYY3FrT2lRbGhKOXdrcXBPT0d6c1JIRG53VUIxdFRCOXYzWmlmdTRzQ2FJZFhzcmhWOEFVcFhabWoyNm52cG51ejVqQ2lTNXdZczQ2YkY3Ulk2QkpwY3dBUFVXZjZNQTBKN0FtX2J3dzFMb2tQY1huWFpERzdqeUtvZ3lETlBETlBqZDNuc3VwN1NOM1luWG4tM29VTWZJYUkzcFhyY2tfSzNiUmRyaXg1TmRGQ0xfbmFiVVFQZzlVTEhFcTdXc0tPUGFkMGhkWnlocUxlTHZzTWRYd3FwN3dNOElUb1BoNk5RYW1WcTlDaEJSQWRUSHc2amJtSXZ0SVNzeGpPaVoxUGhfWXM0eDFQWmpsdjhNclRYdE5mX3NyZkV0LUNfS2VYOU0xVlhtVnEyYmE1LW1qTmJPU3JjRVdBcDJ6eS16eU1pM3BuYXZpY0lWRFJTVTV5VmJaemh2QnRYaHo4dWRXOGlYUFRsNlpuMWp1YWtkcWl3dGRCbDRCRWFvc3Ric3l4XzlBemFEeXpHNk80UkNXbVdIOVZQM2llcHZTSktPdTFnX1hlaGlpWHNHenZXV08wMXFsa1BFSXFHb19YTG1kVTRSZzB4NjEtTjdRYUZ2eTExWHR3dzRjQllBYUJsb2dzMUJaZWtBUDZfLWdmNnNraWtPdk84d19Ya2VIX1ZSYUdDdkVqZkEyTnRMRlRZc3NfT2xMb0tSMlE2eS1ROTFiNGhVOW5KTVl5aUtIZHE5QzhVbW4wZUtUcHM0dmhxaW1JU3lQcDJ3TU1PWElCQ0gtQ0s4dEhsSjZMZVdyNEZJTWRSTm0tT2JSdkxTd1kydnRTYnBoNGlJdFIyZFRtY3I1T29tWF8yalp5eTZXOEFPQUNqb0J4QXpvT1pIcVRQTEJ5LWswMVhLamYtWjVyQ3dCNXVFUlNZRVFWVnh4Y2tQVEZ6dE94UWU2VjFlRjF1Smo0T0N2MW95dFpOeHJrS2k3c3N4R0tVcVctVlp5WjlSNmdZQkpUdl8yYTQ4NDVSLWZMM2RYQ0pxX0xDcS1IWEsxYjhYZktadDAtZVdadVg4eGNvZ2FqVTN6elZlZkp5NVRvdC1JSkNwbnJvWHJFUlhuWjJNblpCa1pBcFRjZUt4cC1RNGV4U3hCNGhzU09FSUstemVSR01zXzZKRi1kSFZaM1dKcVFrR3hBeG4zQW9sN08yZDcxa1JrLVFQNnh0M2p3PT0="
-      }
-    },
-    {
-      "timestamp": "2020-01-01 00:00:00.0",
-      "type": "chat_response",
       "message": "1337",
       "metadata": {
-        "openai_item_id": "bXNnXzAxNjk4NDcwNjA0YTBlYTMwMTZhNTNjYWE2MjUxYzgxOTc5NTZhNmMyYTU0YTc4ZGU4"
-      }
-    },
-    {
-      "type": "config_delta",
-      "timestamp": "2020-01-01 00:00:00.0",
-      "delta": {
-        "assistant": {
-          "model": {
-            "parameters": {
-              "reasoning": "off"
-            }
-          }
-        }
-      }
-    },
-    {
-      "timestamp": "2020-01-01 00:00:00.0",
-      "type": "chat_request",
-      "content": "Repeat your previous answer."
-    },
-    {
-      "timestamp": "2020-01-01 00:00:00.0",
-      "type": "chat_response",
-      "message": "1337",
-      "metadata": {
-        "openai_item_id": "bXNnXzAxNjk4NDcwNjA0YTBlYTMwMTZhNTNjYWE3YmQzYzgxOTc4MTZjZjUyODExZTQ3MGQ2"
+        "openai_item_id": "bXNnXzBmMTU5MjQwZDY5ZDgxOWUwMTZhNTNjYWEzYzA3ODgxOTQ5OWZkZThlNmYxNWM0NjFj",
+        "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }
   ]
