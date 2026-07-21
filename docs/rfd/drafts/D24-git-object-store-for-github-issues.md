@@ -145,6 +145,7 @@ is what tombstones and redaction stubs reference.
 | `add-label` / `remove-label` | issue | observed-remove set |
 | `add-comment` | comment (by GitHub id) | grow-only set |
 | `set-comment-body` | comment (by GitHub id) | multi-value register |
+| `set-comment-visibility` | comment (by GitHub id) | multi-value register |
 | `set-priority` | issue | multi-value register |
 | `delete-issue` | issue | tombstone |
 | `delete-comment` | comment (by GitHub id) | tombstone |
@@ -154,6 +155,15 @@ is what tombstones and redaction stubs reference.
 
 The three fold semantics named in the table are defined in the section
 "Computing issue state", after the causal order they depend on.
+
+`set-comment-visibility` records comment collapsing — GitHub's
+comment-minimization feature — as a register holding `visible` or
+`collapsed` with a reason (off-topic, outdated, resolved, spam, ...).
+Collapse is display muting, not deletion: the fold renders a collapsed
+comment as a marker carrying its reason, and un-collapsing is an ordinary
+later write to the same register.
+The scraper emits this op when it observes a comment's minimized state
+change upstream.
 
 ### Computing issue state
 
@@ -287,11 +297,21 @@ Commits carry provenance: `scraped_at` and the GitHub `updated_at` observed.
 Phase 1 scrapes issues and their conversation comments (comment bodies are
 editable on GitHub, hence `set-comment-body`).
 
-The scraper also detects upstream deletions.
-Each run enumerates the full issue list, and the comment id set of each
-changed issue; a previously observed issue or comment that is gone (API
-404/410, or missing from its id set) gets a `delete-issue` or
-`delete-comment` op carrying scraper provenance.
+The scraper also detects upstream deletions, under one rule: a tombstone
+requires positive evidence of deletion, never absence from a
+possibly-incomplete listing.
+Edits are positive observations and are committed incrementally as scraped;
+a deletion is an inference from absence, so deletion ops are emitted only
+after the enumeration they are inferred from has run to completion, and
+only after a direct GitHub API request for the missing item confirms the
+deletion (HTTP 404/410).
+Concretely: each run enumerates the full issue list, and the comment id set
+of each changed issue; a previously observed issue or comment missing from
+its completed enumeration is requested individually from the API, and only
+an HTTP 404/410 yields the `delete-issue` or `delete-comment` op, carrying
+scraper provenance.
+A scrape that aborts mid-run (rate limit, network failure) therefore emits
+the edits it observed and no deletions.
 
 ### Signed commits
 
@@ -351,6 +371,10 @@ hidden, and the `keep` op changes how the fold renders it.
 time.
 The capability policy lives with the allowed-signers file, outside the
 repository, consistent with the trust anchor decision.
+The table below lists *defaults*: the policy format expresses other rules —
+different thresholds than 1-of-n, per-action writer sets — without any
+change to the store format, because capabilities are evaluated at fold time
+and never recorded in ops.
 Ops signed by a key lacking the required capability are excluded from the
 computed state and surfaced, with the same warn/enforce handling as
 unverifiable signatures.
@@ -363,6 +387,7 @@ op.
 | tag / untag (incl. `wontfix`) | `add-label` / `remove-label` | any trusted writer |
 | reprioritize (kanban ordering) | `set-priority` | any trusted writer |
 | edit allowed tags | `set-allowed-labels` | moderators |
+| collapse / un-collapse comment | `set-comment-visibility` | moderators |
 | moderate issue / comment | `redact-op` | any single moderator (1-of-n) |
 | keep deleted content | `keep` | any single moderator (1-of-n) |
 | delete issue | `delete-issue` | originator while no other writer has appended activity; moderators otherwise |
@@ -462,8 +487,10 @@ The on-disk format is git's either way, so stored data does not change.
 - The kanban tool and any state caching for it (the `set-priority` op is
   registered here; the tool that consumes it is not).
 - Cross-repo mirroring.
-- Moderation governance beyond the 1-of-n rules: vote thresholds, disputes
-  between moderators, appeals.
+- Moderation governance beyond the default capability rules: vote
+  thresholds, disputes between moderators, appeals.
+  The policy format is built to express these later; this RFD fixes only
+  the defaults.
 - Physical removal of store content: deletion only hides.
 
 ## Risks
