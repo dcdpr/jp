@@ -127,6 +127,8 @@ issue state".
 Acknowledgments double as tamper evidence: a writer who rewrote history to
 drop ops would leave other writers' `seen_heads` pointing at op ids that no
 longer exist.
+The fold checks for exactly this dangling reference; see the section
+"Computing issue state".
 
 ### Operations
 
@@ -192,11 +194,22 @@ This relation is the only input to conflict resolution.
   Without a `keep`, a single redact or delete suffices to hide (also
   1-of-n).
 
+**Missing acknowledgments.** Before applying the resolution rules, the fold
+checks every `seen_heads` reference: an entry naming an op id that exists
+nowhere in the store is evidence of a rewritten chain (see the section
+"Attack Analysis: Chain Rewrite").
+The fold stops with a specific typed error instead of rendering partial
+state; running with `--fix-interactive` walks through resolution, including
+the option to drop the offending ref.
+For a fresh clone, which has no prior ref values to compare against, this
+check is the only rewrite detection there is.
+
 **Procedure:**
 
 1. Enumerate heads: `git for-each-ref refs/jp/issues/<number>/`.
 2. Walk each linear chain, collect ops.
-3. Compute happens-before; apply the resolution rules.
+3. Run the missing-acknowledgment check; compute happens-before; apply the
+   resolution rules.
 
 The fold is order-independent across replicas: any two clones that have seen
 the same commits compute the same state, regardless of how or in what order
@@ -223,12 +236,44 @@ the commits arrived.
 > `fetch` entry carries a forcing refspec covering `refs/jp/`.
 > Never configure one manually.
 
+`issue sync` also maintains a local ref journal as a second guard.
+It sets `core.logAllRefUpdates=always` in the repository — informing the
+user whenever this changes existing git configuration — so git journals
+every ref update into reflogs recording each transition's old and new
+values, including a hand-run `git fetch` with a forcing refspec that
+bypasses the tool entirely.
+Every run starts by reading that journal, flags any `refs/jp/` transition
+that failed to fast-forward, and offers to restore the journaled prior
+value.
+The reflog entries also protect the overwritten commits from garbage
+collection while they live, so the restore is always possible.
+
+A remote serving older tips is harmless.
+Refs never move backward — an older tip fails to fast-forward — and the
+newer state is adopted on the next sync with any replica that has it.
+Syncing with a participant who is behind carries no penalty, and which
+remotes to fetch from stays the user's decision.
+
 No push race exists: every worktree is its own writer, so no two replicas
 ever update the same ref.
 Within one worktree, concurrent tool invocations serialize through git's own
 ref locking — `update-ref` with the expected old value; on failure, re-read
 and retry the append.
 No legitimate non-fast-forward ref update exists anywhere in the system.
+
+### Server-side receive gate
+
+A git server that accepts pushes holds a replica of the store, but plain
+git applies no special rules to `refs/jp/issues/*`: a pusher with write
+access can force-push a rewritten chain, and the server accepts what every
+jp tool would refuse.
+A `pre-receive` hook closes the gap by rejecting any update to
+`refs/jp/issues/*` that fails to fast-forward the ref's current value,
+contains a commit with more than one parent, or contains a commit whose
+signature does not match the key hash in the ref path — the same checks
+the fold applies at read time, run at push time.
+The hook is stock git tooling: any server whose operator can install
+`pre-receive` hooks can run it.
 
 ### The scraper
 
@@ -260,6 +305,15 @@ pass, and GitHub's signed-commit protections only cover branches.
 The fold verifies each commit (`git verify-commit`); ops from unverifiable
 commits are excluded from the computed state and surfaced as a warning.
 A configuration option (on by default) escalates the warning to a hard failure.
+
+Verification is required only from a configured cutoff.
+A `verification_required = "<commit-hash>"` configuration field names a
+commit: that commit and everything after it (in the causal order of the
+section "Computing issue state") require verification, while commits before
+the cutoff are exempt from the checks above.
+With the field unset, no commit requires verification.
+This lets a store adopt signing late without invalidating its earlier
+history.
 
 The trust anchor stays **outside the repository**: a per-user allowed-signers
 file (git's `gpg.ssh.allowedSignersFile` format) under the user's own
@@ -357,14 +411,8 @@ The on-disk format is git's either way, so stored data does not change.
   can reconstruct it.
   Acceptable: the consumers are exclusively our own tools.
 - Ops carry a small map of writer id to op id (the `seen_heads` field).
-- Every writer must have commit signing configured, including scraper
-  automation.
-
-    [rgrant 20260720 00:00 UTC] well, verification can be optional.
-      is there a config.toml for this?
-      if so, add a VerificationRequired=<commit-hash> field.
-      everything on and after that commit requires verification.
-
+- Every writer whose commits fall under the `verification_required` cutoff
+  must have commit signing configured, including scraper automation.
 - Subprocess-based reads put a performance ceiling on computing state over
   many issues; the Implementation section names the measured trigger for
   moving reads to `gix`.
@@ -418,7 +466,7 @@ The on-disk format is git's either way, so stored data does not change.
   between moderators, appeals.
 - Physical removal of store content: deletion only hides.
 
-## Risks and Open Questions
+## Risks
 
 - **Deleted content persists in every clone.** Every clone permanently
   holds every op ever synced, including content its author deleted and
@@ -441,119 +489,65 @@ The on-disk format is git's either way, so stored data does not change.
   has not yet pulled.
   Details deferred to the append-phase RFD.
 
+- **Withholding is undetectable.** A remote can serve truthful but stale
+  refs: every commit validly signed, every update a fast-forward, and the
+  newest ops simply absent.
+  A reader served only by that remote sees an issue frozen in the past, and
+  no mechanical check distinguishes withholding from ordinary propagation
+  delay.
+  Accepted as inherent: refs never move backward, the newer tip is adopted
+  as soon as any replica that has it is fetched from, and the choice of
+  remotes is the user's.
 - **Verification cost.** `git verify-commit` per commit at read time is
   subprocess-heavy; verification results may need caching.
   Measure before optimizing.
 
-## Continuing Questions
+## Attack Analysis: Chain Rewrite
 
-These questions came out of analyzing one concrete attack, and each needs a
-decision before the design is complete.
+Several of the mechanisms above — the ref journal, the receive gate, the
+missing-acknowledgment rule — exist because of one concrete attack.
+This section documents it and maps each defense to the design mechanism
+that closes it.
 
-The attack scenario: Mallory is a developer with a git remote she controls.
+Mallory is a developer with a git remote she controls.
 She rewrites the history of one writer chain under `refs/jp/issues/42/`,
 removing the commit that holds the plan for issue 42.
 Alice fetches code and issue refs directly from Mallory's remote.
-Bob runs the git hosting server that the team otherwise shares, and Alice
-has push access to it.
+Bob runs the git server that the team otherwise shares, and Alice has push
+access to it.
 
-The analysis showed: if Alice already holds the current value of the
-rewritten ref, her non-forcing fetch refuses the update (a chain missing a
-commit fails to fast-forward).
+If Alice already holds the current value of the rewritten ref, her
+non-forcing fetch refuses the update: a chain missing a commit fails to
+fast-forward.
 If Alice is behind, or fetching these refs for the first time, she accepts
 Mallory's version — a first fetch has no prior value to compare against,
 and signatures authenticate authorship of the commits that are present
 without proving that the set is complete.
-Alice's replica is then corrupted until the evidence described in question 3
-surfaces, and her next fetch from an honest replica jams on that ref.
-Spreading the corruption further requires a force push to a server that
-accepts one, which motivates question 1.
 
-1. **Server-side receive gate.** A git hosting server that accepts pushes
-   holds a replica of the store, but plain git applies no special rules to
-   `refs/jp/issues/*`: a pusher with write access can force-push a rewritten
-   chain, and the server accepts what every jp tool would refuse.
-   Self-managed hosts (GitLab server hooks, plain git `pre-receive`) can run
-   a hook that rejects any update to `refs/jp/issues/*` that fails to
-   fast-forward the ref's current value, contains a commit with more than
-   one parent, or contains a commit whose signature does not match the key
-   hash in the ref path — the same checks the fold applies at read time,
-   run at push time.
+Otherwise-normal git tooling exposes the attack at every point where it
+would otherwise take hold or spread:
 
-   Question: does this RFD ship that hook, require it, or document it as
-   optional hardening?
+- **Fast-forward refusal** (the section "Sync"): every replica that already
+  holds the honest ref refuses Mallory's rewrite outright.
+- **The local ref journal** (the section "Sync"): if Alice bypasses the
+  tool with a hand-run forcing fetch, the reflog records the
+  non-fast-forward transition; the next `issue sync` flags it and offers to
+  restore the journaled prior value.
+- **Missing-acknowledgment detection** (the section "Computing issue
+  state"): other writers' `seen_heads` still name the dropped op, so even a
+  fresh clone — with no prior refs to compare against — detects the
+  rewrite; the fold stops with a typed error and `--fix-interactive` offers
+  to drop the offending ref.
+- **The server-side receive gate** (the section "Server-side receive
+  gate"): spreading the corruption through the shared server requires a
+  force push that Bob's `pre-receive` hook refuses.
 
-    [rgrant 20260720 11:54 UTC] no RFD ships anything.  it's a fucking
-      discussion.  document the attack, the solution plan, and what
-      tools will be used to complete that phase of the plan.
-
-   Hosted platforms without custom hooks cannot run it; what is the stated
-   posture for them?
-
-    [rgrant 20260720 11:53 UTC] is this one question or two, asshole.  the attack
-      is not about hosted platforms.  if Bob's git tooling has a
-      pre-receive hook then so does any platform.
-
-      focus only on Alice, Bob, and Mallory with their git remotes to
-      each other and their git tools such as pre-fetch.  focus on what
-      otherwise-normal git tool usage exposes the attack.
-
-2. **Local ref journal.** A user can bypass `issue sync` by running `git
-   fetch` by hand with a forcing refspec (see the caution block in the
-   section "Sync"), silently
-   replacing good refs with rewritten ones — the tool never runs, so it
-   cannot object.
-   Setting `core.logAllRefUpdates=always` in the repository makes git
-   journal every ref update, including updates under `refs/jp/`, into
-   reflogs that record each transition's old and new values and that protect
-   the old commits from garbage collection while the entries live.
-   `issue sync` could read that journal at the start of every run, flag any
-   transition that failed to fast-forward, and offer to restore the
-   journaled prior value.
-   Question: does the tool set this configuration automatically and treat
-   the journal check as a standard part of every sync?
-
-     [rgrant 20260720 12:00 UTC] yes, while informing the user IF it is a change
-       in git configuration.
-
-3. **Missing-acknowledgment detection as a mandatory rule.** Each op's
-   `seen_heads` field names, per foreign writer, the newest op id the author
-   had incorporated (see the section "What each commit contains").
-   A chain rewritten to drop an op leaves other writers' `seen_heads`
-   entries naming an op id that no longer exists anywhere in the store.
-   That evidence is available to every replica, including a fresh clone that
-   has no prior refs to compare against — for a fresh clone it is the only
-   rewrite detection there is.
-   The design currently mentions this evidence in one sentence in the
-   section "What each commit contains".
-   Question: promote it to a mandatory fold rule?
-
-     [rgrant 20260720 12:09 UTC] are you fucking asking me whether to catch a bug?
-       yes.  catch the bug.
-
-   And what is the failure mode when it fires — warn and render what
-   remains, or refuse to render the issue until a human adjudicates which
-   chain is authentic?
-
-     [rgrant 20260720 12:09 UTC] specific typed error that stops the program.
-       run --fix-interactive to resolve.
-       offer to drop the offending ref.
-
-4. **Withholding.** A remote can serve truthful but stale refs: every commit
-   validly signed, every update a fast-forward, and the newest ops simply
-   absent.
-   A reader served only by that remote sees an issue frozen in the past.
-   No mechanical check can distinguish withholding from ordinary propagation
-   delay, and the gap heals on the next sync with any replica that has the
-   newer state.
-   Question: accept this as an inherent limit and record it under Risks, or
-   mitigate by fetching from more than one remote and raising an alarm when
-   two remotes disagree about the same writer ref?
-
-     [rgrant 20260720 12:11 UTC] simply update to the correct tip when you see
-       it.  do not penalize sync from participants with older tips,
-       but do not "update" to older state.  leave fetch decisions to
-       user.
+A remote can also *withhold*: serve truthful but stale refs, every commit
+validly signed and every update a fast-forward, with the newest ops simply
+absent.
+That is not a rewrite and no defense above fires; it is an accepted limit,
+recorded under Risks, and the sync rules in the section "Sync" guarantee
+the gap heals on the next sync with any replica that has the newer state.
 
 ## Implementation Plan
 
@@ -565,8 +559,9 @@ Each phase is independently reviewable and mergeable.
    Unit-tested against `MockProcessRunner`, integration-tested against real
    temp repos.
 2. **State computation (the fold)**: chain walking, causal ordering from
-   `seen_heads`, deterministic tiebreak, per-field semantics (multi-value
-   registers, observed-remove set, grow-only set).
+   `seen_heads`, the missing-acknowledgment check with its typed error and
+   `--fix-interactive` resolution, deterministic tiebreak, per-field
+   semantics (multi-value registers, observed-remove set, grow-only set).
    Pure logic over data fetched by phase 1; property-style tests for
    order-independence.
 3. **Scraper** (`issue sync`, write side): scrape via `jp_github`, diff
@@ -576,12 +571,14 @@ Each phase is independently reviewable and mergeable.
    Depends on phases 1–2.
 4. **Sync** (`issue sync`, transport side): fetch refspec configuration,
    fast-forward pushes, refusal to run while any remote's configured
-   `fetch` entry carries a forcing refspec covering `refs/jp/`.
+   `fetch` entry carries a forcing refspec covering `refs/jp/`,
+   `core.logAllRefUpdates=always` setup and the ref-journal check, and a
+   reference `pre-receive` hook for server operators.
 5. **`issue show`**: compute and render one issue's state, including
    surfaced multi-value conflicts and unverified-writer warnings.
 6. **Signature verification** during state computation: `verify-commit`
    against the per-user allowed-signers file, with the warn/enforce
-   configuration option.
+   configuration option and the `verification_required` cutoff.
 7. **Deletion and keeps** (`issue delete`): tombstone ops, `keep` ops,
    capability checks against the per-user policy.
 
@@ -589,7 +586,7 @@ Each phase is independently reviewable and mergeable.
 
 - [RFD 066] — Content-Addressable Blob Store: content-addressed storage for
   conversation blobs, and the designated home for large payloads in the
-  later `issue append` phase (see the section "Risks and Open Questions").
+  later `issue append` phase (see the section "Risks").
 
 - [git-bug] — issues as git objects in refs, closest prior art.
 - [git-appraise] — code review as git objects in refs.
