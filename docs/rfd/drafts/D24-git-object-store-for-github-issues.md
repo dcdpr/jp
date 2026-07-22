@@ -7,50 +7,49 @@
 
 ## Summary
 
-This RFD describes a local-first store for GitHub issues, kept as git objects
-in the project's own `.git` under a dedicated ref namespace.
+This RFD describes a local-first store for GitHub issues, kept as git objects in
+the project's own `.git` under a dedicated ref namespace.
 A scraper tool mirrors issues and their comments from GitHub through
 `jp_github`; contributors sync the store with ordinary push and pull.
 Each issue is a set of per-writer, append-only operation logs; issue state is
-computed deterministically from their union, without merge conflicts and
-without dropped data.
+computed deterministically from their union, without merge conflicts and without
+dropped data.
 
 ## Motivation
 
-Contributors need offline access to the project's issues, and later the
-ability to edit them locally (`issue append`) and build views over them (a
-kanban tool).
+Contributors need offline access to the project's issues, and later the ability
+to edit them locally (`issue append`) and build views over them (a kanban tool).
 The consumers are our own jp-tools: `issue show` first, `issue append` and a
 kanban view later.
 
 GitHub is a read-only interface where some issues get added.
 It is not the authority.
-The local store is the source of truth, designed from day one for a world
-where local edits are made concurrently on machines that do not know about
-each other.
+The local store is the source of truth, designed from day one for a world where
+local edits are made concurrently on machines that do not know about each other.
 
 Three storage approaches fail the requirements:
 
 - **Checked-in files** cause merge conflicts for people working in worktrees,
   and dirty the code's evolution with their own commit history.
+  They also limit the view of open issues available from branches.
 - **A centralized per-user store** mixing all repositories (as radicle's
-  `/storage/` does) is rejected for security reasons - it would
-  require inventing a DSL for access control.
+  `/storage/` does) is rejected for security reasons - it would require
+  inventing a DSL for access control.
 - **Last-write-wins merging** (git-bug's approach, in elaborated form) hides
   conflicts by silently dropping the losing write.
 
 Storing issues as git objects in the repo's own `.git` — objects in the object
 database, refs under a dedicated namespace, nothing in the worktree — avoids
 all three.
-A contributor's responsibility is to pull; after that they have everything
-they need for offline work.
+A contributor's responsibility is to pull; after that they have everything they
+need for offline work.
 
 ## Design
 
 ### What the user sees
 
 ```sh
-# sync: fetch everyone's issue refs, push your own
+# sync: fetch everyone's issue refs, push every issue ref you hold
 jp-tools issue sync
 
 # read a folded issue, offline
@@ -61,11 +60,11 @@ git for-each-ref refs/jp/issues/42/
 git log refs/jp/issues/42/<writer-id>
 ```
 
-Daily git work is unaffected: `git log` (HEAD), `git branch`, and default
-clones never see the store.
+Daily git work is unaffected: `git log` (HEAD), `git branch`, and default clones
+never see the store.
 The sync tool configures the `refs/jp/issues/*` fetch refspec.
-Documentation explains the git integration using refs, and how to edit
-the git config manually.
+Documentation explains the git integration using refs, and how to edit the git
+config manually.
 
 ### Store layout
 
@@ -76,66 +75,64 @@ Each issue has one ref per writer:
 refs/jp/issues/<number>/<writer-id>
 ```
 
-- `<number>` is the GitHub issue number, or — in the later local-creation
-  phase — a `jp_id`-formatted id for an issue born locally; the two forms
-  are syntactically disjoint.
+- `<number>` is the GitHub issue number, or — in the later local-creation phase
+  — a `jp_id`-formatted id for an issue born locally; the two forms are
+  syntactically disjoint.
   The literal `meta` is reserved for the store-level metadata log.
   The store holds the repo's own issues only; a cross-repo mirror would get a
   sibling namespace and is out of scope.
 - `<writer-id>` identifies one worktree of one clone, held by one signer.
   It is composed of three segments,
   `<workspace-id>/<unique-hash-of-signing-key>-<avatar-nickname>/<worktree-id>`:
-  the workspace id scopes the writer to the JP workspace that produced it;
-  the key hash binds the ref to a signing key (the fold rejects commits
-  under a key-hash segment that are not signed by the matching key); the
-  avatar nickname is a human-readable label with no authority; the worktree
-  id is a `jp_id`-formatted id minted per worktree on first write, stored in
-  that worktree's own state under `.git/`, never checked in and never
-  synced.
+  the workspace id scopes the writer to the JP workspace that produced it; the
+  key hash binds the ref to a signing key (the fold rejects commits under a
+  key-hash segment that are not signed by the matching key); the avatar nickname
+  is a human-readable label with no authority; the worktree id is a
+  `jp_id`-formatted id minted per worktree on first write, stored in that
+  worktree's own state under `.git/`, never checked in and never synced.
   Every worktree of every clone is its own writer.
 
-A ref is only ever written by its owner — one worktree — so no two
-replicas ever contend on a ref.
-Every push is a fast-forward, and no merge commit exists anywhere in the
-store.
+A ref is only ever written by its owner — one worktree — so no two replicas
+ever contend on a ref.
+Every push is a fast-forward, and no merge commit exists anywhere in the store.
 
 ### What each commit contains
 
 Each write is one standard commit object, used as an envelope:
 
 - **tree**: a single blob, `ops.json` — the payload.
-  It carries the operations of this write, a `seen_heads` field (defined
-  below), and a format version.
-  Tools read and write `ops.json` and nothing else; its versioned schema is
-  the compatibility boundary between replicas, and changing it is a breaking
-  change for every clone that holds copies.
+  It carries the operations of this write, a `seen_heads` field (defined below),
+  and a format version.
+  Tools read and write `ops.json` and nothing else; its versioned schema is the
+  compatibility boundary between replicas, and changing it is a breaking change
+  for every clone that holds copies.
 - **parent**: the previous commit on this writer's chain (none for the first).
   Exactly one parent, always: every ref is a strictly linear chain.
 - **author/committer**: the writer id as name, write timestamp.
-- **message**: a one-line summary generated by the tool, e.g.
-  `observe #42: set-state closed, add-comment 2140518390`.
-  No human ever writes one; it exists so `git log` stays legible when
-  debugging the store.
+- **message**: a one-line summary generated by the tool, e.g. `observe #42:
+  set-state closed, add-comment 2140518390`.
+  No human ever writes one; it exists so `git log` stays legible when debugging
+  the store.
   Never parsed.
 
-Causality between writers is recorded in the `ops.json` payload; commits
-never have multiple parents.
-`seen_heads` maps each foreign writer id to the newest op `id` this writer
-had incorporated from that chain at write time.
-The resolution protocol built on it is specified in the section "Computing
+Causality between writers is recorded in the `ops.json` payload; commits never
+have multiple parents.
+`seen_heads` maps each foreign writer id to the newest op `id` this writer had
+incorporated from that chain at write time.
+The resolution protocol built on it is specified in the section "Computing issue
+state".
+Acknowledgments double as tamper evidence: a writer who rewrote history to drop
+ops would leave other writers' `seen_heads` pointing at op ids that no longer
+exist.
+The fold checks for exactly this dangling reference; see the section "Computing
 issue state".
-Acknowledgments double as tamper evidence: a writer who rewrote history to
-drop ops would leave other writers' `seen_heads` pointing at op ids that no
-longer exist.
-The fold checks for exactly this dangling reference; see the section
-"Computing issue state".
 
 ### Operations
 
 Operations are fine-grained, one vocabulary for scraped and (later) local
 writes.
-Each op carries a stable `jp_id`-formatted `id`, minted at creation; the id
-is what tombstones and redaction stubs reference.
+Each op carries a stable `jp_id`-formatted `id`, minted at creation; the id is
+what tombstones and redaction stubs reference.
 
 | Op | Target | Fold semantics |
 | --- | --- | --- |
@@ -153,29 +150,31 @@ is what tombstones and redaction stubs reference.
 | `keep` | issue or comment | keep (defined below) |
 | `set-allowed-labels` | store metadata | multi-value register |
 
+A register is one field of one target: ops of the same type on the same target
+address the same register.
 The three fold semantics named in the table are defined in the section
 "Computing issue state", after the causal order they depend on.
 
 `set-comment-visibility` records comment collapsing — GitHub's
-comment-minimization feature — as a register holding `visible` or
-`collapsed` with a reason (off-topic, outdated, resolved, spam, ...).
-Collapse is display muting, not deletion: the fold renders a collapsed
-comment as a marker carrying its reason, and un-collapsing is an ordinary
-later write to the same register.
-The scraper emits this op when it observes a comment's minimized state
-change upstream.
+comment-minimization feature — as a register holding `visible` or `collapsed`
+with a reason (off-topic, outdated, resolved, spam, ...).
+Collapse is display muting, not deletion: the fold renders a collapsed comment
+as a marker carrying its reason, and un-collapsing is an ordinary later write to
+the same register.
+The scraper emits this op when it observes a comment's minimized state change
+upstream.
 
 ### Computing issue state
 
-Issue state is computed by a *fold*: collecting the ops from every writer's
-log and applying them in causal order.
+Issue state is computed by a *fold*: collecting the ops from every writer's log
+and applying them in causal order.
 
 **Causal order.** *Happens-before* is the smallest transitive relation built
 from two edge kinds:
 
 1. Chain order: an op happens-before every later op in its own chain.
-2. Acknowledgment: when op C's `seen_heads` maps writer W to op id X, then X
-   and every op before X in W's chain happen-before C.
+2. Acknowledgment: when op C's `seen_heads` maps writer W to op id X, then X and
+   every op before X in W's chain happen-before C.
 
 Two ops are **concurrent** when neither happens-before the other.
 This relation is the only input to conflict resolution.
@@ -183,36 +182,49 @@ This relation is the only input to conflict resolution.
 **Resolution**, per the fold semantics in the op table:
 
 - **Multi-value register** (title, body, state, comment body, priority): the
-  register's state is the set of ops on it that do not happen-before another
-  op on the same register.
+  register's state is the set of ops on it that do not happen-before another op
+  on the same register.
   One op in that set yields a single value — the normal case.
-  Two or more ops in that set — possible only for concurrent writes — are
-  all retained and all displayed, ordered by op id.
-- **Observed-remove set** (labels): a label is present when some `add-label`
-  op for it does not happen-before a `remove-label` op for it.
+  Two or more ops in that set — possible only for concurrent writes — are all
+  part of the register's state, and `issue show` renders every one, ordered by
+  op id.
+  The register holds a single value again only when a later write acknowledges
+  every op in that set — that write happens-after each of them, and the fold
+  resolves the register to it.
+- **Observed-remove set** (labels): a label is present when some `add-label` op
+  for it does not happen-before a `remove-label` op for it.
   A remove affects only adds it acknowledged; a concurrent add survives.
 - **Grow-only set** (comments): the union of `add-comment` ops.
-- **Tombstone** (deletes, redactions): once present, every fold hides the
-  target from that point on; concurrent edits to the target stay in the log
-  but are not displayed.
-  Hiding is the entire mechanism; the bytes are never removed from the
-  store.
+- **Tombstone** (deletes, redactions): once present, every fold hides the target
+  from that point on; concurrent edits to the target stay in the log but are not
+  displayed.
+  Hiding is the entire mechanism; the bytes are never removed from the store.
 - **Keep** (moderation): a `keep` op from any single moderator (1-of-n)
   overrides a tombstone on the same target.
-  The kept content renders however the keeping moderator chose: full text,
-  a marker, or a moderator-written summary.
-  Without a `keep`, a single redact or delete suffices to hide (also
-  1-of-n).
+  The kept content renders however the keeping moderator chose: full text, a
+  marker, or a moderator-written summary.
+  Without a `keep`, a single redact or delete suffices to hide (also 1-of-n).
 
 **Missing acknowledgments.** Before applying the resolution rules, the fold
-checks every `seen_heads` reference: an entry naming an op id that exists
-nowhere in the store is evidence of a rewritten chain (see the section
-"Attack Analysis: Chain Rewrite").
-The fold stops with a specific typed error instead of rendering partial
-state; running with `--fix-interactive` walks through resolution, including
-the option to drop the offending ref.
-For a fresh clone, which has no prior ref values to compare against, this
-check is the only rewrite detection there is.
+checks every `seen_heads` reference.
+A `seen_heads` entry can name an op id that exists nowhere in the local store.
+A missing op id has two possible causes: a writer rewrote a chain and dropped
+the op, or the local replica has not yet fetched the commits that carry the op.
+No local check can tell the two causes apart, because sync is pairwise and
+asynchronous: a replica can legitimately receive an acknowledgment of an op
+before receiving the op.
+The fold stops with a typed error naming the writer and the missing op id,
+renders nothing, and tells the user to fetch from more remotes.
+Fetching cures the innocent cause.
+When fetching from every available remote still leaves the op id missing, or
+when a refused non-fast-forward fetch or a ref-journal entry points at a
+specific chain, the cause is a rewritten chain (see the section "Attack
+Analysis: Chain Rewrite").
+Running with `--fix-interactive` walks through resolution, including the option
+to drop the offending ref.
+A fresh clone has no prior ref values to compare against, so a fresh clone
+detects rewrites only through missing acknowledgments, and a missing
+acknowledgment is grounds to investigate, not proof of a rewrite.
 
 **Procedure:**
 
@@ -221,9 +233,9 @@ check is the only rewrite detection there is.
 3. Run the missing-acknowledgment check; compute happens-before; apply the
    resolution rules.
 
-The fold is order-independent across replicas: any two clones that have seen
-the same commits compute the same state, regardless of how or in what order
-the commits arrived.
+The fold is order-independent across replicas: any two clones that have seen the
+same commits compute the same state, regardless of how or in what order the
+commits arrived.
 
 ### Sync
 
@@ -233,57 +245,80 @@ the commits arrived.
    append-only, so every legitimate update is a fast-forward.
    A non-fast-forward foreign ref means someone rewrote history; the tool
    refuses the update, keeps its local copy, and reports the ref.
-2. Push the local writer's refs.
+2. Push every `refs/jp/issues/*` ref the local replica holds: the local writer's
+   own refs, plus all foreign refs picked up by fetching.
+   Pushing foreign refs spreads every writer's chain to every remote.
+   If sync pushed only the local writer's refs, then a remote could be missing
+   some writer's chain forever, because no contributor is obligated to push
+   another writer's chain to that remote.
+   A clone made from a remote that is missing a chain cannot compute issue
+   state: surviving chains hold `seen_heads` entries that name op ids inside the
+   missing chain, the fold cannot find those op ids, and the fold stops with an
+   error.
+   Pushing foreign refs is safe: each chain has exactly one writer and only
+   grows, so two replicas pushing the same ref push the same tip, or one tip is
+   an extension of the other.
+   When the remote is already ahead on a ref, git rejects the push; the
+   rejection is harmless, and the next fetch picks up the newer commits.
 
 > [!CAUTION]
 > A forcing refspec — the `+` prefix, as in `+refs/jp/issues/*` — disables
 > git's fast-forward refusal, which is the store's integrity guard.
-> A remote configured with a forcing refspec over `refs/jp/` lets a hostile
-> or compromised peer silently overwrite good refs with rewritten history.
-> `issue sync` always passes its own explicit non-forcing refspec on the
-> `git fetch` command line, which overrides whatever refspecs the remote's
-> config carries; it also refuses to run while any remote's configured
-> `fetch` entry carries a forcing refspec covering `refs/jp/`.
+> A remote configured with a forcing refspec over `refs/jp/` lets a hostile or
+> compromised peer silently overwrite good refs with rewritten history.
+> `issue sync` always passes its own explicit non-forcing refspec on the `git
+> fetch` command line, which overrides whatever refspecs the remote's config
+> carries; it also refuses to run while any remote's configured `fetch` entry
+> carries a forcing refspec covering `refs/jp/`.
 > Never configure one manually.
 
 `issue sync` also maintains a local ref journal as a second guard.
-It sets `core.logAllRefUpdates=always` in the repository — informing the
-user whenever this changes existing git configuration — so git journals
-every ref update into reflogs recording each transition's old and new
-values, including a hand-run `git fetch` with a forcing refspec that
-bypasses the tool entirely.
-Every run starts by reading that journal, flags any `refs/jp/` transition
-that failed to fast-forward, and offers to restore the journaled prior
-value.
-The reflog entries also protect the overwritten commits from garbage
-collection while they live, so the restore is always possible.
+It sets `core.logAllRefUpdates=always` in the repository — informing the user
+whenever this changes existing git configuration — so git journals every ref
+update into reflogs recording each transition's old and new values, including a
+hand-run `git fetch` with a forcing refspec that bypasses the tool entirely.
+Every run starts by reading that journal, flags any `refs/jp/` transition that
+failed to fast-forward, and offers to restore the journaled prior value.
+The reflog entries also protect the overwritten commits from garbage collection
+while they live, so the restore is always possible.
 
 A remote serving older tips is harmless.
-Refs never move backward — an older tip fails to fast-forward — and the
-newer state is adopted on the next sync with any replica that has it.
-Syncing with a participant who is behind carries no penalty, and which
-remotes to fetch from stays the user's decision.
+Refs never move backward — an older tip fails to fast-forward — and the newer
+state is adopted on the next sync with any replica that has it.
+Syncing with a participant who is behind carries no penalty, and which remotes
+to fetch from stays the user's decision.
 
-No push race exists: every worktree is its own writer, so no two replicas
-ever update the same ref.
-Within one worktree, concurrent tool invocations serialize through git's own
-ref locking — `update-ref` with the expected old value; on failure, re-read
-and retry the append.
+Two replicas may push the same ref, but a push race cannot corrupt a chain: only
+the owning worktree ever appends commits to a chain, so competing pushes carry
+the same tip, or one tip is an extension of the other.
+Within one worktree, concurrent tool invocations serialize through git's own ref
+locking — `update-ref` with the expected old value; on failure, re-read and
+retry the append.
 No legitimate non-fast-forward ref update exists anywhere in the system.
 
 ### Server-side receive gate
 
-A git server that accepts pushes holds a replica of the store, but plain
-git applies no special rules to `refs/jp/issues/*`: a pusher with write
-access can force-push a rewritten chain, and the server accepts what every
-jp tool would refuse.
-A `pre-receive` hook closes the gap by rejecting any update to
-`refs/jp/issues/*` that fails to fast-forward the ref's current value,
-contains a commit with more than one parent, or contains a commit whose
-signature does not match the key hash in the ref path — the same checks
-the fold applies at read time, run at push time.
-The hook is stock git tooling: any server whose operator can install
-`pre-receive` hooks can run it.
+A git server that accepts pushes holds a replica of the store, but plain git
+applies no special rules to `refs/jp/issues/*`: a pusher with write access can
+force-push a rewritten chain, and the server accepts a rewritten chain that
+every jp tool would refuse.
+On servers whose operator can install hooks — self-hosted git, or GitHub
+Enterprise Server — a `pre-receive` hook rejects any update to
+`refs/jp/issues/*` that fails to fast-forward the ref's current value, contains
+a commit with more than one parent, or contains a commit whose signature does
+not match the key hash in the ref path.
+The hook runs at push time the same checks the fold runs at read time.
+
+github.com runs no user-supplied `pre-receive` hooks, and github.com branch
+protections and rulesets cover `refs/heads/*` and `refs/tags/*` only.
+A store whose shared remote is github.com has no receive gate: any collaborator
+with write access can force-push a rewritten chain to the shared remote.
+The client-side defenses still hold: every replica's non-forcing fetch refuses
+a rewritten chain, the ref journal records a rewrite forced through by hand,
+and a fresh clone cannot compute issue state, because surviving chains
+acknowledge ops that the rewritten chain no longer carries.
+The receive gate is extra hardening on servers that support hooks; the design
+does not depend on the receive gate.
 
 ### The scraper
 
@@ -298,20 +333,20 @@ Phase 1 scrapes issues and their conversation comments (comment bodies are
 editable on GitHub, hence `set-comment-body`).
 
 The scraper also detects upstream deletions, under one rule: a tombstone
-requires positive evidence of deletion, never absence from a
-possibly-incomplete listing.
-Edits are positive observations and are committed incrementally as scraped;
-a deletion is an inference from absence, so deletion ops are emitted only
-after the enumeration they are inferred from has run to completion, and
-only after a direct GitHub API request for the missing item confirms the
-deletion (HTTP 404/410).
-Concretely: each run enumerates the full issue list, and the comment id set
-of each changed issue; a previously observed issue or comment missing from
-its completed enumeration is requested individually from the API, and only
-an HTTP 404/410 yields the `delete-issue` or `delete-comment` op, carrying
-scraper provenance.
-A scrape that aborts mid-run (rate limit, network failure) therefore emits
-the edits it observed and no deletions.
+requires positive evidence of deletion, never absence from a possibly-incomplete
+listing.
+Edits are positive observations and are committed incrementally as scraped; a
+deletion is an inference from absence, so deletion ops are emitted only after
+the enumeration they are inferred from has run to completion, and only after a
+direct GitHub API request for the missing item confirms the deletion (HTTP
+404/410).
+Concretely: each run enumerates the full issue list, and the comment id set of
+each changed issue; a previously observed issue or comment missing from its
+completed enumeration is requested individually from the API, and only an HTTP
+404/410 yields the `delete-issue` or `delete-comment` op, carrying scraper
+provenance.
+A scrape that aborts mid-run (rate limit, network failure) therefore emits the
+edits it observed and no deletions.
 
 ### Signed commits
 
@@ -319,21 +354,20 @@ Every writer signs its commits (`git commit-tree -S`; SSH-key signing via
 `gpg.format=ssh` keeps the requirement to a key writers already have).
 The scraper signs like any other writer.
 
-Enforcement happens at read time, inside the fold — commits can arrive from
-any remote or bundle, so no single point exists through which all writes
-pass, and GitHub's signed-commit protections only cover branches.
+Enforcement happens at read time, inside the fold — commits can arrive from any
+remote or bundle, so no single point exists through which all writes pass, and
+GitHub's signed-commit protections only cover branches.
 The fold verifies each commit (`git verify-commit`); ops from unverifiable
 commits are excluded from the computed state and surfaced as a warning.
 A configuration option (on by default) escalates the warning to a hard failure.
 
 Verification is required only from a configured cutoff.
-A `verification_required = "<commit-hash>"` configuration field names a
-commit: that commit and everything after it (in the causal order of the
-section "Computing issue state") require verification, while commits before
-the cutoff are exempt from the checks above.
+A `verification_required = "<commit-hash>"` configuration field names a commit:
+that commit and everything after it (in the causal order of the section
+"Computing issue state") require verification, while commits before the cutoff
+are exempt from the checks above.
 With the field unset, no commit requires verification.
-This lets a store adopt signing late without invalidating its earlier
-history.
+This lets a store adopt signing late without invalidating its earlier history.
 
 The trust anchor stays **outside the repository**: a per-user allowed-signers
 file (git's `gpg.ssh.allowedSignersFile` format) under the user's own
@@ -342,28 +376,27 @@ A checked-in list would let anyone who can push code appoint signers — the
 artifact being verified must not control its own trust anchor.
 
 The signing key is the authoritative identity, and the writer id embeds its
-hash: the fold rejects commits that live under a key-hash segment but are
-not signed by the matching key.
+hash: the fold rejects commits that live under a key-hash segment but are not
+signed by the matching key.
 All worktree refs under the same key hash belong to the same principal.
 
 ### Deletion, redaction, and capabilities
 
 The store is append-only: no ref is ever rewritten and no object is ever
 removed.
-Every replica refuses a non-fast-forward update of a foreign ref, so an
-author cannot hide a history rewrite — existing replicas detect it
-directly, and dangling `seen_heads` references expose it even to fresh
-clones.
+Every replica refuses a non-fast-forward update of a foreign ref, so an author
+cannot hide a history rewrite — existing replicas detect the rewrite
+directly, and on a fresh clone the fold stops on the dangling `seen_heads`
+references that the rewrite leaves behind.
 
 `delete-issue`, `delete-comment`, and `redact-op` are ordinary ops: they
-propagate like any other, and every fold hides the target from that point
-on.
+propagate like any other, and every fold hides the target from that point on.
 The hidden bytes remain in every clone, permanently.
 
-**Keeping deleted content.** A user's delete is not final: any single
-moderator may keep the deleted messages by recording a `keep` op in their
-own chain, naming the tombstoned target and the rendering they chose —
-full text, a marker, or a moderator-written summary.
+**Keeping deleted content.** A user's delete is not final: any single moderator
+may keep the deleted messages by recording a `keep` op in their own chain,
+naming the tombstoned target and the rendering they chose — full text, a
+marker, or a moderator-written summary.
 Nothing needs rescuing: the content is still in the author's chain, merely
 hidden, and the `keep` op changes how the fold renders it.
 
@@ -372,14 +405,13 @@ time.
 The capability policy lives with the allowed-signers file, outside the
 repository, consistent with the trust anchor decision.
 The table below lists *defaults*: the policy format expresses other rules —
-different thresholds than 1-of-n, per-action writer sets — without any
-change to the store format, because capabilities are evaluated at fold time
-and never recorded in ops.
+different thresholds than 1-of-n, per-action writer sets — without any change
+to the store format, because capabilities are evaluated at fold time and never
+recorded in ops.
 Ops signed by a key lacking the required capability are excluded from the
-computed state and surfaced, with the same warn/enforce handling as
-unverifiable signatures.
-The originator of an issue or comment is the key that signed its creating
-op.
+computed state and surfaced, with the same warn/enforce handling as unverifiable
+signatures.
+The originator of an issue or comment is the key that signed its creating op.
 
 | Action | Op | Default capability |
 | --- | --- | --- |
@@ -401,51 +433,50 @@ Store-level metadata (the allowed-labels vocabulary) lives in its own log at
 All object and ref access shells out to the `git` binary through the existing
 `ProcessRunner` abstraction in the tools crate:
 
-- writes: `git hash-object -w --stdin`, `git mktree`, `git commit-tree`,
-  `git update-ref`
-- reads: `git for-each-ref`, `git rev-list`, one-shot
-  `git cat-file --batch` with all requests written to stdin upfront
+- writes: `git hash-object -w --stdin`, `git mktree`, `git commit-tree`, `git
+  update-ref`
+- reads: `git for-each-ref`, `git rev-list`, one-shot `git cat-file --batch`
+  with all requests written to stdin upfront
 
 Rationale, in order of weight:
 
-1. **Coexistence is correctness-critical.** The store lives inside
-   repositories people care about.
+1. **Coexistence is correctness-critical.** The store lives inside repositories
+   people care about.
    The git binary can never disagree with itself about locking, gc, packfile
-   formats, or the repo's object format (SHA-256 repos are inherited for
-   free).
-2. **Scale does not justify a library.** Hundreds of issues, dozens of ops
-   each; incremental scrapes write a handful of commits.
+   formats, or the repo's object format (SHA-256 repos are inherited for free).
+2. **Scale does not justify a library.** Hundreds of issues, dozens of ops each;
+   incremental scrapes write a handful of commits.
    The initial import is a one-time bulk write of a few thousand spawns.
 3. **Zero new dependencies** in a project that runs cargo-vet, and the
    subprocess pattern — including `MockProcessRunner` tests and real-git
    integration tests — already exists in the tools crate.
 
-This decision has a pre-agreed revision trigger: if computing state across
-all issues (the kanban view) measures slow, the read path moves to the `gix`
-crate (reading is its most mature half) while writes stay as plumbing.
+This decision has a pre-agreed revision trigger: if computing state across all
+issues (the kanban view) measures slow, the read path moves to the `gix` crate
+(reading is its most mature half) while writes stay as plumbing.
 The on-disk format is git's either way, so stored data does not change.
 
 ## Drawbacks
 
-- Refs grow with issues × worktrees and are permanent: a chain's ops are
-  part of issue state, so refs cannot be pruned.
+- Refs grow with issues × worktrees and are permanent: a chain's ops are part of
+  issue state, so refs cannot be pruned.
 - The store only grows.
   Deleted and redacted content still occupies space in every clone forever.
 - Reads assemble N writer heads per issue instead of walking one DAG, and
-  cross-writer causality is invisible to `git log --graph` — only the fold
-  can reconstruct it.
+  cross-writer causality is invisible to `git log --graph` — only the fold can
+  reconstruct it.
   Acceptable: the consumers are exclusively our own tools.
 - Ops carry a small map of writer id to op id (the `seen_heads` field).
-- Every writer whose commits fall under the `verification_required` cutoff
-  must have commit signing configured, including scraper automation.
-- Subprocess-based reads put a performance ceiling on computing state over
-  many issues; the Implementation section names the measured trigger for
-  moving reads to `gix`.
+- Every writer whose commits fall under the `verification_required` cutoff must
+  have commit signing configured, including scraper automation.
+- Subprocess-based reads put a performance ceiling on computing state over many
+  issues; the Implementation section names the measured trigger for moving reads
+  to `gix`.
 
 ## Alternatives
 
-- **Checked-in files** (e.g. `issues/*.json` in the worktree): merge
-  conflicts in worktrees, issue churn pollutes code history.
+- **Checked-in files** (e.g. `issues/*.json` in the worktree): merge conflicts
+  in worktrees, issue churn pollutes code history.
   Rejected in Motivation.
 - **A dedicated bare repository** owned by JP (or a radicle-style centralized
   store): breaks "pull and you have everything", and centralizing many
@@ -459,72 +490,69 @@ The on-disk format is git's either way, so stored data does not change.
   pushes interpretation into the fold and makes local edits a second,
   differently-shaped op family.
   Fine-grained ops keep `issue append` symmetrical.
-- **One shared ref per issue, merge-on-push**: with N replicas syncing
-  pairwise at arbitrary times, shared-ref convergence mints bookkeeping merge
-  commits at every divergent sync, and independent joins of the same heads
-  themselves diverge.
+- **One shared ref per issue, merge-on-push**: with N replicas syncing pairwise
+  at arbitrary times, shared-ref convergence mints bookkeeping merge commits at
+  every divergent sync, and independent joins of the same heads themselves
+  diverge.
   Per-writer refs eliminate the entire category.
 - **Causality as commit parents** (multi-parent commits referencing foreign
   heads): structurally merge commits, which this design forbids; the
   `seen_heads` field carries the same information while keeping every chain
   linear.
-- **git-bug / git-appraise**: closest prior art, same refs-in-repo approach,
-  but git-bug's elaborated last-write-wins hides conflicts that drop data.
-- **`gix` or `git2` instead of plumbing subprocesses**: see the rationale
-  table in Design; a large vet surface (`gix`) or a C dependency (`git2`)
-  buys speed the workload does not need, at coexistence risk the store cannot
-  afford.
-- **`git fast-import` for bulk writes**: a second command language to
-  generate and debug; the write volume does not demand it.
+- **git-bug / git-appraise**: closest prior art, same refs-in-repo approach, but
+  git-bug's elaborated last-write-wins hides conflicts that drop data.
+- **`gix` or `git2` instead of plumbing subprocesses**: see the rationale table
+  in Design; a large vet surface (`gix`) or a C dependency (`git2`) buys speed
+  the workload does not need, at coexistence risk the store cannot afford.
+- **`git fast-import` for bulk writes**: a second command language to generate
+  and debug; the write volume does not demand it.
   Reach for it only if initial import time annoys someone.
 
 ## Non-Goals
 
 - Pull requests, review comments, and reactions.
 - Local issue creation and editing (`issue append`).
-  The op vocabulary and store format are built for it, but the write path is
-  a later phase.
+  The op vocabulary and store format are built for it, but the write path is a
+  later phase.
 - The kanban tool and any state caching for it (the `set-priority` op is
   registered here; the tool that consumes it is not).
 - Cross-repo mirroring.
-- Moderation governance beyond the default capability rules: vote
-  thresholds, disputes between moderators, appeals.
-  The policy format is built to express these later; this RFD fixes only
-  the defaults.
+- Moderation governance beyond the default capability rules: vote thresholds,
+  disputes between moderators, appeals.
+  The policy format is built to express these later; this RFD fixes only the
+  defaults.
 - Physical removal of store content: deletion only hides.
 
 ## Risks
 
-- **Deleted content persists in every clone.** Every clone permanently
-  holds every op ever synced, including content its author deleted and
-  content a moderator redacted.
-  This is deliberate — the store is append-only — but it means true
-  erasure (leaked credentials, legal demands) is impossible inside the
-  system.
+- **Deleted content persists in every clone.** Every clone permanently holds
+  every op ever synced, including content its author deleted and content a
+  moderator redacted.
+  This is deliberate — the store is append-only — but it means true erasure
+  (leaked credentials, legal demands) is impossible inside the system.
   The remedy for a leaked secret is rotating the secret.
 - **Capability policy is per-user.** Like the allowed-signers file, the
   capability policy lives outside the repository, so two users can compute
   different folded states from the same commits.
   Tools must surface excluded ops, so the divergence stays visible.
-- **Large payloads.** When `issue append` needs content too large for
-  `ops.json` (logs, screenshots), the payload goes to the `.jp/blobs/` store
-  of [RFD 066], referenced from the op by SHA-256.
-  The signed op carries the checksum, so signature verification extends to
-  the blob content.
-  Consequence to accept: blobs travel with ordinary worktree commits, not
-  with `issue sync` ref exchange, so an op can reference a blob its reader
-  has not yet pulled.
+- **Large payloads.** When `issue append` needs content too large for `ops.json`
+  (logs, screenshots), the payload goes to the `.jp/blobs/` store of [RFD 066],
+  referenced from the op by SHA-256.
+  The signed op carries the checksum, so signature verification extends to the
+  blob content.
+  Consequence to accept: blobs travel with ordinary worktree commits, not with
+  `issue sync` ref exchange, so an op can reference a blob its reader has not
+  yet pulled.
   Details deferred to the append-phase RFD.
 
-- **Withholding is undetectable.** A remote can serve truthful but stale
-  refs: every commit validly signed, every update a fast-forward, and the
-  newest ops simply absent.
-  A reader served only by that remote sees an issue frozen in the past, and
-  no mechanical check distinguishes withholding from ordinary propagation
-  delay.
-  Accepted as inherent: refs never move backward, the newer tip is adopted
-  as soon as any replica that has it is fetched from, and the choice of
-  remotes is the user's.
+- **Withholding is undetectable.** A remote can serve truthful but stale refs:
+  every commit validly signed, every update a fast-forward, and the newest ops
+  simply absent.
+  A reader served only by that remote sees an issue frozen in the past, and no
+  mechanical check distinguishes withholding from ordinary propagation delay.
+  Accepted as inherent: refs never move backward, the newer tip is adopted as
+  soon as any replica that has it is fetched from, and the choice of remotes is
+  the user's.
 - **Verification cost.** `git verify-commit` per commit at read time is
   subprocess-heavy; verification results may need caching.
   Measure before optimizing.
@@ -533,8 +561,8 @@ The on-disk format is git's either way, so stored data does not change.
 
 Several of the mechanisms above — the ref journal, the receive gate, the
 missing-acknowledgment rule — exist because of one concrete attack.
-This section documents it and maps each defense to the design mechanism
-that closes it.
+This section documents it and maps each defense to the design mechanism that
+closes it.
 
 Mallory is a developer with a git remote she controls.
 She rewrites the history of one writer chain under `refs/jp/issues/42/`,
@@ -543,38 +571,43 @@ Alice fetches code and issue refs directly from Mallory's remote.
 Bob runs the git server that the team otherwise shares, and Alice has push
 access to it.
 
-If Alice already holds the current value of the rewritten ref, her
-non-forcing fetch refuses the update: a chain missing a commit fails to
-fast-forward.
+If Alice already holds the current value of the rewritten ref, her non-forcing
+fetch refuses the update: a chain missing a commit fails to fast-forward.
 If Alice is behind, or fetching these refs for the first time, she accepts
-Mallory's version — a first fetch has no prior value to compare against,
-and signatures authenticate authorship of the commits that are present
-without proving that the set is complete.
+Mallory's version — a first fetch has no prior value to compare against, and
+signatures authenticate authorship of the commits that are present without
+proving that the set is complete.
 
-Otherwise-normal git tooling exposes the attack at every point where it
-would otherwise take hold or spread:
+Otherwise-normal git tooling exposes the attack at every point where it would
+otherwise take hold or spread:
 
 - **Fast-forward refusal** (the section "Sync"): every replica that already
   holds the honest ref refuses Mallory's rewrite outright.
-- **The local ref journal** (the section "Sync"): if Alice bypasses the
-  tool with a hand-run forcing fetch, the reflog records the
-  non-fast-forward transition; the next `issue sync` flags it and offers to
-  restore the journaled prior value.
-- **Missing-acknowledgment detection** (the section "Computing issue
-  state"): other writers' `seen_heads` still name the dropped op, so even a
-  fresh clone — with no prior refs to compare against — detects the
-  rewrite; the fold stops with a typed error and `--fix-interactive` offers
-  to drop the offending ref.
-- **The server-side receive gate** (the section "Server-side receive
-  gate"): spreading the corruption through the shared server requires a
-  force push that Bob's `pre-receive` hook refuses.
+- **The local ref journal** (the section "Sync"): if Alice bypasses the tool
+  with a hand-run forcing fetch, the reflog records the non-fast-forward
+  transition; the next `issue sync` flags it and offers to restore the journaled
+  prior value.
+- **Missing-acknowledgment detection** (the section "Computing issue state"):
+  other writers' `seen_heads` still name the dropped op, so even a fresh clone
+  — with no prior refs to compare against — refuses to render issue state;
+  the fold stops with a typed error naming the missing op id.
+  Mallory dropped the op from every copy she controls, but the op exists on
+  no other remote either, so fetching from more remotes never cures the
+  error, and the error hardens into evidence of a rewrite.
+  `--fix-interactive` offers to drop the offending ref.
+- **The server-side receive gate** (the section "Server-side receive gate"):
+  spreading the corruption through the shared server requires a force push that
+  Bob's `pre-receive` hook refuses.
+  When the team's shared server is github.com, no hook runs and the force
+  push succeeds; fast-forward refusal, the ref journal, and
+  missing-acknowledgment detection are the remaining defenses.
 
 A remote can also *withhold*: serve truthful but stale refs, every commit
 validly signed and every update a fast-forward, with the newest ops simply
 absent.
 That is not a rewrite and no defense above fires; it is an accepted limit,
-recorded under Risks, and the sync rules in the section "Sync" guarantee
-the gap heals on the next sync with any replica that has the newer state.
+recorded under Risks, and the sync rules in the section "Sync" guarantee the gap
+heals on the next sync with any replica that has the newer state.
 
 ## Implementation Plan
 
@@ -583,37 +616,36 @@ Each phase is independently reviewable and mergeable.
 1. **Store primitives** in the tools crate: writer-id minting and storage,
    `ops.json` schema (versioned), commit read/write via `ProcessRunner`
    plumbing, ref enumeration.
-   Unit-tested against `MockProcessRunner`, integration-tested against real
-   temp repos.
+   Unit-tested against `MockProcessRunner`, integration-tested against real temp
+   repos.
 2. **State computation (the fold)**: chain walking, causal ordering from
    `seen_heads`, the missing-acknowledgment check with its typed error and
-   `--fix-interactive` resolution, deterministic tiebreak, per-field
-   semantics (multi-value registers, observed-remove set, grow-only set).
+   `--fix-interactive` resolution, deterministic tiebreak, per-field semantics
+   (multi-value registers, observed-remove set, grow-only set).
    Pure logic over data fetched by phase 1; property-style tests for
    order-independence.
-3. **Scraper** (`issue sync`, write side): scrape via `jp_github`, diff
-   scraped state against computed local state, emit ops — including
-   `delete-issue` / `delete-comment` tombstones for upstream deletions —
-   and sign commits.
+3. **Scraper** (`issue sync`, write side): scrape via `jp_github`, diff scraped
+   state against computed local state, emit ops — including `delete-issue` /
+   `delete-comment` tombstones for upstream deletions — and sign commits.
    Depends on phases 1–2.
 4. **Sync** (`issue sync`, transport side): fetch refspec configuration,
-   fast-forward pushes, refusal to run while any remote's configured
-   `fetch` entry carries a forcing refspec covering `refs/jp/`,
+   fast-forward pushes, refusal to run while any remote's configured `fetch`
+   entry carries a forcing refspec covering `refs/jp/`,
    `core.logAllRefUpdates=always` setup and the ref-journal check, and a
    reference `pre-receive` hook for server operators.
-5. **`issue show`**: compute and render one issue's state, including
-   surfaced multi-value conflicts and unverified-writer warnings.
-6. **Signature verification** during state computation: `verify-commit`
-   against the per-user allowed-signers file, with the warn/enforce
-   configuration option and the `verification_required` cutoff.
+5. **`issue show`**: compute and render one issue's state, including surfaced
+   multi-value conflicts and unverified-writer warnings.
+6. **Signature verification** during state computation: `verify-commit` against
+   the per-user allowed-signers file, with the warn/enforce configuration option
+   and the `verification_required` cutoff.
 7. **Deletion and keeps** (`issue delete`): tombstone ops, `keep` ops,
    capability checks against the per-user policy.
 
 ## References
 
 - [RFD 066] — Content-Addressable Blob Store: content-addressed storage for
-  conversation blobs, and the designated home for large payloads in the
-  later `issue append` phase (see the section "Risks").
+  conversation blobs, and the designated home for large payloads in the later
+  `issue append` phase (see the section "Risks").
 
 - [git-bug] — issues as git objects in refs, closest prior art.
 - [git-appraise] — code review as git objects in refs.
