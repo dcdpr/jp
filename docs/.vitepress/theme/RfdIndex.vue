@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
+import { inBrowser } from 'vitepress'
 
 const props = defineProps({
     entries: { type: Array, required: true },
@@ -17,18 +18,44 @@ function stored(key, fallback) {
 
 const k = (name) => `${props.storageKey}-${name}`
 
-const filter = ref(stored(k('filter'), 'all'))
-const search = ref(stored(k('search'), ''))
-const showSummaries = ref(stored(k('summaries'), 'true') === 'true')
-
-watch(filter, v => { try { sessionStorage.setItem(k('filter'), v) } catch {} })
-watch(search, v => { try { sessionStorage.setItem(k('search'), v) } catch {} })
-watch(showSummaries, v => { try { sessionStorage.setItem(k('summaries'), String(v)) } catch {} })
+// URL query params take precedence over sessionStorage, so a shared link like
+// /rfd/?search=plugin shows the same filtered list for everyone.
+function fromUrl(name) {
+    if (!inBrowser) return null
+    return new URLSearchParams(window.location.search).get(name)
+}
 
 // Default to descending by id so the newest RFDs sit at the top.
 const sortKey = ref('num')
 const sortAsc = ref(false)
 const categories = ['all', 'design', 'decision', 'guide', 'process']
+
+const urlFilter = fromUrl('filter')
+const filter = ref(categories.includes(urlFilter) ? urlFilter : stored(k('filter'), 'all'))
+const search = ref(fromUrl('search') ?? stored(k('search'), ''))
+const showSummaries = ref(stored(k('summaries'), 'true') === 'true')
+
+// Mirror the toolbar state into the URL so the current view is shareable.
+// replaceState (not pushState) keeps typing from flooding the history stack.
+function syncUrl() {
+    if (!inBrowser) return
+    const params = new URLSearchParams(window.location.search)
+    if (filter.value !== 'all') params.set('filter', filter.value)
+    else params.delete('filter')
+    if (search.value.trim()) params.set('search', search.value)
+    else params.delete('search')
+    const qs = params.toString()
+    const url = window.location.pathname + (qs ? `?${qs}` : '') + window.location.hash
+    window.history.replaceState(window.history.state, '', url)
+}
+
+watch(filter, v => { try { sessionStorage.setItem(k('filter'), v) } catch {}; syncUrl() })
+watch(search, v => { try { sessionStorage.setItem(k('search'), v) } catch {}; syncUrl() })
+watch(showSummaries, v => { try { sessionStorage.setItem(k('summaries'), String(v)) } catch {} })
+
+// State restored from sessionStorage isn't in the URL yet; sync once so the
+// address bar always matches what's on screen.
+onMounted(syncUrl)
 
 const showCategory = computed(() => filter.value === 'all')
 
