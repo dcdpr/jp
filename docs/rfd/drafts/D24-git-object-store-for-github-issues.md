@@ -86,16 +86,16 @@ refs/jp/issues/<number>/<writer-id>
 - `<writer-id>` identifies one replica: one checkout of the repository — a
   clone, or a linked git worktree inside a clone — held by one signer.
   It is composed of two segments,
-  `<unique-hash-of-signing-key>-<avatar-nickname>/<replica-id>`:
-  the key hash binds the ref to a signing key (the fold rejects commits under a
-  key-hash segment that are not signed by the matching key); the avatar nickname
-  is a human-readable label with no authority; the replica id is a
-  `jp_id`-formatted id minted per checkout on first write, stored in that
-  checkout's own state under `.git/`, never checked in and never synced.
-  The replica id exists because one signer works from several checkouts at
-  once: if the signing key alone named the writer, two checkouts holding the
-  same key would append to the same ref independently, and one of the two
-  pushes would fail to fast-forward.
+  `<unique-hash-of-signing-key>-<avatar-nickname>/<replica-id>`: the key hash
+  binds the ref to a signing key (the fold rejects commits under a key-hash
+  segment that are not signed by the matching key); the avatar nickname is a
+  human-readable label with no authority; the replica id is a `jp_id`-formatted
+  id minted per checkout on first write, stored in that checkout's own state
+  under `.git/`, never checked in and never synced.
+  The replica id exists because one signer works from several checkouts at once:
+  if the signing key alone named the writer, two checkouts holding the same key
+  would append to the same ref independently, and one of the two pushes would
+  fail to fast-forward.
   A replica id per checkout gives each checkout its own chain, so every push
   stays a fast-forward.
   Every checkout of every clone is its own writer.
@@ -164,8 +164,8 @@ what `seen_heads` acknowledgments reference.
 
 A register is one field of one target: ops of the same type on the same target
 address the same register.
-The fold semantics named in the table are defined in the section
-"Computing issue state", after the causal order they depend on.
+The fold semantics named in the table are defined in the section "Computing
+issue state", after the causal order they depend on.
 
 `set-comment-visibility` records comment collapsing — GitHub's
 comment-minimization feature — as a register holding `visible` or `collapsed`
@@ -212,8 +212,8 @@ This relation is the only input to conflict resolution.
   A removed label can be re-added by a later `add-label` op; removal is never
   permanent (the distinction from a two-phase set, where removal is final).
 - **Grow-only set** (comments): the union of `add-comment` ops.
-- **Tombstone** (deletes): once present, every fold hides the target
-  from that point on; concurrent edits to the target stay in the log but are not
+- **Tombstone** (deletes): once present, every fold hides the target from that
+  point on; concurrent edits to the target stay in the log but are not
   displayed.
   Hiding is the entire mechanism; the bytes are never removed from the store.
   A tombstone is final: no op un-hides a tombstoned target.
@@ -358,8 +358,8 @@ direct GitHub API request for the missing item confirms the deletion (HTTP
 Concretely: each run enumerates the full issue list, and the comment id set of
 each changed issue; a previously observed issue or comment missing from its
 completed enumeration is requested individually from the API, and only an HTTP
-404/410 yields the `tombstone-issue` or `tombstone-comment` op, carrying
-scraper provenance.
+404/410 yields the `tombstone-issue` or `tombstone-comment` op, carrying scraper
+provenance.
 A scrape that aborts mid-run (rate limit, network failure) therefore emits the
 edits it observed and no deletions.
 
@@ -404,17 +404,17 @@ cannot hide a history rewrite — existing replicas detect the rewrite directly,
 and on a fresh clone the fold stops on the dangling `seen_heads` references that
 the rewrite leaves behind.
 
-`tombstone-issue` and `tombstone-comment` are ordinary ops: they propagate
-like any other, and every fold hides the target from that point on.
+`tombstone-issue` and `tombstone-comment` are ordinary ops: they propagate like
+any other, and every fold hides the target from that point on.
 The hidden bytes remain in every clone, permanently.
 
-Every writer trusted by the allowed-signers file is a full peer: any peer
-may perform any op on any item, including a tombstone on an item another
-peer created.
+Every writer trusted by the allowed-signers file is a full peer: any peer may
+perform any op on any item, including a tombstone on an item another peer
+created.
 A tombstone is final; no op un-hides a tombstoned target.
 When a tombstone turns out to be wrong, the original author resubmits the
-content as a new issue or comment, and the new item can be tombstoned in
-turn by the same rule.
+content as a new issue or comment, and the new item can be tombstoned in turn by
+the same rule.
 
 Store-level metadata (the allowed-labels vocabulary) lives in its own log at
 `refs/jp/issues/meta/<writer-id>`, using the same op machinery as an issue.
@@ -424,8 +424,8 @@ Store-level metadata (the allowed-labels vocabulary) lives in its own log at
 The tooling is an internal command plugin: a `jp-issue` binary under
 `crates/internal/`, registering the `issue` command path, so the commands above
 run as `jp issue sync` and `jp issue show`.
-The plugin is built and installed locally via the existing plugin
-infrastructure and is not published to the plugin registry.
+The plugin is built and installed locally via the existing plugin infrastructure
+and is not published to the plugin registry.
 Store primitives, the fold, and the scraper are library code inside the same
 crate; the CLI is a thin shell over that library, and the fold stays pure logic
 over data the store layer fetched.
@@ -612,9 +612,9 @@ heals on the next sync with any replica that has the newer state.
 
 Each phase is independently reviewable and mergeable.
 
-1. **Store primitives** in the `jp-issue` crate: the plugin skeleton and
-   `issue` command registration, writer-id minting and storage, `ops.json`
-   schema (versioned), commit read/write via git plumbing subprocesses, ref
+1. **Store primitives** in the `jp-issue` crate: the plugin skeleton and `issue`
+   command registration, writer-id minting and storage, `ops.json` schema
+   (versioned), commit read/write via git plumbing subprocesses, ref
    enumeration.
    Unit-tested against mocked git invocations, integration-tested against real
    temporary repositories.
@@ -625,8 +625,8 @@ Each phase is independently reviewable and mergeable.
    Pure logic over data fetched by phase 1; property-style tests for
    order-independence.
 3. **Scraper** (`issue sync`, write side): scrape via `jp_github`, diff scraped
-   state against computed local state, emit ops — including `tombstone-issue`
-   / `tombstone-comment` for upstream deletions — and sign commits.
+   state against computed local state, emit ops — including `tombstone-issue` /
+   `tombstone-comment` for upstream deletions — and sign commits.
    Depends on phases 1–2.
 4. **Sync** (`issue sync`, transport side): fetch refspec configuration,
    fast-forward pushes, refusal to run while any remote's configured `fetch`
