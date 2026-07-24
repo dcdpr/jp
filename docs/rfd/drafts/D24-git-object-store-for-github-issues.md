@@ -9,8 +9,8 @@
 
 This RFD describes a local-first store for GitHub issues, kept as git objects in
 the project's own `.git` under a dedicated ref namespace.
-A scraper tool mirrors issues and their comments from GitHub through
-`jp_github`; contributors sync the store with ordinary push and pull.
+A scraper tool ingests issues and their comments from GitHub through
+`jp_github`, one way; contributors sync the store with ordinary push and pull.
 Each issue is a set of per-writer, append-only operation logs; issue state is
 computed deterministically from their union, without merge conflicts and without
 dropped data.
