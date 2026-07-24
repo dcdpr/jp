@@ -148,19 +148,19 @@ writes.
 Each op carries a stable `jp_id`-formatted `id`, minted at creation; the id is
 what `seen_heads` acknowledgments reference.
 
-| Op | Target | Fold semantics |
-| --- | --- | --- |
-| `set-title` | issue | multi-value register |
-| `set-body` | issue | multi-value register |
-| `set-state` | issue | multi-value register |
-| `add-label` / `remove-label` | issue | observed-remove set |
-| `add-comment` | comment (by GitHub id) | grow-only set |
-| `set-comment-body` | comment (by GitHub id) | multi-value register |
-| `set-comment-visibility` | comment (by GitHub id) | multi-value register |
-| `set-priority` | issue | multi-value register |
-| `tombstone-issue` | issue | tombstone |
-| `tombstone-comment` | comment (by GitHub id) | tombstone |
-| `set-allowed-labels` | store metadata | multi-value register |
+| Op                           | Target                 | Fold semantics       |
+| ---------------------------- | ---------------------- | -------------------- |
+| `set-title`                  | issue                  | multi-value register |
+| `set-body`                   | issue                  | multi-value register |
+| `set-state`                  | issue                  | multi-value register |
+| `add-label` / `remove-label` | issue                  | observed-remove set  |
+| `add-comment`                | comment (by GitHub id) | grow-only set        |
+| `set-comment-body`           | comment (by GitHub id) | multi-value register |
+| `set-comment-visibility`     | comment (by GitHub id) | multi-value register |
+| `set-priority`               | issue                  | multi-value register |
+| `tombstone-issue`            | issue                  | tombstone            |
+| `tombstone-comment`          | comment (by GitHub id) | tombstone            |
+| `set-allowed-labels`         | store metadata         | multi-value register |
 
 A register is one field of one target: ops of the same type on the same target
 address the same register.
@@ -534,6 +534,7 @@ The on-disk format is git's either way, so stored data does not change.
   This is deliberate — the store is append-only — but it means true erasure
   (leaked credentials, legal demands) is impossible inside the system.
   The remedy for a leaked secret is rotating the secret.
+
 - **Large payloads.** When `issue append` needs content too large for `ops.json`
   (logs, screenshots), the payload goes to the `.jp/blobs/` store of [RFD 066],
   referenced from the op by SHA-256.
@@ -552,6 +553,7 @@ The on-disk format is git's either way, so stored data does not change.
   Accepted as inherent: refs never move backward, the newer tip is adopted as
   soon as any replica that has it is fetched from, and the choice of remotes is
   the user's.
+
 - **Verification cost.** `git verify-commit` per commit at read time is
   subprocess-heavy; verification results may need caching.
   Measure before optimizing.
@@ -647,13 +649,15 @@ Each phase is independently reviewable and mergeable.
   `issue append` phase (see the section "Risks").
 
 - [git-bug] — issues as git objects in refs, closest prior art.
+
 - [git-appraise] — code review as git objects in refs.
+
 - [radicle COBs] — collaborative objects as commit DAGs; this design borrows
   the op-log idea but rejects centralized per-user storage and multi-parent
   causality.
 
 [RFD 066]: ../066-content-addressable-blob-store.md
+[git-appraise]: https://github.com/google/git-appraise
 [git-bug]: https://github.com/git-bug/git-bug
 [gitnamespaces(1)]: https://git-scm.com/docs/gitnamespaces
-[git-appraise]: https://github.com/google/git-appraise
 [radicle COBs]: https://radicle.xyz/guides/protocol#collaborative-objects
