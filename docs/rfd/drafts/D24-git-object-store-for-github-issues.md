@@ -19,7 +19,7 @@ dropped data.
 
 Contributors need offline access to the project's issues, and later the ability
 to edit them locally (`issue append`) and build views over them (a kanban tool).
-The consumers are our own jp-tools: `issue show` first, `issue append` and a
+The consumers are our own tooling: `jp issue show` first, `issue append` and a
 kanban view later.
 
 In this version of the design, GitHub is an ingest source only: issues filed
@@ -52,10 +52,10 @@ need for offline work.
 
 ```sh
 # sync: fetch everyone's issue refs, push every issue ref you hold
-jp-tools issue sync
+jp issue sync
 
 # read a folded issue, offline
-jp-tools issue show 42
+jp issue show 42
 
 # poke at the raw store with stock git
 git for-each-ref refs/jp/issues/42/
@@ -99,6 +99,12 @@ refs/jp/issues/<number>/<writer-id>
   A replica id per checkout gives each checkout its own chain, so every push
   stays a fast-forward.
   Every checkout of every clone is its own writer.
+
+`refs/jp/issues/` is an ordinary ref hierarchy in the repository's normal ref
+space, like git's own `refs/notes/*` — not the ref-remapping mechanism of
+[gitnamespaces(1)], which serves multiple logical repositories from one object
+store by rewriting every ref name server-side.
+Nothing here is remapped: clients see, fetch, and push the literal ref names.
 
 A ref is only ever written by its owner — one replica — so no two replicas
 ever contend on a ref.
@@ -413,10 +419,20 @@ turn by the same rule.
 Store-level metadata (the allowed-labels vocabulary) lives in its own log at
 `refs/jp/issues/meta/<writer-id>`, using the same op machinery as an issue.
 
+### Where the code lives
+
+The tooling is an internal command plugin: a `jp-issue` binary under
+`crates/internal/`, registering the `issue` command path, so the commands above
+run as `jp issue sync` and `jp issue show`.
+The plugin is built and installed locally via the existing plugin
+infrastructure and is not published to the plugin registry.
+Store primitives, the fold, and the scraper are library code inside the same
+crate; the CLI is a thin shell over that library, and the fold stays pure logic
+over data the store layer fetched.
+
 ### Implementation: git plumbing subprocesses
 
-All object and ref access shells out to the `git` binary through the existing
-`ProcessRunner` abstraction in the tools crate:
+All object and ref access shells out to the `git` binary:
 
 - writes: `git hash-object -w --stdin`, `git mktree`, `git commit-tree`, `git
   update-ref`
@@ -432,9 +448,7 @@ Rationale, in order of weight:
 2. **Scale does not justify a library.** Hundreds of issues, dozens of ops each;
    incremental scrapes write a handful of commits.
    The initial import is a one-time bulk write of a few thousand spawns.
-3. **Zero new dependencies** in a project that runs cargo-vet, and the
-   subprocess pattern — including `MockProcessRunner` tests and real-git
-   integration tests — already exists in the tools crate.
+3. **Zero new dependencies** in a project that runs cargo-vet.
 
 This decision has a pre-agreed revision trigger: if computing state across all
 issues (the kanban view) measures slow, the read path moves to the `gix` crate
@@ -506,6 +520,12 @@ The on-disk format is git's either way, so stored data does not change.
   Authorization rules can be added later, evaluated at fold time, without
   changing stored data.
 - Physical removal of store content: deletion only hides.
+
+## Future Work
+
+- Assistant-facing `issue_*` tools: thin, non-interactive read tools (an
+  `issue_show`, for example) layered on the store library, so the assistant can
+  consult the issue store during conversations.
 
 ## Risks
 
@@ -592,11 +612,12 @@ heals on the next sync with any replica that has the newer state.
 
 Each phase is independently reviewable and mergeable.
 
-1. **Store primitives** in the tools crate: writer-id minting and storage,
-   `ops.json` schema (versioned), commit read/write via `ProcessRunner`
-   plumbing, ref enumeration.
-   Unit-tested against `MockProcessRunner`, integration-tested against real temp
-   repos.
+1. **Store primitives** in the `jp-issue` crate: the plugin skeleton and
+   `issue` command registration, writer-id minting and storage, `ops.json`
+   schema (versioned), commit read/write via git plumbing subprocesses, ref
+   enumeration.
+   Unit-tested against mocked git invocations, integration-tested against real
+   temporary repositories.
 2. **State computation (the fold)**: chain walking, causal ordering from
    `seen_heads`, the missing-acknowledgment check with its typed error and
    `--fix-interactive` resolution, deterministic tiebreak, per-field semantics
@@ -633,5 +654,6 @@ Each phase is independently reviewable and mergeable.
 
 [RFD 066]: ../066-content-addressable-blob-store.md
 [git-bug]: https://github.com/git-bug/git-bug
+[gitnamespaces(1)]: https://git-scm.com/docs/gitnamespaces
 [git-appraise]: https://github.com/google/git-appraise
 [radicle COBs]: https://radicle.xyz/guides/protocol#collaborative-objects
