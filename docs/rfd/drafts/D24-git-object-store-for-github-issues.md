@@ -22,12 +22,14 @@ to edit them locally (`issue append`) and build views over them (a kanban tool).
 The consumers are our own jp-tools: `issue show` first, `issue append` and a
 kanban view later.
 
-GitHub is a read-only interface where some issues get added.
+In this version of the design, GitHub is an ingest source only: issues filed
+there are scraped into the local store, but the tooling never writes back to
+GitHub.
 It is not the authority.
 The local store is the source of truth, designed from day one for a world where
 local edits are made concurrently on machines that do not know about each other.
 
-Three storage approaches fail the requirements:
+Three approaches fail the requirements:
 
 - **Checked-in files** cause merge conflicts for people working in worktrees,
   and dirty the code's evolution with their own commit history.
@@ -81,18 +83,24 @@ refs/jp/issues/<number>/<writer-id>
   The literal `meta` is reserved for the store-level metadata log.
   The store holds the repo's own issues only; a cross-repo mirror would get a
   sibling namespace and is out of scope.
-- `<writer-id>` identifies one worktree of one clone, held by one signer.
-  It is composed of three segments,
-  `<workspace-id>/<unique-hash-of-signing-key>-<avatar-nickname>/<worktree-id>`:
-  the workspace id scopes the writer to the JP workspace that produced it; the
-  key hash binds the ref to a signing key (the fold rejects commits under a
+- `<writer-id>` identifies one replica: one checkout of the repository — a
+  clone, or a linked git worktree inside a clone — held by one signer.
+  It is composed of two segments,
+  `<unique-hash-of-signing-key>-<avatar-nickname>/<replica-id>`:
+  the key hash binds the ref to a signing key (the fold rejects commits under a
   key-hash segment that are not signed by the matching key); the avatar nickname
-  is a human-readable label with no authority; the worktree id is a
-  `jp_id`-formatted id minted per worktree on first write, stored in that
-  worktree's own state under `.git/`, never checked in and never synced.
-  Every worktree of every clone is its own writer.
+  is a human-readable label with no authority; the replica id is a
+  `jp_id`-formatted id minted per checkout on first write, stored in that
+  checkout's own state under `.git/`, never checked in and never synced.
+  The replica id exists because one signer works from several checkouts at
+  once: if the signing key alone named the writer, two checkouts holding the
+  same key would append to the same ref independently, and one of the two
+  pushes would fail to fast-forward.
+  A replica id per checkout gives each checkout its own chain, so every push
+  stays a fast-forward.
+  Every checkout of every clone is its own writer.
 
-A ref is only ever written by its owner — one worktree — so no two replicas
+A ref is only ever written by its owner — one replica — so no two replicas
 ever contend on a ref.
 Every push is a fast-forward, and no merge commit exists anywhere in the store.
 
@@ -132,7 +140,7 @@ issue state".
 Operations are fine-grained, one vocabulary for scraped and (later) local
 writes.
 Each op carries a stable `jp_id`-formatted `id`, minted at creation; the id is
-what tombstones and redaction stubs reference.
+what `seen_heads` acknowledgments reference.
 
 | Op | Target | Fold semantics |
 | --- | --- | --- |
@@ -144,15 +152,13 @@ what tombstones and redaction stubs reference.
 | `set-comment-body` | comment (by GitHub id) | multi-value register |
 | `set-comment-visibility` | comment (by GitHub id) | multi-value register |
 | `set-priority` | issue | multi-value register |
-| `delete-issue` | issue | tombstone |
-| `delete-comment` | comment (by GitHub id) | tombstone |
-| `redact-op` | op (by op id) | tombstone |
-| `keep` | issue or comment | keep (defined below) |
+| `tombstone-issue` | issue | tombstone |
+| `tombstone-comment` | comment (by GitHub id) | tombstone |
 | `set-allowed-labels` | store metadata | multi-value register |
 
 A register is one field of one target: ops of the same type on the same target
 address the same register.
-The three fold semantics named in the table are defined in the section
+The fold semantics named in the table are defined in the section
 "Computing issue state", after the causal order they depend on.
 
 `set-comment-visibility` records comment collapsing — GitHub's
@@ -191,19 +197,22 @@ This relation is the only input to conflict resolution.
   The register holds a single value again only when a later write acknowledges
   every op in that set — that write happens-after each of them, and the fold
   resolves the register to it.
+  A resolving write is an ordinary write, so two concurrent resolving writes
+  produce a new conflict containing only the resolving values; the same rule
+  applies until one write acknowledges every live value.
 - **Observed-remove set** (labels): a label is present when some `add-label` op
   for it does not happen-before a `remove-label` op for it.
   A remove affects only adds it acknowledged; a concurrent add survives.
+  A removed label can be re-added by a later `add-label` op; removal is never
+  permanent (the distinction from a two-phase set, where removal is final).
 - **Grow-only set** (comments): the union of `add-comment` ops.
-- **Tombstone** (deletes, redactions): once present, every fold hides the target
+- **Tombstone** (deletes): once present, every fold hides the target
   from that point on; concurrent edits to the target stay in the log but are not
   displayed.
   Hiding is the entire mechanism; the bytes are never removed from the store.
-- **Keep** (moderation): a `keep` op from any single moderator (1-of-n)
-  overrides a tombstone on the same target.
-  The kept content renders however the keeping moderator chose: full text, a
-  marker, or a moderator-written summary.
-  Without a `keep`, a single redact or delete suffices to hide (also 1-of-n).
+  A tombstone is final: no op un-hides a tombstoned target.
+  When a tombstone turns out to be wrong, the original author resubmits the
+  content as a new issue or comment.
 
 **Missing acknowledgments.** Before applying the resolution rules, the fold
 checks every `seen_heads` reference.
@@ -289,9 +298,9 @@ Syncing with a participant who is behind carries no penalty, and which remotes
 to fetch from stays the user's decision.
 
 Two replicas may push the same ref, but a push race cannot corrupt a chain: only
-the owning worktree ever appends commits to a chain, so competing pushes carry
+the owning replica ever appends commits to a chain, so competing pushes carry
 the same tip, or one tip is an extension of the other.
-Within one worktree, concurrent tool invocations serialize through git's own ref
+Within one replica, concurrent tool invocations serialize through git's own ref
 locking — `update-ref` with the expected old value; on failure, re-read and
 retry the append.
 No legitimate non-fast-forward ref update exists anywhere in the system.
@@ -313,10 +322,10 @@ github.com runs no user-supplied `pre-receive` hooks, and github.com branch
 protections and rulesets cover `refs/heads/*` and `refs/tags/*` only.
 A store whose shared remote is github.com has no receive gate: any collaborator
 with write access can force-push a rewritten chain to the shared remote.
-The client-side defenses still hold: every replica's non-forcing fetch refuses
-a rewritten chain, the ref journal records a rewrite forced through by hand,
-and a fresh clone cannot compute issue state, because surviving chains
-acknowledge ops that the rewritten chain no longer carries.
+The client-side defenses still hold: every replica's non-forcing fetch refuses a
+rewritten chain, the ref journal records a rewrite forced through by hand, and a
+fresh clone cannot compute issue state, because surviving chains acknowledge ops
+that the rewritten chain no longer carries.
 The receive gate is extra hardening on servers that support hooks; the design
 does not depend on the receive gate.
 
@@ -343,8 +352,8 @@ direct GitHub API request for the missing item confirms the deletion (HTTP
 Concretely: each run enumerates the full issue list, and the comment id set of
 each changed issue; a previously observed issue or comment missing from its
 completed enumeration is requested individually from the API, and only an HTTP
-404/410 yields the `delete-issue` or `delete-comment` op, carrying scraper
-provenance.
+404/410 yields the `tombstone-issue` or `tombstone-comment` op, carrying
+scraper provenance.
 A scrape that aborts mid-run (rate limit, network failure) therefore emits the
 edits it observed and no deletions.
 
@@ -378,52 +387,28 @@ artifact being verified must not control its own trust anchor.
 The signing key is the authoritative identity, and the writer id embeds its
 hash: the fold rejects commits that live under a key-hash segment but are not
 signed by the matching key.
-All worktree refs under the same key hash belong to the same principal.
+All replica refs under the same key hash belong to the same principal.
 
-### Deletion, redaction, and capabilities
+### Deletion
 
 The store is append-only: no ref is ever rewritten and no object is ever
 removed.
 Every replica refuses a non-fast-forward update of a foreign ref, so an author
-cannot hide a history rewrite — existing replicas detect the rewrite
-directly, and on a fresh clone the fold stops on the dangling `seen_heads`
-references that the rewrite leaves behind.
+cannot hide a history rewrite — existing replicas detect the rewrite directly,
+and on a fresh clone the fold stops on the dangling `seen_heads` references that
+the rewrite leaves behind.
 
-`delete-issue`, `delete-comment`, and `redact-op` are ordinary ops: they
-propagate like any other, and every fold hides the target from that point on.
+`tombstone-issue` and `tombstone-comment` are ordinary ops: they propagate
+like any other, and every fold hides the target from that point on.
 The hidden bytes remain in every clone, permanently.
 
-**Keeping deleted content.** A user's delete is not final: any single moderator
-may keep the deleted messages by recording a `keep` op in their own chain,
-naming the tombstoned target and the rendering they chose — full text, a
-marker, or a moderator-written summary.
-Nothing needs rescuing: the content is still in the author's chain, merely
-hidden, and the `keep` op changes how the fold renders it.
-
-**Capabilities.** Actions are authorized per signing key, evaluated at fold
-time.
-The capability policy lives with the allowed-signers file, outside the
-repository, consistent with the trust anchor decision.
-The table below lists *defaults*: the policy format expresses other rules —
-different thresholds than 1-of-n, per-action writer sets — without any change
-to the store format, because capabilities are evaluated at fold time and never
-recorded in ops.
-Ops signed by a key lacking the required capability are excluded from the
-computed state and surfaced, with the same warn/enforce handling as unverifiable
-signatures.
-The originator of an issue or comment is the key that signed its creating op.
-
-| Action | Op | Default capability |
-| --- | --- | --- |
-| close / reopen issue | `set-state` | any trusted writer |
-| tag / untag (incl. `wontfix`) | `add-label` / `remove-label` | any trusted writer |
-| reprioritize (kanban ordering) | `set-priority` | any trusted writer |
-| edit allowed tags | `set-allowed-labels` | moderators |
-| collapse / un-collapse comment | `set-comment-visibility` | moderators |
-| moderate issue / comment | `redact-op` | any single moderator (1-of-n) |
-| keep deleted content | `keep` | any single moderator (1-of-n) |
-| delete issue | `delete-issue` | originator while no other writer has appended activity; moderators otherwise |
-| delete comment | `delete-comment` | originator, subject to moderator keep; moderators |
+Every writer trusted by the allowed-signers file is a full peer: any peer
+may perform any op on any item, including a tombstone on an item another
+peer created.
+A tombstone is final; no op un-hides a tombstoned target.
+When a tombstone turns out to be wrong, the original author resubmits the
+content as a new issue or comment, and the new item can be tombstoned in
+turn by the same rule.
 
 Store-level metadata (the allowed-labels vocabulary) lives in its own log at
 `refs/jp/issues/meta/<writer-id>`, using the same op machinery as an issue.
@@ -458,10 +443,10 @@ The on-disk format is git's either way, so stored data does not change.
 
 ## Drawbacks
 
-- Refs grow with issues × worktrees and are permanent: a chain's ops are part of
+- Refs grow with issues × replicas and are permanent: a chain's ops are part of
   issue state, so refs cannot be pruned.
 - The store only grows.
-  Deleted and redacted content still occupies space in every clone forever.
+  Deleted content still occupies space in every clone forever.
 - Reads assemble N writer heads per issue instead of walking one DAG, and
   cross-writer causality is invisible to `git log --graph` — only the fold can
   reconstruct it.
@@ -517,24 +502,18 @@ The on-disk format is git's either way, so stored data does not change.
 - The kanban tool and any state caching for it (the `set-priority` op is
   registered here; the tool that consumes it is not).
 - Cross-repo mirroring.
-- Moderation governance beyond the default capability rules: vote thresholds,
-  disputes between moderators, appeals.
-  The policy format is built to express these later; this RFD fixes only the
-  defaults.
+- Moderation and per-key authorization: every trusted writer is a full peer.
+  Authorization rules can be added later, evaluated at fold time, without
+  changing stored data.
 - Physical removal of store content: deletion only hides.
 
 ## Risks
 
 - **Deleted content persists in every clone.** Every clone permanently holds
-  every op ever synced, including content its author deleted and content a
-  moderator redacted.
+  every op ever synced, including content its author deleted.
   This is deliberate — the store is append-only — but it means true erasure
   (leaked credentials, legal demands) is impossible inside the system.
   The remedy for a leaked secret is rotating the secret.
-- **Capability policy is per-user.** Like the allowed-signers file, the
-  capability policy lives outside the repository, so two users can compute
-  different folded states from the same commits.
-  Tools must surface excluded ops, so the divergence stays visible.
 - **Large payloads.** When `issue append` needs content too large for `ops.json`
   (logs, screenshots), the payload goes to the `.jp/blobs/` store of [RFD 066],
   referenced from the op by SHA-256.
@@ -589,18 +568,18 @@ otherwise take hold or spread:
   prior value.
 - **Missing-acknowledgment detection** (the section "Computing issue state"):
   other writers' `seen_heads` still name the dropped op, so even a fresh clone
-  — with no prior refs to compare against — refuses to render issue state;
-  the fold stops with a typed error naming the missing op id.
-  Mallory dropped the op from every copy she controls, but the op exists on
-  no other remote either, so fetching from more remotes never cures the
-  error, and the error hardens into evidence of a rewrite.
+  — with no prior refs to compare against — refuses to render issue state; the
+  fold stops with a typed error naming the missing op id.
+  Mallory dropped the op from every copy she controls, but the op exists on no
+  other remote either, so fetching from more remotes never cures the error, and
+  the error hardens into evidence of a rewrite.
   `--fix-interactive` offers to drop the offending ref.
 - **The server-side receive gate** (the section "Server-side receive gate"):
   spreading the corruption through the shared server requires a force push that
   Bob's `pre-receive` hook refuses.
-  When the team's shared server is github.com, no hook runs and the force
-  push succeeds; fast-forward refusal, the ref journal, and
-  missing-acknowledgment detection are the remaining defenses.
+  When the team's shared server is github.com, no hook runs and the force push
+  succeeds; fast-forward refusal, the ref journal, and missing-acknowledgment
+  detection are the remaining defenses.
 
 A remote can also *withhold*: serve truthful but stale refs, every commit
 validly signed and every update a fast-forward, with the newest ops simply
@@ -625,8 +604,8 @@ Each phase is independently reviewable and mergeable.
    Pure logic over data fetched by phase 1; property-style tests for
    order-independence.
 3. **Scraper** (`issue sync`, write side): scrape via `jp_github`, diff scraped
-   state against computed local state, emit ops — including `delete-issue` /
-   `delete-comment` tombstones for upstream deletions — and sign commits.
+   state against computed local state, emit ops — including `tombstone-issue`
+   / `tombstone-comment` for upstream deletions — and sign commits.
    Depends on phases 1–2.
 4. **Sync** (`issue sync`, transport side): fetch refspec configuration,
    fast-forward pushes, refusal to run while any remote's configured `fetch`
@@ -638,8 +617,7 @@ Each phase is independently reviewable and mergeable.
 6. **Signature verification** during state computation: `verify-commit` against
    the per-user allowed-signers file, with the warn/enforce configuration option
    and the `verification_required` cutoff.
-7. **Deletion and keeps** (`issue delete`): tombstone ops, `keep` ops,
-   capability checks against the per-user policy.
+7. **Deletion** (`issue delete`): tombstone ops.
 
 ## References
 
