@@ -1,5 +1,6 @@
 pub(crate) mod conversation;
 pub(crate) mod datetime;
+pub(crate) mod workspace;
 
 use jp_config::types::color::Color;
 use jp_conversation::{Compaction, ToolCallPolicy};

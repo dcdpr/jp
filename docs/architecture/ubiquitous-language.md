@@ -35,6 +35,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Thread](#thread)
     - [Tool Call](#tool-call)
     - [Turn](#turn)
+    - [User-Workspace Directory](#user-workspace-directory)
     - [Workspace](#workspace)
     - [Workspace Projection](#workspace-projection)
 
@@ -207,6 +208,20 @@ Implemented as `Turn<'a>` in `jp_conversation::stream::turn_iter`.
 
 A single Conversation contains many Turns, separated by `TurnStart` events.
 
+### User-Workspace Directory
+
+A workspace's per-user data directory,
+`~/.local/share/jp/workspace/<slug>-<id>/`: this user's durable state for one
+workspace — conversations, session mappings, locks, the roots registry, and the
+user-workspace config search root.
+Named for the user-workspace config scope: the *this user × this workspace*
+point in the user-global / workspace / user-workspace scope taxonomy.
+Located by workspace-ID suffix, never by exact name; `<slug>` is cosmetic,
+display-only, and never renamed.
+Implemented by `FsStorageBackend::with_user_storage` in `jp_storage`;
+directory-name parsing lives in `jp_workspace::roots`.
+See [RFD-031] and [RFD-087].
+
 ### Workspace
 
 The top-level project unit, housing conversations, configuration, plugins, and
@@ -229,4 +244,5 @@ See [RFD-031].
 
 [RFD-001]: ../rfd/001-jp-rfd-process.md
 [RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
+[RFD-087]: ../rfd/087-session-scoped-active-workspace.md
 [`shlex::split`]: https://docs.rs/shlex

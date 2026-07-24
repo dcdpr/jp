@@ -3,14 +3,21 @@
 //! This crate provides data models and storage operations for the JP workspace,
 //! a CLI tool for managing LLM-assisted code conversations with fine-grained
 //! control over context and behavior.
+//!
+//! Session identity, the per-session active-workspace store, and the roots
+//! registry (RFD 087) live in [`session`], [`session_store`], and [`roots`].
+//! The session store is user-global (above any checkout); the roots registry
+//! maps a workspace ID to its live checkouts on disk.
 
 mod conversation_lock;
 mod error;
 mod handle;
 mod id;
+pub mod roots;
 mod sanitize;
 pub mod session;
 pub(crate) mod session_mapping;
+pub mod session_store;
 mod state;
 
 use std::{

@@ -1,3 +1,5 @@
+//! Inline terminal prompt widgets (reply and select) for JP.
+
 mod inline_reply;
 mod inline_select;
 pub mod prompt;

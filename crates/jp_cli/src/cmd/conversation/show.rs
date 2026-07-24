@@ -56,7 +56,12 @@ impl Show {
                 .with_compactions(compactions)
                 .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 
-            print_details(&ctx.printer, details.title.as_deref(), details.rows());
+            print_details(
+                &ctx.printer,
+                details.title.as_deref(),
+                details.rows(),
+                &details.json(),
+            );
         }
         Ok(())
     }

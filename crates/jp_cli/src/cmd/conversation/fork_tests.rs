@@ -923,6 +923,7 @@ fn test_conversation_fork() {
         );
         let workspace = Workspace::new(tmp.path()).with_backend(fs);
         let mut ctx = Ctx::new(
+            crate::bootstrap::ExecutionContext::for_workspace(&workspace),
             workspace,
             None,
             Runtime::new().unwrap(),
@@ -992,6 +993,7 @@ fn fork_targets_correct_source() {
     );
     let workspace = Workspace::new(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -1124,6 +1126,7 @@ fn fork_inherits_local_only_projection() {
     );
     let workspace = Workspace::new(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
