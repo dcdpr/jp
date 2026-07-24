@@ -72,7 +72,7 @@ fn fs_modify_file_impl<R: ProcessRunner>(
     }
 
     // Reject known overly-broad regex patterns.
-    if replace_using_regex && let Some(blocked) = find_blocked_regex_patterns(patterns) {
+    if let Some(blocked) = find_blocked_regex_patterns(patterns, replace_using_regex) {
         let list = blocked
             .iter()
             .map(|p| format!("`{p}`"))
@@ -102,7 +102,9 @@ fn fs_modify_file_impl<R: ProcessRunner>(
             None => vec![path.expect("validated above")],
         };
 
+        let use_regex = pattern.regex.unwrap_or(replace_using_regex);
         let mut applied_any = false;
+        let mut invalid = None;
 
         for target in &targets {
             let resolved = match resolve_workspace_path(&ctx.root, target, ctx.access.as_ref()) {
@@ -128,20 +130,26 @@ fn fs_modify_file_impl<R: ProcessRunner>(
 
             let (_, current) = files.get_mut(&resolved.relative).unwrap();
             let contents = Content(current.clone());
-            let result = if replace_using_regex {
+            let result = if use_regex {
                 contents.replace_regexp(&pattern.old, &pattern.new, replace_all, case_sensitive)
             } else {
                 contents.replace_literal(&pattern.old, &pattern.new, replace_all, case_sensitive)
             };
 
-            if let Ok(after) = result {
-                *current = after;
-                applied_any = true;
+            match result {
+                Ok(after) => {
+                    *current = after;
+                    applied_any = true;
+                }
+                Err(ReplaceError::NotFound) => {}
+                Err(ReplaceError::Invalid(msg)) => invalid = Some(msg),
             }
         }
 
         outcomes.push(if applied_any {
             PatternOutcome::Applied
+        } else if let Some(msg) = invalid {
+            PatternOutcome::Invalid(msg)
         } else {
             PatternOutcome::NotFound
         });
@@ -209,6 +217,11 @@ pub(crate) struct Pattern {
     /// Overrides the root-level `path`.
     #[serde(default)]
     pub paths: Option<OneOrMany<String>>,
+
+    /// Optional per-pattern regex mode.
+    /// Overrides the call-level `replace_using_regex`.
+    #[serde(default)]
+    pub regex: Option<bool>,
 }
 
 /// Result of applying a single pattern.
@@ -219,6 +232,25 @@ enum PatternOutcome {
 
     /// The pattern was not found in the content.
     NotFound,
+
+    /// The pattern is not a valid regex.
+    Invalid(String),
+}
+
+/// Why a replacement could not be performed.
+#[derive(Debug, PartialEq)]
+enum ReplaceError {
+    /// The pattern did not match the content.
+    NotFound,
+
+    /// The pattern could not be compiled or executed as a regex.
+    Invalid(String),
+}
+
+impl From<fancy_regex::Error> for ReplaceError {
+    fn from(err: fancy_regex::Error) -> Self {
+        Self::Invalid(err.to_string())
+    }
 }
 
 /// Validates the patterns for common errors.
@@ -284,35 +316,56 @@ fn validate_paths(default_path: Option<&str>, patterns: &[Pattern]) -> Result<()
 ///
 /// Returns empty string when there is a single pattern that succeeded.
 /// Shows a summary when there are multiple patterns, and details which patterns
-/// were not found.
+/// were not found or were invalid.
 fn format_pattern_report(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
     let total = outcomes.len();
     let applied = outcomes
         .iter()
         .filter(|o| matches!(o, PatternOutcome::Applied))
         .count();
-    let failed: Vec<_> = patterns
+    let not_found: Vec<_> = patterns
         .iter()
         .zip(outcomes.iter())
         .enumerate()
         .filter(|(_, (_, o))| matches!(o, PatternOutcome::NotFound))
         .collect();
+    let invalid: Vec<_> = patterns
+        .iter()
+        .zip(outcomes.iter())
+        .enumerate()
+        .filter_map(|(i, (p, o))| match o {
+            PatternOutcome::Invalid(msg) => Some((i, p, msg)),
+            _ => None,
+        })
+        .collect();
 
     // Single pattern, succeeded: no report.
-    if failed.is_empty() && total <= 1 {
+    if applied == total && total <= 1 {
         return String::new();
     }
 
     // All succeeded, multiple patterns: brief summary.
-    if failed.is_empty() {
+    if applied == total {
         return format!("{applied}/{total} patterns applied.");
     }
 
     // Some or all failed: detailed report.
-    let mut report = format!("{applied}/{total} patterns applied.\n\nPatterns not found:");
-    for (i, (pattern, _)) in &failed {
-        let preview = pattern_preview(&pattern.old);
-        report.push_str(&format!("\n  #{}: `{preview}`", i + 1));
+    let mut report = format!("{applied}/{total} patterns applied.");
+
+    if !not_found.is_empty() {
+        report.push_str("\n\nPatterns not found:");
+        for (i, (pattern, _)) in &not_found {
+            let preview = pattern_preview(&pattern.old);
+            report.push_str(&format!("\n  #{}: `{preview}`", i + 1));
+        }
+    }
+
+    if !invalid.is_empty() {
+        report.push_str("\n\nInvalid regex patterns:");
+        for (i, pattern, msg) in &invalid {
+            let preview = pattern_preview(&pattern.old);
+            report.push_str(&format!("\n  #{}: `{preview}`\n      {msg}", i + 1));
+        }
     }
 
     report
@@ -361,11 +414,15 @@ const BROAD_CHANGE_MIN_LINES: usize = 10;
 /// or replaced.
 const BROAD_CHANGE_MAX_PERCENT: usize = 50;
 
-/// Returns the subset of patterns whose `old` field is a known overly-broad
-/// regex.
-fn find_blocked_regex_patterns(patterns: &[Pattern]) -> Option<Vec<&str>> {
+/// Returns the subset of regex-mode patterns whose `old` field is a known
+/// overly-broad regex.
+///
+/// `default_regex` is the call-level regex mode, used for patterns that do not
+/// set their own `regex` flag.
+fn find_blocked_regex_patterns(patterns: &[Pattern], default_regex: bool) -> Option<Vec<&str>> {
     let matches = patterns
         .iter()
+        .filter(|p| p.regex.unwrap_or(default_regex))
         .map(|p| p.old.trim())
         .filter(|old| BLOCKED_REGEX_PATTERNS.contains(old))
         .collect::<Vec<_>>();
@@ -524,7 +581,7 @@ impl Content {
         replace: &str,
         replace_all: bool,
         case_sensitive: bool,
-    ) -> std::result::Result<String, Error> {
+    ) -> Result<String, ReplaceError> {
         if case_sensitive {
             self.replace_literal_sensitive(find, replace, replace_all)
         } else {
@@ -537,11 +594,11 @@ impl Content {
         find: &str,
         replace: &str,
         replace_all: bool,
-    ) -> std::result::Result<String, Error> {
+    ) -> Result<String, ReplaceError> {
         // Find the first occurrence to determine the effective match.
         let (first_start, first_end) = self
             .find_pattern_range(find)
-            .ok_or("Cannot find pattern to replace")?;
+            .ok_or(ReplaceError::NotFound)?;
 
         if !replace_all {
             let mut result = String::with_capacity(self.0.len());
@@ -574,7 +631,7 @@ impl Content {
         find: &str,
         replace: &str,
         replace_all: bool,
-    ) -> std::result::Result<String, Error> {
+    ) -> Result<String, ReplaceError> {
         // Case-insensitive literal search: use regex with escaped pattern.
         let escaped = fancy_regex::escape(find);
         let re = RegexBuilder::new(&escaped)
@@ -584,7 +641,7 @@ impl Content {
             .build()?;
 
         if !re.is_match(&self.0)? {
-            return Err("Cannot find pattern to replace".into());
+            return Err(ReplaceError::NotFound);
         }
 
         let replaced = if replace_all {
@@ -603,13 +660,17 @@ impl Content {
         replace: &str,
         replace_all: bool,
         case_sensitive: bool,
-    ) -> std::result::Result<String, Error> {
+    ) -> Result<String, ReplaceError> {
         let re = RegexBuilder::new(find)
             .case_insensitive(!case_sensitive)
             .multi_line(true)
             .dot_matches_new_line(false)
             .unicode_mode(true)
             .build()?;
+
+        if !re.is_match(&self.0)? {
+            return Err(ReplaceError::NotFound);
+        }
 
         let result = if replace_all {
             re.replace_all(&self.0, replace)

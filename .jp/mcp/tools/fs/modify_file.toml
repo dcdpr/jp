@@ -56,6 +56,18 @@ Use regex with capture groups:
   "replace_using_regex": true
 }
 ```
+
+Mix literal and regex patterns in one call via the per-pattern `regex` flag:
+```json
+{
+  "path": "src/lib.rs",
+  "patterns": [
+    {"old": "stream().await", "new": "stream()"},
+    {"old": "fn (\\w+)_old", "new": "fn ${1}_new", "regex": true}
+  ],
+  "replace_using_regex": false
+}
+```
 """
 
 # questions.apply_changes.target = "assistant"
@@ -84,6 +96,7 @@ type = "object"
 properties.old = { type = "string", description = "The string to replace in the file. The string may span multiple lines.", required = true }
 properties.new = { type = "string", description = "The string to replace the `old` with. The string may span multiple lines. If empty, the `old` will be deleted.", required = true }
 properties.paths = { type = "array", description = "File paths to apply this pattern to. Overrides the root-level `path`. Each path must be relative to the project's root.", required = false, items = { type = "string" } }
+properties.regex = { type = "boolean", description = "Whether to treat this pattern's `old` as a regular expression. Overrides the call-level `replace_using_regex`, allowing literal and regex patterns to be mixed in a single call.", required = false }
 
 [conversation.tools.fs_modify_file.parameters.replace_using_regex]
 required = true
@@ -96,6 +109,13 @@ as a replacement string, which may contain capture groups.
 
 If `false`, `old` is treated as a literal string and the `new` is treated as \
 a literal string.
+
+Individual patterns can override this via their own `regex` field.
+
+IMPORTANT: in regex mode, `(` and `)` are capture groups, not literal \
+parentheses. A pattern copied verbatim from source code (e.g. `foo(bar)`) \
+will NOT match that source; escape metacharacters (`foo\\(bar\\)`) or use \
+literal mode for such patterns.
 
 When `true`, replaces all non-overlapping matches in text with the replacement provided.
 
