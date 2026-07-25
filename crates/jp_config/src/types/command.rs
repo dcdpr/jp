@@ -13,6 +13,14 @@
 //! "echo 'hello world'" => ["echo", "hello world"]
 //! ```
 //!
+//! Minijinja template spans (`{{ … }}`, `{% … %}`, `{# … #}`) are treated as
+//! atomic during the split, so an expression may contain spaces without being
+//! torn across arguments:
+//!
+//! ```ignore
+//! "just x {{ a | default('') }}" => ["just", "x", "{{ a | default('') }}"]
+//! ```
+//!
 //! Malformed shell quoting (unbalanced quotes, dangling escapes) is rejected at
 //! config-parse time via [`PartialCommandConfigOrString::from_str`] rather than
 //! producing garbage at spawn time.
@@ -95,7 +103,7 @@ impl FromStr for PartialCommandConfigOrString {
         // an empty `program`, which is the same behavior the old
         // `split_whitespace` parser had — execution-time error, not a
         // config-parse error).
-        if shlex::split(s).is_none() {
+        if split_command_words(s).is_none() {
             return Err(format!("invalid shell quoting in command string: {s:?}").into());
         }
 
@@ -112,6 +120,9 @@ impl CommandConfigOrString {
     /// [`CommandConfig::args`].
     /// [`CommandConfig::shell`] is `false`.
     ///
+    /// Minijinja template spans (`{{ … }}`, `{% … %}`, `{# … #}`) stay in a
+    /// single argument even when they contain spaces.
+    ///
     /// Malformed input is normally rejected at config-parse time by
     /// [`PartialCommandConfigOrString::from_str`].
     /// This method is defensive against direct construction in Rust code: on
@@ -121,7 +132,7 @@ impl CommandConfigOrString {
     pub fn command(self) -> CommandConfig {
         match self {
             Self::String(v) => {
-                let mut iter = shlex::split(&v).unwrap_or_default().into_iter();
+                let mut iter = split_command_words(&v).unwrap_or_default().into_iter();
 
                 CommandConfig {
                     program: iter.next().unwrap_or_default(),
@@ -245,6 +256,149 @@ impl ToPartial for CommandConfig {
             shell: partial_opt(&self.shell, defaults.shell),
         }
     }
+}
+
+/// Split a command string into shell words, treating minijinja template spans
+/// as atomic.
+///
+/// The shell split happens before template rendering, so a rendered value can
+/// never inject extra arguments.
+/// A template span may itself contain spaces (e.g. `{{ x | default('') }}`);
+/// masking the spans before the split keeps each one inside a single argument.
+/// Returns `None` on unbalanced shell quoting, mirroring [`shlex::split`].
+fn split_command_words(input: &str) -> Option<Vec<String>> {
+    let (masked, spans) = mask_template_spans(input);
+    let words = shlex::split(&masked)?;
+    Some(
+        words
+            .into_iter()
+            .map(|word| restore_spans(&word, &spans))
+            .collect(),
+    )
+}
+
+/// Replace every minijinja template span (`{{ … }}`, `{% … %}`, `{# … #}`)
+/// with a NUL-delimited placeholder, returning the masked string and the
+/// original span texts in order.
+///
+/// A config value cannot carry a NUL byte, so the placeholder cannot collide
+/// with real command text.
+/// The placeholder holds no whitespace or quote characters, so `shlex` keeps it
+/// inside a single word.
+fn mask_template_spans(input: &str) -> (String, Vec<String>) {
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
+    let mut spans: Vec<String> = Vec::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        let Some(open) = find_span_open(bytes, i) else {
+            out.push_str(&input[i..]);
+            break;
+        };
+
+        out.push_str(&input[i..open]);
+        let end = find_span_end(bytes, open);
+        out.push('\0');
+        out.push_str(&spans.len().to_string());
+        out.push('\0');
+        spans.push(input[open..end].to_owned());
+        i = end;
+    }
+
+    (out, spans)
+}
+
+/// Find the next `{{` / `{%` / `{#` opener at or after `from`.
+fn find_span_open(bytes: &[u8], from: usize) -> Option<usize> {
+    (from..bytes.len().saturating_sub(1))
+        .find(|&j| bytes[j] == b'{' && matches!(bytes[j + 1], b'{' | b'%' | b'#'))
+}
+
+/// Find the byte index just past the closer of the span opened at `open`.
+///
+/// Comment spans (`{# … #}`) are raw text.
+/// Expression (`{{ … }}`) and statement (`{% … %}`) spans skip string
+/// literals, so a closer inside a quoted string does not end the span early.
+/// An unterminated span extends to end of input; the render step then reports
+/// the real error.
+fn find_span_end(bytes: &[u8], open: usize) -> usize {
+    match bytes[open + 1] {
+        b'#' => find_literal_close(bytes, open + 2, b'#'),
+        kind => {
+            let closer = if kind == b'{' { b'}' } else { b'%' };
+            let mut j = open + 2;
+            let mut quote: Option<u8> = None;
+
+            while j < bytes.len() {
+                let b = bytes[j];
+                if let Some(q) = quote {
+                    if b == b'\\' {
+                        j += 2;
+                        continue;
+                    }
+                    if b == q {
+                        quote = None;
+                    }
+                    j += 1;
+                } else if b == b'\'' || b == b'"' {
+                    quote = Some(b);
+                    j += 1;
+                } else if b == closer && bytes.get(j + 1) == Some(&b'}') {
+                    return j + 2;
+                } else {
+                    j += 1;
+                }
+            }
+
+            bytes.len()
+        }
+    }
+}
+
+/// Find the byte index just past a literal `first`+`}` closer at or after `j`.
+fn find_literal_close(bytes: &[u8], mut j: usize, first: u8) -> usize {
+    while j < bytes.len() {
+        if bytes[j] == first && bytes.get(j + 1) == Some(&b'}') {
+            return j + 2;
+        }
+        j += 1;
+    }
+    bytes.len()
+}
+
+/// Substitute masked placeholders in `token` back to their original span text.
+fn restore_spans(token: &str, spans: &[String]) -> String {
+    if !token.contains('\0') {
+        return token.to_owned();
+    }
+
+    let mut out = String::with_capacity(token.len());
+    let mut rest = token;
+
+    while let Some(start) = rest.find('\0') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+
+        let Some(end) = after.find('\0') else {
+            // Unbalanced marker (not one this masker produced): emit verbatim.
+            out.push('\0');
+            rest = after;
+            continue;
+        };
+
+        match after[..end].parse::<usize>() {
+            Ok(idx) if idx < spans.len() => out.push_str(&spans[idx]),
+            _ => {
+                out.push('\0');
+                out.push_str(&after[..=end]);
+            }
+        }
+        rest = &after[end + 1..];
+    }
+
+    out.push_str(rest);
+    out
 }
 
 #[cfg(test)]

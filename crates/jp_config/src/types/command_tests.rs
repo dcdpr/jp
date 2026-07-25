@@ -113,3 +113,88 @@ fn test_command_config_structured_passthrough() {
         shell: true,
     });
 }
+
+#[test]
+fn template_span_with_spaces_stays_one_arg() {
+    // A template expression with interior spaces (and a quoted filter arg) must
+    // survive the shell split as a single argument.
+    let p =
+        PartialCommandConfigOrString::from_str("just rfd-renumber {{ a }} {{ b | default('') }}")
+            .unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "just".to_owned(),
+        args: vec![
+            "rfd-renumber".to_owned(),
+            "{{ a }}".to_owned(),
+            "{{ b | default('') }}".to_owned(),
+        ],
+        shell: false,
+    });
+}
+
+#[test]
+fn template_statement_and_comment_spans_are_atomic() {
+    let p = PartialCommandConfigOrString::from_str("run {% if x %} {# note #}").unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "run".to_owned(),
+        args: vec!["{% if x %}".to_owned(), "{# note #}".to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn template_span_adjacent_to_literal_text() {
+    let p = PartialCommandConfigOrString::from_str("cmd pre{{ x }}post").unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "cmd".to_owned(),
+        args: vec!["pre{{ x }}post".to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn template_span_closer_inside_string_literal() {
+    // The `}}` inside the quoted string must not end the span early.
+    let p = PartialCommandConfigOrString::from_str(r#"echo {{ "}}" }}"#).unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "echo".to_owned(),
+        args: vec![r#"{{ "}}" }}"#.to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn unterminated_template_span_is_kept_whole() {
+    // An unterminated `{{` swallows the rest; minijinja reports the real error
+    // at render time rather than the splitter mangling it.
+    let p = PartialCommandConfigOrString::from_str("just x {{ a").unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "just".to_owned(),
+        args: vec!["x".to_owned(), "{{ a".to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn from_str_ignores_quotes_inside_template_span() {
+    // The apostrophe inside the comment is minijinja text, not shell quoting;
+    // masking the span keeps the unbalanced-quote check from rejecting it.
+    let p = PartialCommandConfigOrString::from_str("echo {# don't split #}").unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "echo".to_owned(),
+        args: vec!["{# don't split #}".to_owned()],
+        shell: false,
+    });
+}
