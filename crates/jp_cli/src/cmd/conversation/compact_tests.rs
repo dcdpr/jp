@@ -322,6 +322,108 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
 }
 
 #[test]
+fn keep_first_composes_with_first() {
+    // `--keep-first M --first N` compacts the first N turns minus the
+    // preserved prefix: `--keep-first 1 --first 16` compacts turns 2..16
+    // (indices 1..=15).
+    let mut stream = ConversationStream::new_test();
+    for t in 0..20 {
+        stream.start_turn(format!("turn {t}"));
+    }
+
+    let compact = parse_compact(&["--keep-first", "1", "--first", "16", "-r"]);
+    let cfg = AppConfig::new_test();
+    let rules = compact.effective_rules(&cfg).unwrap();
+    let from = compact.resolve_from(&stream);
+    let to = compact.resolve_to(&stream);
+
+    let compactions = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &rules,
+            from,
+            to,
+            Some(&Printer::sink()),
+        ))
+        .unwrap();
+
+    assert_eq!(compactions.len(), 1);
+    assert_eq!((compactions[0].from_turn, compactions[0].to_turn), (1, 15));
+}
+
+#[test]
+fn keep_last_composes_with_last() {
+    // `--keep-last M --last N` compacts the last N turns minus the preserved
+    // suffix: over 20 turns, `--keep-last 2 --last 16` compacts turns 5..18
+    // (indices 4..=17), leaving the final 2 untouched.
+    let mut stream = ConversationStream::new_test();
+    for t in 0..20 {
+        stream.start_turn(format!("turn {t}"));
+    }
+
+    let compact = parse_compact(&["--keep-last", "2", "--last", "16", "-r"]);
+    let cfg = AppConfig::new_test();
+    let rules = compact.effective_rules(&cfg).unwrap();
+    let from = compact.resolve_from(&stream);
+    let to = compact.resolve_to(&stream);
+
+    let compactions = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &rules,
+            from,
+            to,
+            Some(&Printer::sink()),
+        ))
+        .unwrap();
+
+    assert_eq!(compactions.len(), 1);
+    assert_eq!((compactions[0].from_turn, compactions[0].to_turn), (4, 17));
+}
+
+#[test]
+fn keep_first_greater_than_first_is_rejected() {
+    // A preserved prefix larger than the selection is nonsensical and must be
+    // an error rather than a silent no-op.
+    let err = parse_compact(&["--keep-first", "17", "--first", "16"])
+        .validate()
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "--keep-first 17 is greater than --first 16: nothing would remain to compact"
+    );
+
+    // Equal values select nothing, which is empty but not nonsensical.
+    assert!(
+        parse_compact(&["--keep-first", "16", "--first", "16"])
+            .validate()
+            .is_ok()
+    );
+}
+
+#[test]
+fn keep_last_greater_than_last_is_rejected() {
+    // A preserved suffix larger than the selection is nonsensical and must be
+    // an error rather than a silent no-op.
+    let err = parse_compact(&["--keep-last", "17", "--last", "16"])
+        .validate()
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "--keep-last 17 is greater than --last 16: nothing would remain to compact"
+    );
+
+    // Equal values select nothing, which is empty but not nonsensical.
+    assert!(
+        parse_compact(&["--keep-last", "16", "--last", "16"])
+            .validate()
+            .is_ok()
+    );
+}
+
+#[test]
 fn summarize_flag_distinguishes_absent_bare_and_valued() {
     // The three states the `Option<Option<String>>` encoding exists to separate.
     assert_eq!(parse_compact(&[]).summarize, None);
