@@ -173,33 +173,6 @@ pub fn list_markdown(header: Row, rows: Vec<Row>) -> String {
     out
 }
 
-/// Render a list table as a JSON array of objects.
-///
-/// Each row becomes an object keyed by the header cell content.
-#[must_use]
-#[expect(clippy::needless_pass_by_value)]
-pub fn list_json(header: Row, rows: Vec<Row>) -> serde_json::Value {
-    let headers: Vec<String> = header
-        .cell_iter()
-        .map(|c| strip_ansi_escapes::strip_str(c.content()))
-        .collect();
-
-    let items: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|row| {
-            let mut obj = serde_json::Map::new();
-            for (idx, cell) in row.cell_iter().enumerate() {
-                let key = headers.get(idx).cloned().unwrap_or_else(|| idx.to_string());
-                let val = strip_ansi_escapes::strip_str(cell.content());
-                obj.insert(key, val.into());
-            }
-            serde_json::Value::Object(obj)
-        })
-        .collect();
-
-    serde_json::Value::Array(items)
-}
-
 /// Render a key-value details table with no borders.
 #[must_use]
 pub fn details(title: Option<&str>, rows: Vec<DetailRow>) -> String {
@@ -308,54 +281,6 @@ fn md_row(label: Option<&str>, value: &str) -> Row {
     }
     r.add_cell(Cell::new(value));
     r
-}
-
-/// Render key-value details as JSON.
-///
-/// A scalar value becomes a string; a list value becomes a JSON array.
-#[must_use]
-pub fn details_json(title: Option<&str>, rows: Vec<DetailRow>) -> serde_json::Value {
-    let mut details = serde_json::Map::new();
-    for DetailRow { label, value } in rows {
-        match label {
-            Some(label) => {
-                details.insert(strip(&label), detail_json_value(value));
-            }
-            // A label-less row has no key of its own; emit each value as a key
-            // with an empty value, matching the label-less column rendering
-            // used by listing commands.
-            None => match value {
-                DetailValue::Scalar(s) => {
-                    details.insert(strip(&s), String::new().into());
-                }
-                DetailValue::List(items) => {
-                    for item in items {
-                        details.insert(strip(&item.text), String::new().into());
-                    }
-                }
-            },
-        }
-    }
-
-    serde_json::json!({
-        "title": title,
-        "details": details,
-    })
-}
-
-fn detail_json_value(value: DetailValue) -> serde_json::Value {
-    match value {
-        DetailValue::Scalar(s) => strip(&s).into(),
-        DetailValue::List(items) => items
-            .into_iter()
-            .map(|item| item.json)
-            .collect::<Vec<_>>()
-            .into(),
-    }
-}
-
-fn strip(s: &str) -> String {
-    strip_ansi_escapes::strip_str(s)
 }
 
 /// Find the maximum column count across all rows.

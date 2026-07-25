@@ -1,6 +1,6 @@
 # RFD 087: Session-Scoped Active Workspace
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-01
@@ -244,6 +244,10 @@ work:
   checkout owns exactly one file and writes never contend.
 - Each run upserts only its own file, recording the canonical path and a
   `last_used` timestamp.
+  The rewrite is debounced: an entry refreshed within the last few minutes is
+  left untouched, since recency only feeds display ordering and `latest`
+  targeting — a per-run rewrite would churn the user data directory on every
+  invocation and re-trigger any external file watcher observing it.
   No file is read-modified-written by more than one checkout.
 - Liveness is **derived**, not stored: a root is live when JP workspace
   discovery from that path resolves a workspace whose loaded ID equals `<id>`
@@ -261,9 +265,9 @@ work:
 { "path": "/Users/jean/Projects/jp.git/my-feature", "last_used": "2026-06-01T18:25:00Z" }
 ```
 
-The roots registry is workspace-scoped, living under the workspace's user-local
-silo directory (`<slug>-<id>`, located by ID suffix per [RFD 031]; the `<id>`
-shorthand in the paths above stands for that silo).
+The roots registry is workspace-scoped, living under the workspace's
+user-workspace directory (`<slug>-<id>`, located by ID suffix per [RFD 031]; the
+`<id>` shorthand in the paths above stands for that directory).
 The session store is user-global (under `sessions/`, mapping a session to its
 active workspace).
 These are deliberately separate, not one store doing two jobs.
@@ -320,8 +324,10 @@ Examples below use `jp w` for brevity.
   includes external (`ext`) conversations that live only in one checkout (see
   [RFD 031]).
   `jp w show <id>` therefore loads the conversation index (index only, not event
-  contents) for each live root and deduplicates by ID — the one place `show`
-  does a multi-root read, chosen so the count is accurate rather than cheap.
+  contents) for one live root — which already merges the user-local store —
+  and scans each sibling root's conversation directory for the IDs that live
+  there alone, deduplicating by ID: the one place `show` does a multi-root read,
+  accurate without paying a full workspace load per root.
   When the target resolves to a single concrete root — a path, or an `<id>`
   with one live root — the readout shows that root.
   When an `<id>` has several live roots, `jp w show` lists every live root and
@@ -370,10 +376,10 @@ previous workspace re-resolved against its roots; multiple roots of the same ID
 are distinct history entries.
 
 The picker and fuzzy free-text match display each workspace by its **slug** —
-the `<slug>` in the user-local silo directory `<slug>-<id>` (see [RFD 031]), the
-workspace directory name captured when the silo was first created.
-The slug is cosmetic: it may be absent (a bare `<id>` silo, in which case the
-`<id>` is shown), is never renamed, and is not unique across workspaces.
+the `<slug>` in the user-workspace directory `<slug>-<id>` (see [RFD 031]), the
+workspace directory name captured when the directory was first created.
+The slug is cosmetic: it may be absent (a bare `<id>` directory, in which case
+the `<id>` is shown), is never renamed, and is not unique across workspaces.
 Fuzzy free-text matches over slug, path, and ID, but resolution is always by ID
 and concrete root — never by slug — so a shared or stale slug affects only
 display and search, never which workspace a command runs against.

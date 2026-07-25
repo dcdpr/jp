@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_term::table::{DetailItem, DetailRow, details};
+use serde_json::json;
 
 use super::datetime::DateTimeFmt;
 
@@ -157,6 +158,43 @@ impl DetailsFmt {
     #[must_use]
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
+    }
+
+    /// The stable machine-readable payload for `jp c show`.
+    ///
+    /// Keys are a fixed contract, deliberately decoupled from the display
+    /// labels in [`Self::rows`]: labels can be reworded freely, these keys
+    /// cannot change without breaking consumers.
+    /// Fields the display hides stay present here — counts as `0`, unqueried
+    /// flags as `null` — so consumers can rely on key presence.
+    /// Timestamps are RFC 3339 in UTC; the display's derived forms ("Currently
+    /// Active", "On Deactivation") are projections of `active`,
+    /// `last_activated_at`, and `expires_at`.
+    #[must_use]
+    pub fn json(&self) -> serde_json::Value {
+        json!({
+            "id": self.id.to_string(),
+            "title": self.title,
+            "assistant": self.assistant_name,
+            "active": self.active_conversation.map(|active| active == self.id),
+            "pinned": self.pinned,
+            "local": self.local,
+            "events": self.message_count,
+            "turns": self.turn_count,
+            "last_message_at": self.last_message_at,
+            "last_activated_at": self.last_activated_at,
+            "expires_at": self.expires_at,
+            "attachments": self
+                .attachments
+                .iter()
+                .map(|item| item.json.clone())
+                .collect::<Vec<_>>(),
+            "compactions": self
+                .compactions
+                .iter()
+                .map(|item| item.json.clone())
+                .collect::<Vec<_>>(),
+        })
     }
 
     /// Return rows for a table displaying the conversation details.

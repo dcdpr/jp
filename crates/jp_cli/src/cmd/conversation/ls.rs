@@ -93,6 +93,37 @@ struct Details {
     external: bool,
 }
 
+/// The stable machine-readable payload: one object per listed conversation.
+///
+/// Keys are a fixed contract, deliberately decoupled from the table's display
+/// columns: column headers, markers, and layout can change freely, these keys
+/// cannot change without breaking consumers.
+/// Absent fields serialize as `null`; titles are never truncated here (only the
+/// pretty table shaves them to fit the terminal); timestamps are RFC 3339 in
+/// UTC.
+fn payload(conversations: &[Details]) -> serde_json::Value {
+    let items: Vec<_> = conversations
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "id": d.id.to_string(),
+                "title": d.title,
+                "active": d.active,
+                "pinned_at": d.pinned_at,
+                "archived_at": d.archived_at,
+                "local": d.local,
+                "external": d.external,
+                "events": d.messages,
+                "created_at": d.id.timestamp(),
+                "last_event_at": d.last_event_at,
+                "expires_at": d.expires_at,
+            })
+        })
+        .collect();
+
+    serde_json::Value::Array(items)
+}
+
 impl Ls {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
         ConversationLoadRequest::explicit_or_none(&self.target)
@@ -223,7 +254,7 @@ impl Ls {
         let header = build_header_row(columns, marker);
         let rows = self.build_body(ctx, &conversations, columns, title_budget, hidden);
         let footer = rows.len() > 20;
-        print_table(&ctx.printer, header, rows, footer);
+        print_table(&ctx.printer, header, rows, footer, &payload(&conversations));
         Ok(())
     }
 

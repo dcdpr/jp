@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     env,
-    path::Path,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::{Arc, Mutex},
     time::Duration,
@@ -52,6 +52,11 @@ pub struct Client {
 
     /// Running MCP services.
     services: Arc<RwLock<HashMap<McpServerId, RunningService<RoleClient, ()>>>>,
+
+    /// Working directory for spawned stdio servers.
+    ///
+    /// `None` inherits the process cwd.
+    child_cwd: Option<PathBuf>,
 }
 
 impl std::fmt::Debug for Client {
@@ -59,6 +64,7 @@ impl std::fmt::Debug for Client {
         f.debug_struct("Client")
             .field("servers", &self.servers)
             .field("services", &self.services.blocking_read().keys())
+            .field("child_cwd", &self.child_cwd)
             .finish()
     }
 }
@@ -75,7 +81,19 @@ impl Client {
         Self {
             services: Arc::new(RwLock::new(HashMap::new())),
             servers: Arc::new(RwLock::new(servers)),
+            child_cwd: None,
         }
+    }
+
+    /// Set the working directory spawned stdio servers inherit.
+    ///
+    /// `None` (the default) inherits the JP process cwd.
+    /// The bootstrap sets this to the selected workspace root for from-anywhere
+    /// runs (RFD 087).
+    #[must_use]
+    pub fn with_child_cwd(mut self, cwd: Option<PathBuf>) -> Self {
+        self.child_cwd = cwd;
+        self
     }
 
     /// Look up a tool definition on a specific MCP server.
@@ -96,7 +114,7 @@ impl Client {
             client.peer().list_all_tools().await?
         } else {
             drop(running);
-            match Self::try_create_client(server_id, server).await? {
+            match Self::try_create_client(server_id, server, self.child_cwd.as_deref()).await? {
                 SpawnOutcome::Started(client) => client.list_all_tools().await?,
                 SpawnOutcome::OptionalFailed => return Err(Error::UnknownTool(id.to_string())),
             }
@@ -194,13 +212,14 @@ impl Client {
             joins.spawn({
                 let servers = self.servers.clone();
                 let clients = self.services.clone();
+                let child_cwd = self.child_cwd.clone();
                 async move {
                     let servers = servers.read().await;
                     let server = servers
                         .get(&server_id)
                         .ok_or(Error::UnknownServer(server_id.clone()))?;
 
-                    match Self::try_create_client(&server_id, server).await? {
+                    match Self::try_create_client(&server_id, server, child_cwd.as_deref()).await? {
                         SpawnOutcome::Started(client) => {
                             clients.write().await.insert(server_id.clone(), client);
                         }
@@ -235,8 +254,9 @@ impl Client {
     async fn try_create_client(
         id: &McpServerId,
         config: &McpProviderConfig,
+        child_cwd: Option<&Path>,
     ) -> Result<SpawnOutcome> {
-        match Self::create_client(id, config).await {
+        match Self::create_client(id, config, child_cwd).await {
             Ok(client) => Ok(SpawnOutcome::Started(client)),
             Err(error) if config.optional() => {
                 warn!(
@@ -255,6 +275,7 @@ impl Client {
     async fn create_client(
         id: &McpServerId,
         config: &McpProviderConfig,
+        child_cwd: Option<&Path>,
     ) -> Result<RunningService<RoleClient, ()>> {
         match config {
             McpProviderConfig::Stdio(config) => {
@@ -289,6 +310,13 @@ impl Client {
                 // Create command
                 let mut cmd = Command::new(&config.command);
                 cmd.args(&config.arguments);
+
+                // The root-as-working-directory invariant (RFD 087): when JP
+                // operates on a workspace other than the launch cwd's own,
+                // servers run as if launched from the selected workspace root.
+                if let Some(cwd) = child_cwd {
+                    cmd.current_dir(cwd);
+                }
 
                 // Put the MCP server in its own process group so terminal
                 // signals (Ctrl+C / SIGINT) don't kill it. JP manages the

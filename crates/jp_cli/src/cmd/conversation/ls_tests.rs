@@ -105,3 +105,65 @@ fn local_cell_marks_external_distinctly() {
     assert_eq!(strip_str(local_cell(true, false)), "Y");
     assert_eq!(strip_str(local_cell(false, true)), "ext");
 }
+
+#[test]
+fn payload_keys_are_the_stable_contract() {
+    let created = DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+    let last_event = created + chrono::Duration::hours(1);
+    let details = Details {
+        id: ConversationId::try_from(created).unwrap(),
+        active: true,
+        pinned_at: None,
+        archived_at: None,
+        title: Some("My title".into()),
+        messages: 4,
+        last_event_at: Some(last_event),
+        expires_at: None,
+        local: true,
+        external: false,
+    };
+
+    let json = payload(std::slice::from_ref(&details));
+    let items = json.as_array().expect("payload is a JSON array");
+    assert_eq!(items.len(), 1);
+
+    // Fixed key set: display columns (headers, markers, truncation) must not
+    // leak into the machine payload. A key rename here is a breaking change.
+    let item = &items[0];
+    let mut keys: Vec<_> = item
+        .as_object()
+        .expect("one object per conversation")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec![
+        "active",
+        "archived_at",
+        "created_at",
+        "events",
+        "expires_at",
+        "external",
+        "id",
+        "last_event_at",
+        "local",
+        "pinned_at",
+        "title",
+    ]);
+
+    assert_eq!(item["id"], serde_json::json!(details.id.to_string()));
+    assert_eq!(item["title"], serde_json::json!("My title"));
+    assert_eq!(item["active"], serde_json::json!(true));
+    assert_eq!(item["events"], serde_json::json!(4));
+    // Absent optionals serialize as null, not as omitted keys.
+    assert_eq!(item["pinned_at"], serde_json::Value::Null);
+    assert_eq!(item["expires_at"], serde_json::Value::Null);
+    // Timestamps are RFC 3339 UTC strings.
+    assert!(
+        item["last_event_at"]
+            .as_str()
+            .is_some_and(|v| v.contains('T') && v.ends_with('Z')),
+        "RFC 3339 UTC timestamp, got: {}",
+        item["last_event_at"]
+    );
+}

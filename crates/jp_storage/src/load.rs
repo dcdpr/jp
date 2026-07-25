@@ -148,6 +148,19 @@ impl Storage {
     }
 }
 
+/// The conversation IDs projected in a checkout's storage directory.
+///
+/// A bare directory scan of the active (non-archived) partition: no workspace
+/// construction, no user-local merge, no registry writes.
+/// `jp w show` uses this to union checkout-only conversations across a
+/// workspace's sibling roots without paying a full workspace load per root —
+/// one loaded checkout already contributes every user-local conversation, so
+/// the siblings can only add conversations that live in their projection alone.
+#[must_use]
+pub fn projected_conversation_ids(storage_dir: &Utf8Path) -> Vec<ConversationId> {
+    scan_conversation_ids(&storage_dir.join(CONVERSATIONS_DIR))
+}
+
 /// Scan a single conversations directory for IDs.
 ///
 /// Dot-prefixed entries (`.trash/`, leftover `.tmp`/`.staging-`/`.old-` dirs

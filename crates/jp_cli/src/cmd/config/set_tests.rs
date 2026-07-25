@@ -57,6 +57,7 @@ fn setup(
     };
     let fs_backend = Some(fs);
     let ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         fs_backend,
         Runtime::new().unwrap(),
