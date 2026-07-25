@@ -221,6 +221,16 @@ impl TurnRange {
         }
     }
 
+    /// The `--first N` count, if set.
+    pub(crate) fn first(&self) -> Option<usize> {
+        self.first
+    }
+
+    /// The `--last N` count, if set.
+    pub(crate) fn last(&self) -> Option<usize> {
+        self.last
+    }
+
     /// The first `--turn` endpoint outside `1..=count`, if any.
     ///
     /// `--turn` names specific turns, so an endpoint past the conversation is
