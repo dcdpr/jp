@@ -38,7 +38,8 @@ Three approaches fail the requirements:
   `/storage/` does) is rejected for security reasons - it would require
   inventing a DSL for access control.
 - **Last-write-wins merging** (git-bug's approach, in elaborated form) hides
-  conflicts by silently dropping the losing write.
+  conflicts: concurrent writes are totally ordered, only the winner is rendered,
+  and neither author is told a conflict happened.
 
 Storing issues as git objects in the repo's own `.git` — objects in the object
 database, refs under a dedicated namespace, nothing in the worktree — avoids
@@ -495,11 +496,28 @@ The on-disk format is git's either way, so stored data does not change.
   diverge.
   Per-writer refs eliminate the entire category.
 - **Causality as commit parents** (multi-parent commits referencing foreign
-  heads): structurally merge commits, which this design forbids; the
-  `seen_heads` field carries the same information while keeping every chain
-  linear.
-- **git-bug / git-appraise**: closest prior art, same refs-in-repo approach, but
-  git-bug's elaborated last-write-wins hides conflicts that drop data.
+  heads): a commit with more than one parent is a merge commit, which this
+  design forbids; the `seen_heads` field carries the same information while
+  keeping every chain linear.
+- **git-bug**: closest prior art, same refs-in-repo approach — git-bug entities
+  sync over plain git push and pull of refs, as this design does. git-bug tracks
+  causality much as this design does, so both detect concurrent edits. git-bug
+  then tie-breaks concurrent edits by lexicographic order and compiles state as
+  if no conflict existed: for a register field (title, state), one edit wins the
+  coin-flip, the other survives in history but disappears from view, and no
+  interface tells either author.
+- **git-appraise**: same refs-in-repo storage and push/pull sync, applied to
+  code review rather than issues.
+  Review data lives in git-notes under `refs/notes/devtools/*`, one JSON item
+  per line on refs that every writer shares; divergent notes are merged with
+  git's `cat_sort_uniq` union strategy.
+  Comments union cleanly (a grow-only set, as here); review requests do not:
+  git-appraise sorts the requests on a commit by wall-clock timestamp and takes
+  the newest as current.
+  A skewed clock reorders history, a concurrent request silently loses, and
+  nothing records causality.
+  Shared refs also require note merges; contrast with this design which forbids
+  merge commits by giving each writer its own ref.
 - **`gix` or `git2` instead of plumbing subprocesses**: see the rationale table
   in Design; a large vet surface (`gix`) or a C dependency (`git2`) buys speed
   the workload does not need, at coexistence risk the store cannot afford.
