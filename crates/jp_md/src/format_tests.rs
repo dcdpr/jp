@@ -1141,6 +1141,31 @@ fn test_table_keeps_natural_width_without_a_terminal_width() {
     assert_eq!(widest, 44, "table should keep its natural width:\n{actual}");
 }
 
+#[test]
+fn test_nested_table_collapses_when_the_prefix_eats_the_terminal() {
+    // Three levels of blockquote prefix (`> > > `) consume all six columns the
+    // terminal has, leaving nothing for the table. That is a known-empty
+    // budget, not an unknown one, so the columns collapse to the minimum
+    // instead of springing back to their natural width.
+    let formatter = Formatter::with_width(80).terminal_width(6);
+    let input = "> > > | Alpha heading | Beta heading |\n> > > | --- | --- |\n> > > | first cell \
+                 content | second cell content |";
+
+    let actual = formatter.format_terminal(input).unwrap();
+
+    let plain = strip_ansi_for_test(&actual);
+    let rows: Vec<&str> = plain.lines().filter(|l| l.contains('|')).collect();
+    assert!(rows.len() > 3, "expected wrapped rows:\n{plain}");
+    for row in rows {
+        // `> > > ` plus `| xxx | xxx |` at the three-column minimum.
+        assert_eq!(
+            row.chars().count(),
+            19,
+            "row should use the minimum layout: {row:?}"
+        );
+    }
+}
+
 /// Regression: the terminal renderer used to emit `<!-- end list -->` between
 /// adjacent lists (and before indented code blocks) — a CommonMark round-trip
 /// hint borrowed from comrak's serializer that has no business appearing in

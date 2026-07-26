@@ -92,24 +92,24 @@ fn test_wrap_ansi_state_continues() {
 
 #[test]
 fn test_fit_columns_unbounded_keeps_natural_widths() {
-    assert_eq!(fit_columns(&[5, 10], 0, 0), vec![5, 10]);
+    assert_eq!(fit_columns(&[5, 10], 0, None), vec![5, 10]);
 }
 
 #[test]
 fn test_fit_columns_applies_cap_without_budget() {
-    assert_eq!(fit_columns(&[50, 10], 40, 0), vec![40, 10]);
+    assert_eq!(fit_columns(&[50, 10], 40, None), vec![40, 10]);
 }
 
 #[test]
 fn test_fit_columns_raises_narrow_columns_to_minimum() {
     // The separator row needs three dashes to read as one.
-    assert_eq!(fit_columns(&[1, 0], 0, 0), vec![3, 3]);
+    assert_eq!(fit_columns(&[1, 0], 0, None), vec![3, 3]);
 }
 
 #[test]
 fn test_fit_columns_leaves_fitting_table_alone() {
     // 7 columns of chrome + 30 of content fits in 80.
-    assert_eq!(fit_columns(&[10, 20], 0, 80), vec![10, 20]);
+    assert_eq!(fit_columns(&[10, 20], 0, Some(80)), vec![10, 20]);
 }
 
 #[test]
@@ -117,31 +117,39 @@ fn test_fit_columns_spends_surplus_on_the_wide_column() {
     // The three short columns keep their natural width and donate the rest of
     // the 47-column content budget to the prose column, rather than all four
     // being narrowed to an equal share.
-    assert_eq!(fit_columns(&[5, 5, 5, 60], 0, 60), vec![5, 5, 5, 32]);
+    assert_eq!(fit_columns(&[5, 5, 5, 60], 0, Some(60)), vec![5, 5, 5, 32]);
 }
 
 #[test]
 fn test_fit_columns_splits_evenly_when_every_column_is_wide() {
-    assert_eq!(fit_columns(&[40, 40, 40], 0, 40), vec![10, 10, 10]);
+    assert_eq!(fit_columns(&[40, 40, 40], 0, Some(40)), vec![10, 10, 10]);
 }
 
 #[test]
 fn test_fit_columns_gives_remainder_to_leftmost_columns() {
     // 32 columns of content across 3 columns: 11, 11, 10.
-    assert_eq!(fit_columns(&[40, 40, 40], 0, 42), vec![11, 11, 10]);
+    assert_eq!(fit_columns(&[40, 40, 40], 0, Some(42)), vec![11, 11, 10]);
 }
 
 #[test]
 fn test_fit_columns_shrinks_below_the_cap() {
     // The cap takes the first column to 40, then the budget takes it to 19.
-    assert_eq!(fit_columns(&[100, 4], 40, 30), vec![19, 4]);
+    assert_eq!(fit_columns(&[100, 4], 40, Some(30)), vec![19, 4]);
 }
 
 #[test]
 fn test_fit_columns_overflows_rather_than_going_below_the_minimum() {
     // Six columns cannot fit in 20 at any width; a 3-column minimum is more
     // useful than a single character each.
-    assert_eq!(fit_columns(&[20; 6], 0, 20), vec![3; 6]);
+    assert_eq!(fit_columns(&[20; 6], 0, Some(20)), vec![3; 6]);
+}
+
+#[test]
+fn test_fit_columns_treats_an_exhausted_budget_as_the_minimum_layout() {
+    // A known budget with nothing left over is not the same as an unknown one:
+    // the columns collapse to the minimum instead of springing back to their
+    // natural widths.
+    assert_eq!(fit_columns(&[20, 30], 0, Some(0)), vec![3, 3]);
 }
 
 #[test]
@@ -176,7 +184,7 @@ fn test_format_table_fits_the_budget() {
             inline_code_bg: None,
             indent: 0,
         },
-        40,
+        Some(40),
     )
     .expect("should format");
 
@@ -223,7 +231,7 @@ fn test_format_simple_table() {
             inline_code_bg: None,
             indent: 0,
         },
-        0,
+        None,
     )
     .expect("should format");
 
@@ -285,7 +293,7 @@ fn test_format_table_with_wrapping() {
             inline_code_bg: None,
             indent: 0,
         },
-        0,
+        None,
     )
     .expect("should format");
 
@@ -349,7 +357,7 @@ fn test_format_table_wrapping_respects_alignment() {
             inline_code_bg: None,
             indent: 0,
         },
-        0,
+        None,
     )
     .expect("should format");
 
@@ -424,7 +432,7 @@ fn test_format_aligned_table() {
             inline_code_bg: None,
             indent: 0,
         },
-        0,
+        None,
     )
     .expect("should format");
 

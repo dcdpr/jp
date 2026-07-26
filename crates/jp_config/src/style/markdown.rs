@@ -50,6 +50,9 @@ pub struct MarkdownConfig {
     /// A column can end up narrower than this: a table wider than the terminal
     /// has its widest columns narrowed until it fits, so the terminal does not
     /// break the rows apart.
+    /// Columns never narrow below three characters, so `1` and `2` behave as
+    /// `3`, and a table with more columns than fit at that minimum is rendered
+    /// at the minimum and overflows the terminal.
     /// Tables in piped or redirected output are not fitted, since there is no
     /// terminal width to fit them to.
     #[setting(default = 40)]

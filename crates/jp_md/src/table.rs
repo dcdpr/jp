@@ -60,7 +60,7 @@ impl TableOptions {
 /// Format a comrak `Table` node into an aligned, ANSI-styled string.
 ///
 /// `budget` is the number of visual columns available for the rendered table,
-/// borders included; `0` means unbounded.
+/// borders included; `None` means unbounded.
 /// No rendered line exceeds it unless the table has too many columns to fit
 /// even at [`MIN_COLUMN_WIDTH`].
 ///
@@ -75,7 +75,11 @@ impl TableOptions {
 ///    to `budget`.
 /// 4. Word-wraps cells that exceed their fitted column width.
 /// 5. Pads and aligns cells according to the table's alignment markers.
-pub fn format_table(node: Node<'_>, options: RenderOptions<'_>, budget: usize) -> Option<String> {
+pub fn format_table(
+    node: Node<'_>,
+    options: RenderOptions<'_>,
+    budget: Option<usize>,
+) -> Option<String> {
     let (alignments, rows) = extract_table(node, options)?;
 
     // Compute the width each column would take if nothing constrained it.
@@ -144,7 +148,7 @@ pub fn format_table(node: Node<'_>, options: RenderOptions<'_>, budget: usize) -
 /// Fit natural column widths into `budget` visual columns.
 ///
 /// Each width is first clamped to `max_column_width` (`0` = unbounded) and
-/// raised to [`MIN_COLUMN_WIDTH`]. If the result fits `budget` (`0` =
+/// raised to [`MIN_COLUMN_WIDTH`]. If the result fits `budget` (`None` =
 /// unbounded), it is returned as-is.
 ///
 /// Otherwise the budget is distributed max-min fair: every column that asks for
@@ -157,7 +161,10 @@ pub fn format_table(node: Node<'_>, options: RenderOptions<'_>, budget: usize) -
 /// A table with more columns than `budget` can hold at [`MIN_COLUMN_WIDTH`] is
 /// laid out at that minimum and overflows: no distribution can save it, and a
 /// one-character column is less useful than an overflowing table.
-fn fit_columns(natural: &[usize], max_column_width: usize, budget: usize) -> Vec<usize> {
+/// `Some(0)` — a known budget with nothing left over, such as a table nested
+/// so deeply that its prefix consumes the terminal — is that same minimum
+/// layout, not an unbounded one.
+fn fit_columns(natural: &[usize], max_column_width: usize, budget: Option<usize>) -> Vec<usize> {
     let count = natural.len();
     let mut widths: Vec<usize> = natural
         .iter()
@@ -171,9 +178,9 @@ fn fit_columns(natural: &[usize], max_column_width: usize, budget: usize) -> Vec
         })
         .collect();
 
-    if count == 0 || budget == 0 {
+    let Some(budget) = budget else {
         return widths;
-    }
+    };
 
     // The trailing `|` closes the last column; every column adds its own chrome.
     let chrome = count * COLUMN_CHROME + 1;

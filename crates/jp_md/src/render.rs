@@ -794,11 +794,13 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         // The table is emitted with wrapping disabled, so it has to fit the
         // terminal on its own. The writer prepends its prefix (list indent,
-        // blockquote markers) to every row, so that comes off the budget.
+        // blockquote markers) to every row, so that comes off the budget. A
+        // prefix that eats the whole terminal leaves `Some(0)`, which is a
+        // known-empty budget rather than an unknown one.
         let budget = self
             .options
             .terminal_width
-            .map_or(0, |width| width.saturating_sub(self.writer.prefix_width()));
+            .map(|width| width.saturating_sub(self.writer.prefix_width()));
 
         if let Some(rendered) = table::format_table(node, self.options, budget) {
             self.writer.output(&rendered, false)?;
