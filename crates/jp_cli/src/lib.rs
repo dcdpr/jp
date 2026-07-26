@@ -35,7 +35,7 @@ use clap::{
     builder::{BoolValueParser, TypedValueParser as _},
 };
 use cmd::Commands;
-use crossterm::style::Stylize as _;
+use crossterm::{style::Stylize as _, terminal};
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
@@ -383,8 +383,20 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
+/// Width of the controlling terminal in columns, when stdout is a TTY.
+///
+/// `None` when stdout is piped or redirected, so output keeps its full width
+/// for machine consumption rather than being laid out against a guessed size.
+fn detect_terminal_width() -> Option<u16> {
+    if !stdout().is_terminal() {
+        return None;
+    }
+
+    terminal::size().ok().map(|(cols, _)| cols)
+}
+
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
-    let printer = Printer::terminal(format);
+    let printer = Printer::terminal(format).with_terminal_width(detect_terminal_width());
 
     // `jp init` is a special case that doesn't need the full startup pipeline.
     if let Commands::Init(args) = &cli.command {

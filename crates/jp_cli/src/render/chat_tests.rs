@@ -19,6 +19,40 @@ fn create_renderer() -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     create_renderer_with_config(AppConfig::new_test())
 }
 
+/// A table is laid out rather than soft-wrapped, so the renderer has to fit it
+/// to the terminal width the printer reports.
+#[test]
+fn test_table_is_fitted_to_the_printers_terminal_width() {
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 80;
+    config.style.markdown.table_max_column_width = 40;
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.with_terminal_width(Some(30))),
+        config.style,
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "| Alpha heading | Beta heading |\n| --- | --- |\n| first cell content | second \
+                  cell content |\n\n"
+            .into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let rendered = strip_ansi(&out.lock());
+    let rows: Vec<&str> = rendered.lines().filter(|l| l.starts_with('|')).collect();
+    assert!(rows.len() > 3, "expected wrapped rows:\n{rendered}");
+    for row in rows {
+        assert_eq!(
+            row.chars().count(),
+            30,
+            "row should fit the reported terminal width: {row:?}"
+        );
+    }
+}
+
 #[test]
 fn test_renders_message() {
     let (mut renderer, out, _err) = create_renderer();

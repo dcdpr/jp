@@ -53,9 +53,6 @@ const CODE_BG: &str = "\x1b[48;5;248m";
 pub struct HrOptions {
     /// The rendering style for horizontal rules.
     pub style: HrStyle,
-
-    /// Actual terminal width, used when `style` is [`HrStyle::Line`].
-    pub terminal_width: Option<usize>,
 }
 
 /// Bundled inputs for the terminal renderer.
@@ -68,6 +65,14 @@ pub struct RenderOptions<'a> {
     /// Target line width for wrapping.
     /// `0` disables wrapping.
     pub width: usize,
+
+    /// Width of the output terminal in columns, when known.
+    ///
+    /// The hard bound for blocks that are laid out rather than wrapped: a table
+    /// wider than this would be broken up by the terminal's own line wrapping.
+    /// `None` leaves those blocks unbounded, which is what piped and redirected
+    /// output wants.
+    pub terminal_width: Option<usize>,
 
     /// Table formatting options.
     pub table_options: &'a table::TableOptions,
@@ -497,14 +502,9 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
                 self.writer.output("-----", false)?;
             }
             HrStyle::Line => {
-                let line_width = self
-                    .options
-                    .hr_options
-                    .terminal_width
-                    .filter(|&w| w > 0)
-                    .unwrap_or(self.writer.width)
-                    .max(1);
-                let line: String = "─".repeat(line_width);
+                // A rule spans the text column, not the terminal, so it lines up
+                // with the wrapped prose above and below it.
+                let line: String = "─".repeat(self.writer.width.max(1));
                 self.writer.output(&line, false)?;
             }
         }
@@ -792,7 +792,15 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
 
         self.writer.blankline();
 
-        if let Some(rendered) = table::format_table(node, self.options) {
+        // The table is emitted with wrapping disabled, so it has to fit the
+        // terminal on its own. The writer prepends its prefix (list indent,
+        // blockquote markers) to every row, so that comes off the budget.
+        let budget = self
+            .options
+            .terminal_width
+            .map_or(0, |width| width.saturating_sub(self.writer.prefix_width()));
+
+        if let Some(rendered) = table::format_table(node, self.options, budget) {
             self.writer.output(&rendered, false)?;
         }
 
