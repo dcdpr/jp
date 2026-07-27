@@ -3,7 +3,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use jp_config::{AppConfig, style::reasoning::ReasoningDisplayConfig, types::color::Color};
+use jp_config::{
+    AppConfig,
+    style::reasoning::{ReasoningDisplayConfig, TruncateChars},
+    types::color::Color,
+};
 use jp_conversation::event::ChatResponse;
 use jp_printer::{OutputFormat, Printer};
 
@@ -68,6 +72,36 @@ fn visible_reasoning_clears_tool_separator_debt() {
     assert!(
         !flag.load(Ordering::Relaxed),
         "visible reasoning supplies spacing and clears the debt"
+    );
+}
+
+#[test]
+fn whitespace_only_reasoning_preserves_tool_separator_debt() {
+    // Interleaved thinking emits whitespace-only chunks between tool calls.
+    // `Full` would render them, but there is nothing to render, so they supply
+    // no spacing and the debt owed by the preceding result must survive.
+    let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Full);
+    view.render_chat_response(&ChatResponse::reasoning("\n\n"));
+    assert!(
+        flag.load(Ordering::Relaxed),
+        "a reasoning chunk that renders nothing must not clear the debt"
+    );
+}
+
+#[test]
+fn reasoning_past_the_truncation_budget_preserves_tool_separator_debt() {
+    // Once the budget is spent, `Truncate` renders nothing for every later
+    // chunk, so those chunks supply no spacing either.
+    let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Truncate(TruncateChars {
+        characters: 5,
+    }));
+    view.render_chat_response(&ChatResponse::reasoning("12345"));
+    flag.store(true, Ordering::Relaxed);
+
+    view.render_chat_response(&ChatResponse::reasoning("67890"));
+    assert!(
+        flag.load(Ordering::Relaxed),
+        "reasoning past the truncation budget renders nothing and must not clear the debt"
     );
 }
 

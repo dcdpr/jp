@@ -679,23 +679,38 @@ impl ChatRenderer {
         }
     }
 
-    /// Whether the configured reasoning display supplies its own separation
-    /// before following content.
+    /// Whether rendering `content` as reasoning supplies its own separation
+    /// before the content that follows it.
     ///
-    /// `Static`, `Full`, and `Truncate` leave terminated visible output, so a
-    /// following tool header is cleanly separated from them.
+    /// True only when the chunk leaves terminated visible output on screen: a
+    /// caller coordinating inter-block spacing keeps its owed separator across
+    /// every chunk for which this is false.
+    ///
+    /// `Static` writes its `reasoning...` line at the transition whatever the
+    /// chunk holds.
+    /// `Full` and `Truncate` depend on the chunk itself — a whitespace-only
+    /// chunk (interleaved thinking emits them between tool calls) renders
+    /// nothing, and neither does any chunk once the truncation budget is spent.
     /// `Hidden` renders nothing, `Timer` writes a stderr line it erases again
     /// on completion, and `Progress` writes `reasoning...` plus dots with no
-    /// trailing newline — none of these separate the next header, so a caller
-    /// coordinating inter-block spacing must keep the owed separator across
-    /// them.
-    pub(crate) fn reasoning_supplies_separation(&self) -> bool {
-        !matches!(
-            self.config.reasoning.display,
+    /// trailing newline.
+    ///
+    /// A chunk still sitting in the markdown buffer counts as rendered: the
+    /// buffer is drained ahead of the next tool header, so its content lands
+    /// first and separates the header.
+    pub(crate) fn reasoning_supplies_separation(&self, content: &str) -> bool {
+        match self.config.reasoning.display {
+            ReasoningDisplayConfig::Static => true,
+            ReasoningDisplayConfig::Full => !content.trim().is_empty(),
+            ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
+                !content.trim().is_empty() && self.reasoning_chars_count < characters
+            }
+            // `Summary` is unimplemented — `render_reasoning` panics on it.
             ReasoningDisplayConfig::Hidden
-                | ReasoningDisplayConfig::Timer
-                | ReasoningDisplayConfig::Progress
-        )
+            | ReasoningDisplayConfig::Timer
+            | ReasoningDisplayConfig::Progress
+            | ReasoningDisplayConfig::Summary => false,
+        }
     }
 
     /// Transition renderer state to tool call mode.
