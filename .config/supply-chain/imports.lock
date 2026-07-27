@@ -213,8 +213,8 @@ user-login = "Byron"
 user-name = "Sebastian Thiel"
 
 [[publisher.globset]]
-version = "0.4.16"
-when = "2025-02-27"
+version = "0.4.19"
+when = "2026-07-15"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
@@ -309,8 +309,8 @@ user-login = "seanmonstar"
 user-name = "Sean McArthur"
 
 [[publisher.ignore]]
-version = "0.4.23"
-when = "2024-09-09"
+version = "0.4.31"
+when = "2026-07-20"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
