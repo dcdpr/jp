@@ -93,13 +93,14 @@ pub struct ChatRenderer {
     code_block: Option<CodeBlockState>,
     /// Active reasoning timer, used by `Timer` display mode.
     reasoning_timer: Option<LineTimer>,
-    /// Whether a rendered reasoning block still owes its trailing inter-block
-    /// separator.
+    /// Whether a blank-line separator is owed before the next rendered content.
     ///
-    /// Reasoning blocks defer that separator so its background can be chosen
-    /// once the following content is known: shaded when more reasoning follows
-    /// (the gap stays inside the reasoning region), unstyled when reasoning
-    /// gives way to a message, tool call, or end of stream.
+    /// Raised by a rendered reasoning block and by the tool-call boundary a
+    /// reasoning region continues across, both of which defer the separator so
+    /// its background can be chosen once the following content is known: shaded
+    /// when more reasoning follows (the gap stays inside the reasoning region),
+    /// unstyled when reasoning gives way to a message, tool call, or end of
+    /// stream.
     reasoning_separator_pending: bool,
     /// Post-processing fixups for LLM quirks in the event stream.
     fixups: Fixups,
@@ -239,19 +240,21 @@ impl ChatRenderer {
         self.last_content_kind = Some(next);
     }
 
-    /// Print the blank line separating tool chrome from the content that
-    /// follows it.
+    /// Emit the blank line separating tool chrome from the content that follows
+    /// it.
     ///
     /// When the next content is reasoning that continues a shaded reasoning
-    /// region across the tool call, the gap sits inside the region and carries
-    /// the reasoning background; otherwise it is a plain blank line.
+    /// region across the tool call, the gap is deferred like a reasoning
+    /// block's own trailing separator: the reasoning chunk that triggered the
+    /// transition may render nothing at all (it is whitespace-only, or
+    /// truncation has already consumed its budget), in which case the gap ends
+    /// up before whatever renders next and its shading has to follow that
+    /// content.
+    /// Otherwise the region ends at the tool call and the gap is a plain blank
+    /// line.
     fn blank_line_after_tool_call(&mut self, next: ContentKind) {
-        let continues = next == ContentKind::Reasoning && self.reasoning_region_continues();
-
-        if continues && let Some(bg) = self.reasoning_background() {
-            let delay = self.config.typewriter.text_delay;
-            let separator = render_separator(Some(&bg));
-            self.printer.print(separator.typewriter(delay.into()));
+        if next == ContentKind::Reasoning && self.reasoning_region_continues() {
+            self.reasoning_separator_pending = true;
         } else {
             self.printer.println("");
         }

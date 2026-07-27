@@ -1251,6 +1251,62 @@ fn test_gap_between_tool_call_and_next_reasoning_is_shaded() {
 }
 
 #[test]
+fn test_gap_after_tool_call_without_background_is_a_plain_blank_line() {
+    // With no reasoning background configured there is nothing to shade, so the
+    // deferred gap resolves to a plain blank line and the tool chrome stays
+    // separated from the resumed reasoning by exactly one empty line.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "More\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Thinking\n\n\nMore\n\n");
+}
+
+#[test]
+fn test_gap_after_tool_call_is_unshaded_when_reasoning_renders_nothing() {
+    // Reasoning → tool call → a whitespace-only reasoning chunk → message.
+    // Interleaved thinking routinely emits such a chunk, which renders nothing,
+    // so the gap after the tool chrome ends up between the chrome and the
+    // message: it sits outside the reasoning region and must not be shaded.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "\n\n".into(),
+    });
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        1,
+        "only the separator before the tool call is shaded; the gap before the message is not, \
+         got: {output:?}"
+    );
+}
+
+#[test]
 fn test_role_header_ends_the_reasoning_region() {
     // A role boundary (a new turn's header, or a user header) ends any
     // reasoning region: a tool call at the start of the next turn must not
