@@ -281,6 +281,7 @@ pr-triage NNN *ARGS: _install-jp _install-tools
                     exit 0 ;;
                 q|Q) exit 0 ;;
                 n|N) ;;
+                *)   echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
             esac ;;
     esac
 
