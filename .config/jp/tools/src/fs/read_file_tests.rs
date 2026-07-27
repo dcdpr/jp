@@ -223,8 +223,10 @@ async fn refuses_a_suppressed_path() {
     let Outcome::Error { message, .. } = result else {
         panic!("expected a refusal, got: {result:?}");
     };
+    // Normalized: a resolved path carries native separators, so the note reads
+    // `.git\HEAD` on Windows.
     assert_eq!(
-        message,
+        message.replace('\\', "/"),
         "'.git/HEAD' is suppressed from this tool's results. If you need it, ask the user to \
          provide it."
     );

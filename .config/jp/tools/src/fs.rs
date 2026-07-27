@@ -124,3 +124,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         _ => Err(format!("Unknown tool '{}'", t.name).into()),
     }
 }
+
+#[cfg(test)]
+#[path = "fs/fs_tests.rs"]
+mod tests;

@@ -286,8 +286,10 @@ async fn suppressed_path_is_reported_so_the_caller_can_ask_the_user() {
     .await
     .unwrap();
 
+    // Normalized: a resolved path carries native separators, so the note reads
+    // `.git\HEAD` on Windows.
     assert_eq!(
-        matches,
+        matches.replace('\\', "/"),
         "No matches found in the paths that were searched.\n\nNote: '.git/HEAD' is suppressed \
          from this tool's results. If you need it, ask the user to provide it."
     );

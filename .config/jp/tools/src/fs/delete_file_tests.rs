@@ -208,8 +208,10 @@ async fn refuses_to_delete_a_path_a_deny_rule_closes() {
     let Outcome::Error { message, .. } = result else {
         panic!("expected a refusal, got: {result:?}");
     };
+    // Normalized: a resolved path carries native separators, so the message reads
+    // `.git\HEAD` on Windows.
     assert_eq!(
-        message,
+        message.replace('\\', "/"),
         "Access denied: cannot delete '.git/HEAD'. Paths granting delete: [.]. If required, ask \
          the user for explicit access."
     );

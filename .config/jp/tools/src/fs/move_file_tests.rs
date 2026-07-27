@@ -157,8 +157,10 @@ fn refuses_to_move_out_of_a_path_a_deny_rule_closes() {
     )
     .unwrap();
 
+    // Normalized: a resolved path carries native separators, so the message reads
+    // `.git\HEAD` on Windows.
     assert_eq!(
-        unwrap_error(result),
+        unwrap_error(result).replace('\\', "/"),
         "Access denied: cannot delete '.git/HEAD'. Paths granting delete: [.]. If required, ask \
          the user for explicit access."
     );
@@ -186,7 +188,7 @@ fn refuses_to_move_into_a_path_a_deny_rule_closes() {
     .unwrap();
 
     assert_eq!(
-        unwrap_error(result),
+        unwrap_error(result).replace('\\', "/"),
         "Access denied: cannot create '.git/note.txt'. Paths granting create: [.]. If required, \
          ask the user for explicit access."
     );

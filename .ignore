@@ -37,6 +37,8 @@
 #   access.fs         — what the tool process may touch at all
 .jp/conversations/
 .jp/local-conversations/
+.jp/mcp/state/
+.jp/**/QUERY_MESSAGE.md
 docs/.yarn/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
@@ -48,3 +50,5 @@ docs/yarn.lock
 **/fixtures/
 docs2/
 lcov.info
+*.log
+/rustc-ice-*

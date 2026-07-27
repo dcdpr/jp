@@ -285,6 +285,16 @@ fn fixtures_workspace(root: &camino::Utf8Path) {
     std::fs::write(root.join("crates/tests/fixtures/a.snap"), "").unwrap();
 }
 
+/// Notes with native separators normalized, so exact assertions hold on Windows
+/// where a resolved path carries `\`.
+fn notes(files: &Files) -> Vec<String> {
+    files
+        .notes()
+        .iter()
+        .map(|note| note.replace('\\', "/"))
+        .collect()
+}
+
 fn listed(files: Files) -> Vec<String> {
     files
         .into_files()
@@ -426,7 +436,7 @@ async fn suppressed_path_is_skipped_with_a_note() {
     .await
     .unwrap();
 
-    assert_eq!(files.notes(), vec![
+    assert_eq!(notes(&files), vec![
         "'.git' is suppressed from this tool's results. If you need it, ask the user to provide \
          it."
         .to_owned()
@@ -453,7 +463,7 @@ async fn suppress_pattern_covers_files_inside_the_named_directory() {
     .await
     .unwrap();
 
-    assert_eq!(files.notes(), vec![
+    assert_eq!(notes(&files), vec![
         "'.git/HEAD' is suppressed from this tool's results. If you need it, ask the user to \
          provide it."
             .to_owned()
@@ -480,7 +490,7 @@ async fn suppress_patterns_match_at_any_depth() {
     .await
     .unwrap();
 
-    assert_eq!(files.notes(), vec![
+    assert_eq!(notes(&files), vec![
         "'crates/inner/target' is suppressed from this tool's results. If you need it, ask the \
          user to provide it."
             .to_owned()
@@ -511,7 +521,7 @@ async fn an_in_workspace_symlink_cannot_dodge_suppression() {
     .await
     .unwrap();
 
-    assert_eq!(files.notes(), vec![
+    assert_eq!(notes(&files), vec![
         "'.git/HEAD' is suppressed from this tool's results. If you need it, ask the user to \
          provide it."
             .to_owned()
@@ -600,7 +610,7 @@ async fn suppressed_path_does_not_suppress_the_other_requested_paths() {
     .await
     .unwrap();
 
-    assert_eq!(files.notes(), vec![
+    assert_eq!(notes(&files), vec![
         "'.git' is suppressed from this tool's results. If you need it, ask the user to provide \
          it."
         .to_owned()
@@ -633,7 +643,7 @@ async fn explicitly_named_file_respects_read_policy() {
     .await
     .unwrap();
 
-    assert_eq!(files.notes(), vec![
+    assert_eq!(notes(&files), vec![
         "'secret.txt' is not readable by this tool and was skipped. If you need it, ask the user \
          to provide it."
             .to_owned()
