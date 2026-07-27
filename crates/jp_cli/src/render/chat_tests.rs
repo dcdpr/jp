@@ -1299,9 +1299,72 @@ fn test_gap_after_tool_call_is_unshaded_when_reasoning_renders_nothing() {
 
     let output = out.lock().clone();
     assert_eq!(
+        strip_ansi(&output),
+        "Thinking\n\n\nAnswer\n\n",
+        "the gap after the tool chrome must survive as a plain blank line, got: {output:?}"
+    );
+    assert_eq!(
         output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
         1,
         "only the separator before the tool call is shaded; the gap before the message is not, \
+         got: {output:?}"
+    );
+}
+
+#[test]
+fn test_tool_calls_stay_adjacent_when_reasoning_between_them_renders_nothing() {
+    // A whitespace-only interleaved-thinking chunk between two tool calls marks
+    // the region as reasoning but puts nothing on screen, so the two headers are
+    // adjacent and the chat renderer contributes no gap between them. (The
+    // headers themselves are chrome on stderr, written by the `ToolRenderer`.)
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "");
+}
+
+#[test]
+fn test_gap_between_tool_calls_survives_when_reasoning_between_them_renders() {
+    // The counterpart: reasoning that does render between two tool calls keeps
+    // its gaps on both sides, all three inside the shaded region.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "More\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        strip_ansi(&output),
+        "Thinking\n\n\nMore\n\n",
+        "got: {output:?}"
+    );
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        3,
+        "the gaps before, after, and following the resumed reasoning all stay inside the region, \
          got: {output:?}"
     );
 }
