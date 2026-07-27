@@ -17,6 +17,14 @@ use crate::{
 /// failures, and each one contributes its own block.
 const MAX_TEST_OUTPUT_BYTES: usize = 8_000;
 
+/// Cap for the captured output of all failing tests combined.
+///
+/// One broken fixture can fail every test in the workspace, so a per-failure
+/// cap alone leaves the total unbounded.
+/// Failures past this budget are counted and named in the summary but carry no
+/// output.
+const MAX_TEST_OUTPUT_BUDGET_BYTES: usize = 32_000;
+
 #[derive(serde::Serialize)]
 struct TestFailure {
     #[serde(rename = "crate")]
@@ -89,6 +97,8 @@ fn cargo_test_impl<R: ProcessRunner>(
 
     let mut total_tests = 0;
     let mut ran_tests = 0;
+    let mut failed_tests = 0;
+    let mut spent_bytes = 0;
     let mut failure = vec![];
     for l in stdout.lines().filter_map(|s| from_str::<Value>(s).ok()) {
         let kind = l.get("type").and_then(Value::as_str).unwrap_or_default();
@@ -115,10 +125,17 @@ fn cargo_test_impl<R: ProcessRunner>(
         let (krate, path) = name.split_once('$').unwrap_or(("", name));
         let krate = krate.split_once("::").unwrap_or((krate, "")).0;
 
+        failed_tests += 1;
+        if spent_bytes >= MAX_TEST_OUTPUT_BUDGET_BYTES {
+            continue;
+        }
+
+        let output = truncate(stdout, MAX_TEST_OUTPUT_BYTES);
+        spent_bytes += output.len();
         failure.push(TestFailure {
             krate: krate.to_owned(),
             path: path.to_owned(),
-            output: truncate(stdout, MAX_TEST_OUTPUT_BYTES),
+            output,
         });
     }
 
@@ -130,15 +147,21 @@ fn cargo_test_impl<R: ProcessRunner>(
         ))?;
     }
 
-    let mut response = format!(
-        "Ran {ran_tests}/{total_tests} tests, of which {} failed.\n",
-        failure.len()
-    );
+    let mut response =
+        format!("Ran {ran_tests}/{total_tests} tests, of which {failed_tests} failed.\n");
 
     if !failure.is_empty() {
         let xml = to_simple_xml_with_root(&failure, "results")?;
         response.push_str("\nWhat follows is an XML representation of the failed tests:\n\n");
         response.push_str(&format!("```xml\n{xml}\n```"));
+
+        let omitted = failed_tests - failure.len();
+        if omitted > 0 {
+            response.push_str(&format!(
+                "\n\nOutput for {omitted} further failing tests was omitted to bound the size of \
+                 this response. Re-run with `testname` set to inspect them."
+            ));
+        }
     }
 
     Ok(response.into())

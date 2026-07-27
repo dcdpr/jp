@@ -47,12 +47,19 @@ One new key, resolved per-tool then from the `'*'` defaults, exactly like `run`,
 # "unlimited".
 size_threshold = "256KB"
 
-[conversation.tools.cargo_expand]
+[conversation.tools.some_mcp_tool]
 # Raise it where the large payload is the point of the tool.
 size_threshold = "1MB"
 ```
 
-Oversized content is cut at a UTF-8 character boundary and a marker is appended:
+`size_threshold` is an upper bound, not a floor. A tool that caps its own output
+lands below the configured value and raising the threshold does not recover what
+the tool already discarded — so `cargo_expand`'s local `MAX_EXPANDED_BYTES` is
+raised or dropped when this lands, and first-party tools keep local caps only
+where they are tighter than any threshold a user would set.
+
+Oversized content is cut at a UTF-8 character boundary and a marker is
+appended:
 
 ```
 ... [truncated, 623 KB → 256 KB]
@@ -67,20 +74,33 @@ The cap is applied at two seams, for two different reasons.
 
 | Seam | Scope | Configurable |
 | --- | --- | --- |
-| `ToolCoordinator::handle_tool_result` | per-tool `size_threshold` | yes |
-| `commit_tool_responses` | hard ceiling, every response | no |
+| `ToolCoordinator::handle_tool_result` | per-tool `size_threshold`, per response | yes |
+| `commit_tool_responses` | hard ceiling, whole batch | no |
 
 The coordinator seam is where `ResultMode` already dispatches: it has
-`tools_config` in hand, runs before both rendering and persistence, and is on the
-path that `MockExecutor` takes, so it is reachable from the turn-loop integration
-tests.
+`tools_config` in hand and is on the path that `MockExecutor` takes, so it is
+reachable from the turn-loop integration tests.
 
-The `commit_tool_responses` seam is the last stop before the write. It applies a
-compile-time ceiling (`MAX_TOOL_RESPONSE_BYTES`, 2 MB) to every response and logs
-a warning naming the tool. Without it the configurable cap is a suggestion: it
-would not hold for `size_threshold = "unlimited"`, for an MCP server that ignores
-everything, or for the responses the coordinator builds itself (unavailable tool,
-orphan synthesis, inquiry failure) which have no tool config to read.
+Within that seam the cap applies to the copy stored as `tracked_response`, and
+only after rendering and after any `ResultMode::Edit` editing. `render_result`
+and the edit prompt both receive the raw response, so the terminal's
+full-content temp file and the user's editor keep the tail that the assistant
+does not get — which is the whole point of calling this a delivery limit.
+Capping after editing also keeps the editor from becoming a way around the cap.
+
+The `commit_tool_responses` seam is the last stop before the write. Without it
+the configurable cap is a suggestion: it would not hold for `size_threshold =
+"unlimited"`, for an MCP server that ignores everything, or for the responses the
+coordinator builds itself (unavailable tool, orphan synthesis, inquiry failure)
+which have no tool config to read.
+
+This ceiling is a budget over the whole batch, not a per-response limit.
+`commit_tool_responses` persists a vector whose length is whatever the model
+emitted, so a per-response ceiling leaves the total unbounded — two 2 MB
+responses already exceed the context window that produced the reported failure.
+The budget (`MAX_TOOL_RESPONSE_BATCH_BYTES`, 2 MB) is spent across the batch by
+truncating the largest responses first, so one oversized response does not
+starve its siblings, and a `warn!` names each tool that was cut.
 
 ### This is a delivery limit, not a display limit
 
@@ -117,6 +137,10 @@ should not end up with two parallel vocabularies. Whichever ships first defines
 - **Two caps to reason about.** A user hitting the ceiling with a raised
   `size_threshold` gets truncation they explicitly configured against, and has to
   find the warning to understand why.
+- **The batch budget makes one tool's size depend on its siblings.** The same
+  tool returning the same output is truncated in a busy cycle and not in a quiet
+  one. That is the price of bounding the total, but it does make the ceiling
+  non-deterministic from any single tool's point of view.
 - **Bytes are the wrong unit for the actual constraint.** A response under the
   threshold can still overflow a small context window; a base64 blob costs far
   more tokens per byte than prose.
@@ -159,8 +183,9 @@ wants megabytes.
   the threshold is the same concept if they arrive.
 - **Bounding request arguments, attachments, or assistant messages.** This RFD
   covers tool responses only.
-- **The truncation markers inside `.config/jp/tools`.** That crate is project
-  maintenance tooling, not part of the main codebase, and keeps its own.
+- **Unifying the marker text with `.config/jp/tools`.** That crate is project
+  maintenance tooling, not part of the main codebase; its in-tool markers stay
+  as they are. Phase 4 changes one cap *value* there, not the wording.
 
 ## Risks and Open Questions
 
@@ -172,6 +197,10 @@ wants megabytes.
 - **Is 2 MB the right ceiling?** It has to be well above any plausible
   `size_threshold` while staying below the smallest context window we support.
   Worth checking against the actual per-provider limits before settling.
+- **Largest-first apportioning is a guess.** Truncating the largest responses
+  until the batch fits is the obvious rule, but an even split or a
+  proportional one may read better in practice. Worth deciding against a real
+  multi-tool cycle rather than in the abstract.
 - **Conversations already carrying an oversized response** are not repaired by
   this RFD. They still need manual stream editing.
 - **Hyrum's Law on the marker text.** Once the marker string is in tool
@@ -187,18 +216,26 @@ wants megabytes.
 `ToolConfigWithDefaults`. Pure config, no behavior change. Mergeable alone.
 
 **Phase 2 — the configurable cap.** Apply `size_threshold` in
-`ToolCoordinator::handle_tool_result`, before rendering and before the response
-reaches `tracked_response`. One vertical slice: a turn-loop integration test with
-a `MockExecutor` returning an oversized result, asserting the *persisted*
-response is capped and carries the marker. Depends on phase 1.
+`ToolCoordinator::handle_tool_result`, on the value assigned to
+`tracked_response` and after the render and edit paths have seen the raw
+response. One vertical slice: a turn-loop integration test with a `MockExecutor`
+returning an oversized result, asserting the *persisted* response is capped and
+carries the marker. A second test edits an oversized result via
+`ResultMode::Edit` and asserts the edited value is capped too. Depends on
+phase 1.
 
-**Phase 3 — the hard ceiling.** `MAX_TOOL_RESPONSE_BYTES` in
-`commit_tool_responses`, with a `warn!` naming the tool. Test asserts it fires
-with `size_threshold = "unlimited"` configured. Independent of phase 2, but
-reviewed after it so the interaction between the two caps is visible in one
-place.
+**Phase 3 — the batch ceiling.** `MAX_TOOL_RESPONSE_BATCH_BYTES` in
+`commit_tool_responses`, apportioned largest-first across the response vector,
+with a `warn!` per truncated tool. Two tests: one response over the budget with
+`size_threshold = "unlimited"` configured, and several responses individually
+under it that exceed the budget together. Independent of phase 2, but reviewed
+after it so the interaction between the two caps is visible in one place.
 
-**Phase 4 — documentation.** Correct the `InlineResults` doc comment, which
+**Phase 4 — raise the tool-local caps.** Drop or raise `MAX_EXPANDED_BYTES` in
+`cargo_expand` so the central threshold is the binding limit for that tool.
+Small, and only meaningful once phase 2 has landed.
+
+**Phase 5 — documentation.** Correct the `InlineResults` doc comment, which
 promises full delivery to the assistant, and document `size_threshold` in
 `docs/configuration.md`.
 

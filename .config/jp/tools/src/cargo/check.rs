@@ -153,7 +153,8 @@ fn comfort_check<R: ProcessRunner>(
     let listing = files.into_iter().collect::<Vec<_>>().join("\n- ");
     Ok(ComfortCheck::Drift(format!(
         "Doc comments in the following files are badly formatted. Run `cargo_fmt` to auto-fix \
-         them:\n- {listing}"
+         them:\n- {}",
+        truncate(&listing, MAX_DIAGNOSTIC_BYTES)
     )))
 }
 

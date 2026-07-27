@@ -102,7 +102,11 @@ fn cargo_format_impl<R: ProcessRunner>(
         Ok("No files to format.".into())
     } else {
         let listing = files.into_iter().collect::<Vec<_>>().join("\n- ");
-        Ok(format!("Formatted files:\n- {listing}").into())
+        Ok(format!(
+            "Formatted files:\n- {}",
+            truncate(&listing, MAX_DIAGNOSTIC_BYTES)
+        )
+        .into())
     }
 }
 
