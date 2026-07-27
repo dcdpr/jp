@@ -23,7 +23,8 @@ pub(crate) struct Rm {
     #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Remove all conversations created in a `[--from, --until)` range.
+    /// Remove all conversations created in a `[--created-since,
+    /// --created-before)` range.
     #[command(flatten)]
     range: CreationRange,
 

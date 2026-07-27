@@ -73,13 +73,17 @@ impl FromStr for TimeThreshold {
     }
 }
 
-/// A half-open `[from, until)` filter on conversation creation date, shared
+/// A half-open `[since, before)` filter on conversation creation date, shared
 /// between subcommands that want range-based selection (`jp c rm`, `jp c
 /// archive`, `jp c use`, …).
 ///
-/// `--from` is inclusive, `--until` is exclusive.
+/// `--created-since` is inclusive, `--created-before` is exclusive.
 /// Both accept the full [`TimeThreshold`] syntax (conversation ID, relative
 /// duration, or absolute date).
+///
+/// The flags name what they filter because `--from`/`--to` select *turns*
+/// within a conversation elsewhere in the CLI (see `cmd::turn_selection`), and
+/// the two accept near-identical values.
 ///
 /// # Type parameters
 ///
@@ -95,15 +99,15 @@ impl FromStr for TimeThreshold {
 /// manually.
 #[derive(Debug)]
 pub(crate) struct CreationRange<const EXCLUSIVE: bool = true> {
-    pub from: Option<TimeThreshold>,
-    pub until: Option<TimeThreshold>,
+    pub since: Option<TimeThreshold>,
+    pub before: Option<TimeThreshold>,
 }
 
 impl<const EXCLUSIVE: bool> Default for CreationRange<EXCLUSIVE> {
     fn default() -> Self {
         Self {
-            from: None,
-            until: None,
+            since: None,
+            before: None,
         }
     }
 }
@@ -111,13 +115,13 @@ impl<const EXCLUSIVE: bool> Default for CreationRange<EXCLUSIVE> {
 impl<const EXCLUSIVE: bool> CreationRange<EXCLUSIVE> {
     /// Whether either bound is set.
     pub fn is_set(&self) -> bool {
-        self.from.is_some() || self.until.is_some()
+        self.since.is_some() || self.before.is_some()
     }
 
     /// Half-open range test on the conversation's creation timestamp.
     pub fn matches(&self, id: ConversationId) -> bool {
-        self.from.is_none_or(|t| id.timestamp() >= *t)
-            && self.until.is_none_or(|t| id.timestamp() < *t)
+        self.since.is_none_or(|t| id.timestamp() >= *t)
+            && self.before.is_none_or(|t| id.timestamp() < *t)
     }
 }
 
@@ -145,36 +149,37 @@ impl TypedValueParser for TimeThresholdParser {
 
 impl<const EXCLUSIVE: bool> clap::Args for CreationRange<EXCLUSIVE> {
     fn augment_args(cmd: Command) -> Command {
-        let from_help = "Match conversations created at or after the specified time.";
-        let from_long_help = "Match conversations created at or after the specified \
-                              time.\n\nAccepts a conversation ID (uses its creation timestamp), a \
-                              relative duration (e.g. `3w`, `30d`, `6h`), or an absolute date \
-                              (e.g. `2026-01-01`). Composable with `--until`.";
-        let until_help = "Match conversations created before the specified time.";
-        let until_long_help = "Match conversations created before the specified time.\n\nAccepts \
-                               the same formats as `--from`. The range is half-open (`--until` is \
-                               exclusive), so `--from X --until Y` matches everything in `[X, Y)`.";
+        let since_help = "Match conversations created at or after the specified time.";
+        let since_long_help = "Match conversations created at or after the specified \
+                               time.\n\nAccepts a conversation ID (uses its creation timestamp), \
+                               a relative duration (e.g. `3w`, `30d`, `6h`), or an absolute date \
+                               (e.g. `2026-01-01`). Composable with `--created-before`.";
+        let before_help = "Match conversations created before the specified time.";
+        let before_long_help = "Match conversations created before the specified time.\n\nAccepts \
+                                the same formats as `--created-since`. The range is half-open \
+                                (`--created-before` is exclusive), so `--created-since X \
+                                --created-before Y` matches everything in `[X, Y)`.";
 
         let mut group = ArgGroup::new("creation_range")
             .multiple(true)
-            .args(["from", "until"]);
+            .args(["created_since", "created_before"]);
         if EXCLUSIVE {
             group = group.conflicts_with("id");
         }
 
         cmd.arg(
-            Arg::new("from")
-                .long("from")
+            Arg::new("created_since")
+                .long("created-since")
                 .value_parser(TimeThresholdParser)
-                .help(from_help)
-                .long_help(from_long_help),
+                .help(since_help)
+                .long_help(since_long_help),
         )
         .arg(
-            Arg::new("until")
-                .long("until")
+            Arg::new("created_before")
+                .long("created-before")
                 .value_parser(TimeThresholdParser)
-                .help(until_help)
-                .long_help(until_long_help),
+                .help(before_help)
+                .long_help(before_long_help),
         )
         .group(group)
     }
@@ -187,17 +192,17 @@ impl<const EXCLUSIVE: bool> clap::Args for CreationRange<EXCLUSIVE> {
 impl<const EXCLUSIVE: bool> FromArgMatches for CreationRange<EXCLUSIVE> {
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         Ok(Self {
-            from: matches.get_one::<TimeThreshold>("from").copied(),
-            until: matches.get_one::<TimeThreshold>("until").copied(),
+            since: matches.get_one::<TimeThreshold>("created_since").copied(),
+            before: matches.get_one::<TimeThreshold>("created_before").copied(),
         })
     }
 
     fn update_from_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), clap::Error> {
-        if let Some(v) = matches.get_one::<TimeThreshold>("from").copied() {
-            self.from = Some(v);
+        if let Some(v) = matches.get_one::<TimeThreshold>("created_since").copied() {
+            self.since = Some(v);
         }
-        if let Some(v) = matches.get_one::<TimeThreshold>("until").copied() {
-            self.until = Some(v);
+        if let Some(v) = matches.get_one::<TimeThreshold>("created_before").copied() {
+            self.before = Some(v);
         }
         Ok(())
     }

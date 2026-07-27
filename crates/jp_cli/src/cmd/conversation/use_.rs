@@ -33,7 +33,7 @@ pub(crate) struct Use {
     /// Case-insensitive unless the pattern contains an uppercase character
     /// (smart-case).
     /// Composable with target keywords (`?`, `?p`, `?s`, `?a`) and with
-    /// `--from` / `--until`.
+    /// `--created-since` / `--created-before`.
     #[arg(long)]
     grep: Option<String>,
 
@@ -51,7 +51,8 @@ impl Use {
             .any(ConversationTarget::is_archived)
     }
 
-    /// Whether any candidate-set filter (`--grep`, `--from`, `--until`) is set.
+    /// Whether any candidate-set filter (`--grep`, `--created-since`,
+    /// `--created-before`) is set.
     /// When true, `Use` resolves its handle internally instead of going through
     /// the standard pipeline.
     fn has_filter(&self) -> bool {

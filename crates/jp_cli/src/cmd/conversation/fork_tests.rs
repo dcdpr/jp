@@ -22,6 +22,55 @@ use crate::{
     cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds},
 };
 
+/// Parse a [`TurnSelection`] from the flags a user would pass to `jp c fork`.
+///
+/// Going through clap keeps these cases pinned to the real flag surface rather
+/// than to the struct's private fields.
+fn selection(args: &[&str]) -> TurnSelection {
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        selection: TurnSelection,
+    }
+
+    let mut argv = vec!["fork"];
+    argv.extend_from_slice(args);
+    clap::Parser::try_parse_from(argv)
+        .map(|cli: TestCli| cli.selection)
+        .unwrap()
+}
+
+/// A stream of `count` turns, each holding one request, two minutes apart
+/// starting at 2020-01-01 00:00:00 UTC.
+///
+/// Turn N starts at `00:(2N):00` and its request lands ten seconds later, so a
+/// bound at an odd minute falls strictly inside a turn.
+fn turns(count: u32) -> Vec<ConversationEvent> {
+    (0..count)
+        .flat_map(|turn| {
+            [
+                ConversationEvent::new(
+                    TurnStart,
+                    Utc.with_ymd_and_hms(2020, 1, 1, 0, turn * 2, 0).unwrap(),
+                ),
+                ConversationEvent::new(
+                    ChatRequest::from(format!("Q{}", turn + 1)),
+                    Utc.with_ymd_and_hms(2020, 1, 1, 0, turn * 2, 10).unwrap(),
+                ),
+            ]
+        })
+        .collect()
+}
+
+/// The request contents of a conversation, in stream order.
+fn requests(stream: &ConversationStream) -> Vec<String> {
+    stream
+        .iter()
+        .filter_map(|e| e.event.as_chat_request())
+        .map(|r| r.content.clone())
+        .collect()
+}
+
 #[test]
 #[expect(clippy::too_many_lines)]
 fn test_conversation_fork() {
@@ -36,10 +85,7 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: None,
-                first: None,
+                range: TurnSelection::default(),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -81,10 +127,7 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: None,
-                first: None,
+                range: TurnSelection::default(),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -136,10 +179,7 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: None,
-                first: None,
+                range: TurnSelection::default(),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: true,
@@ -194,10 +234,7 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: true,
-                from: None,
-                until: None,
-                last: None,
-                first: None,
+                range: TurnSelection::default(),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -251,10 +288,7 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap().into()),
-                until: None,
-                last: None,
-                first: None,
+                range: selection(&["--from", "2020-01-01T00:01:00Z"]),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -269,48 +303,24 @@ fn test_conversation_fork() {
 
                 let h = ctx.workspace.acquire_conversation(&id).unwrap();
                 let lock = ctx.workspace.test_lock(h);
-                lock.as_mut().update_events(|e| {
-                    e.extend(vec![
-                        ConversationEvent::new(
-                            ChatRequest::from("foo"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("bar"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("baz"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
-                        ),
-                    ]);
-                });
+                lock.as_mut().update_events(|e| e.extend(turns(3)));
                 id
             },
 
             assert: |convs, _| {
                 assert_eq!(convs.len(), 2);
-                assert_eq!(convs[0].2.iter().count(), 3);
-                // +1 for injected TurnStart
-                assert_eq!(convs[1].2.iter().count(), 3);
-                assert_eq!(
-                    convs[0].2.first().unwrap().event.timestamp,
-                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
-                );
-                assert_eq!(
-                    convs[1].2.first().unwrap().event.timestamp,
-                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
-                );
+                assert_eq!(requests(&convs[0].2), vec!["Q1", "Q2", "Q3"]);
+                // 00:01:00 falls inside turn 1 (00:00:00-00:02:00), so the fork
+                // starts at turn 2 — the first turn to begin after the cutoff.
+                // The bound never splits turn 1.
+                assert_eq!(requests(&convs[1].2), vec!["Q2", "Q3"]);
             },
         }),
-        ("with until", TestCase {
+        ("with to", TestCase {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap().into()),
-                last: None,
-                first: None,
+                range: selection(&["--to", "2020-01-01T00:03:00Z"]),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -325,49 +335,23 @@ fn test_conversation_fork() {
 
                 let h = ctx.workspace.acquire_conversation(&id).unwrap();
                 let lock = ctx.workspace.test_lock(h);
-                lock.as_mut().update_events(|e| {
-                    e.extend(vec![
-                        ConversationEvent::new(
-                            ChatRequest::from("foo"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("bar"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("baz"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
-                        ),
-                    ]);
-                });
+                lock.as_mut().update_events(|e| e.extend(turns(3)));
                 id
             },
 
             assert: |convs, _| {
                 assert_eq!(convs.len(), 2);
-                assert_eq!(convs[0].2.iter().count(), 3);
-                // --until is exclusive: 00:01:00 event is dropped, only 00:00:00 survives.
-                // +1 for injected TurnStart.
-                assert_eq!(convs[1].2.iter().count(), 2);
-                assert_eq!(
-                    convs[0].2.last().unwrap().event.timestamp,
-                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap()
-                );
-                assert_eq!(
-                    convs[1].2.last().unwrap().event.timestamp,
-                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
-                );
+                assert_eq!(requests(&convs[0].2), vec!["Q1", "Q2", "Q3"]);
+                // 00:03:00 falls inside turn 2 (00:02:00-00:04:00). `--to` is
+                // inclusive of the turn it lands in, so turn 2 is kept whole.
+                assert_eq!(requests(&convs[1].2), vec!["Q1", "Q2"]);
             },
         }),
         ("with last (default 1)", TestCase {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: Some(None),
-                first: None,
+                range: selection(&["--last"]),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -444,10 +428,7 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: Some(Some(2)),
-                first: None,
+                range: selection(&["--last", "2"]),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -523,10 +504,7 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: Some(Some(10)),
-                first: None,
+                range: selection(&["--last", "10"]),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -570,10 +548,7 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: Some(Some(1)),
-                first: None,
+                range: selection(&["--last", "1"]),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -614,12 +589,9 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: None,
+                range: selection(&["--first"]),
                 compact: CompactFlag::default(),
                 no_turns: false,
-                first: Some(None),
                 title: None,
             },
             setup: |ctx| {
@@ -693,12 +665,9 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: Some(Some(1)),
+                range: selection(&["--first", "2", "--last", "1"]),
                 compact: CompactFlag::default(),
                 no_turns: false,
-                first: Some(Some(2)),
                 title: None,
             },
             setup: |ctx| {
@@ -765,12 +734,9 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: None,
+                range: selection(&["--first", "10"]),
                 compact: CompactFlag::default(),
                 no_turns: false,
-                first: Some(Some(10)),
                 title: None,
             },
             setup: |ctx| {
@@ -812,12 +778,9 @@ fn test_conversation_fork() {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: None,
-                until: None,
-                last: None,
+                range: TurnSelection::default(),
                 compact: CompactFlag::default(),
                 no_turns: false,
-                first: None,
                 title: Some("my custom title".to_owned()),
             },
             setup: |ctx| {
@@ -841,14 +804,16 @@ fn test_conversation_fork() {
                 assert_eq!(convs[1].1.title.as_deref(), Some("my custom title"));
             },
         }),
-        ("with from and until", TestCase {
+        ("with from and to", TestCase {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
-                from: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap().into()),
-                until: Some(Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap().into()),
-                last: None,
-                first: None,
+                range: selection(&[
+                    "--from",
+                    "2020-01-01T00:01:00Z",
+                    "--to",
+                    "2020-01-01T00:03:00Z",
+                ]),
                 title: None,
                 compact: CompactFlag::default(),
                 no_turns: false,
@@ -863,47 +828,75 @@ fn test_conversation_fork() {
 
                 let h = ctx.workspace.acquire_conversation(&id).unwrap();
                 let lock = ctx.workspace.test_lock(h);
-                lock.as_mut().update_events(|e| {
-                    e.extend(vec![
-                        ConversationEvent::new(
-                            ChatRequest::from("foo"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("bar"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("baz"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 2, 0).unwrap(),
-                        ),
-                        ConversationEvent::new(
-                            ChatResponse::message("qux"),
-                            Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap(),
-                        ),
-                    ]);
-                });
+                lock.as_mut().update_events(|e| e.extend(turns(4)));
                 id
             },
 
             assert: |convs, _| {
                 assert_eq!(convs.len(), 2);
-                assert_eq!(convs[0].2.iter().count(), 4);
-                // `[from, until)` is half-open: 00:01:00 is kept (from is inclusive),
-                // 00:02:00 is dropped (until is exclusive). +1 for injected TurnStart.
-                assert_eq!(convs[1].2.iter().count(), 2);
-                assert_eq!(
-                    convs[0].2.first().unwrap().event.timestamp,
-                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
+                assert_eq!(requests(&convs[0].2), vec!["Q1", "Q2", "Q3", "Q4"]);
+                // Both cutoffs fall mid-turn: `--from` starts at turn 2 and
+                // `--to` ends at turn 2, leaving exactly that turn.
+                assert_eq!(requests(&convs[1].2), vec!["Q2"]);
+            },
+        }),
+        ("with turn range", TestCase {
+            args: Fork {
+                target: PositionalIds::default(),
+                activate: false,
+                range: selection(&["--turn", "2..3"]),
+                title: None,
+                compact: CompactFlag::default(),
+                no_turns: false,
+            },
+            setup: |ctx| {
+                let id = ConversationId::try_from(ctx.now()).unwrap();
+                ctx.workspace.create_conversation_with_id(
+                    id,
+                    Conversation::default().with_last_activated_at(ctx.now()),
+                    ctx.config(),
                 );
-                assert_eq!(
-                    convs[1].2.last().unwrap().event.timestamp,
-                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 1, 0).unwrap()
+
+                let h = ctx.workspace.acquire_conversation(&id).unwrap();
+                let lock = ctx.workspace.test_lock(h);
+                lock.as_mut().update_events(|e| e.extend(turns(5)));
+                id
+            },
+
+            assert: |convs, _| {
+                assert_eq!(convs.len(), 2);
+                // `--turn A..B` is inclusive on both ends.
+                assert_eq!(requests(&convs[1].2), vec!["Q2", "Q3"]);
+            },
+        }),
+        ("with keep flags", TestCase {
+            args: Fork {
+                target: PositionalIds::default(),
+                activate: false,
+                range: selection(&["--keep-first", "1", "--keep-last", "1"]),
+                title: None,
+                compact: CompactFlag::default(),
+                no_turns: false,
+            },
+            setup: |ctx| {
+                let id = ConversationId::try_from(ctx.now()).unwrap();
+                ctx.workspace.create_conversation_with_id(
+                    id,
+                    Conversation::default().with_last_activated_at(ctx.now()),
+                    ctx.config(),
                 );
-                assert_eq!(
-                    convs[0].2.last().unwrap().event.timestamp,
-                    Utc.with_ymd_and_hms(2020, 1, 1, 0, 3, 0).unwrap()
-                );
+
+                let h = ctx.workspace.acquire_conversation(&id).unwrap();
+                let lock = ctx.workspace.test_lock(h);
+                lock.as_mut().update_events(|e| e.extend(turns(5)));
+                id
+            },
+
+            assert: |convs, _| {
+                assert_eq!(convs.len(), 2);
+                // The keep flags protect the first and last turns from the
+                // selection, so the fork inherits only the middle three.
+                assert_eq!(requests(&convs[1].2), vec!["Q2", "Q3", "Q4"]);
             },
         }),
     ];
@@ -1055,10 +1048,7 @@ fn fork_targets_correct_source() {
     let fork = Fork {
         target: PositionalIds::default(),
         activate: false,
-        from: None,
-        until: None,
-        last: None,
-        first: None,
+        range: TurnSelection::default(),
         compact: CompactFlag::default(),
         no_turns: false,
         title: Some("forked-from-b".to_owned()),

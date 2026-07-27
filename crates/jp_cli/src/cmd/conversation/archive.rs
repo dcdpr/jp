@@ -37,7 +37,8 @@ pub(crate) struct Archive {
     #[command(flatten)]
     target: PositionalIds<false, true>,
 
-    /// Archive all conversations created in a `[--from, --until)` range.
+    /// Archive all conversations created in a `[--created-since,
+    /// --created-before)` range.
     #[command(flatten)]
     range: CreationRange,
 

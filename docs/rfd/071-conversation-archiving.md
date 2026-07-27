@@ -55,17 +55,17 @@ jp c archive +pinned
 # Archive a range of conversations by creation date. Both bounds accept a
 # conversation ID (uses its creation timestamp), a relative duration
 # (3w, 30d, 6h), or an absolute date (2026-01-01). The range is half-open:
-# --from is inclusive, --until is exclusive.
-jp c archive --from 3w --until 1d
-jp c archive --from jp-c123
+# --created-since is inclusive, --created-before is exclusive.
+jp c archive --created-since 3w --created-before 1d
+jp c archive --created-since jp-c123
 
 # Archive every conversation unused since a given time (last_activated_at,
-# not creation date). Accepts the same syntax as --from.
+# not creation date). Accepts the same syntax as --created-since.
 jp c archive --inactive-since 30d
 
 # Filters AND-compose; this archives conversations created in the last
 # month that have been idle for at least a week.
-jp c archive --from 30d --inactive-since 7d
+jp c archive --created-since 30d --inactive-since 7d
 
 # Skip the per-conversation confirmation prompt for pinned/active entries.
 jp c archive --inactive-since 6mo --yes
@@ -211,7 +211,8 @@ is straightforward.
 `jp c archive` participates in the standard conversation resolution pipeline.
 Its `conversation_load_request` behaves in two modes:
 
-- **Filter mode** (any of `--from`/`--until`/`--inactive-since` set): returns
+- **Filter mode** (any of
+  `--created-since`/`--created-before`/`--inactive-since` set): returns
   `ConversationLoadRequest::none()`.
   The subcommand iterates the workspace and selects matching conversations
   internally, mirroring `jp c unarchive`'s internal-resolution pattern.
@@ -221,9 +222,20 @@ Its `conversation_load_request` behaves in two modes:
   Resolution happens in the startup pipeline and the subcommand receives
   pre-resolved handles.
 
-The shared `--from`/`--until` range filter is implemented as a flattened
-`CreationRange` args struct in `crates/jp_cli/src/cmd/time.rs`, reused by `jp c
-rm` so the two commands' creation-range semantics stay in lockstep.
+The shared `--created-since`/`--created-before` range filter is implemented as a
+flattened `CreationRange` args struct in `crates/jp_cli/src/cmd/time.rs`, reused
+by `jp c rm` so the two commands' creation-range semantics stay in lockstep.
+
+> [!NOTE]
+> The creation-range flags shipped as `--from`/`--until` and are now spelled
+> `--created-since`/`--created-before`.
+> They were renamed when `--from`/`--to` became the turn-range selector shared
+> by `jp c print`, `jp c compact`, and `jp c fork`: both families accept nearly
+> the same values (durations, absolute dates), so one flag name could no longer
+> mean both "which conversations" and "which turns".
+> Semantics are unchanged — the range is still half-open on conversation
+> creation time.
+> See [Indexing and Counting Conventions] for the turn-range side.
 
 `jp c unarchive` returns `ConversationLoadRequest::none()` because its targets
 are in the archive partition and cannot be resolved through the active index.
@@ -312,12 +324,12 @@ Add `--archived` flag to `jp c ls`.
 Add `archived`/`+archived`/`?archived` targeting keywords.
 Update `jp c use` to support unarchive-and-activate via the `archived` keyword.
 
-Archive's selection flags ship as `--from`/`--until` (creation-date range) and
-`--inactive-since` (last-activity threshold); all three accept the
-`TimeThreshold` syntax (conversation ID, relative duration, or absolute date)
-and AND-compose.
-`--from`/`--until` are extracted into a shared `CreationRange` args struct
-reused by `jp c rm`.
+Archive's selection flags ship as `--created-since`/`--created-before`
+(creation-date range) and `--inactive-since` (last-activity threshold); all
+three accept the `TimeThreshold` syntax (conversation ID, relative duration, or
+absolute date) and AND-compose.
+The range flags are extracted into a shared `CreationRange` args struct reused
+by `jp c rm`.
 
 Depends on Phase 1.
 
@@ -327,6 +339,9 @@ Depends on Phase 1.
   invalid conversations
 - [RFD 073: Layered Storage Backend for Workspaces][RFD 073] — backend trait
   architecture
+- [Indexing and Counting Conventions] — the turn-range selector the range flags
+  were renamed to make room for
 
+[Indexing and Counting Conventions]: ../architecture/indexing-conventions.md
 [RFD 052]: 052-workspace-data-store-sanitization.md
 [RFD 073]: 073-layered-storage-backend-for-workspaces.md

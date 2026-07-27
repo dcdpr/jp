@@ -1075,76 +1075,28 @@ impl ConversationStream {
         });
     }
 
-    /// Retain only the first `n` turns, dropping later ones.
+    /// Retain only the turns whose 0-based index satisfies `keep`, dropping the
+    /// rest.
     ///
-    /// Mirrors [`Self::retain_last_turns`] for the leading end of the stream.
-    /// A turn is delimited by a [`TurnStart`] event.
-    /// If there are `n` or fewer turns, the stream is left unchanged.
+    /// Indices are the stream's numbering *before* any removal, so a predicate
+    /// built from resolved turn positions selects the turns the caller meant.
+    /// A predicate that keeps every turn leaves the stream untouched.
     ///
-    /// The kept turns keep their indices.
-    /// A [`Compaction`] overlay confined to them survives; [`Self::retain`]
-    /// drops overlays that reach into the dropped trailing turns.
-    ///
-    /// [`TurnStart`]: crate::event::TurnStart
-    pub fn retain_first_turns(&mut self, n: usize) {
-        if n == 0 {
-            self.retain(|_| false);
+    /// Dropping turns renumbers the survivors; [`Self::retain`] drops any
+    /// [`Compaction`] overlay reaching into a removed turn, while an overlay
+    /// confined to an untouched leading block survives.
+    pub fn retain_turns(&mut self, keep: impl Fn(usize) -> bool) {
+        if (0..self.turn_count()).all(&keep) {
             return;
         }
 
-        let turn_count = self
-            .events
-            .iter()
-            .filter(|e| matches!(e, InternalEvent::Event(ev) if ev.is_turn_start()))
-            .count();
-
-        if turn_count <= n {
-            return;
-        }
-
-        let mut turns_seen = 0;
+        let mut index = 0;
         let mut keeping = false;
 
         self.retain(|event| {
             if event.is_turn_start() {
-                turns_seen += 1;
-                keeping = turns_seen <= n;
-            }
-            keeping
-        });
-    }
-
-    /// Retain only the first `first` turns and the last `last` turns, dropping
-    /// the turns in between.
-    ///
-    /// A turn is delimited by a [`TurnStart`] event.
-    /// If `first + last` is greater than or equal to the total number of turns,
-    /// the stream is left unchanged.
-    ///
-    /// Dropping the middle turns renumbers the trailing block; [`Self::retain`]
-    /// drops [`Compaction`] overlays from the first dropped turn onward, while
-    /// overlays confined to the kept leading block survive.
-    ///
-    /// [`TurnStart`]: crate::event::TurnStart
-    pub fn retain_first_and_last_turns(&mut self, first: usize, last: usize) {
-        let turn_count = self
-            .events
-            .iter()
-            .filter(|e| matches!(e, InternalEvent::Event(ev) if ev.is_turn_start()))
-            .count();
-
-        if first.saturating_add(last) >= turn_count && turn_count > 0 {
-            return;
-        }
-
-        let last_start = turn_count.saturating_sub(last);
-        let mut turns_seen = 0;
-        let mut keeping = false;
-
-        self.retain(|event| {
-            if event.is_turn_start() {
-                turns_seen += 1;
-                keeping = turns_seen <= first || turns_seen > last_start;
+                keeping = keep(index);
+                index += 1;
             }
             keeping
         });
