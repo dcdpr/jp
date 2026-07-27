@@ -33,6 +33,12 @@ pub struct Printer {
     /// Whether a TTY writer is available for interactive prompts.
     has_tty: bool,
 
+    /// Width of the output terminal in columns, when the caller knows it.
+    ///
+    /// `None` for buffers, sinks, and redirected output, where there is no
+    /// width to lay content out against.
+    terminal_width: Option<u16>,
+
     /// The worker thread handle.
     worker_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 
@@ -50,6 +56,7 @@ impl Clone for Printer {
             tx: self.tx.clone(),
             format: self.format,
             has_tty: self.has_tty,
+            terminal_width: self.terminal_width,
             worker_handle: self.worker_handle.clone(),
             delay_control: self.delay_control.clone(),
         }
@@ -96,9 +103,30 @@ impl Printer {
             tx,
             format,
             has_tty,
+            terminal_width: None,
             worker_handle: Arc::new(Mutex::new(Some(handle))),
             delay_control,
         }
+    }
+
+    /// Set the width of the output terminal in columns.
+    ///
+    /// Consumers use it to lay out content that can't be soft-wrapped, such as
+    /// markdown tables.
+    /// Pass `None` when the output isn't a terminal, so that content keeps its
+    /// natural width for machine consumption.
+    ///
+    /// Call before the printer is shared; clones inherit the value.
+    #[must_use]
+    pub const fn with_terminal_width(mut self, width: Option<u16>) -> Self {
+        self.terminal_width = width;
+        self
+    }
+
+    /// Returns the width of the output terminal in columns, if known.
+    #[must_use]
+    pub const fn terminal_width(&self) -> Option<u16> {
+        self.terminal_width
     }
 
     /// Create a new printer that writes to the terminal (stdout/stderr).

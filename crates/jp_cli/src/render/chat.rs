@@ -118,7 +118,7 @@ pub struct ChatRenderer {
 impl ChatRenderer {
     pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
         let pretty = printer.pretty_printing_enabled();
-        let formatter = formatter_from_config(&config, pretty);
+        let formatter = formatter_from_config(&config, pretty, printer.terminal_width());
         // Configure the printer's bounded-latency controller from the
         // typewriter style. `max_latency = 0` (the default) leaves the
         // controller disabled, preserving the original static per-character
@@ -750,7 +750,7 @@ impl ChatRenderer {
         self.cancel_reasoning_timer();
         self.buffer = Buffer::new();
         let pretty = self.printer.pretty_printing_enabled();
-        self.formatter = formatter_from_config(&self.config, pretty);
+        self.formatter = formatter_from_config(&self.config, pretty, self.printer.terminal_width());
         self.last_content_kind = None;
         self.last_response_kind = None;
         self.reasoning_separator_pending = false;
@@ -849,7 +849,15 @@ fn indent_lines(content: &str, indent: usize) -> String {
     out
 }
 
-fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
+/// Build a markdown formatter from the style config.
+///
+/// `terminal_width` bounds blocks that can't be soft-wrapped (tables); `None`
+/// leaves them at their natural width.
+fn formatter_from_config(
+    config: &StyleConfig,
+    pretty: bool,
+    terminal_width: Option<u16>,
+) -> Formatter {
     let theme_name = if pretty {
         config.markdown.theme.as_deref()
     } else {
@@ -862,6 +870,7 @@ fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
     }
 
     Formatter::with_width(config.markdown.wrap_width)
+        .terminal_width(terminal_width.map_or(0, usize::from))
         .table_max_column_width(config.markdown.table_max_column_width)
         .theme(theme_name)
         .pretty_hr(pretty && config.markdown.hr_style.is_line())
