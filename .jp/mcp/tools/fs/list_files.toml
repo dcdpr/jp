@@ -2,6 +2,15 @@
 enable = false
 run = "unattended"
 
+# Paths this tool may read but never returns. Their contents would either flood
+# the response or expose something the model has no business seeing. Reading them
+# is a separate question, governed by `access.fs` — `.git` in particular stays
+# readable, since that is how the write tools check for uncommitted work.
+#
+# Patterns use `.ignore` syntax, so `**/target/` matches at any depth. Keep these
+# in step across the `fs_*` tools that return file contents or paths.
+options.suppress = [".git/", "**/target/"]
+
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "List files in the project's local filesystem."
@@ -33,7 +42,7 @@ type = "array"
 items.type = "string"
 summary = "Optional list of path prefixes to filter the results by."
 description = """
-If unspecified, all files in the project will be returned.
+If unspecified, all files in the project are returned.
 """
 
 [conversation.tools.fs_list_files.parameters.extensions]

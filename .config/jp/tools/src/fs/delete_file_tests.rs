@@ -1,8 +1,19 @@
 use camino_tempfile::tempdir;
-use jp_tool::Outcome;
+use jp_tool::{AccessPolicy, FsRule, Outcome};
 use serde_json::Map;
 
 use super::*;
+
+/// A policy granting the whole workspace except `denied`.
+fn workspace_except(denied: &str) -> AccessPolicy {
+    AccessPolicy {
+        fs: vec![
+            FsRule::new("").with_read(true).with_write(true),
+            FsRule::new(denied).with_read(false).with_write(false),
+        ],
+        ..AccessPolicy::default()
+    }
+}
 
 fn no_answers() -> Map<String, serde_json::Value> {
     Map::new()
@@ -176,6 +187,33 @@ async fn deleting_dangling_symlink_succeeds() {
 
     unwrap_success(result);
     assert!(std::fs::symlink_metadata(root.join("broken")).is_err());
+}
+
+#[tokio::test]
+async fn refuses_to_delete_a_path_a_deny_rule_closes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join(".git")).unwrap();
+    std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main").unwrap();
+
+    let result = fs_delete_file(
+        root,
+        Some(&workspace_except(".git")),
+        &no_answers(),
+        ".git/HEAD".to_owned(),
+    )
+    .await
+    .unwrap();
+
+    let Outcome::Error { message, .. } = result else {
+        panic!("expected a refusal, got: {result:?}");
+    };
+    assert_eq!(
+        message,
+        "Access denied: cannot delete '.git/HEAD'. Paths granting delete: [.]. If required, ask \
+         the user for explicit access."
+    );
+    assert!(root.join(".git/HEAD").exists(), "file was deleted anyway");
 }
 
 #[tokio::test]

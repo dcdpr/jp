@@ -2,6 +2,15 @@
 enable = false
 run = "unattended"
 
+# Paths this tool may read but never returns. Their contents would either flood
+# the response or expose something the model has no business seeing. Reading them
+# is a separate question, governed by `access.fs` — `.git` in particular stays
+# readable, since that is how the write tools check for uncommitted work.
+#
+# Patterns use `.ignore` syntax, so `**/target/` matches at any depth. Keep these
+# in step across the `fs_*` tools that return file contents or paths.
+options.suppress = [".git/", "**/target/"]
+
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Grep the project's user documentation."
@@ -12,9 +21,9 @@ Search for a topic:
 {"pattern": "tool configuration"}
 ```
 
-Return entire matching files:
+Search with more surrounding context:
 ```json
-{"pattern": "attachments", "return_entire_file": true}
+{"pattern": "attachments", "context": 5}
 ```
 """
 
@@ -28,12 +37,7 @@ type = "string"
 required = true
 summary = "Regular expression to filter the results by."
 
-[conversation.tools.fs_grep_user_docs.parameters.return_entire_file]
-type = "boolean"
-default = false
-summary = "Whether to return the entire file contents."
-description = """
-If enabled, the tool will return the entire file contents of any files matching
-the pattern. If disabled (the default), only the matching lines and 5 contextual
-lines above and below the matching lines will be returned.
-"""
+[conversation.tools.fs_grep_user_docs.parameters.context]
+type = "integer"
+default = 0
+summary = "Number of lines of context to include before and after the matching lines."

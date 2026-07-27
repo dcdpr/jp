@@ -124,9 +124,34 @@ impl AccessPolicy {
         }
     }
 
-    /// The workspace-relative grant paths, for building helpful error messages.
-    pub fn grant_paths(&self) -> impl Iterator<Item = &Utf8Path> {
-        self.fs.iter().map(FsRule::lexical_path)
+    /// The workspace-relative paths whose rules grant `capability`, for
+    /// building helpful error messages.
+    ///
+    /// Only granting rules are listed.
+    /// A rule that denies the capability is not somewhere the caller can go, so
+    /// naming it as a grant would send the reader straight back into the
+    /// refusal.
+    ///
+    /// The workspace root is reported as `.`, the form it is written in config;
+    /// its lexical path is empty and would otherwise render as nothing.
+    pub fn granting_paths(&self, capability: Capability) -> impl Iterator<Item = &Utf8Path> {
+        self.fs
+            .iter()
+            .filter(move |rule| match capability {
+                Capability::Read => rule.read(),
+                Capability::Create => rule.create(),
+                Capability::Update => rule.update(),
+                Capability::Delete => rule.delete(),
+                Capability::Execute => rule.execute(),
+            })
+            .map(|rule| {
+                let path = rule.lexical_path();
+                if path.as_str().is_empty() {
+                    Utf8Path::new(".")
+                } else {
+                    path
+                }
+            })
     }
 }
 

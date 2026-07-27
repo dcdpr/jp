@@ -1,10 +1,12 @@
+use ignore::gitignore::Gitignore;
 use jp_tool::{Capability, Context};
 
-use super::utils::{authorize, resolve_workspace_path};
+use super::utils::{authorize, is_suppressed, resolve_workspace_path, suppressed_note};
 use crate::util::{ToolResult, error};
 
 pub(crate) async fn fs_read_file(
     ctx: &Context,
+    suppress: &Gitignore,
     path: String,
     start_line: Option<usize>,
     end_line: Option<usize>,
@@ -15,6 +17,11 @@ pub(crate) async fn fs_read_file(
     };
     if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Read, &resolved.relative) {
         return error(msg);
+    }
+    // Matched on the canonical form, so a path reached through an in-workspace
+    // symlink is checked against the pattern for its real location.
+    if is_suppressed(suppress, &resolved.relative) {
+        return error(suppressed_note(resolved.relative.as_str()));
     }
     let absolute_path = resolved.absolute;
     if !absolute_path.exists() {
