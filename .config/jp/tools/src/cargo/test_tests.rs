@@ -64,6 +64,43 @@ fn test_cargo_test_with_failure() {
             ```"});
 }
 
+#[test]
+fn no_tests_ran_error_is_bounded() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    // A panicking proc-macro derive produces one diagnostic per expansion site,
+    // which for a widely-derived macro means megabytes of stderr.
+    let stderr = "error: proc-macro derive panicked\n".repeat(10_000);
+    let runner = MockProcessRunner::builder()
+        .expect_any()
+        .returns_error(&stderr);
+
+    let error = cargo_test_impl(&ctx, None, None, false, false, &runner)
+        .expect_err("a run with zero tests is an error")
+        .to_string();
+
+    assert!(
+        error.len() < MAX_DIAGNOSTIC_BYTES + 200,
+        "error grew to {} bytes",
+        error.len()
+    );
+    assert!(
+        error.ends_with(&format!(
+            "[Truncated: showing {MAX_DIAGNOSTIC_BYTES} of {} bytes]",
+            stderr.len()
+        )),
+        "got: {}",
+        &error[error.len() - 100..]
+    );
+}
+
 /// A runner that captures the environment variables passed to it, so we can
 /// assert on the exact values.
 struct EnvCapturingRunner {

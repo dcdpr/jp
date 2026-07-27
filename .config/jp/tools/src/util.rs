@@ -39,6 +39,30 @@ pub fn lang_from_path(path: &str) -> &str {
     }
 }
 
+/// Cap `s` at `max` bytes, appending a note naming the byte count that was kept
+/// and the original size.
+///
+/// The cut lands on a UTF-8 character boundary, so the result is always valid
+/// UTF-8 and may be slightly shorter than `max`.
+/// Strings that already fit are returned unchanged, without a note.
+///
+/// Use this on any subprocess output that ends up in a tool result: a single
+/// unbounded `stdout` or `stderr` can fill the assistant's whole context
+/// window.
+#[must_use]
+pub fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        return s.to_owned();
+    }
+
+    let end = s.floor_char_boundary(max);
+    format!(
+        "{}\n\n[Truncated: showing {end} of {} bytes]",
+        &s[..end],
+        s.len()
+    )
+}
+
 #[expect(clippy::unnecessary_wraps)]
 pub fn error(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> ToolResult {
     Ok(Outcome::error(error.into().as_ref()))

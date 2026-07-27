@@ -13,6 +13,13 @@ use expand::cargo_expand;
 use format::cargo_format;
 use test::cargo_test;
 
+/// Cap for compiler and linter diagnostics embedded in a tool result.
+///
+/// A single failure in a widely-used macro can produce tens of thousands of
+/// near-identical diagnostics; the head of the output carries the root cause,
+/// the tail is noise.
+const MAX_DIAGNOSTIC_BYTES: usize = 32_000;
+
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     // Opt-in to cargo's checksum-based freshness checks (see
     // rust-lang/cargo#14136). Requires nightly cargo, so it defaults to off

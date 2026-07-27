@@ -1,13 +1,21 @@
 use jp_tool::Context;
 use serde_json::{Value, from_str};
 
+use super::MAX_DIAGNOSTIC_BYTES;
 use crate::{
     to_simple_xml_with_root,
     util::{
         ToolResult,
         runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+        truncate,
     },
 };
+
+/// Cap for a single failing test's captured output.
+///
+/// Tighter than [`MAX_DIAGNOSTIC_BYTES`] because a run can report many
+/// failures, and each one contributes its own block.
+const MAX_TEST_OUTPUT_BYTES: usize = 8_000;
 
 #[derive(serde::Serialize)]
 struct TestFailure {
@@ -110,14 +118,15 @@ fn cargo_test_impl<R: ProcessRunner>(
         failure.push(TestFailure {
             krate: krate.to_owned(),
             path: path.to_owned(),
-            output: stdout.to_owned(),
+            output: truncate(stdout, MAX_TEST_OUTPUT_BYTES),
         });
     }
 
     if ran_tests == 0 {
         Err(format!(
             "Unable to run any tests. This can be due to compilation issues, or incorrect package \
-             or test name:\n\n{stderr}"
+             or test name:\n\n{}",
+            truncate(&stderr, MAX_DIAGNOSTIC_BYTES)
         ))?;
     }
 

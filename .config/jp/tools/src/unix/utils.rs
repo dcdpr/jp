@@ -10,6 +10,7 @@ use crate::{
     util::{
         OneOrMany, ToolResult, error,
         runner::{DuctProcessRunner, ProcessOutput, ProcessRunner, RunnerOpts},
+        truncate,
     },
 };
 
@@ -89,29 +90,12 @@ fn unix_utils_impl<R: ProcessRunner>(
     } = runner.run_with_opts(&exec_str, &arg_refs, &ctx.root, &opts)?;
 
     let output = CommandOutput {
-        stdout: truncate(stdout.trim_end()),
-        stderr: truncate(stderr.trim_end()),
+        stdout: truncate(stdout.trim_end(), MAX_OUTPUT_BYTES),
+        stderr: truncate(stderr.trim_end(), MAX_OUTPUT_BYTES),
         status: status.to_string(),
     };
 
     Ok(to_xml(output)?.into())
-}
-
-// ---------------------------------------------------------------------------
-// Output truncation
-// ---------------------------------------------------------------------------
-
-fn truncate(s: &str) -> String {
-    if s.len() <= MAX_OUTPUT_BYTES {
-        return s.to_owned();
-    }
-
-    let end = s.floor_char_boundary(MAX_OUTPUT_BYTES);
-    format!(
-        "{}\n\n[Truncated: showing {end} of {} bytes]",
-        &s[..end],
-        s.len()
-    )
 }
 
 // ---------------------------------------------------------------------------

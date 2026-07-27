@@ -2,9 +2,11 @@ use std::collections::BTreeSet;
 
 use jp_tool::Context;
 
+use super::MAX_DIAGNOSTIC_BYTES;
 use crate::util::{
     ToolResult, error,
     runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+    truncate,
 };
 
 pub(crate) async fn cargo_check(
@@ -52,17 +54,25 @@ fn cargo_check_impl<R: ProcessRunner>(
     )?;
 
     if !status.is_success() {
-        return error(format!("Cargo command failed: {stderr}"));
+        return error(format!(
+            "Cargo command failed: {}",
+            truncate(&stderr, MAX_DIAGNOSTIC_BYTES)
+        ));
     }
 
     // Strip ANSI escape codes
     let clippy = strip_ansi_escapes::strip_str(stderr);
-    let clippy = clippy.trim();
+    let clippy = truncate(clippy.trim(), MAX_DIAGNOSTIC_BYTES);
 
     let comfort_note = match comfort_check(ctx, package, runner)? {
         ComfortCheck::Clean => None,
         ComfortCheck::Drift(note) => Some(note),
-        ComfortCheck::Failed(stderr) => return error(format!("comfort failed: {stderr}")),
+        ComfortCheck::Failed(stderr) => {
+            return error(format!(
+                "comfort failed: {}",
+                truncate(&stderr, MAX_DIAGNOSTIC_BYTES)
+            ));
+        }
     };
 
     let clippy_section = if clippy.is_empty() {
