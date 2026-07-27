@@ -4,6 +4,7 @@ use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{
     AppConfig,
+    conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle},
     style::reasoning::{ReasoningDisplayConfig, TruncateChars},
 };
 use jp_conversation::{
@@ -1788,6 +1789,76 @@ fn replay_suppresses_tool_chrome_when_show_disabled() {
     assert!(
         !chrome.contains("Calling tool"),
         "tool chrome must be suppressed when style.tool_call.show is false, got: {chrome:?}"
+    );
+}
+
+/// A tool result that rendered visible output owes a blank line before the next
+/// tool header, and a reasoning chunk that renders nothing must not cancel that
+/// debt.
+///
+/// `reasoning -> tool call -> visible result -> Reasoning("\n\n") -> tool
+/// call`: the whitespace-only chunk is the interleaved-thinking filler the LLM
+/// emits between tool calls.
+/// It puts nothing on screen, so it supplies no spacing of its own and the
+/// result stays separated from the following header.
+#[test]
+fn replay_keeps_the_gap_after_a_result_when_reasoning_renders_nothing() {
+    // `parameters = off` and `results_file_link = off` keep the chrome free of
+    // the nondeterministic temp-file path, so the whole stream can be asserted.
+    let mut config = AppConfig::new_test();
+    config.conversation.tools.defaults.style.parameters = ParametersStyle::Off;
+    config.conversation.tools.defaults.style.inline_results = InlineResults::Full;
+    config.conversation.tools.defaults.style.results_file_link = LinkStyle::Off;
+
+    let (mut ctx, id, _out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me check the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(ChatResponse::reasoning("\n\n"), ts(0, 0, 5)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc2".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("b.rs"))]),
+            },
+            ts(0, 0, 6),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert_eq!(
+        strip_ansi(&chrome),
+        "Calling tool read_file\n\ncontents\n\nCalling tool read_file\n",
+        "got: {chrome:?}"
     );
 }
 

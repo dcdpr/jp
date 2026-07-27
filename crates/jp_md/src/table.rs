@@ -5,15 +5,17 @@
 //! It handles ANSI escape sequences in cell content correctly by computing
 //! visual width (ignoring invisible escape bytes) for padding calculations.
 //!
-//! Cell content that exceeds the configured maximum column width is
-//! word-wrapped across multiple visual rows, preserving ANSI formatting state
-//! across line breaks.
+//! Column widths are fitted to the width available on the output line: a table
+//! that fits keeps its natural widths, and one that does not has its widest
+//! columns narrowed until the whole table fits.
+//! Cell content that exceeds its fitted column width is word-wrapped across
+//! multiple visual rows, preserving ANSI formatting state across line breaks.
 //!
 //! # Usage
 //!
 //! Called from the terminal renderer when it encounters a `Table` node.
-//! The renderer passes the table node and receives a fully formatted string
-//! that it writes directly to output.
+//! The renderer passes the table node and the number of columns available, and
+//! receives a fully formatted string that it writes directly to output.
 
 use std::{cmp::min, fmt::Write as _};
 
@@ -27,12 +29,24 @@ use crate::{
 /// Type alias for comrak AST node references.
 type Node<'a> = &'a comrak::nodes::AstNode<'a>;
 
+/// Minimum visual width for a table column.
+///
+/// Keeps the separator row (`---`) readable when the available width forces the
+/// narrowest possible layout.
+const MIN_COLUMN_WIDTH: usize = 3;
+
+/// Visual width each column adds on top of its content: the leading `|` and the
+/// space on either side of the cell.
+const COLUMN_CHROME: usize = 3;
+
 /// Options for table formatting.
 pub struct TableOptions {
-    /// Maximum visual width for any single column.
+    /// Upper bound on the visual width of any single column.
     ///
     /// Cells exceeding this width are word-wrapped across multiple rows.
-    /// `0` means unlimited.
+    /// `0` means unbounded.
+    /// A column can still end up narrower than this, when the table would
+    /// otherwise not fit the available width.
     pub max_column_width: usize,
 }
 
@@ -45,6 +59,11 @@ impl TableOptions {
 
 /// Format a comrak `Table` node into an aligned, ANSI-styled string.
 ///
+/// `budget` is the number of visual columns available for the rendered table,
+/// borders included; `None` means unbounded.
+/// No rendered line exceeds it unless the table has too many columns to fit
+/// even at [`MIN_COLUMN_WIDTH`].
+///
 /// Returns `None` if the node isn't a valid table structure.
 ///
 /// The function:
@@ -52,34 +71,31 @@ impl TableOptions {
 /// 1. Walks the table's children to extract rows and cells.
 /// 2. Renders each cell's inline content using the terminal renderer (with
 ///    `width: 0` to disable wrapping inside cells).
-/// 3. Computes visual column widths (ignoring ANSI bytes).
-/// 4. Word-wraps cells that exceed the maximum column width.
+/// 3. Computes natural visual column widths (ignoring ANSI bytes) and fits them
+///    to `budget`.
+/// 4. Word-wraps cells that exceed their fitted column width.
 /// 5. Pads and aligns cells according to the table's alignment markers.
-pub fn format_table(node: Node<'_>, options: RenderOptions<'_>) -> Option<String> {
+pub fn format_table(
+    node: Node<'_>,
+    options: RenderOptions<'_>,
+    budget: Option<usize>,
+) -> Option<String> {
     let (alignments, rows) = extract_table(node, options)?;
-    let max_column_width = options.table_options.max_column_width;
 
-    // Compute visual widths for each column.
+    // Compute the width each column would take if nothing constrained it.
     let num_cols = alignments.len();
-
-    // minimum 3 for separator "---"
-    let mut col_widths = vec![3_usize; num_cols];
+    let mut natural = vec![0_usize; num_cols];
 
     for row in &rows {
         for (col, cell) in row.iter().enumerate() {
             if col < num_cols {
                 let vw = ansi::visual_width(&cell.rendered);
-                col_widths[col] = col_widths[col].max(vw);
+                natural[col] = natural[col].max(vw);
             }
         }
     }
 
-    // Apply max column width cap.
-    if max_column_width > 0 {
-        for w in &mut col_widths {
-            *w = min(*w, max_column_width);
-        }
-    }
+    let col_widths = fit_columns(&natural, options.table_options.max_column_width, budget);
 
     // Render the table.
     let mut out = String::new();
@@ -89,11 +105,7 @@ pub fn format_table(node: Node<'_>, options: RenderOptions<'_>) -> Option<String
         let wrapped: Vec<Vec<String>> = (0..num_cols)
             .map(|col| {
                 let content = row.get(col).map_or("", |c| c.rendered.as_str());
-                if max_column_width > 0 {
-                    wrap_to_visual_width(content, col_widths[col])
-                } else {
-                    vec![content.to_string()]
-                }
+                wrap_to_visual_width(content, col_widths[col])
             })
             .collect();
 
@@ -131,6 +143,91 @@ pub fn format_table(node: Node<'_>, options: RenderOptions<'_>) -> Option<String
     }
 
     Some(out)
+}
+
+/// Fit natural column widths into `budget` visual columns.
+///
+/// Each width is first clamped to `max_column_width` (`0` = unbounded) and
+/// raised to [`MIN_COLUMN_WIDTH`]. If the result fits `budget` (`None` =
+/// unbounded), it is returned as-is.
+///
+/// Otherwise the budget is distributed max-min fair: every column that asks for
+/// no more than an equal share keeps its full width and donates the remainder
+/// to the columns that want more, repeatedly, until only columns wider than the
+/// share are left.
+/// So a table of four short columns and one prose column spends the surplus on
+/// the prose column instead of narrowing all five to the same width.
+///
+/// A table with more columns than `budget` can hold at [`MIN_COLUMN_WIDTH`] is
+/// laid out at that minimum and overflows: no distribution can save it, and a
+/// one-character column is less useful than an overflowing table.
+/// `Some(0)` — a known budget with nothing left over, such as a table nested
+/// so deeply that its prefix consumes the terminal — is that same minimum
+/// layout, not an unbounded one.
+fn fit_columns(natural: &[usize], max_column_width: usize, budget: Option<usize>) -> Vec<usize> {
+    let count = natural.len();
+    let mut widths: Vec<usize> = natural
+        .iter()
+        .map(|&w| {
+            let capped = if max_column_width > 0 {
+                min(w, max_column_width)
+            } else {
+                w
+            };
+            capped.max(MIN_COLUMN_WIDTH)
+        })
+        .collect();
+
+    let Some(budget) = budget else {
+        return widths;
+    };
+
+    // The trailing `|` closes the last column; every column adds its own chrome.
+    let chrome = count * COLUMN_CHROME + 1;
+    let content_budget = budget.saturating_sub(chrome);
+    if widths.iter().sum::<usize>() <= content_budget {
+        return widths;
+    }
+
+    let mut flexible = vec![true; count];
+    let mut remaining_budget = content_budget;
+    let mut remaining_cols = count;
+
+    // Settle the columns that fit within an equal share, freeing their surplus
+    // for the rest. Each pass raises the share, so it terminates once no column
+    // settles.
+    while remaining_cols > 0 {
+        let share = remaining_budget / remaining_cols;
+        let mut settled = false;
+        for col in 0..count {
+            if !flexible[col] || widths[col] > share {
+                continue;
+            }
+            flexible[col] = false;
+            remaining_budget -= widths[col];
+            remaining_cols -= 1;
+            settled = true;
+        }
+        if !settled {
+            break;
+        }
+    }
+
+    if let Some(share) = remaining_budget.checked_div(remaining_cols) {
+        // Hand the division remainder to the leftmost flexible columns, so the
+        // layout is deterministic and spends the whole budget.
+        let mut extra = remaining_budget % remaining_cols;
+        for col in 0..count {
+            if !flexible[col] {
+                continue;
+            }
+            let bonus = usize::from(extra > 0);
+            extra -= bonus;
+            widths[col] = (share + bonus).max(MIN_COLUMN_WIDTH);
+        }
+    }
+
+    widths
 }
 
 /// A rendered table cell.

@@ -32,13 +32,19 @@ pub(crate) struct Compact {
     /// Preserve the first N turns (or turns within a duration).
     ///
     /// Accepts a turn count (e.g. `2`) or a duration (e.g. `5h`).
-    #[arg(long, conflicts_with_all = ["from", "first", "last", "turn"])]
+    /// Composes with `--first M`: the pair compacts the first M turns minus the
+    /// preserved prefix, e.g. `--keep-first 1 --first 16` compacts turns 2
+    /// through 16.
+    #[arg(long, conflicts_with_all = ["from", "last", "turn"])]
     keep_first: Option<RuleBound>,
 
     /// Preserve the last N turns (or turns within a duration).
     ///
     /// Accepts a turn count (e.g. `3`) or a duration (e.g. `2h`).
-    #[arg(long, conflicts_with_all = ["to", "first", "last", "turn"])]
+    /// Composes with `--last M`: the pair compacts the last M turns minus the
+    /// preserved suffix, e.g. `--keep-last 2 --last 16` compacts the 14 turns
+    /// before the final 2.
+    #[arg(long, conflicts_with_all = ["to", "first", "turn"])]
     keep_last: Option<RuleBound>,
 
     /// Which turns to compact.
@@ -111,6 +117,34 @@ pub(crate) struct Compact {
 }
 
 impl Compact {
+    /// Reject flag combinations clap cannot express.
+    ///
+    /// `--keep-first N --first M` means "compact the first M turns, minus the
+    /// first N" (and `--keep-last`/`--last` the mirror image at the end): with
+    /// N greater than M the preserved turns swallow the whole selection, so the
+    /// pair is rejected rather than silently selecting nothing.
+    /// Only count-based bounds are comparable up front; durations and the other
+    /// bound forms resolve against the stream and may legitimately come up
+    /// empty.
+    fn validate(&self) -> Result<(), String> {
+        if let (Some(RuleBound::Turns(keep)), Some(first)) = (&self.keep_first, self.range.first())
+            && *keep > first
+        {
+            return Err(format!(
+                "--keep-first {keep} is greater than --first {first}: nothing would remain to \
+                 compact"
+            ));
+        }
+        if let (Some(RuleBound::Turns(keep)), Some(last)) = (&self.keep_last, self.range.last())
+            && *keep > last
+        {
+            return Err(format!(
+                "--keep-last {keep} is greater than --last {last}: nothing would remain to compact"
+            ));
+        }
+        Ok(())
+    }
+
     /// Returns `true` if any dedicated policy flag is set.
     ///
     /// Policy flags (`--reasoning`/`--tools`/`--summarize`) build a single
@@ -552,6 +586,7 @@ impl Compact {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        self.validate()?;
         for handle in handles {
             self.compact_one(ctx, handle).await?;
         }
@@ -726,7 +761,17 @@ impl Compact {
     /// The shared selector (`--from`/`--last`/`--turn`) takes precedence; when
     /// none is set it falls back to `--keep-first`, and to [`Bound::Default`]
     /// when that is also unset.
+    /// `--first` is the exception: it composes with `--keep-first`, which then
+    /// supplies the start of the range while `--first` caps its end (via
+    /// [`resolve_to`]).
+    ///
+    /// [`resolve_to`]: Self::resolve_to
     fn resolve_from(&self, events: &ConversationStream) -> Bound {
+        if let Some(bound) = &self.keep_first
+            && self.range.first().is_some()
+        {
+            return keep_first_to_bound(bound, events);
+        }
         match self.range.resolve_from(events) {
             Bound::Default => match &self.keep_first {
                 Some(bound) => keep_first_to_bound(bound, events),
@@ -741,7 +786,17 @@ impl Compact {
     /// The shared selector (`--to`/`--turn`) takes precedence; when none is set
     /// it falls back to `--keep-last`, and to [`Bound::Default`] when that is
     /// also unset.
+    /// `--last` is the exception: it composes with `--keep-last`, which then
+    /// supplies the end of the range while `--last` sets its start (via
+    /// [`resolve_from`]).
+    ///
+    /// [`resolve_from`]: Self::resolve_from
     fn resolve_to(&self, events: &ConversationStream) -> Bound {
+        if let Some(bound) = &self.keep_last
+            && self.range.last().is_some()
+        {
+            return keep_last_to_bound(bound, events);
+        }
         match self.range.resolve_to(events) {
             Bound::Default => match &self.keep_last {
                 Some(bound) => keep_last_to_bound(bound, events),

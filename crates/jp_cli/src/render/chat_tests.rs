@@ -19,6 +19,40 @@ fn create_renderer() -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     create_renderer_with_config(AppConfig::new_test())
 }
 
+/// A table is laid out rather than soft-wrapped, so the renderer has to fit it
+/// to the terminal width the printer reports.
+#[test]
+fn test_table_is_fitted_to_the_printers_terminal_width() {
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 80;
+    config.style.markdown.table_max_column_width = 40;
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.with_terminal_width(Some(30))),
+        config.style,
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "| Alpha heading | Beta heading |\n| --- | --- |\n| first cell content | second \
+                  cell content |\n\n"
+            .into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let rendered = strip_ansi(&out.lock());
+    let rows: Vec<&str> = rendered.lines().filter(|l| l.starts_with('|')).collect();
+    assert!(rows.len() > 3, "expected wrapped rows:\n{rendered}");
+    for row in rows {
+        assert_eq!(
+            row.chars().count(),
+            30,
+            "row should fit the reported terminal width: {row:?}"
+        );
+    }
+}
+
 #[test]
 fn test_renders_message() {
     let (mut renderer, out, _err) = create_renderer();
@@ -149,6 +183,29 @@ async fn test_timer_reasoning_suppresses_output() {
         *out.lock(),
         "",
         "timer reasoning should not produce stdout output"
+    );
+}
+
+/// The timer line and the tool chrome share the terminal row, so entering a
+/// tool call must erase the timer.
+/// Nothing else pins this: the timer writes to stderr, so a leaked line is
+/// invisible to assertions on rendered stdout.
+#[tokio::test]
+async fn test_timer_reasoning_erased_when_entering_tool_call() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Timer;
+    let (mut renderer, _out, err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking hard\n\n".into(),
+    });
+    renderer.enter_tool_call();
+
+    renderer.printer.flush();
+    assert_eq!(
+        *err.lock(),
+        "\r\x1b[K",
+        "the tool-call boundary must erase the timer line"
     );
 }
 
@@ -1308,6 +1365,145 @@ fn test_gap_between_tool_call_and_next_reasoning_is_shaded() {
         output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
         2,
         "both the separator before the tool call and the gap after it stay inside the region, \
+         got: {output:?}"
+    );
+}
+
+#[test]
+fn test_truncate_marks_the_cut_when_whitespace_fills_the_budget() {
+    // The chunk carries no text of its own, but it consumes the last of the
+    // budget, so the elision marker still lands — this is the render the
+    // separation predicate has to agree with.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display =
+        ReasoningDisplayConfig::Truncate(TruncateChars { characters: 2 });
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "...\n\n");
+}
+
+#[test]
+fn test_gap_after_tool_call_without_background_is_a_plain_blank_line() {
+    // With no reasoning background configured there is nothing to shade, so the
+    // deferred gap resolves to a plain blank line and the tool chrome stays
+    // separated from the resumed reasoning by exactly one empty line.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "More\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "Thinking\n\n\nMore\n\n");
+}
+
+#[test]
+fn test_gap_after_tool_call_is_unshaded_when_reasoning_renders_nothing() {
+    // Reasoning → tool call → a whitespace-only reasoning chunk → message.
+    // Interleaved thinking routinely emits such a chunk, which renders nothing,
+    // so the gap after the tool chrome ends up between the chrome and the
+    // message: it sits outside the reasoning region and must not be shaded.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "\n\n".into(),
+    });
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        strip_ansi(&output),
+        "Thinking\n\n\nAnswer\n\n",
+        "the gap after the tool chrome must survive as a plain blank line, got: {output:?}"
+    );
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        1,
+        "only the separator before the tool call is shaded; the gap before the message is not, \
+         got: {output:?}"
+    );
+}
+
+#[test]
+fn test_tool_calls_stay_adjacent_when_reasoning_between_them_renders_nothing() {
+    // A whitespace-only interleaved-thinking chunk between two tool calls marks
+    // the region as reasoning but puts nothing on screen, so the two headers are
+    // adjacent and the chat renderer contributes no gap between them. (The
+    // headers themselves are chrome on stderr, written by the `ToolRenderer`.)
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "");
+}
+
+#[test]
+fn test_gap_between_tool_calls_survives_when_reasoning_between_them_renders() {
+    // The counterpart: reasoning that does render between two tool calls keeps
+    // its gaps on both sides, all three inside the shaded region.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "More\n\n".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        strip_ansi(&output),
+        "Thinking\n\n\nMore\n\n",
+        "got: {output:?}"
+    );
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        3,
+        "the gaps before, after, and following the resumed reasoning all stay inside the region, \
          got: {output:?}"
     );
 }

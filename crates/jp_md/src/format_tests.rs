@@ -1074,8 +1074,8 @@ fn test_thematic_break_markdown_style() {
 
 #[test]
 fn test_thematic_break_line_style_uses_configured_width() {
-    // HrStyle::Line should produce a line of `─` characters using
-    // the configured wrap width when no terminal_width is set.
+    // HrStyle::Line produces a line of `─` characters spanning the configured
+    // wrap width, so it lines up with the prose around it.
     let mut formatter = Formatter::with_width(40);
     formatter.hr_style = HrStyle::Line;
 
@@ -1088,24 +1088,82 @@ fn test_thematic_break_line_style_uses_configured_width() {
 }
 
 #[test]
-fn test_thematic_break_line_style_uses_terminal_width() {
-    // When terminal_width is set, it takes precedence over the
-    // configured wrap width.
+fn test_thematic_break_line_style_ignores_terminal_width() {
+    // A rule tracks the text column, not the terminal: a 120-column rule above
+    // 40-column prose reads as a different element entirely.
     let mut formatter = Formatter::with_width(40).terminal_width(120);
     formatter.hr_style = HrStyle::Line;
 
     let actual = formatter.format_terminal("above\n\n---\n\nbelow").unwrap();
-    let line: String = "─".repeat(120);
     assert!(
-        actual.contains(&line),
-        "Expected 120-char unicode line.\nActual: {actual:?}"
+        actual.contains(&"─".repeat(40)) && !actual.contains(&"─".repeat(41)),
+        "Expected a 40-char unicode line.\nActual: {actual:?}"
     );
-    // Should NOT contain a 40-char line (unless it's a substring, but
-    // we check exact length by verifying no extra `─` beyond 120).
-    assert!(
-        !actual.contains(&"─".repeat(121)),
-        "Line should not exceed terminal width.\nActual: {actual:?}"
-    );
+}
+
+#[test]
+fn test_table_is_fitted_to_the_terminal_width() {
+    // A table is laid out, not wrapped, so it has to fit the terminal on its
+    // own: `wrap_width` being wider than the terminal must not let it overflow.
+    let formatter = Formatter::with_width(80).terminal_width(30);
+    let input = "| Alpha heading | Beta heading |\n| --- | --- |\n| first cell content | second \
+                 cell content |";
+
+    let actual = formatter.format_terminal(input).unwrap();
+
+    let rows: Vec<&str> = actual.lines().filter(|l| l.starts_with('|')).collect();
+    assert!(rows.len() > 3, "expected wrapped rows:\n{actual}");
+    for row in rows {
+        assert_eq!(
+            row.chars().count(),
+            30,
+            "row should fit 30 columns: {row:?}"
+        );
+    }
+}
+
+#[test]
+fn test_table_keeps_natural_width_without_a_terminal_width() {
+    // Piped output has no terminal to fit, so the column cap alone applies.
+    let formatter = Formatter::with_width(80).table_max_column_width(0);
+    let input = "| Alpha heading | Beta heading |\n| --- | --- |\n| first cell content | second \
+                 cell content |";
+
+    let actual = formatter.format_terminal(input).unwrap();
+
+    let widest = actual
+        .lines()
+        .filter(|l| l.starts_with('|'))
+        .map(|l| l.chars().count())
+        .max()
+        .expect("should have rows");
+    // "| first cell content | second cell content |"
+    assert_eq!(widest, 44, "table should keep its natural width:\n{actual}");
+}
+
+#[test]
+fn test_nested_table_collapses_when_the_prefix_eats_the_terminal() {
+    // Three levels of blockquote prefix (`> > > `) consume all six columns the
+    // terminal has, leaving nothing for the table. That is a known-empty
+    // budget, not an unknown one, so the columns collapse to the minimum
+    // instead of springing back to their natural width.
+    let formatter = Formatter::with_width(80).terminal_width(6);
+    let input = "> > > | Alpha heading | Beta heading |\n> > > | --- | --- |\n> > > | first cell \
+                 content | second cell content |";
+
+    let actual = formatter.format_terminal(input).unwrap();
+
+    let plain = strip_ansi_for_test(&actual);
+    let rows: Vec<&str> = plain.lines().filter(|l| l.contains('|')).collect();
+    assert!(rows.len() > 3, "expected wrapped rows:\n{plain}");
+    for row in rows {
+        // `> > > ` plus `| xxx | xxx |` at the three-column minimum.
+        assert_eq!(
+            row.chars().count(),
+            19,
+            "row should use the minimum layout: {row:?}"
+        );
+    }
 }
 
 /// Regression: the terminal renderer used to emit `<!-- end list -->` between

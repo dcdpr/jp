@@ -1,3 +1,4 @@
+pub mod diff;
 pub mod runner;
 pub mod xml;
 
