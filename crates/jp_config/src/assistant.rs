@@ -210,6 +210,7 @@ fn default_system_prompt(_: &()) -> TransformResult<Option<PartialMergeableStrin
         strategy: None,
         separator: None,
         discard_when_merged: Some(true),
+        dedup: None,
     })))
 }
 

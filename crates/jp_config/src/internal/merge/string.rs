@@ -17,28 +17,54 @@ pub fn string_with_strategy(
         return Ok(Some(next));
     }
 
+    let prev_dedup = match &prev {
+        PartialMergeableString::String(_) => None,
+        PartialMergeableString::Merged(v) => v.dedup,
+    };
+
     let prev_value = match prev {
         PartialMergeableString::String(v) => Some(v),
         PartialMergeableString::Merged(v) => v.value,
     };
 
     let next_is_replace = matches!(next, PartialMergeableString::String(_));
-    let (strategy, separator, next_value, discard_when_merged) = match next {
-        PartialMergeableString::String(v) => {
-            (Some(MergedStringStrategy::Replace), None, Some(v), None)
-        }
-        PartialMergeableString::Merged(v) => {
-            (v.strategy, v.separator, v.value, v.discard_when_merged)
-        }
+    let (strategy, separator, next_value, discard_when_merged, next_dedup) = match next {
+        PartialMergeableString::String(v) => (
+            Some(MergedStringStrategy::Replace),
+            None,
+            Some(v),
+            None,
+            None,
+        ),
+        PartialMergeableString::Merged(v) => (
+            v.strategy,
+            v.separator,
+            v.value,
+            v.discard_when_merged,
+            v.dedup,
+        ),
     };
+
+    // Skip an append or prepend whose value is already present, unless a config
+    // explicitly opts out. Applying the same config source twice — through an
+    // `extends` diamond, or by re-supplying `--cfg` on a conversation that
+    // already merged it — must not duplicate its contribution.
+    let dedup = next_dedup.or(prev_dedup);
+    let dedup_active = dedup.unwrap_or(true);
+
+    // An unstated strategy means `append`, matching `MergedStringStrategy`'s
+    // default. Only the computation resolves it; the stored `strategy` keeps
+    // the unstated form so later merges can still express their own.
+    let resolved_strategy = strategy.unwrap_or_default();
 
     let sep = separator.as_ref().map_or("", |sep| sep.as_str());
     let value = match (prev_value, next_value) {
-        (_, n) if strategy == Some(MergedStringStrategy::Replace) => n,
-        (Some(p), Some(n)) if strategy == Some(MergedStringStrategy::Append) => {
+        (_, n) if resolved_strategy == MergedStringStrategy::Replace => n,
+        (Some(p), Some(n)) if dedup_active && contains_block(&p, &n, sep) => Some(p),
+        (Some(p), Some(n)) if resolved_strategy == MergedStringStrategy::Append => {
             Some(format!("{p}{sep}{n}"))
         }
-        (Some(p), Some(n)) if strategy == Some(MergedStringStrategy::Prepend) => {
+        (Some(p), Some(n)) if resolved_strategy == MergedStringStrategy::Prepend => {
             Some(format!("{n}{sep}{p}"))
         }
         (Some(p), None) => Some(p),
@@ -54,8 +80,37 @@ pub fn string_with_strategy(
             strategy,
             separator,
             discard_when_merged,
+            dedup,
         })
     }))
+}
+
+/// Whether `needle` already appears in `haystack` as a whole
+/// `separator`-delimited block.
+///
+/// A match must start at the beginning of `haystack` or right after a
+/// separator, and end at the end of `haystack` or right before one.
+/// Anchoring on both sides keeps a value that merely occurs inside a larger
+/// block from counting as present.
+///
+/// An empty separator leaves no boundaries to anchor on, so only an exact match
+/// of the whole string counts.
+fn contains_block(haystack: &str, needle: &str, separator: &str) -> bool {
+    if needle.is_empty() || haystack == needle {
+        return true;
+    }
+
+    if separator.is_empty() {
+        return false;
+    }
+
+    haystack.match_indices(needle).any(|(index, matched)| {
+        let end = index + matched.len();
+        let starts_block = index == 0 || haystack[..index].ends_with(separator);
+        let ends_block = end == haystack.len() || haystack[end..].starts_with(separator);
+
+        starts_block && ends_block
+    })
 }
 
 #[cfg(test)]

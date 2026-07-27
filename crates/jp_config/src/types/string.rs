@@ -10,6 +10,7 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
     partial::ToPartial,
+    types::deserialize_dedup,
 };
 
 /// String value, either defaulting to a merge strategy of `replace`, or
@@ -156,6 +157,30 @@ pub struct MergedString {
     /// other value is set.
     #[setting(default)]
     pub discard_when_merged: bool,
+
+    /// Whether to skip an `append` or `prepend` whose value is already present.
+    ///
+    /// Defaults to `true`.
+    /// Set to `false` to append the value unconditionally.
+    /// Accepts `true`, `false`, or `"inherit"`.
+    ///
+    /// A value counts as present when it appears in the existing string as a
+    /// whole `separator`-delimited block.
+    /// Partial matches inside a block do not count.
+    /// With `separator = "none"` there are no block boundaries to match
+    /// against, so only an exact match of the whole string counts.
+    ///
+    /// This flag is "sticky": once a config in the merge chain sets it
+    /// explicitly, subsequent merges for this field use that value — unless a
+    /// later config states a different one.
+    ///
+    /// `"inherit"` (or omitting the field) means "no opinion" — inherit from
+    /// the previous merge, falling back to `true`.
+    #[setting(
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_dedup"
+    )]
+    pub dedup: Option<bool>,
 }
 
 impl AssignKeyValue for PartialMergedString {
@@ -166,6 +191,7 @@ impl AssignKeyValue for PartialMergedString {
             "strategy" => self.strategy = kv.try_some_from_str()?,
             "separator" => self.separator = kv.try_some_from_str()?,
             "discard_when_merged" => self.discard_when_merged = kv.try_some_bool()?,
+            "dedup" => self.dedup = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -180,6 +206,7 @@ impl ToPartial for MergedString {
             strategy: Some(self.strategy),
             separator: Some(self.separator),
             discard_when_merged: Some(self.discard_when_merged),
+            dedup: self.dedup,
         }
     }
 }
@@ -194,6 +221,7 @@ impl PartialConfigDelta for PartialMergedString {
                 self.discard_when_merged.as_ref(),
                 next.discard_when_merged,
             ),
+            dedup: delta_opt(self.dedup.as_ref(), next.dedup),
         }
     }
 }

@@ -16,24 +16,26 @@ pub fn vec_with_strategy<T>(
 where
     T: Clone + PartialEq + Serialize + DeserializeOwned + Schematic,
 {
-    let prev_dedup = dedup_flag(&prev);
-    let next_dedup = dedup_flag(&next);
-
-    // Resolve dedup: next's explicit choice wins, then inherit from prev.
+    // Resolve the explicit dedup opinion: next's choice wins, then inherit from
+    // prev. `None` means neither side expressed one.
     //
     // A discarded prev still contributes dedup when next has no opinion (None /
     // "inherit"), but NOT when next explicitly sets it.
-    let dedup = next_dedup.or(prev_dedup).unwrap_or(false);
+    let dedup = dedup_flag(&next).or_else(|| dedup_flag(&prev));
+
+    // Deduplicate unless a config explicitly opts out. Applying the same config
+    // source twice — through an `extends` diamond, or by re-supplying `--cfg`
+    // on a conversation that already merged it — must not duplicate entries.
+    let dedup_active = dedup.unwrap_or(true);
 
     // If prev is default, replace regardless of strategy.
     if prev.discard_when_merged() {
-        if dedup {
-            let mut next = ensure_dedup(next);
+        let mut next = next;
+        if dedup_active {
             dedup_in_place(&mut next);
-            return Ok(Some(next));
         }
 
-        return Ok(Some(next));
+        return Ok(Some(with_dedup_flag(next, dedup)));
     }
 
     let mut prev_value = match prev {
@@ -59,19 +61,17 @@ where
         Some(MergedVecStrategy::Replace) => next_value,
     };
 
-    if dedup {
+    if dedup_active {
         dedup_in_place(&mut value);
     }
 
-    // Carry forward as Option<bool>: Some(true) when active, None otherwise.
-    let resolved_dedup = if dedup { Some(true) } else { None };
-
-    // When dedup is active, always use Merged to carry the flag forward.
-    Ok(Some(if next_is_merged || dedup {
+    // An explicit opinion needs the Merged wrapper to survive the next merge.
+    // Without one, the shape is left alone.
+    Ok(Some(if next_is_merged || dedup.is_some() {
         MergeableVec::Merged(MergedVec {
             value,
             strategy,
-            dedup: resolved_dedup,
+            dedup,
             discard_when_merged,
         })
     } else {
@@ -87,17 +87,24 @@ const fn dedup_flag<T>(v: &MergeableVec<T>) -> Option<bool> {
     }
 }
 
-/// Ensure the dedup flag is set on a `MergeableVec`.
-fn ensure_dedup<T>(v: MergeableVec<T>) -> MergeableVec<T> {
+/// Attach an explicit `dedup` opinion to a `MergeableVec`, wrapping a plain
+/// `Vec` in `Merged` so the flag survives the next merge.
+///
+/// A `None` opinion is left implicit and the value's shape is unchanged.
+fn with_dedup_flag<T>(v: MergeableVec<T>, dedup: Option<bool>) -> MergeableVec<T> {
+    if dedup.is_none() {
+        return v;
+    }
+
     match v {
         MergeableVec::Vec(value) => MergeableVec::Merged(MergedVec {
             value,
             strategy: None,
-            dedup: Some(true),
+            dedup,
             discard_when_merged: false,
         }),
         MergeableVec::Merged(mut m) => {
-            m.dedup = Some(true);
+            m.dedup = dedup;
             MergeableVec::Merged(m)
         }
     }

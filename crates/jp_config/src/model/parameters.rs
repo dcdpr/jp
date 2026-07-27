@@ -77,11 +77,22 @@ pub struct ParametersConfig {
     /// The `stop_words` parameter can be set to specific sequences, such as a
     /// period or specific word, to stop the model from generating text when it
     /// encounters these sequences.
-    #[setting(default, merge = schematic::merge::append_vec, skip_serializing_if = "Vec::is_empty")]
+    #[setting(default, merge = schematic::merge::append_vec)]
     pub stop_words: Vec<String>,
 
     /// Other non-typed parameters that some models might support.
-    #[setting(default, flatten, merge = schematic::merge::merge_iter, skip_serializing_if = "IndexMap::is_empty")]
+    ///
+    /// Set them under `parameters.other`:
+    ///
+    /// ```toml
+    /// [assistant.model.parameters.other]
+    /// presence_penalty = 0.5
+    /// ```
+    // Not `flatten`ed into the parameter block: stored conversation configs
+    // written before flattening carry a literal `other` key, which a flattened
+    // field would capture as a parameter *named* `other` and forward to the
+    // provider. Flattening needs a compat migration first.
+    #[setting(default, merge = schematic::merge::merge_iter)]
     pub other: IndexMap<String, JsonValue>,
 }
 

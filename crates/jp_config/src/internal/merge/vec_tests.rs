@@ -301,12 +301,52 @@ fn test_dedup_sticky_across_non_discarded_merges() {
 }
 
 #[test]
-fn test_no_dedup_without_flag() {
+fn test_dedup_without_flag() {
     let prev = MergeableVec::Vec(vec![1, 2]);
     let next = MergeableVec::Vec(vec![2, 3]);
 
     let result = vec_with_strategy(prev, next, &()).unwrap().unwrap();
+    assert_eq!(&*result, &[1, 2, 3]);
+
+    // No explicit opinion was stated, so the shape stays a plain `Vec`.
+    assert!(matches!(result, MergeableVec::Vec(_)));
+}
+
+#[test]
+fn test_no_dedup_when_explicitly_disabled() {
+    let prev = MergeableVec::Merged(MergedVec {
+        value: vec![1, 2],
+        strategy: None,
+        dedup: Some(false),
+        discard_when_merged: false,
+    });
+    let next = MergeableVec::Vec(vec![2, 3]);
+
+    let result = vec_with_strategy(prev, next, &()).unwrap().unwrap();
     assert_eq!(&*result, &[1, 2, 2, 3]);
+
+    // The opt-out is sticky: a third merge without an opinion keeps duplicates.
+    let more = MergeableVec::Vec(vec![3, 4]);
+    let result = vec_with_strategy(result, more, &()).unwrap().unwrap();
+    assert_eq!(&*result, &[1, 2, 2, 3, 3, 4]);
+}
+
+#[test]
+fn test_dedup_collapses_repeated_source() {
+    // The same source applied twice (an `extends` diamond, or `--cfg` supplied
+    // again on a conversation that already merged it) contributes its entries
+    // once.
+    let source = || MergeableVec::Vec(vec![10, 20]);
+
+    let once = vec_with_strategy(MergeableVec::Vec(vec![1]), source(), &())
+        .unwrap()
+        .unwrap();
+    let twice = vec_with_strategy(once.clone(), source(), &())
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(&*once, &[1, 10, 20]);
+    assert_eq!(&*twice, &[1, 10, 20]);
 }
 
 #[test]

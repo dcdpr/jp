@@ -24,12 +24,14 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foobar".to_owned()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -39,12 +41,14 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -53,6 +57,7 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             next: PartialMergeableString::String("bar".to_owned()),
             expected: PartialMergeableString::String("bar".to_owned()),
@@ -63,18 +68,21 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -83,18 +91,21 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -103,18 +114,21 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foobar".to_owned()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -122,6 +136,7 @@ fn test_string_with_append_strategy() {
                 value: Some("foo".to_owned()),
                 strategy: Some(MergedStringStrategy::Append),
                 discard_when_merged: None,
+                dedup: None,
                 separator: Some(MergedStringSeparator::None),
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
@@ -129,12 +144,14 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -144,12 +161,14 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::Space),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foo bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::Space),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -159,12 +178,14 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::Line),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foo\nbar".to_owned()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::Line),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -174,12 +195,14 @@ fn test_string_with_append_strategy() {
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::Paragraph),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foo\n\nbar".to_owned()),
                 strategy: Some(MergedStringStrategy::Append),
                 separator: Some(MergedStringSeparator::Paragraph),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
     ];
@@ -216,12 +239,14 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("barfoo".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -231,12 +256,14 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -245,6 +272,7 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             next: PartialMergeableString::String("bar".to_owned()),
             expected: PartialMergeableString::String("bar".to_owned()),
@@ -255,18 +283,21 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -275,18 +306,21 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -295,18 +329,21 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("barfoo".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -315,18 +352,21 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Replace),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -336,12 +376,14 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::Space),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar foo".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::Space),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -351,12 +393,14 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::Line),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar\nfoo".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::Line),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
         TestCase {
@@ -366,12 +410,14 @@ fn test_string_with_prepend_strategy() {
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::Paragraph),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar\n\nfoo".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::Paragraph),
                 discard_when_merged: None,
+                dedup: None,
             }),
         },
     ];
@@ -402,6 +448,7 @@ fn test_default_string() {
                 strategy: None,
                 separator: None,
                 discard_when_merged: Some(true),
+                dedup: None,
             }),
             next: PartialMergeableString::String("bar".to_owned()),
             expected: PartialMergeableString::String("bar".to_owned()),
@@ -412,18 +459,21 @@ fn test_default_string() {
                 strategy: None,
                 separator: None,
                 discard_when_merged: Some(true),
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("bar".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: None,
+                dedup: None,
             }),
         }),
         ("default stacking", TestCase {
@@ -432,18 +482,21 @@ fn test_default_string() {
                 strategy: None,
                 separator: None,
                 discard_when_merged: Some(true),
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foo".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: Some(true),
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foo".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: Some(true),
+                dedup: None,
             }),
         }),
         ("next as default", TestCase {
@@ -452,18 +505,21 @@ fn test_default_string() {
                 strategy: None,
                 separator: None,
                 discard_when_merged: Some(false),
+                dedup: None,
             }),
             next: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foo".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: Some(true),
+                dedup: None,
             }),
             expected: PartialMergeableString::Merged(PartialMergedString {
                 value: Some("foobar".to_owned()),
                 strategy: Some(MergedStringStrategy::Prepend),
                 separator: Some(MergedStringSeparator::None),
                 discard_when_merged: Some(true),
+                dedup: None,
             }),
         }),
     ];
@@ -505,6 +561,7 @@ fn test_finalized_round_trip_does_not_double_append() {
         strategy: Some(MergedStringStrategy::Append),
         separator: Some(MergedStringSeparator::Space),
         discard_when_merged: None,
+        dedup: None,
     });
 
     // Step 2: Simulate a finalized config that was previously built from
@@ -515,6 +572,7 @@ fn test_finalized_round_trip_does_not_double_append() {
         strategy: None,
         separator: None,
         discard_when_merged: Some(true),
+        dedup: None,
     });
 
     let merged = string_with_strategy(default_partial, config_file_partial.clone(), &())
@@ -558,6 +616,7 @@ fn test_finalized_round_trip_does_not_double_prepend() {
         strategy: Some(MergedStringStrategy::Prepend),
         separator: Some(MergedStringSeparator::Space),
         discard_when_merged: None,
+        dedup: None,
     });
 
     let default_partial = PartialMergeableString::Merged(PartialMergedString {
@@ -565,6 +624,7 @@ fn test_finalized_round_trip_does_not_double_prepend() {
         strategy: None,
         separator: None,
         discard_when_merged: Some(true),
+        dedup: None,
     });
 
     let merged = string_with_strategy(default_partial, config_file_partial.clone(), &())
@@ -585,4 +645,174 @@ fn test_finalized_round_trip_does_not_double_prepend() {
         "You are JP.",
         "finalized config round-tripped via to_partial() should not re-apply the prepend strategy"
     );
+}
+
+/// Build an appending partial with a paragraph separator.
+fn appending(value: &str, dedup: Option<bool>) -> PartialMergeableString {
+    PartialMergeableString::Merged(PartialMergedString {
+        value: Some(value.to_owned()),
+        strategy: Some(MergedStringStrategy::Append),
+        separator: Some(MergedStringSeparator::Paragraph),
+        discard_when_merged: None,
+        dedup,
+    })
+}
+
+#[test]
+fn test_append_skips_value_already_present_as_block() {
+    // A persona file appends a knowledge block and its own prompt. Supplying
+    // the same source again — a second `--cfg` on an existing conversation, or
+    // an `extends` diamond — must leave the accumulated value untouched.
+    let accumulated = PartialMergeableString::String("base\n\nknowledge\n\npersona".to_owned());
+
+    let result = string_with_strategy(accumulated, appending("knowledge", None), &())
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.as_ref(), "base\n\nknowledge\n\npersona");
+
+    let result = string_with_strategy(result, appending("persona", None), &())
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.as_ref(), "base\n\nknowledge\n\npersona");
+}
+
+#[test]
+fn test_append_matches_first_and_last_block() {
+    let result = string_with_strategy(
+        PartialMergeableString::String("first\n\nlast".to_owned()),
+        appending("first", None),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.as_ref(), "first\n\nlast");
+
+    let result = string_with_strategy(result, appending("last", None), &())
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.as_ref(), "first\n\nlast");
+}
+
+#[test]
+fn test_append_ignores_match_inside_a_block() {
+    // "brief" occurs inside a block but is not a block of its own, so it is a
+    // genuinely new contribution and must be appended.
+    let result = string_with_strategy(
+        PartialMergeableString::String("Be brief and clear.".to_owned()),
+        appending("brief", None),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(result.as_ref(), "Be brief and clear.\n\nbrief");
+}
+
+#[test]
+fn test_append_without_separator_only_skips_exact_match() {
+    // With no separator there are no block boundaries to anchor a match on, so
+    // only a whole-string match counts as already present.
+    let no_separator = |value: &str| {
+        PartialMergeableString::Merged(PartialMergedString {
+            value: Some(value.to_owned()),
+            strategy: Some(MergedStringStrategy::Append),
+            separator: Some(MergedStringSeparator::None),
+            discard_when_merged: None,
+            dedup: None,
+        })
+    };
+
+    let result = string_with_strategy(
+        PartialMergeableString::String("foobar".to_owned()),
+        no_separator("bar"),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.as_ref(), "foobarbar");
+
+    let result = string_with_strategy(
+        PartialMergeableString::String("foo".to_owned()),
+        no_separator("foo"),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.as_ref(), "foo");
+}
+
+#[test]
+fn test_append_duplicates_when_dedup_disabled() {
+    let result = string_with_strategy(
+        PartialMergeableString::String("knowledge".to_owned()),
+        appending("knowledge", Some(false)),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.as_ref(), "knowledge\n\nknowledge");
+
+    // The opt-out is sticky: a later append with no opinion also duplicates.
+    let result = string_with_strategy(result, appending("knowledge", None), &())
+        .unwrap()
+        .unwrap();
+    assert_eq!(result.as_ref(), "knowledge\n\nknowledge\n\nknowledge");
+}
+
+#[test]
+fn test_unstated_strategy_appends() {
+    // `MergedStringStrategy` defaults to `append`, so a config that sets a
+    // value without naming a strategy appends it.
+    let no_strategy = PartialMergeableString::Merged(PartialMergedString {
+        value: Some("bar".to_owned()),
+        strategy: None,
+        separator: Some(MergedStringSeparator::Space),
+        discard_when_merged: None,
+        dedup: None,
+    });
+
+    let result = string_with_strategy(
+        PartialMergeableString::String("foo".to_owned()),
+        no_strategy,
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(result.as_ref(), "foo bar");
+}
+
+#[test]
+fn test_dedup_accepts_inherit() {
+    let merged: PartialMergedString =
+        serde_json::from_str(r#"{"value":"foo","dedup":"inherit"}"#).unwrap();
+    assert_eq!(merged.dedup, None);
+
+    let merged: PartialMergedString =
+        serde_json::from_str(r#"{"value":"foo","dedup":false}"#).unwrap();
+    assert_eq!(merged.dedup, Some(false));
+
+    let merged: PartialMergedString = serde_json::from_str(r#"{"value":"foo"}"#).unwrap();
+    assert_eq!(merged.dedup, None);
+}
+
+#[test]
+fn test_prepend_skips_value_already_present_as_block() {
+    let prepending = PartialMergeableString::Merged(PartialMergedString {
+        value: Some("persona".to_owned()),
+        strategy: Some(MergedStringStrategy::Prepend),
+        separator: Some(MergedStringSeparator::Paragraph),
+        discard_when_merged: None,
+        dedup: None,
+    });
+
+    let result = string_with_strategy(
+        PartialMergeableString::String("persona\n\nbase".to_owned()),
+        prepending,
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(result.as_ref(), "persona\n\nbase");
 }

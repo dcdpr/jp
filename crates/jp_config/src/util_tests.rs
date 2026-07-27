@@ -732,8 +732,63 @@ fn test_load_partial_at_path_diamond_is_not_a_cycle() {
     );
     write_config(&root.join("d.toml"), "assistant.system_prompt = \"d\"");
 
-    let partial = load_partial_at_path(root.join("a.toml")).unwrap();
-    assert!(partial.is_some());
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+    assert_eq!(partial.assistant.system_prompt.as_deref(), Some("d"));
+}
+
+#[test]
+fn test_load_partial_at_path_diamond_applies_shared_file_once() {
+    // a -> b -> d
+    // a -> c -> d
+    //
+    // `d` appends to the system prompt. Reaching it through both branches must
+    // apply the append once: a shared dependency is a diamond, not two
+    // separate contributions.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(&root.join("a.toml"), r#"extends = ["b.toml", "c.toml"]"#);
+    write_config(&root.join("b.toml"), r#"extends = ["d.toml"]"#);
+    write_config(&root.join("c.toml"), r#"extends = ["d.toml"]"#);
+    write_config(
+        &root.join("d.toml"),
+        indoc::indoc!(
+            r#"
+                [assistant.system_prompt]
+                strategy = "append"
+                separator = "space"
+                value = "d"
+            "#
+        ),
+    );
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+    assert_eq!(partial.assistant.system_prompt.as_deref(), Some("d"));
+}
+
+#[test]
+fn test_load_partial_at_path_repeat_visit_keeps_last_position() {
+    // a -> b -> d
+    // a -> d
+    //
+    // `a` declares `extends = ["b.toml", "d.toml"]`, so `d` overrides `b`.
+    // Collapsing the repeat visit must not move `d` ahead of `b` and flip that
+    // precedence.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(&root.join("a.toml"), r#"extends = ["b.toml", "d.toml"]"#);
+    write_config(
+        &root.join("b.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["d.toml"]
+                assistant.name = "b"
+            "#
+        ),
+    );
+    write_config(&root.join("d.toml"), r#"assistant.name = "d""#);
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+    assert_eq!(partial.assistant.name.as_deref(), Some("d"));
 }
 
 #[test]
