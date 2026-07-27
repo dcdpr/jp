@@ -421,7 +421,7 @@ async fn suppressed_path_is_skipped_with_a_note() {
         None,
         Some(vec![".git".to_owned()].into()),
         None,
-        &suppress_matcher(root, &[".git/".to_owned()]),
+        &suppress_matcher(root, &[".git/".to_owned()]).unwrap(),
     )
     .await
     .unwrap();
@@ -448,7 +448,7 @@ async fn suppress_pattern_covers_files_inside_the_named_directory() {
         None,
         Some(vec![".git/HEAD".to_owned()].into()),
         None,
-        &suppress_matcher(root, &[".git/".to_owned()]),
+        &suppress_matcher(root, &[".git/".to_owned()]).unwrap(),
     )
     .await
     .unwrap();
@@ -475,7 +475,7 @@ async fn suppress_patterns_match_at_any_depth() {
         None,
         Some(vec!["crates/inner/target".to_owned()].into()),
         None,
-        &suppress_matcher(root, &["**/target/".to_owned()]),
+        &suppress_matcher(root, &["**/target/".to_owned()]).unwrap(),
     )
     .await
     .unwrap();
@@ -506,7 +506,7 @@ async fn an_in_workspace_symlink_cannot_dodge_suppression() {
         None,
         Some(vec!["gitlink/HEAD".to_owned()].into()),
         None,
-        &suppress_matcher(root, &[".git/".to_owned()]),
+        &suppress_matcher(root, &[".git/".to_owned()]).unwrap(),
     )
     .await
     .unwrap();
@@ -534,7 +534,7 @@ async fn suppressed_tree_is_pruned_from_traversal_without_an_ignore_entry() {
         None,
         None,
         None,
-        &suppress_matcher(root, &["secrets/".to_owned()]),
+        &suppress_matcher(root, &["secrets/".to_owned()]).unwrap(),
     )
     .await
     .unwrap();
@@ -573,7 +573,7 @@ async fn suppression_reaches_inside_an_approved_external_mount() {
         Some(&policy),
         Some(vec!["fork".to_owned()].into()),
         None,
-        &suppress_matcher(ws.path(), &["**/.git/".to_owned()]),
+        &suppress_matcher(ws.path(), &["**/.git/".to_owned()]).unwrap(),
     )
     .await
     .unwrap();
@@ -595,7 +595,7 @@ async fn suppressed_path_does_not_suppress_the_other_requested_paths() {
         None,
         Some(vec![".git".to_owned(), "src".to_owned()].into()),
         None,
-        &suppress_matcher(root, &[".git/".to_owned()]),
+        &suppress_matcher(root, &[".git/".to_owned()]).unwrap(),
     )
     .await
     .unwrap();

@@ -7,8 +7,12 @@ run = "unattended"
 # is a separate question, governed by `access.fs` — `.git` in particular stays
 # readable, since that is how the write tools check for uncommitted work.
 #
-# Patterns use `.ignore` syntax, so `**/target/` matches at any depth. Keep these
-# in step across the `fs_*` tools that return file contents or paths.
+# Patterns use `.ignore` syntax, so `**/target/` matches at any depth.
+#
+# Disclosure blocks like `.git/` belong on every tool that returns contents, so
+# keep those in step. `**/target/` is a flood block and lives only on the tools
+# that enumerate in bulk; `fs_read_file` omits it deliberately, so an exact build
+# log stays retrievable (issue #626).
 options.suppress = [".git/", "**/target/"]
 
 source = "local"

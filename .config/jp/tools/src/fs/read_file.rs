@@ -18,9 +18,10 @@ pub(crate) async fn fs_read_file(
     if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Read, &resolved.relative) {
         return error(msg);
     }
-    // Matched on the canonical form, so a path reached through an in-workspace
-    // symlink is checked against the pattern for its real location.
-    if is_suppressed(suppress, &resolved.relative) {
+    // Matched on both forms: the canonical one so a symlink cannot dodge a
+    // pattern naming its target, and the caller's own spelling so a pattern
+    // naming the link closes that route too.
+    if is_suppressed(suppress, &[&resolved.relative, &resolved.lexical]) {
         return error(suppressed_note(resolved.relative.as_str()));
     }
     let absolute_path = resolved.absolute;

@@ -27,8 +27,16 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     // to hand file contents or paths back; the write tools return confirmations
     // rather than content, and what they may touch is the access policy's
     // question.
-    let patterns: Vec<String> = t.option_or("suppress", vec![]);
-    let suppress = suppress_matcher(&ctx.root, &patterns);
+    //
+    // Parsed strictly rather than through `option_or`: a disclosure control that
+    // falls back to "suppress nothing" when its configuration is malformed hands
+    // over the very paths it was told to hold back, and does it silently.
+    let patterns: Vec<String> = match t.options.get("suppress") {
+        None => vec![],
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|error| format!("Invalid `suppress` option for tool '{}': {error}", t.name))?,
+    };
+    let suppress = suppress_matcher(&ctx.root, &patterns)?;
 
     match t.name.trim_start_matches("fs_") {
         "list_files" => fs_list_files(

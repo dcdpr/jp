@@ -212,7 +212,7 @@ async fn refuses_a_suppressed_path() {
 
     let result = fs_read_file(
         &ctx,
-        &suppress_matcher(workspace.path(), &[".git/".to_owned()]),
+        &suppress_matcher(workspace.path(), &[".git/".to_owned()]).unwrap(),
         ".git/HEAD".to_owned(),
         None,
         None,
@@ -227,6 +227,48 @@ async fn refuses_a_suppressed_path() {
         message,
         "'.git/HEAD' is suppressed from this tool's results. If you need it, ask the user to \
          provide it."
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_pattern_naming_a_symlink_closes_that_route() {
+    // Suppression matches the caller's own spelling as well as the canonical
+    // form, so a pattern written against the link name is honored when a request
+    // arrives through it.
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempdir().unwrap();
+    std::fs::create_dir(workspace.path().join("real")).unwrap();
+    std::fs::write(workspace.path().join("real/secret.txt"), "shhh").unwrap();
+    symlink("real", workspace.path().join("alias")).unwrap();
+
+    let ctx = Context {
+        root: workspace.path().to_path_buf(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let suppress = suppress_matcher(workspace.path(), &["alias/".to_owned()]).unwrap();
+
+    let via_alias = fs_read_file(&ctx, &suppress, "alias/secret.txt".to_owned(), None, None)
+        .await
+        .unwrap();
+    assert!(
+        matches!(via_alias, Outcome::Error { .. }),
+        "the configured spelling should be refused, got: {via_alias:?}"
+    );
+
+    // The other half of the same fact: a pattern naming a link closes that
+    // spelling and nothing else. Patterns belong on real locations; matching the
+    // as-written form is a convenience, not a boundary.
+    let via_real = fs_read_file(&ctx, &suppress, "real/secret.txt".to_owned(), None, None)
+        .await
+        .unwrap();
+    assert!(
+        matches!(via_real, Outcome::Success { .. }),
+        "a pattern on the link name does not cover the target, got: {via_real:?}"
     );
 }
 

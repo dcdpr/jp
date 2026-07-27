@@ -281,7 +281,7 @@ async fn suppressed_path_is_reported_so_the_caller_can_ask_the_user() {
         None,
         Some(vec![".git/HEAD".to_owned()].into()),
         None,
-        &suppress_matcher(root, &[".git/".to_owned()]),
+        &suppress_matcher(root, &[".git/".to_owned()]).unwrap(),
     )
     .await
     .unwrap();

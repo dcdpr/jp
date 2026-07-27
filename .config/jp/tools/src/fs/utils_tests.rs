@@ -4,6 +4,41 @@ use camino_tempfile::tempdir;
 use super::*;
 use crate::util::runner::MockProcessRunner;
 
+mod suppress_matcher {
+    use super::*;
+
+    #[test]
+    fn rejects_an_unparseable_pattern_naming_it() {
+        // A disclosure control that drops the rule it could not read hands over
+        // the very paths it was configured to hold back.
+        let dir = tempdir().unwrap();
+        let err =
+            super::super::suppress_matcher(dir.path(), &["{unclosed".to_owned()]).unwrap_err();
+
+        assert!(err.contains("{unclosed"), "pattern not named: {err}");
+        assert!(
+            err.starts_with("Invalid `suppress` pattern"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn one_bad_pattern_rejects_the_whole_list() {
+        let dir = tempdir().unwrap();
+        let patterns = [".git/".to_owned(), "{unclosed".to_owned()];
+
+        assert!(super::super::suppress_matcher(dir.path(), &patterns).is_err());
+    }
+
+    #[test]
+    fn accepts_an_empty_list() {
+        let dir = tempdir().unwrap();
+        let matcher = super::super::suppress_matcher(dir.path(), &[]).unwrap();
+
+        assert!(!is_suppressed(&matcher, &[Utf8Path::new("anything")]));
+    }
+}
+
 #[test]
 fn test_is_file_dirty_modified() {
     let dir = tempdir().unwrap();

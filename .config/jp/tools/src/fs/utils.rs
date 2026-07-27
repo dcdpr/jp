@@ -21,15 +21,30 @@ use crate::{
 ///
 /// Patterns use `.ignore` syntax, so `**/target/` matches at any depth, and are
 /// matched against workspace-relative paths.
-/// An unparseable pattern is skipped; the rest of the list still applies.
 /// An empty list suppresses nothing, which is the default: what counts as noise
 /// or as sensitive is a property of the project, not of a directory's name.
-pub fn suppress_matcher(root: &Utf8Path, patterns: &[String]) -> Gitignore {
+///
+/// Patterns should name real locations rather than symlinks pointing at them.
+/// A path is matched in both its canonical and its as-written form, so naming a
+/// link does close that spelling — but only that one, and any other route to
+/// the same target stays open.
+///
+/// # Errors
+///
+/// Returns an error naming the offending pattern if one cannot be parsed as a
+/// glob.
+/// A disclosure control that quietly drops the rule it could not read is worse
+/// than one that refuses to start.
+pub fn suppress_matcher(root: &Utf8Path, patterns: &[String]) -> Result<Gitignore, String> {
     let mut builder = GitignoreBuilder::new(root);
     for pattern in patterns {
-        let _result = builder.add_line(None, pattern);
+        builder
+            .add_line(None, pattern)
+            .map_err(|error| format!("Invalid `suppress` pattern '{pattern}': {error}"))?;
     }
-    builder.build().unwrap_or_else(|_| Gitignore::empty())
+    builder
+        .build()
+        .map_err(|error| format!("Could not compile the `suppress` patterns: {error}"))
 }
 
 /// Whether `suppress` keeps `relative` out of a tool's results.
@@ -42,10 +57,14 @@ pub fn suppress_matcher(root: &Utf8Path, patterns: &[String]) -> Gitignore {
 /// A pattern written `secrets/` is meant to cover that name, and wrongly
 /// suppressing a file that happens to share it costs far less than returning a
 /// directory's contents.
-pub fn is_suppressed(suppress: &Gitignore, relative: &Utf8Path) -> bool {
-    suppress
-        .matched_path_or_any_parents(relative, true)
-        .is_ignore()
+///
+/// Pass [`ResolvedPath::relative`] and [`ResolvedPath::lexical`] so a pattern
+/// matches whether it names the real location or the symlink a request arrived
+/// through.
+pub fn is_suppressed(suppress: &Gitignore, forms: &[&Utf8Path]) -> bool {
+    forms
+        .iter()
+        .any(|form| suppress.matched_path_or_any_parents(form, true).is_ignore())
 }
 
 /// Report that a path was suppressed from a tool's results.
@@ -252,6 +271,15 @@ pub struct ResolvedPath {
 
     /// Path relative to the canonical workspace root.
     pub relative: Utf8PathBuf,
+
+    /// The caller's own spelling, lexically normalized and workspace-relative.
+    ///
+    /// Equal to `relative` unless the request arrived through an in-workspace
+    /// symlink, in which case this keeps the link name and `relative` holds the
+    /// target's real location.
+    /// Rules match on `relative`; this exists for checks that should also honor
+    /// the name the caller used.
+    pub lexical: Utf8PathBuf,
 }
 
 /// Resolve a user-supplied path against the workspace root, following symlinks
@@ -297,7 +325,11 @@ pub fn resolve_workspace_path(
 
     let relative = workspace_relative(&absolute, &canonical_root, &cleaned);
 
-    Ok(ResolvedPath { absolute, relative })
+    Ok(ResolvedPath {
+        absolute,
+        relative,
+        lexical: cleaned,
+    })
 }
 
 /// Resolve a user-supplied path as a directory entry, canonicalizing only the
@@ -350,7 +382,11 @@ pub fn resolve_workspace_entry(
 
     let relative = workspace_relative(&absolute, &canonical_root, &cleaned);
 
-    Ok(ResolvedPath { absolute, relative })
+    Ok(ResolvedPath {
+        absolute,
+        relative,
+        lexical: cleaned,
+    })
 }
 
 /// Output of [`validate_workspace_input`]: the cleaned form plus the

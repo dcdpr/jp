@@ -136,10 +136,9 @@ struct WalkSpec {
     path_filter: Option<String>,
     /// Whether `.ignore` files prune this walk.
     ///
-    /// Disabled for a subtree the caller named outright and `soft_ignore` opted
-    /// in: the anchored root patterns do not prune reliably below the workspace
-    /// root, so leaving them on would prune unpredictably rather than not at
-    /// all.
+    /// Disabled for an `.ignore`d subtree the caller named outright: the
+    /// anchored root patterns do not prune reliably below the workspace root,
+    /// so leaving them on would prune unpredictably rather than not at all.
     apply_ignore: bool,
 }
 
@@ -188,7 +187,8 @@ fn resolve_target(
     // rule for its real location, so a link cannot dodge a rule denying its
     // target. External mount paths have no canonical workspace-relative form and
     // keep their lexical shape, which is what external rules match.
-    let cleaned = resolve_workspace_path(root, prefix, access)?.relative;
+    let resolved = resolve_workspace_path(root, prefix, access)?;
+    let cleaned = resolved.relative;
 
     // Both checks come before the mount branch below: an approved mount is named
     // by its in-workspace path, which is the form access rules and suppress
@@ -201,7 +201,9 @@ fn resolve_target(
         return Ok(Target::Skipped(Skipped::Denied(cleaned.into_string())));
     }
 
-    if is_suppressed(suppress, &cleaned) {
+    // Both forms, so a pattern closes the path whether it names the real location
+    // or the symlink this request arrived through.
+    if is_suppressed(suppress, &[&cleaned, &resolved.lexical]) {
         return Ok(Target::Skipped(Skipped::Suppressed(cleaned.into_string())));
     }
 
@@ -363,7 +365,7 @@ fn collect_files(
             } else {
                 display_prefix.join(relative)
             };
-            !is_suppressed(&suppress, &display)
+            !is_suppressed(&suppress, &[&display])
         });
     }
 
