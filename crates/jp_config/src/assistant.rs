@@ -98,6 +98,16 @@ impl AssignKeyValue for PartialAssistantConfig {
             "" => kv.try_merge_object(self)?,
             "name" => self.name = kv.try_some_string()?,
             "system_prompt" => self.system_prompt = kv.try_some_object_or_from_str()?,
+            // Nested keys (`system_prompt.value`, `.strategy`, `.separator`,
+            // `.discard_when_merged`, `.dedup`) address the merge metadata, so
+            // an absent value starts as `Merged` rather than the plain-string
+            // default, which has nowhere to put them.
+            _ if kv.p("system_prompt") => self
+                .system_prompt
+                .get_or_insert_with(|| {
+                    PartialMergeableString::Merged(PartialMergedString::default())
+                })
+                .assign(kv)?,
             _ if kv.p("instructions") => kv.try_vec_of_nested(self.instructions.as_mut())?,
             _ if kv.p("system_prompt_sections") => {
                 kv.try_vec_of_nested(self.system_prompt_sections.as_mut())?;

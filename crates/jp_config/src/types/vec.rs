@@ -302,9 +302,13 @@ pub struct MergedVec<T> {
 
     /// Whether to remove duplicate items after merging.
     ///
-    /// Defaults to `true`.
+    /// Defaults to `true` for `append` and `prepend`, which combine two lists.
     /// Set to `false` to keep duplicates.
     /// Accepts `true`, `false`, or `"inherit"`.
+    ///
+    /// `replace` keeps duplicates by default: it contributes a single list, so
+    /// repeated items in it are kept as written.
+    /// Set `dedup = true` alongside `strategy = "replace"` to collapse them.
     ///
     /// When enabled, items already present in the merged result are skipped.
     /// Comparison uses `PartialEq`.
@@ -315,7 +319,7 @@ pub struct MergedVec<T> {
     /// — unless a later config states a different one.
     ///
     /// `"inherit"` (or omitting the field) means "no opinion" — inherit from
-    /// the previous merge, falling back to `true`.
+    /// the previous merge, falling back to the per-strategy default above.
     #[setting(default, skip_serializing_if = "Option::is_none")]
     #[serde(
         default,

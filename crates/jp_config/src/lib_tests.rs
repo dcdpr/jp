@@ -97,6 +97,59 @@ fn test_partial_app_config_assign() {
 }
 
 #[test]
+fn assign_routes_nested_system_prompt_keys() {
+    use crate::types::string::{MergedStringStrategy, PartialMergeableString, PartialMergedString};
+
+    // `--cfg assistant.system_prompt.dedup=false` addresses the merge metadata,
+    // so it has to reach `PartialMergedString` rather than stopping at
+    // `PartialAssistantConfig` with an unknown key.
+    let mut p = PartialAppConfig::default();
+
+    let kv = KvAssignment::try_from_cli("assistant.system_prompt.dedup", "false").unwrap();
+    p.assign(kv).unwrap();
+
+    let kv = KvAssignment::try_from_cli("assistant.system_prompt.strategy", "prepend").unwrap();
+    p.assign(kv).unwrap();
+
+    assert_eq!(
+        p.assistant.system_prompt,
+        Some(PartialMergeableString::Merged(PartialMergedString {
+            value: None,
+            strategy: Some(MergedStringStrategy::Prepend),
+            separator: None,
+            discard_when_merged: None,
+            dedup: Some(false),
+        }))
+    );
+
+    // `inherit` clears the opt-out set above.
+    let kv = KvAssignment::try_from_cli("assistant.system_prompt.dedup", "inherit").unwrap();
+    p.assign(kv).unwrap();
+
+    assert_eq!(
+        p.assistant.system_prompt,
+        Some(PartialMergeableString::Merged(PartialMergedString {
+            value: None,
+            strategy: Some(MergedStringStrategy::Prepend),
+            separator: None,
+            discard_when_merged: None,
+            dedup: None,
+        }))
+    );
+
+    // `system_prompt_sections` shares the `system_prompt` prefix but is a
+    // different field, and must not be captured by the nested route.
+    let kv = KvAssignment::try_from_cli("assistant.system_prompt_sections:", r#"[{"tag":"foo"}]"#)
+        .unwrap();
+    p.assign(kv).unwrap();
+
+    assert_eq!(
+        p.assistant.system_prompt_sections.first().unwrap().tag,
+        Some("foo".to_owned())
+    );
+}
+
+#[test]
 fn resolve_model_aliases_resolves_assistant_model() {
     use crate::model::id::{
         ModelIdConfig, ModelIdOrAliasConfig, PartialModelIdOrAliasConfig, ProviderId,

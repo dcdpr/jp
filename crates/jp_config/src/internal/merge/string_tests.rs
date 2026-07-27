@@ -876,15 +876,18 @@ fn test_dedup_accepts_inherit() {
 fn test_dedup_assignment_accepts_every_documented_value() {
     use crate::assignment::{AssignKeyValue as _, KvAssignment};
 
-    // Every input channel accepts the values the field documents, so a
-    // `--cfg assistant.system_prompt.dedup=inherit` behaves like the same value
-    // written in a config file.
-    for (input, want) in [
-        ("true", Some(true)),
-        ("false", Some(false)),
-        ("inherit", None),
+    // The leaf parser accepts every value the field documents, matching what
+    // `deserialize_dedup` accepts from a config file. Each case starts from the
+    // opposite opinion, so the assertion cannot pass on a no-op assignment.
+    for (input, seed, want) in [
+        ("true", Some(false), Some(true)),
+        ("false", Some(true), Some(false)),
+        ("inherit", Some(false), None),
     ] {
-        let mut partial = PartialMergedString::default();
+        let mut partial = PartialMergedString {
+            dedup: seed,
+            ..Default::default()
+        };
         let kv = KvAssignment::try_from_cli("dedup", input).unwrap();
         partial.assign(kv).unwrap();
 
