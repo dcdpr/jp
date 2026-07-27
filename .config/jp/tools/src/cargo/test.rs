@@ -17,13 +17,22 @@ use crate::{
 /// failures, and each one contributes its own block.
 const MAX_TEST_OUTPUT_BYTES: usize = 8_000;
 
-/// Cap for the captured output of all failing tests combined.
+/// Cap for the serialized failure blocks of a run, combined.
 ///
 /// One broken fixture can fail every test in the workspace, so a per-failure
 /// cap alone leaves the total unbounded.
 /// Failures past this budget are counted and named in the summary but carry no
 /// output.
 const MAX_TEST_OUTPUT_BUDGET_BYTES: usize = 32_000;
+
+/// Approximate size of one serialized failure block minus its captured output:
+/// the XML tags and indentation around the crate, path, and output fields.
+///
+/// Charged against [`MAX_TEST_OUTPUT_BUDGET_BYTES`] so that failures with empty
+/// captured output still consume budget.
+/// Without it a run where every failure prints nothing spends nothing, and the
+/// block scaffolding alone grows the response without bound.
+const FAILURE_BLOCK_OVERHEAD_BYTES: usize = 120;
 
 #[derive(serde::Serialize)]
 struct TestFailure {
@@ -131,7 +140,7 @@ fn cargo_test_impl<R: ProcessRunner>(
         }
 
         let output = truncate(stdout, MAX_TEST_OUTPUT_BYTES);
-        spent_bytes += output.len();
+        spent_bytes += output.len() + name.len() + FAILURE_BLOCK_OVERHEAD_BYTES;
         failure.push(TestFailure {
             krate: krate.to_owned(),
             path: path.to_owned(),

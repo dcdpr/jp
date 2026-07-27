@@ -150,6 +150,51 @@ fn failure_output_is_bounded_across_the_whole_run() {
     );
 }
 
+#[test]
+fn failure_blocks_are_bounded_when_captured_output_is_empty() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    // Failing tests that print nothing still cost a serialized block each. If
+    // only captured output were charged against the budget, none of these would
+    // spend anything and every one would be serialized.
+    let stdout = (0..5_000)
+        .map(|i| {
+            format!(
+                r#"{{"type":"test","event":"failed","name":"my_crate$tests::t{i:04}","stdout":""}}"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let runner = MockProcessRunner::success(stdout);
+
+    let content = cargo_test_impl(&ctx, None, None, false, false, &runner)
+        .unwrap()
+        .unwrap_content();
+
+    assert!(
+        content.starts_with("Ran 5000/5000 tests, of which 5000 failed.\n"),
+        "got: {}",
+        &content[..60]
+    );
+    assert!(
+        content.len() < MAX_TEST_OUTPUT_BUDGET_BYTES * 2,
+        "response grew to {} bytes",
+        content.len()
+    );
+    assert!(
+        content.contains("further failing tests was omitted to bound the size of this response"),
+        "got tail: {}",
+        &content[content.len() - 200..]
+    );
+}
+
 /// A runner that captures the environment variables passed to it, so we can
 /// assert on the exact values.
 struct EnvCapturingRunner {
