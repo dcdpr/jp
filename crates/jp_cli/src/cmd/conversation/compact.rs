@@ -1,16 +1,19 @@
 use std::{env, fs, path::PathBuf};
 
 use chrono::Utc;
-use jp_config::conversation::compaction::{
-    CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
-    ReasoningMode, RuleBound, ToolCallsMode,
+use jp_config::{
+    PartialAppConfig,
+    conversation::compaction::{
+        CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
+        ReasoningMode, RuleBound, ToolCallsMode,
+    },
 };
 use jp_conversation::{
     Compaction, CompactionRange, ConversationStream, RangeBound, ReasoningPolicy, SummaryPolicy,
     ToolCallPolicy,
     compaction::{extend_summary_range, resolve_range},
 };
-use jp_workspace::{ConversationHandle, ConversationMut};
+use jp_workspace::{ConversationHandle, ConversationMut, Workspace};
 use tracing::warn;
 
 use crate::{
@@ -18,9 +21,10 @@ use crate::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
+        query::apply_model,
         turn_range::{Bound, TurnRange},
     },
-    ctx::Ctx,
+    ctx::{Ctx, IntoPartialAppConfig},
     format::compaction_policy_label,
 };
 
@@ -88,6 +92,18 @@ pub(crate) struct Compact {
     #[arg(short, long, conflicts_with = "compact")]
     summarize: Option<Option<String>>,
 
+    /// The model to summarize with.
+    ///
+    /// Accepts a model alias or a full `provider/name` ID, the same values as
+    /// `jp query --model`.
+    /// Overrides the summarizer model for every rule in this invocation,
+    /// including rules that set their own
+    /// `conversation.compaction.rules[].summary.model`.
+    /// Only affects rules that generate a summary; without one, nothing calls
+    /// an LLM.
+    #[arg(short = 'm', long)]
+    model: Option<String>,
+
     /// Preview what would change without applying.
     #[arg(long)]
     dry_run: bool,
@@ -102,7 +118,7 @@ pub(crate) struct Compact {
         long,
         conflicts_with_all = [
             "keep_first", "keep_last", "from", "to", "first", "last", "turn",
-            "reasoning", "tools", "summarize", "compact",
+            "reasoning", "tools", "summarize", "compact", "model",
         ],
     )]
     reset: bool,
@@ -197,11 +213,49 @@ impl Compact {
         explicit.extend(self.compact_flag.dsl_rules());
 
         let explicit = CompactionConfig::finalize_rules(explicit)?;
-        Ok(crate::cmd::compact_flag::combine_rules(
+        let mut rules = crate::cmd::compact_flag::combine_rules(
             &cfg.conversation.compaction.rules,
             self.compact_flag.use_config_rules,
             explicit,
-        ))
+        );
+
+        if self.model.is_some() {
+            redirect_summaries_to_assistant_model(&mut rules, cfg);
+        }
+
+        Ok(rules)
+    }
+}
+
+/// Point every rule that names its own summary model at `assistant.model.id`.
+///
+/// A rule with no `summary.model` already summarizes on the assistant model, so
+/// it needs nothing here.
+/// A rule that names one would otherwise outrank `--model`, which is applied to
+/// `assistant.model`.
+/// Only the ID moves: the rule keeps its own summary parameters (max tokens,
+/// temperature, ...).
+fn redirect_summaries_to_assistant_model(
+    rules: &mut [CompactionRuleConfig],
+    cfg: &jp_config::AppConfig,
+) {
+    for summary in rules.iter_mut().filter_map(|rule| rule.summary.as_mut()) {
+        if let Some(model) = summary.model.as_mut() {
+            model.id = cfg.assistant.model.id.clone();
+        }
+    }
+}
+
+impl IntoPartialAppConfig for Compact {
+    fn apply_cli_config(
+        &self,
+        _: Option<&Workspace>,
+        mut partial: PartialAppConfig,
+        merged_config: Option<&PartialAppConfig>,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+        apply_model(&mut partial, self.model.as_deref(), merged_config);
+
+        Ok(partial)
     }
 }
 

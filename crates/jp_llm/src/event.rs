@@ -1,3 +1,4 @@
+use jp_conversation::ConversationStream;
 use serde_json::{Map, Value};
 
 /// Represents a completed event from the LLM.
@@ -57,8 +58,8 @@ pub enum Event {
     /// applied to the conversation stream itself so that the error doesn't show
     /// up again in the future.
     ///
-    /// Currently, the caller applies these patches by mutating the stream
-    /// in-place (see `apply_history_patches` in `signals.rs`).
+    /// Callers apply these with [`apply_patches`], which mutates the stream
+    /// in-place.
     /// This is a known deviation from the append-only stream principle (RFD
     /// 064).
     /// When RFD 064's overlay/projection infrastructure lands, patches should
@@ -178,6 +179,55 @@ pub enum EventMatcher {
 pub enum PatchAction {
     /// Remove a metadata key from the event.
     RemoveMetadata(String),
+}
+
+/// Apply provider-issued patches to the events already in `stream`, returning
+/// how many events it changed.
+///
+/// A return value of `0` means `stream` is byte-identical to what it was, so
+/// resending a request built from it would hit the same provider complaint.
+/// A patch whose matcher hits an event that does not carry the field the action
+/// removes counts as no change: matching alone is not progress.
+///
+/// NOTE: This mutates events in place, which deviates from the append-only
+/// principle established in RFD 064 (non-destructive compaction).
+/// It is acceptable because the targets are opaque provider metadata
+/// (cryptographic signatures), not user-visible content, and the
+/// overlay/projection infrastructure from RFD 064 does not exist yet.
+/// Once RFD 064 lands, this should migrate to an append-only patch event that
+/// the projection layer applies at request-build time.
+pub fn apply_patches(stream: &mut ConversationStream, patches: &[EventPatch]) -> usize {
+    let mut count = 0;
+
+    for event in stream.iter_mut() {
+        for patch in patches {
+            let matched = match &patch.matcher {
+                EventMatcher::MetadataValue { key, value } => event
+                    .event
+                    .metadata
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|v| v == value),
+            };
+
+            if !matched {
+                continue;
+            }
+
+            // The matcher key and the action key are independent, so a matched
+            // patch can still be a no-op. Only an actual removal is progress —
+            // callers use the count to decide whether resending is worthwhile.
+            let mutated = match &patch.action {
+                PatchAction::RemoveMetadata(key) => event.event.metadata.remove(key).is_some(),
+            };
+
+            if mutated {
+                count += 1;
+            }
+        }
+    }
+
+    count
 }
 
 impl Event {
@@ -327,3 +377,7 @@ pub enum FinishReason {
     /// The assistant has stopped generating tokens for some reason.
     Other(Value),
 }
+
+#[cfg(test)]
+#[path = "event_tests.rs"]
+mod tests;
