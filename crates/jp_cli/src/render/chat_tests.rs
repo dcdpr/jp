@@ -1251,6 +1251,26 @@ fn test_gap_between_tool_call_and_next_reasoning_is_shaded() {
 }
 
 #[test]
+fn test_truncate_marks_the_cut_when_whitespace_fills_the_budget() {
+    // The chunk carries no text of its own, but it consumes the last of the
+    // budget, so the elision marker still lands — this is the render the
+    // separation predicate has to agree with.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display =
+        ReasoningDisplayConfig::Truncate(TruncateChars { characters: 2 });
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(*out.lock(), "...\n\n");
+}
+
+#[test]
 fn test_gap_after_tool_call_without_background_is_a_plain_blank_line() {
     // With no reasoning background configured there is nothing to shade, so the
     // deferred gap resolves to a plain blank line and the tool chrome stays

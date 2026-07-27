@@ -293,14 +293,7 @@ impl ChatRenderer {
             ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
                 self.flush_on_transition(ContentKind::Reasoning);
 
-                let remaining = characters.saturating_sub(self.reasoning_chars_count);
-
-                if remaining > 0 {
-                    let mut data: String = content.chars().take(remaining).collect();
-                    if data.chars().count() == remaining {
-                        data.push_str("...\n\n");
-                    }
-
+                if let Some(data) = self.truncated_reasoning(content, characters) {
                     self.render_content(&data);
                 }
 
@@ -353,6 +346,29 @@ impl ChatRenderer {
                 todo!("Summary mode requires async LLM summarization")
             }
         }
+    }
+
+    /// The text a `Truncate` display renders for `content`, or `None` once the
+    /// budget is spent.
+    ///
+    /// The `...` elision marker is appended whenever the taken text fills the
+    /// remaining budget — whitespace included, so the cut is still marked when
+    /// the chunk that exhausts the budget holds nothing else.
+    ///
+    /// Reads `reasoning_chars_count` without advancing it, so callers deciding
+    /// what a chunk *would* render get the same answer as the render itself.
+    fn truncated_reasoning(&self, content: &str, characters: usize) -> Option<String> {
+        let remaining = characters.saturating_sub(self.reasoning_chars_count);
+        if remaining == 0 {
+            return None;
+        }
+
+        let mut data: String = content.chars().take(remaining).collect();
+        if data.chars().count() == remaining {
+            data.push_str("...\n\n");
+        }
+
+        Some(data)
     }
 
     fn render_message(&mut self, content: &str) {
@@ -688,9 +704,11 @@ impl ChatRenderer {
     ///
     /// `Static` writes its `reasoning...` line at the transition whatever the
     /// chunk holds.
-    /// `Full` and `Truncate` depend on the chunk itself — a whitespace-only
-    /// chunk (interleaved thinking emits them between tool calls) renders
-    /// nothing, and neither does any chunk once the truncation budget is spent.
+    /// `Full` renders the chunk as-is, so a whitespace-only one (interleaved
+    /// thinking emits them between tool calls) puts nothing on screen.
+    /// `Truncate` answers for the text it would actually render, elision marker
+    /// included — whitespace that fills the remaining budget still shows a
+    /// `...`, while everything past the budget shows nothing.
     /// `Hidden` renders nothing, `Timer` writes a stderr line it erases again
     /// on completion, and `Progress` writes `reasoning...` plus dots with no
     /// trailing newline.
@@ -702,9 +720,9 @@ impl ChatRenderer {
         match self.config.reasoning.display {
             ReasoningDisplayConfig::Static => true,
             ReasoningDisplayConfig::Full => !content.trim().is_empty(),
-            ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
-                !content.trim().is_empty() && self.reasoning_chars_count < characters
-            }
+            ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => self
+                .truncated_reasoning(content, characters)
+                .is_some_and(|data| !data.trim().is_empty()),
             // `Summary` is unimplemented — `render_reasoning` panics on it.
             ReasoningDisplayConfig::Hidden
             | ReasoningDisplayConfig::Timer

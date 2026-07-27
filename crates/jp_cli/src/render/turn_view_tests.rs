@@ -106,6 +106,23 @@ fn reasoning_past_the_truncation_budget_preserves_tool_separator_debt() {
 }
 
 #[test]
+fn whitespace_that_fills_the_truncation_budget_clears_tool_separator_debt() {
+    // `Truncate` appends its `...` elision marker whenever the taken text fills
+    // the remaining budget, whitespace included, so this chunk does put
+    // something on screen and does supply the spacing. Preserving the debt here
+    // would pay it out alongside the chat separator the ellipsis raises, and
+    // the next header would get two blank lines.
+    let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Truncate(TruncateChars {
+        characters: 2,
+    }));
+    view.render_chat_response(&ChatResponse::reasoning("\n\n"));
+    assert!(
+        !flag.load(Ordering::Relaxed),
+        "the rendered ellipsis supplies spacing and must clear the debt"
+    );
+}
+
+#[test]
 fn message_clears_tool_separator_debt() {
     let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Hidden);
     view.render_chat_response(&ChatResponse::message("hello"));
