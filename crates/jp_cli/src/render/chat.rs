@@ -614,6 +614,21 @@ impl ChatRenderer {
         self.flush_with_separator(false);
     }
 
+    /// Close the block region of the chat response that just ended.
+    ///
+    /// Each `ChatResponse` is a self-contained block of assistant output: two
+    /// consecutive reasoning events are two blocks, not one paragraph
+    /// continued.
+    /// Committing the buffered markdown here keeps the next event's opening
+    /// text from being parsed as a continuation of this one's last paragraph.
+    ///
+    /// The owed reasoning separator stays deferred, so the following content
+    /// still decides its shading: another reasoning block keeps the gap inside
+    /// the reasoning region, a message ends the region with a plain blank line.
+    pub fn end_response(&mut self) {
+        self.drain_buffer();
+    }
+
     /// Drain the buffer's end-of-region events to the printer, committing
     /// buffered blocks and closing any open code block.
     ///
@@ -625,8 +640,6 @@ impl ChatRenderer {
     ///
     /// [`flush_with_separator`]: Self::flush_with_separator
     fn drain_buffer(&mut self) {
-        self.cancel_reasoning_timer();
-
         // Drain the buffer's end-of-region events through the same fixup +
         // render path as streaming.
         for raw_event in self.buffer.flush_events() {
@@ -642,6 +655,9 @@ impl ChatRenderer {
     /// `shaded` carries the reasoning background on that separator, keeping the
     /// gap inside a reasoning region; an unshaded separator ends the region.
     fn flush_with_separator(&mut self, shaded: bool) {
+        // Leaving the region ends any ephemeral chrome: the timer line and the
+        // content about to be committed share the terminal row.
+        self.cancel_reasoning_timer();
         self.drain_buffer();
         self.emit_pending_reasoning_separator(shaded);
     }
@@ -737,6 +753,7 @@ impl ChatRenderer {
     /// Does not transition into tool-call mode: with no chrome there is no
     /// boundary for the next content to react to.
     pub fn skip_tool_call(&mut self) {
+        self.cancel_reasoning_timer();
         self.drain_buffer();
     }
 

@@ -278,6 +278,68 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
     assert!(output.contains("Answer"), "Message content should follow");
 }
 
+/// Two consecutive reasoning events are two blocks, not one paragraph
+/// continued.
+/// The first event's text ends mid-paragraph (no trailing newline), so without
+/// a region boundary the markdown buffer joins the next event's opening heading
+/// onto it.
+#[test]
+fn test_consecutive_reasoning_events_render_as_separate_blocks() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First section.".into(),
+    });
+    renderer.end_response();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Second section.".into(),
+    });
+    renderer.end_response();
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(
+        strip_ansi(&out.lock()),
+        "First section.\n\nSecond section.\n\n"
+    );
+}
+
+/// A reasoning-to-reasoning event boundary stays inside the reasoning region:
+/// the gap it creates carries the reasoning background, exactly as the gap
+/// between two paragraphs of a single event does.
+#[test]
+fn test_reasoning_event_boundary_gap_is_shaded() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First section.".into(),
+    });
+    renderer.end_response();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Second section.".into(),
+    });
+    renderer.end_response();
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        1,
+        "expected one shaded separator at the event boundary and an unshaded one before the \
+         message, got: {output:?}"
+    );
+}
+
 #[test]
 fn test_message_buffer_flushed_on_explicit_flush() {
     let (mut renderer, out, _err) = create_renderer();

@@ -129,15 +129,34 @@ impl TurnView {
         self.assistant_header_rendered = false;
     }
 
-    /// Render a chat response chunk (or full event), emitting the assistant
-    /// role header first if it hasn't been emitted yet for this turn.
+    /// Render a complete chat response, closing its block region.
+    ///
+    /// Use this when `resp` holds an entire response (replaying a stored
+    /// event); use [`render_chat_response_chunk`] for a fragment of one still
+    /// streaming in.
+    ///
+    /// [`render_chat_response_chunk`]: Self::render_chat_response_chunk
+    pub fn render_chat_response(&mut self, resp: &ChatResponse) {
+        self.render_chat_response_chunk(resp);
+        self.end_chat_response();
+    }
+
+    /// Render a fragment of a chat response that is still streaming in,
+    /// emitting the assistant role header first if it hasn't been emitted yet
+    /// for this turn.
+    ///
+    /// The caller owns the response boundary: call [`end_chat_response`] once
+    /// the provider closes the item, otherwise the next response's opening text
+    /// continues this one's last paragraph.
     ///
     /// Dispatches structured responses to the structured renderer and
     /// everything else (messages, reasoning) to the chat renderer.
     /// A non-structured response after structured content closes the open
     /// `json` fence first; a structured response after non-structured content
     /// flushes the chat buffer first.
-    pub fn render_chat_response(&mut self, resp: &ChatResponse) {
+    ///
+    /// [`end_chat_response`]: Self::end_chat_response
+    pub fn render_chat_response_chunk(&mut self, resp: &ChatResponse) {
         self.ensure_assistant_header();
 
         // Visible assistant content supplies its own spacing, so a preceding
@@ -160,6 +179,16 @@ impl TurnView {
             self.structured.flush();
             self.chat.render_response(resp);
         }
+    }
+
+    /// Close the block region of the chat response that just ended.
+    ///
+    /// Only streaming callers need this: [`render_chat_response`] already ends
+    /// the region of the complete response it renders.
+    ///
+    /// [`render_chat_response`]: Self::render_chat_response
+    pub fn end_chat_response(&mut self) {
+        self.chat.end_response();
     }
 
     /// Resolve the tool-call boundary, returning the background the tool's

@@ -1363,6 +1363,39 @@ mod synthesize_non_streaming_output_item_events {
     }
 
     #[test]
+    fn multiple_reasoning_summaries_are_separated_by_a_paragraph_break() {
+        let events = collect_events(
+            1,
+            output_item(json!({
+                "type": "reasoning",
+                "id": "rs_123",
+                "status": "completed",
+                "summary": [
+                    {"type": "summary_text", "text": "**First**\n\nOne."},
+                    {"type": "summary_text", "text": "**Second**\n\nTwo."}
+                ],
+                "encrypted_content": "enc"
+            })),
+            false,
+            true,
+        );
+
+        assert_eq!(events, vec![
+            Event::reasoning(1, ""),
+            Event::reasoning(1, "**First**\n\nOne."),
+            Event::reasoning(1, "\n\n"),
+            Event::reasoning(1, "**Second**\n\nTwo."),
+            Event::flush_with_metadata(
+                1,
+                Map::from_iter([
+                    (ITEM_ID_KEY.to_owned(), "rs_123".into()),
+                    (ENCRYPTED_CONTENT_KEY.to_owned(), "enc".into()),
+                ])
+            ),
+        ]);
+    }
+
+    #[test]
     fn reasoning_item_is_skipped_when_reasoning_is_disabled() {
         let events = collect_events(
             1,
@@ -1450,6 +1483,50 @@ mod map_event {
             2,
             r#"{"path":"docs/rfd/drafts/D47"#
         )]);
+    }
+
+    /// A new summary part opens a distinct reasoning block, but its text
+    /// arrives on the same stream as the previous part's.
+    /// The break is what keeps the next part's leading `**Header**` from
+    /// reading as inline bold continuing the previous sentence.
+    #[test]
+    fn reasoning_summary_part_boundary_emits_paragraph_break() {
+        let events = collect(types::Event::ReasoningSummaryPartAdded {
+            item_id: "rs_123".to_owned(),
+            output_index: 0,
+            summary_index: 1,
+            part: serde_json::from_value(json!({"type": "summary_text", "text": ""})).unwrap(),
+        });
+
+        assert_eq!(events, vec![Event::reasoning(0, "\n\n")]);
+    }
+
+    #[test]
+    fn first_reasoning_summary_part_emits_no_break() {
+        let events = collect(types::Event::ReasoningSummaryPartAdded {
+            item_id: "rs_123".to_owned(),
+            output_index: 0,
+            summary_index: 0,
+            part: serde_json::from_value(json!({"type": "summary_text", "text": ""})).unwrap(),
+        });
+
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn reasoning_summary_part_boundary_is_skipped_when_reasoning_is_disabled() {
+        let events = map_event(
+            types::Event::ReasoningSummaryPartAdded {
+                item_id: "rs_123".to_owned(),
+                output_index: 0,
+                summary_index: 1,
+                part: serde_json::from_value(json!({"type": "summary_text", "text": ""})).unwrap(),
+            },
+            false,
+            false,
+        );
+
+        assert!(events.is_empty());
     }
 
     #[test]

@@ -98,6 +98,38 @@ fn prints_user_message() {
     assert!(output.contains("Hello world"), "got: {output}");
 }
 
+/// Replay renders each stored event whole, so two consecutive reasoning events
+/// must be separated even when the first one's text ends mid-paragraph.
+#[test]
+fn prints_consecutive_reasoning_events_as_separate_blocks() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+
+    let (mut ctx, id, out, _err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(ChatResponse::reasoning("First section."), ts(0, 0, 0)),
+        ConversationEvent::new(ChatResponse::reasoning("Second section."), ts(0, 0, 1)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("First section.\n\nSecond section."),
+        "stored reasoning events must render as separate blocks, got: {output:?}"
+    );
+}
+
 #[test]
 fn prints_assistant_message() {
     let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![ConversationEvent::new(

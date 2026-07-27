@@ -245,19 +245,22 @@ impl TurnCoordinator {
             } => {
                 match &part {
                     EventPart::Message(text) => {
-                        self.view.render_chat_response(&ChatResponse::Message {
-                            message: text.clone(),
-                        });
+                        self.view
+                            .render_chat_response_chunk(&ChatResponse::Message {
+                                message: text.clone(),
+                            });
                     }
                     EventPart::Reasoning(text) => {
-                        self.view.render_chat_response(&ChatResponse::Reasoning {
-                            reasoning: text.clone(),
-                        });
+                        self.view
+                            .render_chat_response_chunk(&ChatResponse::Reasoning {
+                                reasoning: text.clone(),
+                            });
                     }
                     EventPart::Structured(chunk) => {
-                        self.view.render_chat_response(&ChatResponse::Structured {
-                            data: serde_json::Value::String(chunk.clone()),
-                        });
+                        self.view
+                            .render_chat_response_chunk(&ChatResponse::Structured {
+                                data: serde_json::Value::String(chunk.clone()),
+                            });
                     }
                     EventPart::ToolCall(_) => {
                         // Tool-call parts are forwarded to the EventBuilder
@@ -286,6 +289,15 @@ impl TurnCoordinator {
                     .as_tool_call_request()
                     .cloned()
                     .map_or(CommittedEvent::None, CommittedEvent::ToolCallRequest);
+
+                // The provider closed this item, so the region opened by the
+                // chunks rendered above ends here: a following response of the
+                // same kind starts a new block rather than continuing this
+                // one's last paragraph.
+                if event.is_chat_response() {
+                    self.view.end_chat_response();
+                }
+
                 self.push_event(stream, event);
                 HandleEventOutcome::committed(Action::Continue, committed)
             }
