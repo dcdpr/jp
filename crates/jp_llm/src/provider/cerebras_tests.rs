@@ -69,6 +69,32 @@ fn create_request_honours_off_for_unknown_model() {
     assert_eq!(body["reasoning_effort"], "none");
 }
 
+/// `auto` on a model with unknown support omits the effort so the server picks
+/// its own, while still requesting the parsed reasoning format so reasoning is
+/// captured rather than inlined as `<think>` tags.
+#[test]
+fn create_request_auto_defers_effort_for_unknown_model() {
+    let model = ModelDetails::empty((PROVIDER, "future-model-99").try_into().unwrap());
+
+    let query = reasoning_query(jp_config::model::parameters::PartialReasoningConfig::Auto);
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert!(body.get("reasoning_effort").is_none());
+    assert_eq!(body["reasoning_format"], "parsed");
+}
+
+/// A known ladder still resolves `auto` to a supported level, since there is
+/// one to pick from.
+#[test]
+fn create_request_auto_uses_known_ladder() {
+    let model = map_model("gpt-oss-120b").unwrap();
+
+    let query = reasoning_query(jp_config::model::parameters::PartialReasoningConfig::Auto);
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert_eq!(body["reasoning_effort"], "medium");
+}
+
 /// A model known not to accept a `none` effort omits the field entirely and
 /// takes the server default, rather than sending a value it would reject.
 #[test]
@@ -79,6 +105,51 @@ fn create_request_omits_off_for_model_without_none() {
     let (body, _) = create_request(&model, query).unwrap();
 
     assert!(body.get("reasoning_effort").is_none());
+}
+
+/// Records a live request for a Cerebras model absent from the built-in table
+/// with `auto` reasoning.
+///
+/// Validates that omitting `reasoning_effort` is accepted while still asking
+/// for the parsed reasoning format, which is the shape the unit tests can only
+/// assert about in the abstract.
+#[tokio::test]
+async fn test_unknown_model_auto_omits_effort() -> jp_test::Result {
+    let id: ModelIdConfig = "cerebras/gemma-4-31b".parse().unwrap();
+
+    // No table entry, so support is unknown and `auto` defers the effort.
+    let details = ModelDetails::empty(id.clone());
+
+    let request = crate::test::TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .reasoning(Some(
+            jp_config::model::parameters::PartialReasoningConfig::Auto,
+        ))
+        .chat_request("What is 2 + 2?");
+
+    crate::test::run_test(PROVIDER, jp_test::function_name!(), Some(request)).await
+}
+
+/// Records a live request for a model absent from the table with reasoning
+/// explicitly off.
+///
+/// Validates that `reasoning_effort: "none"` is accepted, which JP now sends
+/// for unknown models rather than discarding the caller's setting.
+#[tokio::test]
+async fn test_unknown_model_off_sends_none() -> jp_test::Result {
+    let id: ModelIdConfig = "cerebras/gemma-4-31b".parse().unwrap();
+    let details = ModelDetails::empty(id.clone());
+
+    let request = crate::test::TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .reasoning(Some(
+            jp_config::model::parameters::PartialReasoningConfig::Off,
+        ))
+        .chat_request("What is 2 + 2?");
+
+    crate::test::run_test(PROVIDER, jp_test::function_name!(), Some(request)).await
 }
 
 fn sse_message(data: &str) -> SseEvent {

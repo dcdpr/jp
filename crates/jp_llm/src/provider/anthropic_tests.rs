@@ -1,8 +1,12 @@
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use jp_config::model::parameters::{
-    PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort,
+use jp_config::{
+    conversation::tool::{OneOrManyTypes, ToolParameterConfig},
+    model::{
+        id::ModelIdConfig,
+        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
+    },
 };
 use jp_conversation::{event::ChatRequest, thread::Thread};
 use jp_test::{Result, function_name};
@@ -41,6 +45,55 @@ async fn test_request_chaining() -> Result {
     if let Some(details) = request.as_model_details_mut() {
         details.max_output_tokens = Some(1152);
     }
+
+    run_test(PROVIDER, function_name!(), Some(request)).await
+}
+
+/// Records a live Fable 5 request that forces a tool call while reasoning is
+/// active.
+///
+/// This is the combination the unit tests can only assert about in the
+/// abstract: Anthropic rejects a forced `tool_choice` while thinking is on, and
+/// Fable cannot turn thinking off, so the request must go out soft-forced
+/// (`auto` plus a system nudge).
+/// A wrong gate here is a hard 400.
+#[test(tokio::test)]
+async fn test_fable_5_forced_tool_soft_forces() -> Result {
+    let id: ModelIdConfig = "anthropic/claude-fable-5".parse().unwrap();
+
+    // Mirrors what `map_model` derives for Fable 5.
+    let mut details = ModelDetails::empty(id.clone());
+    details.context_window = Some(1_000_000);
+    details.max_output_tokens = Some(128_000);
+    details.reasoning = Some(ReasoningDetails::adaptive(true, true).always_on());
+    details.structured_output = Some(true);
+    details.features = vec![
+        "interleaved-thinking",
+        "context-editing",
+        "adaptive-thinking",
+    ];
+    assert!(
+        !details.supports_disabling_thinking(),
+        "fixture must be unable to disable thinking"
+    );
+
+    let request = TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .enable_reasoning()
+        .tool("run_me", vec![("foo", ToolParameterConfig {
+            kind: OneOrManyTypes::One("string".into()),
+            default: Some("foo".into()),
+            required: false,
+            summary: None,
+            description: None,
+            examples: None,
+            enumeration: vec![],
+            items: None,
+            properties: IndexMap::default(),
+        })])
+        .tool_choice_fn("run_me")
+        .chat_request("Please run the tool, providing whatever arguments you want.");
 
     run_test(PROVIDER, function_name!(), Some(request)).await
 }

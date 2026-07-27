@@ -491,14 +491,18 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
     // Reasoning effort for gpt-oss-120b and zai-glm-4.7.
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
     if let Some(r) = &reasoning {
+        // `auto` asks for the server's own default rather than a level of our
+        // choosing, so it omits the field instead of picking one.
         let effort_str = match r.effort {
-            ReasoningEffort::Low | ReasoningEffort::Xlow | ReasoningEffort::None => "low",
-            ReasoningEffort::Medium | ReasoningEffort::Auto | ReasoningEffort::Absolute(_) => {
-                "medium"
-            }
-            ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max => "high",
+            ReasoningEffort::Auto => None,
+            ReasoningEffort::Low | ReasoningEffort::Xlow | ReasoningEffort::None => Some("low"),
+            ReasoningEffort::Medium | ReasoningEffort::Absolute(_) => Some("medium"),
+            ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max => Some("high"),
         };
-        body["reasoning_effort"] = json!(effort_str);
+
+        if let Some(effort_str) = effort_str {
+            body["reasoning_effort"] = json!(effort_str);
+        }
     } else if matches!(parameters.reasoning, Some(ReasoningConfig::Off)) {
         // Honour an explicit "off" when the model is known to accept a `none`
         // effort (zai-glm-4.7), and also when support is unknown: a model absent

@@ -419,7 +419,19 @@ fn create_request(
 
 /// Map a Gemini model to a `ModelDetails`.
 ///
+/// A model absent from this table still gets its limits from the API, so an
+/// entry is only needed for the reasoning ladder, which the API does not
+/// report.
+///
+/// Note that `/v1beta/models` lists models that `generateContent` no longer
+/// serves, so being listed is not evidence a model is callable.
+/// A documented shutdown date is the *earliest* a model might be retired rather
+/// than the date it was, so a date in the past does not mean the id is gone.
+/// Ids confirmed to return 404 are removed; the rest keep their documented
+/// date.
+///
 /// See: <https://ai.google.dev/gemini-api/docs/models> See:
+/// <https://ai.google.dev/gemini-api/docs/deprecations> See:
 /// <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
 #[expect(clippy::too_many_lines)]
 fn map_model(model: types::Model) -> ModelDetails {
@@ -461,7 +473,10 @@ fn map_model(model: types::Model) -> ModelDetails {
                 ReasoningDetails::leveled(false, true, false, true, false, false).always_on(),
             ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gemini-3.1-pro-preview",
+                Some(NaiveDate::from_ymd_opt(2026, 3, 9).unwrap()),
+            )),
             structured_output: None,
             prefill: None,
             features: vec![],
@@ -480,6 +495,15 @@ fn map_model(model: types::Model) -> ModelDetails {
             prefill: None,
             features: vec![],
         },
+        // Closed to new users rather than retired: `generateContent` answers 404
+        // "no longer available to new users" for a key that never had access,
+        // while existing users are served until the announced shutdown. Note that
+        // a bare 404 cannot distinguish this from a retired model; only the error
+        // body can.
+        //
+        // The entry earns its place because this is a budget-era model. Without
+        // it the catch-all infers a thinking *level*, which this generation does
+        // not accept.
         "gemini-2.5-flash" => ModelDetails {
             id,
             display_name,
@@ -488,16 +512,14 @@ fn map_model(model: types::Model) -> ModelDetails {
             reasoning: Some(ReasoningDetails::budgetted(0, Some(24576))),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-3-flash-preview",
-                Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
+                &"recommended replacement: gemini-3.6-flash",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 16).unwrap()),
             )),
             structured_output: None,
             prefill: None,
             features: vec![],
         },
-        "gemini-flash-lite-latest"
-        | "gemini-2.5-flash-lite"
-        | "gemini-2.5-flash-lite-preview-09-2025" => ModelDetails {
+        "gemini-flash-lite-latest" | "gemini-2.5-flash-lite" => ModelDetails {
             id,
             display_name,
             context_window,
@@ -505,8 +527,8 @@ fn map_model(model: types::Model) -> ModelDetails {
             reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: unknown",
-                Some(NaiveDate::from_ymd_opt(2026, 7, 22).unwrap()),
+                &"recommended replacement: gemini-3.1-flash-lite",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 16).unwrap()),
             )),
             structured_output: None,
             prefill: None,
@@ -520,41 +542,8 @@ fn map_model(model: types::Model) -> ModelDetails {
             reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-3-pro-preview",
-                Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
-            )),
-            structured_output: None,
-            prefill: None,
-            features: vec![],
-        },
-        "gemini-2.0-flash" | "gemini-2.0-flash-001" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            // The models API reports no `thinking` support for 2.0 Flash, the
-            // same as its Flash-Lite sibling. Sending a thinking budget to it
-            // configures a mode the model does not have.
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-2.5-flash",
-                Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
-            )),
-            structured_output: None,
-            prefill: None,
-            features: vec![],
-        },
-        "gemini-2.0-flash-lite" | "gemini-2.0-flash-lite-001" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-2.5-flash-lite",
-                Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
+                &"recommended replacement: gemini-3.1-pro-preview",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 16).unwrap()),
             )),
             structured_output: None,
             prefill: None,

@@ -117,9 +117,12 @@ impl ModelDetails {
                 // Unconfigured or off, so disabled.
                 None | Some(ReasoningConfig::Off) => None,
 
-                // Auto configured, so use medium effort.
+                // Auto configured, so enable reasoning without dictating an
+                // effort. Support is unknown, so there is no ladder to pick a
+                // level from, and `auto` asks for the provider's own default
+                // rather than a level of our choosing.
                 Some(ReasoningConfig::Auto) => Some(CustomReasoningConfig {
-                    effort: ReasoningEffort::Medium,
+                    effort: ReasoningEffort::Auto,
                     exclude: false,
                 }),
 

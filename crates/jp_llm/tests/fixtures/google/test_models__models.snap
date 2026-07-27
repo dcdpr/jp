@@ -35,9 +35,9 @@ expression: v
         ),
         deprecated: Some(
             Deprecated {
-                note: "recommended replacement: gemini-3-flash-preview",
+                note: "recommended replacement: gemini-3.6-flash",
                 retire_at: Some(
-                    2026-06-17,
+                    2026-10-16,
                 ),
             },
         ),
@@ -77,9 +77,9 @@ expression: v
         ),
         deprecated: Some(
             Deprecated {
-                note: "recommended replacement: gemini-3-pro-preview",
+                note: "recommended replacement: gemini-3.1-pro-preview",
                 retire_at: Some(
-                    2026-06-17,
+                    2026-10-16,
                 ),
             },
         ),
@@ -106,17 +106,8 @@ expression: v
         reasoning: Some(
             Unsupported,
         ),
-        knowledge_cutoff: Some(
-            2024-08-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gemini-2.5-flash",
-                retire_at: Some(
-                    2026-06-01,
-                ),
-            },
-        ),
+        knowledge_cutoff: None,
+        deprecated: None,
         structured_output: None,
         prefill: None,
         features: [],
@@ -140,17 +131,8 @@ expression: v
         reasoning: Some(
             Unsupported,
         ),
-        knowledge_cutoff: Some(
-            2024-08-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gemini-2.5-flash",
-                retire_at: Some(
-                    2026-06-01,
-                ),
-            },
-        ),
+        knowledge_cutoff: None,
+        deprecated: None,
         structured_output: None,
         prefill: None,
         features: [],
@@ -174,17 +156,8 @@ expression: v
         reasoning: Some(
             Unsupported,
         ),
-        knowledge_cutoff: Some(
-            2024-08-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gemini-2.5-flash-lite",
-                retire_at: Some(
-                    2026-06-01,
-                ),
-            },
-        ),
+        knowledge_cutoff: None,
+        deprecated: None,
         structured_output: None,
         prefill: None,
         features: [],
@@ -208,17 +181,8 @@ expression: v
         reasoning: Some(
             Unsupported,
         ),
-        knowledge_cutoff: Some(
-            2024-08-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gemini-2.5-flash-lite",
-                retire_at: Some(
-                    2026-06-01,
-                ),
-            },
-        ),
+        knowledge_cutoff: None,
+        deprecated: None,
         structured_output: None,
         prefill: None,
         features: [],
@@ -390,9 +354,9 @@ expression: v
         ),
         deprecated: Some(
             Deprecated {
-                note: "recommended replacement: unknown",
+                note: "recommended replacement: gemini-3.1-flash-lite",
                 retire_at: Some(
-                    2026-07-22,
+                    2026-10-16,
                 ),
             },
         ),
@@ -471,9 +435,9 @@ expression: v
         ),
         deprecated: Some(
             Deprecated {
-                note: "recommended replacement: unknown",
+                note: "recommended replacement: gemini-3.1-flash-lite",
                 retire_at: Some(
-                    2026-07-22,
+                    2026-10-16,
                 ),
             },
         ),
@@ -539,7 +503,12 @@ expression: v
             2025-01-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gemini-3.1-pro-preview",
+                retire_at: Some(
+                    2026-03-09,
+                ),
+            },
         ),
         structured_output: None,
         prefill: None,

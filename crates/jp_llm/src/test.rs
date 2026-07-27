@@ -145,6 +145,22 @@ impl TestRequest {
         self
     }
 
+    /// Replace the model details used to build the request.
+    ///
+    /// [`Self::chat`] seeds one fixed set of details per provider, which
+    /// bypasses `map_model` entirely.
+    /// Use this to exercise a model as the provider actually describes it, such
+    /// as one absent from the built-in table.
+    ///
+    /// Apply after [`Self::model`], which sets the id sent in the request body.
+    pub fn model_details(mut self, details: ModelDetails) -> Self {
+        if let Self::Chat { model, .. } = &mut self {
+            *model = details;
+        }
+
+        self
+    }
+
     pub fn enable_reasoning(self) -> Self {
         self.reasoning(Some(PartialReasoningConfig::Custom(
             PartialCustomReasoningConfig {

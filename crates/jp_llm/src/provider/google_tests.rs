@@ -141,6 +141,39 @@ fn test_apply_thinking_support_keeps_table_when_thinking() {
     assert_eq!(apply_thinking_support(None, true), None);
 }
 
+/// Records a live request for a Gemini model absent from the built-in table,
+/// with an explicit effort.
+///
+/// Validates the inference the unit tests cannot: that a model newer than this
+/// binary accepts a `thinking_level`, rather than the token-budget form 2.x
+/// models take.
+/// Most of Gemini's current catalog reaches this path.
+#[test(tokio::test)]
+async fn test_unknown_model_inferred_thinking_level()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let id: ModelIdConfig = "google/gemini-3.5-flash".parse().unwrap();
+
+    // Mirrors what `map_model` derives: limits from the API, and no reasoning
+    // ladder because the model is absent from the table.
+    let mut details = ModelDetails::empty(id.clone());
+    details.context_window = Some(1_048_576);
+    details.max_output_tokens = Some(65_536);
+    assert_eq!(details.reasoning, None, "fixture must be unknown");
+
+    let request = TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .reasoning(Some(PartialReasoningConfig::Custom(
+            PartialCustomReasoningConfig {
+                effort: Some(ReasoningEffort::High),
+                exclude: Some(false),
+            },
+        )))
+        .event(ChatRequest::from("What is 2 + 2?"));
+
+    run_test(PROVIDER, function_name!(), Some(request)).await
+}
+
 mod thought_signature_recovery {
     use gemini_client_rs::types;
 
