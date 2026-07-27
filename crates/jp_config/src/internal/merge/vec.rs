@@ -23,15 +23,12 @@ where
     // "inherit"), but NOT when next explicitly sets it.
     let dedup = dedup_flag(&next).or_else(|| dedup_flag(&prev));
 
-    // Deduplicate unless a config explicitly opts out. Applying the same config
-    // source twice — through an `extends` diamond, or by re-supplying `--cfg`
-    // on a conversation that already merged it — must not duplicate entries.
-    let dedup_active = dedup.unwrap_or(true);
-
-    // If prev is default, replace regardless of strategy.
+    // If prev is default, replace regardless of strategy. Nothing is combined,
+    // so only an explicit opt-in deduplicates — see the note on `dedup_active`
+    // below.
     if prev.discard_when_merged() {
         let mut next = next;
-        if dedup_active {
+        if dedup == Some(true) {
             dedup_in_place(&mut next);
         }
 
@@ -47,6 +44,21 @@ where
     let (strategy, mut next_value, discard_when_merged) = match next {
         MergeableVec::Vec(v) => (None, v, false),
         MergeableVec::Merged(v) => (v.strategy, v.value, v.discard_when_merged),
+    };
+
+    // Deduplicate unless a config explicitly opts out. Applying the same config
+    // source twice — through an `extends` diamond, or by re-supplying `--cfg`
+    // on a conversation that already merged it — must not duplicate entries.
+    //
+    // Only merges that actually combine two sources deduplicate by default. A
+    // `replace` contributes no second source, so duplicates in it are the
+    // author's own data: free-form `JsonValue` arrays (tool options, template
+    // values) are merged through here with an implicit `replace`, and their
+    // contents must survive untouched. An explicit `dedup = true` still applies.
+    let dedup_active = if matches!(strategy, Some(MergedVecStrategy::Replace)) {
+        dedup == Some(true)
+    } else {
+        dedup.unwrap_or(true)
     };
 
     let mut value = match strategy {
@@ -65,7 +77,7 @@ where
         dedup_in_place(&mut value);
     }
 
-    // An explicit opinion needs the Merged wrapper to survive the next merge.
+    // An explicit opinion needs the `Merged` wrapper to survive the next merge.
     // Without one, the shape is left alone.
     Ok(Some(if next_is_merged || dedup.is_some() {
         MergeableVec::Merged(MergedVec {

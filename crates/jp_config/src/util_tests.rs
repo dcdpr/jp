@@ -766,6 +766,34 @@ fn test_load_partial_at_path_diamond_applies_shared_file_once() {
 }
 
 #[test]
+fn test_load_partial_at_path_diamond_keeps_shared_file_last() {
+    // a -> b -> d
+    // a -> c -> d
+    //
+    // `b` and `d` both set the same replace-merged field. Collapsing `d`'s two
+    // visits to the last one keeps `d` after `b`, so `d` wins — which is the
+    // same winner the uncollapsed graph produced (`[d, b, d, c, a]`), because
+    // the repeat visit already clobbered `b`.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(&root.join("a.toml"), r#"extends = ["b.toml", "c.toml"]"#);
+    write_config(
+        &root.join("b.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["d.toml"]
+                assistant.name = "b"
+            "#
+        ),
+    );
+    write_config(&root.join("c.toml"), r#"extends = ["d.toml"]"#);
+    write_config(&root.join("d.toml"), r#"assistant.name = "d""#);
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+    assert_eq!(partial.assistant.name.as_deref(), Some("d"));
+}
+
+#[test]
 fn test_load_partial_at_path_repeat_visit_keeps_last_position() {
     // a -> b -> d
     // a -> d

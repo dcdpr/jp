@@ -332,6 +332,54 @@ fn test_no_dedup_when_explicitly_disabled() {
 }
 
 #[test]
+fn test_replace_preserves_duplicates_in_the_replacement() {
+    // A replacement combines nothing, so duplicates in it are the author's own
+    // data. `JsonValue` merges every plain array through here with an implicit
+    // `replace`, so free-form tool options and template values must survive
+    // untouched.
+    let prev = MergeableVec::Vec(vec![0]);
+    let next = MergeableVec::Merged(MergedVec {
+        value: vec![1, 1],
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    });
+
+    let result = vec_with_strategy(prev, next, &()).unwrap().unwrap();
+    assert_eq!(&*result, &[1, 1]);
+}
+
+#[test]
+fn test_replace_deduplicates_when_explicitly_enabled() {
+    let prev = MergeableVec::Vec(vec![0]);
+    let next = MergeableVec::Merged(MergedVec {
+        value: vec![1, 1],
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: Some(true),
+        discard_when_merged: false,
+    });
+
+    let result = vec_with_strategy(prev, next, &()).unwrap().unwrap();
+    assert_eq!(&*result, &[1]);
+}
+
+#[test]
+fn test_discarded_default_preserves_duplicates_in_the_replacement() {
+    // Same reasoning as `replace`: the discarded default contributes nothing to
+    // combine with.
+    let default = MergeableVec::Merged(MergedVec {
+        value: vec![],
+        strategy: None,
+        dedup: None,
+        discard_when_merged: true,
+    });
+    let config = MergeableVec::Vec(vec![1, 1, 2]);
+
+    let result = vec_with_strategy(default, config, &()).unwrap().unwrap();
+    assert_eq!(&*result, &[1, 1, 2]);
+}
+
+#[test]
 fn test_dedup_collapses_repeated_source() {
     // The same source applied twice (an `extends` diamond, or `--cfg` supplied
     // again on a conversation that already merged it) contributes its entries

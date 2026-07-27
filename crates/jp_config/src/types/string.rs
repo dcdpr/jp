@@ -10,7 +10,7 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
     partial::ToPartial,
-    types::deserialize_dedup,
+    types::{Dedup, deserialize_dedup},
 };
 
 /// String value, either defaulting to a merge strategy of `replace`, or
@@ -191,7 +191,13 @@ impl AssignKeyValue for PartialMergedString {
             "strategy" => self.strategy = kv.try_some_from_str()?,
             "separator" => self.separator = kv.try_some_from_str()?,
             "discard_when_merged" => self.discard_when_merged = kv.try_some_bool()?,
-            "dedup" => self.dedup = kv.try_some_bool()?,
+            // Tri-state: `inherit` carries no opinion, so it resolves to the
+            // same `None` the field's absence means.
+            "dedup" => {
+                self.dedup = kv
+                    .try_some_bool_or_from_str::<Dedup, _>()?
+                    .and_then(Dedup::opinion);
+            }
             _ => return missing_key(&kv),
         }
 

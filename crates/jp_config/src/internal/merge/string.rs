@@ -12,15 +12,17 @@ pub fn string_with_strategy(
     next: PartialMergeableString,
     _context: &(),
 ) -> MergeResult<PartialMergeableString> {
+    // Resolve the explicit dedup opinion: next's choice wins, then inherit from
+    // prev. `None` means neither side expressed one.
+    //
+    // A discarded prev still contributes dedup when next has no opinion, but
+    // NOT when next explicitly sets it.
+    let dedup = dedup_flag(&next).or_else(|| dedup_flag(&prev));
+
     // If prev is default, replace regardless of strategy.
     if prev.discard_when_merged() {
-        return Ok(Some(next));
+        return Ok(Some(with_dedup_flag(next, dedup)));
     }
-
-    let prev_dedup = match &prev {
-        PartialMergeableString::String(_) => None,
-        PartialMergeableString::Merged(v) => v.dedup,
-    };
 
     let prev_value = match prev {
         PartialMergeableString::String(v) => Some(v),
@@ -28,28 +30,19 @@ pub fn string_with_strategy(
     };
 
     let next_is_replace = matches!(next, PartialMergeableString::String(_));
-    let (strategy, separator, next_value, discard_when_merged, next_dedup) = match next {
-        PartialMergeableString::String(v) => (
-            Some(MergedStringStrategy::Replace),
-            None,
-            Some(v),
-            None,
-            None,
-        ),
-        PartialMergeableString::Merged(v) => (
-            v.strategy,
-            v.separator,
-            v.value,
-            v.discard_when_merged,
-            v.dedup,
-        ),
+    let (strategy, separator, next_value, discard_when_merged) = match next {
+        PartialMergeableString::String(v) => {
+            (Some(MergedStringStrategy::Replace), None, Some(v), None)
+        }
+        PartialMergeableString::Merged(v) => {
+            (v.strategy, v.separator, v.value, v.discard_when_merged)
+        }
     };
 
     // Skip an append or prepend whose value is already present, unless a config
     // explicitly opts out. Applying the same config source twice — through an
     // `extends` diamond, or by re-supplying `--cfg` on a conversation that
     // already merged it — must not duplicate its contribution.
-    let dedup = next_dedup.or(prev_dedup);
     let dedup_active = dedup.unwrap_or(true);
 
     // An unstated strategy means `append`, matching `MergedStringStrategy`'s
@@ -73,7 +66,10 @@ pub fn string_with_strategy(
     };
 
     Ok(Some(if next_is_replace {
-        PartialMergeableString::String(value.unwrap_or_default())
+        with_dedup_flag(
+            PartialMergeableString::String(value.unwrap_or_default()),
+            dedup,
+        )
     } else {
         PartialMergeableString::Merged(PartialMergedString {
             value,
@@ -83,6 +79,40 @@ pub fn string_with_strategy(
             dedup,
         })
     }))
+}
+
+/// The explicit `dedup` opinion carried by a value, if any.
+const fn dedup_flag(v: &PartialMergeableString) -> Option<bool> {
+    match v {
+        PartialMergeableString::String(_) => None,
+        PartialMergeableString::Merged(m) => m.dedup,
+    }
+}
+
+/// Attach an explicit `dedup` opinion, wrapping a plain string in `Merged` with
+/// a `replace` strategy so the flag survives the next merge.
+///
+/// A `None` opinion is left implicit and the value's shape is unchanged.
+fn with_dedup_flag(v: PartialMergeableString, dedup: Option<bool>) -> PartialMergeableString {
+    if dedup.is_none() {
+        return v;
+    }
+
+    match v {
+        PartialMergeableString::String(value) => {
+            PartialMergeableString::Merged(PartialMergedString {
+                value: Some(value),
+                strategy: Some(MergedStringStrategy::Replace),
+                separator: None,
+                discard_when_merged: None,
+                dedup,
+            })
+        }
+        PartialMergeableString::Merged(mut m) => {
+            m.dedup = dedup;
+            PartialMergeableString::Merged(m)
+        }
+    }
 }
 
 /// Whether `needle` already appears in `haystack` as a whole
