@@ -818,15 +818,3 @@ fn test_load_partial_at_path_repeat_visit_keeps_last_position() {
     let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
     assert_eq!(partial.assistant.name.as_deref(), Some("d"));
 }
-
-#[test]
-fn test_vec_dedup_preserves_order() {
-    let result = vec_dedup(vec![3, 1, 2, 1, 3, 4], &()).unwrap();
-    assert_eq!(result, vec![3, 1, 2, 4]);
-}
-
-#[test]
-fn test_vec_dedup_no_duplicates() {
-    let result = vec_dedup(vec![1, 2, 3], &()).unwrap();
-    assert_eq!(result, vec![1, 2, 3]);
-}

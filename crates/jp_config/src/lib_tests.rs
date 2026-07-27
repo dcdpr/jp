@@ -97,6 +97,28 @@ fn test_partial_app_config_assign() {
 }
 
 #[test]
+fn config_load_paths_append_across_layers() {
+    // Each layer adds its search directories to the accumulated list instead of
+    // replacing it, and a directory named by two layers is kept once. Order
+    // matters downstream: `--cfg <name>` resolution walks the list and takes
+    // the first directory that holds a matching file.
+    let mut base = PartialAppConfig::empty();
+    base.config_load_paths = Some(vec![".jp/global".into(), ".jp/shared".into()]);
+
+    let mut overlay = PartialAppConfig::empty();
+    overlay.config_load_paths = Some(vec![".jp/shared".into(), ".jp/workspace".into()]);
+
+    base.merge(&(), overlay).unwrap();
+
+    let want: Vec<RelativePathBuf> = vec![
+        ".jp/global".into(),
+        ".jp/shared".into(),
+        ".jp/workspace".into(),
+    ];
+    assert_eq!(base.config_load_paths, Some(want));
+}
+
+#[test]
 fn assign_routes_nested_system_prompt_keys() {
     use crate::types::string::{MergedStringStrategy, PartialMergeableString, PartialMergedString};
 

@@ -108,7 +108,7 @@ pub struct AppConfig {
     ///
     /// For example, to load `.jp/agents/dev.toml`, add `.jp/agents` to this
     /// list and run `jp query --cfg dev`.
-    #[setting(merge = schematic::merge::append_vec, transform = util::vec_dedup)]
+    #[setting(merge = internal::merge::append_vec_dedup)]
     pub config_load_paths: Vec<RelativePathBuf>,
 
     /// Extends the configuration from the given files.
