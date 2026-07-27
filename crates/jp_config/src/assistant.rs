@@ -21,7 +21,7 @@ use crate::{
         tool_choice::ToolChoice,
     },
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
-    fill::FillDefaults,
+    fill::{FillDefaults, fill_opt},
     internal::merge::{string_with_strategy, vec_with_strategy},
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opts},
@@ -149,7 +149,10 @@ impl FillDefaults for PartialAssistantConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             name: self.name.or(defaults.name),
-            system_prompt: self.system_prompt.or(defaults.system_prompt),
+            // `fill_opt` rather than `or`: a metadata-only prompt (from e.g.
+            // `--cfg assistant.system_prompt.dedup=false`) still needs the
+            // default's value filled in.
+            system_prompt: fill_opt(self.system_prompt, defaults.system_prompt),
             system_prompt_sections: self
                 .system_prompt_sections
                 .fill_from(defaults.system_prompt_sections),

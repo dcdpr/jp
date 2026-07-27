@@ -877,12 +877,14 @@ fn test_dedup_assignment_accepts_every_documented_value() {
     use crate::assignment::{AssignKeyValue as _, KvAssignment};
 
     // The leaf parser accepts every value the field documents, matching what
-    // `deserialize_dedup` accepts from a config file. Each case starts from the
-    // opposite opinion, so the assertion cannot pass on a no-op assignment.
+    // `deserialize_dedup` accepts from a config file. `true` and `false` start
+    // from the opposite opinion so the assertion cannot pass on a no-op;
+    // `inherit` states no opinion and must leave the seed standing.
     for (input, seed, want) in [
         ("true", Some(false), Some(true)),
         ("false", Some(true), Some(false)),
-        ("inherit", Some(false), None),
+        ("inherit", Some(false), Some(false)),
+        ("inherit", None, None),
     ] {
         let mut partial = PartialMergedString {
             dedup: seed,
@@ -900,6 +902,33 @@ fn test_dedup_assignment_accepts_every_documented_value() {
         partial.assign(kv).is_err(),
         "an undocumented value should be rejected"
     );
+}
+
+#[test]
+fn test_inherited_dedup_opt_out_still_duplicates_on_append() {
+    use crate::assignment::{AssignKeyValue as _, KvAssignment};
+
+    // `dedup=inherit` leaves a lower layer's opt-out in force, which is only
+    // observable through the merge it governs: the append below must duplicate.
+    let mut opted_out = PartialMergedString {
+        dedup: Some(false),
+        ..Default::default()
+    };
+    let kv = KvAssignment::try_from_cli("dedup", "inherit").unwrap();
+    opted_out.assign(kv).unwrap();
+
+    let result = string_with_strategy(
+        PartialMergeableString::Merged(PartialMergedString {
+            value: Some("persona".to_owned()),
+            ..opted_out
+        }),
+        appending("persona", None),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(result.as_ref(), "persona\n\npersona");
 }
 
 #[test]

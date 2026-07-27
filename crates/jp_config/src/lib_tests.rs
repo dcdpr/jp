@@ -122,7 +122,7 @@ fn assign_routes_nested_system_prompt_keys() {
         }))
     );
 
-    // `inherit` clears the opt-out set above.
+    // `inherit` states no opinion, leaving the opt-out set above in force.
     let kv = KvAssignment::try_from_cli("assistant.system_prompt.dedup", "inherit").unwrap();
     p.assign(kv).unwrap();
 
@@ -133,7 +133,7 @@ fn assign_routes_nested_system_prompt_keys() {
             strategy: Some(MergedStringStrategy::Prepend),
             separator: None,
             discard_when_merged: None,
-            dedup: None,
+            dedup: Some(false),
         }))
     );
 
@@ -147,6 +147,59 @@ fn assign_routes_nested_system_prompt_keys() {
         p.assistant.system_prompt_sections.first().unwrap().tag,
         Some("foo".to_owned())
     );
+}
+
+#[test]
+fn metadata_only_system_prompt_keeps_the_default_prompt() {
+    // A metadata-only override states no value, so the built-in default has to
+    // survive gap-filling. Without it, `--cfg assistant.system_prompt.dedup=false`
+    // resolves the prompt to an empty string.
+    let mut p = PartialAppConfig::new_test();
+
+    let kv = KvAssignment::try_from_cli("assistant.system_prompt.dedup", "false").unwrap();
+    p.assign(kv).unwrap();
+
+    let config = AppConfig::from_partial_with_defaults(p).unwrap();
+
+    assert_eq!(
+        config.assistant.system_prompt.as_deref(),
+        Some("You are a helpful assistant.")
+    );
+}
+
+#[test]
+fn scalar_system_prompt_accepts_nested_metadata() {
+    use crate::types::string::{MergedStringStrategy, PartialMergeableString, PartialMergedString};
+
+    // A lower layer supplying the common scalar form must not block a dotted
+    // override. The scalar is promoted to `Merged` with `replace` pinned, which
+    // is what the plain form means.
+    let mut p = PartialAppConfig::new_test();
+
+    let kv = KvAssignment::try_from_cli("assistant.system_prompt", "base").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(
+        p.assistant.system_prompt,
+        Some(PartialMergeableString::String("base".to_owned()))
+    );
+
+    let kv = KvAssignment::try_from_cli("assistant.system_prompt.dedup", "false").unwrap();
+    p.assign(kv).unwrap();
+
+    assert_eq!(
+        p.assistant.system_prompt,
+        Some(PartialMergeableString::Merged(PartialMergedString {
+            value: Some("base".to_owned()),
+            strategy: Some(MergedStringStrategy::Replace),
+            separator: None,
+            discard_when_merged: None,
+            dedup: Some(false),
+        }))
+    );
+
+    // The promotion preserves the scalar's meaning end to end.
+    let config = AppConfig::from_partial_with_defaults(p).unwrap();
+    assert_eq!(config.assistant.system_prompt.as_deref(), Some("base"));
 }
 
 #[test]
