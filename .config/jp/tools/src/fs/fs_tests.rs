@@ -25,10 +25,12 @@ fn list_files_with_suppress(root: &camino::Utf8Path, suppress: Value) -> (Contex
 
 #[tokio::test]
 async fn a_non_array_suppress_option_fails_the_invocation() {
-    // The strict parse replaced `option_or`, which turned any unreadable value
-    // into an empty list and handed over the very paths the option named. This
-    // drives the dispatcher itself, so a regression back to the lenient read is
-    // caught here rather than by nobody.
+    // A malformed `suppress` value fails the invocation at the dispatcher rather
+    // than degrading to "suppress nothing", which would hand over the very paths
+    // the option names.
+    // `Tool::option_or` degrades exactly that way, so reading this option through
+    // it satisfies every other test while breaking the guarantee; only driving
+    // `run` itself catches that.
     let tmp = tempdir().unwrap();
     std::fs::write(tmp.path().join("a.txt"), "").unwrap();
 
