@@ -399,6 +399,47 @@ fn structured_response_followed_by_message_closes_fence_first() {
     );
 }
 
+/// Each structured response is a self-contained block, so two consecutive
+/// structured events render as two complete `json` fences rather than both
+/// values being appended inside the first one as `}{`.
+#[test]
+fn prints_consecutive_structured_events_as_separate_fences() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Extract"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::structured(json!({"name": "Alice"})),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ChatResponse::structured(json!({"name": "Bob"})),
+            ts(0, 0, 3),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert_eq!(
+        output.matches("```json").count(),
+        2,
+        "each structured event opens its own fence, got: {output:?}"
+    );
+    assert!(
+        !output.contains("}{"),
+        "the second value must not be appended inside the first fence, got: {output:?}"
+    );
+}
+
 /// Regression: a message after a structured response *within the same turn*
 /// must close the `json` fence first.
 /// This pins the structured→message branch in `TurnView::render_chat_response`

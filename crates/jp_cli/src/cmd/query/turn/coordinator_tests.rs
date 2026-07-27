@@ -101,6 +101,41 @@ fn consecutive_reasoning_events_render_as_separate_blocks() {
     );
 }
 
+/// A provider response carrying two structured items produces two structured
+/// events, and the second must not be appended inside the first's `json` fence.
+///
+/// Pins the live path: the chunks of item 0 carry no terminator, so the only
+/// signal that its fence can close is its `Event::Flush`.
+#[test]
+fn consecutive_structured_events_render_as_separate_fences() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        Some("openai/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("extract"));
+
+    coordinator.handle_event(&mut stream, Event::structured(0, r#"{"name":"Alice"}"#));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::structured(1, r#"{"name":"Bob"}"#));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    let output = strip_ansi(&out.lock());
+    assert_eq!(
+        output.matches("```json").count(),
+        2,
+        "each structured item opens its own fence, got: {output:?}"
+    );
+}
+
 #[test]
 fn finish_notice_silent_for_completed_and_retry() {
     assert!(finish_notice(&FinishReason::Completed, &[]).is_none());

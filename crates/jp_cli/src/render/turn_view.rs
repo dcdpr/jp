@@ -185,11 +185,17 @@ impl TurnView {
 
     /// Close the block region of the chat response that just ended.
     ///
+    /// Closes whichever renderer holds the response: a structured response's
+    /// `json` fence, or the chat renderer's buffered markdown.
+    /// Two consecutive structured responses are two fenced blocks, just as two
+    /// consecutive reasoning responses are two markdown blocks.
+    ///
     /// Only streaming callers need this: [`render_chat_response`] already ends
     /// the region of the complete response it renders.
     ///
     /// [`render_chat_response`]: Self::render_chat_response
     pub fn end_chat_response(&mut self) {
+        self.structured.flush();
         self.chat.end_response();
     }
 
