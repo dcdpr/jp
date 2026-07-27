@@ -168,6 +168,64 @@ fn test_map_model_without_reasoning_is_unsupported() {
     assert_eq!(details.max_output_tokens, None);
 }
 
+/// The serving provider's context window wins over the model's own, which may
+/// be larger than what a request can actually get.
+#[test]
+fn test_map_model_prefers_serving_provider_context_window() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/routed",
+        "name": "Routed",
+        "created": 1_784_912_546,
+        "context_length": 1_000_000,
+        "top_provider": {"context_length": 200_000, "max_completion_tokens": 64_000},
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.context_window, Some(200_000));
+    assert_eq!(details.max_output_tokens, Some(64_000));
+}
+
+/// A provider that advertises no window of its own falls back to the model's.
+#[test]
+fn test_map_model_falls_back_to_model_context_window() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/unrouted",
+        "name": "Unrouted",
+        "created": 1_784_912_546,
+        "context_length": 8_192,
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.context_window, Some(8_192));
+}
+
+/// A reasoning block naming no efforts describes nothing, so support stays
+/// unknown rather than becoming a known ladder with no rungs.
+/// Building one would send a `minimal` effort the catalog never announced.
+#[test]
+fn test_map_model_empty_supported_efforts_stays_unknown() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/undescribed",
+        "name": "Undescribed",
+        "created": 1_784_912_546,
+        "context_length": 200_000,
+        "supported_parameters": ["reasoning", "reasoning_effort"],
+        "reasoning": {"mandatory": true, "supported_efforts": []},
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.reasoning, None);
+    // Unknown support still reads as unable to disable, so nothing is lost by
+    // not preserving `mandatory` as a ladder.
+    assert!(!details.supports_disabling_thinking());
+}
+
 /// A catalog entry that lists no parameters at all reported nothing, which is
 /// not the same as the model supporting nothing.
 #[test]

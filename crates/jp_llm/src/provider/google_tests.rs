@@ -93,26 +93,69 @@ fn test_map_model_thinking_flag_overrides_table() {
 #[test]
 fn test_unknown_thinking_level_honours_requested_effort() {
     assert_eq!(
-        unknown_thinking_level(ReasoningEffort::High, None),
+        effort_to_thinking_level(ReasoningEffort::High, None),
         Some(types::ThinkingLevel::High)
     );
     assert_eq!(
-        unknown_thinking_level(ReasoningEffort::Low, None),
+        effort_to_thinking_level(ReasoningEffort::Low, None),
         Some(types::ThinkingLevel::Low)
     );
     assert_eq!(
-        unknown_thinking_level(ReasoningEffort::Medium, None),
+        effort_to_thinking_level(ReasoningEffort::Medium, None),
         Some(types::ThinkingLevel::Medium)
     );
 
     // Efforts above `high` clamp down rather than being dropped.
     assert_eq!(
-        unknown_thinking_level(ReasoningEffort::Max, None),
+        effort_to_thinking_level(ReasoningEffort::Max, None),
         Some(types::ThinkingLevel::High)
     );
 
     // `auto` leaves the choice to the model.
-    assert_eq!(unknown_thinking_level(ReasoningEffort::Auto, None), None);
+    assert_eq!(effort_to_thinking_level(ReasoningEffort::Auto, None), None);
+}
+
+/// A leveled model that cannot turn reasoning off must not be sent
+/// `thinking_budget: 0` when reasoning is off: that both disables a model which
+/// rejects being disabled and uses the budget form for a level-based model.
+/// Its lowest supported level is requested with the thoughts withheld instead.
+#[test]
+fn test_off_on_always_on_leveled_model_uses_lowest_level() {
+    let mut model = ModelDetails::empty((PROVIDER, "gemini-3-pro-preview").try_into().unwrap());
+    model.max_output_tokens = Some(65_536);
+    // Mirrors the table entry: low and high only, reasoning always on.
+    model.reasoning =
+        Some(ReasoningDetails::leveled(false, true, false, true, false, false).always_on());
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("an always-on model still gets a thinking config");
+
+    assert!(!thinking.include_thoughts, "thoughts are withheld");
+    assert_eq!(
+        thinking.thinking_budget, None,
+        "a level-based model takes no token budget"
+    );
+    assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::Low));
 }
 
 /// A model the API reports as not thinking is recorded as not reasoning, even

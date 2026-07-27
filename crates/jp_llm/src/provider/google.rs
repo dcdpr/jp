@@ -278,6 +278,20 @@ fn create_request(
                     _ => None,
                 },
             })
+        } else if !details.can_disable() {
+            // Reasoning is off, but this model rejects an explicit disable. Ask
+            // for the least thinking it accepts and withhold the thoughts: a
+            // leveled model takes its lowest level, a budgetted one its minimum
+            // budget. Sending `thinking_budget: 0` here would both disable a
+            // model that cannot be disabled and use the budget form for a
+            // level-based one.
+            Some(types::ThinkingConfig {
+                include_thoughts: false,
+                thinking_budget: (details.min_tokens() > 0).then(|| details.min_tokens()),
+                thinking_level: details
+                    .lowest_effort()
+                    .and_then(|effort| effort_to_thinking_level(effort, max_output_tokens)),
+            })
         } else if details.min_tokens() > 0 {
             // Model requires a minimum thinking budget — can't fully disable.
             Some(types::ThinkingConfig {
@@ -312,7 +326,7 @@ fn create_request(
         Some(types::ThinkingConfig {
             include_thoughts: true,
             thinking_budget: None,
-            thinking_level: unknown_thinking_level(config.effort, max_output_tokens),
+            thinking_level: effort_to_thinking_level(config.effort, max_output_tokens),
         })
     } else {
         None
@@ -581,13 +595,14 @@ fn map_model(model: types::Model) -> ModelDetails {
     details
 }
 
-/// Map a requested effort onto a thinking level for a model whose effort ladder
-/// is unknown.
+/// Map a reasoning effort onto the nearest thinking level, without consulting a
+/// ladder.
 ///
 /// Returns `None` for `Auto`, leaving the choice to the model.
-/// Every other effort maps to the nearest level, so an unrecognised model still
-/// honours the caller's request instead of silently discarding it.
-fn unknown_thinking_level(
+/// Callers that know the model's ladder should resolve against it first; this
+/// is the fallback for an effort that has to be expressed as a level
+/// regardless.
+fn effort_to_thinking_level(
     effort: ReasoningEffort,
     max_output_tokens: Option<i32>,
 ) -> Option<types::ThinkingLevel> {

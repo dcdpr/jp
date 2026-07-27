@@ -609,7 +609,12 @@ fn map_model(model: response::Model) -> Result<ModelDetails> {
     Ok(ModelDetails {
         id: (PROVIDER, model.id).try_into()?,
         display_name: Some(model.name),
-        context_window: Some(model.context_length),
+        // The serving provider's window, which may be smaller than the model's
+        // own, is what a request actually gets.
+        context_window: model
+            .top_provider
+            .context_length
+            .or(Some(model.context_length)),
         max_output_tokens: model.top_provider.max_completion_tokens,
         reasoning,
         // Not `created`, which is when the model was listed on OpenRouter rather
@@ -657,6 +662,14 @@ fn derive_reasoning(model: &response::Model) -> Option<ModelReasoningDetails> {
             .all(|p| p != "reasoning" && p != "reasoning_effort")
             .then(ModelReasoningDetails::unsupported);
     };
+
+    // A reasoning block naming no efforts describes nothing, so support stays
+    // unknown rather than becoming a known ladder with no rungs. Building one
+    // would let `custom_reasoning_config` fall through to `xlow` and send a
+    // `minimal` effort the catalog never announced.
+    if reasoning.supported_efforts.is_empty() {
+        return None;
+    }
 
     let supports = |effort: &str| reasoning.supported_efforts.iter().any(|e| e == effort);
 

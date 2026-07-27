@@ -95,6 +95,18 @@ fn create_request_auto_uses_known_ladder() {
     assert_eq!(body["reasoning_effort"], "medium");
 }
 
+/// `gemma-4-31b` accepts a `none` effort, which the recorded fixture for this
+/// model confirms, so an explicit `off` is honoured rather than dropped.
+#[test]
+fn create_request_honours_off_for_gemma() {
+    let model = map_model("gemma-4-31b").unwrap();
+
+    let query = reasoning_query(jp_config::model::parameters::PartialReasoningConfig::Off);
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert_eq!(body["reasoning_effort"], "none");
+}
+
 /// A model known not to accept a `none` effort omits the field entirely and
 /// takes the server default, rather than sending a value it would reject.
 #[test]

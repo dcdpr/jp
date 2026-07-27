@@ -350,12 +350,11 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             context_window: Some(131_072),
             max_output_tokens: Some(40_960),
             // The public models API reports reasoning support but no effort
-            // ladder, so this mirrors the other Cerebras reasoning models.
-            // Marked always-on because sending an unsupported `none` effort is
-            // an error, while omitting it merely spends tokens.
-            reasoning: Some(
-                ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
-            ),
+            // ladder, so the levels mirror the other Cerebras reasoning models.
+            // Reasoning is disableable: the model accepts a `none` effort.
+            reasoning: Some(ReasoningDetails::leveled(
+                false, true, true, true, false, false,
+            )),
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: Some(true),

@@ -29,7 +29,7 @@ expression: v
                     xhigh: false,
                     max: false,
                 },
-                can_disable: false,
+                can_disable: true,
             },
         ),
         knowledge_cutoff: None,
