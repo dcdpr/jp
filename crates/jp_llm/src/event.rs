@@ -1,3 +1,4 @@
+use jp_conversation::ConversationStream;
 use serde_json::{Map, Value};
 
 /// Represents a completed event from the LLM.
@@ -178,6 +179,48 @@ pub enum EventMatcher {
 pub enum PatchAction {
     /// Remove a metadata key from the event.
     RemoveMetadata(String),
+}
+
+/// Apply provider-issued patches to the events already in `stream`, returning
+/// how many mutations were made.
+///
+/// A return value of `0` means no event matched, so resending a request built
+/// from `stream` would hit the same provider complaint.
+///
+/// NOTE: This mutates events in place, which deviates from the append-only
+/// principle established in RFD 064 (non-destructive compaction).
+/// It is acceptable because the targets are opaque provider metadata
+/// (cryptographic signatures), not user-visible content, and the
+/// overlay/projection infrastructure from RFD 064 does not exist yet.
+/// Once RFD 064 lands, this should migrate to an append-only patch event that
+/// the projection layer applies at request-build time.
+pub fn apply_patches(stream: &mut ConversationStream, patches: &[EventPatch]) -> usize {
+    let mut count = 0;
+
+    for event in stream.iter_mut() {
+        for patch in patches {
+            let matched = match &patch.matcher {
+                EventMatcher::MetadataValue { key, value } => event
+                    .event
+                    .metadata
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|v| v == value),
+            };
+
+            if !matched {
+                continue;
+            }
+
+            match &patch.action {
+                PatchAction::RemoveMetadata(key) => event.event.metadata.remove(key),
+            };
+
+            count += 1;
+        }
+    }
+
+    count
 }
 
 impl Event {

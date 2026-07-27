@@ -485,7 +485,7 @@ impl From<crate::error::Error> for Error {
                 (
                     "suggestion",
                     "Retry with a different summarizer model, e.g. `jp conversation compact \
-                     --model <model>`."
+                     --model <model>`, or raise `max_tokens` for the current one."
                         .to_owned(),
                 ),
             ]

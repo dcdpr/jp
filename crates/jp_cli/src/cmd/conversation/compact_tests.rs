@@ -73,6 +73,45 @@ fn model_flag_targets_the_assistant_model() {
 }
 
 #[test]
+fn model_alias_reaches_a_configured_summary_model_through_the_pipeline() {
+    // The whole path in one go: `--model gpt` -> `apply_cli_config` -> the
+    // config pipeline (which resolves the alias) -> `effective_rules`. Asserting
+    // the exact requested model catches a broken CLI-config hop, a missed alias
+    // resolution, or a missed redirect, none of which the narrower tests below
+    // can distinguish on their own.
+    let mut partial = PartialAppConfig::new_test();
+    partial.providers.llm.aliases.insert(
+        "gpt".to_owned(),
+        PartialModelIdOrAliasConfig::from("openai/gpt-5"),
+    );
+    partial.conversation.compaction.rules = vec![PartialCompactionRuleConfig {
+        summary: Some(PartialSummaryConfig {
+            model: Some(PartialModelConfig {
+                id: "anthropic/claude-configured".into(),
+                ..PartialModelConfig::default()
+            }),
+            ..PartialSummaryConfig::default()
+        }),
+        ..PartialCompactionRuleConfig::default()
+    }]
+    .into();
+
+    // No `--summarize`: a policy flag would replace the configured rule with an
+    // ad-hoc one, and the configured `summary.model` is what this exercises.
+    let compact = parse_compact(&["--model", "gpt"]);
+    let partial = compact.apply_cli_config(None, partial, None).unwrap();
+    let cfg = jp_config::util::build(partial).unwrap();
+
+    let rules = compact.effective_rules(&cfg).unwrap();
+    let summary = rules[0].summary.as_ref().expect("configured summary rule");
+
+    assert_eq!(
+        summary.model.as_ref().unwrap().id.resolved().to_string(),
+        "openai/gpt-5"
+    );
+}
+
+#[test]
 fn model_flag_overrides_a_configured_summary_model() {
     // A rule with its own `summary.model` outranks the assistant model in the
     // summarizer, which would make `--model` a silent no-op.

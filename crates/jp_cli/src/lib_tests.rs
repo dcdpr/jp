@@ -632,3 +632,59 @@ fn resolve_config_consumes_default_id() {
         config.conversation.default_id,
     );
 }
+
+/// `jp conversation compact --model` has to travel `Commands` -\>
+/// `Conversation` -\> `Compact` to reach the config.
+/// A missing delegation arm anywhere on that chain makes the flag a silent
+/// no-op, which no test on `Compact` alone can catch.
+#[test]
+fn resolve_config_applies_the_compact_model_flag() {
+    use jp_config::model::id::PartialModelIdOrAliasConfig;
+
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
+    let mut workspace = Workspace::new(root).with_backend(fs_backend);
+    let conversation_id = make_id(3000);
+    workspace
+        .create_and_lock_conversation_with_id(
+            conversation_id,
+            Conversation::default(),
+            Arc::new(config_with_model(ProviderId::Anthropic, "opus")),
+            None,
+        )
+        .unwrap();
+
+    let mut base = PartialAppConfig::new_test();
+    base.providers.llm.aliases.insert(
+        "gpt".to_owned(),
+        PartialModelIdOrAliasConfig::from("openai/gpt-5"),
+    );
+
+    // `compact` takes the conversation as a positional argument.
+    let cli = Cli::try_parse_from([
+        "jp",
+        "conversation",
+        "compact",
+        &conversation_id.to_string(),
+        "--model",
+        "gpt",
+    ])
+    .unwrap();
+    let (config, _handles, _start_new) = resolve_config(
+        &cli.command,
+        base,
+        &cli.globals.config,
+        &mut workspace,
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.assistant.model.id.resolved().to_string(),
+        "openai/gpt-5"
+    );
+}
