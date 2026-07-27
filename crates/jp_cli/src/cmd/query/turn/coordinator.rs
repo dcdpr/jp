@@ -221,6 +221,14 @@ impl TurnCoordinator {
         self.state = TurnPhase::Streaming;
     }
 
+    /// Process one event from a Provider stream.
+    ///
+    /// [`Event::Flush`] commits an indexed response to the Conversation but
+    /// does not flush terminal rendering.
+    /// Provider aggregation boundaries and [`ConversationEvent`] boundaries are
+    /// not Markdown boundaries; consecutive responses of the same kind stay in
+    /// one renderer content region until a semantic boundary such as a tool
+    /// call, content-kind transition, or end of stream.
     pub fn handle_event(
         &mut self,
         stream: &mut ConversationStream,
@@ -395,13 +403,14 @@ impl TurnCoordinator {
         self.event_builder.peek_partial_events()
     }
 
-    /// Resets the coordinator state back to Streaming for a new cycle.
+    /// Reset per-request state before continuing from committed partial output.
     ///
-    /// Used after handling a Continue action with prefill - the partial content
-    /// has been injected into the thread, and we're ready to receive the
-    /// continuation from the LLM.
+    /// The next request rebuilds the Thread with that output as continuation
+    /// context.
+    /// The Provider decides whether the target model accepts native assistant
+    /// prefill or needs another supported wire representation.
     pub fn prepare_continuation(&mut self) {
-        // Clear any partial buffers since we're starting fresh with prefill
+        // The committed partial response replaces these per-request buffers.
         self.event_builder = EventBuilder::new();
         self.view.reset_for_continuation();
         self.state = TurnPhase::Streaming;
@@ -455,8 +464,8 @@ impl TurnCoordinator {
     ///
     /// Transitions the state machine based on the user's choice from the
     /// interrupt menu.
-    /// Content injection (partial content, prefill, replies) is handled here to
-    /// keep the state machine self-contained.
+    /// Partial responses and replies are committed here to keep the state
+    /// machine self-contained.
     pub fn handle_streaming_interrupt(
         &mut self,
         action: InterruptAction,

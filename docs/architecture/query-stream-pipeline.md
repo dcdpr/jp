@@ -1419,13 +1419,13 @@ Interrupt Handler
      │
      │
      │
-     └─── stream dead ────▶ InterruptAction::Continue { partial }
+     └─── stream dead ────▶ InterruptAction::Continue
                                  │
                                  ▼
                             Turn Coordinator
                                  │
-                                 │ build continuation request with assistant prefill
-                                 │ send [User: Query] -> [Assistant: Partial]
+                                 │ commit partial response and rebuild Thread
+                                 │ Provider encodes a supported continuation request
                                  │
                                  ▼
                             LLM Provider (new stream)
@@ -1446,7 +1446,7 @@ Interrupt Handler
 
 ### Continue Flow
 
-Detailed view of the assistant prefill process:
+Detailed view of the continuation process:
 
 ```
 Before interrupt:
@@ -1463,23 +1463,29 @@ Event Builder buffers:
 User chooses "Continue", stream is dead:
 ────────────────────────────────────────
 
-1. Build continuation request with prefill:
+1. Commit the partial response and rebuild the Thread:
 
    Thread for LLM:
      [ChatRequest("What is 2+2?")]
      [ChatResponse::Reasoning("Let me think")]
-     [ChatResponse::Message("The answer")]      ← injected as prefill
+     [ChatResponse::Message("The answer")]
 
-2. Send to LLM, receive continuation:
+2. Let the Provider encode continuation for the target model:
+
+   - Use native assistant prefill only when the model supports it.
+   - Otherwise retain the partial assistant response as history and append a
+     synthetic user continuation request.
+
+3. Send to the LLM and receive continuation:
 
    LLM responds: " is 4. Because 2+2=4."
 
-3. Update Event Builder:
+4. Update Event Builder:
 
    buffers[1].append(" is 4. Because 2+2=4.")
    // Total buffer content: "The answer is 4. Because 2+2=4."
 
-4. Continue processing:
+5. Continue processing:
 
    More chunks arrive, appended to buffers[1]
    Eventually flush arrives
@@ -1492,7 +1498,12 @@ Final ConversationStream (persisted):
 
   [ChatRequest("What is 2+2?")]
   [ChatResponse::Reasoning("Let me think")]
-  [ChatResponse::Message("The answer is 4. Because 2+2=4. ...")]
+  [ChatResponse::Message("The answer")]
+  [ChatResponse::Message(" is 4. Because 2+2=4. ...")]
+
+Consecutive responses of the same kind remain one renderer content region.
+Conversation Event and Provider request boundaries do not insert Markdown
+boundaries, so live rendering and replay concatenate these message fragments.
 ```
 
 -----
@@ -1779,7 +1790,7 @@ test "events are persisted in stream order":
 
 1. Create `InterruptHandler` with context-aware menus
 2. Integrate with Turn Coordinator state machine
-3. Implement `Continue` flow using assistant prefill
+3. Implement `Continue` flow using Provider-specific continuation encoding
 4. Add integration tests for interrupt scenarios
 
 ### Phase 7: Cleanup

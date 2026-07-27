@@ -217,8 +217,8 @@ impl TurnView {
 
     /// Reset internal renderer state, discarding partial buffers.
     ///
-    /// Used when a streaming cycle is interrupted and a new one begins (e.g.
-    /// interrupt-with-prefill).
+    /// Used when a streaming cycle is interrupted and a continuation request
+    /// begins.
     /// Preserves the existing `assistant_header_rendered` flag: if a header was
     /// already on the terminal before the interrupt, the continuation is part
     /// of the same assistant turn and must not re-emit it; if no header had
