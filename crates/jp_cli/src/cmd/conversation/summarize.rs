@@ -9,13 +9,13 @@ use jp_conversation::{
     thread::ThreadBuilder,
 };
 use jp_llm::{
-    event::Event,
+    event::{Event, FinishReason},
     event_builder::EventBuilder,
     provider,
     retry::{RetryConfig, collect_with_retry},
 };
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 const DEFAULT_INSTRUCTIONS: &str = "\
 Summarize the preceding conversation for continuity. The summary will replace the original \
@@ -109,6 +109,7 @@ pub async fn generate_summary(
     // Collect the response text.
     let mut builder = EventBuilder::new();
     let mut flushed = Vec::new();
+    let mut finish = None;
     for event in llm_events {
         match event {
             Event::Part {
@@ -121,7 +122,10 @@ pub async fn generate_summary(
             Event::Flush { index, metadata } => {
                 flushed.extend(builder.handle_flush(index, metadata));
             }
-            Event::Finished(_) => flushed.extend(builder.drain()),
+            Event::Finished(reason) => {
+                flushed.extend(builder.drain());
+                finish = Some(reason);
+            }
             // `Patch` is applied upstream; `KeepAlive` is a liveness signal.
             Event::Patch(_) | Event::KeepAlive => {}
         }
@@ -136,13 +140,51 @@ pub async fn generate_summary(
         })
         .collect::<String>();
 
-    if summary.is_empty() {
-        return Err(crate::error::Error::Compaction(
-            "Summarizer returned an empty response".into(),
-        ));
+    // A refusal must not be salvaged: `FinishReason::Refused` requires
+    // discarding any partial output, so a declined stream fails even when the
+    // model streamed text before backing out.
+    let refused = matches!(finish, Some(FinishReason::Refused { .. }));
+    if refused || summary.is_empty() {
+        return Err(Error::Summarize {
+            model: model_id.to_string(),
+            reason: failure_reason(finish.as_ref()),
+        });
     }
 
     Ok(summary)
+}
+
+/// Explain why a summarization attempt produced no usable summary.
+///
+/// `finish` is the stream's terminal reason, or `None` when the stream ended
+/// without one.
+fn failure_reason(finish: Option<&FinishReason>) -> String {
+    match finish {
+        Some(FinishReason::Refused {
+            category,
+            explanation,
+        }) => {
+            let category = category
+                .as_deref()
+                .map_or_else(String::new, |c| format!(" ({c})"));
+            let explanation = explanation
+                .as_deref()
+                .map_or_else(String::new, |e| format!(": {e}"));
+            format!("the model declined to summarize this conversation{category}{explanation}")
+        }
+        Some(FinishReason::MaxTokens) => {
+            "the model reached its max output token limit before producing a summary".to_owned()
+        }
+        Some(FinishReason::Other(value)) => {
+            let detail = value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned);
+            format!("the model stopped early ({detail}) without producing a summary")
+        }
+        Some(FinishReason::Completed | FinishReason::Retry) | None => {
+            "the model returned an empty response".to_owned()
+        }
+    }
 }
 
 /// Collect all events in the inclusive turn range `[range_from, range_to]`.

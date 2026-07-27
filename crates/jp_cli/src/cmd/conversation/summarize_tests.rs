@@ -1,6 +1,7 @@
 use jp_conversation::ConversationStream;
+use jp_llm::event::FinishReason;
 
-use super::collect_range_events;
+use super::{collect_range_events, failure_reason};
 
 fn build_stream_with_turns(count: usize) -> ConversationStream {
     let mut stream = ConversationStream::new_test();
@@ -86,4 +87,56 @@ fn empty_for_empty_stream() {
     let events = collect_range_events(&stream, 0, 5);
 
     assert!(events.is_empty());
+}
+
+#[test]
+fn refusal_reason_reports_category_and_explanation() {
+    let reason = failure_reason(Some(&FinishReason::Refused {
+        category: Some("bio".to_owned()),
+        explanation: Some("configure a fallback model".to_owned()),
+    }));
+
+    assert_eq!(
+        reason,
+        "the model declined to summarize this conversation (bio): configure a fallback model"
+    );
+}
+
+#[test]
+fn refusal_reason_without_details_is_still_a_refusal() {
+    let reason = failure_reason(Some(&FinishReason::Refused {
+        category: None,
+        explanation: None,
+    }));
+
+    assert_eq!(reason, "the model declined to summarize this conversation");
+}
+
+#[test]
+fn max_tokens_reason_names_the_token_limit() {
+    let reason = failure_reason(Some(&FinishReason::MaxTokens));
+
+    assert_eq!(
+        reason,
+        "the model reached its max output token limit before producing a summary"
+    );
+}
+
+#[test]
+fn other_reason_reports_the_provider_detail() {
+    let reason = failure_reason(Some(&FinishReason::Other("content_filter".into())));
+
+    assert_eq!(
+        reason,
+        "the model stopped early (content_filter) without producing a summary"
+    );
+}
+
+#[test]
+fn clean_finish_with_no_text_is_an_empty_response() {
+    // A model that completes normally but emits no message text: the only case
+    // where "empty response" is the whole story.
+    let reason = failure_reason(Some(&FinishReason::Completed));
+
+    assert_eq!(reason, "the model returned an empty response");
 }
