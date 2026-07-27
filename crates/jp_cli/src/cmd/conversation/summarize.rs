@@ -2,6 +2,7 @@
 
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, conversation::compaction::SummaryConfig,
+    model::id::ModelIdConfig,
 };
 use jp_conversation::{
     ConversationEvent, ConversationStream,
@@ -9,21 +10,16 @@ use jp_conversation::{
     thread::ThreadBuilder,
 };
 use jp_llm::{
+    Provider,
     event::{Event, EventPatch, FinishReason, apply_patches},
     event_builder::EventBuilder,
+    model::ModelDetails,
     provider,
     retry::{RetryConfig, collect_with_retry},
 };
 use tracing::debug;
 
 use crate::error::{Error, Result};
-
-/// How many times a `FinishReason::Retry` is honoured before giving up.
-///
-/// The provider's patches fix a specific bad event, so one rebuild is enough; a
-/// second `Retry` means the patches did not resolve the problem and looping
-/// again would spin against the same request.
-const MAX_PATCH_RETRIES: usize = 1;
 
 const DEFAULT_INSTRUCTIONS: &str = "\
 Summarize the preceding conversation for continuity. The summary will replace the original \
@@ -92,9 +88,41 @@ pub async fn generate_summary(
 
     let provider = provider::get_provider(model_id.provider, &app_cfg.providers.llm)?;
     let model_details = provider.model_details(&model_id.name).await?;
+
+    summarize_stream(
+        provider.as_ref(),
+        &model_details,
+        &model_id,
+        stream,
+        instructions,
+        &user_message,
+    )
+    .await
+}
+
+/// Request a summary of `stream`, honouring provider rebuild requests.
+///
+/// A provider that answers with [`FinishReason::Retry`] supplies patches that
+/// make the request acceptable; each round applies them to `stream` and
+/// resends.
+/// Providers degrade one bad event per round (see Anthropic's
+/// `build_thinking_patches` and Google's `build_thought_signature_patch`), so a
+/// stream carrying several bad events legitimately needs several rounds.
+///
+/// The loop terminates because every round requires at least one applied patch,
+/// and the only action available (`RemoveMetadata`) strictly shrinks a finite
+/// set of metadata entries.
+/// A round that changes nothing ends it.
+async fn summarize_stream(
+    provider: &dyn Provider,
+    model_details: &ModelDetails,
+    model_id: &ModelIdConfig,
+    mut stream: ConversationStream,
+    instructions: &str,
+    user_message: &str,
+) -> Result<String> {
     let retry_config = RetryConfig::default();
 
-    let mut patch_retries = 0;
     loop {
         let thread = ThreadBuilder::default()
             .with_events(stream.clone())
@@ -102,7 +130,7 @@ pub async fn generate_summary(
             .build()?;
 
         let mut thread_events = thread.events.clone();
-        thread_events.start_turn(ChatRequest::from(user_message.clone()));
+        thread_events.start_turn(ChatRequest::from(user_message.to_owned()));
 
         let query = jp_llm::query::ChatQuery {
             thread: jp_conversation::thread::Thread {
@@ -113,8 +141,7 @@ pub async fn generate_summary(
             tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
         };
 
-        let llm_events =
-            collect_with_retry(provider.as_ref(), &model_details, query, &retry_config).await?;
+        let llm_events = collect_with_retry(provider, model_details, query, &retry_config).await?;
 
         let patches = match summarize_events(llm_events) {
             StreamOutcome::Summary(summary) => return Ok(summary),
@@ -127,16 +154,6 @@ pub async fn generate_summary(
             StreamOutcome::Retry(patches) => patches,
         };
 
-        if patch_retries >= MAX_PATCH_RETRIES {
-            return Err(Error::Summarize {
-                model: model_id.to_string(),
-                reason: "the provider asked to rebuild the request again after it was already \
-                         rebuilt once"
-                    .to_owned(),
-            });
-        }
-
-        // `FinishReason::Retry` asks us to fix the request and send it again.
         // The patches target events in the local range stream, so applying them
         // here leaves the stored conversation untouched: repairing the user's
         // history is the query loop's job, not a side effect of summarizing.
@@ -144,17 +161,15 @@ pub async fn generate_summary(
         if applied == 0 {
             return Err(Error::Summarize {
                 model: model_id.to_string(),
-                reason: "the provider asked to rebuild the request but sent no applicable fix, so \
-                         resending it would fail the same way"
+                reason: "the provider asked to rebuild the request but sent no fix that changed \
+                         it, so resending would fail the same way"
                     .to_owned(),
             });
         }
 
-        patch_retries += 1;
         debug!(
             applied,
-            attempt = patch_retries,
-            "Provider requested a retry; patched the summarizer stream."
+            "Provider requested a rebuild; patched the summarizer stream and resending."
         );
     }
 }

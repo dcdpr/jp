@@ -58,8 +58,8 @@ pub enum Event {
     /// applied to the conversation stream itself so that the error doesn't show
     /// up again in the future.
     ///
-    /// Currently, the caller applies these patches by mutating the stream
-    /// in-place (see `apply_history_patches` in `signals.rs`).
+    /// Callers apply these with [`apply_patches`], which mutates the stream
+    /// in-place.
     /// This is a known deviation from the append-only stream principle (RFD
     /// 064).
     /// When RFD 064's overlay/projection infrastructure lands, patches should
@@ -182,10 +182,12 @@ pub enum PatchAction {
 }
 
 /// Apply provider-issued patches to the events already in `stream`, returning
-/// how many mutations were made.
+/// how many events it changed.
 ///
-/// A return value of `0` means no event matched, so resending a request built
-/// from `stream` would hit the same provider complaint.
+/// A return value of `0` means `stream` is byte-identical to what it was, so
+/// resending a request built from it would hit the same provider complaint.
+/// A patch whose matcher hits an event that does not carry the field the action
+/// removes counts as no change: matching alone is not progress.
 ///
 /// NOTE: This mutates events in place, which deviates from the append-only
 /// principle established in RFD 064 (non-destructive compaction).
@@ -212,11 +214,16 @@ pub fn apply_patches(stream: &mut ConversationStream, patches: &[EventPatch]) ->
                 continue;
             }
 
-            match &patch.action {
-                PatchAction::RemoveMetadata(key) => event.event.metadata.remove(key),
+            // The matcher key and the action key are independent, so a matched
+            // patch can still be a no-op. Only an actual removal is progress —
+            // callers use the count to decide whether resending is worthwhile.
+            let mutated = match &patch.action {
+                PatchAction::RemoveMetadata(key) => event.event.metadata.remove(key).is_some(),
             };
 
-            count += 1;
+            if mutated {
+                count += 1;
+            }
         }
     }
 
@@ -370,3 +377,7 @@ pub enum FinishReason {
     /// The assistant has stopped generating tokens for some reason.
     Other(Value),
 }
+
+#[cfg(test)]
+#[path = "event_tests.rs"]
+mod tests;
