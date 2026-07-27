@@ -7,11 +7,13 @@ mod check;
 mod expand;
 mod format;
 mod test;
+mod update;
 
 use check::cargo_check;
 use expand::cargo_expand;
 use format::cargo_format;
 use test::cargo_test;
+use update::cargo_update;
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     // Opt-in to cargo's checksum-based freshness checks (see
@@ -34,6 +36,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             .await
         }
         "format" => cargo_format(&ctx, t.opt("package")?).await,
+        "update" => cargo_update(&ctx, t.req("packages")?).await,
         _ => unknown_tool(t),
     }
 }
