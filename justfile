@@ -272,7 +272,7 @@ pr-triage NNN *ARGS: _install-jp _install-tools
                 ans=n
             fi
             case "$ans" in
-                p|P)
+                p|P|"")
                     jp conversation use '?session'
                     jp query --cfg=personas/pr-triager \
                         --attach "gh:pull/{{NNN}}/diff" \
@@ -280,7 +280,8 @@ pr-triage NNN *ARGS: _install-jp _install-tools
                         $args
                     exit 0 ;;
                 q|Q) exit 0 ;;
-                *) ;;
+                n|N) ;;
+                *)   echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
             esac ;;
     esac
 
