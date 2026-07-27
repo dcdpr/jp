@@ -6,10 +6,7 @@ use futures::{StreamExt as _, TryStreamExt as _, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
-    model::{
-        id::{ModelIdConfig, Name, ProviderId},
-        parameters::ReasoningConfig,
-    },
+    model::id::{ModelIdConfig, Name, ProviderId},
     providers::llm::ollama::OllamaConfig,
 };
 use jp_conversation::{
@@ -379,13 +376,16 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessage
 
     request = request.options(options);
 
-    // Ollama models may default to thinking-on, so we must explicitly set the
-    // flag in both directions. `None` is treated as off because we can't know
-    // whether an arbitrary local model supports reasoning.
-    request = request.think(!matches!(
-        parameters.reasoning,
-        None | Some(ReasoningConfig::Off)
-    ));
+    // Ollama models may default to thinking-on, so the flag is set explicitly in
+    // both directions. Resolving through the model's capabilities keeps a model
+    // that advertises no `thinking` support from being asked to think, which it
+    // rejects outright. A model whose support is unknown still honours an
+    // explicit request and lets the provider decide.
+    request = request.think(
+        model
+            .custom_reasoning_config(parameters.reasoning)
+            .is_some(),
+    );
 
     if let Some(schema) = structured_schema {
         request = request.format(schema);

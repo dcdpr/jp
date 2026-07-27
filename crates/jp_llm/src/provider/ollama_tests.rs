@@ -1,5 +1,89 @@
 use super::*;
 
+/// Build a query whose only config is an explicit reasoning setting.
+fn reasoning_query(
+    reasoning: Option<jp_config::model::parameters::PartialReasoningConfig>,
+) -> ChatQuery {
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+
+    if let Some(reasoning) = reasoning {
+        let mut delta = jp_config::PartialAppConfig::empty();
+        delta.assistant.model.parameters.reasoning = Some(reasoning);
+        events.add_config_delta(delta);
+    }
+
+    ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    }
+}
+
+fn think_flag(
+    details: &ModelDetails,
+    reasoning: Option<jp_config::model::parameters::PartialReasoningConfig>,
+) -> bool {
+    let (request, _) = create_request(details, reasoning_query(reasoning)).unwrap();
+    serde_json::to_value(request).unwrap()["think"]
+        .as_bool()
+        .expect("request carries an explicit think flag")
+}
+
+/// A model advertising no `thinking` capability must not be asked to think,
+/// even when the caller enables reasoning: Ollama rejects the request outright.
+#[test]
+fn create_request_does_not_ask_unsupported_model_to_think() {
+    let mut details = ModelDetails::empty((PROVIDER, "llama3:latest").try_into().unwrap());
+    details.reasoning = Some(ReasoningDetails::unsupported());
+
+    assert!(!think_flag(
+        &details,
+        Some(jp_config::model::parameters::PartialReasoningConfig::Auto)
+    ));
+    assert!(!think_flag(
+        &details,
+        Some(
+            jp_config::model::parameters::PartialReasoningConfig::Custom(
+                jp_config::model::parameters::PartialCustomReasoningConfig {
+                    effort: Some(jp_config::model::parameters::ReasoningEffort::High),
+                    exclude: Some(false),
+                },
+            )
+        )
+    ));
+}
+
+/// A model whose support is unknown still honours an explicit request, leaving
+/// the provider to reject it if the model genuinely cannot think.
+#[test]
+fn create_request_asks_unknown_model_to_think_when_requested() {
+    let details = ModelDetails::empty((PROVIDER, "future-model-99").try_into().unwrap());
+    assert_eq!(details.reasoning, None, "fixture must be unknown");
+
+    assert!(think_flag(
+        &details,
+        Some(jp_config::model::parameters::PartialReasoningConfig::Auto)
+    ));
+}
+
+/// Reasoning left unconfigured, or explicitly off, never asks the model to
+/// think.
+#[test]
+fn create_request_does_not_think_when_unconfigured_or_off() {
+    let details = ModelDetails::empty((PROVIDER, "future-model-99").try_into().unwrap());
+
+    assert!(!think_flag(&details, None));
+    assert!(!think_flag(
+        &details,
+        Some(jp_config::model::parameters::PartialReasoningConfig::Off)
+    ));
+}
+
 /// Ollama reports the trained context length per model, so it is used rather
 /// than left unknown.
 /// A model advertising `thinking` keeps its reasoning support unknown, since no
