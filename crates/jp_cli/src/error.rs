@@ -170,4 +170,13 @@ pub(crate) enum Error {
 
     #[error("Compaction error: {0}")]
     Compaction(String),
+
+    /// The summarizer produced no usable summary.
+    ///
+    /// A dedicated variant so the failure names the model that produced
+    /// nothing: a refusal or a token-limited stream is a property of the model,
+    /// not of the compaction range, and the fix is to point the summarizer at a
+    /// different model.
+    #[error("Summarization failed for {model}: {reason}")]
+    Summarize { model: String, reason: String },
 }

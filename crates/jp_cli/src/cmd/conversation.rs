@@ -1,7 +1,8 @@
-use jp_workspace::ConversationHandle;
+use jp_config::PartialAppConfig;
+use jp_workspace::{ConversationHandle, Workspace};
 
 use super::{ConversationLoadRequest, Output};
-use crate::ctx::Ctx;
+use crate::ctx::{Ctx, IntoPartialAppConfig};
 
 mod archive;
 pub(crate) mod compact;
@@ -55,6 +56,30 @@ impl Conversation {
             Commands::Use(args) => args.conversation_load_request(),
             Commands::Archive(args) => args.conversation_load_request(),
             Commands::Unarchive(args) => args.conversation_load_request(),
+        }
+    }
+}
+
+impl IntoPartialAppConfig for Conversation {
+    fn apply_cli_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: PartialAppConfig,
+        merged_config: Option<&PartialAppConfig>,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+        match &self.command {
+            Commands::Compact(args) => args.apply_cli_config(workspace, partial, merged_config),
+            Commands::Show(_)
+            | Commands::Remove(_)
+            | Commands::Edit(_)
+            | Commands::Fork(_)
+            | Commands::Grep(_)
+            | Commands::Print(_)
+            | Commands::Path(_)
+            | Commands::List(_)
+            | Commands::Use(_)
+            | Commands::Archive(_)
+            | Commands::Unarchive(_) => Ok(partial),
         }
     }
 }

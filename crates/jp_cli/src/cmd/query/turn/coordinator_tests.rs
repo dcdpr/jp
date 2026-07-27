@@ -1,4 +1,4 @@
-use jp_config::AppConfig;
+use jp_config::{AppConfig, style::reasoning::ReasoningDisplayConfig};
 use jp_conversation::event::{ChatResponse, ToolCallRequest};
 use jp_llm::event::FinishReason;
 use jp_printer::{OutputFormat, Printer};
@@ -60,6 +60,80 @@ fn test_transitions_to_executing_on_tool_call() {
         .collect();
     assert_eq!(tool_calls.len(), 1);
     assert_eq!(tool_calls[0].id, "call_1");
+}
+
+/// A provider response carrying two reasoning items produces two reasoning
+/// events, and the second must not continue the first's paragraph.
+///
+/// Pins the live path specifically: the renderer sees per-delta calls, so the
+/// only signal that item 0 is complete is its `Event::Flush`.
+/// Item 0's text ends mid-paragraph, so without a boundary there the markdown
+/// buffer glues item 1's opening text onto it.
+#[test]
+fn consecutive_reasoning_events_render_as_separate_blocks() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut style = AppConfig::new_test().style;
+    style.reasoning.display = ReasoningDisplayConfig::Full;
+    style.reasoning.background = None;
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        style,
+        None,
+        None,
+        Some("openai/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("hello"));
+
+    coordinator.handle_event(&mut stream, Event::reasoning(0, "First section."));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::reasoning(1, "Second section."));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.ends_with("First section.\n\nSecond section.\n\n"),
+        "reasoning items must render as separate blocks, got: {output:?}"
+    );
+}
+
+/// A provider response carrying two structured items produces two structured
+/// events, and the second must not be appended inside the first's `json` fence.
+///
+/// Pins the live path: the chunks of item 0 carry no terminator, so the only
+/// signal that its fence can close is its `Event::Flush`.
+#[test]
+fn consecutive_structured_events_render_as_separate_fences() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        Some("openai/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("extract"));
+
+    coordinator.handle_event(&mut stream, Event::structured(0, r#"{"name":"Alice"}"#));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::structured(1, r#"{"name":"Bob"}"#));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    let output = strip_ansi(&out.lock());
+    assert_eq!(
+        output.matches("```json").count(),
+        2,
+        "each structured item opens its own fence, got: {output:?}"
+    );
 }
 
 #[test]

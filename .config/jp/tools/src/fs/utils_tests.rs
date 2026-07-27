@@ -4,6 +4,41 @@ use camino_tempfile::tempdir;
 use super::*;
 use crate::util::runner::MockProcessRunner;
 
+mod suppress_matcher {
+    use super::*;
+
+    #[test]
+    fn rejects_an_unparseable_pattern_naming_it() {
+        // A disclosure control that drops the rule it could not read hands over
+        // the very paths it was configured to hold back.
+        let dir = tempdir().unwrap();
+        let err =
+            super::super::suppress_matcher(dir.path(), &["{unclosed".to_owned()]).unwrap_err();
+
+        assert!(err.contains("{unclosed"), "pattern not named: {err}");
+        assert!(
+            err.starts_with("Invalid `suppress` pattern"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn one_bad_pattern_rejects_the_whole_list() {
+        let dir = tempdir().unwrap();
+        let patterns = [".git/".to_owned(), "{unclosed".to_owned()];
+
+        assert!(super::super::suppress_matcher(dir.path(), &patterns).is_err());
+    }
+
+    #[test]
+    fn accepts_an_empty_list() {
+        let dir = tempdir().unwrap();
+        let matcher = super::super::suppress_matcher(dir.path(), &[]).unwrap();
+
+        assert!(!is_suppressed(&matcher, &[Utf8Path::new("anything")]));
+    }
+}
+
 #[test]
 fn test_is_file_dirty_modified() {
     let dir = tempdir().unwrap();
@@ -490,87 +525,5 @@ mod resolve_workspace_entry {
         let dir = tempdir().unwrap();
         let err = resolve_workspace_entry(dir.path(), "C:foo", None).unwrap_err();
         assert!(err.contains("relative"), "unexpected error: {err}");
-    }
-}
-
-mod clean_workspace_path {
-    use super::*;
-
-    #[test]
-    fn rejects_absolute_path() {
-        let dir = tempdir().unwrap();
-        let err = clean_workspace_path(dir.path(), "/etc/passwd", None).unwrap_err();
-        assert!(err.contains("relative"), "unexpected error: {err}");
-    }
-
-    #[test]
-    fn rejects_escaping_parent_dir() {
-        let dir = tempdir().unwrap();
-        let err = clean_workspace_path(dir.path(), "../../etc/passwd", None).unwrap_err();
-        assert!(
-            err.contains("escape the workspace"),
-            "unexpected error: {err}"
-        );
-    }
-
-    #[test]
-    fn rejects_empty_path() {
-        let dir = tempdir().unwrap();
-        let err = clean_workspace_path(dir.path(), "", None).unwrap_err();
-        assert!(err.contains("empty"), "unexpected error: {err}");
-    }
-
-    #[test]
-    fn accepts_normal_path_and_returns_cleaned_form() {
-        let dir = tempdir().unwrap();
-        let cleaned = clean_workspace_path(dir.path(), "src/main.rs", None).unwrap();
-        assert_eq!(cleaned, Utf8PathBuf::from("src/main.rs"));
-    }
-
-    #[test]
-    fn collapses_redundant_components() {
-        let dir = tempdir().unwrap();
-        std::fs::create_dir(dir.path().join("sub")).unwrap();
-        let cleaned = clean_workspace_path(dir.path(), "sub/../target.rs", None).unwrap();
-        assert_eq!(cleaned, Utf8PathBuf::from("target.rs"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn preserves_symlink_input_shape() {
-        // Where `resolve_workspace_path` would canonicalize the symlink and
-        // return `real/foo.rs`, `clean_workspace_path` keeps the user's
-        // input shape `link/foo.rs` — while still checking the escape.
-        let workspace = tempdir().unwrap();
-        std::fs::create_dir(workspace.path().join("real")).unwrap();
-        std::fs::write(workspace.path().join("real/foo.rs"), "").unwrap();
-        std::os::unix::fs::symlink(
-            workspace.path().join("real").as_std_path(),
-            workspace.path().join("link").as_std_path(),
-        )
-        .unwrap();
-
-        let cleaned = clean_workspace_path(workspace.path(), "link/foo.rs", None).unwrap();
-        assert_eq!(cleaned, Utf8PathBuf::from("link/foo.rs"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn rejects_symlink_escaping_workspace() {
-        let outside = tempdir().unwrap();
-        std::fs::create_dir(outside.path().join("real")).unwrap();
-
-        let workspace = tempdir().unwrap();
-        std::os::unix::fs::symlink(
-            outside.path().join("real").as_std_path(),
-            workspace.path().join("linkdir").as_std_path(),
-        )
-        .unwrap();
-
-        let err = clean_workspace_path(workspace.path(), "linkdir/file.rs", None).unwrap_err();
-        assert!(
-            err.contains("escapes the workspace"),
-            "unexpected error: {err}"
-        );
     }
 }

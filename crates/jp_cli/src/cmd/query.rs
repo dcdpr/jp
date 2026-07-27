@@ -1514,7 +1514,15 @@ fn build_thread(
 }
 
 /// Apply the CLI model configuration to the partial configuration.
-fn apply_model(partial: &mut PartialAppConfig, model: Option<&str>, _: Option<&PartialAppConfig>) {
+///
+/// `model` is the raw `--model` value: an alias or a full `provider/name` ID.
+/// It is stored unresolved; the config pipeline resolves aliases when it builds
+/// the final [`AppConfig`].
+pub(super) fn apply_model(
+    partial: &mut PartialAppConfig,
+    model: Option<&str>,
+    _: Option<&PartialAppConfig>,
+) {
     let Some(id) = model else { return };
 
     partial.assistant.model.id = id.into();

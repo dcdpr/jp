@@ -186,6 +186,29 @@ async fn test_timer_reasoning_suppresses_output() {
     );
 }
 
+/// The timer line and the tool chrome share the terminal row, so entering a
+/// tool call must erase the timer.
+/// Nothing else pins this: the timer writes to stderr, so a leaked line is
+/// invisible to assertions on rendered stdout.
+#[tokio::test]
+async fn test_timer_reasoning_erased_when_entering_tool_call() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Timer;
+    let (mut renderer, _out, err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Thinking hard\n\n".into(),
+    });
+    renderer.enter_tool_call();
+
+    renderer.printer.flush();
+    assert_eq!(
+        *err.lock(),
+        "\r\x1b[K",
+        "the tool-call boundary must erase the timer line"
+    );
+}
+
 #[tokio::test]
 async fn test_timer_reasoning_then_message() {
     let mut config = AppConfig::new_test();
@@ -310,6 +333,68 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
         "Buffered reasoning should be flushed before message, got: {output:?}"
     );
     assert!(output.contains("Answer"), "Message content should follow");
+}
+
+/// Two consecutive reasoning events are two blocks, not one paragraph
+/// continued.
+/// The first event's text ends mid-paragraph (no trailing newline), so without
+/// a region boundary the markdown buffer joins the next event's opening heading
+/// onto it.
+#[test]
+fn test_consecutive_reasoning_events_render_as_separate_blocks() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First section.".into(),
+    });
+    renderer.end_response();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Second section.".into(),
+    });
+    renderer.end_response();
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(
+        strip_ansi(&out.lock()),
+        "First section.\n\nSecond section.\n\n"
+    );
+}
+
+/// A reasoning-to-reasoning event boundary stays inside the reasoning region:
+/// the gap it creates carries the reasoning background, exactly as the gap
+/// between two paragraphs of a single event does.
+#[test]
+fn test_reasoning_event_boundary_gap_is_shaded() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First section.".into(),
+    });
+    renderer.end_response();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Second section.".into(),
+    });
+    renderer.end_response();
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
+        1,
+        "expected one shaded separator at the event boundary and an unshaded one before the \
+         message, got: {output:?}"
+    );
 }
 
 #[test]

@@ -1,7 +1,8 @@
 use camino_tempfile::tempdir;
+use ignore::gitignore::Gitignore;
 use jp_tool::{Action, Context, Outcome};
 
-use super::*;
+use super::{super::utils::suppress_matcher, *};
 
 #[tokio::test]
 async fn test_fs_read_file() {
@@ -61,9 +62,15 @@ async fn test_fs_read_file() {
             workspace_id: "test".into(),
             conversation_id: "test".into(),
         };
-        let result = fs_read_file(&ctx, "file.txt".to_owned(), start_line, end_line)
-            .await
-            .unwrap();
+        let result = fs_read_file(
+            &ctx,
+            &Gitignore::empty(),
+            "file.txt".to_owned(),
+            start_line,
+            end_line,
+        )
+        .await
+        .unwrap();
 
         let out = match result {
             Outcome::Success { content } => content,
@@ -106,9 +113,15 @@ async fn reads_through_approved_external_mount() {
         conversation_id: "test".into(),
     };
 
-    let result = fs_read_file(&ctx, "fork/lib.rs".to_owned(), None, None)
-        .await
-        .unwrap();
+    let result = fs_read_file(
+        &ctx,
+        &Gitignore::empty(),
+        "fork/lib.rs".to_owned(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     let content = match result {
         Outcome::Success { content } => content,
@@ -149,9 +162,15 @@ async fn read_through_internal_symlink_respects_deny_rule() {
     };
 
     // Direct read of the denied path is rejected.
-    let direct = fs_read_file(&ctx, "secret/f.txt".to_owned(), None, None)
-        .await
-        .unwrap();
+    let direct = fs_read_file(
+        &ctx,
+        &Gitignore::empty(),
+        "secret/f.txt".to_owned(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     assert!(
         matches!(direct, Outcome::Error { .. }),
         "direct read should be denied"
@@ -159,12 +178,99 @@ async fn read_through_internal_symlink_respects_deny_rule() {
 
     // Reaching it through the in-workspace symlink canonicalizes to `secret/`
     // and must be denied too — the symlink cannot dodge the deny rule.
-    let via_alias = fs_read_file(&ctx, "alias/f.txt".to_owned(), None, None)
+    let via_alias = fs_read_file(
+        &ctx,
+        &Gitignore::empty(),
+        "alias/f.txt".to_owned(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(via_alias, Outcome::Error { .. }),
+        "symlinked read should be denied"
+    );
+}
+
+#[tokio::test]
+async fn refuses_a_suppressed_path() {
+    // Naming a path outright is how the user hands a file to the model, so it is
+    // normally enough. Suppression is the exception: the tool can read the file
+    // — no access rule stops it — and declines to return it.
+    let workspace = tempdir().unwrap();
+    std::fs::create_dir(workspace.path().join(".git")).unwrap();
+    std::fs::write(workspace.path().join(".git/HEAD"), "ref: refs/heads/main").unwrap();
+
+    let ctx = Context {
+        root: workspace.path().to_path_buf(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    let result = fs_read_file(
+        &ctx,
+        &suppress_matcher(workspace.path(), &[".git/".to_owned()]).unwrap(),
+        ".git/HEAD".to_owned(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    let Outcome::Error { message, .. } = result else {
+        panic!("expected a refusal, got: {result:?}");
+    };
+    // Normalized: a resolved path carries native separators, so the note reads
+    // `.git\HEAD` on Windows.
+    assert_eq!(
+        message.replace('\\', "/"),
+        "'.git/HEAD' is suppressed from this tool's results. If you need it, ask the user to \
+         provide it."
+    );
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_pattern_naming_a_symlink_closes_that_route() {
+    // Suppression matches the caller's own spelling as well as the canonical
+    // form, so a pattern written against the link name is honored when a request
+    // arrives through it.
+    use std::os::unix::fs::symlink;
+
+    let workspace = tempdir().unwrap();
+    std::fs::create_dir(workspace.path().join("real")).unwrap();
+    std::fs::write(workspace.path().join("real/secret.txt"), "shhh").unwrap();
+    symlink("real", workspace.path().join("alias")).unwrap();
+
+    let ctx = Context {
+        root: workspace.path().to_path_buf(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let suppress = suppress_matcher(workspace.path(), &["alias/".to_owned()]).unwrap();
+
+    let via_alias = fs_read_file(&ctx, &suppress, "alias/secret.txt".to_owned(), None, None)
         .await
         .unwrap();
     assert!(
         matches!(via_alias, Outcome::Error { .. }),
-        "symlinked read should be denied"
+        "the configured spelling should be refused, got: {via_alias:?}"
+    );
+
+    // The other half of the same fact: a pattern naming a link closes that
+    // spelling and nothing else. Patterns belong on real locations; matching the
+    // as-written form is a convenience, not a boundary.
+    let via_real = fs_read_file(&ctx, &suppress, "real/secret.txt".to_owned(), None, None)
+        .await
+        .unwrap();
+    assert!(
+        matches!(via_real, Outcome::Success { .. }),
+        "a pattern on the link name does not cover the target, got: {via_real:?}"
     );
 }
 
@@ -189,8 +295,14 @@ async fn denies_in_workspace_path_with_no_matching_grant() {
         conversation_id: "test".into(),
     };
 
-    let result = fs_read_file(&ctx, "secret.txt".to_owned(), None, None)
-        .await
-        .unwrap();
+    let result = fs_read_file(
+        &ctx,
+        &Gitignore::empty(),
+        "secret.txt".to_owned(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     assert!(matches!(result, Outcome::Error { .. }));
 }

@@ -540,14 +540,30 @@ impl TurnSelection {
         }
 
         if self.first.is_some() || self.last.is_some() {
+            let first = self.first.filter(|n| *n > 0);
+            let last = self.last.filter(|n| *n > 0);
+
+            // Two windows that meet or overlap are one window. Collapsing here
+            // rather than after resolution keeps every consumer consistent:
+            // `compact` acts per window, so a stale overlap would compact — and
+            // for a summary rule, re-summarize — the shared turns twice.
+            if let (Some(f), Some(l)) = (first, last)
+                && f.saturating_add(l) >= events.turn_count()
+            {
+                return vec![BoundWindow {
+                    from: Bound::At(RangeBound::Absolute(0)),
+                    to: Bound::At(RangeBound::FromEnd(0)),
+                }];
+            }
+
             let mut windows = Vec::with_capacity(2);
-            if let Some(n) = self.first.filter(|n| *n > 0) {
+            if let Some(n) = first {
                 windows.push(BoundWindow {
                     from: Bound::At(RangeBound::Absolute(0)),
                     to: Bound::At(RangeBound::Absolute(n - 1)),
                 });
             }
-            if let Some(n) = self.last.filter(|n| *n > 0) {
+            if let Some(n) = last {
                 windows.push(BoundWindow {
                     from: Bound::At(RangeBound::FromEnd(n - 1)),
                     to: Bound::At(RangeBound::FromEnd(0)),
