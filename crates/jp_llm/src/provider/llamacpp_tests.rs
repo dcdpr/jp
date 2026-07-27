@@ -5,6 +5,36 @@ use reqwest_eventsource::Error as SseError;
 
 use super::*;
 
+/// llama.cpp reports the trained context length per loaded model, so it is used
+/// rather than left unknown.
+#[test]
+fn map_model_uses_reported_context_length() {
+    let model: LlamacppModel = serde_json::from_value(serde_json::json!({
+        "id": "unsloth/Qwen3.5-9B-GGUF",
+        "meta": {"n_ctx_train": 262_144},
+    }))
+    .unwrap();
+
+    let details = map_model(&model).unwrap();
+
+    assert_eq!(details.context_window, Some(262_144));
+    // The vendor prefix is stripped from the id.
+    assert_eq!(details.id.name.as_ref(), "Qwen3.5-9B-GGUF");
+}
+
+/// An older build reporting no metadata leaves the context window unknown
+/// rather than asserting a value.
+#[test]
+fn map_model_without_meta_leaves_context_unknown() {
+    let model: LlamacppModel =
+        serde_json::from_value(serde_json::json!({"id": "local-model"})).unwrap();
+
+    let details = map_model(&model).unwrap();
+
+    assert_eq!(details.context_window, None);
+    assert_eq!(details.reasoning, None);
+}
+
 fn sse_message(data: &str) -> SseEvent {
     SseEvent::Message(MessageEvent {
         data: data.to_owned(),

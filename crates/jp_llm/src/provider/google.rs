@@ -22,14 +22,14 @@ use jp_conversation::{
     thread::{ThreadParts, text_attachments_to_xml},
 };
 use serde_json::{Map, Value};
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use super::{EventStream, Provider, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
     error::{Error, Result, StreamError, looks_like_quota_error},
     event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
-    model::{ModelDeprecation, ModelDetails, ReasoningDetails},
+    model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
     query::ChatQuery,
     tool::ToolDefinition,
 };
@@ -237,16 +237,15 @@ fn create_request(
                         .max(details.min_tokens());
                     Some(tokens)
                 },
-                thinking_level: match details {
-                    ReasoningDetails::Leveled {
-                        none: _,
+                thinking_level: match details.mode() {
+                    Some(ReasoningMode::Leveled {
                         xlow,
                         low,
                         medium,
                         high,
                         xhigh: _,
                         max: _,
-                    } => {
+                    }) => {
                         let level = config
                             .effort
                             .abs_to_rel(max_output_tokens.map(i32::cast_unsigned))
@@ -260,10 +259,20 @@ fn create_request(
                             ReasoningEffort::Medium if medium => Some(types::ThinkingLevel::Medium),
                             ReasoningEffort::High if high => Some(types::ThinkingLevel::High),
 
-                            // Any other level is unsupported and treated as
-                            // high (since the documentation specifies this is
-                            // the default).
-                            _ => Some(types::ThinkingLevel::High),
+                            // Any other level is unsupported and clamps to high
+                            // (the documented default). Warn rather than clamp
+                            // silently, so a setting that could not be honoured
+                            // as asked is visible.
+                            _ => {
+                                warn!(
+                                    id = %model.id,
+                                    requested = ?level,
+                                    "Model does not support the requested reasoning effort; \
+                                     clamping to `high`."
+                                );
+
+                                Some(types::ThinkingLevel::High)
+                            }
                         }
                     }
                     _ => None,
@@ -284,6 +293,27 @@ fn create_request(
                 thinking_level: None,
             })
         }
+    } else if let (None, Some(config)) = (model.reasoning, reasoning) {
+        // Reasoning support is unknown, meaning a model newer than this binary,
+        // and the caller asked for reasoning.
+        //
+        // Request thoughts: sending no thinking config lets Gemini think while
+        // withholding them, billing reasoning tokens that never reach the
+        // transcript. Pass the effort through as a level rather than dropping
+        // it, which would silently ignore the caller's setting. Every
+        // budget-era model is in the table above, so a model that reaches here
+        // postdates the level/budget split and takes levels.
+        debug!(
+            id = %model.id,
+            inferred = true,
+            "No reasoning capability reported; inferring leveled thinking."
+        );
+
+        Some(types::ThinkingConfig {
+            include_thoughts: true,
+            thinking_budget: None,
+            thinking_level: unknown_thinking_level(config.effort, max_output_tokens),
+        })
     } else {
         None
     };
@@ -401,19 +431,24 @@ fn map_model(model: types::Model) -> ModelDetails {
         return ModelDetails::empty((PROVIDER, "unknown").try_into().unwrap());
     };
 
-    match name {
+    // Whether the API reports the model as able to think at all. It does not
+    // report effort levels, so any ladder still comes from the table below.
+    let thinks = model.thinking;
+
+    let mut details = match name {
         "gemini-pro-latest" | "gemini-3.1-pro-preview" | "gemini-3.1-pro-preview-customtools" => {
             ModelDetails {
                 id,
                 display_name,
                 context_window,
                 max_output_tokens,
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, false, true, true, true, false, false,
-                )),
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+                ),
                 knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
                 deprecated: Some(ModelDeprecation::Active),
                 structured_output: None,
+                prefill: None,
                 features: vec![],
             }
         }
@@ -422,12 +457,13 @@ fn map_model(model: types::Model) -> ModelDetails {
             display_name,
             context_window,
             max_output_tokens,
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, false, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, false, true, false, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gemini-flash-latest" | "gemini-3-flash-preview" => ModelDetails {
@@ -435,12 +471,13 @@ fn map_model(model: types::Model) -> ModelDetails {
             display_name,
             context_window,
             max_output_tokens,
-            reasoning: Some(ReasoningDetails::leveled(
-                false, true, true, true, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gemini-2.5-flash" => ModelDetails {
@@ -455,6 +492,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gemini-flash-lite-latest"
@@ -471,6 +509,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 Some(NaiveDate::from_ymd_opt(2026, 7, 22).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gemini-2.5-pro" => ModelDetails {
@@ -485,6 +524,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gemini-2.0-flash" | "gemini-2.0-flash-001" => ModelDetails {
@@ -492,13 +532,17 @@ fn map_model(model: types::Model) -> ModelDetails {
             display_name,
             context_window,
             max_output_tokens,
-            reasoning: Some(ReasoningDetails::budgetted(0, Some(24576))),
+            // The models API reports no `thinking` support for 2.0 Flash, the
+            // same as its Flash-Lite sibling. Sending a thinking budget to it
+            // configures a mode the model does not have.
+            reasoning: Some(ReasoningDetails::unsupported()),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
                 &"recommended replacement: gemini-2.5-flash",
                 Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gemini-2.0-flash-lite" | "gemini-2.0-flash-lite-001" => ModelDetails {
@@ -513,6 +557,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         id => {
@@ -536,9 +581,60 @@ fn map_model(model: types::Model) -> ModelDetails {
                 knowledge_cutoff: None,
                 deprecated: None,
                 structured_output: None,
+                prefill: None,
                 features: vec![],
             }
         }
+    };
+
+    details.reasoning = apply_thinking_support(details.reasoning, thinks);
+
+    details
+}
+
+/// Map a requested effort onto a thinking level for a model whose effort ladder
+/// is unknown.
+///
+/// Returns `None` for `Auto`, leaving the choice to the model.
+/// Every other effort maps to the nearest level, so an unrecognised model still
+/// honours the caller's request instead of silently discarding it.
+fn unknown_thinking_level(
+    effort: ReasoningEffort,
+    max_output_tokens: Option<i32>,
+) -> Option<types::ThinkingLevel> {
+    let effort = effort
+        .abs_to_rel(max_output_tokens.map(i32::cast_unsigned))
+        .unwrap_or(ReasoningEffort::Auto);
+
+    match effort {
+        ReasoningEffort::Auto => None,
+        ReasoningEffort::None | ReasoningEffort::Xlow => Some(types::ThinkingLevel::Minimal),
+        ReasoningEffort::Low => Some(types::ThinkingLevel::Low),
+        ReasoningEffort::Medium => Some(types::ThinkingLevel::Medium),
+        ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max => {
+            Some(types::ThinkingLevel::High)
+        }
+        // `abs_to_rel` has already converted any absolute budget.
+        ReasoningEffort::Absolute(_) => Some(types::ThinkingLevel::High),
+    }
+}
+
+/// Reconcile the table's reasoning entry with the API's answer on whether the
+/// model thinks at all.
+///
+/// The API is authoritative here: sending a thinking budget to a model that
+/// does not think configures a mode it does not have.
+/// It does not report effort levels though, so a thinking model with no table
+/// entry stays `None`, leaving the ladder unknown so the request still asks for
+/// its thoughts.
+fn apply_thinking_support(
+    reasoning: Option<ReasoningDetails>,
+    thinks: bool,
+) -> Option<ReasoningDetails> {
+    if thinks {
+        reasoning
+    } else {
+        Some(ReasoningDetails::unsupported())
     }
 }
 

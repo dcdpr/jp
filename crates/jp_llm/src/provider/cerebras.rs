@@ -1,4 +1,4 @@
-use std::{env, time::Duration};
+use std::{collections::HashMap, env, time::Duration};
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt as _, future, stream};
@@ -17,6 +17,7 @@ use jp_conversation::{
 };
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest_eventsource::{Event as SseEvent, EventSource, retry::Never};
+use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use tracing::{debug, trace, warn};
 
@@ -28,7 +29,7 @@ use super::{
 use crate::{
     error::{Error, Result, StreamError},
     event::{Event, FinishReason},
-    model::ReasoningDetails,
+    model::{ModelDeprecation, ReasoningDetails},
     provider::trace_to_tmpfile,
     query::ChatQuery,
     stream::with_tool_call_keepalive,
@@ -73,10 +74,15 @@ impl Provider for Cerebras {
             .json()
             .await?;
 
+        // The authenticated endpoint is the source of truth for which models
+        // this key can reach, including private or preview listings. The public
+        // catalog then supplies the metadata it omits.
+        let catalog = fetch_public_catalog(&self.client, &self.base_url).await;
+
         let mut models: Vec<ModelDetails> = response
             .data
             .into_iter()
-            .map(|m| map_model(&m.id))
+            .map(|m| map_model_with_catalog(&m.id, catalog.get(&m.id)))
             .collect::<Result<_>>()?;
 
         models.sort_by(|a, b| a.id.cmp(&b.id));
@@ -196,30 +202,164 @@ struct ModelEntry {
     id: String,
 }
 
+/// An entry in the public model catalog.
+///
+/// The authenticated `/v1/models` endpoint returns ids only; this carries the
+/// limits and capabilities alongside them.
+#[derive(Debug, Deserialize)]
+struct PublicModel {
+    id: String,
+
+    #[serde(default)]
+    name: Option<String>,
+
+    #[serde(default)]
+    limits: PublicLimits,
+
+    #[serde(default)]
+    capabilities: PublicCapabilities,
+
+    #[serde(default)]
+    deprecated: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct PublicLimits {
+    #[serde(default)]
+    max_context_length: Option<u32>,
+
+    #[serde(default)]
+    max_completion_tokens: Option<u32>,
+}
+
+/// Capabilities the public catalog reports.
+///
+/// Each is `None` when the catalog says nothing about it, which is distinct
+/// from reporting it as unsupported.
+#[derive(Debug, Default, Deserialize)]
+struct PublicCapabilities {
+    #[serde(default)]
+    reasoning: Option<bool>,
+
+    #[serde(default)]
+    structured_outputs: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PublicModelsResponse {
+    #[serde(default)]
+    data: Vec<PublicModel>,
+}
+
+/// Fetch the public model catalog, keyed by model id.
+///
+/// Best effort by design: the catalog is unauthenticated and secondary, so a
+/// failure leaves the built-in table in place rather than failing the listing.
+async fn fetch_public_catalog(
+    client: &reqwest::Client,
+    base_url: &str,
+) -> HashMap<String, PublicModel> {
+    let url = format!("{base_url}/public/v1/models");
+
+    let result = async {
+        client
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<PublicModelsResponse>()
+            .await
+    }
+    .await;
+
+    match result {
+        Ok(response) => response
+            .data
+            .into_iter()
+            .map(|model| (model.id.clone(), model))
+            .collect(),
+        Err(error) => {
+            debug!(
+                %url,
+                %error,
+                "Public Cerebras catalog unavailable; using the built-in model table."
+            );
+            HashMap::new()
+        }
+    }
+}
+
+/// Combine the built-in table with a public catalog entry.
+///
+/// The catalog supplies token limits, structured output support, deprecation,
+/// and whether the model reasons at all.
+/// It does not report an effort ladder, so that continues to come from the
+/// table.
+fn map_model_with_catalog(id: &str, public: Option<&PublicModel>) -> Result<ModelDetails> {
+    let mut details = map_model(id)?;
+
+    let Some(public) = public else {
+        return Ok(details);
+    };
+
+    if let Some(name) = &public.name {
+        details.display_name = Some(name.clone());
+    }
+    if let Some(context) = public.limits.max_context_length {
+        details.context_window = Some(context);
+    }
+    if let Some(output) = public.limits.max_completion_tokens {
+        details.max_output_tokens = Some(output);
+    }
+
+    if let Some(structured) = public.capabilities.structured_outputs {
+        details.structured_output = Some(structured);
+    }
+
+    details.deprecated = Some(if public.deprecated {
+        ModelDeprecation::deprecated(&"reported as deprecated by the provider", None)
+    } else {
+        ModelDeprecation::Active
+    });
+
+    match public.capabilities.reasoning {
+        // The catalog is authoritative on whether the model reasons at all.
+        Some(false) => details.reasoning = Some(ReasoningDetails::unsupported()),
+
+        // It reasons, but the catalog reports no effort ladder. Leave support
+        // unknown rather than inventing levels.
+        Some(true) if details.reasoning.is_none_or(|r| r.is_unsupported()) => {
+            details.reasoning = None;
+        }
+
+        // Reported as reasoning with a ladder already known, or not reported at
+        // all: keep whatever the table said.
+        _ => {}
+    }
+
+    Ok(details)
+}
+
 fn map_model(id: &str) -> Result<ModelDetails> {
     let details = match id {
         // Context and output limits use paid-tier values. Free-tier users
         // get lower limits enforced server-side.
-        "llama3.1-8b" => ModelDetails {
+        "gemma-4-31b" => ModelDetails {
             id: (PROVIDER, id).try_into()?,
-            display_name: Some("Llama 3.1 8B".to_owned()),
-            context_window: Some(32_768),
-            max_output_tokens: Some(8_192),
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: Some(true),
-            features: vec![],
-        },
-        "qwen-3-235b-a22b-instruct-2507" => ModelDetails {
-            id: (PROVIDER, id).try_into()?,
-            display_name: Some("Qwen 3 235B A22B".to_owned()),
+            display_name: Some("Gemma 4 31B".to_owned()),
             context_window: Some(131_072),
             max_output_tokens: Some(40_960),
-            reasoning: Some(ReasoningDetails::unsupported()),
+            // The public models API reports reasoning support but no effort
+            // ladder, so this mirrors the other Cerebras reasoning models.
+            // Marked always-on because sending an unsupported `none` effort is
+            // an error, while omitting it merely spends tokens.
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+            ),
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: Some(true),
+            prefill: None,
             features: vec![],
         },
         "gpt-oss-120b" => ModelDetails {
@@ -227,12 +367,13 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             display_name: Some("GPT-OSS 120B".to_owned()),
             context_window: Some(131_072),
             max_output_tokens: Some(40_960),
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, true, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+            ),
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: Some(true),
+            prefill: None,
             features: vec![],
         },
         "zai-glm-4.7" => ModelDetails {
@@ -242,11 +383,12 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             max_output_tokens: Some(40_960),
             // Reasoning is enabled by default; only `none` disables it.
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, false, false, false, false, false,
+                false, false, false, false, false, false,
             )),
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: Some(true),
+            prefill: None,
             features: vec![],
         },
         _ => {
@@ -316,7 +458,11 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         "Built Cerebras request."
     );
 
-    let reasoning_enabled = model.reasoning.is_some_and(|r| !r.is_unsupported());
+    // Unknown reasoning support counts as "may reason": without the parsed
+    // format, Cerebras returns reasoning inline in `content` wrapped in
+    // `<think>` tags, which then leaks into the visible message instead of being
+    // recorded as reasoning.
+    let reasoning_enabled = model.reasoning.is_none_or(|r| !r.is_unsupported());
 
     let mut body = json!({
         "model": slug,
@@ -353,16 +499,27 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
             ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max => "high",
         };
         body["reasoning_effort"] = json!(effort_str);
-    } else if matches!(parameters.reasoning, Some(ReasoningConfig::Off))
-        && model
-            .reasoning
-            .and_then(|r| r.lowest_effort())
-            .is_some_and(|e| e == ReasoningEffort::None)
-    {
-        // Only models that explicitly support `none` (e.g. zai-glm-4.7) can
-        // have reasoning disabled this way. For others (e.g. gpt-oss-120b), we
-        // simply omit reasoning_effort and let the server use its default.
-        body["reasoning_effort"] = json!("none");
+    } else if matches!(parameters.reasoning, Some(ReasoningConfig::Off)) {
+        // Honour an explicit "off" when the model is known to accept a `none`
+        // effort (zai-glm-4.7), and also when support is unknown: a model absent
+        // from the table may well accept it, and silently discarding the
+        // caller's setting is worse than a provider error. A model known to lack
+        // `none` (gpt-oss-120b) omits the field and takes the server default.
+        let known_none =
+            model.reasoning.and_then(|r| r.lowest_effort()) == Some(ReasoningEffort::None);
+        let unknown = model.reasoning.is_none();
+
+        if unknown {
+            debug!(
+                id = %model.id,
+                inferred = true,
+                "No reasoning capability reported; honouring the requested `off`."
+            );
+        }
+
+        if known_none || unknown {
+            body["reasoning_effort"] = json!("none");
+        }
     }
 
     if !converted_tools.is_empty() {

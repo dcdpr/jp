@@ -15,9 +15,8 @@ mod custom_reasoning_config {
     /// `max` instead of falling through to an unsupported level.
     #[test]
     fn auto_on_max_only_model_selects_max() {
-        let details = model(ReasoningDetails::leveled(
-            false, false, false, false, false, false, true,
-        ));
+        let details =
+            model(ReasoningDetails::leveled(false, false, false, false, false, true).always_on());
 
         let config = details
             .custom_reasoning_config(Some(ReasoningConfig::Auto))
@@ -30,9 +29,8 @@ mod custom_reasoning_config {
     /// selection.
     #[test]
     fn auto_prefers_lower_levels_over_max() {
-        let details = model(ReasoningDetails::leveled(
-            false, false, true, false, false, false, true,
-        ));
+        let details =
+            model(ReasoningDetails::leveled(false, true, false, false, false, true).always_on());
 
         let config = details
             .custom_reasoning_config(Some(ReasoningConfig::Auto))

@@ -594,6 +594,14 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
 }
 
 #[expect(clippy::too_many_lines)]
+/// Map an OpenAI model id onto its capabilities.
+///
+/// This table is authoritative rather than a fallback: `GET /v1/models/{id}`
+/// returns only `{id, object, created, owned_by}`, reporting neither context
+/// windows nor reasoning effort levels.
+/// Unlike the Anthropic, OpenRouter, and Cerebras providers, there is nothing
+/// to derive from, so every value here is maintained by hand against OpenAI's
+/// published model documentation.
 fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
         "gpt-5.6" | "gpt-5.6-sol" => ModelDetails {
@@ -603,11 +611,12 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: none, low, medium, high, xhigh, max.
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, true,
+                false, true, true, true, true, true,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 2, 16).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![
                 TEMP_REQUIRES_NO_REASONING,
                 REASONING_PRO_MODE,
@@ -621,11 +630,12 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, true,
+                false, true, true, true, true, true,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 2, 16).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![
                 TEMP_REQUIRES_NO_REASONING,
                 REASONING_PRO_MODE,
@@ -639,11 +649,12 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, true,
+                false, true, true, true, true, true,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 2, 16).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![
                 TEMP_REQUIRES_NO_REASONING,
                 REASONING_PRO_MODE,
@@ -657,11 +668,12 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, false,
+                false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 12, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.5-pro" | "gpt-5.5-pro-2026-04-23" => ModelDetails {
@@ -669,12 +681,13 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             display_name: Some("GPT-5.5 pro".to_owned()),
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, true, true, true, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, false, true, true, true, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 12, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING, STREAMING_UNSUPPORTED],
         },
         "gpt-5.4" | "gpt-5.4-2026-03-05" => ModelDetails {
@@ -683,11 +696,12 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, false,
+                false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.4-pro" | "gpt-5.4-pro-2026-03-05" => ModelDetails {
@@ -695,12 +709,13 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             display_name: Some("GPT-5.4 pro".to_owned()),
             context_window: Some(1_050_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, true, true, true, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, false, true, true, true, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.4-mini" | "gpt-5.4-mini-2026-03-17" => ModelDetails {
@@ -709,11 +724,12 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, false,
+                false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.4-nano" | "gpt-5.4-nano-2026-03-17" => ModelDetails {
@@ -722,11 +738,12 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, false,
+                false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.3-codex" => ModelDetails {
@@ -734,12 +751,13 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             display_name: Some("GPT-5.3 Codex".to_owned()),
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, true, true, true, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.3-chat-latest" => ModelDetails {
@@ -747,15 +765,16 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             display_name: Some("GPT-5.3 Chat".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, true, true, true, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
                 &"recommended replacement: gpt-5.5",
                 Some(NaiveDate::from_ymd_opt(2026, 8, 10).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.2-codex" => ModelDetails {
@@ -764,15 +783,16 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: low, medium, high, xhigh (no none)
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, true, true, true, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, true, true, true, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
                 &"recommended replacement: gpt-5.5",
                 Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.2-pro" | "gpt-5.2-pro-2025-12-11" => ModelDetails {
@@ -780,12 +800,13 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             display_name: Some("GPT-5.2 pro".to_owned()),
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, true, true, true, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, false, true, true, true, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.2" | "gpt-5.2-2025-12-11" => ModelDetails {
@@ -795,11 +816,12 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: none (default), low, medium, high, xhigh
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, false,
+                false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.2-chat-latest" => ModelDetails {
@@ -808,7 +830,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, false,
+                false, true, true, true, true, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
@@ -816,6 +838,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 8, 10).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1-codex-max" => ModelDetails {
@@ -830,6 +853,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1-codex" => ModelDetails {
@@ -844,6 +868,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1-codex-mini" => ModelDetails {
@@ -858,6 +883,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1" | "gpt-5.1-2025-11-13" => ModelDetails {
@@ -867,11 +893,12 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: none (default), low, medium, high
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, false, false,
+                false, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1-chat-latest" => ModelDetails {
@@ -880,7 +907,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
             reasoning: Some(ReasoningDetails::leveled(
-                true, false, true, true, true, false, false,
+                false, true, true, true, false, false,
             )),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
@@ -888,6 +915,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-codex" => ModelDetails {
@@ -902,6 +930,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5" => ModelDetails {
@@ -910,9 +939,9 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: minimal, low, medium, high
-            reasoning: Some(ReasoningDetails::leveled(
-                false, true, true, true, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             // Deprecated without an announced retirement date; only the
             // 2025-08-07 snapshot has a scheduled shutdown (2026-12-11).
@@ -921,6 +950,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 None,
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-2025-08-07" => ModelDetails {
@@ -929,15 +959,16 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
             // Reasoning.effort supports: minimal, low, medium, high
-            reasoning: Some(ReasoningDetails::leveled(
-                false, true, true, true, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
                 &"recommended replacement: gpt-5.5",
                 Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-pro" | "gpt-5-pro-2025-10-06" => ModelDetails {
@@ -945,15 +976,16 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             display_name: Some("GPT-5 pro".to_owned()),
             context_window: Some(400_000),
             max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, false, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, false, false, true, false, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
                 &"recommended replacement: gpt-5.5-pro",
                 Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-chat-latest" => ModelDetails {
@@ -961,15 +993,16 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             display_name: Some("GPT-5 Chat".to_owned()),
             context_window: Some(128_000),
             max_output_tokens: Some(16_384),
-            reasoning: Some(ReasoningDetails::leveled(
-                false, true, true, true, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 9, 30).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
                 &"recommended replacement: gpt-5.5",
                 Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-mini" | "gpt-5-mini-2025-08-07" => ModelDetails {
@@ -984,6 +1017,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-nano" | "gpt-5-nano-2025-08-07" => ModelDetails {
@@ -998,6 +1032,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "o4-mini" | "o4-mini-2025-04-16" => ModelDetails {
@@ -1012,6 +1047,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "o3-mini" | "o3-mini-2025-01-31" => ModelDetails {
@@ -1026,6 +1062,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "o3" | "o3-2025-04-16" => ModelDetails {
@@ -1040,6 +1077,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "o3-pro" | "o3-pro-2025-06-10" => ModelDetails {
@@ -1054,6 +1092,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 12, 11).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "o1" | "o1-2024-12-17" => ModelDetails {
@@ -1068,6 +1107,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "o1-pro" | "o1-pro-2025-03-19" => ModelDetails {
@@ -1082,6 +1122,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gpt-4.1" | "gpt-4.1-2025-04-14" => ModelDetails {
@@ -1093,6 +1134,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gpt-4o" | "gpt-4o-2024-08-06" | "gpt-4o-2024-11-20" => ModelDetails {
@@ -1109,6 +1151,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 None,
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => ModelDetails {
@@ -1123,6 +1166,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 10, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => ModelDetails {
@@ -1134,6 +1178,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2023, 10, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => ModelDetails {
@@ -1145,6 +1190,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gpt-oss-120b" => ModelDetails {
@@ -1156,6 +1202,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gpt-oss-20b" => ModelDetails {
@@ -1167,6 +1214,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 6, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "o3-deep-research" | "o3-deep-research-2025-06-26" => ModelDetails {
@@ -1181,6 +1229,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "o4-mini-deep-research" | "o4-mini-deep-research-2025-06-26" => ModelDetails {
@@ -1195,6 +1244,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
                 Some(NaiveDate::from_ymd_opt(2026, 7, 23).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         id => {

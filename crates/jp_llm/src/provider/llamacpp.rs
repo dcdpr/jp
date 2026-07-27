@@ -22,10 +22,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
 
-use super::{
-    EventStream, ModelDetails,
-    openai::{ModelListResponse, ModelResponse, parameters_with_strict_mode},
-};
+use super::{EventStream, ModelDetails, openai::parameters_with_strict_mode};
 use crate::{
     error::{Error, StreamError},
     event::{Event, FinishReason},
@@ -69,7 +66,7 @@ impl Provider for Llamacpp {
             .send()
             .await?
             .error_for_status()?
-            .json::<ModelListResponse>()
+            .json::<LlamacppModelList>()
             .await?
             .data
             .iter()
@@ -677,7 +674,36 @@ fn convert_tool_choice(choice: &ToolChoice) -> &str {
     }
 }
 
-fn map_model(model: &ModelResponse) -> Result<ModelDetails, Error> {
+/// A `/v1/models` listing from llama.cpp.
+///
+/// llama.cpp serves the OpenAI shape but adds a `meta` object per entry, so
+/// this is modelled separately rather than widening the OpenAI type with fields
+/// only one provider sends.
+#[derive(Debug, Deserialize)]
+struct LlamacppModelList {
+    #[serde(default)]
+    data: Vec<LlamacppModel>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LlamacppModel {
+    id: String,
+
+    #[serde(default)]
+    meta: LlamacppMeta,
+}
+
+/// Loaded-model metadata reported by llama.cpp.
+#[derive(Debug, Default, Deserialize)]
+struct LlamacppMeta {
+    /// Context length the model was trained for.
+    ///
+    /// Absent on older llama.cpp builds.
+    #[serde(default)]
+    n_ctx_train: Option<u32>,
+}
+
+fn map_model(model: &LlamacppModel) -> Result<ModelDetails, Error> {
     Ok(ModelDetails {
         id: (
             PROVIDER,
@@ -688,12 +714,18 @@ fn map_model(model: &ModelResponse) -> Result<ModelDetails, Error> {
         )
             .try_into()?,
         display_name: None,
-        context_window: None,
+        context_window: model.meta.n_ctx_train,
+        // llama.cpp reports no generation ceiling; it is bounded by the served
+        // context rather than a per-model limit.
         max_output_tokens: None,
+        // Reasoning is a server-launch concern for llama.cpp, selected with
+        // `--reasoning-format` rather than reported per model, so support stays
+        // unknown and an explicit request is passed through.
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec![],
     })
 }

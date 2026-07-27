@@ -766,7 +766,7 @@ mod map_model {
         assert_eq!(
             details.reasoning,
             Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, true,
+                false, true, true, true, true, true,
             ))
         );
         assert_eq!(
@@ -799,7 +799,7 @@ mod map_model {
         assert_eq!(
             details.reasoning,
             Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, true,
+                false, true, true, true, true, true,
             ))
         );
         assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
@@ -821,7 +821,7 @@ mod map_model {
         assert_eq!(
             details.reasoning,
             Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, true,
+                false, true, true, true, true, true,
             ))
         );
         assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
@@ -843,7 +843,7 @@ mod map_model {
         assert_eq!(
             details.reasoning,
             Some(ReasoningDetails::leveled(
-                true, false, true, true, true, true, false,
+                false, true, true, true, true, false,
             ))
         );
         assert_eq!(
@@ -863,9 +863,7 @@ mod map_model {
         assert_eq!(details.max_output_tokens, Some(128_000));
         assert_eq!(
             details.reasoning,
-            Some(ReasoningDetails::leveled(
-                false, false, false, true, true, true, false,
-            ))
+            Some(ReasoningDetails::leveled(false, false, true, true, true, false).always_on())
         );
         assert_eq!(
             details.knowledge_cutoff,
@@ -1182,7 +1180,7 @@ mod convert_reasoning {
     #[test]
     fn max_effort_is_sent_when_supported() {
         let details = model(ReasoningDetails::leveled(
-            true, false, true, true, true, true, true,
+            false, true, true, true, true, true,
         ));
         let config = convert_reasoning(
             CustomReasoningConfig {
@@ -1198,7 +1196,7 @@ mod convert_reasoning {
     #[test]
     fn max_effort_degrades_to_xhigh_when_unsupported() {
         let details = model(ReasoningDetails::leveled(
-            true, false, true, true, true, true, false,
+            false, true, true, true, true, false,
         ));
         let config = convert_reasoning(
             CustomReasoningConfig {

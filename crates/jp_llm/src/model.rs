@@ -37,7 +37,19 @@ pub struct ModelDetails {
     /// models.
     pub structured_output: Option<bool>,
 
+    /// Whether the model accepts a trailing assistant message as a prefill to
+    /// continue from.
+    ///
+    /// Models that reject prefill require the conversation to end with a user
+    /// message, so callers must inject a synthetic continuation instead.
+    ///
+    /// `None` means the provider reports nothing either way.
+    pub prefill: Option<bool>,
+
     /// Provider-specific features.
+    ///
+    /// Reserved for capabilities read only by the provider that declares them.
+    /// A capability that shared code reads belongs in a typed field instead.
     pub features: Vec<&'static str>,
 }
 
@@ -53,6 +65,7 @@ impl ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: None,
+            prefill: None,
             features: vec![],
         }
     }
@@ -63,10 +76,14 @@ impl ModelDetails {
         self.structured_output.unwrap_or(false)
     }
 
-    /// Returns `true` if the model supports assistant prefill.
+    /// Returns `true` if the model is known to support assistant prefill.
+    ///
+    /// Unknown support reads as `false`: injecting a synthetic continuation for
+    /// a model that would have accepted a prefill costs a few tokens, whereas
+    /// prefilling one that rejects it is a request error.
     #[must_use]
     pub fn supports_prefill(&self) -> bool {
-        self.features.contains(&"prefill")
+        self.prefill.unwrap_or(false)
     }
 
     /// Returns `true` if the model supports disabling reasoning.
@@ -75,9 +92,13 @@ impl ModelDetails {
     /// `thinking: disabled`, return `false`.
     /// For those, callers must omit the thinking field rather than disabling
     /// it.
+    ///
+    /// Models whose reasoning support is unknown also return `false`: sending
+    /// `thinking: disabled` to a model that rejects it is a hard request error,
+    /// whereas leaving thinking enabled only costs tokens.
     #[must_use]
     pub fn supports_disabling_thinking(&self) -> bool {
-        !self.features.contains(&"thinking-always-on")
+        self.reasoning.is_some_and(|r| r.can_disable())
     }
 
     #[must_use]
@@ -125,7 +146,10 @@ impl ModelDetails {
             },
 
             // Budgetted
-            Some(ReasoningDetails::Budgetted { .. }) => match config {
+            Some(ReasoningDetails::Supported {
+                mode: ReasoningMode::Budgetted { .. },
+                ..
+            }) => match config {
                 // Off, so disabled.
                 Some(ReasoningConfig::Off) => None,
 
@@ -140,14 +164,17 @@ impl ModelDetails {
             },
 
             // Leveled
-            Some(ReasoningDetails::Leveled {
-                none: _,
-                xlow: _,
-                low,
-                medium,
-                high,
-                xhigh,
-                max,
+            Some(ReasoningDetails::Supported {
+                mode:
+                    ReasoningMode::Leveled {
+                        xlow: _,
+                        low,
+                        medium,
+                        high,
+                        xhigh,
+                        max,
+                    },
+                ..
             }) => match config {
                 // Off, so disabled.
                 Some(ReasoningConfig::Off) => None,
@@ -176,7 +203,10 @@ impl ModelDetails {
             },
 
             // Adaptive
-            Some(ReasoningDetails::Adaptive { .. }) => match config {
+            Some(ReasoningDetails::Supported {
+                mode: ReasoningMode::Adaptive { .. },
+                ..
+            }) => match config {
                 // Off, so disabled.
                 Some(ReasoningConfig::Off) => None,
 
@@ -228,6 +258,22 @@ pub enum ReasoningDetails {
     /// Reasoning is not supported.
     Unsupported,
 
+    /// Reasoning is supported, in the given mode.
+    Supported {
+        /// How this model expresses reasoning effort.
+        mode: ReasoningMode,
+
+        /// Whether reasoning can be turned off entirely.
+        ///
+        /// Models that always reason reject an explicit "disable" request, so
+        /// callers must omit the field rather than disabling it.
+        can_disable: bool,
+    },
+}
+
+/// How a model expresses reasoning effort.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ReasoningMode {
     /// Budgetted reasoning support.
     ///
     /// Most models allow specifying the minimum and maximum number of tokens
@@ -248,9 +294,6 @@ pub enum ReasoningDetails {
     /// reasoning configuration, but instead offer specific "efforts" of
     /// reasoning, such as low/medium/high effort.
     Leveled {
-        /// Whether the model supports completely disabling reasoning.
-        none: bool,
-
         /// Whether the model supports extremely low effort reasoning.
         xlow: bool,
 
@@ -288,18 +331,29 @@ pub enum ReasoningDetails {
 }
 
 impl ReasoningDetails {
+    /// Reasoning expressed as a token budget.
+    ///
+    /// Reasoning is disableable; chain [`always_on`] for models that cannot
+    /// turn it off.
+    ///
+    /// [`always_on`]: Self::always_on
     #[must_use]
     pub fn budgetted(min_tokens: u32, max_tokens: Option<u32>) -> Self {
-        Self::Budgetted {
+        Self::supported(ReasoningMode::Budgetted {
             min_tokens,
             max_tokens,
-        }
+        })
     }
 
+    /// Reasoning expressed as discrete effort levels.
+    ///
+    /// Reasoning is disableable; chain [`always_on`] for models that cannot
+    /// turn it off.
+    ///
+    /// [`always_on`]: Self::always_on
     #[must_use]
     #[expect(clippy::fn_params_excessive_bools)]
     pub fn leveled(
-        none: bool,
         xlow: bool,
         low: bool,
         medium: bool,
@@ -307,20 +361,25 @@ impl ReasoningDetails {
         xhigh: bool,
         max: bool,
     ) -> Self {
-        Self::Leveled {
-            none,
+        Self::supported(ReasoningMode::Leveled {
             xlow,
             low,
             medium,
             high,
             xhigh,
             max,
-        }
+        })
     }
 
+    /// Reasoning the model schedules itself, steered by effort level.
+    ///
+    /// Reasoning is disableable; chain [`always_on`] for models that cannot
+    /// turn it off.
+    ///
+    /// [`always_on`]: Self::always_on
     #[must_use]
     pub fn adaptive(xhigh: bool, max: bool) -> Self {
-        Self::Adaptive { xhigh, max }
+        Self::supported(ReasoningMode::Adaptive { xhigh, max })
     }
 
     #[must_use]
@@ -329,18 +388,62 @@ impl ReasoningDetails {
     }
 
     #[must_use]
-    pub fn min_tokens(&self) -> u32 {
+    fn supported(mode: ReasoningMode) -> Self {
+        Self::Supported {
+            mode,
+            can_disable: true,
+        }
+    }
+
+    /// Mark reasoning as impossible to turn off.
+    ///
+    /// Such models reject an explicit "disable reasoning" request, so callers
+    /// must omit the field instead of disabling it.
+    #[must_use]
+    pub fn always_on(self) -> Self {
         match self {
-            Self::Budgetted { min_tokens, .. } => *min_tokens,
-            Self::Leveled { .. } | Self::Adaptive { .. } | Self::Unsupported => 0,
+            Self::Supported { mode, .. } => Self::Supported {
+                mode,
+                can_disable: false,
+            },
+            Self::Unsupported => Self::Unsupported,
+        }
+    }
+
+    /// Whether reasoning can be turned off entirely.
+    ///
+    /// Models that never reason report `true`: there is nothing to turn off, so
+    /// an explicit disable is always safe.
+    #[must_use]
+    pub fn can_disable(&self) -> bool {
+        match self {
+            Self::Unsupported => true,
+            Self::Supported { can_disable, .. } => *can_disable,
+        }
+    }
+
+    /// The reasoning mode, or `None` when reasoning is unsupported.
+    #[must_use]
+    pub fn mode(&self) -> Option<ReasoningMode> {
+        match self {
+            Self::Unsupported => None,
+            Self::Supported { mode, .. } => Some(*mode),
+        }
+    }
+
+    #[must_use]
+    pub fn min_tokens(&self) -> u32 {
+        match self.mode() {
+            Some(ReasoningMode::Budgetted { min_tokens, .. }) => min_tokens,
+            _ => 0,
         }
     }
 
     #[must_use]
     pub fn max_tokens(&self) -> Option<u32> {
-        match self {
-            Self::Budgetted { max_tokens, .. } => *max_tokens,
-            Self::Leveled { .. } | Self::Adaptive { .. } | Self::Unsupported => None,
+        match self.mode() {
+            Some(ReasoningMode::Budgetted { max_tokens, .. }) => max_tokens,
+            _ => None,
         }
     }
 
@@ -354,16 +457,19 @@ impl ReasoningDetails {
     #[must_use]
     pub fn lowest_effort(&self) -> Option<ReasoningEffort> {
         match self {
-            Self::Leveled {
-                none,
-                xlow,
-                low,
-                medium,
-                high,
-                xhigh,
-                max,
+            Self::Supported {
+                can_disable,
+                mode:
+                    ReasoningMode::Leveled {
+                        xlow,
+                        low,
+                        medium,
+                        high,
+                        xhigh,
+                        max,
+                    },
             } => {
-                if *none {
+                if *can_disable {
                     Some(ReasoningEffort::None)
                 } else if *xlow {
                     Some(ReasoningEffort::Xlow)
@@ -389,8 +495,11 @@ impl ReasoningDetails {
     #[must_use]
     pub fn supports_max_effort(&self) -> bool {
         matches!(
-            self,
-            Self::Leveled { max: true, .. } | Self::Adaptive { max: true, .. }
+            self.mode(),
+            Some(
+                ReasoningMode::Leveled { max: true, .. }
+                    | ReasoningMode::Adaptive { max: true, .. }
+            )
         )
     }
 
@@ -401,17 +510,17 @@ impl ReasoningDetails {
 
     #[must_use]
     pub fn is_budgetted(&self) -> bool {
-        matches!(self, Self::Budgetted { .. })
+        matches!(self.mode(), Some(ReasoningMode::Budgetted { .. }))
     }
 
     #[must_use]
     pub fn is_leveled(&self) -> bool {
-        matches!(self, Self::Leveled { .. })
+        matches!(self.mode(), Some(ReasoningMode::Leveled { .. }))
     }
 
     #[must_use]
     pub fn is_adaptive(&self) -> bool {
-        matches!(self, Self::Adaptive { .. })
+        matches!(self.mode(), Some(ReasoningMode::Adaptive { .. }))
     }
 }
 

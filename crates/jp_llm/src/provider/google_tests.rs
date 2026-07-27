@@ -29,6 +29,118 @@ async fn test_gemini_3_reasoning() -> std::result::Result<(), Box<dyn std::error
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
 
+/// Regression: when reasoning support is unknown (a model newer than this
+/// binary) and reasoning is configured, the request must still ask for
+/// thoughts.
+/// Sending no thinking config lets Gemini think while withholding the thoughts,
+/// billing reasoning tokens that never reach the transcript.
+#[test]
+fn test_unknown_model_requests_thoughts() {
+    let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+    assert_eq!(model.reasoning, None, "fixture must have unknown reasoning");
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Auto);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("thinking config must be sent for an unknown model");
+    assert!(
+        thinking.include_thoughts,
+        "thoughts must be requested so reasoning reaches the transcript"
+    );
+}
+
+/// End-to-end: the API's `thinking` flag overrides the table, so a model the
+/// API reports as not thinking is never configured for it.
+#[test]
+fn test_map_model_thinking_flag_overrides_table() {
+    let model = types::Model {
+        base_model_id: "gemini-2.0-flash".to_owned(),
+        display_name: "Gemini 2.0 Flash".to_owned(),
+        input_token_limit: 1_048_576,
+        output_token_limit: 8_192,
+        thinking: false,
+        ..Default::default()
+    };
+
+    let details = map_model(model);
+
+    assert_eq!(details.reasoning, Some(ReasoningDetails::unsupported()));
+    assert_eq!(details.context_window, Some(1_048_576));
+    assert_eq!(details.max_output_tokens, Some(8_192));
+}
+
+/// A model whose ladder is unknown still honours the caller's effort.
+/// Dropping it would make `-r high` silently do nothing on any thinking model
+/// newer than this binary, which is most of Gemini's current catalog.
+#[test]
+fn test_unknown_thinking_level_honours_requested_effort() {
+    assert_eq!(
+        unknown_thinking_level(ReasoningEffort::High, None),
+        Some(types::ThinkingLevel::High)
+    );
+    assert_eq!(
+        unknown_thinking_level(ReasoningEffort::Low, None),
+        Some(types::ThinkingLevel::Low)
+    );
+    assert_eq!(
+        unknown_thinking_level(ReasoningEffort::Medium, None),
+        Some(types::ThinkingLevel::Medium)
+    );
+
+    // Efforts above `high` clamp down rather than being dropped.
+    assert_eq!(
+        unknown_thinking_level(ReasoningEffort::Max, None),
+        Some(types::ThinkingLevel::High)
+    );
+
+    // `auto` leaves the choice to the model.
+    assert_eq!(unknown_thinking_level(ReasoningEffort::Auto, None), None);
+}
+
+/// A model the API reports as not thinking is recorded as not reasoning, even
+/// when the built-in table claims a ladder for it.
+/// Sending a thinking budget to such a model configures a mode it does not
+/// have.
+#[test]
+fn test_apply_thinking_support_overrides_table() {
+    let table = Some(ReasoningDetails::budgetted(0, Some(24_576)));
+
+    assert_eq!(
+        apply_thinking_support(table, false),
+        Some(ReasoningDetails::unsupported())
+    );
+}
+
+/// A thinking model keeps whatever the table says, including "unknown", since
+/// the API reports no effort levels to derive a ladder from.
+#[test]
+fn test_apply_thinking_support_keeps_table_when_thinking() {
+    let table = Some(ReasoningDetails::leveled(
+        false, true, true, true, false, false,
+    ));
+
+    assert_eq!(apply_thinking_support(table, true), table);
+    assert_eq!(apply_thinking_support(None, true), None);
+}
+
 mod thought_signature_recovery {
     use gemini_client_rs::types;
 

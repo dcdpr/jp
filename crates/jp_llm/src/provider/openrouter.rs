@@ -2,6 +2,7 @@ use std::{env, time::Duration};
 
 use async_trait::async_trait;
 use base64::Engine as _;
+use chrono::NaiveDate;
 use futures::{StreamExt as _, TryStreamExt as _, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
@@ -39,6 +40,7 @@ use crate::{
     Error, StreamError,
     error::{Result, StreamErrorKind, looks_like_quota_error},
     event::{self, Event, EventPart},
+    model::ReasoningDetails as ModelReasoningDetails,
     provider::{Provider, openai::parameters_with_strict_mode},
     query::ChatQuery,
     stream::with_tool_call_keepalive,
@@ -594,16 +596,85 @@ fn map_models(models: Vec<response::Model>) -> Vec<ModelDetails> {
 
 // TODO: Manually add a bunch of often-used models.
 fn map_model(model: response::Model) -> Result<ModelDetails> {
+    // An empty parameter list means the catalog reported nothing, which is not
+    // the same as the model supporting nothing.
+    let structured_output = (!model.supported_parameters.is_empty()).then(|| {
+        model
+            .supported_parameters
+            .iter()
+            .any(|p| p == "structured_outputs")
+    });
+    let reasoning = derive_reasoning(&model);
+
     Ok(ModelDetails {
         id: (PROVIDER, model.id).try_into()?,
         display_name: Some(model.name),
         context_window: Some(model.context_length),
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: Some(model.created.0.date_naive()),
+        max_output_tokens: model.top_provider.max_completion_tokens,
+        reasoning,
+        // Not `created`, which is when the model was listed on OpenRouter rather
+        // than a training cutoff.
+        knowledge_cutoff: model
+            .knowledge_cutoff
+            .as_deref()
+            .and_then(parse_knowledge_cutoff),
         deprecated: None,
-        structured_output: None,
+        structured_output,
+        prefill: None,
         features: vec![],
+    })
+}
+
+/// Parse a catalog knowledge cutoff, reported as `YYYY-MM-DD`.
+///
+/// An unparseable value is treated as absent rather than failing the listing:
+/// the catalog is shared across many upstream providers and one malformed date
+/// must not drop the whole model.
+fn parse_knowledge_cutoff(raw: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(raw, "%Y-%m-%d")
+        .inspect_err(|error| debug!(%raw, %error, "Ignoring unparseable knowledge cutoff."))
+        .ok()
+}
+
+/// Derive reasoning support from a model's advertised capabilities.
+///
+/// Returns `None` when the model claims a reasoning parameter without
+/// describing it, leaving support unknown rather than guessing a ladder.
+fn derive_reasoning(model: &response::Model) -> Option<ModelReasoningDetails> {
+    let Some(reasoning) = &model.reasoning else {
+        // An empty parameter list means the catalog reported nothing, so support
+        // stays unknown. Without this guard `all` holds vacuously and an
+        // unreported model reads as "known: does not reason".
+        if model.supported_parameters.is_empty() {
+            return None;
+        }
+
+        // No reasoning block. A model that also advertises no reasoning
+        // parameter does not reason; anything else is unknown.
+        return model
+            .supported_parameters
+            .iter()
+            .all(|p| p != "reasoning" && p != "reasoning_effort")
+            .then(ModelReasoningDetails::unsupported);
+    };
+
+    let supports = |effort: &str| reasoning.supported_efforts.iter().any(|e| e == effort);
+
+    let details = ModelReasoningDetails::leveled(
+        supports("minimal") || supports("xlow"),
+        supports("low"),
+        supports("medium"),
+        supports("high"),
+        supports("xhigh"),
+        supports("max"),
+    );
+
+    // `mandatory` is the one capability field any provider reports that maps
+    // directly onto reasoning being impossible to turn off.
+    Some(if reasoning.mandatory {
+        details.always_on()
+    } else {
+        details
     })
 }
 

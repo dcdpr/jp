@@ -36,6 +36,7 @@ use super::{EventStream, ModelDetails, Provider, trace_to_tmpfile};
 use crate::{
     error::{Error, Result, StreamError},
     event::{Event, FinishReason},
+    model::ReasoningDetails,
     query::ChatQuery,
     tool::ToolDefinition,
 };
@@ -104,17 +105,38 @@ impl Provider for Ollama {
 }
 
 fn map_model(model: LocalModel) -> Result<ModelDetails> {
+    let context_window = model
+        .details
+        .context_length
+        .and_then(|tokens| u32::try_from(tokens).ok());
+
     Ok(ModelDetails {
         id: (PROVIDER, &model.name).try_into()?,
+        reasoning: derive_reasoning(&model.capabilities),
         display_name: Some(model.name),
-        context_window: None,
+        context_window,
+        // `/api/tags` reports no generation ceiling.
         max_output_tokens: None,
-        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec![],
     })
+}
+
+/// Derive reasoning support from the capabilities Ollama advertises.
+///
+/// Only a non-empty capability list can rule reasoning out: an empty list means
+/// this Ollama version does not report capabilities, which is not the same as
+/// the model having none.
+/// A model that does advertise `thinking` keeps `None`, since no effort ladder
+/// is reported to derive one from.
+fn derive_reasoning(capabilities: &[String]) -> Option<ReasoningDetails> {
+    let reported = !capabilities.is_empty();
+    let thinks = capabilities.iter().any(|c| c == "thinking");
+
+    (reported && !thinks).then(ReasoningDetails::unsupported)
 }
 
 /// Map an Ollama streaming chunk into provider-agnostic events.
@@ -514,3 +536,7 @@ impl From<OllamaError> for StreamError {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "ollama_tests.rs"]
+mod tests;

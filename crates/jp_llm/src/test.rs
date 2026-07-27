@@ -642,6 +642,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: None,
+            prefill: None,
             features: vec!["interleaved-thinking", "context-editing"],
         },
         ProviderId::Google => ModelDetails {
@@ -653,6 +654,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         ProviderId::Openai => ModelDetails {
@@ -664,6 +666,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         ProviderId::Llamacpp => ModelDetails {
@@ -675,6 +678,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         ProviderId::Ollama => ModelDetails {
@@ -686,6 +690,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         ProviderId::Openrouter => ModelDetails {
@@ -697,6 +702,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         ProviderId::Cerebras => ModelDetails {
@@ -704,12 +710,13 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             display_name: Some("GPT-OSS 120B".to_owned()),
             context_window: Some(131_072),
             max_output_tokens: Some(40_960),
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, true, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+            ),
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: Some(true),
+            prefill: None,
             features: vec![],
         },
         ProviderId::Test => ModelDetails::empty("test/mock-model".parse().unwrap()),

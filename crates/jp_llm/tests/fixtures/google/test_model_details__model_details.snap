@@ -20,11 +20,14 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 512,
-                max_tokens: Some(
-                    24576,
-                ),
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 512,
+                    max_tokens: Some(
+                        24576,
+                    ),
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -39,6 +42,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
 ]
