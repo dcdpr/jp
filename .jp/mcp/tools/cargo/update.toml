@@ -4,21 +4,23 @@ run = "ask"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Update one or more named dependencies in `Cargo.lock`."
-description = """Update one or more named dependencies in `Cargo.lock`, leaving every other \
-package in the lockfile alone.
+description = """Update one or more named dependencies in `Cargo.lock`.
+
+Only the named packages are targeted, but cargo may also move their transitive dependencies when \
+the requested update cannot be applied otherwise. Every change to the lockfile, transitive ones \
+included, appears in the `Cargo.lock` diff in the result.
 
 At least one package is required; there is no way to update the whole lockfile at once.
 
 A package given as a bare name moves to the newest release allowed by the version requirement in \
 `Cargo.toml`, so a major-version bump needs the requirement in `Cargo.toml` changed first. A \
 package given as `{"name": ..., "version": ...}` is pinned to that exact version, which fails if \
-the version does not satisfy the manifest requirement.
+the version does not satisfy the manifest requirement. Unknown keys in that object are rejected, \
+so a misspelled `version` fails the call rather than silently updating to the newest release.
 
 Each package is updated independently: if one fails, the rest are still applied and the failures \
-are listed in the result.
-
-The result includes a diff of `Cargo.lock`, which shows transitive dependencies that moved as a \
-side effect of the requested updates.
+are listed in the result. A package already at its newest allowed version succeeds without moving \
+anything, which the result reports as an unchanged lockfile.
 
 Requires network access to refresh the registry index."""
 

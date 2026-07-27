@@ -35,10 +35,10 @@ fn name(name: &str) -> PackageSpec {
 }
 
 fn pinned(name: &str, version: &str) -> PackageSpec {
-    PackageSpec::Pinned {
+    PackageSpec::Pinned(PinnedSpec {
         name: name.to_owned(),
         version: Some(version.to_owned()),
-    }
+    })
 }
 
 fn success(stderr: &str) -> ProcessOutput {
@@ -91,6 +91,27 @@ fn bare_string_and_object_forms_both_deserialize() {
     ]);
 }
 
+/// A misspelled `version` key must not deserialize: dropping it would widen a
+/// request for one exact version into "newest compatible", which for a tool
+/// that rewrites the lockfile is the wrong way to be lenient.
+#[test]
+fn a_misspelled_version_key_is_rejected() {
+    let result = serde_json::from_value::<Vec<PackageSpec>>(json!([
+        {"name": "serde", "versoin": "1.0.210"},
+    ]));
+
+    assert!(result.is_err(), "expected a parse error, got: {result:?}");
+}
+
+#[test]
+fn an_unknown_extra_key_is_rejected() {
+    let result = serde_json::from_value::<Vec<PackageSpec>>(json!([
+        {"name": "serde", "version": "1.0.210", "precise": true},
+    ]));
+
+    assert!(result.is_err(), "expected a parse error, got: {result:?}");
+}
+
 #[test]
 fn single_package_updates_only_that_package() {
     let (_dir, ctx) = ctx();
@@ -121,7 +142,7 @@ fn each_package_gets_its_own_invocation() {
 
     let result = cargo_update_impl(&ctx, &[name("serde"), name("tokio")], &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
-            2/2 packages updated.
+            2/2 update commands succeeded.
 
             Updating serde v1.0.200 -> v1.0.210
 
@@ -157,16 +178,21 @@ fn each_pinned_package_gets_its_own_version() {
     let packages = [pinned("serde", "1.0.210"), pinned("tokio", "1.44.0")];
     let result = cargo_update_impl(&ctx, &packages, &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
-            2/2 packages updated.
+            2/2 update commands succeeded.
 
             Updating serde v1.0.200 -> v1.0.210
 
             Updating tokio v1.40.0 -> v1.44.0"});
 }
 
+/// Every command succeeding is not the same as anything having moved: three
+/// exit-0 invocations that leave the lockfile untouched must not read as three
+/// bumps.
 #[test]
 fn packages_are_updated_in_request_order() {
     let (_dir, ctx) = ctx();
+    fs::write(ctx.root.join("Cargo.lock"), "version = 4\n").unwrap();
+
     let runner = MockProcessRunner::builder()
         .expect("cargo")
         .args(&["update", "--color=never", "serde"])
@@ -180,7 +206,10 @@ fn packages_are_updated_in_request_order() {
 
     let packages = [name("serde"), pinned("tokio", "1.44.0"), name("regex")];
     let result = cargo_update_impl(&ctx, &packages, &runner).unwrap();
-    assert_eq!(result.unwrap_content(), "3/3 packages updated.");
+    assert_eq!(result.unwrap_content(), indoc! {"
+            3/3 update commands succeeded.
+
+            Nothing to update, the lockfile is unchanged."});
 }
 
 #[test]
@@ -245,12 +274,17 @@ fn an_unchanged_lockfile_produces_no_diff() {
         .returns(success("    Updating crates.io index"));
 
     let result = cargo_update_impl(&ctx, &[name("serde")], &runner).unwrap();
-    assert_eq!(result.unwrap_content(), "Updating crates.io index");
+    assert_eq!(result.unwrap_content(), indoc! {"
+            Updating crates.io index
+
+            Nothing to update, the lockfile is unchanged."});
 }
 
 #[test]
 fn nothing_reported_and_nothing_changed_says_so() {
     let (_dir, ctx) = ctx();
+    fs::write(ctx.root.join("Cargo.lock"), "version = 4\n").unwrap();
+
     let runner = MockProcessRunner::builder()
         .expect("cargo")
         .returns(success(""));
@@ -279,7 +313,7 @@ fn a_failing_package_does_not_stop_the_others() {
 
     let result = cargo_update_impl(&ctx, &[name("srde"), name("tokio")], &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
-            1/2 packages updated.
+            1/2 update commands succeeded.
 
             Updating tokio v1.40.0 -> v1.44.0
 
@@ -306,7 +340,7 @@ fn a_failed_pinned_package_is_reported_with_its_version() {
     let packages = [name("serde"), pinned("tokio", "99.0.0")];
     let result = cargo_update_impl(&ctx, &packages, &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
-            1/2 packages updated.
+            1/2 update commands succeeded.
 
             Updating serde v1.0.200 -> v1.0.210
 
@@ -396,15 +430,24 @@ fn an_invalid_package_rejects_the_whole_call() {
 }
 
 #[test]
-fn lockfile_diff_returns_none_when_unchanged() {
+fn an_identical_lockfile_is_unchanged() {
     assert_eq!(
-        lockfile_diff(Some("version = 4\n"), Some("version = 4\n")),
-        None
+        lockfile_change(Some("version = 4\n"), Some("version = 4\n")),
+        LockfileChange::Unchanged
     );
 }
 
+/// Without both snapshots there is no basis for claiming the lockfile held
+/// still, so the report says nothing about it rather than guessing.
 #[test]
-fn lockfile_diff_returns_none_when_the_lockfile_is_missing() {
-    assert_eq!(lockfile_diff(None, Some("version = 4\n")), None);
-    assert_eq!(lockfile_diff(Some("version = 4\n"), None), None);
+fn a_missing_snapshot_is_unknown_rather_than_unchanged() {
+    assert_eq!(
+        lockfile_change(None, Some("version = 4\n")),
+        LockfileChange::Unknown
+    );
+    assert_eq!(
+        lockfile_change(Some("version = 4\n"), None),
+        LockfileChange::Unknown
+    );
+    assert_eq!(lockfile_change(None, None), LockfileChange::Unknown);
 }

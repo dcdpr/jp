@@ -18,24 +18,35 @@ const LOCKFILE: &str = "Cargo.lock";
 #[serde(untagged)]
 pub(crate) enum PackageSpec {
     Name(String),
-    Pinned {
-        name: String,
-        #[serde(default)]
-        version: Option<String>,
-    },
+    Pinned(PinnedSpec),
+}
+
+/// A package named alongside the exact version to move it to.
+///
+/// Unknown keys are rejected: a misspelled `version` would otherwise be
+/// dropped, turning a request for one exact version into "whatever cargo
+/// considers newest".
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct PinnedSpec {
+    pub name: String,
+
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 impl PackageSpec {
     fn name(&self) -> &str {
         match self {
-            Self::Name(name) | Self::Pinned { name, .. } => name,
+            Self::Name(name) => name,
+            Self::Pinned(spec) => &spec.name,
         }
     }
 
     fn version(&self) -> Option<&str> {
         match self {
             Self::Name(_) => None,
-            Self::Pinned { version, .. } => version.as_deref(),
+            Self::Pinned(spec) => spec.version.as_deref(),
         }
     }
 
@@ -114,23 +125,34 @@ fn cargo_update_impl<R: ProcessRunner>(
     }
 
     let after = fs::read_to_string(&lockfile).ok();
-    let diff = lockfile_diff(before.as_deref(), after.as_deref());
 
     let mut sections = vec![];
+    // Counts commands, not version bumps: cargo exits 0 for a package that was
+    // already at the newest version its requirement allows.
     if total > 1 || !failures.is_empty() {
-        sections.push(format!("{updated}/{total} packages updated."));
+        sections.push(format!("{updated}/{total} update commands succeeded."));
     }
     sections.extend(reports);
     if !failures.is_empty() {
         sections.push(format!("Failed:\n{}", failures.join("\n")));
     }
-    let has_diff = diff.is_some();
-    if let Some(diff) = diff {
-        sections.push(diff);
+
+    let change = lockfile_change(before.as_deref(), after.as_deref());
+    let has_diff = matches!(change, LockfileChange::Changed(_));
+    match change {
+        LockfileChange::Changed(diff) => sections.push(diff),
+        // Succeeding without moving anything is the outcome most easily
+        // misread as a bump, so it is stated rather than left to inference.
+        // Suppressed when something failed: "nothing to update" would read as
+        // a verdict on the whole call.
+        LockfileChange::Unchanged if failures.is_empty() => {
+            sections.push("Nothing to update, the lockfile is unchanged.".to_owned());
+        }
+        LockfileChange::Unchanged | LockfileChange::Unknown => {}
     }
 
     if sections.is_empty() {
-        return Ok("Nothing to update, the lockfile is unchanged.".into());
+        return Ok("cargo update produced no output.".into());
     }
 
     let content = sections.join("\n\n");
@@ -146,16 +168,32 @@ fn cargo_update_impl<R: ProcessRunner>(
     })
 }
 
-/// Unified diff between two lockfile snapshots.
+/// What happened to the lockfile across an update.
+#[derive(Debug, PartialEq)]
+enum LockfileChange {
+    /// The lockfile moved; carries the unified diff.
+    Changed(String),
+
+    /// The lockfile was read before and after, and is byte-identical.
+    Unchanged,
+
+    /// One of the two snapshots is missing, so nothing can be claimed about
+    /// what moved.
+    Unknown,
+}
+
+/// Compare two lockfile snapshots.
 ///
-/// Returns `None` when the lockfile is unchanged, unreadable, or absent before
-/// the update.
-/// A lockfile that did not exist yet would render in full, which buries the
-/// update report under thousands of added lines.
-fn lockfile_diff(before: Option<&str>, after: Option<&str>) -> Option<String> {
-    let (before, after) = (before?, after?);
+/// A snapshot missing on either side yields [`LockfileChange::Unknown`] rather
+/// than a diff: a lockfile that did not exist yet would render in full, burying
+/// the update report under thousands of added lines.
+fn lockfile_change(before: Option<&str>, after: Option<&str>) -> LockfileChange {
+    let (Some(before), Some(after)) = (before, after) else {
+        return LockfileChange::Unknown;
+    };
+
     if before == after {
-        return None;
+        return LockfileChange::Unchanged;
     }
 
     let diff = text_diff(before, after);
@@ -164,7 +202,7 @@ fn lockfile_diff(before: Option<&str>, after: Option<&str>) -> Option<String> {
     // Drop the trailing newline so the diff joins with the other report
     // sections like any other block. `strip_suffix` rather than `trim_end`,
     // because a blank context line is a significant single space.
-    Some(unified.strip_suffix('\n').unwrap_or(&unified).to_owned())
+    LockfileChange::Changed(unified.strip_suffix('\n').unwrap_or(&unified).to_owned())
 }
 
 /// Reject values cargo would misread as a flag, or that are blank.
