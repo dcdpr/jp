@@ -126,5 +126,5 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 }
 
 #[cfg(test)]
-#[path = "fs/fs_tests.rs"]
+#[path = "fs_tests.rs"]
 mod tests;
