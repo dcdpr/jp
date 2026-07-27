@@ -5,6 +5,14 @@ run = "unattended"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "List files in the project's local filesystem."
+description = """
+Results honor the workspace `.ignore` file with gitignore semantics,
+including negations. Note the gitignore re-inclusion rule: files inside
+an excluded tree stay hidden unless the directory and its contents are
+negated separately and seemingly redundantly (`!/target/doc/` and
+`!/target/doc/**`). If a file exists on disk but is absent from the
+listing, it matched an `.ignore` rule.
+"""
 
 examples = """
 List all Rust files:
