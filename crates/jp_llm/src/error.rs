@@ -72,6 +72,12 @@ impl StreamError {
         Self::new(StreamErrorKind::Transient, message)
     }
 
+    /// Create a context-window-exceeded error.
+    #[must_use]
+    pub fn context_window_exceeded(message: impl Into<String>) -> Self {
+        Self::new(StreamErrorKind::ContextWindowExceeded, message)
+    }
+
     /// Returns the human-readable error message (without the source chain).
     #[must_use]
     pub fn message(&self) -> &str {
@@ -125,9 +131,16 @@ impl StreamError {
 
 impl fmt::Display for StreamError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)?;
+        f.write_str(&self.message)?;
+
+        // Providers commonly build the message out of the source's own
+        // rendering (`StreamError::other(err.to_string()).with_source(err)`),
+        // which would otherwise print the same sentence twice.
         if let Some(ref source) = self.source {
-            write!(f, ": {source}")?;
+            let source = source.to_string();
+            if !self.message.contains(&source) {
+                write!(f, ": {source}")?;
+            }
         }
 
         Ok(())
@@ -219,12 +232,25 @@ impl StreamError {
                 let retry_after = extract_retry_after(&headers);
                 let code = status.as_u16();
 
+                // An oversized prompt is the same size on the next attempt, so
+                // it is classified before the retry heuristics below. A 429 is
+                // exempt: it is an authoritative rate-limit signal, and
+                // token-per-minute limits are phrased close enough to a window
+                // overflow that the text check would misread them as fatal.
+                if code != 429 && looks_like_context_window_error(&body) {
+                    return Self::context_window_exceeded(display);
+                }
+
                 // Non-standard `x-should-retry` header overrides
                 // status-code heuristics.
                 let retryable = match header_str(&headers, "x-should-retry") {
                     Some("true") => true,
                     Some("false") => false,
-                    _ => matches!(code, 408 | 409 | 429 | _ if code >= 500),
+                    // Timeout, conflict, rate limit, and any server error.
+                    // Written as two checks rather than one `matches!`: a guard
+                    // attaches to the whole or-pattern, so `408 | 409 | 429 | _
+                    // if code >= 500` silently reduces to `code >= 500`.
+                    _ => matches!(code, 408 | 409 | 429) || code >= 500,
                 };
 
                 if !retryable {
@@ -288,6 +314,11 @@ pub enum StreamErrorKind {
     /// This is not retryable — the user needs to top up or change plans.
     InsufficientQuota,
 
+    /// The request is larger than the model's context window.
+    /// This is not retryable — the request has to shrink, or move to a model
+    /// with a larger window.
+    ContextWindowExceeded,
+
     /// Other errors that are not categorized.
     /// These may or may not be retryable depending on the specific error.
     Other,
@@ -303,6 +334,7 @@ impl StreamErrorKind {
             Self::RateLimit => "Rate limited",
             Self::Transient => "Server error",
             Self::InsufficientQuota => "Insufficient API quota",
+            Self::ContextWindowExceeded => "Context window exceeded",
             Self::Other => "Stream Error",
         }
     }
@@ -511,6 +543,28 @@ pub(crate) fn looks_like_quota_error(text: &str) -> bool {
         || lower.contains("credit balance is too low")
         || lower.contains("quota exceeded")
         || lower.contains("resource_exhausted")
+}
+
+/// Heuristic check for a request exceeding the model's context window, based on
+/// error text.
+///
+/// Providers report this as a plain invalid-request error, indistinguishable
+/// from any other 400 without reading the message:
+///
+/// - Anthropic: `"prompt is too long: 531500 tokens > 200000 maximum"`
+/// - OpenAI: `"context_length_exceeded"`, `"maximum context length is ..."`
+/// - Google: `"The input token count ... exceeds the maximum number of tokens
+///   allowed"`
+/// - llama.cpp: `"the request exceeds the available context size"`
+pub(crate) fn looks_like_context_window_error(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("context_length_exceeded")
+        || lower.contains("context length")
+        || lower.contains("context window")
+        || lower.contains("context size")
+        || lower.contains("prompt is too long")
+        || lower.contains("exceeds the maximum number of tokens")
+        || lower.contains("too many tokens")
 }
 
 /// Heuristic check for transient network/proxy failures based on error text.

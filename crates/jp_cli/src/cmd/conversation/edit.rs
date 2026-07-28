@@ -4,30 +4,15 @@ use camino::Utf8PathBuf;
 use chrono::Utc;
 use crossterm::style::Stylize as _;
 use inquire::Confirm;
-use jp_config::{
-    AppConfig, PartialAppConfig, ToPartial as _, model::id::PartialModelIdOrAliasConfig,
-};
-use jp_conversation::{
-    ConversationEvent, ConversationId, ConversationStream,
-    event::{ChatRequest, ChatResponse},
-    thread::ThreadBuilder,
-};
+use jp_conversation::ConversationId;
 use jp_editor::{EditOutcome, EditRequest};
-use jp_llm::{
-    event::Event,
-    event_builder::EventBuilder,
-    provider,
-    retry::{RetryConfig, collect_with_retry},
-    title,
-};
-use jp_printer::PrinterWriter;
 use jp_storage::{
     LoadError,
     backend::{FsStorageBackend, LoadBackend, Projection},
 };
 use jp_workspace::ConversationHandle;
 
-use super::path::resolve_paths;
+use super::{path::resolve_paths, title};
 use crate::{
     cmd::{
         ConversationLoadRequest, Output,
@@ -74,7 +59,11 @@ pub(crate) struct Edit {
     #[arg(long = "no-tmp", group = "property")]
     no_expires_at: bool,
 
-    /// Edit the title of the conversation.
+    /// Set the title of the conversation.
+    ///
+    /// Without a value, generates one with an LLM and offers the candidates as
+    /// a picker — the same as `conversation title`, which additionally exposes
+    /// the model and candidate count.
     #[arg(long, group = "property", conflicts_with = "no_title")]
     title: Option<Option<String>>,
 
@@ -271,14 +260,15 @@ impl Edit {
                 });
             }
 
-            if let Some(ref title) = self.title {
-                let events = conv.events().clone();
-                let title = match title {
-                    Some(title) => title.clone(),
-                    None => {
-                        generate_titles(&ctx.config(), ctx.printer.out_writer(), events, vec![])
-                            .await?
-                    }
+            if let Some(ref new_title) = self.title {
+                // A bare `--title` asks for a generated one; `conversation
+                // title` owns that path and its flags.
+                let title = if let Some(title) = new_title {
+                    title.clone()
+                } else {
+                    let cfg = ctx.config();
+                    let events = conv.events().clone();
+                    title::select(ctx, &cfg, events, title::DEFAULT_COUNT, false).await?
                 };
 
                 conv.update_metadata(|m| m.title = Some(title));
@@ -305,115 +295,6 @@ impl Edit {
 
         ctx.printer.println("Conversation(s) updated.");
         Ok(())
-    }
-}
-
-async fn generate_titles(
-    config: &AppConfig,
-    mut writer: PrinterWriter<'_>,
-    mut events: ConversationStream,
-    mut rejected: Vec<String>,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
-    let count = 3;
-    let model = config
-        .conversation
-        .title
-        .generate
-        .model
-        .clone()
-        .unwrap_or_else(|| config.assistant.model.clone());
-
-    let model_id = model.id.resolved();
-
-    let mut partial = PartialAppConfig::empty();
-    partial.assistant.model.id = PartialModelIdOrAliasConfig::Id(model_id.to_partial());
-    events.add_config_delta(partial);
-
-    let provider = provider::get_provider(model_id.provider, &config.providers.llm)?;
-    let model_details = provider.model_details(&model_id.name).await?;
-
-    let sections = title::title_instructions(count, &rejected);
-    let schema = title::title_schema(count);
-
-    let thread = ThreadBuilder::default()
-        .with_events(events.clone())
-        .with_sections(sections)
-        .build()?;
-
-    let mut thread_events = thread.events.clone();
-    thread_events.start_turn(ChatRequest {
-        content: "Generate titles for this conversation.".into(),
-        schema: Some(schema),
-        author: None,
-    });
-
-    let query = jp_llm::query::ChatQuery {
-        thread: jp_conversation::thread::Thread {
-            events: thread_events,
-            ..thread
-        },
-        tools: vec![],
-        tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
-    };
-
-    let retry_config = RetryConfig::default();
-    let llm_events =
-        collect_with_retry(provider.as_ref(), &model_details, query, &retry_config).await?;
-
-    // Pipe raw streaming events through the EventBuilder so that structured
-    // JSON chunks are concatenated and parsed into a proper Value (rather than
-    // individual Value::String fragments).
-    let mut builder = EventBuilder::new();
-    let mut flushed = Vec::new();
-    for event in llm_events {
-        match event {
-            Event::Part {
-                index,
-                part,
-                metadata,
-            } => {
-                builder.handle_part(index, part, metadata);
-            }
-            Event::Flush { index, metadata } => {
-                flushed.extend(builder.handle_flush(index, metadata));
-            }
-            Event::Finished(_) => flushed.extend(builder.drain()),
-            Event::Patch(_) | Event::KeepAlive => {}
-        }
-    }
-
-    let structured_data = flushed
-        .into_iter()
-        .filter_map(ConversationEvent::into_chat_response)
-        .find_map(ChatResponse::into_structured_data);
-
-    let titles = structured_data
-        .as_ref()
-        .map(title::extract_titles)
-        .unwrap_or_default();
-
-    if titles.is_empty() {
-        return Err("No titles generated".into());
-    }
-
-    let mut choices = titles.clone();
-    choices.extend(rejected.clone());
-    choices.push("More...".to_owned());
-    choices.push("Manually enter a title".to_owned());
-
-    let result =
-        inquire::Select::new("Conversation Title", choices).prompt_with_writer(&mut writer)?;
-
-    match result.as_str() {
-        "More..." => {
-            rejected.extend(titles);
-            Box::pin(generate_titles(config, writer, events, rejected)).await
-        }
-        "Manually enter a title" => {
-            let title = inquire::Text::new("Title").prompt_with_writer(&mut writer)?;
-            Ok(title.trim().to_owned())
-        }
-        choice => Ok(choice.to_owned()),
     }
 }
 

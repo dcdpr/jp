@@ -27,7 +27,7 @@ use tracing::{debug, trace};
 use super::{EventStream, Provider, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
-    error::{Error, Result, StreamError, looks_like_quota_error},
+    error::{Error, Result, StreamError, looks_like_context_window_error, looks_like_quota_error},
     event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
@@ -1028,6 +1028,15 @@ impl From<GeminiError> for StreamError {
                     .get("status")
                     .or_else(|| value.pointer("/error/code"))
                     .and_then(Value::as_u64);
+
+                // An oversized prompt is the same size on the next attempt, so
+                // it is classified before the status codes below. A 429 is
+                // exempt: it is an authoritative rate-limit signal, and
+                // token-per-minute limits are phrased close enough to a window
+                // overflow that the text check would misread them as fatal.
+                if status != Some(429) && looks_like_context_window_error(&msg) {
+                    return StreamError::context_window_exceeded(msg).with_source(err);
+                }
 
                 match status {
                     Some(429) => StreamError::rate_limit(None).with_source(err),
