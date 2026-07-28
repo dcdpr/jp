@@ -180,6 +180,25 @@ impl IntoPartialAppConfig for Commands {
 
 pub(crate) type Output = std::result::Result<(), Error>;
 
+/// Fold a drained persist failure into a command's result.
+///
+/// With no failure the result passes through.
+/// A failure on an otherwise successful run becomes the error, so an unsaved
+/// conversation cannot exit zero.
+/// Alongside an existing error the failure is attached as metadata: the two can
+/// be independent (a provider error and a full disk), and the primary error is
+/// the more specific diagnostic.
+pub(crate) fn fold_persist_failure(result: Output, persist: Option<jp_workspace::Error>) -> Output {
+    match (result, persist) {
+        (result, None) => result,
+        (Ok(()), Some(persist)) => Err(Error::from(crate::error::Error::Workspace(persist))),
+        (Err(mut error), Some(persist)) => {
+            error.push_metadata("persist_failure", persist.to_string());
+            Err(error)
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) struct Error {
     /// The error code.
@@ -222,6 +241,14 @@ impl Error {
             disable_persistence: !persist,
             ..self
         }
+    }
+
+    /// Append a metadata entry, rendered under the error's message.
+    ///
+    /// Used to attach a secondary fact to an error that already has a more
+    /// specific message of its own.
+    pub(super) fn push_metadata(&mut self, key: &str, value: impl Into<Value>) {
+        self.metadata.push((key.to_owned(), value.into()));
     }
 }
 
@@ -752,6 +779,24 @@ impl From<jp_storage::Error> for Error {
                 ("path", path.to_string().into()),
             ]
             .into(),
+            Error::OutOfSpace { path, source } => [
+                ("message", "No space left on device".into()),
+                ("path", path.to_string().into()),
+                ("error", source.to_string().into()),
+                (
+                    "suggestion",
+                    "Free up disk space and re-run. Anything after the last successful write was \
+                     not saved."
+                        .into(),
+                ),
+            ]
+            .into(),
+            Error::WriteFailed { path, source } => [
+                ("message", "Failed to write file".into()),
+                ("path", path.to_string().into()),
+                ("error", source.to_string().into()),
+            ]
+            .into(),
             Error::ConversationNotFound(id) => [
                 ("message", "Conversation not found.".into()),
                 ("id", id.to_string().into()),
@@ -808,3 +853,7 @@ impl From<jp_id::Error> for Error {
         Self::from(metadata)
     }
 }
+
+#[cfg(test)]
+#[path = "cmd_tests.rs"]
+mod tests;

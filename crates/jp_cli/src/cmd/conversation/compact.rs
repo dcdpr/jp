@@ -656,7 +656,7 @@ impl Compact {
         };
 
         let cfg = ctx.config();
-        let conv = lock.into_mut();
+        let mut conv = lock.into_mut();
         let events_snapshot = conv.events().clone();
 
         if self.reset {
@@ -671,6 +671,9 @@ impl Compact {
                 }
             } else {
                 let removed = conv.update_events(ConversationStream::remove_compactions);
+                // Write before reporting, so a failed write is an error rather
+                // than a confirmation the user cannot trust.
+                conv.flush()?;
                 if removed > 0 {
                     ctx.printer
                         .println(format!("Removed {removed} compaction event(s)."));
@@ -735,6 +738,9 @@ impl Compact {
             &conv.id().to_string(),
         ));
         apply_compactions(&conv, compactions);
+        // Write before reporting the timeline, so a failed write is an error
+        // rather than a confirmation the user cannot trust.
+        conv.flush()?;
         for line in timeline_lines(&segments, last_turn, false) {
             ctx.printer.println(line);
         }

@@ -36,6 +36,109 @@ fn test_storage_new_errors_on_source_file() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn a_failed_import_leaves_nothing_that_looks_like_a_conversation() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("ws").join("conversations");
+    let user = tmp.path().join("user").join("conversations");
+    let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();
+    let prefix = id.to_dirname(None);
+
+    let src = workspace.join(&prefix);
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("events.json"), "[]").unwrap();
+    fs::write(src.join("notes.md"), "keep me").unwrap();
+    // A dangling symlink makes exactly one `fs::copy` fail mid-directory, the
+    // way a disk filling up would, without having to fill a disk.
+    std::os::unix::fs::symlink("nowhere", src.join("dangling")).unwrap();
+
+    let error = import_external_copy(&id, Some("title"), &workspace, &user)
+        .expect_err("the copy fails on the dangling entry");
+    assert!(matches!(error, Error::WriteFailed { .. }));
+
+    // The poisoning this guards against: a partial directory under the real
+    // name makes every later run skip the import, and its fresh mtime makes the
+    // loader prefer it over the intact workspace copy.
+    assert!(
+        find_normal_conversation_dir_path(&user, &prefix).is_none(),
+        "a failed import must not leave a conversation directory"
+    );
+    assert_eq!(
+        dir_entries(&user).count(),
+        0,
+        "the staging directory is cleaned up too"
+    );
+
+    // Clear the obstruction: the retry now completes, non-managed file included.
+    fs::remove_file(src.join("dangling")).unwrap();
+    import_external_copy(&id, Some("title"), &workspace, &user).expect("the retry succeeds");
+
+    let imported =
+        find_normal_conversation_dir_path(&user, &prefix).expect("the conversation is imported");
+    assert_eq!(
+        fs::read_to_string(imported.join("notes.md")).unwrap(),
+        "keep me"
+    );
+}
+
+#[test]
+fn an_import_never_merges_into_a_leftover_staging_tree() {
+    // Debris from a crashed import can survive: the error-path cleanup is
+    // best-effort, and `remove_dir_all` can partially fail (a read-only file on
+    // Windows is enough). `copy_dir_all` overwrites the files it copies but
+    // removes nothing, so a merge would publish entries the workspace copy no
+    // longer has. Staging under a fresh name per attempt is what rules that out.
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("ws").join("conversations");
+    let user = tmp.path().join("user").join("conversations");
+    let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();
+    let prefix = id.to_dirname(None);
+
+    let src = workspace.join(&prefix);
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("events.json"), "[]").unwrap();
+
+    // A stale tree holding a file the source does not have, under the name a
+    // single fixed staging directory would have used.
+    let stale = user.join(format!(".import-{}", id.to_dirname(Some("title"))));
+    fs::create_dir_all(&stale).unwrap();
+    fs::write(stale.join("stale.md"), "from an older generation").unwrap();
+
+    import_external_copy(&id, Some("title"), &workspace, &user).expect("the import succeeds");
+
+    let imported =
+        find_normal_conversation_dir_path(&user, &prefix).expect("the conversation is imported");
+    assert!(
+        !imported.join("stale.md").exists(),
+        "the published conversation must hold only what the source has"
+    );
+    assert!(imported.join("events.json").is_file());
+}
+
+#[test]
+fn copy_dir_all_failure_names_the_destination_file() {
+    // The import leg of a persist copies whole conversation directories, so a
+    // full disk can fail here rather than in `write_json`. Without the path the
+    // user is told only "IO error".
+    let tmp = tempdir().unwrap();
+    let src = tmp.path().join("src");
+    let dst = tmp.path().join("dst");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("events.json"), "[]").unwrap();
+
+    // A directory where the copied file must land fails on all platforms.
+    let blocker = dst.join("events.json");
+    fs::create_dir_all(&blocker).unwrap();
+
+    let error = copy_dir_all(&src, &dst).expect_err("copying onto a directory should fail");
+
+    match error {
+        Error::WriteFailed { path, .. } => assert_eq!(path, blocker),
+        other => panic!("expected WriteFailed, got {other:?}"),
+    }
+}
+
 #[test]
 fn test_conversation_dir_name_generation() {
     let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();

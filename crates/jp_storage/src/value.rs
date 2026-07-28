@@ -4,7 +4,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 /// The temp-file suffix used by [`write_json`] for atomic writes.
 pub const TMP_SUFFIX: &str = ".tmp";
@@ -57,11 +57,16 @@ pub fn read_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
 /// target.
 /// If anything fails before the rename, the original file is left untouched and
 /// the temp file is cleaned up on a best-effort basis.
+/// The temp file lives on the same filesystem as `path`, so the write needs
+/// room for a full second copy of the content.
 ///
 /// The write is skipped when `path` already holds the exact same bytes, so an
 /// unchanged file keeps its modification time.
 /// Use [`write_json_force`] when a refreshed mtime is required regardless of
 /// content.
+///
+/// A failure names the path it was writing, and reports a full filesystem as
+/// [`Error::OutOfSpace`].
 pub fn write_json<T: Serialize>(path: &Utf8Path, value: &T) -> Result<()> {
     write_json_impl(path, value, false)
 }
@@ -84,7 +89,7 @@ fn write_json_impl<T: Serialize>(path: &Utf8Path, value: &T, force: bool) -> Res
 /// is skipped so the file's modification time is preserved.
 fn write_bytes(path: &Utf8Path, bytes: &[u8], force: bool) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).map_err(|error| Error::write_failed(parent, error))?;
     }
 
     if !force
@@ -97,12 +102,12 @@ fn write_bytes(path: &Utf8Path, bytes: &[u8], force: bool) -> Result<()> {
     let tmp_path = tmp_path_for(path);
     if let Err(error) = fs::write(&tmp_path, bytes) {
         let _err = fs::remove_file(&tmp_path);
-        return Err(error.into());
+        return Err(Error::write_failed(&tmp_path, error));
     }
 
     if let Err(error) = fs::rename(&tmp_path, path) {
         let _err = fs::remove_file(&tmp_path);
-        return Err(error.into());
+        return Err(Error::write_failed(path, error));
     }
 
     Ok(())

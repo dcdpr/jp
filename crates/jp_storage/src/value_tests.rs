@@ -55,6 +55,25 @@ fn write_json_preserves_original_on_write_failure() {
 }
 
 #[test]
+fn write_json_failure_names_the_path_it_was_writing() {
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("out.json");
+
+    // A directory at the .tmp path makes the temp write fail on all platforms.
+    let blocker = Utf8PathBuf::from(format!("{path}{TMP_SUFFIX}"));
+    fs::create_dir(&blocker).unwrap();
+
+    let error = write_json(&path, &json!({"v": 1})).expect_err("temp write should fail");
+
+    // The failing path is the temp sibling, not the target: naming the target
+    // would point the user at a file that was never touched.
+    match error {
+        Error::WriteFailed { path: failed, .. } => assert_eq!(failed, blocker),
+        other => panic!("expected WriteFailed, got {other:?}"),
+    }
+}
+
+#[test]
 fn write_json_overwrites_existing_file() {
     let tmp = tempdir().unwrap();
     let path = tmp.path().join("out.json");

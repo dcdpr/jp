@@ -466,6 +466,15 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         }
     });
 
+    // The shutdown arm above drops the command future, so a conversation scope
+    // that was dirty persists from its `Drop` and records any failure on the
+    // workspace — with the command's own drain gone along with the future.
+    // Draining here, before the `disable_persistence` check below, is what lets
+    // an interrupted unsaved run still say so.
+    // Commands that reported already left nothing behind: the record yields
+    // each failure once.
+    let output = cmd::fold_persist_failure(output, ctx.workspace.take_persist_failure());
+
     if let Err(error) = output.as_ref()
         && error.disable_persistence
     {
@@ -491,8 +500,14 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     // shutdown request (Ctrl-C, an interrupt earlier in the run, or SIGTERM)
     // switches to a 2s cancellation countdown; any further Ctrl-C exits the
     // process immediately via the signal router's escalation ladder.
-    rt.block_on(drain_background_tasks(&mut ctx))
-        .map_err(Error::Task)?;
+    let drained = rt.block_on(drain_background_tasks(&mut ctx));
+
+    // Task sync takes conversation locks of its own — the title generator
+    // persists its result — so this is the run's last write, after the drain
+    // above. Held separately from the drain's own error so a failing task and an
+    // unsaved conversation are not reported as the same thing.
+    let output = cmd::fold_persist_failure(output, ctx.workspace.take_persist_failure());
+    drained.map_err(Error::Task)?;
 
     // Remove ephemeral conversations that are no longer needed, but protect
     // any conversation that is active in a terminal session.
