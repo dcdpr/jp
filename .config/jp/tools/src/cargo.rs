@@ -30,7 +30,14 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     let checksum_freshness = t.option_or("checksum_freshness", false);
 
     match t.name.trim_start_matches("cargo_") {
-        "check" => cargo_check(&ctx, t.opt("package")?, checksum_freshness).await,
+        "check" => {
+            // Documentation lints fire on doc comments rather than on code, so
+            // clippy never sees them. Checking them here keeps them from
+            // reaching CI, at the cost of a `cargo doc` pass; set
+            // `options.docs = false` to trade that back.
+            let docs = t.option_or("docs", true);
+            cargo_check(&ctx, t.opt("package")?, checksum_freshness, docs).await
+        }
         "expand" => cargo_expand(&ctx, t.req("item")?, t.opt("package")?, checksum_freshness).await,
         "test" => {
             cargo_test(

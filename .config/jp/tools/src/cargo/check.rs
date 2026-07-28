@@ -9,15 +9,32 @@ use crate::util::{
     truncate,
 };
 
+/// Rustdoc lints that are denied, kept in lockstep with `just docs-ci`.
+///
+/// These fire on documentation content rather than on code, so `cargo clippy`
+/// and `cargo check` never see them and they otherwise surface only on CI.
+const RUSTDOC_LINTS: &[&str] = &[
+    "-D rustdoc::broken-intra-doc-links",
+    "-D rustdoc::private-intra-doc-links",
+    "-D rustdoc::invalid-codeblock-attributes",
+    "-D rustdoc::invalid-html-tags",
+    "-D rustdoc::invalid-rust-codeblocks",
+    "-D rustdoc::bare-urls",
+    "-D rustdoc::unescaped-backticks",
+    "-D rustdoc::redundant-explicit-links",
+];
+
 pub(crate) async fn cargo_check(
     ctx: &Context,
     package: Option<String>,
     checksum_freshness: bool,
+    docs: bool,
 ) -> ToolResult {
     cargo_check_impl(
         ctx,
         package.as_deref(),
         checksum_freshness,
+        docs,
         &DuctProcessRunner,
     )
 }
@@ -26,6 +43,7 @@ fn cargo_check_impl<R: ProcessRunner>(
     ctx: &Context,
     package: Option<&str>,
     checksum_freshness: bool,
+    docs: bool,
     runner: &R,
 ) -> ToolResult {
     let clippy_scope = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
@@ -64,6 +82,14 @@ fn cargo_check_impl<R: ProcessRunner>(
     let clippy = strip_ansi_escapes::strip_str(stderr);
     let clippy = truncate(clippy.trim(), MAX_DIAGNOSTIC_BYTES);
 
+    let doc_note = match doc_check(ctx, package, checksum_freshness, docs, runner)? {
+        DocCheck::Skipped | DocCheck::Clean => None,
+        DocCheck::Lints(diagnostics) => Some(format!(
+            "Documentation lints failed. These are denied on CI (`just docs-ci`) and are not \
+             reported by clippy:\n\n```\n{diagnostics}\n```"
+        )),
+    };
+
     let comfort_note = match comfort_check(ctx, package, runner)? {
         ComfortCheck::Clean => None,
         ComfortCheck::Drift(note) => Some(note),
@@ -81,10 +107,90 @@ fn cargo_check_impl<R: ProcessRunner>(
         format!("```\n{clippy}\n```\n")
     };
 
-    match comfort_note {
-        Some(note) => Ok(format!("{}\n\n{note}", clippy_section.trim_end()).into()),
-        None => Ok(clippy_section.into()),
+    // Hardest-to-ignore first: doc lints fail CI, comfort drift is auto-fixable.
+    let extra: Vec<String> = doc_note.into_iter().chain(comfort_note).collect();
+    if extra.is_empty() {
+        return Ok(clippy_section.into());
     }
+
+    let mut sections = vec![clippy_section.trim_end().to_owned()];
+    sections.extend(extra);
+    Ok(sections.join("\n\n").into())
+}
+
+enum DocCheck {
+    /// The caller opted out of the documentation pass.
+    Skipped,
+    /// Rustdoc accepted every doc comment in scope.
+    Clean,
+    /// Rustdoc rejected the documentation; carries the diagnostics.
+    Lints(String),
+}
+
+/// Run `cargo doc` with the rustdoc lints CI denies.
+///
+/// `--document-private-items` is required, not cosmetic: without it
+/// `private-intra-doc-links` cannot fire at all, which is the lint that catches
+/// a public doc comment linking to a private item.
+///
+/// Runs under the `docs` profile, matching `just docs-ci`.
+/// Cargo's build lock lives at `target/<profile>/.cargo-lock`, so a dedicated
+/// profile keeps this pass from blocking (or being blocked by) whatever is
+/// building under the dev profile: an editor's `cargo check`, a `bacon` loop, a
+/// concurrent `cargo_test`.
+/// It also reuses whatever `just docs-ci` already built.
+fn doc_check<R: ProcessRunner>(
+    ctx: &Context,
+    package: Option<&str>,
+    checksum_freshness: bool,
+    enabled: bool,
+    runner: &R,
+) -> Result<DocCheck, std::io::Error> {
+    if !enabled {
+        return Ok(DocCheck::Skipped);
+    }
+
+    let scope = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
+    let rustdocflags = RUSTDOC_LINTS.join(" ");
+
+    let mut env = vec![("RUSTDOCFLAGS", rustdocflags.as_str())];
+    if checksum_freshness {
+        env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
+    }
+
+    let ProcessOutput { stderr, status, .. } = runner.run_with_env(
+        "cargo",
+        &[
+            "doc",
+            "--color=never",
+            &scope,
+            "--quiet",
+            "--profile=docs",
+            "--no-deps",
+            "--document-private-items",
+            // Report every crate's diagnostics in one pass rather than stopping
+            // at the first failing crate.
+            "--keep-going",
+        ],
+        &ctx.root,
+        &env,
+    )?;
+
+    if status.is_success() {
+        return Ok(DocCheck::Clean);
+    }
+
+    let diagnostics = strip_ansi_escapes::strip_str(stderr);
+    let diagnostics = diagnostics.trim();
+
+    // Clippy already built the workspace, so a `cargo doc` failure here is a
+    // documentation problem rather than a broken build. An empty stderr leaves
+    // nothing to report but the status, which is still worth surfacing.
+    Ok(DocCheck::Lints(if diagnostics.is_empty() {
+        format!("`cargo doc` failed with exit status {status} and no diagnostics.")
+    } else {
+        truncate(diagnostics, MAX_DIAGNOSTIC_BYTES)
+    }))
 }
 
 enum ComfortCheck {
