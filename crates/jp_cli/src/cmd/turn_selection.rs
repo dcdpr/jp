@@ -501,22 +501,38 @@ impl TurnSelection {
     /// Swallowing a window is only an error when it takes the whole selection
     /// with it — `--first`/`--last` are a union, so `--first 1 --last 2
     /// --keep-first 2` still legitimately selects the final two turns.
+    /// A window its own keep flag covers exactly (`--last 1 --keep-last 1`)
+    /// contributes no turns either, so it can't stand in as that survivor.
     /// Only count-based bounds are comparable up front; durations and the other
     /// bound forms resolve against the stream and may legitimately come up
     /// empty.
     pub(crate) fn validate(&self) -> Result<(), String> {
-        // The `(keep, count)` pair for a window whose keep flag provably covers
-        // it, or `None` when it doesn't.
+        // The `(keep, count)` pair for a window the keep flag swallows outright
+        // (`keep > count`), or `None` when it doesn't. This is what the error
+        // reports.
         let swallowed = |keep: Option<&RuleBound>, count: Option<usize>| match (keep, count) {
             (Some(RuleBound::Turns(keep)), Some(count)) if *keep > count => Some((*keep, count)),
             _ => None,
         };
+
+        // Whether the keep flag provably leaves the window empty (`keep >=
+        // count`). Equality on its own is allowed — empty but not
+        // contradictory — so this is deliberately a wider test than
+        // `swallowed`: an exactly-covered window names no turn, and so cannot
+        // excuse a swallowed sibling.
+        let covered = |keep: Option<&RuleBound>, count: Option<usize>| match (keep, count) {
+            (Some(RuleBound::Turns(keep)), Some(count)) => *keep >= count,
+            _ => false,
+        };
+
         let first_swallowed = swallowed(self.keep_first.as_ref(), self.first);
         let last_swallowed = swallowed(self.keep_last.as_ref(), self.last);
 
-        // A window survives when it names at least one turn and isn't swallowed.
-        let first_survives = self.first.is_some_and(|n| n > 0) && first_swallowed.is_none();
-        let last_survives = self.last.is_some_and(|n| n > 0) && last_swallowed.is_none();
+        // A window survives when it names at least one turn and isn't covered.
+        let first_survives =
+            self.first.is_some_and(|n| n > 0) && !covered(self.keep_first.as_ref(), self.first);
+        let last_survives =
+            self.last.is_some_and(|n| n > 0) && !covered(self.keep_last.as_ref(), self.last);
 
         if let Some((keep, first)) = first_swallowed
             && !last_survives

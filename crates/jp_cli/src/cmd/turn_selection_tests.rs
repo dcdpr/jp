@@ -574,6 +574,48 @@ fn validate_rejects_keeps_that_swallow_both_windows() {
 }
 
 #[test]
+fn validate_rejects_a_swallowed_window_beside_an_exactly_covered_one() {
+    // `--keep-last 1 --last 1` names no turn on any stream, so it cannot be the
+    // survivor that excuses `--keep-first 2 --first 1`. Recognising only
+    // `keep > count` here would let this through while the `--keep-first 2
+    // --first 1` pair errors on its own.
+    let selection = TurnSelection {
+        first: Some(1),
+        last: Some(1),
+        keep_first: Some(RuleBound::Turns(2)),
+        keep_last: Some(RuleBound::Turns(1)),
+        ..Default::default()
+    };
+    assert!(selection.validate().is_err());
+    assert!(selection.resolve(&stream(8)).is_empty());
+
+    // The mirror image.
+    let selection = TurnSelection {
+        first: Some(1),
+        last: Some(1),
+        keep_first: Some(RuleBound::Turns(1)),
+        keep_last: Some(RuleBound::Turns(2)),
+        ..Default::default()
+    };
+    assert!(selection.validate().is_err());
+    assert!(selection.resolve(&stream(8)).is_empty());
+}
+
+#[test]
+fn validate_allows_equal_keep_and_count_on_both_windows() {
+    // Equality alone stays allowed — empty but not contradictory — and that
+    // policy doesn't change just because both windows hit it.
+    let selection = TurnSelection {
+        first: Some(2),
+        last: Some(2),
+        keep_first: Some(RuleBound::Turns(2)),
+        keep_last: Some(RuleBound::Turns(2)),
+        ..Default::default()
+    };
+    assert!(selection.validate().is_ok());
+}
+
+#[test]
 fn check_turn_range_rejects_endpoints_past_the_conversation() {
     let selection = TurnSelection {
         turn: Some(TurnSpec::Single(7)),
