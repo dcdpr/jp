@@ -11,6 +11,7 @@ use jp_llm::{
 
 use super::{
     StreamOutcome, collect_range_events, failure_reason, summarize_events, summarize_stream,
+    window_overflow,
 };
 
 /// A stream that produced `text` and then stopped for `reason`.
@@ -83,6 +84,55 @@ fn chat_request_texts(events: &[jp_conversation::ConversationEvent]) -> Vec<Stri
         .filter_map(|e| e.as_chat_request())
         .map(|r| r.content.clone())
         .collect()
+}
+
+/// A range comfortably inside the window is summarized as-is.
+#[test]
+fn a_range_that_fits_reports_no_overflow() {
+    let stream = build_stream_with_turns(4);
+    assert_eq!(window_overflow(&stream, Some(100_000), 0), None);
+}
+
+/// The reported failure's shape, on the summarizer path: a large range against
+/// a small-window model.
+/// Unlike title generation this is rejected rather than shortened, so the
+/// summary never covers less than the range it is stored for.
+#[test]
+fn a_range_past_the_window_overflows() {
+    let mut stream = ConversationStream::new_test();
+    for i in 0..200 {
+        stream.start_turn(format!("turn {i}: {}", "x".repeat(1000)));
+    }
+
+    let overflow = window_overflow(&stream, Some(1000), 0).expect("range must not fit");
+    assert_eq!(
+        overflow,
+        "are roughly 201890 characters, which exceeds the ~2700 that fit in the model's 1000 \
+         token context window"
+    );
+}
+
+/// Overhead is charged against the same window, so a range that fits on its own
+/// can still overflow once the instructions are counted.
+#[test]
+fn overhead_can_push_a_fitting_range_over() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("x".repeat(2000));
+
+    assert_eq!(window_overflow(&stream, Some(1000), 0), None);
+    assert!(window_overflow(&stream, Some(1000), 1000).is_some());
+}
+
+/// Providers that don't report a window (local llama.cpp, Ollama) have no
+/// budget to check against, so nothing is rejected.
+#[test]
+fn an_unknown_window_never_overflows() {
+    let mut stream = ConversationStream::new_test();
+    for i in 0..200 {
+        stream.start_turn(format!("turn {i}: {}", "x".repeat(1000)));
+    }
+
+    assert_eq!(window_overflow(&stream, None, 0), None);
 }
 
 #[test]

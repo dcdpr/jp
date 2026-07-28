@@ -179,4 +179,13 @@ pub(crate) enum Error {
     /// different model.
     #[error("Summarization failed for {model}: {reason}")]
     Summarize { model: String, reason: String },
+
+    /// Title generation produced no usable title.
+    ///
+    /// A dedicated variant so the failure names the model that produced
+    /// nothing: a refusal or a schema the model couldn't satisfy is a property
+    /// of the model, not of the conversation, and the fix is to point
+    /// `conversation.title.generate.model` somewhere else.
+    #[error("Title generation failed for {model}: {reason}")]
+    TitleGeneration { model: String, reason: String },
 }

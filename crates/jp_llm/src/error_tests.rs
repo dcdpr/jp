@@ -1,3 +1,5 @@
+use std::io;
+
 use super::*;
 
 #[tokio::test]
@@ -285,4 +287,64 @@ fn other_error_with_upstream_failure_message_is_retryable() {
 fn other_error_without_transient_pattern_is_not_retryable() {
     let error = StreamError::other("unknown error: something exploded");
     assert!(!error.is_retryable());
+}
+
+#[test]
+fn context_window_error_detects_provider_messages() {
+    // The exact shape of the reported Anthropic failure.
+    assert!(looks_like_context_window_error(
+        "api error: invalid_request_error: prompt is too long: 531500 tokens > 200000 maximum"
+    ));
+    assert!(looks_like_context_window_error("context_length_exceeded"));
+    assert!(looks_like_context_window_error(
+        "This model's maximum context length is 8192 tokens. However, your messages resulted in \
+         10000 tokens."
+    ));
+    assert!(looks_like_context_window_error(
+        "The input token count (1200000) exceeds the maximum number of tokens allowed (1048576)."
+    ));
+    assert!(looks_like_context_window_error(
+        "the request exceeds the available context size, try increasing it"
+    ));
+}
+
+#[test]
+fn context_window_error_ignores_unrelated_errors() {
+    assert!(!looks_like_context_window_error("invalid request"));
+    assert!(!looks_like_context_window_error(
+        "api error: rate_limit_error: too many requests"
+    ));
+    assert!(!looks_like_context_window_error(""));
+}
+
+#[test]
+fn context_window_error_is_not_retryable() {
+    // Retrying sends the same oversized prompt; the request has to shrink.
+    let error = StreamError::context_window_exceeded("prompt is too long");
+    assert!(!error.is_retryable());
+    assert_eq!(error.kind, StreamErrorKind::ContextWindowExceeded);
+}
+
+#[test]
+fn display_does_not_repeat_a_source_already_in_the_message() {
+    // Providers build the message from the source's own rendering; the source
+    // must not then be appended a second time.
+    let source = io::Error::other("prompt is too long: 531500 tokens > 200000 maximum");
+    let error = StreamError::other(source.to_string()).with_source(source);
+
+    assert_eq!(
+        error.to_string(),
+        "prompt is too long: 531500 tokens > 200000 maximum"
+    );
+}
+
+#[test]
+fn display_appends_a_source_that_adds_information() {
+    let source = io::Error::other("connection reset by peer");
+    let error = StreamError::other("request failed").with_source(source);
+
+    assert_eq!(
+        error.to_string(),
+        "request failed: connection reset by peer"
+    );
 }

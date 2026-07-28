@@ -27,7 +27,7 @@ use tracing::{debug, trace};
 use super::{EventStream, Provider, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
-    error::{Error, Result, StreamError, looks_like_quota_error},
+    error::{Error, Result, StreamError, looks_like_context_window_error, looks_like_quota_error},
     event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::{ModelDeprecation, ModelDetails, ReasoningDetails},
     query::ChatQuery,
@@ -1021,6 +1021,12 @@ impl From<GeminiError> for StreamError {
                         ),
                     )
                     .with_source(err);
+                }
+
+                // An oversized prompt is the same size on the next attempt, so
+                // this is checked before the status-code classification below.
+                if looks_like_context_window_error(&msg) {
+                    return StreamError::context_window_exceeded(msg).with_source(err);
                 }
 
                 // Classify by HTTP status code if present in the API error.

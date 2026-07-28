@@ -33,7 +33,7 @@ use super::{EventStream, ModelDetails, Provider};
 use crate::{
     error::{
         Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
-        looks_like_quota_error,
+        looks_like_context_window_error, looks_like_quota_error,
     },
     event::{Event, FinishReason},
     model::{ModelDeprecation, ReasoningDetails},
@@ -1489,6 +1489,15 @@ fn classify_stream_error(error: types::response::Error) -> StreamError {
                 error.message
             ),
         );
+    }
+
+    // An oversized prompt is the same size on the next attempt, so this is
+    // checked before the retryable categories below.
+    if code == Some("context_length_exceeded")
+        || type_ == "context_length_exceeded"
+        || looks_like_context_window_error(&error.message)
+    {
+        return StreamError::context_window_exceeded(error.message);
     }
 
     // Rate-limits may signal via either `type` or `code`. OpenAI's TPM/RPM
