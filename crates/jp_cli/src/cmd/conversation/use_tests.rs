@@ -145,7 +145,7 @@ fn run_with_contention_skips_metadata_bump() {
     );
 }
 
-// --- Filter mode (`--grep`, `--from`, `--until`) ----------------------------
+// --- Filter mode (`--grep`, `--created-since`, `--created-before`) ----------
 //
 // Filter mode resolves handles internally instead of going through the
 // standard pipeline. These tests exercise the N=1 short-circuit path that

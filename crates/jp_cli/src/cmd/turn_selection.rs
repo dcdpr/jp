@@ -10,8 +10,10 @@
 //! Most selections are a single window; `--first N --last M` produces two,
 //! skipping the turns in between.
 //!
-//! Every bound resolves to a whole turn — a time-based bound names the turn it
-//! falls in and never splits one.
+//! A bound never splits a turn.
+//! The two ends resolve a time value differently: `--from <time>` starts at the
+//! first turn to *begin* after the cutoff, while `--to <time>` ends at (and
+//! includes) the turn that was running at it.
 //!
 //! Turn positions are 1-based on the CLI and 0-based in the stream; the
 //! translation happens here.
@@ -109,6 +111,27 @@ fn parse_to_bound(s: &str) -> Result<CliRangeBound, String> {
         );
     }
     parse_bound(s)
+}
+
+/// Parse a `--keep-last` bound, rejecting the `last-compaction` marker.
+///
+/// `keep_last_bound` maps `AfterLastCompaction` to [`Bound::Default`], which
+/// leaves the end of the selection untrimmed.
+/// Accepting the marker here would make an explicit `--keep-last
+/// last-compaction` a silent no-op, and in `compact` it would additionally
+/// suppress the rule's own configured `keep_last` — compacting *more* than
+/// omitting the flag.
+/// `--keep-first last-compaction` is meaningful and stays accepted.
+fn parse_keep_last(s: &str) -> Result<RuleBound, String> {
+    let bound = RuleBound::from_str(s).map_err(|e| e.to_string())?;
+    if bound == RuleBound::AfterLastCompaction {
+        return Err(
+            "`last-compaction` is only valid for `--from` and `--keep-first` (it marks the most \
+             recent compaction)"
+                .to_owned(),
+        );
+    }
+    Ok(bound)
 }
 
 /// Parse a 1-based turn number for `--turn`, rejecting `0`.
@@ -392,8 +415,11 @@ pub(crate) struct TurnSelection {
     /// turn), a relative duration (`5h`), a date (`2026-01-01`), an RFC 3339
     /// timestamp, or `last-compaction` (the turn after the most recent
     /// compaction).
-    /// A time-based value names the turn it falls in; a bound never splits a
-    /// turn.
+    ///
+    /// A time-based value starts the selection at the first turn to *begin*
+    /// after the given instant, so the turn that was already running at that
+    /// instant is excluded.
+    /// A bound never splits a turn.
     // `allow_negative_numbers` keeps the from-end form usable as a
     // space-separated value (`--from -3`), which clap would otherwise read as an
     // unknown short flag.
@@ -404,6 +430,11 @@ pub(crate) struct TurnSelection {
     ///
     /// Accepts the same forms as `--from`, except `last-compaction`, which only
     /// makes sense as a start bound.
+    ///
+    /// A time-based value ends the selection at (and includes) the turn that
+    /// was running at the given instant — the mirror of `--from`, which
+    /// excludes it.
+    /// A bound never splits a turn.
     #[arg(long, value_parser = parse_to_bound, allow_negative_numbers = true)]
     to: Option<CliRangeBound>,
 
@@ -418,10 +449,11 @@ pub(crate) struct TurnSelection {
 
     /// Protect the last N turns from the selection.
     ///
-    /// Accepts the same forms as `--keep-first`.
+    /// Accepts the same forms as `--keep-first`, except `last-compaction`,
+    /// which only makes sense at the start.
     /// Composes with every other selector: the selection ends no later than the
     /// last unprotected turn.
-    #[arg(long, allow_negative_numbers = true)]
+    #[arg(long, value_parser = parse_keep_last, allow_negative_numbers = true)]
     keep_last: Option<RuleBound>,
 }
 

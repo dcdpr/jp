@@ -545,6 +545,17 @@ impl Compact {
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
         self.range.validate()?;
+
+        // Reject an out-of-range `--turn` against every target before compacting
+        // any of them, so a bad endpoint on the last conversation can't leave the
+        // earlier ones already compacted.
+        // `compact_one` re-checks against the locked snapshot, which is the
+        // authoritative count if a concurrent writer appends in between.
+        for handle in &handles {
+            self.range
+                .check_turn_range(ctx.workspace.events(handle)?.turn_count())?;
+        }
+
         for handle in handles {
             self.compact_one(ctx, handle).await?;
         }

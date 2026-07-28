@@ -90,13 +90,17 @@ so it is half-open and uses distinct flag names (`--created-since` /
   produces a `TurnSet` of inclusive 0-based windows.
 
   `--turn`, `--from`/`--to`, and `--first`/`--last` are three ways of naming the
-  base selection and are mutually exclusive.
-  `--turn N` is `Absolute(N - 1)` on both ends; `--turn A..B` spans \`Absolute(A
+  base selection and are mutually exclusive:
 
-  - 1\)`through`Absolute(B - 1)` ;  `--first N`is`Absolute(0)`through`Absolute(N
-    - 1)` ;  `--last N`is`FromEnd(N - 1)`through the last
-    turn.`--first`and`--last\` given together produce two windows and skip the
-    turns between them.
+  | Selector     | Start bound      | End bound        |
+  | ------------ | ---------------- | ---------------- |
+  | `--turn N`   | `Absolute(N - 1)` | `Absolute(N - 1)` |
+  | `--turn A..B` | `Absolute(A - 1)` | `Absolute(B - 1)` |
+  | `--first N`  | `Absolute(0)`    | `Absolute(N - 1)` |
+  | `--last N`   | `FromEnd(N - 1)` | `FromEnd(0)`     |
+
+  `--first` and `--last` given together produce two windows and skip the turns
+  between them.
 
 - **Keep flags** (`jp_cli::cmd::turn_selection`): `keep_first_bound` /
   `keep_last_bound` map `RuleBound::Absolute(N)` (the 1-based value parsed from

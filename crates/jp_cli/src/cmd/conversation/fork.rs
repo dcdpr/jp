@@ -65,10 +65,16 @@ impl Fork {
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         self.range.validate()?;
 
+        // Reject an out-of-range `--turn` against every source before forking any
+        // of them: `fork` accepts multiple sources, and checking inside the loop
+        // would leave the earlier forks created when a later source turns out to
+        // be too short.
         for source in handles {
             self.range
                 .check_turn_range(ctx.workspace.events(source)?.turn_count())?;
+        }
 
+        for source in handles {
             // `--no-turns` folds the source's effective config (base + every
             // delta) into a fresh base config; resolving it here lets the
             // fallible `config()` propagate, keeping the closure infallible.

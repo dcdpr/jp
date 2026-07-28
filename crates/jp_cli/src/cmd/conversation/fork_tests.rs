@@ -1097,6 +1097,86 @@ fn fork_targets_correct_source() {
     assert_eq!(a_requests, vec!["alpha question"]);
 }
 
+/// An out-of-range `--turn` on *any* source must be rejected before *any* fork
+/// is created.
+///
+/// Validating inside the mutation loop would fork the first source, then error
+/// on the second — leaving a conversation behind that the failed command
+/// appears not to have created.
+#[test]
+fn turn_out_of_range_on_a_later_source_forks_nothing() {
+    let tmp = tempdir().unwrap();
+    let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
+    let config = AppConfig::new_test();
+    let storage = tmp.path().join(".jp");
+    let user = tmp.path().join("user");
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::new(tmp.path()).with_backend(fs);
+    let mut ctx = Ctx::new(
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        config,
+        None,
+        printer,
+    );
+
+    // Source A has three turns, source B only one.
+    let id_a = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        id_a,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let h_a = ctx.workspace.acquire_conversation(&id_a).unwrap();
+    let lock_a = ctx.workspace.test_lock(h_a);
+    lock_a.as_mut().update_events(|e| e.extend(turns(3)));
+    drop(lock_a);
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    let id_b = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        id_b,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let h_b = ctx.workspace.acquire_conversation(&id_b).unwrap();
+    let lock_b = ctx.workspace.test_lock(h_b);
+    lock_b.as_mut().update_events(|e| e.extend(turns(1)));
+    drop(lock_b);
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    // Turn 3 exists in A but not in B.
+    let fork = Fork {
+        target: PositionalIds::default(),
+        activate: false,
+        range: selection(&["--turn", "3"]),
+        compact: CompactFlag::default(),
+        no_turns: false,
+        title: None,
+    };
+    let handle_a = ctx.workspace.acquire_conversation(&id_a).unwrap();
+    let handle_b = ctx.workspace.acquire_conversation(&id_b).unwrap();
+    let result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(fork.run(&mut ctx, &[handle_a, handle_b]));
+
+    assert!(result.is_err(), "turn 3 is out of range for source B");
+    assert_eq!(
+        ctx.workspace.conversations().count(),
+        2,
+        "a rejected multi-source fork must not leave a partial fork behind"
+    );
+}
+
 /// Regression test: forking a `--local` conversation must keep the fork
 /// local-only instead of projecting it into the workspace.
 #[test]

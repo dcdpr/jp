@@ -18,9 +18,9 @@ use crate::{
 ///
 /// Without flags, `jp c use [ID]` activates the given conversation (or opens a
 /// picker when no target is provided).
-/// `--grep` and `--from`/`--until` restrict the picker's candidate set; when
-/// the combined filter leaves a single conversation, it is activated directly
-/// without prompting.
+/// `--grep` and `--created-since`/`--created-before` restrict the picker's
+/// candidate set; when the combined filter leaves a single conversation, it is
+/// activated directly without prompting.
 #[derive(Debug, clap::Args)]
 pub(crate) struct Use {
     #[command(flatten)]

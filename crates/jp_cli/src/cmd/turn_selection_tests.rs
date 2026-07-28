@@ -130,6 +130,34 @@ fn parse_to_bound_rejects_last_compaction_but_accepts_other_forms() {
 }
 
 #[test]
+fn parse_keep_last_rejects_the_last_compaction_marker() {
+    // `keep_last_bound` maps the marker to `Bound::Default`, so accepting it
+    // would make the flag a silent no-op — and in `compact` it would suppress
+    // the rule's own `keep_last` on top of that.
+    assert!(parse_keep_last("last-compaction").is_err());
+    // The deprecated bare alias reaches the same arm.
+    assert!(parse_keep_last("last").is_err());
+
+    // Every other bound form still parses.
+    assert_eq!(parse_keep_last("2").unwrap(), RuleBound::Turns(2));
+    assert_eq!(parse_keep_last("@3").unwrap(), RuleBound::Absolute(3));
+    assert_eq!(parse_keep_last("-3").unwrap(), RuleBound::FromEnd(3));
+    assert!(matches!(
+        parse_keep_last("5h").unwrap(),
+        RuleBound::Duration(_)
+    ));
+}
+
+#[test]
+fn clap_rejects_last_compaction_only_at_the_end_of_the_selection() {
+    // Start-side bounds accept the marker; end-side bounds reject it.
+    assert!(parse(&["--from", "last-compaction"]).is_ok());
+    assert!(parse(&["--keep-first", "last-compaction"]).is_ok());
+    assert!(parse(&["--to", "last-compaction"]).is_err());
+    assert!(parse(&["--keep-last", "last-compaction"]).is_err());
+}
+
+#[test]
 fn parse_turn_single_and_range() {
     assert!(matches!(parse_turn("3").unwrap(), TurnSpec::Single(3)));
     assert!(matches!(
