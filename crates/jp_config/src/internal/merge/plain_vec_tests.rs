@@ -33,7 +33,10 @@ fn keeps_first_occurrence_order() {
 }
 
 #[test]
-fn collapses_duplicates_within_a_single_layer() {
+fn collapses_repeats_inside_the_incoming_layer() {
+    // Only reachable when two layers combine — a list supplied by a single
+    // layer never reaches this function, so its own repeats are kept. See
+    // `test_load_partial_at_path_keeps_repeats_from_a_single_file`.
     let result = append_vec_dedup(vec![1], vec![2, 2], &()).unwrap().unwrap();
 
     assert_eq!(result, vec![1, 2]);

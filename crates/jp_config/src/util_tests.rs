@@ -818,3 +818,58 @@ fn test_load_partial_at_path_repeat_visit_keeps_last_position() {
     let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
     assert_eq!(partial.assistant.name.as_deref(), Some("d"));
 }
+
+/// The `config_load_paths` entries of a loaded partial, as strings.
+fn load_paths(partial: &PartialAppConfig) -> Vec<&str> {
+    partial
+        .config_load_paths
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|p| p.as_str())
+        .collect()
+}
+
+#[test]
+fn test_load_partial_at_path_dedups_load_paths_across_files() {
+    // Two files naming the same search directory contribute it once. This is
+    // the path the merge strategy actually runs on: `merge_setting` only
+    // invokes it when both layers supply a value.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("a.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["b.toml"]
+                config_load_paths = ["shared", "a-only"]
+            "#
+        ),
+    );
+    write_config(
+        &root.join("b.toml"),
+        r#"config_load_paths = ["shared", "b-only"]"#,
+    );
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+
+    assert_eq!(load_paths(&partial), ["shared", "b-only", "a-only"]);
+}
+
+#[test]
+fn test_load_partial_at_path_keeps_repeats_from_a_single_file() {
+    // One file, so nothing is combined and the list is stored as written.
+    // Repeats inside a single source are the author's own data, the same rule
+    // `replace` follows on `MergeableVec`; the resolved list is searched in
+    // order and stops at the first match, so a repeat changes no outcome.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("a.toml"),
+        r#"config_load_paths = ["dupe", "dupe"]"#,
+    );
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+
+    assert_eq!(load_paths(&partial), ["dupe", "dupe"]);
+}
