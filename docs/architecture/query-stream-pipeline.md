@@ -1424,19 +1424,26 @@ Interrupt Handler
                                  ▼
                             Turn Coordinator
                                  │
-                                 │ commit partial response and rebuild Thread
-                                 │ Provider encodes a supported continuation request
+                                 │ commit partial response, reset per-request
+                                 │ state, break the inner streaming loop
+                                 │
+                                 ▼
+                            Turn Loop
+                                 │
+                                 │ rebuild Thread from conversation events
+                                 │ (build_thread)
                                  │
                                  ▼
                             LLM Provider (new stream)
                                  │
-                                 │ first chunk: "... is 42."
-                                 │ (continues exactly from where it left off)
+                                 │ encode a supported continuation request
+                                 │ first chunk, e.g.: "... is 42."
+                                 │ (best effort: no overlap merging here)
                                  │
                                  ▼
-                            Event Builder
+                            Event Builder (fresh)
                                  │
-                                 │ buffer continues accumulating
+                                 │ accumulates the continuation only
                                  │
                                  ▼
                             Turn Coordinator (state: Streaming)
@@ -1463,33 +1470,45 @@ Event Builder buffers:
 User chooses "Continue", stream is dead:
 ────────────────────────────────────────
 
-1. Commit the partial response and rebuild the Thread:
+1. The Turn Coordinator commits the partial response:
+
+   The partial message is appended to the current turn, per-request state is
+   reset, and the inner streaming loop breaks.
+
+2. The turn loop rebuilds the Thread from the conversation events:
 
    Thread for LLM:
      [ChatRequest("What is 2+2?")]
      [ChatResponse::Reasoning("Let me think")]
      [ChatResponse::Message("The answer")]
 
-2. Let the Provider encode continuation for the target model:
+3. The Provider encodes continuation for the target model:
 
    - Use native assistant prefill only when the model supports it.
    - Otherwise retain the partial assistant response as history and append a
      synthetic user continuation request.
 
-3. Send to the LLM and receive continuation:
+   Either encoding is best effort. Nothing on this path detects or merges a
+   repeated tail, so the model may repeat, bridge, or rewrite content.
+
+4. Send to the LLM and receive a continuation, for example:
 
    LLM responds: " is 4. Because 2+2=4."
 
-4. Update Event Builder:
+5. A fresh Event Builder accumulates it:
 
-   buffers[1].append(" is 4. Because 2+2=4.")
-   // Total buffer content: "The answer is 4. Because 2+2=4."
+   The continuation lands in a new EventBuilder, under whatever index the new
+   provider stream assigns:
 
-5. Continue processing:
+     new buffer = Message(" is 4. Because 2+2=4.")
 
-   More chunks arrive, appended to buffers[1]
+   The committed "The answer" exists only in the ConversationStream.
+
+6. Continue processing:
+
+   More chunks arrive, appended to the new buffer
    Eventually flush arrives
-   Complete event pushed to stream
+   A second Message event is pushed to the stream
 
 ─────────────────────────────────────────────────────────────────
 
@@ -1501,9 +1520,14 @@ Final ConversationStream (persisted):
   [ChatResponse::Message("The answer")]
   [ChatResponse::Message(" is 4. Because 2+2=4. ...")]
 
-Consecutive responses of the same kind remain one renderer content region.
-Conversation Event and Provider request boundaries do not insert Markdown
-boundaries, so live rendering and replay concatenate these message fragments.
+Provider aggregation boundaries (Event::Flush) inside one stream do not flush
+the renderer, so replay renders these adjacent same-kind responses as one
+Markdown content region.
+
+Live rendering differs: the continuation boundary finalizes the buffered
+Markdown (flush_renderer runs before the interrupt menu, and again on a stream
+retry), so the terminal starts a new region there. Only the persisted stream
+and its replay are seamless; the live gap is a known limitation.
 ```
 
 -----
