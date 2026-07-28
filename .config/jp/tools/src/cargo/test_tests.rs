@@ -64,6 +64,137 @@ fn test_cargo_test_with_failure() {
             ```"});
 }
 
+#[test]
+fn no_tests_ran_error_is_bounded() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    // A panicking proc-macro derive produces one diagnostic per expansion site,
+    // which for a widely-derived macro means megabytes of stderr.
+    let stderr = "error: proc-macro derive panicked\n".repeat(10_000);
+    let runner = MockProcessRunner::builder()
+        .expect_any()
+        .returns_error(&stderr);
+
+    let error = cargo_test_impl(&ctx, None, None, false, false, &runner)
+        .expect_err("a run with zero tests is an error")
+        .to_string();
+
+    assert!(
+        error.len() < MAX_DIAGNOSTIC_BYTES + 200,
+        "error grew to {} bytes",
+        error.len()
+    );
+    assert!(
+        error.ends_with(&format!(
+            "[Truncated: showing {MAX_DIAGNOSTIC_BYTES} of {} bytes]",
+            stderr.len()
+        )),
+        "got: {}",
+        &error[error.len() - 100..]
+    );
+}
+
+#[test]
+fn failure_output_is_bounded_across_the_whole_run() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    // A broken shared fixture fails every test in the workspace, each one
+    // carrying its own captured output.
+    let per_test_output = "x".repeat(MAX_TEST_OUTPUT_BYTES);
+    let stdout = (0..500)
+        .map(|i| {
+            format!(
+                r#"{{"type":"test","event":"failed","name":"my_crate$tests::t{i}","stdout":"{per_test_output}"}}"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let runner = MockProcessRunner::success(stdout);
+
+    let content = cargo_test_impl(&ctx, None, None, false, false, &runner)
+        .unwrap()
+        .unwrap_content();
+
+    // Every failure is still counted, even though most carry no output.
+    assert!(
+        content.starts_with("Ran 500/500 tests, of which 500 failed.\n"),
+        "got: {}",
+        &content[..60]
+    );
+    assert!(
+        content.len() < MAX_TEST_OUTPUT_BUDGET_BYTES * 2,
+        "response grew to {} bytes",
+        content.len()
+    );
+    assert!(
+        content.ends_with(
+            "Output for 496 further failing tests was omitted to bound the size of this response. \
+             Re-run with `testname` set to inspect them."
+        ),
+        "got tail: {}",
+        &content[content.len() - 200..]
+    );
+}
+
+#[test]
+fn failure_blocks_are_bounded_when_captured_output_is_empty() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    // Failing tests that print nothing still cost a serialized block each. If
+    // only captured output were charged against the budget, none of these would
+    // spend anything and every one would be serialized.
+    let stdout = (0..5_000)
+        .map(|i| {
+            format!(
+                r#"{{"type":"test","event":"failed","name":"my_crate$tests::t{i:04}","stdout":""}}"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let runner = MockProcessRunner::success(stdout);
+
+    let content = cargo_test_impl(&ctx, None, None, false, false, &runner)
+        .unwrap()
+        .unwrap_content();
+
+    assert!(
+        content.starts_with("Ran 5000/5000 tests, of which 5000 failed.\n"),
+        "got: {}",
+        &content[..60]
+    );
+    assert!(
+        content.len() < MAX_TEST_OUTPUT_BUDGET_BYTES * 2,
+        "response grew to {} bytes",
+        content.len()
+    );
+    assert!(
+        content.contains("further failing tests was omitted to bound the size of this response"),
+        "got tail: {}",
+        &content[content.len() - 200..]
+    );
+}
+
 /// A runner that captures the environment variables passed to it, so we can
 /// assert on the exact values.
 struct EnvCapturingRunner {

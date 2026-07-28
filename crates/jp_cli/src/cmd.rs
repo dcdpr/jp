@@ -146,8 +146,10 @@ impl IntoPartialAppConfig for Commands {
             Commands::AttachmentAdd(args) => {
                 args.apply_cli_config(workspace, partial, merged_config)
             }
+            Commands::Conversation(args) => {
+                args.apply_cli_config(workspace, partial, merged_config)
+            }
             Commands::Config(_)
-            | Commands::Conversation(_)
             | Commands::Init(_)
             | Commands::Plugin(_)
             | Commands::External(_) => Ok(partial),
@@ -476,6 +478,18 @@ impl From<crate::error::Error> for Error {
             )]
             .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
+            Summarize { model, reason } => [
+                ("message", "Summarization failed".to_owned()),
+                ("model", model),
+                ("reason", reason),
+                (
+                    "suggestion",
+                    "Retry with a different summarizer model, e.g. `jp conversation compact \
+                     --model <model>`, or raise `max_tokens` for the current one."
+                        .to_owned(),
+                ),
+            ]
+            .into(),
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }

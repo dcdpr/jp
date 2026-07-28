@@ -141,6 +141,40 @@ fn clippy_warnings_and_comfort_drift_are_both_reported() {
 }
 
 #[test]
+fn comfort_drift_listing_is_bounded() {
+    let (_dir, ctx) = ctx();
+    let comfort_stdout = (0..4_000)
+        .map(|i| format!("{root}/src/generated/file_{i}.rs", root = ctx.root))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns(ProcessOutput {
+            stdout: comfort_stdout,
+            stderr: String::new(),
+            status: ExitCode::from_code(1),
+        });
+
+    let content = cargo_check_impl(&ctx, None, false, &runner)
+        .unwrap()
+        .unwrap_content();
+
+    assert!(
+        content.len() < MAX_DIAGNOSTIC_BYTES + 200,
+        "drift note grew to {} bytes",
+        content.len()
+    );
+    assert!(
+        content.contains("[Truncated: showing"),
+        "got tail: {}",
+        &content[content.len() - 100..]
+    );
+}
+
+#[test]
 fn comfort_real_failure_is_reported_as_error() {
     let (_dir, ctx) = ctx();
 

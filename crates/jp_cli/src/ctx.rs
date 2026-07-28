@@ -7,7 +7,6 @@ use std::{
 
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
-use crossterm::terminal;
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
 use jp_mcp::id::McpServerId;
 use jp_printer::Printer;
@@ -96,11 +95,7 @@ impl Ctx {
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
         let is_tty = io::stdout().is_terminal();
-        let width = if is_tty {
-            terminal::size().ok().map(|(cols, _)| cols)
-        } else {
-            None
-        };
+        let width = printer.terminal_width();
 
         Self {
             workspace,

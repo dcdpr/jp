@@ -4,6 +4,7 @@ use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{
     AppConfig,
+    conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle},
     style::reasoning::{ReasoningDisplayConfig, TruncateChars},
 };
 use jp_conversation::{
@@ -96,6 +97,38 @@ fn prints_user_message() {
     result.unwrap();
     let output = out.lock().clone();
     assert!(output.contains("Hello world"), "got: {output}");
+}
+
+/// Replay renders each stored event whole, so two consecutive reasoning events
+/// must be separated even when the first one's text ends mid-paragraph.
+#[test]
+fn prints_consecutive_reasoning_events_as_separate_blocks() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+
+    let (mut ctx, id, out, _err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(ChatResponse::reasoning("First section."), ts(0, 0, 0)),
+        ConversationEvent::new(ChatResponse::reasoning("Second section."), ts(0, 0, 1)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("First section.\n\nSecond section."),
+        "stored reasoning events must render as separate blocks, got: {output:?}"
+    );
 }
 
 #[test]
@@ -363,6 +396,47 @@ fn structured_response_followed_by_message_closes_fence_first() {
     assert!(
         welcome_idx > close_idx,
         "trailing message must render after the JSON fence is closed; output: {output:?}"
+    );
+}
+
+/// Each structured response is a self-contained block, so two consecutive
+/// structured events render as two complete `json` fences rather than both
+/// values being appended inside the first one as `}{`.
+#[test]
+fn prints_consecutive_structured_events_as_separate_fences() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Extract"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::structured(json!({"name": "Alice"})),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ChatResponse::structured(json!({"name": "Bob"})),
+            ts(0, 0, 3),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert_eq!(
+        output.matches("```json").count(),
+        2,
+        "each structured event opens its own fence, got: {output:?}"
+    );
+    assert!(
+        !output.contains("}{"),
+        "the second value must not be appended inside the first fence, got: {output:?}"
     );
 }
 
@@ -1756,6 +1830,76 @@ fn replay_suppresses_tool_chrome_when_show_disabled() {
     assert!(
         !chrome.contains("Calling tool"),
         "tool chrome must be suppressed when style.tool_call.show is false, got: {chrome:?}"
+    );
+}
+
+/// A tool result that rendered visible output owes a blank line before the next
+/// tool header, and a reasoning chunk that renders nothing must not cancel that
+/// debt.
+///
+/// `reasoning -> tool call -> visible result -> Reasoning("\n\n") -> tool
+/// call`: the whitespace-only chunk is the interleaved-thinking filler the LLM
+/// emits between tool calls.
+/// It puts nothing on screen, so it supplies no spacing of its own and the
+/// result stays separated from the following header.
+#[test]
+fn replay_keeps_the_gap_after_a_result_when_reasoning_renders_nothing() {
+    // `parameters = off` and `results_file_link = off` keep the chrome free of
+    // the nondeterministic temp-file path, so the whole stream can be asserted.
+    let mut config = AppConfig::new_test();
+    config.conversation.tools.defaults.style.parameters = ParametersStyle::Off;
+    config.conversation.tools.defaults.style.inline_results = InlineResults::Full;
+    config.conversation.tools.defaults.style.results_file_link = LinkStyle::Off;
+
+    let (mut ctx, id, _out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me check the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(ChatResponse::reasoning("\n\n"), ts(0, 0, 5)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc2".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("b.rs"))]),
+            },
+            ts(0, 0, 6),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert_eq!(
+        strip_ansi(&chrome),
+        "Calling tool read_file\n\ncontents\n\nCalling tool read_file\n",
+        "got: {chrome:?}"
     );
 }
 

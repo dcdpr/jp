@@ -124,9 +124,52 @@ impl AccessPolicy {
         }
     }
 
-    /// The workspace-relative grant paths, for building helpful error messages.
-    pub fn grant_paths(&self) -> impl Iterator<Item = &Utf8Path> {
-        self.fs.iter().map(FsRule::lexical_path)
+    /// The workspace-relative paths whose rules grant `capability`, for
+    /// building helpful error messages.
+    ///
+    /// Only granting rules are listed.
+    /// A rule that denies the capability is not somewhere the caller can go, so
+    /// naming it as a grant would send the reader straight back into the
+    /// refusal.
+    ///
+    /// Rules sharing a lexical path are collapsed to the last one declared,
+    /// matching how [`AccessPolicy::permits`] breaks equal-specificity ties.
+    /// Appending config layers routinely produces such duplicates, and a grant
+    /// a later layer has overridden is not a place the caller can go either.
+    /// Shadowing across *different* paths is left alone: a root grant is still
+    /// worth naming when a deeper rule denies one subtree.
+    ///
+    /// The workspace root is reported as `.`, the form it is written in config;
+    /// its lexical path is empty and would otherwise render as nothing.
+    pub fn granting_paths(&self, capability: Capability) -> impl Iterator<Item = &Utf8Path> {
+        let mut effective: Vec<&FsRule> = vec![];
+        for rule in &self.fs {
+            match effective
+                .iter_mut()
+                .find(|kept| kept.lexical_path() == rule.lexical_path())
+            {
+                Some(kept) => *kept = rule,
+                None => effective.push(rule),
+            }
+        }
+
+        effective
+            .into_iter()
+            .filter(move |rule| match capability {
+                Capability::Read => rule.read(),
+                Capability::Create => rule.create(),
+                Capability::Update => rule.update(),
+                Capability::Delete => rule.delete(),
+                Capability::Execute => rule.execute(),
+            })
+            .map(|rule| {
+                let path = rule.lexical_path();
+                if path.as_str().is_empty() {
+                    Utf8Path::new(".")
+                } else {
+                    path
+                }
+            })
     }
 }
 
@@ -683,6 +726,58 @@ mod tests {
         // The root rule wins for an unmatched subtree.
         let rule = find_matching_rule(&rules, Utf8Path::new("tests/x.rs")).unwrap();
         assert!(rule.read());
+    }
+
+    #[test]
+    fn granting_paths_drops_a_grant_a_later_rule_shadows() {
+        // Append-merged config layers routinely produce two rules on one path.
+        // `permits` breaks the tie toward the last, so the earlier grant is dead
+        // and naming it in a refusal points the reader back at what was refused.
+        let policy = AccessPolicy {
+            fs: vec![
+                FsRule::new("src").with_read(true),
+                FsRule::new("src").with_read(false),
+            ],
+            ..AccessPolicy::default()
+        };
+
+        assert!(!policy.permits(Capability::Read, Utf8Path::new("src/lib.rs")));
+        assert_eq!(policy.granting_paths(Capability::Read).count(), 0);
+    }
+
+    #[test]
+    fn granting_paths_keeps_a_grant_a_later_rule_restores() {
+        let policy = AccessPolicy {
+            fs: vec![
+                FsRule::new("src").with_read(false),
+                FsRule::new("src").with_read(true),
+            ],
+            ..AccessPolicy::default()
+        };
+
+        assert!(policy.permits(Capability::Read, Utf8Path::new("src/lib.rs")));
+        assert_eq!(
+            policy.granting_paths(Capability::Read).collect::<Vec<_>>(),
+            vec![Utf8Path::new("src")]
+        );
+    }
+
+    #[test]
+    fn granting_paths_keeps_a_broader_grant_a_deeper_rule_denies() {
+        // Cross-path shadowing is not collapsed: the root is still reachable
+        // everywhere except the one subtree the deeper rule closes.
+        let policy = AccessPolicy {
+            fs: vec![
+                FsRule::new("").with_read(true),
+                FsRule::new("src").with_read(false),
+            ],
+            ..AccessPolicy::default()
+        };
+
+        assert_eq!(
+            policy.granting_paths(Capability::Read).collect::<Vec<_>>(),
+            vec![Utf8Path::new(".")]
+        );
     }
 
     #[test]

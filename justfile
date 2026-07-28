@@ -272,7 +272,7 @@ pr-triage NNN *ARGS: _install-jp _install-tools
                 ans=n
             fi
             case "$ans" in
-                p|P)
+                p|P|"")
                     jp conversation use '?session'
                     jp query --cfg=personas/pr-triager \
                         --attach "gh:pull/{{NNN}}/diff" \
@@ -280,7 +280,8 @@ pr-triage NNN *ARGS: _install-jp _install-tools
                         $args
                     exit 0 ;;
                 q|Q) exit 0 ;;
-                *) ;;
+                n|N) ;;
+                *)   echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
             esac ;;
     esac
 
@@ -1951,7 +1952,7 @@ check-and-fix *FLAGS:
 [group('check')]
 [group('main')]
 test *FLAGS="--workspace": (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
-    cargo nextest run --all-targets --cargo-profile=nextest {{FLAGS}}
+    cargo nextest run --all-targets --cargo-profile=nextest --status-level=slow --failure-output=final {{FLAGS}}
 
 # Continuously run tests, using Bacon.
 [group('check')]
@@ -2078,7 +2079,7 @@ fmt-markdown-ci: _install-comfort _install_ci_matchers
 # Test the code on CI.
 [group('ci')]
 test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
-    cargo nextest run --locked --lib --tests --cargo-profile=nextest --workspace --no-fail-fast
+    cargo nextest run --locked --lib --tests --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast
 
 # Generate documentation on CI.
 [group('ci')]

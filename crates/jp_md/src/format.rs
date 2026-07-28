@@ -121,11 +121,12 @@ pub struct Formatter {
     /// How horizontal rules are rendered in terminal output.
     hr_style: HrStyle,
 
-    /// Actual terminal width in columns, if known.
+    /// Width of the output terminal in columns, if known.
     ///
-    /// Used by [`HrStyle::Line`] to render a horizontal line spanning the full
-    /// terminal width.
-    /// When `None`, the configured `width` is used as a fallback.
+    /// Bounds blocks that are laid out rather than wrapped, so they don't run
+    /// into the terminal's own line wrapping.
+    /// Tables are fitted to it; when `None` they keep their natural widths,
+    /// which is what piped and redirected output wants.
     terminal_width: Option<usize>,
 
     /// Override background color for inline code spans.
@@ -208,14 +209,14 @@ impl Formatter {
         self
     }
 
-    /// Set the actual terminal width in columns.
+    /// Set the width of the output terminal in columns.
     ///
-    /// When [`HrStyle::Line`] is active, horizontal rules are rendered as a
-    /// unicode line spanning this width.
-    /// If not set, the configured `width` is used instead.
+    /// Tables are laid out to fit this width, narrowing their widest columns
+    /// when the natural layout would be wider.
+    /// A width of `0` is treated as unknown, leaving tables unbounded.
     #[must_use]
     pub const fn terminal_width(mut self, width: usize) -> Self {
-        self.terminal_width = Some(width);
+        self.terminal_width = if width > 0 { Some(width) } else { None };
         self
     }
 
@@ -287,10 +288,10 @@ impl Formatter {
         let table_options = TableOptions::new(self.table_max_column_width);
         let hr_options = HrOptions {
             style: self.hr_style,
-            terminal_width: self.terminal_width,
         };
         let render_options = RenderOptions {
             width: self.width,
+            terminal_width: self.terminal_width,
             table_options: &table_options,
             hr_options: &hr_options,
             theme: &self.theme,

@@ -60,6 +60,23 @@ enum ContentKind {
     ToolCall,
 }
 
+/// What raised the blank-line separator owed before the next rendered content.
+///
+/// The debt itself is the same either way; the origin decides how a following
+/// tool call resolves it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SeparatorOrigin {
+    /// A rendered reasoning block, which defers its trailing separator.
+    Content,
+
+    /// A tool-call boundary the reasoning region continues across.
+    ///
+    /// Dropped when the next thing rendered is more tool chrome: the reasoning
+    /// that raised it put nothing on screen, so the two tool headers sit
+    /// adjacent with no gap between them.
+    ToolCall,
+}
+
 /// Renders chat events to the terminal.
 ///
 /// Handles user messages, assistant reasoning, and assistant message content,
@@ -93,14 +110,15 @@ pub struct ChatRenderer {
     code_block: Option<CodeBlockState>,
     /// Active reasoning timer, used by `Timer` display mode.
     reasoning_timer: Option<LineTimer>,
-    /// Whether a rendered reasoning block still owes its trailing inter-block
-    /// separator.
+    /// The blank-line separator owed before the next rendered content, if any.
     ///
-    /// Reasoning blocks defer that separator so its background can be chosen
-    /// once the following content is known: shaded when more reasoning follows
-    /// (the gap stays inside the reasoning region), unstyled when reasoning
-    /// gives way to a message, tool call, or end of stream.
-    reasoning_separator_pending: bool,
+    /// Raised by a rendered reasoning block and by the tool-call boundary a
+    /// reasoning region continues across, both of which defer the separator so
+    /// its fate can be settled once the following content is known: shaded when
+    /// more reasoning follows (the gap stays inside the reasoning region),
+    /// unstyled when reasoning gives way to a message or end of stream, and
+    /// dropped when nothing rendered between two tool calls.
+    pending_separator: Option<SeparatorOrigin>,
     /// Post-processing fixups for LLM quirks in the event stream.
     fixups: Fixups,
     /// Accumulated source of the top-level paragraph currently streaming.
@@ -118,7 +136,7 @@ pub struct ChatRenderer {
 impl ChatRenderer {
     pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
         let pretty = printer.pretty_printing_enabled();
-        let formatter = formatter_from_config(&config, pretty);
+        let formatter = formatter_from_config(&config, pretty, printer.terminal_width());
         // Configure the printer's bounded-latency controller from the
         // typewriter style. `max_latency = 0` (the default) leaves the
         // controller disabled, preserving the original static per-character
@@ -134,7 +152,7 @@ impl ChatRenderer {
             reasoning_chars_count: 0,
             code_block: None,
             reasoning_timer: None,
-            reasoning_separator_pending: false,
+            pending_separator: None,
             fixups: Fixups::llm_quirks(),
             para_source: String::new(),
             para_emitted: 0,
@@ -239,19 +257,21 @@ impl ChatRenderer {
         self.last_content_kind = Some(next);
     }
 
-    /// Print the blank line separating tool chrome from the content that
-    /// follows it.
+    /// Emit the blank line separating tool chrome from the content that follows
+    /// it.
     ///
     /// When the next content is reasoning that continues a shaded reasoning
-    /// region across the tool call, the gap sits inside the region and carries
-    /// the reasoning background; otherwise it is a plain blank line.
+    /// region across the tool call, the gap is deferred like a reasoning
+    /// block's own trailing separator: the reasoning chunk that triggered the
+    /// transition may render nothing at all (it is whitespace-only, or
+    /// truncation has already consumed its budget), in which case the gap ends
+    /// up before whatever renders next and its shading has to follow that
+    /// content.
+    /// Otherwise the region ends at the tool call and the gap is a plain blank
+    /// line.
     fn blank_line_after_tool_call(&mut self, next: ContentKind) {
-        let continues = next == ContentKind::Reasoning && self.reasoning_region_continues();
-
-        if continues && let Some(bg) = self.reasoning_background() {
-            let delay = self.config.typewriter.text_delay;
-            let separator = render_separator(Some(&bg));
-            self.printer.print(separator.typewriter(delay.into()));
+        if next == ContentKind::Reasoning && self.reasoning_region_continues() {
+            self.pending_separator = Some(SeparatorOrigin::ToolCall);
         } else {
             self.printer.println("");
         }
@@ -273,14 +293,7 @@ impl ChatRenderer {
             ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => {
                 self.flush_on_transition(ContentKind::Reasoning);
 
-                let remaining = characters.saturating_sub(self.reasoning_chars_count);
-
-                if remaining > 0 {
-                    let mut data: String = content.chars().take(remaining).collect();
-                    if data.chars().count() == remaining {
-                        data.push_str("...\n\n");
-                    }
-
+                if let Some(data) = self.truncated_reasoning(content, characters) {
                     self.render_content(&data);
                 }
 
@@ -335,6 +348,29 @@ impl ChatRenderer {
         }
     }
 
+    /// The text a `Truncate` display renders for `content`, or `None` once the
+    /// budget is spent.
+    ///
+    /// The `...` elision marker is appended whenever the taken text fills the
+    /// remaining budget — whitespace included, so the cut is still marked when
+    /// the chunk that exhausts the budget holds nothing else.
+    ///
+    /// Reads `reasoning_chars_count` without advancing it, so callers deciding
+    /// what a chunk *would* render get the same answer as the render itself.
+    fn truncated_reasoning(&self, content: &str, characters: usize) -> Option<String> {
+        let remaining = characters.saturating_sub(self.reasoning_chars_count);
+        if remaining == 0 {
+            return None;
+        }
+
+        let mut data: String = content.chars().take(remaining).collect();
+        if data.chars().count() == remaining {
+            data.push_str("...\n\n");
+        }
+
+        Some(data)
+    }
+
     fn render_message(&mut self, content: &str) {
         self.flush_on_transition(ContentKind::Message);
         self.render_content(content);
@@ -383,7 +419,7 @@ impl ChatRenderer {
                 // A code block inside reasoning consumes the deferred
                 // separator the same way another reasoning block would.
                 if self.last_content_kind == Some(ContentKind::Reasoning) {
-                    self.emit_pending_reasoning_separator(true);
+                    self.emit_pending_separator(true);
                 }
                 self.code_block = Some(self.formatter.begin_code_block(language));
                 let bg = self.terminal_options(0).default_background;
@@ -484,7 +520,7 @@ impl ChatRenderer {
         // deferred separator shaded so the gap stays inside the reasoning
         // region.
         if is_reasoning {
-            self.emit_pending_reasoning_separator(true);
+            self.emit_pending_separator(true);
         }
 
         // Defer a reasoning block's trailing separator (its shading depends on
@@ -498,7 +534,7 @@ impl ChatRenderer {
         self.printer.print(formatted.typewriter(delay.into()));
 
         if is_reasoning {
-            self.reasoning_separator_pending = true;
+            self.pending_separator = Some(SeparatorOrigin::Content);
         }
     }
 
@@ -518,7 +554,7 @@ impl ChatRenderer {
         // First chunk of this paragraph: a reasoning paragraph consumes the
         // deferred separator shaded, exactly as `print_block` does for a Block.
         if self.para_source.is_empty() && is_reasoning {
-            self.emit_pending_reasoning_separator(true);
+            self.emit_pending_separator(true);
         }
 
         self.para_source.push_str(content);
@@ -551,7 +587,7 @@ impl ChatRenderer {
 
         if last {
             if is_reasoning {
-                self.reasoning_separator_pending = true;
+                self.pending_separator = Some(SeparatorOrigin::Content);
             }
             self.para_source.clear();
             self.para_emitted = 0;
@@ -584,18 +620,18 @@ impl ChatRenderer {
             })
     }
 
-    /// Emit the separator owed by the previously rendered reasoning block.
+    /// Emit the deferred blank-line separator, if one is owed.
     ///
-    /// Reasoning blocks render without their trailing inter-block separator so
-    /// its background can be decided once the following content is known.
+    /// Reasoning blocks and the tool-call boundaries a reasoning region
+    /// continues across render without their separator so its background can be
+    /// decided once the following content is known.
     /// When `shaded`, the separator carries the reasoning background (the gap
-    /// sits between two reasoning blocks); otherwise it is unstyled (reasoning
-    /// is giving way to other content).
-    fn emit_pending_reasoning_separator(&mut self, shaded: bool) {
-        if !self.reasoning_separator_pending {
+    /// sits inside the region); otherwise it is unstyled (reasoning is giving
+    /// way to other content).
+    fn emit_pending_separator(&mut self, shaded: bool) {
+        if self.pending_separator.take().is_none() {
             return;
         }
-        self.reasoning_separator_pending = false;
 
         let background = if shaded {
             self.reasoning_background()
@@ -608,10 +644,29 @@ impl ChatRenderer {
     }
 
     pub fn flush(&mut self) {
+        // Leaving the region ends any ephemeral chrome: the timer line and the
+        // content about to be committed share the terminal row.
+        self.cancel_reasoning_timer();
+        self.drain_buffer();
         // A plain flush leaves the current content region (a content-kind
         // transition, a role header, or end of stream), so the deferred
-        // reasoning separator is emitted unshaded.
-        self.flush_with_separator(false);
+        // separator is emitted unshaded.
+        self.emit_pending_separator(false);
+    }
+
+    /// Close the block region of the chat response that just ended.
+    ///
+    /// Each `ChatResponse` is a self-contained block of assistant output: two
+    /// consecutive reasoning events are two blocks, not one paragraph
+    /// continued.
+    /// Committing the buffered markdown here keeps the next event's opening
+    /// text from being parsed as a continuation of this one's last paragraph.
+    ///
+    /// The deferred separator is left pending, so the following content still
+    /// decides its shading: another reasoning block keeps the gap inside the
+    /// reasoning region, a message ends the region with a plain blank line.
+    pub fn end_response(&mut self) {
+        self.drain_buffer();
     }
 
     /// Drain the buffer's end-of-region events to the printer, committing
@@ -620,13 +675,11 @@ impl ChatRenderer {
     /// A code block left open by the stream is closed here with a matched,
     /// escalated fence (recognized or synthesized by `flush_events`) instead of
     /// leaking its body as re-parsed markdown.
-    /// The deferred reasoning separator is left untouched — callers emit it
-    /// via [`flush_with_separator`] or leave it pending.
+    /// The deferred separator is left untouched — callers resolve it via
+    /// [`emit_pending_separator`] or leave it pending.
     ///
-    /// [`flush_with_separator`]: Self::flush_with_separator
+    /// [`emit_pending_separator`]: Self::emit_pending_separator
     fn drain_buffer(&mut self) {
-        self.cancel_reasoning_timer();
-
         // Drain the buffer's end-of-region events through the same fixup +
         // render path as streaming.
         for raw_event in self.buffer.flush_events() {
@@ -635,15 +688,6 @@ impl ChatRenderer {
             }
         }
         self.code_block = None;
-    }
-
-    /// Drain the buffer, then emit the deferred reasoning separator.
-    ///
-    /// `shaded` carries the reasoning background on that separator, keeping the
-    /// gap inside a reasoning region; an unshaded separator ends the region.
-    fn flush_with_separator(&mut self, shaded: bool) {
-        self.drain_buffer();
-        self.emit_pending_reasoning_separator(shaded);
     }
 
     /// Signal that the current typewriter producer is done emitting.
@@ -667,23 +711,40 @@ impl ChatRenderer {
         }
     }
 
-    /// Whether the configured reasoning display supplies its own separation
-    /// before following content.
+    /// Whether rendering `content` as reasoning supplies its own separation
+    /// before the content that follows it.
     ///
-    /// `Static`, `Full`, and `Truncate` leave terminated visible output, so a
-    /// following tool header is cleanly separated from them.
+    /// True only when the chunk leaves terminated visible output on screen: a
+    /// caller coordinating inter-block spacing keeps its owed separator across
+    /// every chunk for which this is false.
+    ///
+    /// `Static` writes its `reasoning...` line at the transition whatever the
+    /// chunk holds.
+    /// `Full` renders the chunk as-is, so a whitespace-only one (interleaved
+    /// thinking emits them between tool calls) puts nothing on screen.
+    /// `Truncate` answers for the text it would actually render, elision marker
+    /// included — whitespace that fills the remaining budget still shows a
+    /// `...`, while everything past the budget shows nothing.
     /// `Hidden` renders nothing, `Timer` writes a stderr line it erases again
     /// on completion, and `Progress` writes `reasoning...` plus dots with no
-    /// trailing newline — none of these separate the next header, so a caller
-    /// coordinating inter-block spacing must keep the owed separator across
-    /// them.
-    pub(crate) fn reasoning_supplies_separation(&self) -> bool {
-        !matches!(
-            self.config.reasoning.display,
+    /// trailing newline.
+    ///
+    /// A chunk still sitting in the markdown buffer counts as rendered: the
+    /// buffer is drained ahead of the next tool header, so its content lands
+    /// first and separates the header.
+    pub(crate) fn reasoning_supplies_separation(&self, content: &str) -> bool {
+        match self.config.reasoning.display {
+            ReasoningDisplayConfig::Static => true,
+            ReasoningDisplayConfig::Full => !content.trim().is_empty(),
+            ReasoningDisplayConfig::Truncate(TruncateChars { characters }) => self
+                .truncated_reasoning(content, characters)
+                .is_some_and(|data| !data.trim().is_empty()),
+            // `Summary` is unimplemented — `render_reasoning` panics on it.
             ReasoningDisplayConfig::Hidden
-                | ReasoningDisplayConfig::Timer
-                | ReasoningDisplayConfig::Progress
-        )
+            | ReasoningDisplayConfig::Timer
+            | ReasoningDisplayConfig::Progress
+            | ReasoningDisplayConfig::Summary => false,
+        }
     }
 
     /// Transition renderer state to tool call mode.
@@ -704,9 +765,15 @@ impl ChatRenderer {
     /// Resolve the tool-call boundary against the reasoning region.
     ///
     /// Drains the markdown buffer so buffered content lands before the tool
-    /// header, emits the deferred reasoning separator — shaded when the tool
-    /// call continues the reasoning region, unshaded otherwise — and
-    /// transitions into tool-call mode.
+    /// header, resolves the deferred separator, and transitions into tool-call
+    /// mode.
+    ///
+    /// A separator owed by rendered content is emitted — shaded when the tool
+    /// call continues the reasoning region, unstyled otherwise.
+    /// One owed by an earlier tool-call boundary is dropped instead: the
+    /// reasoning between the two tool calls rendered nothing, so their headers
+    /// belong on consecutive lines, exactly as back-to-back tool calls with no
+    /// reasoning between them do.
     ///
     /// The tool call continues the region when the last chat response was
     /// reasoning and `style.reasoning.extend_across_tool_calls` is enabled.
@@ -718,7 +785,14 @@ impl ChatRenderer {
     /// call does not extend a shaded reasoning region.
     pub fn enter_tool_call(&mut self) -> Option<DefaultBackground> {
         let continues = self.reasoning_region_continues();
-        self.flush_with_separator(continues);
+        // The tool header takes over the terminal row the timer line occupies.
+        self.cancel_reasoning_timer();
+        self.drain_buffer();
+        if self.pending_separator == Some(SeparatorOrigin::ToolCall) {
+            self.pending_separator = None;
+        } else {
+            self.emit_pending_separator(continues);
+        }
         self.transition_to_tool_call();
         if continues {
             self.reasoning_background()
@@ -737,6 +811,7 @@ impl ChatRenderer {
     /// Does not transition into tool-call mode: with no chrome there is no
     /// boundary for the next content to react to.
     pub fn skip_tool_call(&mut self) {
+        self.cancel_reasoning_timer();
         self.drain_buffer();
     }
 
@@ -750,10 +825,10 @@ impl ChatRenderer {
         self.cancel_reasoning_timer();
         self.buffer = Buffer::new();
         let pretty = self.printer.pretty_printing_enabled();
-        self.formatter = formatter_from_config(&self.config, pretty);
+        self.formatter = formatter_from_config(&self.config, pretty, self.printer.terminal_width());
         self.last_content_kind = None;
         self.last_response_kind = None;
-        self.reasoning_separator_pending = false;
+        self.pending_separator = None;
         self.reasoning_chars_count = 0;
         self.code_block = None;
         self.fixups = Fixups::llm_quirks();
@@ -849,7 +924,15 @@ fn indent_lines(content: &str, indent: usize) -> String {
     out
 }
 
-fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
+/// Build a markdown formatter from the style config.
+///
+/// `terminal_width` bounds blocks that can't be soft-wrapped (tables); `None`
+/// leaves them at their natural width.
+fn formatter_from_config(
+    config: &StyleConfig,
+    pretty: bool,
+    terminal_width: Option<u16>,
+) -> Formatter {
     let theme_name = if pretty {
         config.markdown.theme.as_deref()
     } else {
@@ -862,6 +945,7 @@ fn formatter_from_config(config: &StyleConfig, pretty: bool) -> Formatter {
     }
 
     Formatter::with_width(config.markdown.wrap_width)
+        .terminal_width(terminal_width.map_or(0, usize::from))
         .table_max_column_width(config.markdown.table_max_column_width)
         .theme(theme_name)
         .pretty_hr(pretty && config.markdown.hr_style.is_line())

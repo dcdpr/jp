@@ -14,7 +14,7 @@ use jp_config::interrupt::{StreamingInterruptConfig, ToolInterruptConfig};
 use jp_conversation::ConversationStream;
 use jp_editor::EditorBackend;
 use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
-use jp_llm::event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction};
+use jp_llm::event::{Event, FinishReason, apply_patches};
 use jp_printer::Printer;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, trace};
@@ -131,7 +131,10 @@ pub fn handle_llm_event(
     // in the conversation stream. This can be handled directly instead of
     // passing through the turn coordinator.
     if let Event::Patch(patches) = event {
-        apply_history_patches(conversation_stream, &patches);
+        let count = apply_patches(conversation_stream, &patches);
+        if count > 0 {
+            tracing::debug!(count, "Applied history patches to conversation stream.");
+        }
         return (LoopAction::Continue, CommittedEvent::None);
     }
 
@@ -149,48 +152,6 @@ pub fn handle_llm_event(
     };
 
     (loop_action, outcome.committed)
-}
-
-/// Apply provider-issued metadata patches to historical conversation events.
-///
-/// NOTE: This mutates the stream in-place, which deviates from the append-only
-/// principle established in RFD 064 (non-destructive compaction).
-/// This is acceptable for now because the targets are opaque provider metadata
-/// (cryptographic signatures), not user-visible content, and the overlay/
-/// projection infrastructure from RFD 064 does not exist yet.
-/// Once RFD 064 lands, this should migrate to an append-only patch event that
-/// the projection layer applies at request-build time.
-fn apply_history_patches(stream: &mut ConversationStream, patches: &[EventPatch]) {
-    let mut count = 0;
-
-    for event in stream.iter_mut() {
-        for patch in patches {
-            let matched = match &patch.matcher {
-                EventMatcher::MetadataValue { key, value } => event
-                    .event
-                    .metadata
-                    .get(key)
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|v| v == value),
-                _ => false,
-            };
-
-            if !matched {
-                continue;
-            }
-
-            match &patch.action {
-                PatchAction::RemoveMetadata(key) => event.event.metadata.remove(key),
-                _ => continue,
-            };
-
-            count += 1;
-        }
-    }
-
-    if count > 0 {
-        tracing::debug!(count, "Applied history patches to conversation stream.");
-    }
 }
 
 /// Result of handling an interrupt during tool execution.
