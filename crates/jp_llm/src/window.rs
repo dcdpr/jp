@@ -39,7 +39,7 @@ const TARGET_FACTOR: usize = 80; // percent
 /// window with conversation events.
 ///
 /// Binary attachments consume tokens too (base64 framing, image tiles) but
-/// can't be measured in chars; [`OVERHEAD_FACTOR`] absorbs them.
+/// can't be measured in chars; the module's safety margin absorbs them.
 #[must_use]
 pub fn estimate_overhead_chars(
     system_prompt: Option<&str>,
@@ -207,8 +207,8 @@ fn estimate_event_chars(event: &ConversationEvent) -> usize {
 
 /// Chars available to conversation events before truncation kicks in.
 ///
-/// This is the model's window converted to chars, discounted by
-/// [`OVERHEAD_FACTOR`] and reduced by the caller's measured overhead.
+/// This is the model's window converted to chars, discounted by the safety
+/// margin and reduced by the caller's measured overhead.
 /// Saturates at zero when the overhead alone fills the window.
 #[must_use]
 pub fn budget_chars(context_window: u32, overhead_chars: usize) -> usize {
