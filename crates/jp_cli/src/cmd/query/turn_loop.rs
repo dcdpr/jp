@@ -482,9 +482,10 @@ pub(super) async fn run_turn_loop(
                                             });
                                             match action {
                                                 // With a dead stream, "continue"
-                                                // prepares a prefill continuation
-                                                // and breaks for a fresh request;
-                                                // a keep-polling Continue cannot
+                                                // commits partial output as
+                                                // continuation context and breaks
+                                                // for a fresh request; a
+                                                // keep-polling Continue cannot
                                                 // occur here.
                                                 StreamingInterruptResult::Continue
                                                 | StreamingInterruptResult::Break => break,
