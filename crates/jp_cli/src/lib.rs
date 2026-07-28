@@ -802,7 +802,7 @@ fn load_partial_configs_from_files(
         partials.push(cwd_config);
     }
 
-    // Load `$XDG_DATA_HOME/jp/<workspace_id>/config.{toml,json,yaml}`.
+    // Load `$XDG_DATA_HOME/jp/workspace/<name>-<id>/config.{toml,json,yaml}`.
     if let Some(user_workspace_config) = fs
         .and_then(|f| f.user_storage_with_path(config_path))
         .and_then(|p| load_partial_at_path(p).transpose())

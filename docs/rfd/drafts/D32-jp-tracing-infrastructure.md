@@ -757,6 +757,16 @@ Users familiar with `RUST_LOG` will recognize the format.
   If metrics become needed, the `Emit` trait can be extended to emit metrics
   alongside trace events.
 
+> [!TIP]
+> [RFD D34] versions JP's machine-readable output behind a `{format, version,
+> data}` envelope, and excludes tracing on the grounds that JP does not today
+> commit to the trace event shape.
+> The typed events this RFD introduces change that premise: once trace events
+> are JP-owned structs rather than `tracing-subscriber`'s serialization, whether
+> they become versioned machine records with format addresses is this RFD's call
+> to make.
+> RFD D34 neither claims nor forecloses it.
+
 ## Risks and Open Questions
 
 ### Task-local recorder and `tokio::spawn`
@@ -896,3 +906,4 @@ Depends on Phase 1 and the chrome verbosity RFD.
 [RFD 048]: ../048-four-channel-output-model.md
 [RFD 072]: ../072-command-plugin-system.md
 [RFD D15]: D15-structured-logging-infrastructure.md
+[RFD D34]: D34-versioned-machine-output-envelope.md

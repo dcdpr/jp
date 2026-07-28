@@ -232,7 +232,7 @@
     "summary": "Add `jp completions` and `jp manpage` subcommands using clap_complete and clap_mangen for shell integration."
   },
   "060-config-explain.md": {
-    "hash": "b944888f2eea5fb4e717826c184af99b5a5b2e0bb8b1a3822e8642510a3f4c42",
+    "hash": "af1475f128e5897ec6b895706f6ef04f91a75dbeb61753b4768503a9a8ae4e22",
     "summary": "Global `--explain` flag traces config resolution through 9 layers, showing where each field value originates."
   },
   "061-interactive-config.md": {
@@ -292,7 +292,7 @@
     "summary": "UPPERCASE keywords NONE and WORKSPACE reset config state; loader.reset entry setting provides local resets; ConfigDelta becomes enum to persist resets."
   },
   "079-config-sources-and-load-order.md": {
-    "hash": "5e5c78898d1ba2ac5de5ef86ebad0da886c8ca608beaa6fd202e75ba6db670fc",
+    "hash": "4f02ce9e5d97a0573d9f408509498177337b9ea0c959a9cb369b5cc77dad5c12",
     "summary": "JP loads config from four implicit sources plus environment variables, with extends directives and inherit flags controlling precedence."
   },
   "074-eager-loading-with-command-declared-data-requirements.md": {
