@@ -1090,15 +1090,22 @@ impl ConversationStream {
             return;
         }
 
-        let mut index = 0;
-        let mut keeping = false;
+        let mut turn: usize = 0;
+        // Whether the current turn already holds a conversation event. A
+        // `TurnStart` opens a new turn only when this is set, which is the
+        // boundary rule [`Self::iter_turns`] and
+        // `projection::assign_turn_indices` use: events before the first
+        // `TurnStart` form an implicit turn 0, and the first explicit
+        // `TurnStart` opens turn 1. Numbering the turns any other way here
+        // would drop the turns the caller's predicate meant to keep.
+        let mut current_has_event = false;
 
         self.retain(|event| {
-            if event.is_turn_start() {
-                keeping = keep(index);
-                index += 1;
+            if event.is_turn_start() && current_has_event {
+                turn += 1;
             }
-            keeping
+            current_has_event = true;
+            keep(turn)
         });
     }
 

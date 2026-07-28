@@ -497,22 +497,37 @@ impl TurnSelection {
     ///
     /// `--keep-first N --first M` selects the first M turns minus the first N,
     /// e.g. `--keep-first 1 --first 16` selects turns 2 through 16: with N
-    /// greater than M the protected turns swallow the whole selection, so the
-    /// pair is rejected rather than silently selecting nothing.
+    /// greater than M the protected turns swallow that window.
+    /// Swallowing a window is only an error when it takes the whole selection
+    /// with it — `--first`/`--last` are a union, so `--first 1 --last 2
+    /// --keep-first 2` still legitimately selects the final two turns.
     /// Only count-based bounds are comparable up front; durations and the other
     /// bound forms resolve against the stream and may legitimately come up
     /// empty.
     pub(crate) fn validate(&self) -> Result<(), String> {
-        if let (Some(RuleBound::Turns(keep)), Some(first)) = (&self.keep_first, self.first)
-            && *keep > first
+        // The `(keep, count)` pair for a window whose keep flag provably covers
+        // it, or `None` when it doesn't.
+        let swallowed = |keep: Option<&RuleBound>, count: Option<usize>| match (keep, count) {
+            (Some(RuleBound::Turns(keep)), Some(count)) if *keep > count => Some((*keep, count)),
+            _ => None,
+        };
+        let first_swallowed = swallowed(self.keep_first.as_ref(), self.first);
+        let last_swallowed = swallowed(self.keep_last.as_ref(), self.last);
+
+        // A window survives when it names at least one turn and isn't swallowed.
+        let first_survives = self.first.is_some_and(|n| n > 0) && first_swallowed.is_none();
+        let last_survives = self.last.is_some_and(|n| n > 0) && last_swallowed.is_none();
+
+        if let Some((keep, first)) = first_swallowed
+            && !last_survives
         {
             return Err(format!(
                 "--keep-first {keep} is greater than --first {first}: nothing would remain to \
                  select"
             ));
         }
-        if let (Some(RuleBound::Turns(keep)), Some(last)) = (&self.keep_last, self.last)
-            && *keep > last
+        if let Some((keep, last)) = last_swallowed
+            && !first_survives
         {
             return Err(format!(
                 "--keep-last {keep} is greater than --last {last}: nothing would remain to select"

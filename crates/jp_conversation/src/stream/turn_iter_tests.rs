@@ -252,6 +252,48 @@ fn retain_turns_noop_when_every_turn_is_kept() {
 }
 
 #[test]
+fn retain_turns_numbers_an_implicit_leading_turn_like_iter_turns() {
+    // `[A, TurnStart, B]` is turn 0 = `[A]` and turn 1 = `[TurnStart, B]`:
+    // a `TurnStart` opens a turn only when the current one already holds an
+    // event. A predicate built from resolved turn positions must agree, or
+    // `--first 1` on a fork keeps B instead of A.
+    let events = || {
+        vec![
+            ConversationEvent::new(ChatRequest::from("A"), ts(0, 0, 0)),
+            ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+            ConversationEvent::new(ChatRequest::from("B"), ts(0, 1, 1)),
+        ]
+    };
+
+    let mut stream = ConversationStream::new_test();
+    stream.extend(events());
+    assert_eq!(
+        stream.iter_turns().len(),
+        2,
+        "fixture has an implicit turn 0"
+    );
+
+    stream.retain_turns(|index| index == 0);
+    let requests: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.as_chat_request())
+        .map(|r| r.content.clone())
+        .collect();
+    assert_eq!(requests, vec!["A"], "turn 0 is the unmarked prefix");
+
+    let mut stream = ConversationStream::new_test();
+    stream.extend(events());
+
+    stream.retain_turns(|index| index == 1);
+    let requests: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.as_chat_request())
+        .map(|r| r.content.clone())
+        .collect();
+    assert_eq!(requests, vec!["B"], "turn 1 is the marked suffix");
+}
+
+#[test]
 fn retain_turns_keeping_nothing_clears() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![

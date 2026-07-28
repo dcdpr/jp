@@ -10,7 +10,7 @@ use jp_config::{
     model::{PartialModelConfig, id::PartialModelIdOrAliasConfig},
 };
 use jp_conversation::{
-    Compaction, ConversationStream, ReasoningPolicy, ToolCallPolicy,
+    Compaction, ConversationStream, ReasoningPolicy, SummaryPolicy, ToolCallPolicy,
     event::{ToolCallRequest, ToolCallResponse},
 };
 use jp_printer::Printer;
@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 
 use super::{
     Compact, IntoPartialAppConfig as _, TimelineSegment, TurnSelection, build_compaction_events,
-    existing_segments, segments_for_compactions, timeline_lines,
+    existing_segments, plan_rule_ranges, segments_for_compactions, timeline_lines,
 };
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
@@ -32,6 +32,19 @@ fn parse_compact(args: &[&str]) -> Compact {
     let mut argv = vec!["compact"];
     argv.extend_from_slice(args);
     TestCli::try_parse_from(argv).unwrap().compact
+}
+
+/// A rule that summarizes the whole selection, with both keep bounds open so
+/// the rule's own bounds never narrow the window under test.
+fn summary_rule() -> CompactionRuleConfig {
+    CompactionConfig::finalize_rules(vec![PartialCompactionRuleConfig {
+        keep_first: Some(RuleBound::Turns(0)),
+        keep_last: Some(RuleBound::Turns(0)),
+        summary: Some(PartialSummaryConfig::default()),
+        ..PartialCompactionRuleConfig::default()
+    }])
+    .unwrap()
+    .remove(0)
 }
 
 #[test]
@@ -537,6 +550,66 @@ fn first_and_last_compact_two_windows_and_skip_the_middle() {
         .map(|c| (c.from_turn, c.to_turn))
         .collect();
     assert_eq!(ranges, vec![(0, 1), (6, 7)]);
+}
+
+#[test]
+fn an_existing_summary_spanning_both_windows_plans_one_range() {
+    // An existing summary over turns 1-8 sits under both `--first 2` and
+    // `--last 2`. `extend_summary_range` grows each window onto it, so both
+    // become 1-8: without coalescing that is two LLM calls and two identical
+    // compactions, the second immediately superseding the first.
+    //
+    // Asserted at the planning seam, which is where the duplicate would be
+    // introduced; going through `build_compaction_events` would need a live
+    // summarizer.
+    let mut stream = ConversationStream::new_test();
+    for t in 0..8 {
+        stream.start_turn(format!("turn {t}"));
+    }
+    stream.add_compaction(Compaction::new(0, 7).with_summary(SummaryPolicy {
+        summary: "existing".to_owned(),
+    }));
+
+    let rule = summary_rule();
+    let compact = parse_compact(&["--first", "2", "--last", "2"]);
+    let windows = compact.range.windows(&stream);
+    assert_eq!(windows.len(), 2, "the two windows start out disjoint");
+
+    let ranges = plan_rule_ranges(&stream, &stream, &rule, &windows, &compact.range);
+
+    assert_eq!(
+        ranges
+            .iter()
+            .map(|r| (r.from_turn, r.to_turn))
+            .collect::<Vec<_>>(),
+        vec![(0, 7)],
+        "both windows extend onto the same existing summary, so they are one range"
+    );
+}
+
+#[test]
+fn disjoint_windows_without_an_overlapping_summary_stay_separate() {
+    // The coalescing must not collapse windows that genuinely name distinct
+    // regions: with no summary to extend onto, `--first 2 --last 2` over 8 turns
+    // plans two ranges.
+    let mut stream = ConversationStream::new_test();
+    for t in 0..8 {
+        stream.start_turn(format!("turn {t}"));
+    }
+
+    let rule = summary_rule();
+    let compact = parse_compact(&["--first", "2", "--last", "2"]);
+    let windows = compact.range.windows(&stream);
+
+    let ranges = plan_rule_ranges(&stream, &stream, &rule, &windows, &compact.range);
+
+    assert_eq!(
+        ranges
+            .iter()
+            .map(|r| (r.from_turn, r.to_turn))
+            .collect::<Vec<_>>(),
+        vec![(0, 1), (6, 7)]
+    );
 }
 
 #[test]

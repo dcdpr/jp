@@ -527,6 +527,53 @@ fn validate_rejects_a_keep_that_swallows_the_selection() {
 }
 
 #[test]
+fn validate_allows_a_swallowed_window_when_the_other_survives() {
+    // `--first`/`--last` are a union, so a keep flag covering one window is not
+    // a contradiction while the other window still names turns.
+    let selection = TurnSelection {
+        first: Some(1),
+        last: Some(2),
+        keep_first: Some(RuleBound::Turns(2)),
+        ..Default::default()
+    };
+    assert!(selection.validate().is_ok());
+    // Only the trailing window survives.
+    assert_eq!(windows(&selection, 8), vec![(6, 7)]);
+
+    // The mirror image: `--keep-last` swallows the trailing window.
+    let selection = TurnSelection {
+        first: Some(2),
+        last: Some(1),
+        keep_last: Some(RuleBound::Turns(2)),
+        ..Default::default()
+    };
+    assert!(selection.validate().is_ok());
+    assert_eq!(windows(&selection, 8), vec![(0, 1)]);
+}
+
+#[test]
+fn validate_rejects_keeps_that_swallow_both_windows() {
+    // Neither window survives, so the pair is contradictory after all.
+    let selection = TurnSelection {
+        first: Some(1),
+        last: Some(1),
+        keep_first: Some(RuleBound::Turns(2)),
+        keep_last: Some(RuleBound::Turns(2)),
+        ..Default::default()
+    };
+    assert!(selection.validate().is_err());
+
+    // An explicit zero on the other side is not a surviving window either.
+    let selection = TurnSelection {
+        first: Some(1),
+        last: Some(0),
+        keep_first: Some(RuleBound::Turns(2)),
+        ..Default::default()
+    };
+    assert!(selection.validate().is_err());
+}
+
+#[test]
 fn check_turn_range_rejects_endpoints_past_the_conversation() {
     let selection = TurnSelection {
         turn: Some(TurnSpec::Single(7)),

@@ -272,6 +272,49 @@ fn resolve_rule_range(
     })
 }
 
+/// Resolve every selected window into the ranges one rule will compact.
+///
+/// A summary rule's range grows to subsume any summary it touches
+/// ([`extend_summary_range`]), so two windows that started out disjoint can
+/// extend onto each other — or onto the same pre-existing summary — and end
+/// up overlapping or identical.
+/// Coalescing here, before any text is generated, keeps one region from being
+/// compacted twice and one summary from being generated only to be immediately
+/// superseded by the next.
+///
+/// Sorting by start turn first makes a single left-to-right sweep enough:
+/// extending the open range as it goes absorbs transitive chains (A touches B,
+/// B touches C) without a second pass.
+fn plan_rule_ranges(
+    range_stream: &ConversationStream,
+    overlap_stream: &ConversationStream,
+    rule: &CompactionRuleConfig,
+    windows: &[BoundWindow],
+    selection: &TurnSelection,
+) -> Vec<CompactionRange> {
+    let mut ranges: Vec<CompactionRange> = windows
+        .iter()
+        .filter_map(|window| {
+            resolve_rule_range(range_stream, overlap_stream, rule, window, selection)
+        })
+        .collect();
+
+    ranges.sort_by_key(|r| (r.from_turn, r.to_turn));
+
+    let mut merged: Vec<CompactionRange> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        match merged.last_mut() {
+            // Intersection only: two abutting ranges are distinct regions, and
+            // for a summary rule two adjacent summaries are legal.
+            Some(last) if range.from_turn <= last.to_turn => {
+                last.to_turn = last.to_turn.max(range.to_turn);
+            }
+            _ => merged.push(range),
+        }
+    }
+    merged
+}
+
 /// Generate the summary text (if any) and assemble a [`Compaction`] for an
 /// already-resolved range.
 ///
@@ -336,10 +379,7 @@ pub(crate) async fn build_compaction_events(
     let mut overlap = events.clone();
     let mut compactions = Vec::new();
     for rule in rules {
-        for window in &windows {
-            let Some(range) = resolve_rule_range(events, &overlap, rule, window, selection) else {
-                continue;
-            };
+        for range in plan_rule_ranges(events, &overlap, rule, &windows, selection) {
             let compaction = build_compaction_for_range(events, cfg, rule, range, printer).await?;
             overlap.add_compaction(compaction.clone());
             compactions.push(compaction);
@@ -658,12 +698,7 @@ impl Compact {
         let mut overlap = events_snapshot.clone();
         let mut new_segments = Vec::new();
         for rule in rules {
-            for window in &windows {
-                let Some(range) =
-                    resolve_rule_range(events_snapshot, &overlap, rule, window, selection)
-                else {
-                    continue;
-                };
+            for range in plan_rule_ranges(events_snapshot, &overlap, rule, &windows, selection) {
                 let label = if rule.summary.is_some() {
                     Some("summary".to_owned())
                 } else {
