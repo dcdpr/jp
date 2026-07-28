@@ -1,4 +1,5 @@
 use indexmap::IndexMap;
+use jp_config::{PartialAppConfig, assistant::request::CachePolicy};
 use jp_conversation::{Compaction, ConversationStream, SummaryPolicy, event::ChatResponse};
 
 use super::*;
@@ -185,15 +186,15 @@ fn message_texts(events: &ConversationStream) -> Vec<String> {
 }
 
 /// A cutoff that drops every chat request but leaves an assistant response
-/// behind cannot form a valid provider message sequence, so the whole stream is
-/// emptied.
+/// behind cannot form a valid provider message sequence, so every conversation
+/// event is dropped.
 ///
 /// The sizes are picked so the drop loop stops right after the request: a
 /// 3000-char request against a 1000-token window needs 720 chars dropped, which
 /// the request alone satisfies, leaving the 100-char response as the only
 /// survivor.
 #[test]
-fn truncate_clears_stream_when_no_chat_request_survives() {
+fn truncate_empties_stream_when_no_chat_request_survives() {
     let mut events = ConversationStream::new_test().with_turn("q".repeat(3000));
     events
         .current_turn_mut()
@@ -203,4 +204,36 @@ fn truncate_clears_stream_when_no_chat_request_survives() {
 
     assert_eq!(truncate_to_fit(&mut events, 1000, 0), 2);
     assert_eq!(events.len(), 0);
+}
+
+/// Emptying the stream must not take the conversation's configuration with it.
+///
+/// Callers build the provider request from the stream's effective config, so a
+/// delta lost here silently reverts settings the conversation had chosen
+/// (`assistant.request.cache`, for one) to their creation-time defaults.
+#[test]
+fn truncate_keeps_config_deltas_when_the_stream_is_emptied() {
+    let mut events = ConversationStream::new_test().with_turn("q".repeat(3000));
+    events
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("a".repeat(100)))
+        .build()
+        .unwrap();
+
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.request.cache = Some(CachePolicy::Off);
+    events.add_config_delta(delta);
+
+    assert_eq!(truncate_to_fit(&mut events, 1000, 0), 2);
+    assert_eq!(events.len(), 0, "conversation events must be gone");
+    assert_eq!(
+        events
+            .config()
+            .expect("merged config")
+            .assistant
+            .request
+            .cache,
+        CachePolicy::Off,
+        "the config delta must outlive the emptied stream"
+    );
 }

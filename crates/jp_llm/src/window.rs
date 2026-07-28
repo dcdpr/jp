@@ -94,11 +94,13 @@ pub fn estimate_overhead_chars(
 /// Structural invariants are restored afterwards via
 /// [`ConversationStream::sanitize`] (orphaned tool calls, leading non-user
 /// events).
-/// If truncation removes every chat request the stream is cleared entirely: the
-/// remaining events cannot form a valid provider message sequence, since
-/// providers require the first message to come from the user.
+/// If truncation removes every chat request, every remaining conversation event
+/// is dropped too: what is left cannot form a valid provider message sequence,
+/// since providers require the first message to come from the user.
 /// Callers append their own request after fitting, so an emptied stream is
 /// still valid input.
+/// Config deltas survive that emptying — they are global, provider-invisible,
+/// and callers read the stream's effective config to build the request.
 pub fn truncate_to_fit(
     events: &mut ConversationStream,
     context_window: u32,
@@ -158,7 +160,10 @@ pub fn truncate_to_fit(
     events.sanitize();
 
     if !events.has_chat_request() {
-        events.clear();
+        // Drop the conversation events, keep the configuration. `retain`
+        // preserves global entries, so the config deltas the request is built
+        // from outlive the emptying; `clear` would take them with it.
+        events.retain(|_| false);
     }
 
     info!(

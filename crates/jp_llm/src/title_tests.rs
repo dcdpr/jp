@@ -153,6 +153,33 @@ async fn generate_keeps_non_model_settings_from_the_conversation() {
     assert_eq!(config.assistant.request.cache, CachePolicy::Off);
 }
 
+/// The same guarantee on the path where fitting empties the stream.
+///
+/// A single oversized turn against a small-window title model leaves no chat
+/// request, and `truncate_to_fit` then drops every conversation event.
+/// The request is still built from the stream's effective config, so the delta
+/// has to survive that emptying.
+#[tokio::test]
+async fn generate_keeps_non_model_settings_when_fitting_empties_the_stream() {
+    let (provider, requests) = title_provider(Some(1000));
+    let details = details(&provider).await;
+
+    let mut events = ConversationStream::new_test().with_turn("q".repeat(3000));
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.request.cache = Some(CachePolicy::Off);
+    events.add_config_delta(delta);
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    let config = sent[0].thread.events.config().expect("merged config");
+    assert_eq!(config.assistant.request.cache, CachePolicy::Off);
+
+    // The turn really was dropped, so this is the emptying path and not a
+    // request that happened to fit.
+    assert_eq!(sent[0].thread.events.turn_count(), 1);
+}
+
 /// The prompt cache identity providers derive from `created_at` survives the
 /// rebase.
 ///
