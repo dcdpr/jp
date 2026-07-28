@@ -28,6 +28,18 @@ fn parse_relative_duration_days() {
 }
 
 #[test]
+fn parse_rejects_a_duration_chrono_cannot_represent() {
+    // `humantime` parses durations far larger than chrono's date range, and
+    // subtracting one from `now` panics. `--created-since 10000000000000s` must
+    // return a parse error rather than abort the process.
+    let err = "10000000000000s".parse::<TimeThreshold>().unwrap_err();
+    assert!(
+        err.contains("too large"),
+        "expected a too-large error, got: {err}"
+    );
+}
+
+#[test]
 fn parse_relative_duration_hours() {
     let t: TimeThreshold = "6h".parse().unwrap();
     let diff = Utc::now() - *t;

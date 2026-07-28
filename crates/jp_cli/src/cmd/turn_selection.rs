@@ -76,7 +76,14 @@ fn parse_bound(s: &str) -> Result<CliRangeBound, String> {
     }
 
     if let Ok(d) = humantime::Duration::from_str(s) {
-        return Ok(CliRangeBound::At(Utc::now() - Duration::from(d)));
+        // `humantime` accepts durations far outside chrono's representable range,
+        // and subtracting one panics rather than saturating, so an oversized
+        // value has to fail as a parse error instead of aborting the process.
+        let cutoff = chrono::Duration::from_std(Duration::from(d))
+            .ok()
+            .and_then(|d| Utc::now().checked_sub_signed(d))
+            .ok_or_else(|| format!("invalid turn bound `{s}`: duration is too large"))?;
+        return Ok(CliRangeBound::At(cutoff));
     }
 
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
@@ -347,10 +354,15 @@ pub(crate) fn keep_first_bound(bound: &RuleBound, events: &ConversationStream) -
             let Some(first) = events.iter().next() else {
                 return Bound::Empty;
             };
-            let Ok(d) = chrono::Duration::from_std(*d) else {
+            // An unrepresentable duration, or a cutoff past the end of
+            // representable time, means the window covers every turn.
+            let Some(cutoff) = chrono::Duration::from_std(*d)
+                .ok()
+                .and_then(|d| first.event.timestamp.checked_add_signed(d))
+            else {
                 return Bound::Empty;
             };
-            match events.turn_at_time(first.event.timestamp + d) {
+            match events.turn_at_time(cutoff) {
                 Some(turn) => Bound::At(RangeBound::Absolute(turn.index() + 1)),
                 None => Bound::At(RangeBound::Absolute(0)),
             }
@@ -369,8 +381,12 @@ pub(crate) fn keep_last_bound(bound: &RuleBound, events: &ConversationStream) ->
         RuleBound::Absolute(n) => Bound::At(RangeBound::Absolute(n.saturating_sub(1))),
         RuleBound::Duration(d) => {
             // Protect the trailing `d` window. A window covering the whole
-            // conversation protects everything.
-            match events.turn_at_time(Utc::now() - *d) {
+            // conversation protects everything, which is also what a duration
+            // chrono can't represent amounts to.
+            let cutoff = chrono::Duration::from_std(*d)
+                .ok()
+                .and_then(|d| Utc::now().checked_sub_signed(d));
+            match cutoff.and_then(|cutoff| events.turn_at_time(cutoff)) {
                 Some(turn) => Bound::At(RangeBound::Absolute(turn.index())),
                 None => Bound::Empty,
             }
@@ -441,7 +457,8 @@ pub(crate) struct TurnSelection {
     /// Protect the first N turns from the selection.
     ///
     /// Accepts a turn count (`2`), an absolute 1-based turn (`@3`), a from-end
-    /// offset (`-3`), or a duration (`5h`).
+    /// offset (`-3`), a duration (`5h`), or `last-compaction` (protect every
+    /// turn through the most recent compaction).
     /// Composes with every other selector: the selection starts no earlier than
     /// the first unprotected turn.
     #[arg(long, allow_negative_numbers = true)]

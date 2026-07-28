@@ -119,6 +119,43 @@ fn parse_bound_rejects_unparseable_values() {
 }
 
 #[test]
+fn parse_bound_rejects_a_duration_chrono_cannot_represent() {
+    // `humantime` happily parses durations far larger than chrono's date range.
+    // Subtracting one from `now` panics, so an oversized value must come back as
+    // a parse error rather than aborting the process mid-parse.
+    for s in ["10000000000000s", "100000000years"] {
+        let err = parse_bound(s).unwrap_err();
+        assert!(
+            err.contains("too large"),
+            "`{s}` should be rejected as too large, got: {err}"
+        );
+    }
+
+    // The clap-level forms reject it too, on both ends.
+    assert!(parse(&["--from", "10000000000000s"]).is_err());
+    assert!(parse(&["--to", "10000000000000s"]).is_err());
+}
+
+#[test]
+fn keep_bounds_treat_an_unrepresentable_duration_as_covering_everything() {
+    // The duration arms resolve against the stream, so an oversized value can't
+    // fail at parse time. It means "the protected window covers every turn",
+    // which is what `Bound::Empty` already encodes in both arms.
+    let huge = RuleBound::Duration(std::time::Duration::from_secs(10_000_000_000_000));
+    let events = stream(5);
+
+    assert!(matches!(keep_first_bound(&huge, &events), Bound::Empty));
+    assert!(matches!(keep_last_bound(&huge, &events), Bound::Empty));
+
+    // And the whole selection resolves to nothing rather than panicking.
+    let selection = TurnSelection {
+        keep_first: Some(huge),
+        ..Default::default()
+    };
+    assert!(selection.resolve(&events).is_empty());
+}
+
+#[test]
 fn parse_to_bound_rejects_last_compaction_but_accepts_other_forms() {
     // The most-recent-compaction marker is start-only, so `--to` rejects it
     // (canonical name and alias).

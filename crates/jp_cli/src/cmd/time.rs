@@ -48,7 +48,14 @@ impl FromStr for TimeThreshold {
 
         // Try as relative duration (e.g. "3w", "30d", "6h").
         if let Ok(dur) = humantime::parse_duration(s) {
-            let cutoff = Utc::now() - dur;
+            // `humantime` accepts durations far outside chrono's representable
+            // range, and subtracting one panics rather than saturating, so an
+            // oversized value has to fail as a parse error instead of aborting
+            // the process.
+            let cutoff = chrono::Duration::from_std(dur)
+                .ok()
+                .and_then(|dur| Utc::now().checked_sub_signed(dur))
+                .ok_or_else(|| format!("invalid time threshold '{s}': duration is too large"))?;
             return Ok(Self(cutoff));
         }
 
