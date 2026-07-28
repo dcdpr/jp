@@ -92,12 +92,12 @@ so it is half-open and uses distinct flag names (`--created-since` /
   `--turn`, `--from`/`--to`, and `--first`/`--last` are three ways of naming the
   base selection and are mutually exclusive:
 
-  | Selector     | Start bound      | End bound        |
-  | ------------ | ---------------- | ---------------- |
-  | `--turn N`   | `Absolute(N - 1)` | `Absolute(N - 1)` |
+  | Selector      | Start bound       | End bound         |
+  | ------------- | ----------------- | ----------------- |
+  | `--turn N`    | `Absolute(N - 1)` | `Absolute(N - 1)` |
   | `--turn A..B` | `Absolute(A - 1)` | `Absolute(B - 1)` |
-  | `--first N`  | `Absolute(0)`    | `Absolute(N - 1)` |
-  | `--last N`   | `FromEnd(N - 1)` | `FromEnd(0)`     |
+  | `--first N`   | `Absolute(0)`     | `Absolute(N - 1)` |
+  | `--last N`    | `FromEnd(N - 1)`  | `FromEnd(0)`      |
 
   `--first` and `--last` given together produce two windows and skip the turns
   between them.
