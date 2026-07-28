@@ -60,27 +60,103 @@ fn grep_finds_matches() {
 fn grep_no_matches() {
     let (content, note) = grep_diff(small_diff(), "nonexistent_pattern", 3, None).unwrap();
 
-    assert!(content.contains("No matches"));
+    // The line count tells the caller how much was actually searched, so a
+    // zero-match result on a small diff can't be mistaken for a broken filter.
+    assert_eq!(
+        content,
+        "No matches for pattern 'nonexistent_pattern' in the diff output (9 lines searched)."
+    );
     assert!(note.is_none());
 }
 
 #[test]
-fn grep_context_controls_visible_lines() {
-    // With 0 context, only matching lines are shown.
-    let (content_0, _) = grep_diff(small_diff(), "hello", 0, None).unwrap();
-    let lines_0: Vec<&str> = content_0
-        .lines()
-        .filter(|l| !l.starts_with('[') && !l.is_empty())
-        .collect();
+fn grep_no_matches_with_bounds_reports_window_size() {
+    // `hello` is at input line 7, outside the window.
+    let (content, _) = grep_diff(small_diff(), "hello", 3, Some((1, 4))).unwrap();
 
-    // With 2 context, we get surrounding lines too.
-    let (content_2, _) = grep_diff(small_diff(), "hello", 2, None).unwrap();
-    let lines_2: Vec<&str> = content_2
-        .lines()
-        .filter(|l| !l.starts_with('[') && !l.is_empty())
-        .collect();
+    assert_eq!(
+        content,
+        "No matches for pattern 'hello' in the diff output (4 lines searched)."
+    );
+}
 
-    assert!(lines_2.len() >= lines_0.len());
+#[test]
+fn grep_with_zero_context_shows_only_matching_lines() {
+    let (content, _) = grep_diff(small_diff(), "hello", 0, None).unwrap();
+
+    // The `world` line is adjacent to the match but must not appear. The `@@`
+    // header is synthesized because the real one at input line 5 is not
+    // visible.
+    assert_eq!(
+        content,
+        "\
+diff --git a/src/main.rs b/src/main.rs
+index abc..def 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -2,1 +2,0 @@
+-    println!(\"hello\");
+"
+    );
+}
+
+#[test]
+fn grep_with_context_includes_surrounding_lines() {
+    let (content, note) = grep_diff(small_diff(), "hello", 2, None).unwrap();
+
+    // 2 lines of context reach every line of the hunk, so the original `@@`
+    // header is visible and no header is synthesized.
+    assert_eq!(
+        content,
+        "\
+diff --git a/src/main.rs b/src/main.rs
+index abc..def 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,3 +1,3 @@
+ fn main() {
+-    println!(\"hello\");
++    println!(\"world\");
+ }
+"
+    );
+    assert_eq!(
+        note.as_deref(),
+        Some("[Showing 5/9 lines matching 'hello' (1 matches, 2 lines of context)]")
+    );
+}
+
+#[test]
+fn grep_alternation_matches_every_branch() {
+    let (both, _) = grep_diff(small_diff(), "hello|world", 0, None).unwrap();
+
+    assert_eq!(
+        both,
+        "\
+diff --git a/src/main.rs b/src/main.rs
+index abc..def 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -2,1 +2,1 @@
+-    println!(\"hello\");
++    println!(\"world\");
+"
+    );
+
+    // A branch that matches nothing must not suppress the branches that do.
+    let (one, _) = grep_diff(small_diff(), "nonexistent|world", 0, None).unwrap();
+
+    assert_eq!(
+        one,
+        "\
+diff --git a/src/main.rs b/src/main.rs
+index abc..def 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -3,0 +2,1 @@
++    println!(\"world\");
+"
+    );
 }
 
 #[test]
