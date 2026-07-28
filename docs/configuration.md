@@ -105,8 +105,9 @@ extends = [
 
 Paths are resolved relative to the directory of the file that declares them, and
 may contain glob patterns.
-The default value is `config.d/**/*`, which auto-loads any file placed in a
-`config.d/` directory next to the configuration file.
+For example, `extends = ["config.d/**/*"]` loads every file in a `config.d/`
+directory next to the declaring file.
+The field must be declared explicitly to have any effect.
 
 Each entry is merged *before* the declaring file by default, so the declaring
 file wins on conflicting options.
@@ -120,9 +121,12 @@ matching](#fuzzy-matching-configuration-file-name) below).
 Concretely: if a workspace file extends `../skill/web.toml`, only the
 workspace's own `skill/web.toml` is loaded, even when a file with the same name
 exists in your user-global config directory.
-To layer personal additions on top of such a file, create a file with the same
-`--cfg`-resolvable name (e.g. `skill/web.toml`) under your user-global config
-directory; both files are then found and merged when you pass `--cfg skill/web`.
+To have a personal file contribute alongside such a file, give it the same
+`--cfg`-resolvable name (e.g. `skill/web.toml`) under one of the other
+configuration roots; both files are then found and merged when you pass `--cfg
+skill/web`.
+Which file wins on a conflicting option depends on the root you choose, as
+described under [fuzzy matching](#fuzzy-matching-configuration-file-name).
 
 ### Environment Variables
 
@@ -180,7 +184,7 @@ merged with the other configuration sources.
 If the provided value is not an existing file, it will be searched for in any
 configured `config_load_paths` directories.
 If the file name does not have an extension, any file with the extension
-`.toml`, `.json`, `.json5`, `.yaml`, or `.yml` will be loaded, in that order.
+`.toml`, `.json`, `.yaml`, or `.yml` will be loaded, in that order.
 The value can contain a nested file path, such as `path/to/my_file`, in which
 case any directory in `config_load_paths` will be searched for sub-directories
 named `path/to`, containing the file `my_file` with one of the above extensions.
@@ -193,14 +197,19 @@ Each entry is resolved against three roots, searched in this order:
 2. The workspace root, which is the closest directory containing a `.jp`
    directory.
 3. The user-workspace data directory, e.g.
-   `$XDG_DATA_HOME/jp/workspace/<id>/config/`.
+   `$XDG_DATA_HOME/jp/workspace/<workspace-name>-<workspace-id>/config/`.
+   The directory is located by its workspace-ID suffix, so a directory created
+   by an older version may be named `<workspace-id>` without the name prefix.
 
 Within a single root, the first `config_load_paths` entry that produces a match
 wins.
 Across roots, all matches are loaded and merged, with later roots taking
 precedence.
-This lets you extend or override a workspace-provided configuration file with a
-private file of the same name in your user-global config directory.
+So a private file in your user-global config directory contributes *beneath* a
+workspace file of the same name: it can add options the workspace file leaves
+unset, but the workspace file wins wherever the two conflict.
+To override a workspace-provided file, put yours in the user-workspace data
+directory, which has the highest precedence of the three.
 
 Concretely, if I have a file `<workspace root>/.config/persona/dev.toml`, and my
 `config_load_paths` contains `.config`, then the `--cfg persona/dev` flag will
