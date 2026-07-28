@@ -268,7 +268,7 @@
     "summary": "Automatically retry forced tool calls with reasoning disabled if the model ignores soft-force directives."
   },
   "069-guard-scoped-persistence-for-conversations.md": {
-    "hash": "8dc9e83e1b0f57e5ac28a4e16e3ef1feef092e0e33466c6f773a6446a2f528b9",
+    "hash": "15ef78674300a43b4ba7eeac9ab29415314b560933e8b5d84949e8b7a4c49871",
     "summary": "Guard-scoped persistence: ConversationMut auto-persists on drop while holding cross-process file lock, with callback-based writes and explicit flush for checkpoints."
   },
   "072-command-plugin-system.md": {

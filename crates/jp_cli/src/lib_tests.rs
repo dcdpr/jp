@@ -145,6 +145,63 @@ fn a_cancelled_command_future_still_reports_its_persist_failure() {
 }
 
 #[test]
+fn a_background_task_persist_failure_is_recorded_after_the_command_finished() {
+    // `TitleGeneratorTask::sync` takes a conversation lock of its own and
+    // swallows a failed `flush()` into a `warn!`. The still-dirty scope's drop
+    // then records on the workspace, which happens while background tasks are
+    // draining — after the command's own drain has already run. That is why
+    // `run_inner` folds a second time once the drain returns.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut workspace = Workspace::new("root").with_persist(Arc::new(AlwaysFullBackend));
+
+    let lock = workspace
+        .create_and_lock_conversation(
+            Conversation::default(),
+            Arc::new(AppConfig::new_test()),
+            None,
+        )
+        .unwrap();
+    let id = lock.id();
+    // `sync` acquires the lock itself and skips when it is already held, which
+    // would make every assertion below pass vacuously.
+    drop(lock);
+    assert!(
+        workspace.take_persist_failure().is_none(),
+        "setup must record nothing, or the failure asserted below proves nothing"
+    );
+
+    let cfg = AppConfig::new_test();
+    let task = Box::new(jp_task::task::TitleGeneratorTask {
+        conversation_id: id,
+        model_id: cfg.assistant.model.id.resolved().clone(),
+        providers: cfg.providers.llm.clone(),
+        events: jp_conversation::ConversationStream::new_test(),
+        title: Some("generated".into()),
+        is_tty: false,
+    });
+
+    // `sync` reports success: it only logs the write failure.
+    rt.block_on(jp_task::Task::sync(task, &mut workspace))
+        .expect("sync swallows the write failure");
+
+    let recorded = workspace
+        .take_persist_failure()
+        .expect("the title task's failed write is recorded on the workspace");
+    assert_eq!(
+        recorded.to_string(),
+        "Storage error: no space left on device while writing /data/conv/events.json"
+    );
+
+    // What the post-drain fold makes of it: a run that would otherwise have
+    // exited zero now carries the failure.
+    let error = cmd::fold_persist_failure(Ok(()), Some(recorded))
+        .expect_err("an unsaved conversation must not exit zero");
+    assert_eq!(error.message.as_deref(), Some("No space left on device"));
+}
+
+#[test]
 fn tracing_guard_persist_returns_explicit_log_file_path() {
     // `--log-file <path>`: the file lives wherever the caller put it; persist
     // just hands the path back.

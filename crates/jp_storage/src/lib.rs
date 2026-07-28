@@ -875,21 +875,6 @@ fn import_external_copy(
     Ok(())
 }
 
-/// Remove leftover import staging directories from a `conversations/`
-/// directory.
-///
-/// One only survives a crash between the copy and the rename, and holds nothing
-/// the workspace copy does not still have.
-pub(crate) fn cleanup_import_staging(conversations_dir: &Utf8Path) {
-    for entry in dir_entries(conversations_dir) {
-        if entry.file_name().starts_with(IMPORT_STAGING_PREFIX) && entry.path().is_dir() {
-            let path = entry.into_path();
-            trace!(%path, "Removing leftover import staging directory.");
-            let _err = fs::remove_dir_all(path);
-        }
-    }
-}
-
 /// Recursively copy directory `src` into `dst`.
 ///
 /// A failure names the destination path it was writing, and reports a full

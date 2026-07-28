@@ -21,6 +21,73 @@ fn write_valid(storage: &camino::Utf8Path, id: &ConversationId) {
 }
 
 #[test]
+fn staging_dirs_are_swept_only_when_the_conversation_is_unlocked() {
+    // The sweep runs at startup in every process, while another process may be
+    // importing that same conversation under its lock. Reaping mid-copy would
+    // let the importer rename an incomplete tree into place, so a held lock has
+    // to make the sweep skip. Driven by taking the lock in-process rather than
+    // racing two imports, so the outcome is deterministic.
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join(CONVERSATIONS_DIR);
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let staging = conversations.join(format!(".import-{}", id.to_dirname(Some("title"))));
+    fs::create_dir_all(staging.join("partial")).unwrap();
+
+    let guard = storage
+        .try_lock_conversation(&id.to_string(), None)
+        .unwrap()
+        .expect("the lock is free in this test");
+
+    drop(storage.validate_conversations());
+    assert!(
+        staging.is_dir(),
+        "an in-flight import's staging directory must survive the sweep"
+    );
+
+    drop(guard);
+
+    drop(storage.validate_conversations());
+    assert!(
+        !staging.exists(),
+        "an abandoned staging directory is reaped once nobody holds the lock"
+    );
+}
+
+#[test]
+fn the_sweep_leaves_real_conversations_and_dot_dirs_alone() {
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join(CONVERSATIONS_DIR);
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    write_valid(tmp.path(), &id);
+    fs::create_dir_all(conversations.join(".archive")).unwrap();
+
+    drop(storage.validate_conversations());
+
+    assert!(conversations.join(id.to_dirname(None)).is_dir());
+    assert!(conversations.join(".archive").is_dir());
+}
+
+#[test]
+fn a_staging_dir_with_an_unparseable_name_is_left_in_place() {
+    // Without a parseable id there is no lock to check, so removing it could
+    // race an owner this code cannot identify.
+    let tmp = tempdir().unwrap();
+    let storage = Storage::new(tmp.path()).unwrap();
+    let conversations = tmp.path().join(CONVERSATIONS_DIR);
+
+    let staging = conversations.join(".import-not-an-id");
+    fs::create_dir_all(&staging).unwrap();
+
+    drop(storage.validate_conversations());
+
+    assert!(staging.is_dir());
+}
+
+#[test]
 fn test_valid_conversations_are_collected() {
     let tmp = tempdir().unwrap();
     let storage = Storage::new(tmp.path()).unwrap();

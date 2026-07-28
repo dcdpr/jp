@@ -83,21 +83,6 @@ fn a_failed_import_leaves_nothing_that_looks_like_a_conversation() {
 }
 
 #[test]
-fn cleanup_import_staging_removes_only_staging_dirs() {
-    let tmp = tempdir().unwrap();
-    let conversations = tmp.path();
-    fs::create_dir_all(conversations.join(".import-17457886043-title")).unwrap();
-    fs::create_dir_all(conversations.join("17457886043-title")).unwrap();
-    fs::create_dir_all(conversations.join(".archive")).unwrap();
-
-    cleanup_import_staging(conversations);
-
-    assert!(!conversations.join(".import-17457886043-title").exists());
-    assert!(conversations.join("17457886043-title").is_dir());
-    assert!(conversations.join(".archive").is_dir());
-}
-
-#[test]
 fn copy_dir_all_failure_names_the_destination_file() {
     // The import leg of a persist copies whole conversation directories, so a
     // full disk can fail here rather than in `write_json`. Without the path the
