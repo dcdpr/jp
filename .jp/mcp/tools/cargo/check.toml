@@ -3,7 +3,7 @@ enable = false
 run = "unattended"
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
-summary = "Run `cargo check` for the given package, validating if the code compiles. Also reports documentation lints that CI denies (e.g. a public doc comment linking to a private item), and doc comments that are badly formatted; run `cargo_fmt` to auto-fix the formatting."
+summary = "Run `cargo check` for the given package, validating if the code compiles. Also runs the documentation lints CI denies (e.g. a public doc comment linking to a private item), and reports doc comments that are badly formatted; run `cargo_fmt` to auto-fix the formatting."
 
 examples = """
 ```json
@@ -24,9 +24,9 @@ options.checksum_freshness = true
 
 # Also run `cargo doc` with the rustdoc lints CI denies. These fire on doc
 # comment content, so clippy never sees them and they otherwise surface only on
-# CI. Runs under the `docs` profile, so it holds its own build lock rather than
-# queueing behind a dev-profile build. Costs a `cargo doc` pass on top of
-# clippy; set to `false` to trade the coverage back for speed.
+# CI. Shares the clippy pass's profile and feature set, so the only new work is
+# rustdoc over the workspace crates; set to `false` to trade the coverage back
+# for speed.
 options.docs = true
 
 [conversation.tools.cargo_check.style]

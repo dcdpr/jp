@@ -66,6 +66,9 @@ fn cargo_check_impl<R: ProcessRunner>(
             &clippy_scope,
             "--quiet",
             "--all-targets",
+            // Matches `just lint-ci`. Code behind an optional feature is not
+            // compiled without this, so its lints surface only on CI.
+            "--all-features",
         ],
         &ctx.root,
         &env,
@@ -84,9 +87,13 @@ fn cargo_check_impl<R: ProcessRunner>(
 
     let doc_note = match doc_check(ctx, package, checksum_freshness, docs, runner)? {
         DocCheck::Skipped | DocCheck::Clean => None,
-        DocCheck::Lints(diagnostics) => Some(format!(
-            "Documentation lints failed. These are denied on CI (`just docs-ci`) and are not \
-             reported by clippy:\n\n```\n{diagnostics}\n```"
+        // Deliberately silent on *why* it failed: exit 101 also covers cargo
+        // errors, `cfg(doc)` compile errors and rustdoc crashes, and nothing in
+        // the exit status distinguishes those from a denied lint. The
+        // diagnostics below say which it was.
+        DocCheck::Failed(diagnostics) => Some(format!(
+            "`cargo doc` failed. This pass runs the documentation lints CI denies (`just \
+             docs-ci`), which clippy does not report:\n\n```\n{diagnostics}\n```"
         )),
     };
 
@@ -101,19 +108,29 @@ fn cargo_check_impl<R: ProcessRunner>(
         }
     };
 
-    let clippy_section = if clippy.is_empty() {
-        "Check succeeded. No warnings or errors found.".to_owned()
-    } else {
-        format!("```\n{clippy}\n```\n")
-    };
-
-    // Hardest-to-ignore first: doc lints fail CI, comfort drift is auto-fixable.
+    // Hardest-to-ignore first: a failed doc pass blocks CI, comfort drift is
+    // auto-fixable.
     let extra: Vec<String> = doc_note.into_iter().chain(comfort_note).collect();
+
     if extra.is_empty() {
-        return Ok(clippy_section.into());
+        return Ok(if clippy.is_empty() {
+            "Check succeeded. No warnings or errors found."
+                .to_owned()
+                .into()
+        } else {
+            format!("```\n{clippy}\n```\n").into()
+        });
     }
 
-    let mut sections = vec![clippy_section.trim_end().to_owned()];
+    // Something below failed, so the header is scoped to what clippy alone
+    // found. A bare "Check succeeded" would contradict the sections that follow.
+    let header = if clippy.is_empty() {
+        "`cargo clippy` found no warnings or errors.".to_owned()
+    } else {
+        format!("```\n{clippy}\n```")
+    };
+
+    let mut sections = vec![header];
     sections.extend(extra);
     Ok(sections.join("\n\n").into())
 }
@@ -121,10 +138,14 @@ fn cargo_check_impl<R: ProcessRunner>(
 enum DocCheck {
     /// The caller opted out of the documentation pass.
     Skipped,
-    /// Rustdoc accepted every doc comment in scope.
+    /// `cargo doc` succeeded, so no denied lint fired.
     Clean,
-    /// Rustdoc rejected the documentation; carries the diagnostics.
-    Lints(String),
+    /// `cargo doc` exited non-zero; carries whatever it reported.
+    ///
+    /// A denied lint is the expected cause, but the exit status alone cannot
+    /// rule out a cargo error, a `cfg(doc)` compile error or a rustdoc crash,
+    /// so this variant does not claim to know which.
+    Failed(String),
 }
 
 /// Run `cargo doc` with the rustdoc lints CI denies.
@@ -133,12 +154,13 @@ enum DocCheck {
 /// `private-intra-doc-links` cannot fire at all, which is the lint that catches
 /// a public doc comment linking to a private item.
 ///
-/// Runs under the `docs` profile, matching `just docs-ci`.
-/// Cargo's build lock lives at `target/<profile>/.cargo-lock`, so a dedicated
-/// profile keeps this pass from blocking (or being blocked by) whatever is
-/// building under the dev profile: an editor's `cargo check`, a `bacon` loop, a
-/// concurrent `cargo_test`.
-/// It also reuses whatever `just docs-ci` already built.
+/// Shares cargo's default profile and feature set with the clippy pass above,
+/// rather than the `docs` profile CI runs under: that pass already holds the
+/// profile's build lock (`target/<profile>/.cargo-lock`) and has already built
+/// every dependency unit, so this leaves rustdoc over the workspace crates as
+/// the only new work and adds no contention the same invocation wasn't causing
+/// already.
+/// Profile choice does not affect which documentation lints fire.
 fn doc_check<R: ProcessRunner>(
     ctx: &Context,
     package: Option<&str>,
@@ -165,7 +187,10 @@ fn doc_check<R: ProcessRunner>(
             "--color=never",
             &scope,
             "--quiet",
-            "--profile=docs",
+            // `just docs-ci` documents every feature. Without this, code behind
+            // an optional feature is never compiled, so its doc comments go
+            // unlinted here and fail on CI instead.
+            "--all-features",
             "--no-deps",
             "--document-private-items",
             // Report every crate's diagnostics in one pass rather than stopping
@@ -183,10 +208,9 @@ fn doc_check<R: ProcessRunner>(
     let diagnostics = strip_ansi_escapes::strip_str(stderr);
     let diagnostics = diagnostics.trim();
 
-    // Clippy already built the workspace, so a `cargo doc` failure here is a
-    // documentation problem rather than a broken build. An empty stderr leaves
-    // nothing to report but the status, which is still worth surfacing.
-    Ok(DocCheck::Lints(if diagnostics.is_empty() {
+    // An empty stderr leaves nothing to report but the status, which is still
+    // worth surfacing.
+    Ok(DocCheck::Failed(if diagnostics.is_empty() {
         format!("`cargo doc` failed with exit status {status} and no diagnostics.")
     } else {
         truncate(diagnostics, MAX_DIAGNOSTIC_BYTES)

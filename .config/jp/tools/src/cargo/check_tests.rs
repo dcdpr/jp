@@ -1,9 +1,12 @@
+use std::{io, sync::Mutex};
+
+use camino::Utf8Path;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_tool::{Action, Outcome};
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput};
+use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput, RunnerOpts};
 
 fn ctx() -> (Utf8TempDir, Context) {
     let dir = tempdir().unwrap();
@@ -102,8 +105,10 @@ fn clean_clippy_with_comfort_drift_appends_note() {
 
     let result = cargo_check_impl(&ctx, None, false, false, &runner).unwrap();
 
+    // The header is clippy-scoped, not a blanket "Check succeeded", so it does
+    // not contradict the drift note below it.
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
-            Check succeeded. No warnings or errors found.
+            `cargo clippy` found no warnings or errors.
 
             Doc comments in the following files are badly formatted. Run `cargo_fmt` to auto-fix them:
             - src/lib.rs
@@ -230,6 +235,7 @@ fn package_scope_is_passed_through_to_both_tools() {
             "--package=my_pkg",
             "--quiet",
             "--all-targets",
+            "--all-features",
         ])
         .returns_success("")
         .expect("comfort")
@@ -280,9 +286,9 @@ fn doc_lints_are_reported_alongside_a_clean_clippy_run() {
     let result = cargo_check_impl(&ctx, None, false, true, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
-            Check succeeded. No warnings or errors found.
+            `cargo clippy` found no warnings or errors.
 
-            Documentation lints failed. These are denied on CI (`just docs-ci`) and are not reported by clippy:
+            `cargo doc` failed. This pass runs the documentation lints CI denies (`just docs-ci`), which clippy does not report:
 
             ```
             error: public documentation for `estimate_overhead_chars` links to private item `OVERHEAD_FACTOR`
@@ -337,9 +343,9 @@ fn doc_lints_and_comfort_drift_are_both_reported() {
     let result = cargo_check_impl(&ctx, None, false, true, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
-            Check succeeded. No warnings or errors found.
+            `cargo clippy` found no warnings or errors.
 
-            Documentation lints failed. These are denied on CI (`just docs-ci`) and are not reported by clippy:
+            `cargo doc` failed. This pass runs the documentation lints CI denies (`just docs-ci`), which clippy does not report:
 
             ```
             error: unresolved link to `Nope`
@@ -349,9 +355,9 @@ fn doc_lints_and_comfort_drift_are_both_reported() {
             - src/lib.rs"});
 }
 
-/// `--document-private-items` is what makes `private-intra-doc-links` fire, the
-/// package scope has to reach rustdoc too, and `--profile=docs` keeps the run
-/// on its own build lock instead of contending with the dev profile.
+/// `--document-private-items` is what makes `private-intra-doc-links` fire,
+/// `--all-features` is what makes feature-gated doc comments visible at all,
+/// and the package scope has to reach rustdoc too.
 #[test]
 fn doc_run_denies_the_ci_lints_and_honours_the_package_scope() {
     let (_dir, ctx) = ctx();
@@ -364,6 +370,7 @@ fn doc_run_denies_the_ci_lints_and_honours_the_package_scope() {
             "--package=my_pkg",
             "--quiet",
             "--all-targets",
+            "--all-features",
         ])
         .returns_success("")
         .expect("cargo")
@@ -372,7 +379,7 @@ fn doc_run_denies_the_ci_lints_and_honours_the_package_scope() {
             "--color=never",
             "--package=my_pkg",
             "--quiet",
-            "--profile=docs",
+            "--all-features",
             "--no-deps",
             "--document-private-items",
             "--keep-going",
@@ -386,11 +393,173 @@ fn doc_run_denies_the_ci_lints_and_honours_the_package_scope() {
         result.into_content().unwrap(),
         "Check succeeded. No warnings or errors found."
     );
+}
 
-    assert!(
-        RUSTDOC_LINTS.contains(&"-D rustdoc::private-intra-doc-links"),
-        "the lint that catches a public doc linking to a private item must be denied"
+/// The denied lints only take effect if they reach rustdoc.
+///
+/// `MockProcessRunner` validates the program and args of each call but ignores
+/// the environment, so without this the whole `RUSTDOCFLAGS` plumbing could be
+/// deleted and every other test here would still pass.
+#[test]
+fn doc_run_passes_the_denied_lints_to_rustdoc() {
+    let (_dir, ctx) = ctx();
+
+    let runner: CallCapturingRunner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .into();
+
+    cargo_check_impl(&ctx, None, false, true, &runner).unwrap();
+
+    let doc = runner
+        .call_with_arg("doc")
+        .expect("the doc pass must have run");
+
+    let expected = RUSTDOC_LINTS.join(" ");
+    assert_eq!(
+        doc.env
+            .iter()
+            .find(|(key, _)| key == "RUSTDOCFLAGS")
+            .map(|(_, value)| value.as_str()),
+        Some(expected.as_str()),
     );
+
+    // The lint that caught the failure this pass was added for.
+    assert!(expected.contains("-D rustdoc::private-intra-doc-links"));
+}
+
+/// `CARGO_UNSTABLE_CHECKSUM_FRESHNESS` has to reach both cargo passes.
+///
+/// Sibling git worktrees share a target directory, and mtime-based freshness
+/// lets one checkout serve the other's stale artifacts; content checksums are
+/// what prevent that.
+/// `MockProcessRunner` validates args but ignores the environment, so nothing
+/// else here would notice the variable going missing from either pass.
+#[test]
+fn checksum_freshness_reaches_both_cargo_passes() {
+    let (_dir, ctx) = ctx();
+
+    let runner: CallCapturingRunner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .into();
+
+    cargo_check_impl(&ctx, None, true, true, &runner).unwrap();
+
+    for pass in ["clippy", "doc"] {
+        let call = runner
+            .call_with_arg(pass)
+            .unwrap_or_else(|| panic!("the {pass} pass must have run"));
+
+        assert_eq!(
+            call.env
+                .iter()
+                .find(|(key, _)| key == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS")
+                .map(|(_, value)| value.as_str()),
+            Some("true"),
+            "the {pass} pass must opt into checksum-based freshness",
+        );
+    }
+}
+
+/// Off unless opted into, so the tools also work on stable cargo.
+#[test]
+fn checksum_freshness_is_absent_unless_opted_into() {
+    let (_dir, ctx) = ctx();
+
+    let runner: CallCapturingRunner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .into();
+
+    cargo_check_impl(&ctx, None, false, true, &runner).unwrap();
+
+    for pass in ["clippy", "doc"] {
+        let call = runner
+            .call_with_arg(pass)
+            .unwrap_or_else(|| panic!("the {pass} pass must have run"));
+
+        assert!(
+            !call
+                .env
+                .iter()
+                .any(|(key, _)| key == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS"),
+            "the {pass} pass must not require nightly cargo unless asked to",
+        );
+    }
+}
+
+/// One recorded subprocess invocation.
+struct CapturedCall {
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+/// A runner that records every call's args and environment.
+///
+/// `EnvCapturingRunner` in `cargo/test_tests.rs` keeps only the most recent
+/// call's environment; `cargo_check` makes three, so the doc pass has to be
+/// picked out rather than assumed to be last.
+struct CallCapturingRunner {
+    inner: MockProcessRunner,
+    calls: Mutex<Vec<CapturedCall>>,
+}
+
+impl From<MockProcessRunner> for CallCapturingRunner {
+    fn from(inner: MockProcessRunner) -> Self {
+        Self {
+            inner,
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl CallCapturingRunner {
+    /// The first recorded call whose first argument is `arg`.
+    fn call_with_arg(&self, arg: &str) -> Option<CapturedCall> {
+        self.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|call| call.args.first().is_some_and(|first| first == arg))
+            .map(|call| CapturedCall {
+                args: call.args.clone(),
+                env: call.env.clone(),
+            })
+    }
+}
+
+impl ProcessRunner for CallCapturingRunner {
+    fn run_with_opts(
+        &self,
+        program: &str,
+        args: &[&str],
+        working_dir: &Utf8Path,
+        opts: &RunnerOpts<'_>,
+    ) -> Result<ProcessOutput, io::Error> {
+        self.calls.lock().unwrap().push(CapturedCall {
+            args: args.iter().map(|a| (*a).to_owned()).collect(),
+            env: opts
+                .env
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        });
+
+        self.inner.run_with_opts(program, args, working_dir, opts)
+    }
 }
 
 /// A `cargo doc` failure with no diagnostics still has to say something.
