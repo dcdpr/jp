@@ -47,6 +47,12 @@ This is particularly painful for:
 - **Conflicting layers**: An env var sets one value, a `--cfg` flag sets
   another.
   Which wins?
+- **`extends` vs `--cfg` resolution**: `extends` paths resolve relative to the
+  declaring file only, while `--cfg <name>` searches all three config roots
+  ([RFD 035]) and merges every match.
+  A user who expects a workspace file's `extends = ["../skill/web.toml"]` to
+  also pick up their user-global `skill/web.toml` gets no error and no signal
+  that only the workspace file was loaded.
 
 `--explain` makes the resolution chain visible, turning "why is my config wrong"
 from a debugging session into a single command.
@@ -294,6 +300,17 @@ The `before` and `after` ordering of extends paths (controlled by
 `ExtendingRelativePath::is_before`) is preserved in the snapshot sequence —
 `before` extensions appear as sub-layers before the parent file, `after`
 extensions appear after it.
+
+Sub-layer output shows the concrete file each extends entry resolved to.
+This is what makes the `extends`-vs-`--cfg` confusion from the motivation
+diagnosable: the trace for a workspace file with `extends =
+["../skill/web.toml"]` shows exactly one resolved file — the workspace's own
+`skill/web.toml` — making it visible that no user-global counterpart was
+loaded.
+Named `--cfg` file arguments need the same treatment: a single argument like
+`--cfg skill/web` can resolve to multiple files across the config roots ([RFD
+035]), and each resolved file becomes its own sub-layer under the `cli_cfg`
+layer so the user can see which roots contributed.
 
 Layers 1-4 are merged by `load_partials_with_inheritance()`.
 When `inherit = false` is set, earlier layers are skipped — the snapshot still
@@ -612,13 +629,19 @@ needs.
    helper functions in `Query` and other command structs.
 4. Add `cli_recorder_field_paths_are_valid` test.
 5. Test with representative scenarios: alias resolution, inheritance cutoff,
-   conversation deltas, env var overrides.
+   conversation deltas, env var overrides, and file-relative `extends` next to
+   multi-root `--cfg` resolution (a workspace file extending `../skill/web.toml`
+   while a same-named file exists in the user-global root: the extends trace
+   must show exactly one resolved file, while the `--cfg skill/web` trace must
+   show both).
 
 Phases 1 and 2 can be developed and tested independently.
 Phase 3 integrates them into the CLI and can be merged as a single PR.
 
 ## References
 
+- [RFD 035]: Multi-root config load path resolution — why `--cfg <name>` can
+  resolve to several files while `extends` cannot
 - [RFD 059]: Shell completions and man pages
 - Future RFD: Interactive config (bare `--cfg` flag)
 - `load_partial_config()` in `jp_cli/src/lib.rs` — the 9-layer merge pipeline
@@ -630,6 +653,7 @@ Phase 3 integrates them into the CLI and can be merged as a single PR.
 - `terraform plan` — precedent for dry-run config explanation
 - `git config --show-origin --list` — precedent for config provenance display
 
+[RFD 035]: 035-multi-root-config-load-path-resolution.md
 [RFD 059]: 059-shell-completions-and-man-pages.md
 [RFD 061]: 061-interactive-config.md
 [RFD 063]: 063-usage-based-wizard-field-ordering.md
