@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
 
+use chrono::{DateTime, Utc};
 use jp_config::{
     PartialAppConfig,
+    assistant::request::CachePolicy,
     model::{
         id::{ModelIdConfig, Name, ProviderId},
         parameters::ReasoningConfig,
@@ -126,6 +128,50 @@ async fn generate_does_not_inherit_conversation_parameters() {
 
     assert_eq!(parameters.max_tokens, None);
     assert_eq!(parameters.temperature, None);
+}
+
+/// Replacing the model must not revert everything else the conversation
+/// configured.
+///
+/// Providers read more than the model off this config: both Anthropic and
+/// OpenAI read `assistant.request.cache`, so a conversation that turned caching
+/// off would silently start writing to the provider cache again.
+#[tokio::test]
+async fn generate_keeps_non_model_settings_from_the_conversation() {
+    let (provider, requests) = title_provider(Some(1_000_000));
+    let details = details(&provider).await;
+
+    let mut events = long_conversation(2);
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.request.cache = Some(CachePolicy::Off);
+    events.add_config_delta(delta);
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    let config = sent[0].thread.events.config().expect("merged config");
+    assert_eq!(config.assistant.request.cache, CachePolicy::Off);
+}
+
+/// The prompt cache identity providers derive from `created_at` survives the
+/// rebase.
+///
+/// A fresh timestamp would miss the cache on every request, including each
+/// `More...` batch re-sending the same conversation prefix.
+#[tokio::test]
+async fn generate_preserves_the_conversation_cache_identity() {
+    let (provider, requests) = title_provider(Some(1_000_000));
+    let details = details(&provider).await;
+
+    let created_at = "2026-01-02T03:04:05Z"
+        .parse::<DateTime<Utc>>()
+        .expect("valid timestamp");
+    let events = long_conversation(2).with_created_at(created_at);
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    assert_eq!(sent[0].thread.events.created_at, created_at);
 }
 
 /// The title model's own parameters do reach the request.

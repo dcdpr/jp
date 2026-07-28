@@ -144,7 +144,7 @@ pub async fn generate(
     }
 
     let mut thread = ThreadBuilder::default()
-        .with_events(rebase_on_model(&events, model))
+        .with_events(rebase_on_model(&events, model)?)
         .with_sections(sections)
         .build()?;
 
@@ -177,22 +177,35 @@ pub async fn generate(
 /// A config delta cannot express "unset": merging one carries every parameter
 /// the conversation had set but `model` leaves unset, so an assistant
 /// `max_tokens` outlives the switch to a smaller title model and is sent to it.
-/// Putting `model` in the base config and carrying the events over without
-/// their deltas replaces the parameters outright.
+/// Collapsing the conversation's effective config into the base and replacing
+/// `assistant.model` outright is the only way to drop those parameters.
 ///
-/// Dropping the deltas costs nothing here: the request has no tools and no
-/// attachments, so the assistant model is the only config it reads.
+/// Everything the conversation configured other than the model is preserved:
+/// the new base is the *merged* config, so settings the provider reads
+/// alongside the model (`assistant.request.cache`, for one) keep the values the
+/// conversation arrived at rather than reverting to its creation-time defaults.
+///
+/// `created_at` carries over too.
+/// Providers derive a per-conversation prompt cache identity from it, so a
+/// fresh timestamp would cost a cache miss on every request and orphan this one
+/// from the conversation whose prefix it shares.
 ///
 /// Only conversation events are carried over, so `events` must already be
 /// projected (see [`ConversationStream::apply_projection`]) or its compaction
 /// overlays are lost.
-fn rebase_on_model(events: &ConversationStream, model: ModelConfig) -> ConversationStream {
-    let mut base = (*events.base_config()).clone();
+///
+/// # Errors
+///
+/// Returns an error if the conversation's own config deltas do not merge into a
+/// valid config.
+fn rebase_on_model(events: &ConversationStream, model: ModelConfig) -> Result<ConversationStream> {
+    let mut base = events.config()?;
     base.assistant.model = model;
 
-    let mut rebased = ConversationStream::new(Arc::new(base));
+    let mut rebased = ConversationStream::new(Arc::new(base)).with_created_at(events.created_at);
     rebased.extend(events.iter().map(|e| e.event.clone()));
-    rebased
+
+    Ok(rebased)
 }
 
 /// JSON schema for the title generation structured output.
