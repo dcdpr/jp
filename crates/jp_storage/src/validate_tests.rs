@@ -32,7 +32,9 @@ fn staging_dirs_are_swept_only_when_the_conversation_is_unlocked() {
     let conversations = tmp.path().join(CONVERSATIONS_DIR);
 
     let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
-    let staging = conversations.join(format!(".import-{}", id.to_dirname(Some("title"))));
+    // Built through the production helper: its per-attempt uniqueness suffix is
+    // exactly what the sweep has to still recognise and be able to lock.
+    let staging = conversations.join(crate::import_staging_dirname(&id.to_dirname(Some("title"))));
     fs::create_dir_all(staging.join("partial")).unwrap();
 
     let guard = storage

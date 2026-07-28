@@ -146,16 +146,17 @@ impl Storage {
     ///
     /// A staging directory only survives a crash between an import's copy and
     /// its rename, and holds nothing the workspace copy does not still have, so
-    /// removing one is pure disk hygiene.
+    /// removing one is pure disk hygiene: each import stages under a fresh name
+    /// and never reads a leftover.
     ///
     /// Each removal is made while holding the conversation's own lock.
     /// Without it, this would race an import running under that lock in another
     /// process: `copy_dir_all` recreates directories as it recurses, so a
     /// mid-copy removal would leave the importer to rename an incomplete tree
     /// into place.
-    /// A conversation whose lock is held is skipped entirely — an import that
-    /// is genuinely abandoned holds no lock, and the next locked import
-    /// pre-cleans its own staging directory anyway.
+    /// A conversation whose lock is held is skipped entirely, and because the
+    /// sweep is only reclaiming disk space, skipping costs nothing but a delay
+    /// until the next run.
     fn cleanup_import_staging(&self, conversations_dir: &Utf8Path) {
         for entry in dir_entries(conversations_dir) {
             let Some(dirname) = entry.file_name().strip_prefix(IMPORT_STAGING_PREFIX) else {

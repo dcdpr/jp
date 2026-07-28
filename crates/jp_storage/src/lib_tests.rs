@@ -83,6 +83,40 @@ fn a_failed_import_leaves_nothing_that_looks_like_a_conversation() {
 }
 
 #[test]
+fn an_import_never_merges_into_a_leftover_staging_tree() {
+    // Debris from a crashed import can survive: the error-path cleanup is
+    // best-effort, and `remove_dir_all` can partially fail (a read-only file on
+    // Windows is enough). `copy_dir_all` overwrites the files it copies but
+    // removes nothing, so a merge would publish entries the workspace copy no
+    // longer has. Staging under a fresh name per attempt is what rules that out.
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("ws").join("conversations");
+    let user = tmp.path().join("user").join("conversations");
+    let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();
+    let prefix = id.to_dirname(None);
+
+    let src = workspace.join(&prefix);
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("events.json"), "[]").unwrap();
+
+    // A stale tree holding a file the source does not have, under the name a
+    // single fixed staging directory would have used.
+    let stale = user.join(format!(".import-{}", id.to_dirname(Some("title"))));
+    fs::create_dir_all(&stale).unwrap();
+    fs::write(stale.join("stale.md"), "from an older generation").unwrap();
+
+    import_external_copy(&id, Some("title"), &workspace, &user).expect("the import succeeds");
+
+    let imported =
+        find_normal_conversation_dir_path(&user, &prefix).expect("the conversation is imported");
+    assert!(
+        !imported.join("stale.md").exists(),
+        "the published conversation must hold only what the source has"
+    );
+    assert!(imported.join("events.json").is_file());
+}
+
+#[test]
 fn copy_dir_all_failure_names_the_destination_file() {
     // The import leg of a persist copies whole conversation directories, so a
     // full disk can fail here rather than in `write_json`. Without the path the

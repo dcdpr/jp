@@ -35,6 +35,31 @@ pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
 const IMPORT_STAGING_PREFIX: &str = ".import-";
 pub(crate) const ARCHIVE_DIR: &str = ".archive";
 
+/// Build the staging directory name an import copies into.
+///
+/// The name is unique per attempt, so a copy can never land in a tree left by
+/// an earlier one.
+/// That matters because a merge would publish entries the source no longer has:
+/// `copy_dir_all` overwrites the files it copies but removes nothing, so
+/// anything surviving from an older generation would be renamed into place
+/// alongside the fresh copy.
+///
+/// The uniqueness suffix goes *after* the conversation dirname so the leading
+/// timestamp segment stays intact.
+/// The sanitize sweep identifies a leftover by parsing that segment, and can
+/// only take the conversation's lock (and so only reap the directory) while it
+/// stays parseable.
+fn import_staging_dirname(dirname: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+
+    format!(
+        "{IMPORT_STAGING_PREFIX}{dirname}-{}-{nanos}",
+        std::process::id()
+    )
+}
+
 #[derive(Debug, Clone)]
 struct Storage {
     /// The path to the original storage directory.
@@ -854,14 +879,19 @@ fn import_external_copy(
     // and skips it forever, while its fresh mtime makes the loader prefer it
     // over the intact workspace copy. Staging plus a rename makes the visible
     // result atomic.
+    //
+    // The staging name is unique per attempt, so this copy cannot land in a tree
+    // an earlier attempt left behind. Reusing one name and clearing it first
+    // would make correctness depend on that removal succeeding: a partial
+    // failure leaves entries the source no longer has, and the rename publishes
+    // them.
     let dirname = id.to_dirname(title);
-    let staging = user_conversations.join(format!("{IMPORT_STAGING_PREFIX}{dirname}"));
+    let staging = user_conversations.join(import_staging_dirname(&dirname));
     let target = user_conversations.join(&dirname);
 
-    // A leftover staging directory is debris from an earlier crash; copying
-    // into it would carry stale entries across.
-    let _err = fs::remove_dir_all(&staging);
-
+    // Both cleanups are best-effort: a leftover under a unique name is inert.
+    // It is never copied into, `find_normal_conversation_dir_path` cannot match
+    // it, and the sanitize sweep reaps it under the conversation's lock.
     if let Err(error) = copy_dir_all(&workspace_conv, &staging) {
         let _err = fs::remove_dir_all(&staging);
         return Err(error);
