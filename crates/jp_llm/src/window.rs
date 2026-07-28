@@ -1,10 +1,10 @@
 //! Fitting a conversation into a model's context window.
 //!
-//! [`truncate_to_fit`] is the entry point: it drops the oldest events from a
-//! stream until a char-based estimate of its size fits the budget derived from
-//! the model's context window.
-//! Callers measure the fixed overhead sharing that window — system prompt,
-//! instruction sections, attachments, tool definitions — with
+//! [`truncate_to_fit`] is the entry point: it applies compaction projection,
+//! then drops the oldest events from a stream until a char-based estimate of
+//! its size fits the budget derived from the model's context window.
+//! Callers measure the fixed overhead sharing that window (system prompt,
+//! instruction sections, attachments, tool definitions) with
 //! [`estimate_overhead_chars`] and pass it in.
 //!
 //! Estimation is deliberately crude: a fixed chars-per-token ratio with a
@@ -82,6 +82,10 @@ pub fn estimate_overhead_chars(
 /// Returns the number of events dropped, which is zero when the stream already
 /// fits.
 ///
+/// The stream is left projected: compaction overlays are resolved into the
+/// events they imply (see [`ConversationStream::apply_projection`]), which is
+/// what the provider receives either way.
+///
 /// Events are dropped from the start, which keeps the cutoff stable across
 /// repeated calls on a growing stream: streams are append-only, so the same K
 /// oldest events are dropped no matter how many new events arrive at the end,
@@ -100,6 +104,13 @@ pub fn truncate_to_fit(
     context_window: u32,
     overhead_chars: usize,
 ) -> usize {
+    // Measure the events the provider will actually receive. A stored summary
+    // can stand in for a long range, so the raw stream both over-estimates the
+    // request and is the wrong thing to cut: dropping a prefix invalidates every
+    // compaction overlay it touches (see `ConversationStream::retain`), which
+    // would hand the provider the raw tail a summary was covering.
+    events.apply_projection();
+
     let budget = budget_chars(context_window, overhead_chars);
     let total_chars = estimate_chars(events);
 
@@ -162,6 +173,8 @@ pub fn truncate_to_fit(
 ///
 /// Counts provider-visible payloads only; turn markers, config deltas and
 /// compaction overlays contribute nothing.
+/// The stream is measured as given: to size what a provider would receive,
+/// project it first (see [`ConversationStream::apply_projection`]).
 #[must_use]
 pub fn estimate_chars(events: &ConversationStream) -> usize {
     events.iter().map(|e| estimate_event_chars(e.event)).sum()

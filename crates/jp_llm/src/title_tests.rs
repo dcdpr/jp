@@ -1,9 +1,13 @@
 use std::sync::{Arc, Mutex};
 
-use jp_config::model::{
-    id::{ModelIdConfig, Name, ProviderId},
-    parameters::ReasoningConfig,
+use jp_config::{
+    PartialAppConfig,
+    model::{
+        id::{ModelIdConfig, Name, ProviderId},
+        parameters::ReasoningConfig,
+    },
 };
+use jp_conversation::{Compaction, EventKind, SummaryPolicy, event::ChatResponse};
 
 use super::*;
 use crate::{
@@ -89,6 +93,65 @@ async fn generate_shrinks_a_conversation_past_the_window() {
     );
 }
 
+/// A conversation that accumulated `max_tokens` must not impose it on a title
+/// model that leaves the parameter unset.
+///
+/// A config delta cannot express "unset", so overriding the model through one
+/// would carry the conversation's 64000 into a request the title model may not
+/// accept.
+/// The assertion is on the effective config of what was sent, not on the
+/// `ModelConfig` handed in.
+#[tokio::test]
+async fn generate_does_not_inherit_conversation_parameters() {
+    let (provider, requests) = title_provider(Some(1_000_000));
+    let details = details(&provider).await;
+
+    let mut events = long_conversation(2);
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.model.parameters.max_tokens = Some(64_000);
+    delta.assistant.model.parameters.temperature = Some(1.5);
+    events.add_config_delta(delta);
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    let parameters = sent[0]
+        .thread
+        .events
+        .config()
+        .expect("merged config")
+        .assistant
+        .model
+        .parameters;
+
+    assert_eq!(parameters.max_tokens, None);
+    assert_eq!(parameters.temperature, None);
+}
+
+/// The title model's own parameters do reach the request.
+#[tokio::test]
+async fn generate_applies_the_title_model_parameters() {
+    let (provider, requests) = title_provider(Some(1_000_000));
+    let details = details(&provider).await;
+
+    let mut model = model_config("mock");
+    model.parameters.max_tokens = Some(256);
+
+    generate(&provider, &details, TitleRequest {
+        events: long_conversation(2),
+        model,
+        count: 1,
+        rejected: vec![],
+    })
+    .await
+    .expect("title generation succeeds");
+
+    let sent = requests.lock().unwrap();
+    let config = sent[0].thread.events.config().expect("merged config");
+    assert_eq!(config.assistant.model.parameters.max_tokens, Some(256));
+    assert_eq!(config.assistant.model.id.resolved(), &model_id("mock"));
+}
+
 #[tokio::test]
 async fn generate_keeps_a_conversation_that_fits() {
     let (provider, requests) = title_provider(Some(1_000_000));
@@ -99,6 +162,42 @@ async fn generate_keeps_a_conversation_that_fits() {
     // The three original turns plus the appended title request.
     let sent = requests.lock().unwrap();
     assert_eq!(sent[0].thread.events.turn_count(), 4);
+}
+
+/// A stored summary reaches the provider even when no window forces fitting.
+///
+/// The rebuild that replaces the assistant model carries conversation events
+/// only, so the overlay has to be resolved before it runs or the summary is
+/// silently swapped back for the raw turns it covers.
+#[tokio::test]
+async fn generate_keeps_a_summary_when_the_window_is_unknown() {
+    let (provider, requests) = title_provider(None);
+    let details = details(&provider).await;
+
+    let mut events = long_conversation(20);
+    events.add_compaction(Compaction::new(0, 18).with_summary(SummaryPolicy {
+        summary: "A short summary of the first 19 turns.".to_owned(),
+    }));
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    let messages: Vec<String> = sent[0]
+        .thread
+        .events
+        .iter()
+        .filter_map(|e| match &e.event.kind {
+            EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "A short summary of the first 19 turns."),
+        "the summary must reach the provider, got {messages:?}"
+    );
 }
 
 /// Providers that don't report a window (local llama.cpp, Ollama) leave the

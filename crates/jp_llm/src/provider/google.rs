@@ -1023,17 +1023,20 @@ impl From<GeminiError> for StreamError {
                     .with_source(err);
                 }
 
-                // An oversized prompt is the same size on the next attempt, so
-                // this is checked before the status-code classification below.
-                if looks_like_context_window_error(&msg) {
-                    return StreamError::context_window_exceeded(msg).with_source(err);
-                }
-
                 // Classify by HTTP status code if present in the API error.
                 let status = value
                     .get("status")
                     .or_else(|| value.pointer("/error/code"))
                     .and_then(Value::as_u64);
+
+                // An oversized prompt is the same size on the next attempt, so
+                // it is classified before the status codes below. A 429 is
+                // exempt: it is an authoritative rate-limit signal, and
+                // token-per-minute limits are phrased close enough to a window
+                // overflow that the text check would misread them as fatal.
+                if status != Some(429) && looks_like_context_window_error(&msg) {
+                    return StreamError::context_window_exceeded(msg).with_source(err);
+                }
 
                 match status {
                     Some(429) => StreamError::rate_limit(None).with_source(err),

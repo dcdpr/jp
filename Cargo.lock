@@ -2409,6 +2409,7 @@ dependencies = [
  "eventsource-stream",
  "futures",
  "gemini_client_rs",
+ "http",
  "indexmap",
  "infer",
  "insta",

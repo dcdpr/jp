@@ -2,12 +2,86 @@ use std::io;
 
 use super::*;
 
+/// A `reqwest_eventsource::Error::InvalidStatusCode` carrying `status` and
+/// `body`, as the provider stream paths receive it.
+fn invalid_status(status: u16, body: &str) -> reqwest_eventsource::Error {
+    let response = http::Response::builder()
+        .status(status)
+        .body(body.to_owned())
+        .expect("valid response");
+
+    reqwest_eventsource::Error::InvalidStatusCode(
+        reqwest::StatusCode::from_u16(status).expect("valid status"),
+        reqwest::Response::from(response),
+    )
+}
+
 #[tokio::test]
 async fn stream_ended_classifies_as_retryable() {
     // A stream that ends without a terminal event is the disconnect case (e.g.
     // the socket dropped mid-response). It must route through the retry layer,
     // not be surfaced as a fatal error.
     let err = StreamError::from_eventsource(reqwest_eventsource::Error::StreamEnded).await;
+    assert!(err.is_retryable());
+}
+
+#[tokio::test]
+async fn oversized_prompt_body_is_a_context_window_error() {
+    let err = StreamError::from_eventsource(invalid_status(
+        400,
+        r#"{"error":{"message":"prompt is too long: 531500 tokens > 200000 maximum"}}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::ContextWindowExceeded);
+    assert!(!err.is_retryable());
+}
+
+/// A plain 429 is a rate limit, and its `Retry-After` survives.
+#[tokio::test]
+async fn a_429_is_a_rate_limit() {
+    let err = StreamError::from_eventsource(invalid_status(429, "slow down")).await;
+
+    assert_eq!(err.kind, StreamErrorKind::RateLimit);
+    assert!(err.is_retryable());
+}
+
+/// A request timeout and a conflict are retryable without being rate limits.
+#[tokio::test]
+async fn timeout_and_conflict_are_transient() {
+    for code in [408, 409] {
+        let err = StreamError::from_eventsource(invalid_status(code, "try again")).await;
+
+        assert_eq!(err.kind, StreamErrorKind::Transient, "HTTP {code}");
+        assert!(err.is_retryable(), "HTTP {code}");
+    }
+}
+
+/// A 400 carries no retry signal and no recognized phrasing, so it stays fatal.
+#[tokio::test]
+async fn a_plain_400_is_not_retryable() {
+    let err = StreamError::from_eventsource(invalid_status(400, "malformed request")).await;
+
+    assert_eq!(err.kind, StreamErrorKind::Other);
+    assert!(!err.is_retryable());
+}
+
+/// A 429 whose body reads like a window overflow must stay a retryable rate
+/// limit.
+///
+/// The status code is an authoritative rate-limit signal; the body heuristic is
+/// a fallback for the 4xx responses that carry no such signal.
+/// Letting the text win would turn a wait-and-retry into a fatal error and
+/// discard the retry timing with it.
+#[tokio::test]
+async fn a_429_outranks_a_context_window_phrasing_in_the_body() {
+    let err = StreamError::from_eventsource(invalid_status(
+        429,
+        r#"{"error":{"message":"Rate limit reached: too many tokens per minute."}}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::RateLimit);
     assert!(err.is_retryable());
 }
 

@@ -229,21 +229,28 @@ impl StreamError {
                     return Self::new(StreamErrorKind::InsufficientQuota, display);
                 }
 
-                // An oversized prompt is the same size on the next attempt, so
-                // this is classified before the retry heuristics below.
-                if looks_like_context_window_error(&body) {
-                    return Self::context_window_exceeded(display);
-                }
-
                 let retry_after = extract_retry_after(&headers);
                 let code = status.as_u16();
+
+                // An oversized prompt is the same size on the next attempt, so
+                // it is classified before the retry heuristics below. A 429 is
+                // exempt: it is an authoritative rate-limit signal, and
+                // token-per-minute limits are phrased close enough to a window
+                // overflow that the text check would misread them as fatal.
+                if code != 429 && looks_like_context_window_error(&body) {
+                    return Self::context_window_exceeded(display);
+                }
 
                 // Non-standard `x-should-retry` header overrides
                 // status-code heuristics.
                 let retryable = match header_str(&headers, "x-should-retry") {
                     Some("true") => true,
                     Some("false") => false,
-                    _ => matches!(code, 408 | 409 | 429 | _ if code >= 500),
+                    // Timeout, conflict, rate limit, and any server error.
+                    // Written as two checks rather than one `matches!`: a guard
+                    // attaches to the whole or-pattern, so `408 | 409 | 429 | _
+                    // if code >= 500` silently reduces to `code >= 500`.
+                    _ => matches!(code, 408 | 409 | 429) || code >= 500,
                 };
 
                 if !retryable {

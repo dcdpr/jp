@@ -7,8 +7,10 @@
 //! The schema and instruction helpers are public so callers can measure or
 //! inspect the request they are about to make.
 
+use std::sync::Arc;
+
 use jp_config::{
-    AppConfig, PartialAppConfig, ToPartial as _,
+    AppConfig,
     assistant::{
         instructions::InstructionsConfig, sections::SectionConfig, tool_choice::ToolChoice,
     },
@@ -41,11 +43,11 @@ pub struct TitleRequest {
     /// stream they want to keep.
     pub events: ConversationStream,
 
-    /// The model the request runs on.
+    /// The model the request runs on, with the parameters it runs under.
     ///
-    /// Applied as a config delta on `events` so the request uses this model's
-    /// parameters — reasoning effort, max tokens — rather than the ones the
-    /// conversation itself accumulated.
+    /// These parameters are the only ones the request carries: reasoning
+    /// effort, max tokens, temperature and provider-specific values are taken
+    /// from here and never inherited from the conversation.
     /// See [`resolve_model`].
     pub model: ModelConfig,
 
@@ -129,6 +131,11 @@ pub async fn generate(
 
     let sections = title_instructions(count, &rejected);
 
+    // Resolve compaction overlays up front: `rebase_on_model` carries
+    // conversation events only, so a stored summary has to already be part of
+    // the event list by the time it runs.
+    events.apply_projection();
+
     // The request carries no system prompt and no attachments, so the
     // instruction sections are the only fixed overhead sharing the window.
     if let Some(context_window) = details.context_window {
@@ -136,15 +143,8 @@ pub async fn generate(
         window::truncate_to_fit(&mut events, context_window, overhead);
     }
 
-    // Override the whole assistant model, not just its ID, so the request runs
-    // on the title model's max tokens and reasoning effort instead of whatever
-    // the conversation accumulated.
-    let mut partial = PartialAppConfig::empty();
-    partial.assistant.model = model.to_partial();
-    events.add_config_delta(partial);
-
     let mut thread = ThreadBuilder::default()
-        .with_events(events)
+        .with_events(rebase_on_model(&events, model))
         .with_sections(sections)
         .build()?;
 
@@ -170,6 +170,29 @@ pub async fn generate(
         .as_ref()
         .map(extract_titles)
         .unwrap_or_default())
+}
+
+/// Rebuild `events` so `model` is the only assistant model the request sees.
+///
+/// A config delta cannot express "unset": merging one carries every parameter
+/// the conversation had set but `model` leaves unset, so an assistant
+/// `max_tokens` outlives the switch to a smaller title model and is sent to it.
+/// Putting `model` in the base config and carrying the events over without
+/// their deltas replaces the parameters outright.
+///
+/// Dropping the deltas costs nothing here: the request has no tools and no
+/// attachments, so the assistant model is the only config it reads.
+///
+/// Only conversation events are carried over, so `events` must already be
+/// projected (see [`ConversationStream::apply_projection`]) or its compaction
+/// overlays are lost.
+fn rebase_on_model(events: &ConversationStream, model: ModelConfig) -> ConversationStream {
+    let mut base = (*events.base_config()).clone();
+    base.assistant.model = model;
+
+    let mut rebased = ConversationStream::new(Arc::new(base));
+    rebased.extend(events.iter().map(|e| e.event.clone()));
+    rebased
 }
 
 /// JSON schema for the title generation structured output.

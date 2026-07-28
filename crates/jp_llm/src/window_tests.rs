@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use jp_conversation::{ConversationStream, event::ChatResponse};
+use jp_conversation::{Compaction, ConversationStream, SummaryPolicy, event::ChatResponse};
 
 use super::*;
 use crate::tool::ToolDocs;
@@ -139,6 +139,49 @@ fn truncate_triggers_with_overhead() {
     let dropped = truncate_to_fit(&mut events, context_window, overhead);
     assert!(dropped > 0);
     assert!(events.len() < count_before);
+}
+
+/// A conversation whose bulk is already covered by a stored summary fits a
+/// small window once projected, so nothing is dropped.
+///
+/// Measuring the raw events instead would both over-estimate the request and
+/// destroy the overlay: dropping a prefix invalidates every compaction it
+/// touches, handing the provider the raw tail the summary was standing in for.
+#[test]
+fn truncate_measures_the_projected_stream() {
+    let mut events = ConversationStream::new_test();
+    for i in 0..50 {
+        events = events.with_turn(format!("turn {i}: {}", "x".repeat(1000)));
+    }
+    events.add_compaction(Compaction::new(0, 48).with_summary(SummaryPolicy {
+        summary: "A short summary of the first 49 turns.".to_owned(),
+    }));
+
+    // ~50k chars raw, but the projection is the summary pair plus the last turn.
+    let raw_chars = estimate_chars(&events);
+    assert!(
+        raw_chars > budget_chars(10_000, 0),
+        "fixture must not fit raw"
+    );
+
+    assert_eq!(truncate_to_fit(&mut events, 10_000, 0), 0);
+    assert!(
+        message_texts(&events)
+            .iter()
+            .any(|t| t == "A short summary of the first 49 turns."),
+        "the summary must survive into the fitted stream"
+    );
+}
+
+/// Assistant message text in the stream, in order.
+fn message_texts(events: &ConversationStream) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|e| match &e.event.kind {
+            EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// A cutoff that drops every chat request but leaves an assistant response
