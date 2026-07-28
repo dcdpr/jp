@@ -232,7 +232,7 @@
     "summary": "Add `jp completions` and `jp manpage` subcommands using clap_complete and clap_mangen for shell integration."
   },
   "060-config-explain.md": {
-    "hash": "e17e3627b295475d59571e94db13f3b673dc9d135f147a5e17767c85b8690110",
+    "hash": "af1475f128e5897ec6b895706f6ef04f91a75dbeb61753b4768503a9a8ae4e22",
     "summary": "Global `--explain` flag traces config resolution through 9 layers, showing where each field value originates."
   },
   "061-interactive-config.md": {

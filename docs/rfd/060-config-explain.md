@@ -21,7 +21,7 @@ JP's configuration is loaded from up to 9 sources, merged in a specific order:
 1. User global config (`$XDG_CONFIG_HOME/jp/config.toml`)
 2. Workspace config (`.jp/config.toml`)
 3. CWD config (`.jp.toml`, recursive upwards)
-4. User workspace config (`$XDG_DATA_HOME/jp/<id>/config.toml`)
+4. User workspace config (`$XDG_DATA_HOME/jp/workspace/<name>-<id>/config.toml`)
 5. Environment variables (`JP_CFG_*`)
 6. Conversation delta (stored in the active conversation's event stream)
 7. CLI `--cfg` arguments
@@ -238,8 +238,8 @@ The layers correspond to the steps in `load_partial_config()`:
 |       |                  | extends                                  |
 | 2     | `workspace`      | `.jp/config.toml` + extends              |
 | 3     | `cwd`            | `.jp.toml` (recursive upwards)           |
-| 4     | `user_workspace` | `$XDG_DATA_HOME/jp/<id>/config.toml` +   |
-|       |                  | extends                                  |
+| 4     | `user_workspace` | `$XDG_DATA_HOME/jp/workspace/`           |
+|       |                  | `<name>-<id>/config.toml` + extends      |
 | 5     | `environment`    | `JP_CFG_*` variables                     |
 | 6     | `conversation`   | Active conversation's config delta       |
 | 7     | `cli_cfg`        | `--cfg KEY=VALUE` arguments              |

@@ -61,13 +61,19 @@ overriding earlier ones.
 1. `$XDG_CONFIG_HOME/jp/config.toml` (user-global)
 2. `<workspace path>/.jp/config.toml` (workspace)
 3. `$CWD/.jp.toml` (current directory, recursively upwards)
-4. `$XDG_CONFIG_HOME/jp/<workspace id>/config.toml` (user-workspace)
+4. `$XDG_DATA_HOME/jp/workspace/<workspace-name>-<workspace-id>/config.toml`
+   (user-workspace)
 
 *A configuration file can be either a TOML, JSON, or YAML file, the above
 example uses TOML, but the same applies to JSON and YAML.*
 
-*The `$XDG_CONFIG_HOME` variable is not used on all platforms, but a suitable
-alternative is used instead, see [the directories crate] for more details.*
+*The `$XDG_CONFIG_HOME` and `$XDG_DATA_HOME` variables are not used on all
+platforms, but suitable alternatives are used instead, see [the directories
+crate] for more details.*
+
+*The user-workspace directory is located by its workspace-ID suffix, so a
+directory created by an older version may be named `<workspace-id>` without the
+name prefix.*
 
 *Note that `$CWD/.jp.toml` behaves differently, depending on if you are in a
 workspace or not. If you are in a workspace, recursion ends at the workspace
