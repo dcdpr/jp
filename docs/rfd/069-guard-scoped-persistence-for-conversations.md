@@ -166,6 +166,9 @@ impl ConversationMut {
     /// Long-running loops must call this at each checkpoint so I/O
     /// errors propagate via `?`. Drop is the safety net for unwinding.
     ///
+    /// Returns a failure recorded by an earlier drop-time write before
+    /// attempting its own.
+    ///
     /// Takes `&mut self` to prevent calling while a write guard from
     /// update_events() is held (which would deadlock).
     pub fn flush(&mut self) -> Result<()>;
@@ -174,16 +177,31 @@ impl ConversationMut {
 impl Drop for ConversationMut {
     fn drop(&mut self) {
         if !self.dirty.load(Ordering::Relaxed) { return; }
-        if let Some(writer) = &self.writer {
-            let meta = self.metadata.read();
-            let evts = self.events.read();
-            if let Err(e) = writer.write(&self.id, &meta, &evts) {
-                eprintln!("Failed to persist conversation {}: {e}", self.id);
-            }
+        if self.persist.lock().out_of_space { return; }
+
+        let meta = self.metadata.read();
+        let evts = self.events.read();
+        if let Err(error) = self.writer.write(&self.id, &meta, &evts, self.projection) {
+            warn!(id = %self.id, %error, "Failed to persist conversation.");
+            let mut state = self.persist.lock();
+            state.out_of_space |= error.is_out_of_space();
+            if state.failure.is_none() { state.failure = Some(error); }
         }
     }
 }
 ```
+
+`Drop` cannot propagate, so it records the failure on state shared with the
+originating lock rather than writing to the terminal.
+`ConversationLock::take_persist_failure` (and its `ConversationMut`
+counterpart) drains it, so the shell reports once, through the printer, with a
+non-zero exit code.
+One failing disk therefore yields one diagnostic instead of one per mutation
+scope.
+
+A failure that shows the filesystem is full marks the shared state, and
+subsequent write attempts are skipped: nothing can succeed until space is
+freed.
 
 `AtomicBool` is used for the dirty flag instead of `Cell<bool>`.
 `Cell<bool>` is `!Sync`, which would make `ConversationMut` `!Sync` and cause
@@ -352,8 +370,12 @@ This is slightly more verbose but structurally prevents
 `.await`-across-lock-guard bugs.
 `?` composes naturally since the callback's return type is forwarded.
 
-**Errors in `Drop` are swallowed.** If persist fails during `ConversationMut`'s
-drop, the error is logged to stderr but cannot be propagated.
+**Errors in `Drop` cannot be propagated.** A persist failure during
+`ConversationMut`'s drop is recorded on the shared persist state and surfaced by
+the next `flush()` or by a `take_persist_failure()` drain at teardown, rather
+than returned from `drop`.
+A scope that owns the lock (`into_mut`) and drops without either is the one
+remaining hole: its failure reaches the log file but no caller.
 Long-running loops must call `flush()?` at checkpoints so that I/O failures halt
 immediately.
 

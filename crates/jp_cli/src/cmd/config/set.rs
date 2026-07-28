@@ -53,9 +53,12 @@ impl Set {
                 LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
             };
 
-            let conv = lock.into_mut();
+            let mut conv = lock.into_mut();
             let id = conv.id();
             conv.update_events(|events| events.add_config_delta(config_delta.clone()));
+            // Write before reporting success, so a failed write is an error
+            // rather than a confirmation the user cannot trust.
+            conv.flush()?;
             ctx.printer
                 .println(format!("Set configuration in conversation {id}"));
         }

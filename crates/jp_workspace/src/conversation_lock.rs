@@ -61,10 +61,24 @@
 //! - **`Drop`** — safety net.
 //!   If the `ConversationMut` drops while dirty (e.g., due to `?` unwinding),
 //!   `Drop` persists the data.
-//!   Errors are logged but cannot be propagated from `Drop`.
 //!
 //! Long-running loops should call `flush()` at each checkpoint so disk errors
 //! halt immediately rather than letting the loop continue with unsaved data.
+//!
+//! # Reporting Drop-Time Failures
+//!
+//! `Drop` cannot propagate, so a failed drop-time persist is recorded on state
+//! shared with the originating lock instead of being written to the terminal.
+//! The next `flush()` returns it, and
+//! [`take_persist_failure`][ConversationLock::take_persist_failure] drains it
+//! for a caller that wants to report at teardown.
+//! Either way, one failing disk yields one diagnostic rather than one per
+//! mutation scope, and the reporting happens where the output channel and the
+//! exit code live.
+//!
+//! A failure that shows the filesystem is full also marks the shared state, and
+//! subsequent write attempts are skipped: nothing can succeed until space is
+//! freed.
 
 use std::sync::{
     Arc,
@@ -73,10 +87,29 @@ use std::sync::{
 
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::backend::{ConversationLockGuard, PersistBackend, Projection};
-use parking_lot::{RwLock, RwLockReadGuard};
-use tracing::info;
+use parking_lot::{Mutex, RwLock, RwLockReadGuard};
+use tracing::{info, warn};
 
-use crate::handle::ConversationHandle;
+use crate::{error::Error, handle::ConversationHandle};
+
+/// Shared record of drop-time persistence outcomes for one conversation lock.
+///
+/// See the module docs for how a recorded failure reaches the user.
+#[derive(Debug, Default)]
+struct PersistState {
+    /// The first drop-time failure no caller has been told about yet.
+    ///
+    /// The first is kept rather than the last: later failures are consequences
+    /// of the same condition, while the first names the write that actually
+    /// broke.
+    failure: Option<Error>,
+
+    /// Set once a failure showed the filesystem is full.
+    ///
+    /// Sticky, and never cleared: further write attempts are skipped rather
+    /// than retried against a disk with no room.
+    out_of_space: bool,
+}
 
 /// Result of attempting to acquire a conversation lock.
 #[derive(Debug)]
@@ -105,6 +138,7 @@ pub struct ConversationLock {
     writer: Arc<dyn PersistBackend>,
     lock_guard: Arc<Box<dyn ConversationLockGuard>>,
     projection: Projection,
+    persist: Arc<Mutex<PersistState>>,
 }
 
 impl ConversationLock {
@@ -128,7 +162,19 @@ impl ConversationLock {
             writer,
             lock_guard: Arc::new(lock_guard),
             projection,
+            persist: Arc::default(),
         }
+    }
+
+    /// Take the drop-time persist failure recorded since the last call.
+    ///
+    /// A caller reports it once, through whatever output channel and exit code
+    /// it owns.
+    /// Failures already surfaced through [`ConversationMut::flush`] are not
+    /// recorded here and are never returned twice.
+    #[must_use]
+    pub fn take_persist_failure(&self) -> Option<Error> {
+        self.persist.lock().failure.take()
     }
 
     /// The write projection this lock persists with.
@@ -184,6 +230,7 @@ impl ConversationLock {
             dirty: AtomicBool::new(false),
             writer: Arc::clone(&self.writer),
             projection: self.projection,
+            persist: Arc::clone(&self.persist),
             _lock_guard: Arc::clone(&self.lock_guard),
         }
     }
@@ -202,6 +249,7 @@ impl ConversationLock {
             dirty: AtomicBool::new(false),
             writer: self.writer,
             projection: self.projection,
+            persist: self.persist,
             _lock_guard: self.lock_guard,
         }
     }
@@ -234,6 +282,10 @@ pub struct ConversationMut {
     dirty: AtomicBool,
     writer: Arc<dyn PersistBackend>,
     projection: Projection,
+
+    // Shared with the originating lock and every other scope derived from it,
+    // so a failure recorded here survives this scope's drop.
+    persist: Arc<Mutex<PersistState>>,
 
     // Holds the lock guard alive. Released when the last Arc drops.
     _lock_guard: Arc<Box<dyn ConversationLockGuard>>,
@@ -331,8 +383,10 @@ impl ConversationMut {
     /// Long-running loops **must** call this at each checkpoint (e.g., after
     /// each turn in the LLM loop) so that I/O errors propagate immediately via
     /// `?`.
-    /// The `Drop` implementation is a safety net for `?` unwinding — it
-    /// persists partial state but swallows errors.
+    ///
+    /// Returns a persist failure recorded by an earlier drop-time write before
+    /// attempting its own, so a failure that could not propagate from `Drop`
+    /// still reaches a caller that can act on it.
     ///
     /// Takes `&mut self` to prevent calling while a write guard from
     /// `update_events()` or `update_metadata()` is held (which would deadlock).
@@ -341,17 +395,36 @@ impl ConversationMut {
     ///
     /// After a successful flush, the dirty flag is cleared.
     pub fn flush(&mut self) -> crate::error::Result<()> {
+        if let Some(error) = self.persist.lock().failure.take() {
+            return Err(error);
+        }
+
         if !self.dirty.load(Ordering::Relaxed) {
             return Ok(());
         }
 
         let meta = self.metadata.read();
         let evts = self.events.read();
-        self.writer.write(&self.id, &meta, &evts, self.projection)?;
+        if let Err(error) = self.writer.write(&self.id, &meta, &evts, self.projection) {
+            // Recorded as futile but not as a pending failure: this error is
+            // returned, so the caller owns reporting it.
+            let error = Error::from(error);
+            self.persist.lock().out_of_space |= error.is_out_of_space();
+            return Err(error);
+        }
         self.dirty.store(false, Ordering::Relaxed);
 
         info!(id = %self.id, "Flushed conversation to disk.");
         Ok(())
+    }
+
+    /// Take the drop-time persist failure recorded since the last call.
+    ///
+    /// Counterpart of [`ConversationLock::take_persist_failure`] for a scope
+    /// that owns the lock, where no `ConversationLock` remains to drain.
+    #[must_use]
+    pub fn take_persist_failure(&self) -> Option<Error> {
+        self.persist.lock().failure.take()
     }
 
     /// The write projection this scope persists with.
@@ -399,12 +472,23 @@ impl Drop for ConversationMut {
             return;
         }
 
+        if self.persist.lock().out_of_space {
+            warn!(id = %self.id, "Skipping persist: no space left on device.");
+            return;
+        }
+
         let meta = self.metadata.read();
         let evts = self.events.read();
 
-        #[expect(clippy::print_stderr)]
-        if let Err(e) = self.writer.write(&self.id, &meta, &evts, self.projection) {
-            eprintln!("Failed to persist conversation {}: {e}", self.id);
+        if let Err(error) = self.writer.write(&self.id, &meta, &evts, self.projection) {
+            let error = Error::from(error);
+            warn!(id = %self.id, %error, "Failed to persist conversation.");
+
+            let mut state = self.persist.lock();
+            state.out_of_space |= error.is_out_of_space();
+            if state.failure.is_none() {
+                state.failure = Some(error);
+            }
         }
     }
 }

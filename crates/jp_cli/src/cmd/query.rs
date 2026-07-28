@@ -499,21 +499,24 @@ impl Query {
             echo.render_user_request(&chat_request);
         }
 
+        // One mutable scope for the whole pre-turn setup. Every mutation below
+        // shares its single write at the closing `flush`, instead of each
+        // statement persisting the entire conversation on its own drop.
+        let mut setup = lock.as_mut();
+
         // Record the CLI-provided config delta (`--cfg`) now that the query is
         // known to be non-empty. Recording it before the empty-query check
         // would leave a config event behind for a query that was ultimately
         // ignored.
         if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
-            lock.as_mut()
-                .update_events(|events| events.add_config_delta(delta));
+            setup.update_events(|events| events.add_config_delta(delta));
         }
 
         if !editor_provided_config.is_empty() {
             // Resolve any model aliases before storing in the stream so
             // that per-event configs always contain concrete model IDs.
             editor_provided_config.resolve_model_aliases(&cfg.providers.llm.aliases);
-            lock.as_mut()
-                .update_events(|events| events.add_config_delta(editor_provided_config));
+            setup.update_events(|events| events.add_config_delta(editor_provided_config));
         }
 
         // Snapshot the stream for title generation and thread assembly. The
@@ -522,7 +525,7 @@ impl Query {
         // stream is only trimmed at the turn-start commit point), the new
         // request not yet appended.
         let stream = {
-            let mut stream = lock.events().clone();
+            let mut stream = setup.events().clone();
             pending_trim.apply(&mut stream);
             stream
         };
@@ -546,8 +549,7 @@ impl Query {
             ) {
                 NewTitle::FromHeading(title) => {
                     debug!("Using leading markdown heading as conversation title");
-                    lock.as_mut()
-                        .update_metadata(|m| m.title = Some(title.clone()));
+                    setup.update_metadata(|m| m.title = Some(title.clone()));
                     if ctx.term.is_tty {
                         jp_term::osc::set_title(format!("{cid}: {title}"));
                     }
@@ -595,7 +597,13 @@ impl Query {
 
         // Sanitize any structural issues (orphaned tool calls, missing
         // user messages, etc.) before sending the stream to the provider.
-        lock.as_mut().update_events(ConversationStream::sanitize);
+        setup.update_events(ConversationStream::sanitize);
+
+        // Commit the setup phase before the turn starts. Errors propagate here
+        // rather than being swallowed by a drop, and the turn loop's own
+        // checkpoints take over from this point.
+        setup.flush()?;
+        drop(setup);
 
         let invocation = InvocationContext {
             workspace_id: ctx.workspace.id().to_string(),
@@ -643,6 +651,17 @@ impl Query {
         // path captured before the turn ran.
         if turn_result.is_ok() {
             cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
+        }
+
+        // A mutation scope that dropped while dirty could not propagate its
+        // persist failure, so it recorded it on the lock instead. Surface it
+        // here so an unsaved conversation never exits zero. Only when the turn
+        // itself succeeded: a turn error is the more specific diagnostic, and
+        // the persist failure is usually a consequence of the same condition.
+        if turn_result.is_ok()
+            && let Some(error) = lock.take_persist_failure()
+        {
+            return Err(cmd::Error::from(Error::Workspace(error)));
         }
 
         turn_result

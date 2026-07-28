@@ -738,6 +738,24 @@ impl From<jp_storage::Error> for Error {
                 ("path", path.to_string().into()),
             ]
             .into(),
+            Error::OutOfSpace { path, source } => [
+                ("message", "No space left on device".into()),
+                ("path", path.to_string().into()),
+                ("error", source.to_string().into()),
+                (
+                    "suggestion",
+                    "Free up disk space and re-run. Anything after the last successful write was \
+                     not saved."
+                        .into(),
+                ),
+            ]
+            .into(),
+            Error::WriteFailed { path, source } => [
+                ("message", "Failed to write file".into()),
+                ("path", path.to_string().into()),
+                ("error", source.to_string().into()),
+            ]
+            .into(),
             Error::ConversationNotFound(id) => [
                 ("message", "Conversation not found.".into()),
                 ("id", id.to_string().into()),
@@ -794,3 +812,7 @@ impl From<jp_id::Error> for Error {
         Self::from(metadata)
     }
 }
+
+#[cfg(test)]
+#[path = "cmd_tests.rs"]
+mod tests;

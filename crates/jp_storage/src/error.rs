@@ -1,3 +1,5 @@
+use std::io;
+
 use camino::Utf8PathBuf;
 use jp_conversation::ConversationId;
 
@@ -17,8 +19,31 @@ pub enum Error {
     #[error("configuration error")]
     Config(#[from] jp_config::error::Error),
 
-    #[error("IO error")]
+    #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    /// A write to `path` failed.
+    ///
+    /// `std::io::Error` carries no path, so a bare I/O failure cannot tell the
+    /// user which file it was.
+    #[error("failed to write {path}")]
+    WriteFailed {
+        path: Utf8PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    /// The filesystem holding `path` has no room left.
+    ///
+    /// Separate from [`Error::WriteFailed`] because it is the one write failure
+    /// with an obvious user action, and because no retry can succeed until
+    /// space is freed.
+    #[error("no space left on device while writing {path}")]
+    OutOfSpace {
+        path: Utf8PathBuf,
+        #[source]
+        source: io::Error,
+    },
 
     #[error("invalid JSON data")]
     Json(#[from] serde_json::Error),
@@ -28,6 +53,45 @@ pub enum Error {
 
     #[error("conversation not found: {0}")]
     ConversationNotFound(ConversationId),
+}
+
+impl Error {
+    /// Classify a failed write to `path`.
+    ///
+    /// Yields [`Error::OutOfSpace`] when the operating system reported a full
+    /// filesystem, and [`Error::WriteFailed`] otherwise.
+    #[must_use]
+    pub fn write_failed(path: impl Into<Utf8PathBuf>, source: io::Error) -> Self {
+        let path = path.into();
+        if is_storage_full(&source) {
+            Self::OutOfSpace { path, source }
+        } else {
+            Self::WriteFailed { path, source }
+        }
+    }
+
+    /// Whether the error means the filesystem is full.
+    ///
+    /// A caller that sees this should stop attempting writes rather than move
+    /// on to the next one: none of them can succeed until space is freed.
+    #[must_use]
+    pub fn is_out_of_space(&self) -> bool {
+        match self {
+            Self::OutOfSpace { .. } => true,
+            Self::Io(error) => is_storage_full(error),
+            _ => false,
+        }
+    }
+}
+
+/// Whether an OS error reports a full filesystem.
+///
+/// Recognises both a raw OS error (`ENOSPC`, `ERROR_DISK_FULL`) and an error
+/// constructed directly from the kind, since `std` maps the platform codes onto
+/// [`io::ErrorKind::StorageFull`].
+#[must_use]
+pub fn is_storage_full(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::StorageFull
 }
 
 #[cfg(test)]
@@ -41,3 +105,7 @@ impl PartialEq for Error {
         format!("{self:?}") == format!("{other:?}")
     }
 }
+
+#[cfg(test)]
+#[path = "error_tests.rs"]
+mod tests;

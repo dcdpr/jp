@@ -237,7 +237,7 @@ impl Storage {
         // Bring any existing copy to the current directory name (e.g. after a
         // title change) and drop other stale copies for this id.
         reconcile_conversation_dir(id, conversations_dir, &conv_dir)?;
-        fs::create_dir_all(&conv_dir)?;
+        fs::create_dir_all(&conv_dir).map_err(|error| Error::write_failed(&conv_dir, error))?;
 
         let (base_config, events_json) = events
             .to_parts()
