@@ -26,7 +26,6 @@ fn write_failed_classifies_full_disk_as_out_of_space() {
     let error = Error::write_failed(Utf8Path::new("/data/conv/events.json"), os_disk_full());
 
     assert!(matches!(error, Error::OutOfSpace { .. }));
-    assert!(error.is_out_of_space());
     assert_eq!(
         error.to_string(),
         "no space left on device while writing /data/conv/events.json"
@@ -41,7 +40,6 @@ fn write_failed_classifies_other_errors_as_write_failed() {
     );
 
     assert!(matches!(error, Error::WriteFailed { .. }));
-    assert!(!error.is_out_of_space());
     assert_eq!(error.to_string(), "failed to write /data/conv/events.json");
 }
 
@@ -64,11 +62,4 @@ fn io_variant_renders_the_os_error_verbatim() {
     let error = Error::from(os_disk_full());
 
     assert_eq!(error.to_string(), "No space left on device (os error 28)");
-    assert!(error.is_out_of_space());
-}
-
-#[test]
-fn unrelated_errors_are_not_out_of_space() {
-    assert!(!Error::NotDir(Utf8Path::new("/data").to_owned()).is_out_of_space());
-    assert!(!Error::from(io::Error::from(io::ErrorKind::NotFound)).is_out_of_space());
 }

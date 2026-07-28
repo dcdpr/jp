@@ -221,6 +221,14 @@ impl Error {
             ..self
         }
     }
+
+    /// Append a metadata entry, rendered under the error's message.
+    ///
+    /// Used to attach a secondary fact to an error that already has a more
+    /// specific message of its own.
+    pub(super) fn push_metadata(&mut self, key: &str, value: impl Into<Value>) {
+        self.metadata.push((key.to_owned(), value.into()));
+    }
 }
 
 impl fmt::Display for Error {

@@ -1,5 +1,4 @@
 use camino::Utf8PathBuf;
-use jp_storage::error::is_storage_full;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -43,19 +42,6 @@ pub enum Error {
 }
 
 impl Error {
-    /// Whether the error means the filesystem is full.
-    ///
-    /// A caller that sees this should stop attempting writes rather than move
-    /// on to the next one: none of them can succeed until space is freed.
-    #[must_use]
-    pub fn is_out_of_space(&self) -> bool {
-        match self {
-            Self::Storage(error) => error.is_out_of_space(),
-            Self::Io(error) => is_storage_full(error),
-            _ => false,
-        }
-    }
-
     pub fn not_found(target: &'static str, id: &impl ToString) -> Self {
         Self::NotFound(target, id.to_string())
     }

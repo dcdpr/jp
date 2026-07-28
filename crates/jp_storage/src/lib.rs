@@ -836,7 +836,8 @@ fn import_external_copy(
         return Ok(());
     };
 
-    fs::create_dir_all(user_conversations)?;
+    fs::create_dir_all(user_conversations)
+        .map_err(|error| Error::write_failed(user_conversations, error))?;
     copy_dir_all(
         &workspace_conv,
         &user_conversations.join(id.to_dirname(title)),
@@ -844,8 +845,11 @@ fn import_external_copy(
 }
 
 /// Recursively copy directory `src` into `dst`.
+///
+/// A failure names the destination path it was writing, and reports a full
+/// filesystem as [`Error::OutOfSpace`].
 fn copy_dir_all(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
-    fs::create_dir_all(dst)?;
+    fs::create_dir_all(dst).map_err(|error| Error::write_failed(dst, error))?;
     for entry in dir_entries(src) {
         let to = dst.join(entry.file_name());
         let is_dir = entry.file_type().is_ok_and(|ty| ty.is_dir());
@@ -853,7 +857,7 @@ fn copy_dir_all(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
         if is_dir {
             copy_dir_all(&from, &to)?;
         } else {
-            fs::copy(&from, &to)?;
+            fs::copy(&from, &to).map_err(|error| Error::write_failed(&to, error))?;
         }
     }
     Ok(())
@@ -939,7 +943,7 @@ fn reconcile_conversation_dir(
             .into_iter()
             .find(|dir| dir != target)
     {
-        fs::rename(&src, target)?;
+        fs::rename(&src, target).map_err(|error| Error::write_failed(target, error))?;
     }
 
     for dir in conversation_dirs_for_id(conversations_dir, &prefix) {

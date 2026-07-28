@@ -344,7 +344,6 @@ pub(crate) struct Query {
 }
 
 impl Query {
-    #[expect(clippy::too_many_lines)]
     pub(crate) async fn run(
         self,
         ctx: &mut Ctx,
@@ -353,8 +352,6 @@ impl Query {
     ) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
-        let now = ctx.now();
-        let cfg = ctx.config();
 
         // Resolve the target conversation and acquire an exclusive lock.
         //
@@ -365,6 +362,24 @@ impl Query {
         // 4. Lock contention: user picks "new" or "fork" from the prompt.
         let lock = self.acquire_lock(ctx, handle, start_new).await?;
 
+        let result = self.run_locked(ctx, &lock).await;
+
+        // Every exit from the locked region lands here, which is what makes
+        // this the one reliable drain point: a mutation scope that dropped
+        // while dirty recorded its persist failure on the lock, and any `?` in
+        // the region above returns past every other candidate site.
+        fold_persist_failure(result, lock.take_persist_failure())
+    }
+
+    /// Run the query against an already-locked conversation.
+    ///
+    /// Errors propagate freely: the caller drains any persist failure the
+    /// unwinding left behind.
+    #[expect(clippy::too_many_lines)]
+    async fn run_locked(self, ctx: &mut Ctx, lock: &ConversationLock) -> Output {
+        let now = ctx.now();
+        let cfg = ctx.config();
+
         // Create symlinks and seed approvals for any `--mount` flags before the
         // turn runs, so tools can reach the mounted paths.
         create_mount_effects(&self.mount, &ctx.workspace, ctx.fs_backend.as_deref(), now)?;
@@ -372,13 +387,13 @@ impl Query {
         // The two flags are mutually exclusive (enforced by clap), and the
         // resolved conversation may be new, freshly forked (which clones the
         // source's metadata, including any title), or resumed.
-        apply_title_override(&lock, self.title.as_deref(), self.no_title);
+        apply_title_override(lock, self.title.as_deref(), self.no_title);
 
         // Record this conversation as the session's active conversation.
         if let Some(session) = &ctx.session
             && let Err(error) = ctx
                 .workspace
-                .activate_session_conversation(&lock, session, now)
+                .activate_session_conversation(lock, session, now)
         {
             warn!(%error, "Failed to record activation.");
         }
@@ -400,7 +415,7 @@ impl Query {
 
         // Compact the conversation before querying, if requested.
         if self.compact.should_compact() {
-            self.apply_pre_query_compaction(&lock, &cfg).await?;
+            self.apply_pre_query_compaction(lock, &cfg).await?;
         }
 
         let mut mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
@@ -508,7 +523,7 @@ impl Query {
         // known to be non-empty. Recording it before the empty-query check
         // would leave a config event behind for a query that was ultimately
         // ignored.
-        if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
+        if let Some(delta) = get_config_delta_from_cli(&cfg, lock)? {
             setup.update_events(|events| events.add_config_delta(delta));
         }
 
@@ -610,7 +625,7 @@ impl Query {
             conversation_id: lock.id().to_string(),
         };
 
-        let turn_result = self
+        let mut turn_result = self
             .handle_turn(
                 &cfg,
                 &ctx.signals,
@@ -618,7 +633,7 @@ impl Query {
                 root,
                 ctx.term.is_tty,
                 &thread.attachments,
-                &lock,
+                lock,
                 cfg.assistant.tool_choice.clone(),
                 &tools,
                 ctx.printer.clone(),
@@ -629,6 +644,19 @@ impl Query {
             )
             .await
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
+
+        // Fold a drop-time persist failure into the turn's result before
+        // anything downstream treats the turn as a success. Both gates below
+        // key off `is_ok`, and the scratch file one of them deletes is the
+        // user's only recovery copy of a request that was never saved.
+        //
+        // `run` drains again for the exits that never reach this point; the
+        // failure is only ever handed out once.
+        if turn_result.is_ok()
+            && let Some(error) = lock.take_persist_failure()
+        {
+            turn_result = Err(cmd::Error::from(Error::Workspace(error)));
+        }
 
         // Extract structured data from the conversation after the turn.
         if self.schema.is_some() && turn_result.is_ok() {
@@ -651,17 +679,6 @@ impl Query {
         // path captured before the turn ran.
         if turn_result.is_ok() {
             cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
-        }
-
-        // A mutation scope that dropped while dirty could not propagate its
-        // persist failure, so it recorded it on the lock instead. Surface it
-        // here so an unsaved conversation never exits zero. Only when the turn
-        // itself succeeded: a turn error is the more specific diagnostic, and
-        // the persist failure is usually a consequence of the same condition.
-        if turn_result.is_ok()
-            && let Some(error) = lock.take_persist_failure()
-        {
-            return Err(cmd::Error::from(Error::Workspace(error)));
         }
 
         turn_result
@@ -1348,6 +1365,25 @@ fn resolve_new_title(from_heading: bool, generate_auto: bool, content: &str) -> 
     }
 
     NewTitle::Skip
+}
+
+/// Fold a drained persist failure into the run's result.
+///
+/// With no failure the result passes through.
+/// A failure on an otherwise successful run becomes the error, so an unsaved
+/// conversation cannot exit zero.
+/// Alongside an existing error the failure is attached as metadata: the two can
+/// be independent (a provider error and a full disk), and the primary error is
+/// the more specific diagnostic.
+fn fold_persist_failure(result: Output, persist: Option<jp_workspace::Error>) -> Output {
+    match (result, persist) {
+        (result, None) => result,
+        (Ok(()), Some(persist)) => Err(cmd::Error::from(Error::Workspace(persist))),
+        (Err(mut error), Some(persist)) => {
+            error.push_metadata("persist_failure", persist.to_string());
+            Err(error)
+        }
+    }
 }
 
 /// Apply `--title` / `--no-title` to the resolved conversation.

@@ -177,14 +177,12 @@ impl ConversationMut {
 impl Drop for ConversationMut {
     fn drop(&mut self) {
         if !self.dirty.load(Ordering::Relaxed) { return; }
-        if self.persist.lock().out_of_space { return; }
 
         let meta = self.metadata.read();
         let evts = self.events.read();
         if let Err(error) = self.writer.write(&self.id, &meta, &evts, self.projection) {
             warn!(id = %self.id, %error, "Failed to persist conversation.");
             let mut state = self.persist.lock();
-            state.out_of_space |= error.is_out_of_space();
             if state.failure.is_none() { state.failure = Some(error); }
         }
     }
@@ -193,15 +191,22 @@ impl Drop for ConversationMut {
 
 `Drop` cannot propagate, so it records the failure on state shared with the
 originating lock rather than writing to the terminal.
-`ConversationLock::take_persist_failure` (and its `ConversationMut`
-counterpart) drains it, so the shell reports once, through the printer, with a
-non-zero exit code.
-One failing disk therefore yields one diagnostic instead of one per mutation
-scope.
+`ConversationLock::take_persist_failure` (and its `ConversationMut` counterpart)
+drains it, so the shell reports once, through the printer, with a non-zero exit
+code.
+Only the first failure is kept, so one failing disk yields one diagnostic
+instead of one per mutation scope.
 
-A failure that shows the filesystem is full marks the shared state, and
-subsequent write attempts are skipped: nothing can succeed until space is
-freed.
+Every later scope still attempts its own write.
+A persist spans two roots that can be separate filesystems (the durable
+user-local copy and the workspace projection), so a failure against one says
+nothing about the other; skipping subsequent writes would strand new events that
+the healthy root would have accepted.
+
+`flush` records nothing of its own, since it propagates and the caller owns
+reporting.
+A caller that swallows that error leaves the scope dirty, so the drop retries
+and records the outcome — a swallowed flush failure still reaches a drain.
 
 `AtomicBool` is used for the dirty flag instead of `Cell<bool>`.
 `Cell<bool>` is `!Sync`, which would make `ConversationMut` `!Sync` and cause

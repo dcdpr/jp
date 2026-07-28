@@ -37,6 +37,29 @@ fn test_storage_new_errors_on_source_file() {
 }
 
 #[test]
+fn copy_dir_all_failure_names_the_destination_file() {
+    // The import leg of a persist copies whole conversation directories, so a
+    // full disk can fail here rather than in `write_json`. Without the path the
+    // user is told only "IO error".
+    let tmp = tempdir().unwrap();
+    let src = tmp.path().join("src");
+    let dst = tmp.path().join("dst");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("events.json"), "[]").unwrap();
+
+    // A directory where the copied file must land fails on all platforms.
+    let blocker = dst.join("events.json");
+    fs::create_dir_all(&blocker).unwrap();
+
+    let error = copy_dir_all(&src, &dst).expect_err("copying onto a directory should fail");
+
+    match error {
+        Error::WriteFailed { path, .. } => assert_eq!(path, blocker),
+        other => panic!("expected WriteFailed, got {other:?}"),
+    }
+}
+
+#[test]
 fn test_conversation_dir_name_generation() {
     let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();
     assert_eq!(id.to_dirname(None), "17457886043");

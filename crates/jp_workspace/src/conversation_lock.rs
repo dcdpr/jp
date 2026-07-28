@@ -72,13 +72,15 @@
 //! The next `flush()` returns it, and
 //! [`take_persist_failure`][ConversationLock::take_persist_failure] drains it
 //! for a caller that wants to report at teardown.
-//! Either way, one failing disk yields one diagnostic rather than one per
-//! mutation scope, and the reporting happens where the output channel and the
-//! exit code live.
+//! Only the first failure is kept, so one failing disk yields one diagnostic
+//! rather than one per mutation scope, and the reporting happens where the
+//! output channel and the exit code live.
 //!
-//! A failure that shows the filesystem is full also marks the shared state, and
-//! subsequent write attempts are skipped: nothing can succeed until space is
-//! freed.
+//! Every later scope still attempts its own write.
+//! A persist can span two filesystems (the durable user-local copy and the
+//! workspace projection), so a failure against one of them says nothing about
+//! the other: skipping subsequent writes would strand new events that the
+//! healthy root could still accept.
 
 use std::sync::{
     Arc,
@@ -103,12 +105,6 @@ struct PersistState {
     /// of the same condition, while the first names the write that actually
     /// broke.
     failure: Option<Error>,
-
-    /// Set once a failure showed the filesystem is full.
-    ///
-    /// Sticky, and never cleared: further write attempts are skipped rather
-    /// than retried against a disk with no room.
-    out_of_space: bool,
 }
 
 /// Result of attempting to acquire a conversation lock.
@@ -405,13 +401,10 @@ impl ConversationMut {
 
         let meta = self.metadata.read();
         let evts = self.events.read();
-        if let Err(error) = self.writer.write(&self.id, &meta, &evts, self.projection) {
-            // Recorded as futile but not as a pending failure: this error is
-            // returned, so the caller owns reporting it.
-            let error = Error::from(error);
-            self.persist.lock().out_of_space |= error.is_out_of_space();
-            return Err(error);
-        }
+        // Not recorded on the shared state: this error is returned, so the
+        // caller owns reporting it. The scope stays dirty, so if the caller
+        // swallows it, the drop below retries and records that failure.
+        self.writer.write(&self.id, &meta, &evts, self.projection)?;
         self.dirty.store(false, Ordering::Relaxed);
 
         info!(id = %self.id, "Flushed conversation to disk.");
@@ -472,11 +465,6 @@ impl Drop for ConversationMut {
             return;
         }
 
-        if self.persist.lock().out_of_space {
-            warn!(id = %self.id, "Skipping persist: no space left on device.");
-            return;
-        }
-
         let meta = self.metadata.read();
         let evts = self.events.read();
 
@@ -485,7 +473,6 @@ impl Drop for ConversationMut {
             warn!(id = %self.id, %error, "Failed to persist conversation.");
 
             let mut state = self.persist.lock();
-            state.out_of_space |= error.is_out_of_space();
             if state.failure.is_none() {
                 state.failure = Some(error);
             }

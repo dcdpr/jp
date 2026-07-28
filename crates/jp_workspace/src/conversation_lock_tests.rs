@@ -60,33 +60,18 @@ impl PersistBackend for MockPersistBackend {
     }
 }
 
-/// Persistence backend that fails every write with a fixed error, counting the
+/// Persistence backend whose every write fails with a full disk, counting the
 /// attempts.
 ///
-/// The count is what makes the "one failing disk, one report" claim testable: a
-/// backend that only records the error cannot distinguish "the write was
-/// skipped" from "the write was retried and failed again".
-#[derive(Debug)]
+/// The count is what makes the retry claims testable: a backend that only
+/// records the error cannot distinguish "the write was skipped" from "the write
+/// was retried and failed again".
+#[derive(Debug, Default)]
 struct FailingPersistBackend {
     attempts: AtomicUsize,
-    out_of_space: bool,
 }
 
 impl FailingPersistBackend {
-    fn out_of_space() -> Self {
-        Self {
-            attempts: AtomicUsize::new(0),
-            out_of_space: true,
-        }
-    }
-
-    fn permission_denied() -> Self {
-        Self {
-            attempts: AtomicUsize::new(0),
-            out_of_space: false,
-        }
-    }
-
     fn attempts(&self) -> usize {
         self.attempts.load(AtomicOrdering::Relaxed)
     }
@@ -102,14 +87,9 @@ impl PersistBackend for FailingPersistBackend {
     ) -> Result<(), jp_storage::Error> {
         self.attempts.fetch_add(1, AtomicOrdering::Relaxed);
 
-        let source = if self.out_of_space {
-            io::Error::from(io::ErrorKind::StorageFull)
-        } else {
-            io::Error::from(io::ErrorKind::PermissionDenied)
-        };
         Err(jp_storage::Error::write_failed(
             Utf8Path::new("/data/conv/events.json"),
-            source,
+            io::Error::from(io::ErrorKind::StorageFull),
         ))
     }
 
@@ -126,10 +106,8 @@ impl PersistBackend for FailingPersistBackend {
     }
 }
 
-fn test_lock_with_failing_backend(
-    backend: FailingPersistBackend,
-) -> (ConversationLock, Arc<FailingPersistBackend>) {
-    let backend = Arc::new(backend);
+fn test_lock_with_failing_backend() -> (ConversationLock, Arc<FailingPersistBackend>) {
+    let backend = Arc::new(FailingPersistBackend::default());
     let lock = ConversationLock::new(
         test_handle(),
         Arc::new(RwLock::new(Conversation::default())),
@@ -391,7 +369,7 @@ fn no_persist_failure_recorded_on_a_healthy_backend() {
 
 #[test]
 fn drop_records_persist_failure_on_the_lock() {
-    let (lock, backend) = test_lock_with_failing_backend(FailingPersistBackend::out_of_space());
+    let (lock, backend) = test_lock_with_failing_backend();
 
     {
         let conv = lock.as_mut();
@@ -402,7 +380,6 @@ fn drop_records_persist_failure_on_the_lock() {
     let error = lock
         .take_persist_failure()
         .expect("the failed drop-time write is recorded on the lock");
-    assert!(error.is_out_of_space());
     assert_eq!(
         error.to_string(),
         "Storage error: no space left on device while writing /data/conv/events.json"
@@ -411,7 +388,7 @@ fn drop_records_persist_failure_on_the_lock() {
 
 #[test]
 fn recorded_persist_failure_is_returned_only_once() {
-    let (lock, _backend) = test_lock_with_failing_backend(FailingPersistBackend::out_of_space());
+    let (lock, _backend) = test_lock_with_failing_backend();
 
     {
         let conv = lock.as_mut();
@@ -426,25 +403,24 @@ fn recorded_persist_failure_is_returned_only_once() {
 }
 
 #[test]
-fn out_of_space_skips_every_later_write_attempt() {
-    let (lock, backend) = test_lock_with_failing_backend(FailingPersistBackend::out_of_space());
+fn every_scope_attempts_its_own_write_after_a_failure() {
+    // A persist spans two roots that can be separate filesystems. A failure
+    // against one says nothing about the other, so a scope must never skip its
+    // write on the strength of an earlier failure: doing so strands new events
+    // that the healthy root would have accepted.
+    let (lock, backend) = test_lock_with_failing_backend();
 
-    // Three mutation scopes, each of which would persist on drop.
     for _ in 0..3 {
         let conv = lock.as_mut();
         conv.update_metadata(|_| {});
     }
 
-    assert_eq!(
-        backend.attempts(),
-        1,
-        "a full disk must be hit once, not once per mutation scope"
-    );
+    assert_eq!(backend.attempts(), 3);
 }
 
 #[test]
 fn out_of_space_records_only_the_first_failure() {
-    let (lock, _backend) = test_lock_with_failing_backend(FailingPersistBackend::out_of_space());
+    let (lock, _backend) = test_lock_with_failing_backend();
 
     {
         let conv = lock.as_mut();
@@ -460,25 +436,8 @@ fn out_of_space_records_only_the_first_failure() {
 }
 
 #[test]
-fn a_recoverable_failure_does_not_skip_later_writes() {
-    // Only a full filesystem makes further writes futile. A permission error may
-    // clear (the user chmods the directory mid-run), so each scope still tries.
-    let (lock, backend) =
-        test_lock_with_failing_backend(FailingPersistBackend::permission_denied());
-
-    for _ in 0..3 {
-        let conv = lock.as_mut();
-        conv.update_metadata(|_| {});
-    }
-
-    assert_eq!(backend.attempts(), 3);
-    let error = lock.take_persist_failure().expect("failure is recorded");
-    assert!(!error.is_out_of_space());
-}
-
-#[test]
 fn flush_returns_a_failure_recorded_by_an_earlier_drop() {
-    let (lock, backend) = test_lock_with_failing_backend(FailingPersistBackend::out_of_space());
+    let (lock, backend) = test_lock_with_failing_backend();
 
     {
         let conv = lock.as_mut();
@@ -491,11 +450,14 @@ fn flush_returns_a_failure_recorded_by_an_earlier_drop() {
         .flush()
         .expect_err("flush surfaces the earlier drop-time failure");
 
-    assert!(error.is_out_of_space());
+    assert_eq!(
+        error.to_string(),
+        "Storage error: no space left on device while writing /data/conv/events.json"
+    );
     assert_eq!(
         backend.attempts(),
         1,
-        "flush returns the recorded failure without touching a full disk again"
+        "the recorded failure is returned without a further write of its own"
     );
     assert!(
         lock.take_persist_failure().is_none(),
@@ -504,34 +466,31 @@ fn flush_returns_a_failure_recorded_by_an_earlier_drop() {
 }
 
 #[test]
-fn flush_does_not_record_its_own_failure() {
-    // `flush` propagates, so its caller owns reporting. Recording it too would
-    // produce the double report this mechanism exists to prevent.
-    let (lock, _backend) = test_lock_with_failing_backend(FailingPersistBackend::out_of_space());
+fn a_swallowed_flush_failure_still_reaches_a_drain() {
+    // `flush` records nothing of its own: it propagates, so the caller owns
+    // reporting. A caller that logs and moves on (the turn loop does this when
+    // aborting on a fatal stream error) would otherwise lose the fact that
+    // nothing was saved. The scope stays dirty, so its drop retries and
+    // records that failure for a teardown drain.
+    let (lock, backend) = test_lock_with_failing_backend();
 
     let mut conv = lock.as_mut();
     conv.update_metadata(|_| {});
     assert!(conv.flush().is_err());
-    drop(conv);
-
-    assert!(lock.take_persist_failure().is_none());
-}
-
-#[test]
-fn a_failed_flush_leaves_the_scope_dirty_for_the_drop_safety_net() {
-    let (lock, backend) =
-        test_lock_with_failing_backend(FailingPersistBackend::permission_denied());
-
-    let mut conv = lock.as_mut();
-    conv.update_metadata(|_| {});
-    assert!(conv.flush().is_err());
-    assert!(conv.is_dirty());
+    assert!(
+        conv.is_dirty(),
+        "a failed flush must not clear the dirty flag"
+    );
     drop(conv);
 
     assert_eq!(
         backend.attempts(),
         2,
-        "the drop safety net retries a recoverable flush failure"
+        "the drop safety net retries the failed flush"
+    );
+    assert!(
+        lock.take_persist_failure().is_some(),
+        "the retry's failure is recorded, so a swallowed flush is not silent"
     );
 }
 
@@ -539,7 +498,7 @@ fn a_failed_flush_leaves_the_scope_dirty_for_the_drop_safety_net() {
 fn a_scope_drains_a_failure_recorded_before_it_existed() {
     // The lock-owning scope (`into_mut`) is the only drain point once the lock
     // has been consumed, so it must see failures recorded by earlier scopes.
-    let (lock, _backend) = test_lock_with_failing_backend(FailingPersistBackend::out_of_space());
+    let (lock, _backend) = test_lock_with_failing_backend();
 
     {
         let conv = lock.as_mut();
@@ -550,7 +509,10 @@ fn a_scope_drains_a_failure_recorded_before_it_existed() {
     let error = conv
         .take_persist_failure()
         .expect("the owning scope sees the earlier failure");
-    assert!(error.is_out_of_space());
+    assert_eq!(
+        error.to_string(),
+        "Storage error: no space left on device while writing /data/conv/events.json"
+    );
     assert!(conv.take_persist_failure().is_none());
 }
 

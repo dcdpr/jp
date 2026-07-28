@@ -69,19 +69,6 @@ impl Error {
             Self::WriteFailed { path, source }
         }
     }
-
-    /// Whether the error means the filesystem is full.
-    ///
-    /// A caller that sees this should stop attempting writes rather than move
-    /// on to the next one: none of them can succeed until space is freed.
-    #[must_use]
-    pub fn is_out_of_space(&self) -> bool {
-        match self {
-            Self::OutOfSpace { .. } => true,
-            Self::Io(error) => is_storage_full(error),
-            _ => false,
-        }
-    }
 }
 
 /// Whether an OS error reports a full filesystem.
@@ -89,8 +76,7 @@ impl Error {
 /// Recognises both a raw OS error (`ENOSPC`, `ERROR_DISK_FULL`) and an error
 /// constructed directly from the kind, since `std` maps the platform codes onto
 /// [`io::ErrorKind::StorageFull`].
-#[must_use]
-pub fn is_storage_full(error: &io::Error) -> bool {
+fn is_storage_full(error: &io::Error) -> bool {
     error.kind() == io::ErrorKind::StorageFull
 }
 
