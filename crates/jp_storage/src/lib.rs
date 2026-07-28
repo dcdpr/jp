@@ -27,6 +27,12 @@ pub(crate) const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 const BASE_CONFIG_FILE: &str = "base_config.json";
 pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
+
+/// Name prefix for a conversation directory being staged by an import.
+///
+/// Dot-prefixed so a leftover is invisible to conversation lookups and index
+/// scans, both of which match on the bare conversation dirname.
+const IMPORT_STAGING_PREFIX: &str = ".import-";
 pub(crate) const ARCHIVE_DIR: &str = ".archive";
 
 #[derive(Debug, Clone)]
@@ -821,6 +827,10 @@ fn remove_conversation_dirs(id: &ConversationId, conversations_dir: &Utf8Path) -
 /// name the upcoming write will use.
 /// A conversation already present in user-local, or one with no workspace copy,
 /// is left untouched.
+///
+/// The copy lands in a staging directory and is renamed into place, so the
+/// import is all-or-nothing: a failed or killed run leaves nothing that later
+/// runs can mistake for an imported conversation.
 fn import_external_copy(
     id: &ConversationId,
     title: Option<&str>,
@@ -838,10 +848,46 @@ fn import_external_copy(
 
     fs::create_dir_all(user_conversations)
         .map_err(|error| Error::write_failed(user_conversations, error))?;
-    copy_dir_all(
-        &workspace_conv,
-        &user_conversations.join(id.to_dirname(title)),
-    )
+
+    // Copying straight to the final name would leave a partial directory behind
+    // on failure. The next run then finds it, treats the import as already done
+    // and skips it forever, while its fresh mtime makes the loader prefer it
+    // over the intact workspace copy. Staging plus a rename makes the visible
+    // result atomic.
+    let dirname = id.to_dirname(title);
+    let staging = user_conversations.join(format!("{IMPORT_STAGING_PREFIX}{dirname}"));
+    let target = user_conversations.join(&dirname);
+
+    // A leftover staging directory is debris from an earlier crash; copying
+    // into it would carry stale entries across.
+    let _err = fs::remove_dir_all(&staging);
+
+    if let Err(error) = copy_dir_all(&workspace_conv, &staging) {
+        let _err = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+
+    if let Err(error) = fs::rename(&staging, &target) {
+        let _err = fs::remove_dir_all(&staging);
+        return Err(Error::write_failed(&target, error));
+    }
+
+    Ok(())
+}
+
+/// Remove leftover import staging directories from a `conversations/`
+/// directory.
+///
+/// One only survives a crash between the copy and the rename, and holds nothing
+/// the workspace copy does not still have.
+pub(crate) fn cleanup_import_staging(conversations_dir: &Utf8Path) {
+    for entry in dir_entries(conversations_dir) {
+        if entry.file_name().starts_with(IMPORT_STAGING_PREFIX) && entry.path().is_dir() {
+            let path = entry.into_path();
+            trace!(%path, "Removing leftover import staging directory.");
+            let _err = fs::remove_dir_all(path);
+        }
+    }
 }
 
 /// Recursively copy directory `src` into `dst`.

@@ -466,6 +466,14 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         }
     });
 
+    // The shutdown arm above drops the command future, so a conversation scope
+    // that was dirty persists from its `Drop` and records any failure on the
+    // workspace — with the command's own drain gone along with the future. This
+    // is the last place that can still tell the user nothing was saved.
+    // Commands that reported already left nothing behind: the record yields
+    // each failure once.
+    let output = cmd::fold_persist_failure(output, ctx.workspace.take_persist_failure());
+
     if let Err(error) = output.as_ref()
         && error.disable_persistence
     {

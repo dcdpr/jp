@@ -81,6 +81,12 @@
 //! workspace projection), so a failure against one of them says nothing about
 //! the other: skipping subsequent writes would strand new events that the
 //! healthy root could still accept.
+//!
+//! The record is owned by the `Workspace`, not by the lock, so a failure
+//! recorded while a dropped future unwinds is still there once the lock is
+//! gone.
+//! `Workspace::take_persist_failure` is the drain of last resort for a run
+//! whose command future was cancelled before it could report.
 
 use std::sync::{
     Arc,
@@ -94,11 +100,11 @@ use tracing::{info, warn};
 
 use crate::{error::Error, handle::ConversationHandle};
 
-/// Shared record of drop-time persistence outcomes for one conversation lock.
+/// Shared record of drop-time persistence outcomes.
 ///
 /// See the module docs for how a recorded failure reaches the user.
 #[derive(Debug, Default)]
-struct PersistState {
+pub(crate) struct PersistState {
     /// The first drop-time failure no caller has been told about yet.
     ///
     /// The first is kept rather than the last: later failures are consequences
@@ -106,6 +112,19 @@ struct PersistState {
     /// broke.
     failure: Option<Error>,
 }
+
+impl PersistState {
+    /// Take the recorded failure, leaving the slot empty.
+    pub(crate) fn take(&mut self) -> Option<Error> {
+        self.failure.take()
+    }
+}
+
+/// Shared handle to the record of drop-time persistence failures.
+///
+/// Held by the workspace and by every lock and scope derived from it, so a
+/// failure recorded while a future unwinds outlives the scope that recorded it.
+pub(crate) type PersistFailures = Arc<Mutex<PersistState>>;
 
 /// Result of attempting to acquire a conversation lock.
 #[derive(Debug)]
@@ -134,7 +153,7 @@ pub struct ConversationLock {
     writer: Arc<dyn PersistBackend>,
     lock_guard: Arc<Box<dyn ConversationLockGuard>>,
     projection: Projection,
-    persist: Arc<Mutex<PersistState>>,
+    persist: PersistFailures,
 }
 
 impl ConversationLock {
@@ -150,6 +169,7 @@ impl ConversationLock {
         writer: Arc<dyn PersistBackend>,
         lock_guard: Box<dyn ConversationLockGuard>,
         projection: Projection,
+        persist: PersistFailures,
     ) -> Self {
         Self {
             id: handle.into_inner(),
@@ -158,7 +178,7 @@ impl ConversationLock {
             writer,
             lock_guard: Arc::new(lock_guard),
             projection,
-            persist: Arc::default(),
+            persist,
         }
     }
 
@@ -170,7 +190,7 @@ impl ConversationLock {
     /// recorded here and are never returned twice.
     #[must_use]
     pub fn take_persist_failure(&self) -> Option<Error> {
-        self.persist.lock().failure.take()
+        self.persist.lock().take()
     }
 
     /// The write projection this lock persists with.
@@ -279,9 +299,9 @@ pub struct ConversationMut {
     writer: Arc<dyn PersistBackend>,
     projection: Projection,
 
-    // Shared with the originating lock and every other scope derived from it,
-    // so a failure recorded here survives this scope's drop.
-    persist: Arc<Mutex<PersistState>>,
+    // Shared with the workspace, the originating lock, and every other scope
+    // derived from it, so a failure recorded here survives this scope's drop.
+    persist: PersistFailures,
 
     // Holds the lock guard alive. Released when the last Arc drops.
     _lock_guard: Arc<Box<dyn ConversationLockGuard>>,
@@ -391,7 +411,7 @@ impl ConversationMut {
     ///
     /// After a successful flush, the dirty flag is cleared.
     pub fn flush(&mut self) -> crate::error::Result<()> {
-        if let Some(error) = self.persist.lock().failure.take() {
+        if let Some(error) = self.persist.lock().take() {
             return Err(error);
         }
 
@@ -417,7 +437,7 @@ impl ConversationMut {
     /// that owns the lock, where no `ConversationLock` remains to drain.
     #[must_use]
     pub fn take_persist_failure(&self) -> Option<Error> {
-        self.persist.lock().failure.take()
+        self.persist.lock().take()
     }
 
     /// The write projection this scope persists with.

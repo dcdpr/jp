@@ -208,6 +208,13 @@ reporting.
 A caller that swallows that error leaves the scope dirty, so the drop retries
 and records the outcome — a swallowed flush failure still reaches a drain.
 
+The record is owned by the `Workspace`, not by the lock.
+A cancelled command future (Ctrl-C, SIGTERM) is dropped mid-flight: the scope
+persists from its `Drop` and the lock goes with it, taking any drain inside the
+future along.
+`Workspace::take_persist_failure` runs after the command future has resolved or
+been dropped, and is the drain of last resort for that path.
+
 `AtomicBool` is used for the dirty flag instead of `Cell<bool>`.
 `Cell<bool>` is `!Sync`, which would make `ConversationMut` `!Sync` and cause
 async futures holding `&ConversationMut` across `.await` points to become
@@ -376,11 +383,11 @@ This is slightly more verbose but structurally prevents
 `?` composes naturally since the callback's return type is forwarded.
 
 **Errors in `Drop` cannot be propagated.** A persist failure during
-`ConversationMut`'s drop is recorded on the shared persist state and surfaced by
-the next `flush()` or by a `take_persist_failure()` drain at teardown, rather
-than returned from `drop`.
-A scope that owns the lock (`into_mut`) and drops without either is the one
-remaining hole: its failure reaches the log file but no caller.
+`ConversationMut`'s drop is recorded on the workspace-owned persist state and
+surfaced by the next `flush()`, by a `take_persist_failure()` drain in the
+command, or by the CLI's teardown drain, rather than returned from `drop`.
+The record outliving both the scope and the lock is what makes the teardown
+drain reachable after a cancelled future.
 Long-running loops must call `flush()?` at checkpoints so that I/O failures halt
 immediately.
 

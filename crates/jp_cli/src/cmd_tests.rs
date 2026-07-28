@@ -23,6 +23,56 @@ fn rendered(error: &Error) -> String {
     lines.join("\n")
 }
 
+/// A drop-time persist failure as the workspace records one.
+fn persist_failure() -> jp_workspace::Error {
+    jp_workspace::Error::Storage(jp_storage::Error::write_failed(
+        Utf8Path::new("/data/conv/events.json"),
+        io::Error::from(io::ErrorKind::StorageFull),
+    ))
+}
+
+#[test]
+fn a_clean_run_passes_through_unchanged() {
+    assert!(fold_persist_failure(Ok(()), None).is_ok());
+}
+
+#[test]
+fn a_persist_failure_fails_an_otherwise_successful_run() {
+    let error =
+        fold_persist_failure(Ok(()), Some(persist_failure())).expect_err("must not exit zero");
+
+    assert_eq!(error.message.as_deref(), Some("No space left on device"));
+    assert_eq!(error.code.get(), 1);
+}
+
+#[test]
+fn a_persist_failure_rides_along_with_an_existing_error() {
+    // The two can be independent — a provider error and a full disk — so the
+    // primary error stays the headline and the persist failure is attached
+    // rather than dropped.
+    let error = fold_persist_failure(Err(Error::from("Rate limited")), Some(persist_failure()))
+        .expect_err("the primary error is preserved");
+
+    assert_eq!(error.message.as_deref(), Some("Rate limited"));
+    assert_eq!(
+        error
+            .metadata
+            .iter()
+            .find(|(key, _)| key == "persist_failure")
+            .map(|(_, value)| value.as_str().unwrap_or_default()),
+        Some("Storage error: no space left on device while writing /data/conv/events.json")
+    );
+}
+
+#[test]
+fn an_existing_error_survives_when_nothing_was_recorded() {
+    let error = fold_persist_failure(Err(Error::from("Rate limited")), None)
+        .expect_err("the primary error is preserved");
+
+    assert_eq!(error.message.as_deref(), Some("Rate limited"));
+    assert!(error.metadata.is_empty());
+}
+
 #[cfg(unix)]
 #[test]
 fn out_of_space_renders_path_cause_and_action() {

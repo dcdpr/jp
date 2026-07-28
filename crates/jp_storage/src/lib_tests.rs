@@ -36,6 +36,67 @@ fn test_storage_new_errors_on_source_file() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn a_failed_import_leaves_nothing_that_looks_like_a_conversation() {
+    let tmp = tempdir().unwrap();
+    let workspace = tmp.path().join("ws").join("conversations");
+    let user = tmp.path().join("user").join("conversations");
+    let id = ConversationId::from_str("jp-c17457886043-otvo8").unwrap();
+    let prefix = id.to_dirname(None);
+
+    let src = workspace.join(&prefix);
+    fs::create_dir_all(&src).unwrap();
+    fs::write(src.join("events.json"), "[]").unwrap();
+    fs::write(src.join("notes.md"), "keep me").unwrap();
+    // A dangling symlink makes exactly one `fs::copy` fail mid-directory, the
+    // way a disk filling up would, without having to fill a disk.
+    std::os::unix::fs::symlink("nowhere", src.join("dangling")).unwrap();
+
+    let error = import_external_copy(&id, Some("title"), &workspace, &user)
+        .expect_err("the copy fails on the dangling entry");
+    assert!(matches!(error, Error::WriteFailed { .. }));
+
+    // The poisoning this guards against: a partial directory under the real
+    // name makes every later run skip the import, and its fresh mtime makes the
+    // loader prefer it over the intact workspace copy.
+    assert!(
+        find_normal_conversation_dir_path(&user, &prefix).is_none(),
+        "a failed import must not leave a conversation directory"
+    );
+    assert_eq!(
+        dir_entries(&user).count(),
+        0,
+        "the staging directory is cleaned up too"
+    );
+
+    // Clear the obstruction: the retry now completes, non-managed file included.
+    fs::remove_file(src.join("dangling")).unwrap();
+    import_external_copy(&id, Some("title"), &workspace, &user).expect("the retry succeeds");
+
+    let imported =
+        find_normal_conversation_dir_path(&user, &prefix).expect("the conversation is imported");
+    assert_eq!(
+        fs::read_to_string(imported.join("notes.md")).unwrap(),
+        "keep me"
+    );
+}
+
+#[test]
+fn cleanup_import_staging_removes_only_staging_dirs() {
+    let tmp = tempdir().unwrap();
+    let conversations = tmp.path();
+    fs::create_dir_all(conversations.join(".import-17457886043-title")).unwrap();
+    fs::create_dir_all(conversations.join("17457886043-title")).unwrap();
+    fs::create_dir_all(conversations.join(".archive")).unwrap();
+
+    cleanup_import_staging(conversations);
+
+    assert!(!conversations.join(".import-17457886043-title").exists());
+    assert!(conversations.join("17457886043-title").is_dir());
+    assert!(conversations.join(".archive").is_dir());
+}
+
 #[test]
 fn copy_dir_all_failure_names_the_destination_file() {
     // The import leg of a persist copies whole conversation directories, so a

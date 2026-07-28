@@ -368,7 +368,7 @@ impl Query {
         // this the one reliable drain point: a mutation scope that dropped
         // while dirty recorded its persist failure on the lock, and any `?` in
         // the region above returns past every other candidate site.
-        fold_persist_failure(result, lock.take_persist_failure())
+        cmd::fold_persist_failure(result, lock.take_persist_failure())
     }
 
     /// Run the query against an already-locked conversation.
@@ -1365,25 +1365,6 @@ fn resolve_new_title(from_heading: bool, generate_auto: bool, content: &str) -> 
     }
 
     NewTitle::Skip
-}
-
-/// Fold a drained persist failure into the run's result.
-///
-/// With no failure the result passes through.
-/// A failure on an otherwise successful run becomes the error, so an unsaved
-/// conversation cannot exit zero.
-/// Alongside an existing error the failure is attached as metadata: the two can
-/// be independent (a provider error and a full disk), and the primary error is
-/// the more specific diagnostic.
-fn fold_persist_failure(result: Output, persist: Option<jp_workspace::Error>) -> Output {
-    match (result, persist) {
-        (result, None) => result,
-        (Ok(()), Some(persist)) => Err(cmd::Error::from(Error::Workspace(persist))),
-        (Err(mut error), Some(persist)) => {
-            error.push_metadata("persist_failure", persist.to_string());
-            Err(error)
-        }
-    }
 }
 
 /// Apply `--title` / `--no-title` to the resolved conversation.

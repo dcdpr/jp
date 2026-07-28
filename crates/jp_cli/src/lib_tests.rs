@@ -64,6 +64,86 @@ fn build_cfg(
     pipeline.partial_without_conversation()
 }
 
+/// Persistence backend whose every write fails with a full disk.
+#[derive(Debug)]
+struct AlwaysFullBackend;
+
+impl jp_storage::backend::PersistBackend for AlwaysFullBackend {
+    fn write(
+        &self,
+        _id: &ConversationId,
+        _metadata: &Conversation,
+        _events: &jp_conversation::ConversationStream,
+        _projection: jp_storage::backend::Projection,
+    ) -> std::result::Result<(), jp_storage::Error> {
+        Err(jp_storage::Error::write_failed(
+            camino::Utf8Path::new("/data/conv/events.json"),
+            std::io::Error::from(std::io::ErrorKind::StorageFull),
+        ))
+    }
+
+    fn remove(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn archive(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn unarchive(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_cancelled_command_future_still_reports_its_persist_failure() {
+    // Mirrors `run_inner`'s shutdown arm: on Ctrl-C the command future is
+    // dropped mid-flight, so the drain inside it never runs. The command arm
+    // here parks forever after dirtying the conversation, which holds the
+    // window open — cancellation always lands while the scope is still alive,
+    // rather than racing a sleep.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut workspace = Workspace::new("root").with_persist(Arc::new(AlwaysFullBackend));
+    let lock = workspace
+        .create_and_lock_conversation(
+            Conversation::default(),
+            Arc::new(AppConfig::new_test()),
+            None,
+        )
+        .unwrap();
+
+    let output: cmd::Output = rt.block_on(async {
+        tokio::select! {
+            biased;
+            () = async {
+                let conv = lock.as_mut();
+                conv.update_metadata(|m| m.title = Some("unsaved".into()));
+                std::future::pending::<()>().await;
+            } => unreachable!("the command arm never completes"),
+            () = std::future::ready(()) => Err(cmd::Error::interrupted()),
+        }
+    });
+    drop(lock);
+
+    let error = cmd::fold_persist_failure(output, workspace.take_persist_failure())
+        .expect_err("the run was interrupted");
+
+    // The interrupt stays the headline and keeps its exit code; the fact that
+    // nothing was saved rides along instead of being lost to the log file.
+    assert_eq!(error.message.as_deref(), Some("Interrupted"));
+    assert_eq!(error.code.get(), 130);
+    assert_eq!(
+        error
+            .metadata
+            .iter()
+            .find(|(key, _)| key == "persist_failure")
+            .map(|(_, value)| value.as_str().unwrap_or_default()),
+        Some("Storage error: no space left on device while writing /data/conv/events.json")
+    );
+}
+
 #[test]
 fn tracing_guard_persist_returns_explicit_log_file_path() {
     // `--log-file <path>`: the file lives wherever the caller put it; persist

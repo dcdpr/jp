@@ -178,6 +178,25 @@ impl IntoPartialAppConfig for Commands {
 
 pub(crate) type Output = std::result::Result<(), Error>;
 
+/// Fold a drained persist failure into a command's result.
+///
+/// With no failure the result passes through.
+/// A failure on an otherwise successful run becomes the error, so an unsaved
+/// conversation cannot exit zero.
+/// Alongside an existing error the failure is attached as metadata: the two can
+/// be independent (a provider error and a full disk), and the primary error is
+/// the more specific diagnostic.
+pub(crate) fn fold_persist_failure(result: Output, persist: Option<jp_workspace::Error>) -> Output {
+    match (result, persist) {
+        (result, None) => result,
+        (Ok(()), Some(persist)) => Err(Error::from(crate::error::Error::Workspace(persist))),
+        (Err(mut error), Some(persist)) => {
+            error.push_metadata("persist_failure", persist.to_string());
+            Err(error)
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub(crate) struct Error {
     /// The error code.

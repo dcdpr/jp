@@ -107,7 +107,20 @@ impl PersistBackend for FailingPersistBackend {
 }
 
 fn test_lock_with_failing_backend() -> (ConversationLock, Arc<FailingPersistBackend>) {
+    let (lock, backend, _) = test_lock_sharing_persist_state();
+    (lock, backend)
+}
+
+/// A failing-backend lock plus the persist record the workspace would own.
+///
+/// Handed out separately so a test can drain after the lock itself is gone.
+fn test_lock_sharing_persist_state() -> (
+    ConversationLock,
+    Arc<FailingPersistBackend>,
+    PersistFailures,
+) {
     let backend = Arc::new(FailingPersistBackend::default());
+    let failures = PersistFailures::default();
     let lock = ConversationLock::new(
         test_handle(),
         Arc::new(RwLock::new(Conversation::default())),
@@ -115,8 +128,9 @@ fn test_lock_with_failing_backend() -> (ConversationLock, Arc<FailingPersistBack
         Arc::clone(&backend) as _,
         Box::new(NoopLockGuard),
         Projection::Projected,
+        Arc::clone(&failures),
     );
-    (lock, backend)
+    (lock, backend, failures)
 }
 
 fn test_id() -> ConversationId {
@@ -136,6 +150,7 @@ fn test_lock_with_mock() -> (ConversationLock, Arc<MockPersistBackend>) {
         Arc::clone(&mock) as _,
         Box::new(NoopLockGuard),
         Projection::Projected,
+        PersistFailures::default(),
     );
     (lock, mock)
 }
@@ -148,6 +163,7 @@ fn test_lock_no_writer() -> ConversationLock {
         Arc::new(NullPersistBackend),
         Box::new(NoopLockGuard),
         Projection::Projected,
+        PersistFailures::default(),
     )
 }
 
@@ -491,6 +507,31 @@ fn a_swallowed_flush_failure_still_reaches_a_drain() {
     assert!(
         lock.take_persist_failure().is_some(),
         "the retry's failure is recorded, so a swallowed flush is not silent"
+    );
+}
+
+#[test]
+fn a_recorded_failure_outlives_the_lock_that_produced_it() {
+    // What a cancelled command future leaves behind: the scope and the lock are
+    // both dropped during the unwind, so the only reachable drain is the record
+    // the workspace owns. If the record died with the lock, an interrupted
+    // out-of-space run would report nothing but `Interrupted`.
+    let (lock, backend, failures) = test_lock_sharing_persist_state();
+
+    {
+        let conv = lock.as_mut();
+        conv.update_metadata(|m| m.title = Some("unsaved".into()));
+    }
+    drop(lock);
+
+    assert_eq!(backend.attempts(), 1);
+    let error = failures
+        .lock()
+        .take()
+        .expect("the failure is still reachable after the lock is gone");
+    assert_eq!(
+        error.to_string(),
+        "Storage error: no space left on device while writing /data/conv/events.json"
     );
 }
 

@@ -6,8 +6,8 @@ use rayon::prelude::*;
 use tracing::{debug, trace};
 
 use crate::{
-    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, dir_entries,
-    trash::trash_conversation, value::cleanup_tmp_files,
+    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage,
+    cleanup_import_staging, dir_entries, trash::trash_conversation, value::cleanup_tmp_files,
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -152,6 +152,11 @@ pub(crate) fn trash_invalid_conversation(entry: &InvalidConversation) -> crate::
 
 fn validate_root(conversations_dir: &Utf8Path, result: &mut ValidationResult) {
     trace!(root = %conversations_dir, "Validating conversation root.");
+
+    // Debris from an import killed between its copy and its rename. Swept here
+    // rather than left in place so a large abandoned copy doesn't sit on the
+    // user's disk indefinitely.
+    cleanup_import_staging(conversations_dir);
 
     let entries: Vec<_> = dir_entries(conversations_dir)
         .filter(|entry| {
