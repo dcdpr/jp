@@ -200,9 +200,9 @@ pub async fn handle_stream_error(
     // Record the attempt (must happen before backoff calculation).
     retry_state.record_attempt();
 
-    // Reset the coordinator for the next streaming cycle. The flushed partial
-    // content above is now part of the stream and will be rebuilt into the
-    // thread as assistant prefill.
+    // Reset the coordinator for the next streaming cycle. The committed partial
+    // response becomes continuation context in the rebuilt Thread; the Provider
+    // decides how to encode it for the target model.
     turn_coordinator.prepare_continuation();
 
     // Notify the user.
