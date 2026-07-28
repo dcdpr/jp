@@ -1520,9 +1520,11 @@ Final ConversationStream (persisted):
   [ChatResponse::Message("The answer")]
   [ChatResponse::Message(" is 4. Because 2+2=4. ...")]
 
-Provider aggregation boundaries (Event::Flush) inside one stream do not flush
-the renderer, so replay renders these adjacent same-kind responses as one
-Markdown content region.
+Replay renders these adjacent same-kind responses as one Markdown content
+region: TurnRenderer feeds consecutive ChatResponse events of the same kind
+through one renderer without flushing between them. Live streaming follows the
+same rule within a single provider stream, where aggregation boundaries
+(Event::Flush) do not flush the renderer.
 
 Live rendering differs: the continuation boundary finalizes the buffered
 Markdown (flush_renderer runs before the interrupt menu, and again on a stream

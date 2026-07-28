@@ -225,10 +225,11 @@ impl TurnCoordinator {
     ///
     /// [`Event::Flush`] commits an indexed response to the Conversation but
     /// does not flush terminal rendering.
-    /// Provider aggregation boundaries and [`ConversationEvent`] boundaries are
-    /// not Markdown boundaries; consecutive responses of the same kind stay in
-    /// one renderer content region until a semantic boundary such as a tool
-    /// call, content-kind transition, or end of stream.
+    /// Neither a provider aggregation boundary nor the boundary between two
+    /// adjacent same-kind [`ChatResponse`] events is a Markdown boundary:
+    /// consecutive responses of the same kind stay in one renderer content
+    /// region until a semantic boundary such as a tool call, content-kind
+    /// transition, or end of stream.
     pub fn handle_event(
         &mut self,
         stream: &mut ConversationStream,
