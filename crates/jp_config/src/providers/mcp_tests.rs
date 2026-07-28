@@ -38,6 +38,35 @@ fn mcp_provider_optional_reports_stdio_flag() {
 }
 
 #[test]
+fn arguments_and_variables_append_across_layers() {
+    use schematic::PartialConfig as _;
+
+    // Both fields declare `merge = append_vec`, so a later layer adds to the
+    // earlier one rather than replacing it.
+    let mut base = PartialStdioConfig {
+        arguments: Some(vec!["serve".to_owned()]),
+        variables: Some(vec!["HOME".to_owned()]),
+        ..Default::default()
+    };
+    let overlay = PartialStdioConfig {
+        arguments: Some(vec!["--verbose".to_owned()]),
+        variables: Some(vec!["PATH".to_owned()]),
+        ..Default::default()
+    };
+
+    base.merge(&(), overlay).unwrap();
+
+    assert_eq!(
+        base.arguments,
+        Some(vec!["serve".to_owned(), "--verbose".to_owned()])
+    );
+    assert_eq!(
+        base.variables,
+        Some(vec!["HOME".to_owned(), "PATH".to_owned()])
+    );
+}
+
+#[test]
 fn assign_optional_flag_via_cli() {
     let mut p = PartialStdioConfig::default();
     assert_eq!(p.optional, None);

@@ -39,6 +39,20 @@ pub fn preserve_str_literal(meta: &Meta) -> darling::Result<Expr> {
     }
 }
 
+/// Parse a `default` argument, which accepts both `default` and `default =
+/// <expr>`.
+///
+/// The bare form states that the field falls back to its type's `Default` impl,
+/// which is what the generated code emits when no default expression is
+/// present, so it parses to `None`.
+pub fn parse_default(meta: &Meta) -> darling::Result<Option<Expr>> {
+    match meta {
+        Meta::Path(_) => Ok(None),
+        Meta::List(_) => Err(darling::Error::unsupported_format("list").with_span(meta)),
+        Meta::NameValue(nv) => Ok(Some(nv.value.clone())),
+    }
+}
+
 pub fn get_meta_path(meta: &Meta) -> &Path {
     match meta {
         Meta::Path(path) => path,
