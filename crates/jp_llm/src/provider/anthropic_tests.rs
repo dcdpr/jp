@@ -1512,8 +1512,8 @@ fn test_find_merge_point_edge_cases() {
     }
 }
 
-/// When the last event is an assistant message and the model does NOT have the
-/// "prefill" feature, a synthetic user "continue" message is appended.
+/// When the last event is an assistant message and the model does not support
+/// prefill, a synthetic user "continue" message is appended.
 #[test]
 fn test_continue_injected_when_prefill_unsupported() {
     let model = ModelDetails {
@@ -1562,8 +1562,8 @@ fn test_continue_injected_when_prefill_unsupported() {
     assert_eq!(request.messages.len(), 3); // user, assistant, synthetic user
 }
 
-/// When the model HAS the "prefill" feature, no synthetic message is injected
-/// even if the last event is an assistant message.
+/// When the model supports prefill, no synthetic message is injected even if
+/// the last event is an assistant message.
 #[test]
 fn test_prefill_preserved_for_supported_models() {
     let model = ModelDetails {

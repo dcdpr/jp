@@ -526,13 +526,16 @@ fn create_request(
         request::ChatCompletion {
             model: slug,
             messages: messages.0,
-            // OpenRouter doesn't expose per-model reasoning capabilities,
-            // so we always send a reasoning config. When reasoning is off,
-            // we use `effort: minimal` + `exclude: true` instead of
-            // `effort: none`, because some models (e.g. gpt-5-mini) reject
-            // fully disabled reasoning.
-            // Always capture reasoning tokens. The display layer handles
-            // visibility.
+            // A reasoning object is always sent. Resolving the effort against
+            // the model's ladder happens upstream in `custom_reasoning_config`,
+            // so by this point the only question is how to express the result on
+            // the wire.
+            //
+            // "Off" is expressed as `effort: minimal` + `exclude: true` rather
+            // than `effort: none`, because some models (e.g. gpt-5-mini) reject
+            // fully disabled reasoning; `minimal` is the floor every routed model
+            // accepts. Reasoning tokens are always captured, and the display
+            // layer decides what to show.
             reasoning: Some(match reasoning {
                 Some(r) => request::Reasoning {
                     exclude: false,
