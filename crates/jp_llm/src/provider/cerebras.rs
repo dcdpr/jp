@@ -349,12 +349,13 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             display_name: Some("Gemma 4 31B".to_owned()),
             context_window: Some(131_072),
             max_output_tokens: Some(40_960),
-            // The public models API reports reasoning support but no effort
-            // ladder, so the levels mirror the other Cerebras reasoning models.
-            // Reasoning is disableable: the model accepts a `none` effort.
-            reasoning: Some(ReasoningDetails::leveled(
-                false, true, true, true, false, false,
-            )),
+            // The public catalog reports that this model reasons but names no
+            // effort levels, so support stays unknown rather than inheriting a
+            // ladder invented from its siblings. `auto` then omits the effort and
+            // lets the server pick, and an explicit `off` still sends
+            // `reasoning_effort: "none"`, both of which are recorded as accepted
+            // for this model.
+            reasoning: None,
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: Some(true),

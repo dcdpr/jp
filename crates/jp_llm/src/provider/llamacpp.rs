@@ -61,6 +61,11 @@ impl Provider for Llamacpp {
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>, Error> {
+        // The served context window, which is what a request is actually bounded
+        // by. Best effort: older builds expose no `/props`, and the trained
+        // length is a usable second choice.
+        let served_context = self.served_context().await;
+
         self.reqwest_client
             .get(format!("{}/v1/models", self.base_url))
             .send()
@@ -70,7 +75,7 @@ impl Provider for Llamacpp {
             .await?
             .data
             .iter()
-            .map(map_model)
+            .map(|model| map_model(model, served_context))
             .collect::<Result<_, _>>()
     }
 
@@ -674,6 +679,56 @@ fn convert_tool_choice(choice: &ToolChoice) -> &str {
     }
 }
 
+impl Llamacpp {
+    /// The context size the server was launched with, from `/props`.
+    ///
+    /// Best effort by design: `/props` is secondary to the model listing, so a
+    /// failure falls back to the trained length rather than failing the
+    /// listing.
+    async fn served_context(&self) -> Option<u32> {
+        let url = format!("{}/props", self.base_url);
+
+        let result = async {
+            self.reqwest_client
+                .get(&url)
+                .send()
+                .await?
+                .error_for_status()?
+                .json::<LlamacppProps>()
+                .await
+        }
+        .await;
+
+        match result {
+            Ok(props) => props.default_generation_settings.n_ctx,
+            Err(error) => {
+                debug!(
+                    %url,
+                    %error,
+                    "llama.cpp `/props` unavailable; falling back to the trained context length."
+                );
+                None
+            }
+        }
+    }
+}
+
+/// The context size llama.cpp was launched with, from `/props`.
+///
+/// `None` when the endpoint is unavailable or reports no size, which includes
+/// older builds predating `/props`.
+#[derive(Debug, Deserialize)]
+struct LlamacppProps {
+    #[serde(default)]
+    default_generation_settings: LlamacppGenerationSettings,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LlamacppGenerationSettings {
+    #[serde(default)]
+    n_ctx: Option<u32>,
+}
+
 /// A `/v1/models` listing from llama.cpp.
 ///
 /// llama.cpp serves the OpenAI shape but adds a `meta` object per entry, so
@@ -703,7 +758,15 @@ struct LlamacppMeta {
     n_ctx_train: Option<u32>,
 }
 
-fn map_model(model: &LlamacppModel) -> Result<ModelDetails, Error> {
+/// Map a llama.cpp model, preferring the served context window over the trained
+/// one.
+///
+/// `served_context` comes from `/props` and is what a request is actually
+/// bounded by; `meta.n_ctx_train` is what the model was trained for and is
+/// commonly far larger than the size the server was launched with.
+/// Falling back to it can over-report, which is why the served value wins when
+/// available.
+fn map_model(model: &LlamacppModel, served_context: Option<u32>) -> Result<ModelDetails, Error> {
     Ok(ModelDetails {
         id: (
             PROVIDER,
@@ -714,7 +777,7 @@ fn map_model(model: &LlamacppModel) -> Result<ModelDetails, Error> {
         )
             .try_into()?,
         display_name: None,
-        context_window: model.meta.n_ctx_train,
+        context_window: served_context.or(model.meta.n_ctx_train),
         // llama.cpp reports no generation ceiling; it is bounded by the served
         // context rather than a per-model limit.
         max_output_tokens: None,

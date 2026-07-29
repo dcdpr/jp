@@ -19,7 +19,7 @@ use jp_config::{
     assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::{
         id::{Name, ProviderId},
-        parameters::ReasoningEffort,
+        parameters::{ReasoningConfig, ReasoningEffort},
     },
     providers::llm::anthropic::AnthropicConfig,
 };
@@ -1146,8 +1146,13 @@ fn create_request(
     // Whether this request runs with thinking active. Configuring reasoning
     // turns it on; so does a model that always thinks (Fable 5), which keeps
     // thinking on even when `reasoning = off` because it cannot honor a
-    // `thinking: disabled` it does not support. The disabled-thinking branch
-    // below derives from the same predicate, so the two cannot disagree.
+    // `thinking: disabled` it does not support.
+    //
+    // A model whose support is unknown counts as active even when the branch
+    // below attempts a disable for it: forced-tool soft-forcing exists to avoid
+    // a 400 this code can predict, and staying conservative there costs only a
+    // system nudge, whereas hard-forcing against an endpoint that ignored the
+    // disable is a hard error.
     let thinking_active = reasoning_config.is_some() || !model.supports_disabling_thinking();
 
     // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
@@ -1286,6 +1291,11 @@ fn create_request(
                     display: Some(types::ThinkingDisplay::Summarized),
                 });
 
+                // Both flags are deliberately optimistic. Support here is
+                // inferred, so there is no reported ladder to clamp against, and
+                // clamping on a guess would silently under-deliver an explicit
+                // setting on a model that does support the level. An unsupported
+                // effort fails as a visible provider error instead.
                 effort = adaptive_effort(
                     &model.id,
                     config.effort,
@@ -1315,6 +1325,24 @@ fn create_request(
         // Models that always think never reach here (`thinking_active` stays
         // true for them); omitting the field lets them think adaptively, the
         // only mode they support.
+        builder.thinking(types::ExtendedThinking::Disabled);
+    } else if model.reasoning.is_none()
+        && matches!(parameters.reasoning, Some(ReasoningConfig::Off))
+    {
+        // Support is unknown and the caller explicitly turned reasoning off, so
+        // attempt the disable and let the endpoint be the judge. Sending nothing
+        // would take a provider default that, on modern models, thinks and bills
+        // for reasoning the caller asked not to have. A rejected disable is a
+        // visible error; silently billing is not.
+        //
+        // The endpoint matters here: a custom `base_url` may serve a model that
+        // accepts a disable even where the canonical API would not.
+        debug!(
+            id = %model.id,
+            inferred = true,
+            "No reasoning capability reported; attempting the requested disable."
+        );
+
         builder.thinking(types::ExtendedThinking::Disabled);
     }
 
@@ -1365,10 +1393,12 @@ fn create_request(
 
 /// Derive reasoning support from the API-reported model capabilities.
 ///
-/// Used for models absent from the table below, so a model newer than this
-/// binary still receives an explicit thinking configuration instead of falling
-/// back to the provider default (which returns thinking tokens the caller is
-/// billed for but never sees).
+/// This is the sole source of reasoning support: every model goes through it,
+/// and the override table carries no mode or ladder of its own, only an
+/// `always_on` flag applied to the result.
+/// A model newer than this binary therefore still receives an explicit thinking
+/// configuration rather than falling back to the provider default, which bills
+/// for thinking tokens the caller never sees.
 ///
 /// Returns `None` when the capabilities report nothing about thinking, leaving
 /// support genuinely unknown.

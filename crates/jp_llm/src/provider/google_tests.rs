@@ -69,22 +69,37 @@ fn test_unknown_model_requests_thoughts() {
 
 /// End-to-end: the API's `thinking` flag overrides the table, so a model the
 /// API reports as not thinking is never configured for it.
+///
+/// The fixture must be a model the table *does* carry a ladder for, otherwise
+/// the catch-all supplies `None` and the override is never exercised.
 #[test]
 fn test_map_model_thinking_flag_overrides_table() {
     let model = types::Model {
-        base_model_id: "gemini-2.0-flash".to_owned(),
-        display_name: "Gemini 2.0 Flash".to_owned(),
+        base_model_id: "gemini-2.5-flash".to_owned(),
+        display_name: "Gemini 2.5 Flash".to_owned(),
         input_token_limit: 1_048_576,
-        output_token_limit: 8_192,
+        output_token_limit: 65_536,
         thinking: false,
         ..Default::default()
     };
+
+    // The table entry this overrides.
+    assert!(
+        map_model(types::Model {
+            base_model_id: "gemini-2.5-flash".to_owned(),
+            thinking: true,
+            ..Default::default()
+        })
+        .reasoning
+        .is_some_and(|r| r.is_budgetted()),
+        "fixture must target a model the table gives a ladder"
+    );
 
     let details = map_model(model);
 
     assert_eq!(details.reasoning, Some(ReasoningDetails::unsupported()));
     assert_eq!(details.context_window, Some(1_048_576));
-    assert_eq!(details.max_output_tokens, Some(8_192));
+    assert_eq!(details.max_output_tokens, Some(65_536));
 }
 
 /// A model whose ladder is unknown still honours the caller's effort.
@@ -113,6 +128,45 @@ fn test_unknown_thinking_level_honours_requested_effort() {
 
     // `auto` leaves the choice to the model.
     assert_eq!(effort_to_thinking_level(ReasoningEffort::Auto, None), None);
+}
+
+/// An explicit `off` on a model whose support is unknown sends the documented
+/// disable rather than nothing.
+///
+/// Sending nothing takes a provider default that, on a modern model, thinks and
+/// bills for reasoning the caller turned off.
+/// A custom `base_url` may also serve a model that accepts the disable, so the
+/// endpoint is the judge.
+#[test]
+fn test_off_on_unknown_model_attempts_disable() {
+    let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+    assert_eq!(model.reasoning, None, "fixture must be unknown");
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("an explicit off must not be silently dropped");
+
+    assert!(!thinking.include_thoughts);
+    assert_eq!(thinking.thinking_budget, Some(0));
 }
 
 /// A leveled model that cannot turn reasoning off must not be sent

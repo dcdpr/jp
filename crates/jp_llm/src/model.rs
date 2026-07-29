@@ -86,16 +86,19 @@ impl ModelDetails {
         self.prefill.unwrap_or(false)
     }
 
-    /// Returns `true` if the model supports disabling reasoning.
+    /// Returns `true` if the model is *known* to support disabling reasoning.
     ///
     /// Models that always run with adaptive thinking, and reject an explicit
     /// `thinking: disabled`, return `false`.
     /// For those, callers must omit the thinking field rather than disabling
     /// it.
     ///
-    /// Models whose reasoning support is unknown also return `false`: sending
-    /// `thinking: disabled` to a model that rejects it is a hard request error,
-    /// whereas leaving thinking enabled only costs tokens.
+    /// Unknown support also returns `false`, so this answers "may I assume a
+    /// disable is safe?" rather than "is a disable worth attempting?".
+    /// Callers deciding whether to honour an explicit `reasoning = off` should
+    /// treat unknown support as worth attempting and let the endpoint reject
+    /// it; this accessor is for the conservative question, such as whether a
+    /// forced tool call has to be soft-forced.
     #[must_use]
     pub fn supports_disabling_thinking(&self) -> bool {
         self.reasoning.is_some_and(|r| r.can_disable())
@@ -270,6 +273,15 @@ pub enum ReasoningDetails {
         ///
         /// Models that always reason reject an explicit "disable" request, so
         /// callers must omit the field rather than disabling it.
+        ///
+        /// For [`ReasoningMode::Leveled`] this additionally asserts that the
+        /// provider accepts an explicit "none" effort *value* on the wire,
+        /// which is what [`lowest_effort`] encodes by returning
+        /// [`ReasoningEffort::None`].
+        /// A leveled model that disables by omitting the field instead must not
+        /// set this, or it will be sent a level it never announced.
+        ///
+        /// [`lowest_effort`]: ReasoningDetails::lowest_effort
         can_disable: bool,
     },
 }

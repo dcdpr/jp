@@ -714,6 +714,44 @@ fn test_unknown_reasoning_infers_adaptive_thinking() {
     assert_eq!(request.output_config.unwrap().effort, Some(Effort::High));
 }
 
+/// An explicit `off` on a model whose support is unknown sends `thinking:
+/// disabled` rather than nothing.
+///
+/// Sending nothing takes a provider default that, on a modern model, thinks and
+/// bills for reasoning the caller turned off.
+/// A custom `base_url` may also serve a model that accepts the disable, so the
+/// endpoint is the judge.
+#[test]
+fn test_off_on_unknown_model_attempts_disable() {
+    let model = ModelDetails::empty((PROVIDER, "claude-future-99").try_into().unwrap());
+    assert_eq!(model.reasoning, None, "fixture must be unknown");
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::Disabled),
+        "an explicit off must not be silently dropped"
+    );
+}
+
 /// An effort the model does not support clamps to the nearest supported level
 /// rather than being dropped or sent as-is.
 #[test]

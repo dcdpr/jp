@@ -95,11 +95,16 @@ fn create_request_auto_uses_known_ladder() {
     assert_eq!(body["reasoning_effort"], "medium");
 }
 
-/// `gemma-4-31b` accepts a `none` effort, which the recorded fixture for this
-/// model confirms, so an explicit `off` is honoured rather than dropped.
+/// `gemma-4-31b` reasons but reports no ladder, so support is unknown and an
+/// explicit `off` is honoured via the unknown path.
+/// The recorded fixture for this model confirms the provider accepts it.
 #[test]
 fn create_request_honours_off_for_gemma() {
     let model = map_model("gemma-4-31b").unwrap();
+    assert_eq!(
+        model.reasoning, None,
+        "no ladder is reported for this model"
+    );
 
     let query = reasoning_query(jp_config::model::parameters::PartialReasoningConfig::Off);
     let (body, _) = create_request(&model, query).unwrap();
@@ -430,7 +435,9 @@ fn map_model_known() {
     assert_eq!(details.display_name.as_deref(), Some("Gemma 4 31B"));
     assert_eq!(details.context_window, Some(131_072));
     assert_eq!(details.max_output_tokens, Some(40_960));
-    assert!(details.reasoning.unwrap().is_leveled());
+    // Limits are known, but the catalog names no effort levels, so the ladder
+    // stays unknown rather than being invented.
+    assert_eq!(details.reasoning, None);
 }
 
 #[test]

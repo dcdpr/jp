@@ -5,31 +5,44 @@ use reqwest_eventsource::Error as SseError;
 
 use super::*;
 
-/// llama.cpp reports the trained context length per loaded model, so it is used
-/// rather than left unknown.
-#[test]
-fn map_model_uses_reported_context_length() {
-    let model: LlamacppModel = serde_json::from_value(serde_json::json!({
+fn qwen_model() -> LlamacppModel {
+    serde_json::from_value(serde_json::json!({
         "id": "unsloth/Qwen3.5-9B-GGUF",
         "meta": {"n_ctx_train": 262_144},
     }))
-    .unwrap();
+    .unwrap()
+}
 
-    let details = map_model(&model).unwrap();
+/// The served context window wins over the trained one.
+/// A server launched with a smaller `--ctx-size` than the model was trained for
+/// is the normal local setup, and the served value is what a request is
+/// actually bounded by.
+#[test]
+fn map_model_prefers_served_context_length() {
+    let details = map_model(&qwen_model(), Some(8_192)).unwrap();
 
-    assert_eq!(details.context_window, Some(262_144));
+    assert_eq!(details.context_window, Some(8_192));
     // The vendor prefix is stripped from the id.
     assert_eq!(details.id.name.as_ref(), "Qwen3.5-9B-GGUF");
 }
 
-/// An older build reporting no metadata leaves the context window unknown
-/// rather than asserting a value.
+/// Without `/props` the trained length is the only figure available, so it is
+/// used even though it can over-report the served window.
+#[test]
+fn map_model_falls_back_to_trained_context_length() {
+    let details = map_model(&qwen_model(), None).unwrap();
+
+    assert_eq!(details.context_window, Some(262_144));
+}
+
+/// An older build reporting neither `/props` nor metadata leaves the context
+/// window unknown rather than asserting a value.
 #[test]
 fn map_model_without_meta_leaves_context_unknown() {
     let model: LlamacppModel =
         serde_json::from_value(serde_json::json!({"id": "local-model"})).unwrap();
 
-    let details = map_model(&model).unwrap();
+    let details = map_model(&model, None).unwrap();
 
     assert_eq!(details.context_window, None);
     assert_eq!(details.reasoning, None);

@@ -12,7 +12,7 @@ expression: v
         },
         display_name: None,
         context_window: Some(
-            262144,
+            8192,
         ),
         max_output_tokens: None,
         reasoning: None,

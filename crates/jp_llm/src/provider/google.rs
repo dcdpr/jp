@@ -12,7 +12,7 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::ReasoningEffort,
+        parameters::{ReasoningConfig, ReasoningEffort},
     },
     providers::llm::google::GoogleConfig,
 };
@@ -327,6 +327,28 @@ fn create_request(
             include_thoughts: true,
             thinking_budget: None,
             thinking_level: effort_to_thinking_level(config.effort, max_output_tokens),
+        })
+    } else if model.reasoning.is_none()
+        && matches!(parameters.reasoning, Some(ReasoningConfig::Off))
+    {
+        // Support is unknown and the caller explicitly turned reasoning off, so
+        // send the documented disable and let the endpoint be the judge. Sending
+        // nothing would take a provider default that, on modern models, thinks
+        // and bills for reasoning the caller asked not to have. A rejected
+        // disable is a visible error; silently billing is not.
+        //
+        // The endpoint matters here: a custom `base_url` may serve a model that
+        // accepts a zero budget even where the canonical API would not.
+        debug!(
+            id = %model.id,
+            inferred = true,
+            "No reasoning capability reported; attempting the requested disable."
+        );
+
+        Some(types::ThinkingConfig {
+            include_thoughts: false,
+            thinking_budget: Some(0),
+            thinking_level: None,
         })
     } else {
         None
