@@ -57,10 +57,19 @@ pub(super) fn grep_diff<'a>(
         }
     }
 
+    // Size of the window the user asked about (the whole diff when no bounds
+    // are set), so both the no-match message and the ratio in the note describe
+    // the scope that was actually searched.
+    let searched_lines = bounds_end.saturating_sub(bounds_start);
+
     let match_count = matched.iter().filter(|&&m| m).count();
     if match_count == 0 {
         return Ok((
-            format!("No matches for pattern '{pattern}' in the diff output.").into(),
+            format!(
+                "No matches for pattern '{pattern}' in the diff output ({searched_lines} lines \
+                 searched)."
+            )
+            .into(),
             None,
         ));
     }
@@ -181,13 +190,10 @@ pub(super) fn grep_diff<'a>(
         }
     }
 
-    // Denominator is the size of the window the user asked about (the whole
-    // diff when no bounds are set), so the ratio in the note is meaningful.
-    let total_lines = bounds_end.saturating_sub(bounds_start);
     let visible_lines = visible.iter().filter(|&&v| v).count();
-    let note = if visible_lines < total_lines {
+    let note = if visible_lines < searched_lines {
         Some(format!(
-            "[Showing {visible_lines}/{total_lines} lines matching '{pattern}' ({match_count} \
+            "[Showing {visible_lines}/{searched_lines} lines matching '{pattern}' ({match_count} \
              matches, {context_lines} lines of context)]"
         ))
     } else {
