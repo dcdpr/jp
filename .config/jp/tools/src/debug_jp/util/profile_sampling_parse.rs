@@ -43,7 +43,11 @@ pub(crate) struct Thread {
 
 impl Thread {
     /// Aggregate sample counts by demangled symbol across this thread.
-    /// Useful for the "hot leaves regardless of stack" lens.
+    ///
+    /// Counts are *inclusive* (a frame plus everything it called), so a caller
+    /// and its callees both count the same samples.
+    /// Good for "how much time was spent under X", useless for "which code is
+    /// hot" — use [`Self::self_samples`] for that.
     pub(crate) fn aggregate_by_symbol(&self) -> Vec<(String, u64)> {
         let mut map: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
         for frame in &self.frames {
@@ -53,6 +57,88 @@ impl Thread {
         vec.sort_by_key(|entry| std::cmp::Reverse(entry.1));
         vec
     }
+
+    /// Samples attributed to each frame *itself*, excluding its callees.
+    ///
+    /// `sample(1)` reports inclusive counts, so self time is a frame's count
+    /// minus the sum of its immediate children's.
+    /// Assumes frames are in depth-first preorder, which is how the parser
+    /// emits them.
+    ///
+    /// Returned in the same order as [`Self::frames`].
+    pub(crate) fn self_samples(&self) -> Vec<u64> {
+        let mut selves: Vec<u64> = self.frames.iter().map(|f| f.samples).collect();
+
+        // Ancestors still open at this point in the preorder walk, as
+        // (depth, index), innermost last.
+        let mut open: Vec<(usize, usize)> = Vec::new();
+
+        for (index, frame) in self.frames.iter().enumerate() {
+            while open.last().is_some_and(|&(depth, _)| depth >= frame.depth) {
+                open.pop();
+            }
+            // Only an immediate parent absorbs the child's count. A depth jump
+            // (malformed input) leaves the samples unattributed rather than
+            // charging them to a grandparent.
+            if let Some(&(depth, parent)) = open.last()
+                && depth + 1 == frame.depth
+            {
+                selves[parent] = selves[parent].saturating_sub(frame.samples);
+            }
+            open.push((frame.depth, index));
+        }
+
+        selves
+    }
+}
+
+/// Aggregate self time by symbol across every thread.
+///
+/// Returns `(symbol, self_samples)` sorted descending.
+/// This is the "which code is actually hot" lens: for a thread-pool workload
+/// the main thread is parked and every interesting frame lives on a worker.
+pub(crate) fn self_samples_by_symbol(threads: &[Thread]) -> Vec<(String, u64)> {
+    let mut map: std::collections::BTreeMap<String, u64> = std::collections::BTreeMap::new();
+
+    for thread in threads {
+        for (frame, self_samples) in thread.frames.iter().zip(thread.self_samples()) {
+            if self_samples == 0 {
+                continue;
+            }
+            *map.entry(frame.symbol.clone()).or_default() += self_samples;
+        }
+    }
+
+    let mut vec: Vec<(String, u64)> = map.into_iter().collect();
+    vec.sort_by_key(|entry| std::cmp::Reverse(entry.1));
+    vec
+}
+
+/// Whether a symbol is a thread parked doing nothing.
+///
+/// Idle workers dominate a self-time leaderboard otherwise: a 26-thread rayon
+/// pool spends most of its wall clock asleep.
+/// Idle samples are reported as a total plus a per-symbol breakdown rather than
+/// dropped silently, so a thread genuinely blocked in `kevent` for the whole
+/// run is still visible.
+pub(crate) fn is_idle_symbol(symbol: &str) -> bool {
+    const PARKED: &[&str] = &[
+        "__psynch_cvwait",
+        "_pthread_cond_wait",
+        "__semwait_signal",
+        "kevent",
+        "mach_msg2_trap",
+        "mach_msg_trap",
+        "__workq_kernreturn",
+        "start_wqthread",
+        "_pthread_wqthread",
+        "thread_start",
+        "__select",
+    ];
+
+    PARKED.contains(&symbol)
+        || symbol.contains("LockLatch>::wait")
+        || symbol.contains("sleep::Sleep>::sleep")
 }
 
 /// Parse the call-graph section of a `sample(1)` output file.
