@@ -157,6 +157,78 @@ fn truncate_to_width_keeps_the_longest_fitting_prefix() {
     );
 }
 
+/// Sum of the display widths of each grapheme cluster in `s`.
+fn cluster_width_sum(s: &str) -> usize {
+    s.graphemes(true).map(display_width).sum()
+}
+
+#[test]
+fn cluster_width_sum_is_an_upper_bound_on_display_width() {
+    // The invariant the cheap path in `truncate_to_width` rests on: summing
+    // cluster widths can over-count (ligatures) but never under-count, so a
+    // prefix that fits under the sum certainly fits. A widening interaction
+    // sits inside one cluster (U+2018 plus U+FE01 renders in two columns), where
+    // measuring the cluster whole already accounts for it.
+    for s in [
+        LAM_ALEF,
+        TIFINAGH_LIGATURE,
+        ZWJ_EMOJI,
+        "\u{2018}\u{FE01}",
+        "\u{2018}\u{FE00}",
+        "plain ascii",
+        "\u{65E5}\u{672C}\u{8A9E}",
+    ] {
+        assert!(
+            display_width(s) <= cluster_width_sum(s),
+            "cluster sum under-counts {s:?}: {} > {}",
+            display_width(s),
+            cluster_width_sum(s)
+        );
+    }
+}
+
+#[test]
+fn measurement_count_follows_the_budget_not_the_input_size() {
+    // Whole-string measurement is the expensive step, so its count has to depend
+    // on the budget rather than on how long the title is. Conversation titles are
+    // user-editable and uncapped, and `conversation ls` truncates one per row.
+    // Measuring every candidate prefix took 76s for the 100k input below, against
+    // 7ms once the count is bounded.
+    let (_, short) = longest_fitting_prefix(&"x".repeat(500), 9);
+    let (_, long) = longest_fitting_prefix(&"x".repeat(100_000), 9);
+
+    assert_eq!(short, long, "measurement count grew with the input");
+    assert!(
+        long <= MAX_LIGATURE_PROBES,
+        "{long} measurements for a 9-column cut"
+    );
+}
+
+#[test]
+fn measurement_count_stays_bounded_across_ligatures() {
+    // Ligatures are why the exact measurement exists at all, so the bound has to
+    // hold for an input made entirely of them, where every probe finds a prefix
+    // that fits and starts a fresh run.
+    let (_, short) = longest_fitting_prefix(&LAM_ALEF.repeat(250), 2);
+    let (_, long) = longest_fitting_prefix(&LAM_ALEF.repeat(50_000), 2);
+
+    assert_eq!(short, long, "measurement count grew with the input");
+}
+
+#[test]
+fn truncate_to_width_cuts_long_input_the_same_way_as_short() {
+    // The bounded measurement must not change where the cut lands: these are the
+    // 100k-scale counterparts of the ASCII and Lam-Alef cases above.
+    assert_eq!(
+        truncate_to_width(&"x".repeat(100_000), 10),
+        "xxxxxxxxx\u{2026}"
+    );
+    assert_eq!(
+        truncate_to_width(&LAM_ALEF.repeat(50_000), 3),
+        format!("{}\u{2026}", LAM_ALEF.repeat(2))
+    );
+}
+
 #[test]
 fn display_width_counts_wide_characters_as_two_columns() {
     assert_eq!(display_width("日本語"), 6);

@@ -30,6 +30,16 @@ pub fn max_line_width(rendered: &str) -> usize {
     rendered.lines().map(display_width).max().unwrap_or(0)
 }
 
+/// How many clusters past the budget to keep measuring for a ligature that
+/// brings the prefix back under it.
+///
+/// Every width-collapsing rule in `unicode-width` reduces a run of two or three
+/// clusters, so a prefix that has overshot recovers within a cluster or two if
+/// it recovers at all.
+/// Probing a bounded distance keeps a long input from turning the scan
+/// quadratic.
+const MAX_LIGATURE_PROBES: usize = 8;
+
 /// Truncate `s` to at most `max_width` display columns, appending `…` when
 /// cut.
 ///
@@ -46,6 +56,9 @@ pub fn max_line_width(rendered: &str) -> usize {
 /// `s` is expected to carry no ANSI escapes: the budget is spent on the text,
 /// so escape bytes would consume it and could be split mid-sequence.
 /// Truncate before styling, not after.
+///
+/// Runs in time proportional to the input, with the whole-string measurements
+/// needed for ligatures confined to the few clusters around the cut.
 #[must_use]
 pub fn truncate_to_width(s: &str, max_width: usize) -> String {
     if display_width(s) <= max_width {
@@ -58,26 +71,60 @@ pub fn truncate_to_width(s: &str, max_width: usize) -> String {
     // Reserve one column for the ellipsis.
     let budget = max_width - 1;
 
-    // Each candidate prefix is measured whole rather than by summing the widths
-    // of its clusters: a ZWJ emoji sequence's clusters sum to twice the width
-    // the sequence renders in, and Arabic Lam-Alef spans two clusters that sum
-    // to two columns but ligate into one.
-    //
-    // Every boundary is measured, without stopping at the first prefix that
-    // overshoots, because a longer prefix can render narrower than a shorter
-    // one: a Tifinagh consonant joiner costs a column on its own and none once
-    // the consonant after it completes the ligature.
-    let mut end = 0;
-    for (offset, cluster) in s.grapheme_indices(true) {
-        let candidate = offset + cluster.len();
-        if UnicodeWidthStr::width(&s[..candidate]) <= budget {
-            end = candidate;
-        }
-    }
-
+    let (end, _) = longest_fitting_prefix(s, budget);
     let mut out = s[..end].to_string();
     out.push('…');
     out
+}
+
+/// Byte offset just past the longest prefix of `s` that fits `budget` columns,
+/// and the number of whole-string measurements taken to find it.
+///
+/// The count is returned so tests can pin it: it has to depend on `budget`, not
+/// on the size of `s`, and measuring every candidate prefix instead turns a
+/// long input quadratic.
+fn longest_fitting_prefix(s: &str, budget: usize) -> (usize, usize) {
+    // The running sum of cluster widths is an upper bound on the true width of
+    // the prefix: the interactions that make a string narrower than its parts
+    // (ZWJ emoji sequences, Arabic Lam-Alef, Tifinagh joiners) span cluster
+    // boundaries, while the ones that make it wider (a quotation mark plus
+    // U+FE01) stay inside a single cluster and are caught by measuring the
+    // cluster whole. So a prefix that fits under the sum certainly fits, and
+    // that costs O(1) per cluster.
+    //
+    // Only once the sum passes the budget does the exact width matter, and then
+    // it takes a whole-string measurement, because a longer prefix can render
+    // narrower than a shorter one: a Tifinagh consonant joiner costs a column on
+    // its own and none once the consonant after it completes the ligature.
+    let mut end = 0;
+    let mut sum = 0;
+    let mut probes = 0;
+    let mut measurements = 0;
+
+    for (offset, cluster) in s.grapheme_indices(true) {
+        let candidate = offset + cluster.len();
+        sum += UnicodeWidthStr::width(cluster);
+
+        if sum <= budget {
+            end = candidate;
+            continue;
+        }
+
+        if probes == MAX_LIGATURE_PROBES {
+            break;
+        }
+        probes += 1;
+        measurements += 1;
+
+        if UnicodeWidthStr::width(&s[..candidate]) <= budget {
+            end = candidate;
+            // A ligature closed and brought the prefix back under budget; allow
+            // a fresh run of probes for the next one.
+            probes = 0;
+        }
+    }
+
+    (end, measurements)
 }
 
 #[cfg(test)]
