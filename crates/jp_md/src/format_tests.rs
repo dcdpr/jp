@@ -356,6 +356,61 @@ fn test_default_background_column_fill_with_indent() {
 }
 
 #[test]
+fn paragraph_column_fill_counts_a_tab_to_the_next_tab_stop() {
+    // Comrak keeps tabs inside paragraph text, and the writer forwards them, so
+    // the cursor lands on the next multiple of 8 while the fill is computed from
+    // the writer's own column. Measuring the tab as the zero width
+    // `UnicodeWidthChar` reports for it puts this line at 2 instead of 9, so the
+    // pad runs 7 columns past the target.
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: "48;5;236".into(),
+            fill: BackgroundFill::Column(16),
+        }),
+        ..Default::default()
+    };
+
+    let rendered = Formatter::with_width(0)
+        .format_terminal_with("a\tb\n", &opts)
+        .unwrap();
+
+    let plain = strip_ansi_for_test(&rendered);
+    let first_line = plain.lines().next().expect("at least one line");
+
+    assert_eq!(
+        first_line, "a\tb       ",
+        "the tab lands on column 8, so `b` ends at 9 and 7 columns remain"
+    );
+}
+
+#[test]
+fn wrapped_paragraph_column_fill_counts_a_tab_to_the_next_tab_stop() {
+    // The wrap path measures the emitted line separately from `column`, both at
+    // the break point and for the continuation line, so it needs the same
+    // cursor-aware measurement.
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: "48;5;236".into(),
+            fill: BackgroundFill::Column(20),
+        }),
+        ..Default::default()
+    };
+
+    let rendered = Formatter::with_width(12)
+        .format_terminal_with("aa\tbb cccc dddd\n", &opts)
+        .unwrap();
+
+    let plain = strip_ansi_for_test(&rendered);
+    for line in plain.lines() {
+        let columns = ansi::advance_column(0, line);
+        assert_eq!(
+            columns, 20,
+            "every wrapped line should be shaded to column 20: {line:?}\nfull output:\n{plain:?}"
+        );
+    }
+}
+
+#[test]
 fn line_fill_is_the_single_interpretation_of_the_fill_mode() {
     assert_eq!(line_fill(BackgroundFill::Content, 0), "");
     assert_eq!(line_fill(BackgroundFill::Terminal, 0), "\x1b[K");
