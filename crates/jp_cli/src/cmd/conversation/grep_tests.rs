@@ -8,7 +8,7 @@ use jp_conversation::{
     Conversation, ConversationEvent, ConversationId,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse, TurnStart},
 };
-use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_printer::{OutputFormat, OutputWidth, Printer, SharedBuffer};
 use jp_workspace::Workspace;
 use serde_json::{Map, Value};
 use strip_ansi_escapes::strip_str;
@@ -37,7 +37,7 @@ fn lines(output: &str) -> Vec<String> {
 /// Plain-text context: no ANSI, no heading, no width limit — the shape a pipe
 /// sees.
 fn setup(events: Vec<(ConversationId, Vec<ConversationEvent>)>) -> (Ctx, SharedBuffer) {
-    setup_with(events, OutputFormat::Text, None)
+    setup_with(events, OutputFormat::Text, OutputWidth::Unknown)
 }
 
 /// Pretty context with a known terminal width — the shape a terminal sees.
@@ -45,17 +45,21 @@ fn setup_pretty(
     events: Vec<(ConversationId, Vec<ConversationEvent>)>,
     width: u16,
 ) -> (Ctx, SharedBuffer) {
-    setup_with(events, OutputFormat::TextPretty, Some(width))
+    setup_with(
+        events,
+        OutputFormat::TextPretty,
+        OutputWidth::Terminal(width),
+    )
 }
 
 fn setup_json(events: Vec<(ConversationId, Vec<ConversationEvent>)>) -> (Ctx, SharedBuffer) {
-    setup_with(events, OutputFormat::Json, None)
+    setup_with(events, OutputFormat::Json, OutputWidth::Unknown)
 }
 
 fn setup_with(
     events: Vec<(ConversationId, Vec<ConversationEvent>)>,
     format: OutputFormat,
-    width: Option<u16>,
+    width: OutputWidth,
 ) -> (Ctx, SharedBuffer) {
     let entries = events
         .into_iter()
@@ -67,19 +71,19 @@ fn setup_with(
 fn setup_conversations(
     entries: Vec<(ConversationId, Conversation, Vec<ConversationEvent>)>,
 ) -> (Ctx, SharedBuffer) {
-    setup_conversations_with(entries, OutputFormat::Text, None)
+    setup_conversations_with(entries, OutputFormat::Text, OutputWidth::Unknown)
 }
 
 fn setup_conversations_with(
     entries: Vec<(ConversationId, Conversation, Vec<ConversationEvent>)>,
     format: OutputFormat,
-    width: Option<u16>,
+    width: OutputWidth,
 ) -> (Ctx, SharedBuffer) {
     let tmp = tempdir().unwrap();
     let config = AppConfig::new_test();
     let workspace = Workspace::new(tmp.path());
     let (printer, out, _err) = Printer::memory(format);
-    let printer = printer.with_terminal_width(width);
+    let printer = printer.with_output_width(width);
     let mut ctx = Ctx::new(
         workspace,
         None,
@@ -221,7 +225,7 @@ fn heading_mode_groups_hits_under_the_conversation() {
             ]),
         )],
         OutputFormat::TextPretty,
-        Some(80),
+        OutputWidth::Terminal(80),
     );
 
     let rendered = run(grep("omega-mark"), &mut ctx, &out);
@@ -355,7 +359,7 @@ fn heading_omits_the_turn_count_for_a_title_only_search() {
             )]),
         )],
         OutputFormat::TextPretty,
-        Some(80),
+        OutputWidth::Terminal(80),
     );
 
     let grep = Grep {
@@ -567,7 +571,9 @@ fn an_explicit_width_caps_the_whole_line() {
             )]),
         )],
         OutputFormat::Text,
-        Some(40),
+        // `Declared` rather than `Terminal`: this is the `--width` path, a known
+        // width on output the caller says is laid out but that isn't a TTY.
+        OutputWidth::Declared(40),
     );
 
     let rendered = run(grep("zzz"), &mut ctx, &out);
@@ -1833,7 +1839,7 @@ fn json_carries_the_coordinate_and_submatches() {
             )]),
         )],
         OutputFormat::Json,
-        None,
+        OutputWidth::Unknown,
     );
 
     grep("needle").run(&mut ctx, vec![]).unwrap();
@@ -1897,8 +1903,11 @@ fn json_reports_a_title_hit_with_a_null_turn() {
         title: Some("phi-mark title".into()),
         ..Default::default()
     };
-    let (mut ctx, out) =
-        setup_conversations_with(vec![(id, conv, vec![])], OutputFormat::Json, None);
+    let (mut ctx, out) = setup_conversations_with(
+        vec![(id, conv, vec![])],
+        OutputFormat::Json,
+        OutputWidth::Unknown,
+    );
 
     grep("phi-mark").run(&mut ctx, vec![]).unwrap();
     ctx.printer.flush();
