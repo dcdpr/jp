@@ -271,7 +271,7 @@ fn extract_rustdoc_section(section: &ElementRef<'_>) -> String {
 ///
 /// The sibling walk starts from the heading's wrapper when it has one (see
 /// [`heading_walk_origin`]): `MediaWiki` nests every heading in a `<div
-/// class="mw-heading">` together with its "[edit]" link, so the section body is
+/// class="mw-heading">` together with its `[edit]` link, so the section body is
 /// a sibling of the wrapper, not of the heading itself.
 /// Boundary detection uses [`wrapped_heading_level`] for the same reason: the
 /// next section may start with a wrapper div rather than a bare heading.
@@ -341,7 +341,7 @@ fn is_block_content(el: &ElementRef<'_>) -> bool {
 /// class="mw-heading"><h2 id="..">…</h2><span
 /// class="mw-editsection">…</span></div>`, with the section prose as siblings
 /// of the *div*.
-/// Walking the heading's own siblings there yields only the "[edit]" span.
+/// Walking the heading's own siblings there yields only the `[edit]` span.
 ///
 /// Hoisting is deliberately conservative so content containers never become the
 /// walk origin (which would leak surrounding content into the section): each
@@ -726,7 +726,7 @@ fn clean_heading_text(heading: &ElementRef<'_>) -> String {
 
 /// Collect a short plain-text preview from content after the heading.
 /// Walks siblings of the heading's wrapper (see [`heading_walk_origin`]) so
-/// wrapped headings preview their prose instead of their "[edit]" chrome.
+/// wrapped headings preview their prose instead of their `[edit]` chrome.
 fn extract_preview_after_heading(heading: &ElementRef<'_>) -> String {
     let mut text = String::new();
     let level = heading_level(heading.value().name()).unwrap_or(0);
