@@ -1951,8 +1951,12 @@ check-and-fix *FLAGS:
 # Run tests, using nextest.
 [group('check')]
 [group('main')]
+[positional-arguments]
 test *FLAGS="--workspace": (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
-    cargo nextest run --all-targets --cargo-profile=nextest --status-level=slow --failure-output=final {{FLAGS}}
+    #!/usr/bin/env sh
+    set -eu
+
+    cargo nextest run --all-targets --cargo-profile=nextest --status-level=slow --failure-output=final "$@"
 
 # Continuously run tests, using Bacon.
 [group('check')]
