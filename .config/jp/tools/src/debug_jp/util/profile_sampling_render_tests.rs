@@ -59,14 +59,14 @@ fn render_includes_headline() {
 }
 
 #[test]
-fn render_includes_hot_leaves_table() {
+fn render_includes_inclusive_totals_table() {
     let report = render(
         &fixture_threads(),
         &fixture_launch(),
         &["c".into()],
         "x.txt",
     );
-    assert!(report.contains("## Hot leaves"));
+    assert!(report.contains("## Inclusive totals"));
     assert!(report.contains("| 100 | `jp_cli::run` |"));
     assert!(report.contains("| 60 | `PartialAppConfig::clone` |"));
 }
@@ -85,7 +85,7 @@ fn render_reports_self_time_not_inclusive_totals() {
 
     let start = report.find("## Hot code").expect("self-time section");
     let end = report[start..]
-        .find("## Hot leaves")
+        .find("## Inclusive totals")
         .map_or(report.len(), |off| start + off);
     let section = &report[start..end];
 
@@ -142,8 +142,9 @@ fn render_hot_code_spans_worker_threads_and_excludes_parked_frames() {
         "worker-thread work must appear:\n{report}"
     );
     assert!(
-        report.contains("Parked/idle: 90"),
-        "parked samples must be reported, not silently dropped:\n{report}"
+        report.contains("Parked/idle: 90 (excluded below): `_pthread_cond_wait` 90."),
+        "parked samples must be reported per symbol, not silently dropped or lumped into an \
+         opaque total:\n{report}"
     );
 }
 

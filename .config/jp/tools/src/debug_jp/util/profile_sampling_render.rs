@@ -12,8 +12,9 @@
 //! `jp` parallelizes with rayon, so on a workload like `conversation grep` the
 //! main thread is parked on a latch and every frame worth reading lives on a
 //! worker.
-//! Idle parking frames are partitioned out and reported as one total rather
-//! than dropped, so the numbers still reconcile.
+//! Idle parking frames are partitioned out of the leaderboard and reported as a
+//! total plus a per-symbol breakdown, so the numbers still reconcile and a
+//! thread genuinely blocked in `kevent` for the whole run stays visible.
 
 use std::{fmt::Write as _, time::Duration};
 
@@ -24,8 +25,9 @@ use crate::debug_jp::util::{
 
 /// Top-N for each section.
 /// Tuned to keep the rendered report under a couple of pages while still
-/// showing enough leaves to spot patterns.
-const TOP_LEAVES: usize = 30;
+/// showing enough symbols to spot patterns.
+const TOP_SYMBOLS: usize = 30;
+const TOP_IDLE: usize = 5;
 const TOP_STACKS: usize = 15;
 const STACK_FRAMES: usize = 10;
 
@@ -42,7 +44,7 @@ pub(crate) fn render(
     write_run_stats(&mut out, launch);
     write_headline(&mut out, threads);
     write_hot_code(&mut out, threads);
-    write_hot_leaves(&mut out, threads);
+    write_inclusive_totals(&mut out, threads);
     write_hot_stacks(&mut out, threads);
     let _ = writeln!(out, "\n---\n\n*Raw `sample(1)` output: `{sample_path}`*");
     out
@@ -99,7 +101,7 @@ fn write_headline(out: &mut String, threads: &[Thread]) {
 fn write_hot_code(out: &mut String, threads: &[Thread]) {
     let _ = writeln!(
         out,
-        "## Hot code (self time, all threads, top {TOP_LEAVES})"
+        "## Hot code (self time, all threads, top {TOP_SYMBOLS})"
     );
     let _ = writeln!(out);
 
@@ -115,13 +117,26 @@ fn write_hot_code(out: &mut String, threads: &[Thread]) {
     let idle_total: u64 = idle.iter().map(|entry| entry.1).sum();
     let busy_total: u64 = busy.iter().map(|entry| entry.1).sum();
 
-    let _ = writeln!(
+    let _ = write!(
         out,
-        "Working: **{busy_total}** samples. Parked/idle: {idle_total} (excluded below).\n"
+        "Working: **{busy_total}** samples. Parked/idle: {idle_total} (excluded below)"
     );
+    // Name the top idle symbols: a command that is slow because it waits on
+    // HTTP, MCP, or a subprocess parks in `kevent` / `mach_msg2_trap`, and a
+    // bare total would hide which wait it was.
+    if idle.is_empty() {
+        let _ = writeln!(out, ".\n");
+    } else {
+        let breakdown: Vec<String> = idle
+            .iter()
+            .take(TOP_IDLE)
+            .map(|(symbol, samples)| format!("`{symbol}` {samples}"))
+            .collect();
+        let _ = writeln!(out, ": {}.\n", breakdown.join(", "));
+    }
     let _ = writeln!(out, "| Self | Share | Symbol |");
     let _ = writeln!(out, "| ---: | ----: | :----- |");
-    for (symbol, samples) in busy.iter().take(TOP_LEAVES) {
+    for (symbol, samples) in busy.iter().take(TOP_SYMBOLS) {
         // Percent to one decimal, in integer arithmetic: sample counts are far
         // below the range where the f64 cast would matter, but the lint is right
         // that the cast has no business here.
@@ -140,11 +155,9 @@ fn write_hot_code(out: &mut String, threads: &[Thread]) {
     let _ = writeln!(out);
 }
 
-fn write_hot_leaves(out: &mut String, threads: &[Thread]) {
-    let _ = writeln!(
-        out,
-        "## Hot leaves (main thread, top {TOP_LEAVES}, inclusive)"
-    );
+/// Inclusive per-symbol totals on the main thread: which call paths dominate.
+fn write_inclusive_totals(out: &mut String, threads: &[Thread]) {
+    let _ = writeln!(out, "## Inclusive totals (main thread, top {TOP_SYMBOLS})");
     let _ = writeln!(out);
     let Some(main) = threads.first() else {
         let _ = writeln!(out, "*No data.*\n");
@@ -153,7 +166,7 @@ fn write_hot_leaves(out: &mut String, threads: &[Thread]) {
     let aggregate = main.aggregate_by_symbol();
     let _ = writeln!(out, "| Samples | Symbol |");
     let _ = writeln!(out, "| ------: | :----- |");
-    for (symbol, samples) in aggregate.iter().take(TOP_LEAVES) {
+    for (symbol, samples) in aggregate.iter().take(TOP_SYMBOLS) {
         let _ = writeln!(out, "| {samples} | `{}` |", escape_pipes(symbol));
     }
     let _ = writeln!(out);

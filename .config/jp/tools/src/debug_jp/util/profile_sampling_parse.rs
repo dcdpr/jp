@@ -62,23 +62,30 @@ impl Thread {
     ///
     /// `sample(1)` reports inclusive counts, so self time is a frame's count
     /// minus the sum of its immediate children's.
-    /// Frames are in depth-first preorder, so a frame's immediate children are
-    /// the following frames at `depth + 1`, up to the next frame at `depth` or
-    /// shallower.
+    /// Assumes frames are in depth-first preorder, which is how the parser
+    /// emits them.
     ///
     /// Returned in the same order as [`Self::frames`].
     pub(crate) fn self_samples(&self) -> Vec<u64> {
         let mut selves: Vec<u64> = self.frames.iter().map(|f| f.samples).collect();
 
-        for (i, frame) in self.frames.iter().enumerate() {
-            for child in &self.frames[i + 1..] {
-                if child.depth <= frame.depth {
-                    break;
-                }
-                if child.depth == frame.depth + 1 {
-                    selves[i] = selves[i].saturating_sub(child.samples);
-                }
+        // Ancestors still open at this point in the preorder walk, as
+        // (depth, index), innermost last.
+        let mut open: Vec<(usize, usize)> = Vec::new();
+
+        for (index, frame) in self.frames.iter().enumerate() {
+            while open.last().is_some_and(|&(depth, _)| depth >= frame.depth) {
+                open.pop();
             }
+            // Only an immediate parent absorbs the child's count. A depth jump
+            // (malformed input) leaves the samples unattributed rather than
+            // charging them to a grandparent.
+            if let Some(&(depth, parent)) = open.last()
+                && depth + 1 == frame.depth
+            {
+                selves[parent] = selves[parent].saturating_sub(frame.samples);
+            }
+            open.push((frame.depth, index));
         }
 
         selves
@@ -111,8 +118,9 @@ pub(crate) fn self_samples_by_symbol(threads: &[Thread]) -> Vec<(String, u64)> {
 ///
 /// Idle workers dominate a self-time leaderboard otherwise: a 26-thread rayon
 /// pool spends most of its wall clock asleep.
-/// Reported as a single total rather than dropped silently, so the numbers
-/// still add up.
+/// Idle samples are reported as a total plus a per-symbol breakdown rather than
+/// dropped silently, so a thread genuinely blocked in `kevent` for the whole
+/// run is still visible.
 pub(crate) fn is_idle_symbol(symbol: &str) -> bool {
     const PARKED: &[&str] = &[
         "__psynch_cvwait",
