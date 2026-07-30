@@ -356,6 +356,74 @@ fn test_default_background_column_fill_with_indent() {
 }
 
 #[test]
+fn line_fill_is_the_single_interpretation_of_the_fill_mode() {
+    assert_eq!(line_fill(BackgroundFill::Content, 0), "");
+    assert_eq!(line_fill(BackgroundFill::Terminal, 0), "\x1b[K");
+    assert_eq!(line_fill(BackgroundFill::Column(4), 1), "   ");
+    // A line already at or past the column gets nothing, never a negative pad.
+    assert_eq!(line_fill(BackgroundFill::Column(4), 4), "");
+    assert_eq!(line_fill(BackgroundFill::Column(4), 9), "");
+}
+
+#[test]
+fn code_block_lines_are_padded_under_a_column_fill() {
+    // `apply_line_background` renders code fences and highlighted code-block
+    // lines, so a reasoning region containing tool output reaches the fill
+    // through here. It used to honour only `Terminal`, leaving `Column` regions
+    // unfilled — the case a host that drops `\x1b[K` depends on.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\ncd\n", Some(&bg));
+    let lines: Vec<&str> = rendered.split('\n').collect();
+    assert!(
+        lines[0].ends_with("ab    \x1b[0m"),
+        "first line should pad to column 6: {:?}",
+        lines[0]
+    );
+    assert!(
+        lines[1].ends_with("cd    \x1b[0m"),
+        "second line should pad to column 6: {:?}",
+        lines[1]
+    );
+}
+
+#[test]
+fn code_block_column_fill_measures_visible_width_only() {
+    // The content arrives syntax-highlighted, so its escapes must not be
+    // counted against the fill column.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("a\x1b[31mb\x1b[39m\n", Some(&bg));
+    assert!(
+        rendered.contains("\x1b[39m    \x1b[0m"),
+        "two visible columns should leave a four-space pad: {rendered:?}"
+    );
+}
+
+#[test]
+fn code_block_trailing_segment_is_not_padded() {
+    // `split('\n')` yields an empty trailing segment after a final newline.
+    // It is not a line and must not be filled, or every block would gain a
+    // stray shaded row.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\n", Some(&bg));
+    assert!(
+        rendered.ends_with("\x1b[0m\n\x1b[48;5;236m"),
+        "trailing segment should carry no pad: {rendered:?}"
+    );
+}
+
+#[test]
 fn test_default_background_terminal_fill_with_indent() {
     // Same as above for `BackgroundFill::Terminal` (erase-to-EOL).
     // The erase escape should appear after content (so the bg fills to

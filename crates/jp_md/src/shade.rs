@@ -16,9 +16,11 @@
 
 use std::fmt::{self, Write};
 
+use unicode_width::UnicodeWidthStr;
+
 use crate::{
     ansi::{self, AnsiState, Segment},
-    format::{BackgroundFill, DefaultBackground},
+    format::{self, BackgroundFill, DefaultBackground},
 };
 
 /// Wraps a writer and maintains a default-background invariant across the byte
@@ -43,11 +45,21 @@ pub struct ShadedWriter<W: Write> {
     /// The region background escape (`\x1b[{param}m`), pre-rendered.
     background_escape: String,
 
-    /// Whether the region fills each line to the right edge with `\x1b[K`.
+    /// How far the region background extends on each completed line.
     ///
-    /// True for [`BackgroundFill::Terminal`] (the reasoning background);
-    /// otherwise the background only backs the content itself.
-    fill_to_edge: bool,
+    /// The full policy, not a boolean: [`BackgroundFill::Terminal`] defers the
+    /// fill to the terminal via `\x1b[K`, while [`BackgroundFill::Column`] pads
+    /// with real spaces — the only form a host that lays out its own
+    /// sub-window (an `fzf` preview pane) renders.
+    fill: BackgroundFill,
+
+    /// Visible column of the write cursor on the current line.
+    ///
+    /// Only meaningful for [`BackgroundFill::Column`], which needs to know how
+    /// far to pad.
+    /// Counted in display columns over escape-free text runs, and reset by `\n`
+    /// and `\r`.
+    column: usize,
 
     /// The content's currently active attributes, fed only the content's own
     /// escapes — never the writer's injected background.
@@ -74,7 +86,8 @@ impl<W: Write> ShadedWriter<W> {
         Self {
             output,
             background_escape: format!("\x1b[{}m", background.param),
-            fill_to_edge: matches!(background.fill, BackgroundFill::Terminal),
+            fill: background.fill,
+            column: 0,
             content: AnsiState::default(),
             needs_background: true,
             pending: String::new(),
@@ -143,11 +156,13 @@ impl<W: Write> ShadedWriter<W> {
                     self.emit_run(&text[start..i])?;
                     self.fill_line()?;
                     self.output.write_str("\n")?;
+                    self.column = 0;
                     start = i + 1;
                 }
                 b'\r' => {
                     self.emit_run(&text[start..i])?;
                     self.output.write_str("\r")?;
+                    self.column = 0;
                     start = i + 1;
                 }
                 _ => {}
@@ -162,17 +177,22 @@ impl<W: Write> ShadedWriter<W> {
             return Ok(());
         }
         self.ensure_background()?;
+        // The run comes from a `Segment::Text`, so it carries no escape bytes
+        // and its display width is its visible width.
+        self.column += UnicodeWidthStr::width(run);
         self.output.write_str(run)
     }
 
-    /// Fill the current line to the right edge with the active background,
-    /// ahead of a newline.
+    /// Fill the rest of the current line with the active background, ahead of a
+    /// newline.
     fn fill_line(&mut self) -> fmt::Result {
-        self.ensure_background()?;
-        if self.fill_to_edge {
-            self.output.write_str("\x1b[K")?;
+        let fill = format::line_fill(self.fill, self.column);
+        if fill.is_empty() {
+            return Ok(());
         }
-        Ok(())
+
+        self.ensure_background()?;
+        self.output.write_str(&fill)
     }
 
     /// Assert the region background if it is owed and the content hasn't set

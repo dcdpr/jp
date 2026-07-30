@@ -25,6 +25,66 @@ fn empty_input_produces_no_output() {
     assert_eq!(shade("", &terminal_bg()), "");
 }
 
+/// A background that pads to a fixed column instead of deferring to the
+/// terminal.
+fn column_bg(width: usize) -> DefaultBackground {
+    DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(width),
+    }
+}
+
+#[test]
+fn column_fill_pads_with_spaces_instead_of_erasing() {
+    // A host that lays out its own sub-window (an `fzf` preview pane) drops
+    // `\x1b[K`, so the fill has to be real characters. Each line is padded from
+    // its own visible width up to the column.
+    assert_eq!(
+        shade("ab\nc\n", &column_bg(4)),
+        "\x1b[48;5;236mab  \nc   \n\x1b[49m"
+    );
+}
+
+#[test]
+fn column_fill_counts_display_width_not_bytes() {
+    // Two double-width characters fill four of the six columns, so two spaces
+    // remain. Counting bytes would have padded nothing (6 bytes >= 6).
+    assert_eq!(
+        shade("日本\n", &column_bg(6)),
+        "\x1b[48;5;236m日本  \n\x1b[49m"
+    );
+}
+
+#[test]
+fn column_fill_ignores_escape_bytes_when_measuring() {
+    // The content's own styling is zero-width: `ab` is still 2 columns, so the
+    // pad is 2, not 2-minus-the-escape-length.
+    let shaded = shade("a\x1b[1mb\x1b[22m\n", &column_bg(4));
+    assert!(
+        shaded.ends_with("  \n\x1b[49m"),
+        "expected a two-space pad, got {shaded:?}"
+    );
+}
+
+#[test]
+fn column_fill_emits_nothing_once_the_line_reaches_the_column() {
+    // An over-long line gets no padding rather than a negative one.
+    assert_eq!(
+        shade("abcdef\n", &column_bg(4)),
+        "\x1b[48;5;236mabcdef\n\x1b[49m"
+    );
+}
+
+#[test]
+fn content_fill_backs_only_the_text() {
+    // `Content` asserts the background under the text but never extends it.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Content,
+    };
+    assert_eq!(shade("ab\n", &bg), "\x1b[48;5;236mab\n\x1b[49m");
+}
+
 #[test]
 fn content_background_is_preserved_and_the_region_resumes_after_it() {
     // While the content owns the background the writer stays out of the way;

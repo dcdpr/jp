@@ -415,72 +415,60 @@ impl<'w> TerminalWriter<'w> {
         Ok(())
     }
 
-    /// Emit the background fill for the current line.
-    ///
-    /// Depending on the [`BackgroundFill`] mode this either:
-    ///
-    /// - does nothing (`Content`),
-    /// - pads with spaces to a fixed column (`Column`),
-    /// - emits `\x1b[K` to fill to the terminal edge (`Terminal`).
+    /// Emit the background fill for the current line into the wrap buffer.
     fn emit_line_fill(&mut self) -> fmt::Result {
-        let Some(ref bg) = self.default_background else {
-            return Ok(());
-        };
-
-        match bg.fill {
-            BackgroundFill::Content => {}
-            BackgroundFill::Column(target) => {
-                let pad = target.saturating_sub(self.column);
-                if pad > 0 {
-                    let spaces: String = " ".repeat(pad);
-                    if self.width == 0 {
-                        self.output.write_str(&spaces)?;
-                    } else {
-                        self.wrap_buffer.push_str(&spaces);
-                    }
-                    self.column += pad;
-                }
-            }
-            BackgroundFill::Terminal => {
-                // Ensure the default background is active before erase,
-                // so a temporary background (e.g. inline code) doesn't
-                // bleed to the terminal edge.
-                self.write_escape(&format!("\x1b[{}m\x1b[K", bg.param))?;
-            }
-        }
-        Ok(())
+        self.emit_fill(false)
     }
 
-    /// Like [`emit_line_fill`] but writes directly to the output writer.
-    /// Used in the wrap-break path.
+    /// Like [`emit_line_fill`] but writes straight to the output writer.
+    /// Used in the wrap-break path, where the buffer has already been flushed.
     ///
     /// [`emit_line_fill`]: Self::emit_line_fill
     fn emit_line_fill_direct(&mut self) -> fmt::Result {
+        self.emit_fill(true)
+    }
+
+    /// Extend the active background to the end of the current line.
+    ///
+    /// The fill itself comes from [`format::line_fill`], the single
+    /// interpretation of [`BackgroundFill`].
+    /// The background escape always precedes it so a temporary background
+    /// (inline code, say) can't bleed into the fill.
+    ///
+    /// `direct` selects the sink: the output writer when the wrap buffer has
+    /// already been flushed, the buffer otherwise.
+    fn emit_fill(&mut self, direct: bool) -> fmt::Result {
         let Some(ref bg) = self.default_background else {
             return Ok(());
         };
 
-        match bg.fill {
-            BackgroundFill::Content => {}
-            BackgroundFill::Column(target) => {
-                let pad = target.saturating_sub(self.column);
-                if pad > 0 {
-                    // Set default bg before padding so inline code
-                    // background doesn't bleed into the padding.
-                    self.output.write_str(&format!("\x1b[{}m", bg.param))?;
-                    for _ in 0..pad {
-                        self.output.write_char(' ')?;
-                    }
-                    self.column += pad;
-                }
-            }
-            BackgroundFill::Terminal => {
-                // Set default bg before erase so inline code background
-                // doesn't bleed to the terminal edge.
-                self.output
-                    .write_str(&format!("\x1b[{}m\x1b[K", bg.param))?;
+        let fill = format::line_fill(bg.fill, self.column);
+        if fill.is_empty() {
+            return Ok(());
+        }
+
+        let bg_escape = format!("\x1b[{}m", bg.param);
+        // `\x1b[K` is an escape, not content: it advances no column. Padding
+        // spaces do, and the column has to follow them so a later fill on the
+        // same line doesn't pad twice.
+        let advances = !matches!(bg.fill, BackgroundFill::Terminal);
+
+        if direct {
+            self.output.write_str(&bg_escape)?;
+            self.output.write_str(&fill)?;
+        } else {
+            self.write_escape(&bg_escape)?;
+            if advances {
+                self.wrap_buffer.push_str(&fill);
+            } else {
+                self.write_escape(&fill)?;
             }
         }
+
+        if advances {
+            self.column += fill.chars().count();
+        }
+
         Ok(())
     }
 

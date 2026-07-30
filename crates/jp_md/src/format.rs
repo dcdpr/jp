@@ -1,6 +1,6 @@
 //! Markdown formatting utilities.
 
-use std::{fmt, sync::LazyLock};
+use std::{borrow::Cow, fmt, sync::LazyLock};
 
 use comrak::{
     Arena,
@@ -11,6 +11,7 @@ use syntect::{highlighting::Theme, parsing::SyntaxSet};
 use two_face::syntax;
 
 use crate::{
+    ansi,
     render::{self, HrOptions, RenderOptions},
     table::TableOptions,
     theme,
@@ -447,24 +448,43 @@ fn ends_with_tight_list<'a>(root: &'a comrak::nodes::AstNode<'a>) -> bool {
     )
 }
 
+/// The text that extends a background from `column` to the end of the line.
+///
+/// The one place [`BackgroundFill`] is interpreted.
+/// Every writer that maintains a region background consults this so the three
+/// modes cannot drift apart: `Content` adds nothing, `Terminal` defers to the
+/// terminal's erase-to-end-of- line, and `Column` pads with real spaces — the
+/// only form a host that lays out its own sub-window (an `fzf` preview pane)
+/// renders, since it does not implement the erase.
+///
+/// The caller is responsible for having the background active before writing
+/// the result.
+pub(crate) fn line_fill(fill: BackgroundFill, column: usize) -> Cow<'static, str> {
+    match fill {
+        BackgroundFill::Content => Cow::Borrowed(""),
+        BackgroundFill::Terminal => Cow::Borrowed("\x1b[K"),
+        BackgroundFill::Column(target) => match target.saturating_sub(column) {
+            0 => Cow::Borrowed(""),
+            pad => Cow::Owned(" ".repeat(pad)),
+        },
+    }
+}
+
 /// Render an inter-block separator (blank line) with optional background fill.
 /// Used between blocks and after closing code fences.
 #[must_use]
 pub fn render_separator(background: Option<&DefaultBackground>) -> String {
-    match background {
-        Some(bg) if matches!(bg.fill, BackgroundFill::Terminal) => {
-            format!("\x1b[{}m\x1b[K\x1b[49m\n", bg.param)
-        }
-        Some(bg) if let BackgroundFill::Column(width) = bg.fill => {
-            let mut s = format!("\x1b[{}m", bg.param);
-            for _ in 0..width {
-                s.push(' ');
-            }
-            s.push_str("\x1b[49m\n");
-            s
-        }
-        _ => "\n".to_string(),
+    let Some(bg) = background else {
+        return "\n".to_string();
+    };
+
+    // The separator line holds no content, so the fill starts at column 0.
+    let fill = line_fill(bg.fill, 0);
+    if fill.is_empty() {
+        return "\n".to_string();
     }
+
+    format!("\x1b[{}m{fill}\x1b[49m\n", bg.param)
 }
 
 /// Apply an optional default background to content, injecting the background
@@ -475,18 +495,24 @@ pub fn apply_line_background(content: &str, background: Option<&DefaultBackgroun
         return content.to_string();
     };
     let bg_esc = format!("\x1b[{}m", bg.param);
-    let use_erase = matches!(bg.fill, BackgroundFill::Terminal);
 
+    let lines: Vec<&str> = content.split('\n').collect();
     let mut out = String::new();
-    for (i, line) in content.split('\n').enumerate() {
+    for (i, line) in lines.iter().enumerate() {
         if i > 0 {
-            if use_erase {
-                out.push_str("\x1b[K");
-            }
             out.push_str("\x1b[0m\n");
         }
         out.push_str(&bg_esc);
         out.push_str(line);
+
+        // Only a line that a newline completes gets a fill; the trailing
+        // segment after the final newline isn't a line.
+        // Width is measured per line because the content arrives already
+        // syntax-highlighted, so its escapes must not count toward the column
+        // the fill starts from.
+        if i + 1 < lines.len() {
+            out.push_str(&line_fill(bg.fill, ansi::visual_width(line)));
+        }
     }
     out
 }

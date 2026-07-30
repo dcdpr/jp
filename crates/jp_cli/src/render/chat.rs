@@ -216,7 +216,7 @@ impl ChatRenderer {
             label,
             suffix,
             detail,
-            self.config.markdown.wrap_width,
+            wrap_width(&self.config, self.printer.terminal_width()),
             pretty,
         );
 
@@ -610,13 +610,22 @@ impl ChatRenderer {
     }
 
     /// The full-width background fill configured for reasoning content, if any.
+    ///
+    /// A known width pads with real spaces, which every consumer renders.
+    /// The erase-to-end-of-line escape is the fallback for an unknown width: a
+    /// terminal honors it, but a host that lays out its own sub-window — an
+    /// `fzf` preview pane — drops it, leaving the shading to stop at the last
+    /// character.
     fn reasoning_background(&self) -> Option<DefaultBackground> {
         self.config
             .reasoning
             .background
             .map(|color| DefaultBackground {
                 param: crate::format::color_to_bg_param(color),
-                fill: BackgroundFill::Terminal,
+                fill: match self.printer.terminal_width() {
+                    Some(width) => BackgroundFill::Column(usize::from(width)),
+                    None => BackgroundFill::Terminal,
+                },
             })
     }
 
@@ -924,6 +933,21 @@ fn indent_lines(content: &str, indent: usize) -> String {
     out
 }
 
+/// Columns prose wraps at: the configured width, capped by the space available.
+///
+/// `style.markdown.wrap_width` is a reading-comfort preference, so a wider
+/// output area doesn't widen it.
+/// A *narrower* one has to win, though — wrapping past the available width
+/// leaves the host to wrap again on top, which double-wraps in a terminal and
+/// silently truncates in a pane that clips.
+fn wrap_width(config: &StyleConfig, terminal_width: Option<u16>) -> usize {
+    let configured = config.markdown.wrap_width;
+    match terminal_width {
+        Some(available) => configured.min(usize::from(available)),
+        None => configured,
+    }
+}
+
 /// Build a markdown formatter from the style config.
 ///
 /// `terminal_width` bounds blocks that can't be soft-wrapped (tables); `None`
@@ -944,7 +968,7 @@ fn formatter_from_config(
         warn!("Unknown theme {name:?} in `style.markdown.theme`, falling back to the default.");
     }
 
-    Formatter::with_width(config.markdown.wrap_width)
+    Formatter::with_width(wrap_width(config, terminal_width))
         .terminal_width(terminal_width.map_or(0, usize::from))
         .table_max_column_width(config.markdown.table_max_column_width)
         .theme(theme_name)

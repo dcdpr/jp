@@ -19,6 +19,28 @@ fn create_renderer() -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     create_renderer_with_config(AppConfig::new_test())
 }
 
+#[test]
+fn wrap_width_is_capped_by_the_available_columns() {
+    // Prose wrapped wider than the output area leaves the host to wrap again on
+    // top of it, which double-wraps in a terminal and silently truncates in a
+    // pane that clips.
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 80;
+
+    assert_eq!(wrap_width(&config.style, Some(30)), 30);
+}
+
+#[test]
+fn wrap_width_keeps_the_configured_preference_on_a_wider_output() {
+    // The configured width is a reading-comfort choice, not a limitation: extra
+    // columns don't widen it.
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 80;
+
+    assert_eq!(wrap_width(&config.style, Some(200)), 80);
+    assert_eq!(wrap_width(&config.style, None), 80);
+}
+
 /// A table is laid out rather than soft-wrapped, so the renderer has to fit it
 /// to the terminal width the printer reports.
 #[test]
