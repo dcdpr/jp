@@ -340,7 +340,7 @@
     "summary": "Add --explain flag to jp query showing rendered system prompt, tools, attachments, and final request without calling the LLM provider."
   },
   "086-line-oriented-stdin-input-for-cli-arguments.md": {
-    "hash": "df319f2f8d8476bcfec18dc2315a29ddba75f0cc212d6ec7ec6fd1d695746d7b",
+    "hash": "9425e7b6fa3fedd4d77f6e9d4466c15368f9a35accb665a4153ac2acdfdfc0eb",
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
@@ -380,7 +380,7 @@
     "summary": "Extend reasoning-region background shading across tool calls to visually represent continuous reasoning despite interleaved tool execution."
   },
   "096-terminal-output-sanitization-for-untrusted-content.md": {
-    "hash": "10bedc94a7d1454fffef85238fbe8f7d2216ca9969aef50abb90d9c50feaed06",
+    "hash": "8abdc1050cab6c682042be4f5cdc621baed71c1ae407be68318fad667b9afa46",
     "summary": "Sanitize terminal output by allowlisting safe ANSI sequences (colors) and dropping dangerous ones (cursor, erase, OSC) to prevent escape injection attacks from untrusted content."
   },
   "097-stable-event-identifiers.md": {

@@ -2267,6 +2267,7 @@ dependencies = [
  "pretty_assertions",
  "quick-xml",
  "rayon",
+ "regex",
  "relative-path",
  "reqwest",
  "schemars",

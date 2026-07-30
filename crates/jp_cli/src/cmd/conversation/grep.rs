@@ -1,8 +1,12 @@
-use std::{borrow::Cow, collections::HashSet, fmt::Write as _};
+use std::{collections::HashSet, fmt::Write as _, num::NonZeroUsize, ops::Range};
 
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
+use jp_term::{
+    osc::hyperlink,
+    width::{display_width, truncate_to_width},
+};
 use jp_workspace::ConversationHandle;
 use rayon::prelude::*;
 use serde_json::json;
@@ -12,23 +16,51 @@ use crate::{
     cmd::{ConversationLoadRequest, Error, Output, conversation_id::FlagIds},
     ctx::Ctx,
     output::print_json,
-    shared::search::{ConcreteScope, Matcher, event_lines, event_scope, title_for},
+    shared::search::{
+        ConcreteScope, Matcher, event_lines, event_scope, resolve_ignore_case, title_for,
+    },
 };
 
-/// Maximum number of characters to show from a matching line.
-const TRUNCATE_AT: usize = 60;
+/// Display columns always left for a hit's text, however wide the line prefix
+/// grows.
+const MIN_TEXT_WIDTH: usize = 20;
+
+/// The kind field of a line-mode record whose line contains the pattern.
+const MATCH_KIND: char = 'm';
+
+/// The kind field of a line-mode record pulled in by `--context`.
+const CONTEXT_KIND: char = 'c';
+
+/// The turn field of a hit that isn't turn-scoped.
+///
+/// `..` is the whole conversation in the `--turn` selector `print` and
+/// `compact` accept, so a title hit's coordinate stays usable as-is.
+const WHOLE_CONVERSATION: &str = "..";
 
 #[derive(Debug, Default, clap::Args)]
 pub(crate) struct Grep {
     /// The search pattern.
-    pattern: String,
+    ///
+    /// Multiple words are joined with single spaces, so quoting is optional:
+    /// `jp c grep two words` searches for `two words`.
+    /// A pattern that starts with `-` still needs `--` ahead of it.
+    // `required` because a `Vec` positional is optional by default in clap, and
+    // `num_args` only constrains values per occurrence. Without it a bare
+    // `jp c grep` compiles the empty pattern, which matches every line of every
+    // conversation.
+    #[arg(value_name = "PATTERN", required = true, num_args = 1..)]
+    pattern: Vec<String>,
 
     #[command(flatten)]
     target: FlagIds<true, true>,
 
-    /// Case-insensitive matching.
-    #[arg(long)]
+    /// Match case-insensitively, overriding smart-case.
+    #[arg(long, conflicts_with = "case_sensitive")]
     ignore_case: bool,
+
+    /// Match case-sensitively, overriding smart-case.
+    #[arg(long)]
+    case_sensitive: bool,
 
     /// Number of context lines to show around each match.
     #[arg(long, default_value_t = 0)]
@@ -42,24 +74,54 @@ pub(crate) struct Grep {
     #[arg(long)]
     descending: bool,
 
-    /// Print only the matched (and context) lines, without any decoration.
-    #[arg(long)]
-    raw: bool,
-
-    /// Treat the pattern as a regular expression instead of a substring.
+    /// Treat the pattern as a regular expression instead of a literal.
     #[arg(long, short)]
     regex: bool,
 
-    /// Print only the IDs of conversations that contain a match, one per line.
-    #[arg(long = "list", short = 'l')]
-    ids: bool,
+    /// What to emit for each conversation that contains a match.
+    ///
+    /// - `hits`: the matching lines with their coordinates.
+    /// - `ids`: the conversation ID only.
+    /// - `count`: the conversation ID and its number of matching lines.
+    /// - `text`: the matched and context lines with no coordinates.
+    #[arg(long, value_enum, default_value_t)]
+    output: OutputKind,
+
+    /// Group hits under a per-conversation heading.
+    ///
+    /// On by default in the human format (`-F auto` on a terminal), off in the
+    /// machine format.
+    #[arg(long, conflicts_with = "no_heading")]
+    heading: bool,
+
+    /// Print one fully-qualified `ID:TURN:SCOPE:KIND:TEXT` line per hit instead
+    /// of grouping them under headings.
+    #[arg(long)]
+    no_heading: bool,
+
+    /// Stop after this many matching lines per conversation.
+    ///
+    /// Must be at least 1: a cap of zero would discard every match and report
+    /// the run as finding nothing.
+    #[arg(long, short = 'm')]
+    max_matches: Option<NonZeroUsize>,
+
+    /// Show at most this many conversations, in sort order.
+    ///
+    /// Must be at least 1: a cap of zero would discard real matches and report
+    /// the run as finding nothing.
+    #[arg(long)]
+    limit: Option<NonZeroUsize>,
 
     /// Restrict the search to specific parts of the conversation.
     ///
-    /// Repeatable or comma-separated.
+    /// Repeat the flag (`--scope user --scope assistant`) or comma-separate the
+    /// values (`--scope user,assistant`).
     /// If omitted, every part is searched.
     /// Meta-scopes `chat` and `tool` expand to their concrete members.
-    #[arg(long = "scope", short = 's', value_enum, value_delimiter = ',', num_args = 1..)]
+    // One value per occurrence: a multi-value `--scope` would swallow the
+    // positional pattern that follows it in every documented example.
+    #[arg(long = "scope", short = 's', value_enum, value_delimiter = ',')]
     scopes: Vec<Scope>,
 }
 
@@ -70,12 +132,20 @@ impl Grep {
 
     #[expect(clippy::needless_pass_by_value)]
     pub(crate) fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        let matcher = if self.regex {
-            Matcher::regex(&self.pattern, self.ignore_case)
-                .map_err(|e| format!("invalid regex pattern: {e}"))?
-        } else {
-            Matcher::substring(&self.pattern, self.ignore_case)
+        let explicit_case = match (self.ignore_case, self.case_sensitive) {
+            (true, _) => Some(true),
+            (_, true) => Some(false),
+            _ => None,
         };
+        // Rejoined with single spaces: the shell already split on whitespace, so
+        // an unquoted multi-word pattern arrives as several arguments.
+        let pattern = self.pattern.join(" ");
+        let ignore_case = resolve_ignore_case(&pattern, explicit_case);
+
+        // An unusable pattern is a failure, not an empty result: exit 2 so a
+        // script can tell a broken pattern from a pattern that found nothing.
+        let matcher = Matcher::new(&pattern, self.regex, ignore_case)
+            .map_err(|e| (2, format!("invalid pattern: {e}")))?;
 
         let wanted = expand_scopes(&self.scopes);
 
@@ -88,18 +158,93 @@ impl Grep {
 
         self.sort_ids(&mut ids, ctx);
 
-        let hits = self.collect_hits(&ids, &matcher, &wanted, ctx);
+        // The global `--quiet` asks for no output, which leaves the exit status
+        // as the whole answer: stop at the first match instead of collecting
+        // every hit nobody will read.
+        if ctx.term.args.quiet {
+            // Ungated: the gate exists to stop paying the backtrack limit for
+            // results that will be discarded, but here a single found match is
+            // the whole answer and outlives any failure. Leaving it on would
+            // make the status depend on whether a worker hit the poisoning
+            // conversation before the matching one.
+            let matcher = matcher.ungated();
+            let matched = self.any_match(&ids, &matcher, &wanted, ctx);
 
-        if hits.is_empty() {
-            // Finding nothing is a result, not a failure. The status stays
-            // non-zero so a script can branch on it, but the run did what was
-            // asked, so failure-only output (the trace log location) stays quiet
-            // for a piped run.
-            return Err(Error::from("No matches found.").expected());
+            // A found match wins over a failure, as in `grep -q`: "if -q is
+            // given and a line is selected, the exit status is 0 even if an
+            // error occurred".
+            if matched {
+                return Ok(());
+            }
+            if let Some(error) = matcher.failure() {
+                return Err((2, format!("pattern matching failed: {error}")).into());
+            }
+
+            // Marked expected for the same reason `render_empty` is: finding
+            // nothing is a result, not a failure. This path bypasses
+            // `render_empty` entirely, so it carries the marker itself.
+            return Err(Error::from(1).expected());
         }
 
-        self.render(&hits, ctx);
+        let mut groups = self.collect_hits(&ids, &matcher, &wanted, ctx);
+
+        // A pattern that failed part-way through leaves an unknown result, so it
+        // is reported instead of the hits collected so far.
+        if let Some(error) = matcher.failure() {
+            return Err((2, format!("pattern matching failed: {error}")).into());
+        }
+
+        if let Some(limit) = self.limit {
+            groups.truncate(limit.get());
+        }
+
+        if groups.is_empty() {
+            return Err(Self::render_empty(ctx));
+        }
+
+        self.render(&groups, ctx);
         Ok(())
+    }
+
+    /// Whether any conversation contains a match.
+    ///
+    /// Stops as soon as one is found; the remaining conversations are never
+    /// read.
+    fn any_match(
+        &self,
+        ids: &[ConversationId],
+        matcher: &Matcher,
+        wanted: &HashSet<ConcreteScope>,
+        ctx: &Ctx,
+    ) -> bool {
+        let needs_events = needs_events_for(wanted);
+
+        ids.par_iter()
+            .find_any(|&&id| {
+                !self
+                    .collect_hits_for_id(id, matcher, wanted, needs_events, Some(1), ctx)
+                    .hits
+                    .is_empty()
+            })
+            .is_some()
+    }
+
+    /// Report the absence of matches and produce the exit status for it.
+    ///
+    /// JSON consumers get a well-formed empty result; a terminal gets a short
+    /// note on the chrome channel; a pipe gets nothing at all, matching `grep`.
+    ///
+    /// The status is always 1, marked expected: it is non-zero so a script can
+    /// branch on it, but the run did what was asked, so failure-only output
+    /// (the trace log location) stays quiet for a piped run.
+    fn render_empty(ctx: &Ctx) -> Error {
+        if ctx.printer.format().is_json() {
+            print_json(&ctx.printer, &json!([]));
+        } else if ctx.printer.pretty_printing_enabled() {
+            ctx.printer.eprintln("No matches.".dim().to_string());
+        }
+
+        Error::from(1).expected()
     }
 
     fn collect_hits(
@@ -108,22 +253,27 @@ impl Grep {
         matcher: &Matcher,
         wanted: &HashSet<ConcreteScope>,
         ctx: &Ctx,
-    ) -> Vec<Hit> {
+    ) -> Vec<ConversationHits> {
         // Any scope other than `Title` is sourced from the event stream.
         // Skipping the event pass entirely when it can't contribute avoids a
         // sequential disk read per conversation.
         let needs_events = needs_events_for(wanted);
 
-        // Each worker produces an independent `Vec<Hit>`. Collecting via
-        // `Vec<Vec<Hit>>` preserves input order (rayon `collect` is
-        // order-preserving, unlike `reduce`); flatten merges per-id results
-        // while keeping the (already-sorted) id order intact.
-        let per_id: Vec<Vec<Hit>> = ids
-            .par_iter()
-            .map(|&id| self.collect_hits_for_id(id, matcher, wanted, needs_events, ctx))
-            .collect();
-
-        per_id.into_iter().flatten().collect()
+        // rayon's `collect` is order-preserving (unlike `reduce`), so the
+        // already-sorted id order survives the parallel pass.
+        ids.par_iter()
+            .map(|&id| {
+                self.collect_hits_for_id(
+                    id,
+                    matcher,
+                    wanted,
+                    needs_events,
+                    self.max_matches.map(NonZeroUsize::get),
+                    ctx,
+                )
+            })
+            .filter(|group| !group.hits.is_empty())
+            .collect()
     }
 
     /// Per-conversation hit collection.
@@ -135,165 +285,191 @@ impl Grep {
         matcher: &Matcher,
         wanted: &HashSet<ConcreteScope>,
         needs_events: bool,
+        max_matches: Option<usize>,
         ctx: &Ctx,
-    ) -> Vec<Hit> {
-        let mut hits = Vec::new();
+    ) -> ConversationHits {
+        let mut group = ConversationHits {
+            id,
+            title: None,
+            turn_count: None,
+            hits: Vec::new(),
+        };
 
         let handle = match ctx.workspace.acquire_conversation(&id) {
             Ok(handle) => handle,
             Err(error) => {
                 warn!(%id, %error, "Failed to load conversation");
-                return hits;
+                return group;
             }
         };
 
+        group.title = title_for(ctx, &handle);
+
+        // Counts down as matches are taken, so `--max-matches` applies across
+        // the whole conversation rather than per scope.
+        let mut budget = Budget::new(max_matches);
+
         if wanted.contains(&ConcreteScope::Title)
-            && let Some(title) = title_for(ctx, &handle)
+            && let Some(title) = &group.title
         {
             let lines: Vec<_> = title.lines().collect();
-
             collect_scope_hits(
-                &mut hits,
-                id,
+                &mut group.hits,
+                None,
                 ConcreteScope::Title,
+                None,
                 &lines,
                 matcher,
                 self.context,
+                &mut budget,
             );
         }
 
         if !needs_events {
-            return hits;
+            return group;
         }
 
         let events = match ctx.workspace.events(&handle) {
             Ok(events) => events,
             Err(error) => {
                 warn!(%id, %error, "Failed to load conversation events");
-                return hits;
+                return group;
             }
         };
 
-        for event in events.iter() {
-            let Some(scope) = event_scope(&event.event.kind) else {
+        // Counted up front so `--max-matches` cutting the walk short below can't
+        // understate it. Allocation-free, unlike `iter_turns`.
+        group.turn_count = Some(events.turn_count());
+
+        // `iter_events_by_turn` rather than `iter_turns`: the latter resolves and
+        // clones a `PartialAppConfig` per event, which grep never reads.
+        for (index, event) in events.iter_events_by_turn() {
+            if budget.is_exhausted() {
+                return group;
+            }
+
+            let Some(scope) = event_scope(&event.kind) else {
                 continue;
             };
             if !wanted.contains(&scope) {
                 continue;
             }
 
-            let lines = event_lines(&event.event.kind);
+            let lines = event_lines(&event.kind);
             let line_refs: Vec<&str> = lines.iter().map(AsRef::as_ref).collect();
-            collect_scope_hits(&mut hits, id, scope, &line_refs, matcher, self.context);
+
+            collect_scope_hits(
+                &mut group.hits,
+                // 1-based to match the `--turn` selector and the headers `print`
+                // renders.
+                Some(index + 1),
+                scope,
+                Some(event.timestamp),
+                &line_refs,
+                matcher,
+                self.context,
+                &mut budget,
+            );
         }
 
-        hits
+        group
     }
 
-    fn render(&self, hits: &[Hit], ctx: &Ctx) {
-        let format = ctx.printer.format();
+    fn render(&self, groups: &[ConversationHits], ctx: &Ctx) {
+        match self.output {
+            OutputKind::Ids => Self::render_ids(groups, ctx),
+            OutputKind::Count => Self::render_count(groups, ctx),
+            OutputKind::Text => Self::render_plain_text(groups, ctx),
+            OutputKind::Hits if ctx.printer.format().is_json() => Self::render_json(groups, ctx),
+            OutputKind::Hits => self.render_hits(groups, ctx),
+        }
+    }
 
-        if self.ids {
-            Self::render_ids(hits, ctx);
-        } else if format.is_json() {
-            Self::render_json(hits, ctx);
-        } else if self.raw {
-            Self::render_raw(hits, ctx);
+    /// Whether hits are grouped under per-conversation headings.
+    ///
+    /// A terminal gets headings; a pipe gets one self-contained line per hit so
+    /// that field-splitting tools see a fixed shape.
+    fn heading_enabled(&self, pretty: bool) -> bool {
+        if self.heading {
+            true
+        } else if self.no_heading {
+            false
         } else {
-            self.render_text(hits, ctx);
+            pretty
         }
     }
 
-    fn render_text(&self, hits: &[Hit], ctx: &Ctx) {
+    fn render_hits(&self, groups: &[ConversationHits], ctx: &Ctx) {
         let pretty = ctx.printer.pretty_printing_enabled();
+        let columns = ctx.term.width.map(usize::from);
 
-        // Show the scope column only when the user explicitly asked for more
-        // than one scope. A bare `jp c grep foo` or `--scope title` stays
-        // visually identical to the pre-scope output.
-        let show_scope = self.scopes.len() > 1;
-        let scope_width = if show_scope {
-            hits.iter()
-                .map(|h| h.scope.as_str().len())
-                .max()
-                .unwrap_or(0)
+        // Following `grep`, `--` group separators belong to context output. They
+        // delimit blocks of surrounding lines; with no `--context` there are no
+        // blocks, and a separator between two adjacent matches says nothing. In
+        // line mode it would also break the promise that every emitted line is a
+        // coordinate record.
+        let separators = self.context > 0;
+
+        let mut output = String::new();
+        if self.heading_enabled(pretty) {
+            for (index, group) in groups.iter().enumerate() {
+                if index > 0 {
+                    output.push('\n');
+                }
+                render_group_heading(&mut output, group, columns, pretty);
+                render_group_hits(&mut output, group, columns, pretty, separators);
+            }
         } else {
-            0
-        };
-
-        let mut output = String::new();
-        for hit in hits {
-            if hit.group_break {
-                if pretty {
-                    let _ = writeln!(output, "{}", "--".dim());
-                } else {
-                    let _ = writeln!(output, "--");
+            for (index, group) in groups.iter().enumerate() {
+                // Without headings a conversation boundary is just another gap
+                // between groups of lines, so it gets the same `--` marker.
+                // Never styled: see `write_group_break`.
+                if separators && index > 0 {
+                    write_group_break(&mut output, "", false);
                 }
-            }
-
-            let truncated = truncate_line(&hit.text, TRUNCATE_AT);
-            let sep = if hit.is_match { ":" } else { "-" };
-            let id_str = hit.id.to_string();
-
-            if show_scope {
-                let scope_str = hit.scope.as_str();
-                let pad = scope_width.saturating_sub(scope_str.len());
-                if pretty {
-                    let _ = writeln!(
-                        output,
-                        "{} {:pad$}{}{sep} {}",
-                        id_str.bold().yellow(),
-                        "",
-                        scope_str.blue(),
-                        truncated.dim(),
-                        pad = pad,
-                    );
-                } else {
-                    let _ = writeln!(
-                        output,
-                        "{id_str} {:pad$}{scope_str}{sep} {truncated}",
-                        "",
-                        pad = pad,
-                    );
-                }
-            } else if pretty {
-                let _ = writeln!(
-                    output,
-                    "{}{sep} {}",
-                    id_str.bold().yellow(),
-                    truncated.dim()
-                );
-            } else {
-                let _ = writeln!(output, "{id_str}{sep} {truncated}");
+                render_group_lines(&mut output, group, columns, pretty, separators);
             }
         }
 
-        let output = output.trim_end_matches('\n');
-        ctx.printer.println_raw(output);
+        ctx.printer.println_raw(output.trim_end_matches('\n'));
     }
 
-    fn render_raw(hits: &[Hit], ctx: &Ctx) {
-        let mut output = String::new();
-
-        for hit in hits {
-            if hit.group_break {
-                let _ = writeln!(output, "--");
-            }
-            let _ = writeln!(output, "{}", hit.text.trim());
-        }
-
-        let output = output.trim_end_matches('\n');
-        ctx.printer.println_raw(output);
-    }
-
-    fn render_json(hits: &[Hit], ctx: &Ctx) {
-        let entries: Vec<_> = hits
+    /// Print the matched and context lines with no coordinates and no
+    /// separators, for piping content into another tool.
+    fn render_plain_text(groups: &[ConversationHits], ctx: &Ctx) {
+        // Verbatim, like every unbudgeted output path: trailing whitespace can
+        // be the match itself, and machine output must not edit the text.
+        let lines: Vec<&str> = groups
             .iter()
-            .map(|hit| {
-                json!({
-                    "id": hit.id.to_string(),
-                    "scope": hit.scope.as_str(),
-                    "text": hit.text.trim(),
-                    "match": hit.is_match,
+            .flat_map(|group| group.hits.iter())
+            .map(|hit| hit.text.as_str())
+            .collect();
+
+        if ctx.printer.format().is_json() {
+            print_json(&ctx.printer, &json!(lines));
+            return;
+        }
+
+        ctx.printer.println_raw(lines.join("\n"));
+    }
+
+    fn render_json(groups: &[ConversationHits], ctx: &Ctx) {
+        let entries: Vec<_> = groups
+            .iter()
+            .flat_map(|group| {
+                group.hits.iter().map(move |hit| {
+                    json!({
+                        "id": group.id.to_string(),
+                        "turn": hit.turn,
+                        "scope": hit.scope.as_str(),
+                        "timestamp": hit.timestamp,
+                        "title": group.title,
+                        // Emitted verbatim: `submatches` offsets index this
+                        // string, so trimming it would shift them.
+                        "text": hit.text,
+                        "match": hit.is_match,
+                        "submatches": submatches_json(hit),
+                    })
                 })
             })
             .collect();
@@ -301,15 +477,10 @@ impl Grep {
         print_json(&ctx.printer, &json!(entries));
     }
 
-    /// Print the unique conversation IDs that contain a match, one per line
-    /// (JSON array under `-F json`), in the sorted hit order.
-    fn render_ids(hits: &[Hit], ctx: &Ctx) {
-        let mut seen = HashSet::new();
-        let ids: Vec<String> = hits
-            .iter()
-            .filter(|h| seen.insert(h.id))
-            .map(|h| h.id.to_string())
-            .collect();
+    /// Print the ID of each conversation that contains a match, one per line (a
+    /// JSON array under `-F json`), in sort order.
+    fn render_ids(groups: &[ConversationHits], ctx: &Ctx) {
+        let ids: Vec<String> = groups.iter().map(|group| group.id.to_string()).collect();
 
         if ctx.printer.format().is_json() {
             print_json(&ctx.printer, &json!(ids));
@@ -319,37 +490,66 @@ impl Grep {
         ctx.printer.println_raw(ids.join("\n"));
     }
 
+    /// Print `ID:COUNT` per conversation, where the count is its number of
+    /// matching lines.
+    fn render_count(groups: &[ConversationHits], ctx: &Ctx) {
+        if ctx.printer.format().is_json() {
+            let entries: Vec<_> = groups
+                .iter()
+                .map(|group| json!({ "id": group.id.to_string(), "count": group.match_count() }))
+                .collect();
+
+            print_json(&ctx.printer, &json!(entries));
+            return;
+        }
+
+        let lines: Vec<String> = groups
+            .iter()
+            .map(|group| format!("{}:{}", group.id, group.match_count()))
+            .collect();
+
+        ctx.printer.println_raw(lines.join("\n"));
+    }
+
     fn sort_ids(&self, ids: &mut [ConversationId], ctx: &Ctx) {
-        ids.sort_by(|a, b| {
-            let ord = match self.sort {
-                Sort::Created => a.timestamp().cmp(&b.timestamp()),
-                Sort::Activated => {
-                    let ts = |id| -> DateTime<Utc> {
-                        ctx.workspace
-                            .acquire_conversation(id)
-                            .ok()
-                            .and_then(|h| ctx.workspace.metadata(&h).ok())
-                            .map(|m| m.last_activated_at)
-                            .unwrap_or_default()
-                    };
+        // Each key is computed once per conversation rather than once per
+        // comparison. `activated` and `updated` reach into the workspace for
+        // metadata, and doing that inside the comparator costs O(n log n)
+        // handle acquisitions and lookups where O(n) is enough.
+        let mut keyed: Vec<(Option<DateTime<Utc>>, ConversationId)> = ids
+            .iter()
+            .map(|id| (self.sort_key(*id, ctx), *id))
+            .collect();
 
-                    ts(a).cmp(&ts(b))
-                }
-                Sort::Updated => {
-                    let ts = |id| -> Option<DateTime<Utc>> {
-                        ctx.workspace
-                            .acquire_conversation(id)
-                            .ok()
-                            .and_then(|h| ctx.workspace.metadata(&h).ok())
-                            .and_then(|m| m.last_event_at)
-                    };
-
-                    ts(a).cmp(&ts(b))
-                }
-            };
-
+        keyed.sort_by(|(a, _), (b, _)| {
+            let ord = a.cmp(b);
             if self.descending { ord.reverse() } else { ord }
         });
+
+        for (slot, (_, id)) in ids.iter_mut().zip(keyed) {
+            *slot = id;
+        }
+    }
+
+    /// The timestamp `--sort` orders a conversation by.
+    ///
+    /// `None` sorts first ascending, which is where a conversation with no
+    /// events lands under `updated`.
+    fn sort_key(&self, id: ConversationId, ctx: &Ctx) -> Option<DateTime<Utc>> {
+        let metadata = || {
+            ctx.workspace
+                .acquire_conversation(&id)
+                .ok()
+                .and_then(|handle| ctx.workspace.metadata(&handle).ok())
+        };
+
+        match self.sort {
+            Sort::Created => Some(id.timestamp()),
+            // A conversation whose metadata can't be read sorts as the epoch
+            // rather than dropping out of the ordering.
+            Sort::Activated => Some(metadata().map(|m| m.last_activated_at).unwrap_or_default()),
+            Sort::Updated => metadata().and_then(|m| m.last_event_at),
+        }
     }
 }
 
@@ -364,6 +564,24 @@ enum Sort {
 
     /// Sort by last event time.
     Updated,
+}
+
+/// What `--output` emits for each conversation that contains a match.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+enum OutputKind {
+    /// Matching lines with their `ID:TURN:SCOPE` coordinate.
+    #[default]
+    Hits,
+
+    /// The conversation ID only.
+    Ids,
+
+    /// The conversation ID and its number of matching lines.
+    Count,
+
+    /// Matched and context lines with no coordinate.
+    Text,
 }
 
 /// Parts of a conversation that can be restricted with `--scope`.
@@ -449,16 +667,47 @@ fn expand_scopes(scopes: &[Scope]) -> HashSet<ConcreteScope> {
     out
 }
 
+/// Every hit found in one conversation, with what a heading needs to describe
+/// it.
+struct ConversationHits {
+    id: ConversationId,
+    title: Option<String>,
+
+    /// Total turns in the conversation, as a sense of its size.
+    ///
+    /// `None` when the event stream was never read — a title-only search skips
+    /// it — so the figure is omitted rather than reported as zero.
+    turn_count: Option<usize>,
+
+    hits: Vec<Hit>,
+}
+
+impl ConversationHits {
+    /// Number of matching lines, excluding the context lines around them.
+    fn match_count(&self) -> usize {
+        self.hits.iter().filter(|hit| hit.is_match).count()
+    }
+}
+
 /// A single output line from a grep search.
 struct Hit {
-    /// The target conversation ID.
-    id: ConversationId,
+    /// The 1-based turn the line came from, or `None` for a conversation-scoped
+    /// scope such as the title.
+    turn: Option<usize>,
 
     /// Where in the conversation this line came from.
     scope: ConcreteScope,
 
+    /// When the event carrying this line was recorded, or `None` for a
+    /// conversation-scoped scope.
+    timestamp: Option<DateTime<Utc>>,
+
     /// The line text.
     text: String,
+
+    /// Byte ranges of the pattern matches within `text`.
+    /// Empty for a context line.
+    spans: Vec<Range<usize>>,
 
     /// If false, this is a "context" line.
     is_match: bool,
@@ -467,36 +716,82 @@ struct Hit {
     group_break: bool,
 }
 
+impl Hit {
+    /// The turn field of this hit's coordinate.
+    fn turn_field(&self) -> String {
+        self.turn
+            .map_or_else(|| WHOLE_CONVERSATION.to_owned(), |turn| turn.to_string())
+    }
+}
+
+/// How many more matches may still be taken.
+struct Budget(Option<usize>);
+
+impl Budget {
+    /// A budget of `max` matches, or an unlimited one when `max` is `None`.
+    const fn new(max: Option<usize>) -> Self {
+        Self(max)
+    }
+
+    /// Whether no further matches may be taken.
+    const fn is_exhausted(&self) -> bool {
+        matches!(self.0, Some(0))
+    }
+
+    /// Reduce `indices` to the matches the budget still allows, and spend them.
+    fn take(&mut self, indices: Vec<usize>) -> Vec<usize> {
+        let Some(remaining) = self.0.as_mut() else {
+            return indices;
+        };
+
+        let taken = indices.len().min(*remaining);
+        *remaining -= taken;
+        indices.into_iter().take(taken).collect()
+    }
+}
+
 /// Run the match+context pipeline for a single scope source and append hits.
 fn collect_scope_hits(
     hits: &mut Vec<Hit>,
-    id: ConversationId,
+    turn: Option<usize>,
     scope: ConcreteScope,
+    timestamp: Option<DateTime<Utc>>,
     lines: &[&str],
     matcher: &Matcher,
     context: usize,
+    budget: &mut Budget,
 ) {
     if lines.is_empty() {
         return;
     }
 
-    let match_indices = matching_lines(lines, matcher);
+    let match_indices = budget.take(matching_lines(lines, matcher));
     if match_indices.is_empty() {
         return;
     }
 
+    let block_start = hits.len();
     let ranges = context_ranges(&match_indices, context, lines.len());
     for (range_idx, (start, end)) in ranges.iter().enumerate() {
         for (i, line) in lines.iter().enumerate().skip(*start).take(end - start + 1) {
+            let is_match = match_indices.contains(&i);
             hits.push(Hit {
-                id,
+                turn,
                 scope,
+                timestamp,
+                spans: if is_match {
+                    matcher.find_spans(line)
+                } else {
+                    vec![]
+                },
                 text: (*line).to_owned(),
-                is_match: match_indices.contains(&i),
+                is_match,
                 group_break: range_idx > 0 && i == *start,
             });
         }
     }
+
+    mark_block_break(hits, block_start);
 }
 
 /// Return indices of lines that match the pattern.
@@ -530,21 +825,303 @@ fn context_ranges(indices: &[usize], ctx: usize, count: usize) -> Vec<(usize, us
     ranges
 }
 
-/// Truncate a line to `max` characters, appending `...` if truncated.
-fn truncate_line(line: &str, max: usize) -> Cow<'_, str> {
-    let trimmed = line.trim();
-    if trimmed.len() <= max {
-        return trimmed.into();
+/// Mark the hit at `start` as needing a `--` separator before it.
+///
+/// `start` is where a block of hits began.
+/// Nothing is marked when the block is empty or is the first one, so a
+/// separator only ever lands *between* blocks.
+fn mark_block_break(hits: &mut [Hit], start: usize) {
+    if start > 0
+        && let Some(hit) = hits.get_mut(start)
+    {
+        hit.group_break = true;
+    }
+}
+
+/// Display columns available for a hit's text, given the width of the line
+/// prefix.
+///
+/// `None` means no limit.
+/// A prefix wide enough to fill the line on its own still leaves
+/// [`MIN_TEXT_WIDTH`] columns.
+fn text_budget(columns: Option<usize>, prefix_width: usize) -> Option<usize> {
+    let columns = columns?;
+    Some(columns.saturating_sub(prefix_width).max(MIN_TEXT_WIDTH))
+}
+
+/// A hit's text fitted to the available columns.
+struct FittedText {
+    text: String,
+
+    /// Byte offset in [`Self::text`] where the text carried over from the
+    /// original ends.
+    ///
+    /// `None` when nothing was cut, so the whole string is original text.
+    /// When truncation happened this is where the appended ellipsis begins:
+    /// match spans index the original line, and the ellipsis is not part of it,
+    /// so highlighting must stop here.
+    kept: Option<usize>,
+}
+
+/// Fit a hit's text to the available columns.
+///
+/// The text is modified only when a width budget applies: trailing whitespace
+/// is trimmed so invisible columns don't spend the budget, and the rest is
+/// truncated to fit.
+/// With no budget — piped output — the text is returned verbatim, which is
+/// what the `TEXT` field of a piped record promises.
+/// Even trailing whitespace can be the match itself (`--regex '\s+$'`).
+fn fit_text(text: &str, columns: Option<usize>, prefix_width: usize) -> FittedText {
+    let Some(budget) = text_budget(columns, prefix_width) else {
+        return FittedText {
+            text: text.to_owned(),
+            kept: None,
+        };
+    };
+
+    let trimmed = text.trim_end();
+    let fitted = truncate_to_width(trimmed, budget);
+
+    // `truncate_to_width` returns the input unchanged when it already fits, and
+    // otherwise a prefix of it plus a single ellipsis character. Taking the
+    // offset of that final character avoids restating which character it is.
+    let kept =
+        (fitted != trimmed).then(|| fitted.char_indices().next_back().map_or(0, |(at, _)| at));
+
+    FittedText { text: fitted, kept }
+}
+
+/// Style each matched span within `text`, leaving the rest unstyled.
+///
+/// `spans` are byte ranges into the hit's *original* text.
+/// `kept` bounds how much of `text` came from that original: any span starting
+/// at or after it is dropped and one straddling it is clipped, so a truncated
+/// line highlights only what survived and never the appended ellipsis.
+/// A span whose clipped end isn't a character boundary is skipped rather than
+/// split.
+fn highlight(text: &str, spans: &[Range<usize>], kept: Option<usize>) -> String {
+    let boundary = kept.unwrap_or(text.len());
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+
+    for span in spans {
+        if span.start >= boundary || span.start < cursor {
+            continue;
+        }
+        let end = span.end.min(boundary);
+        if !text.is_char_boundary(span.start) || !text.is_char_boundary(end) {
+            continue;
+        }
+
+        out.push_str(&text[cursor..span.start]);
+        let _ = write!(out, "{}", text[span.start..end].red().bold());
+        cursor = end;
     }
 
-    // Find a char boundary at or before `max`.
-    let end = trimmed
-        .char_indices()
-        .take_while(|(i, _)| *i <= max)
-        .last()
-        .map_or(max, |(i, _)| i);
+    out.push_str(&text[cursor..]);
+    out
+}
 
-    format!("{}...", &trimmed[..end]).into()
+/// Render a hit's text, styled for a match or dimmed for a context line.
+fn styled_text(hit: &Hit, fitted: &FittedText, pretty: bool) -> String {
+    let text = fitted.text.as_str();
+    if !pretty {
+        return text.to_owned();
+    }
+    if hit.is_match {
+        return highlight(text, &hit.spans, fitted.kept);
+    }
+
+    text.dim().to_string()
+}
+
+/// Write the `--` separator that precedes a hit starting a new group.
+///
+/// `styled` dims the marker, which suits a heading-mode view.
+/// Line mode must leave it bare whatever the format: the separator is the one
+/// row in that stream that isn't a record, and a consumer is told to drop it by
+/// matching `--` exactly, which styling bytes would defeat.
+fn write_group_break(output: &mut String, indent: &str, styled: bool) {
+    if styled {
+        let _ = writeln!(output, "{indent}{}", "--".dim());
+    } else {
+        let _ = writeln!(output, "{indent}--");
+    }
+}
+
+/// Write a conversation's heading: its ID, title, and match and turn counts.
+fn render_group_heading(
+    output: &mut String,
+    group: &ConversationHits,
+    columns: Option<usize>,
+    pretty: bool,
+) {
+    let matches = group.match_count();
+    let noun = if matches == 1 { "match" } else { "matches" };
+    let stats = match group.turn_count {
+        Some(turns) => {
+            let turn_noun = if turns == 1 { "turn" } else { "turns" };
+            format!("{matches} {noun} · {turns} {turn_noun}")
+        }
+        None => format!("{matches} {noun}"),
+    };
+
+    let id_str = group.id.to_string();
+    let title = group.title.as_deref().unwrap_or("(no title)");
+
+    // Two spaces on either side of the title, and the stats pushed to the right
+    // margin when there is a margin to push them to.
+    let fixed = display_width(&id_str) + display_width(&stats) + 4;
+    let title = match columns {
+        Some(width) => truncate_to_width(title, width.saturating_sub(fixed)),
+        None => title.to_owned(),
+    };
+    let gap = columns.map_or(2, |width| {
+        width
+            .saturating_sub(fixed + display_width(&title))
+            .saturating_add(2)
+    });
+
+    if pretty {
+        let linked = hyperlink(
+            format!("jp://show-events/{id_str}"),
+            id_str.clone().magenta().to_string(),
+        );
+        let _ = writeln!(
+            output,
+            "{linked}  {}{:gap$}{}",
+            title.bold(),
+            "",
+            stats.dim(),
+            gap = gap
+        );
+    } else {
+        let _ = writeln!(output, "{id_str}  {title}{:gap$}{stats}", "", gap = gap);
+    }
+}
+
+/// Write a conversation's hits indented under its heading, as
+/// `TURN:SCOPE:TEXT`.
+fn render_group_hits(
+    output: &mut String,
+    group: &ConversationHits,
+    columns: Option<usize>,
+    pretty: bool,
+    separators: bool,
+) {
+    const INDENT: &str = "  ";
+
+    // Both fields are right-aligned to the widest in the group, so the text
+    // starts in the same column on every row. That alignment is what lets a
+    // context row leave its coordinate blank and still line up.
+    //
+    // Padded by character count rather than display width: a turn is digits or
+    // `..` and a scope name is from a fixed ASCII set, so the two agree.
+    let turn_width = group
+        .hits
+        .iter()
+        .map(|hit| display_width(&hit.turn_field()))
+        .max()
+        .unwrap_or(0);
+    let scope_width = group
+        .hits
+        .iter()
+        .map(|hit| display_width(hit.scope.as_str()))
+        .max()
+        .unwrap_or(0);
+
+    // `INDENT`, both padded fields, and the two `:` separators.
+    let prefix_width = INDENT.len() + turn_width + scope_width + 2;
+
+    for hit in &group.hits {
+        if separators && hit.group_break {
+            write_group_break(output, INDENT, pretty);
+        }
+
+        let text = fit_text(&hit.text, columns, prefix_width);
+        let text = styled_text(hit, &text, pretty);
+
+        // A context row's coordinate is its match's, by construction: every hit
+        // in a block comes from one event, so the turn and scope are identical.
+        // Printing it once per block instead of once per line makes a visible
+        // coordinate the match marker on its own, rather than a `:`-versus-`-`
+        // difference the eye has to hunt for down a dense block.
+        if !hit.is_match {
+            let _ = writeln!(output, "{blank:prefix_width$}{text}", blank = "");
+            continue;
+        }
+
+        let turn = format!("{:>turn_width$}", hit.turn_field());
+        let scope = format!("{:>scope_width$}", hit.scope.as_str());
+
+        if pretty {
+            let _ = writeln!(output, "{INDENT}{}:{}:{text}", turn.green(), scope.dim());
+        } else {
+            let _ = writeln!(output, "{INDENT}{turn}:{scope}:{text}");
+        }
+    }
+}
+
+/// Write a conversation's hits as self-contained `ID:TURN:SCOPE:TEXT` lines.
+///
+/// `separators` enables the `--` markers between non-contiguous groups; without
+/// them every line emitted is a coordinate record.
+fn render_group_lines(
+    output: &mut String,
+    group: &ConversationHits,
+    columns: Option<usize>,
+    pretty: bool,
+    separators: bool,
+) {
+    let id_str = group.id.to_string();
+    let id_styled = id_str.clone().magenta().to_string();
+
+    for hit in &group.hits {
+        // Never styled: see `write_group_break`.
+        if separators && hit.group_break {
+            write_group_break(output, "", false);
+        }
+
+        let kind = if hit.is_match {
+            MATCH_KIND
+        } else {
+            CONTEXT_KIND
+        };
+        let turn = hit.turn_field();
+        let scope = hit.scope.as_str();
+
+        // Four separators plus the single-character kind field.
+        let prefix_width = display_width(&id_str) + display_width(&turn) + display_width(scope) + 5;
+        let text = fit_text(&hit.text, columns, prefix_width);
+        let text = styled_text(hit, &text, pretty);
+
+        if pretty {
+            let _ = writeln!(
+                output,
+                "{id_styled}:{}:{}:{}:{text}",
+                turn.green(),
+                scope.dim(),
+                kind.dim()
+            );
+        } else {
+            let _ = writeln!(output, "{id_str}:{turn}:{scope}:{kind}:{text}");
+        }
+    }
+}
+
+/// The `submatches` array for a hit: the matched text and its byte offsets,
+/// mirroring `rg --json`.
+///
+/// Offsets index the hit's `text` exactly as the JSON emits it, so a consumer
+/// can slice one out of the other.
+fn submatches_json(hit: &Hit) -> Vec<serde_json::Value> {
+    hit.spans
+        .iter()
+        .filter_map(|span| {
+            let text = hit.text.get(span.clone())?;
+            Some(json!({ "match": text, "start": span.start, "end": span.end }))
+        })
+        .collect()
 }
 
 #[cfg(test)]

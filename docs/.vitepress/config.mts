@@ -271,6 +271,7 @@ export default defineConfig({
                     { text: 'Personas', link: '/features/personas' },
                     { text: 'Named Contexts', link: '/features/contexts' },
                     { text: 'Attachments', link: '/features/attachments' },
+                    { text: 'Conversation Search', link: '/features/conversation-search' },
                     { text: 'Workspace Tools', link: '/features/tools' },
                     { text: 'Model Context Protocol', link: '/features/mcp' },
                     { text: 'Structured Output', link: '/features/structured-output' },
