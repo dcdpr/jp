@@ -101,7 +101,7 @@ use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
 use jp_storage::backend::Projection;
 use jp_task::task::TitleGeneratorTask;
-use jp_term::width::truncate_to_width;
+use jp_term::width::{display_width, truncate_to_width};
 use jp_workspace::{ConversationHandle, ConversationLock, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
 use tool::{TerminalExecutorSource, ToolCoordinator};
@@ -1141,12 +1141,28 @@ async fn await_mcp_servers(
         Duration::from_secs(config.delay_secs.into()),
         Duration::from_millis(config.interval_ms.into()),
         move |secs, status| {
-            let line = format!("⏱ Starting {}… {secs:.1}s", status.unwrap_or("MCP servers"));
-            // Truncate the visible text only; the `\r\x1b[K` control prefix
-            // must stay outside the width budget.
+            let status = status.unwrap_or("MCP servers");
+            let full = format!("⏱ Starting {status}… {secs:.1}s");
+            // Truncate only the server-list fragment, reserving the prefix and
+            // the elapsed-time suffix, so the timer keeps ticking even when a
+            // long list overflows. The `\r\x1b[K` control prefix stays outside
+            // the width budget.
             let line = match width {
-                Some(w) => truncate_to_width(&line, w.into()),
-                None => line,
+                Some(w) if display_width(&full) > usize::from(w) => {
+                    let w = usize::from(w);
+                    let prefix = "⏱ Starting ";
+                    let suffix = format!(" {secs:.1}s");
+                    let reserved = display_width(prefix) + display_width(&suffix);
+                    if w <= reserved {
+                        // Too narrow even for the prefix and timer: keep the
+                        // bounded timer alone so elapsed time still moves.
+                        truncate_to_width(&format!("⏱ {secs:.1}s"), w)
+                    } else {
+                        let status = truncate_to_width(status, w - reserved);
+                        format!("{prefix}{status}{suffix}")
+                    }
+                }
+                _ => full,
             };
             format!("\r\x1b[K{line}")
         },

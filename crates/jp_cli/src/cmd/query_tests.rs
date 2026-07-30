@@ -18,7 +18,8 @@ use jp_llm::{
     provider::mock::MockProvider,
     tool::{InvocationContext, builtin::BuiltinExecutors, executor::ExecutorSource},
 };
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_term::width::display_width;
 use jp_workspace::{ConversationHandle, Workspace};
 use relative_path::RelativePathBuf;
 use serde_json::Value;
@@ -1475,6 +1476,21 @@ async fn await_mcp_servers_shows_and_clears_timer_line() {
     );
 }
 
+/// Poll `err` until `needle` appears, failing after a hard timeout.
+///
+/// Synchronizes on the rendered output instead of a fixed sleep: the timer
+/// writes frames from its own task, so tests wait for the frame to land rather
+/// than guessing how long that takes.
+async fn wait_for_frame(err: &SharedBuffer, needle: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !err.lock().contains(needle) {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("frame {needle:?} never rendered"));
+}
+
 /// Drives the aggregate redraw: two servers start, one finishes while the other
 /// is still pending, then the second finishes.
 /// The line must go from both names, to the survivor alone, to cleared.
@@ -1509,11 +1525,12 @@ async fn await_mcp_servers_redraws_as_servers_finish() {
         None,
     ));
 
-    // Let the two-server frame render, then release `bookworm` and let the
-    // survivor-only frame render before releasing `grizzly`.
-    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+    // Advance on the rendered frames, not the clock: wait until each frame is
+    // actually in the buffer before releasing the next server, so a slow timer
+    // task can't make the release outrun the redraw it's supposed to observe.
+    wait_for_frame(&err, "2 MCP servers (bookworm, grizzly)").await;
     bookworm_tx.send(()).expect("wait task is still running");
-    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+    wait_for_frame(&err, "MCP server grizzly…").await;
     grizzly_tx.send(()).expect("wait task is still running");
     wait.await
         .expect("task did not panic")
@@ -1539,4 +1556,59 @@ async fn await_mcp_servers_redraws_as_servers_finish() {
         chrome.ends_with("\r\x1b[K"),
         "finishing the wait must leave the line cleared.\nChrome:\n{chrome}"
     );
+}
+
+/// A server name long enough to force truncation must not cost the elapsed-time
+/// suffix: the whole point of the line is the moving timer, so truncation has
+/// to fall on the server list, not the `Ns` tail.
+#[tokio::test(flavor = "multi_thread")]
+async fn await_mcp_servers_timer_suffix_survives_truncation() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+
+    let long = "bookworm-with-a-very-long-descriptive-server-name";
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        release_rx.await.ok();
+        Ok(McpServerId::new(long))
+    });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new(long)],
+    };
+
+    // A width far below the full line forces the status fragment to truncate.
+    let width = 30u16;
+    let wait = tokio::spawn(await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        printer.clone(),
+        true,
+        Some(width),
+    ));
+
+    // The suffix is only reachable if truncation spared it: under whole-line
+    // truncation the trailing ` 0.0s` is the first thing cut, so this wait
+    // would time out instead.
+    wait_for_frame(&err, "0.0s").await;
+    release_tx.send(()).expect("wait task is still running");
+    wait.await
+        .expect("task did not panic")
+        .expect("startup succeeds");
+    printer.flush();
+
+    let chrome = err.lock();
+    assert!(
+        chrome.contains('…'),
+        "the long server name must actually truncate.\nChrome:\n{chrome}"
+    );
+    // Every rendered frame (\r-separated) must fit the declared width once its
+    // control bytes are stripped, so the line never wraps past one row.
+    for frame in chrome.split('\r').filter(|f| !f.is_empty()) {
+        assert!(
+            display_width(frame) <= usize::from(width),
+            "frame exceeds width {width}: {frame:?}\nChrome:\n{chrome}"
+        );
+    }
 }
