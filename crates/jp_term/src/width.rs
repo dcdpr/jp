@@ -35,13 +35,15 @@ pub fn max_line_width(rendered: &str) -> usize {
 ///
 /// The ellipsis is counted against the budget, so the result never exceeds
 /// `max_width` columns.
-/// A `max_width` of `0` yields an empty string.
+/// Input that already fits is returned unchanged, which includes zero-column
+/// input under a `max_width` of `0`; anything wider than a `max_width` of `0`
+/// yields an empty string.
 ///
 /// The cut falls on a grapheme cluster boundary, so an emoji ZWJ or modifier
 /// sequence is either kept whole or dropped whole rather than left with a
 /// trailing joiner.
 ///
-/// `s` is expected to carry no ANSI escapes: the budget is spent per cluster,
+/// `s` is expected to carry no ANSI escapes: the budget is spent on the text,
 /// so escape bytes would consume it and could be split mid-sequence.
 /// Truncate before styling, not after.
 #[must_use]
@@ -55,21 +57,25 @@ pub fn truncate_to_width(s: &str, max_width: usize) -> String {
 
     // Reserve one column for the ellipsis.
     let budget = max_width - 1;
-    let mut width = 0;
-    let mut out = String::new();
 
-    // Measured per cluster rather than per scalar: the scalars of a ZWJ emoji
-    // sequence sum to twice the width the sequence renders in, which would
-    // spend the budget at twice the true rate and could cut between a base
-    // character and its joiner.
-    for cluster in s.graphemes(true) {
-        let w = UnicodeWidthStr::width(cluster);
-        if width + w > budget {
-            break;
+    // Each candidate prefix is measured whole rather than by summing the widths
+    // of its clusters: a ZWJ emoji sequence's clusters sum to twice the width
+    // the sequence renders in, and Arabic Lam-Alef spans two clusters that sum
+    // to two columns but ligate into one.
+    //
+    // Every boundary is measured, without stopping at the first prefix that
+    // overshoots, because a longer prefix can render narrower than a shorter
+    // one: a Tifinagh consonant joiner costs a column on its own and none once
+    // the consonant after it completes the ligature.
+    let mut end = 0;
+    for (offset, cluster) in s.grapheme_indices(true) {
+        let candidate = offset + cluster.len();
+        if UnicodeWidthStr::width(&s[..candidate]) <= budget {
+            end = candidate;
         }
-        width += w;
-        out.push_str(cluster);
     }
+
+    let mut out = s[..end].to_string();
     out.push('…');
     out
 }
