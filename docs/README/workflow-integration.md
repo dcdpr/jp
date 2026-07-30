@@ -63,8 +63,11 @@ what it is.
 An `fzf` preview pane, which exports `$FZF_PREVIEW_COLUMNS`:
 
 ```sh
-fzf --preview 'jp --width "$FZF_PREVIEW_COLUMNS" conversation print {}'
+fzf --preview 'jp -F text-pretty --width "$FZF_PREVIEW_COLUMNS" conversation print {}'
 ```
+
+A pipe also turns off colors and shading, so ask for them back with `-F
+text-pretty` wherever the reader is a human.
 
 JP is a single binary you call from wherever you already work; shell scripts,
 editor terminals, `git` hooks, CI pipelines, Makefiles.

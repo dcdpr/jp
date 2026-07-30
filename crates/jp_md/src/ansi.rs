@@ -337,20 +337,31 @@ pub fn visual_width(s: &str) -> usize {
 
 /// The column the cursor sits at after writing `s` from `column`.
 ///
-/// ANSI escape sequences contribute nothing, and a tab moves to the next
-/// multiple of [`TAB_STOP`] — the position the display actually arrives at, so
-/// text padded to a fixed column lands there instead of overshooting by up to a
-/// tab stop per tab.
+/// ANSI escape sequences contribute nothing, a tab moves to the next multiple
+/// of [`TAB_STOP`], and a carriage return returns to column 0 — the positions
+/// the display actually arrives at, so text padded to a fixed column lands
+/// there instead of overshooting.
 pub fn advance_column(column: usize, s: &str) -> usize {
     let plain = visible_text(s);
     let mut column = column;
-    for (index, run) in plain.split('\t').enumerate() {
-        if index > 0 {
-            column = (column / TAB_STOP + 1) * TAB_STOP;
+    let mut start = 0;
+    for (index, byte) in plain.bytes().enumerate() {
+        match byte {
+            b'\t' => {
+                column += plain[start..index].width();
+                column = (column / TAB_STOP + 1) * TAB_STOP;
+                start = index + 1;
+            }
+            // Everything written before the return is overwritten, so its width
+            // drops out of the calculation entirely.
+            b'\r' => {
+                column = 0;
+                start = index + 1;
+            }
+            _ => {}
         }
-        column += run.width();
     }
-    column
+    column + plain[start..].width()
 }
 
 #[cfg(test)]

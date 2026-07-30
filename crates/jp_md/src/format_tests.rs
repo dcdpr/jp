@@ -443,6 +443,39 @@ fn code_block_column_fill_accounts_for_the_indent_the_caller_adds() {
 }
 
 #[test]
+fn code_block_column_fill_drops_a_crlf_carriage_return() {
+    // A Windows code line reaches the fill as `"ab\r"`. Left in place, the `\r`
+    // puts the cursor back at column 0 and the pad overwrites the content,
+    // rendering a blank shaded row. The newline terminates the line anyway.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\r\n", Some(&bg), 0);
+    assert_eq!(
+        rendered, "\x1b[48;5;236mab    \x1b[0m\n\x1b[48;5;236m",
+        "the pad should extend the content, not overwrite it"
+    );
+}
+
+#[test]
+fn code_block_erase_fill_drops_a_crlf_carriage_return() {
+    // Same hazard for the erase: after a `\r` the cursor is at column 0, so
+    // `\x1b[K` would wipe the line it was meant to shade.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    };
+
+    let rendered = apply_line_background("ab\r\n", Some(&bg), 0);
+    assert_eq!(
+        rendered, "\x1b[48;5;236mab\x1b[K\x1b[0m\n\x1b[48;5;236m",
+        "the erase should run from the end of the content"
+    );
+}
+
+#[test]
 fn code_block_fill_reasserts_a_background_the_line_reset() {
     // Highlighted lines end with `\x1b[0m`, and tool output carries whatever
     // escapes it likes, so the pad would otherwise run under the terminal

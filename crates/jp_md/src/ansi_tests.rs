@@ -299,3 +299,18 @@ fn advance_column_moves_a_tab_to_the_next_tab_stop() {
     // Consecutive tabs each move one stop.
     assert_eq!(advance_column(0, "\t\t"), 16);
 }
+
+#[test]
+fn advance_column_returns_to_column_zero_on_a_carriage_return() {
+    // `unicode_width` measures `\r` as an ordinary column, but the cursor goes
+    // back to the start of the line, so everything before it is overwritten.
+    assert_eq!(visual_width("ab\r"), 3);
+    assert_eq!(advance_column(0, "ab\r"), 0);
+    assert_eq!(advance_column(9, "ab\r"), 0);
+    // Text after the return counts from the left margin again.
+    assert_eq!(advance_column(5, "ab\rcde"), 3);
+    // The last return wins.
+    assert_eq!(advance_column(0, "ab\rcd\re"), 1);
+    // A tab after a return measures from column 0.
+    assert_eq!(advance_column(20, "\rx\ty"), 9);
+}

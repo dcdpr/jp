@@ -535,12 +535,24 @@ pub fn apply_line_background(
         if i > 0 {
             out.push_str("\x1b[0m\n");
         }
-        out.push_str(&bg_esc);
-        out.push_str(line);
 
         // Only a line that a newline completes gets a fill; the trailing
         // segment after the final newline isn't a line.
-        if i + 1 == lines.len() {
+        let completes_line = i + 1 < lines.len();
+
+        // A CRLF line's `\r` puts the cursor back at column 0, so a fill written
+        // after it overwrites the content instead of extending it. The newline
+        // below terminates the line on its own.
+        let line = if completes_line {
+            line.strip_suffix('\r').unwrap_or(line)
+        } else {
+            line
+        };
+
+        out.push_str(&bg_esc);
+        out.push_str(line);
+
+        if !completes_line {
             continue;
         }
 
