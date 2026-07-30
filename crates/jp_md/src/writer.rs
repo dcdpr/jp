@@ -599,9 +599,12 @@ impl<'w> TerminalWriter<'w> {
             self.need_cr -= 1;
         }
 
+        // The body is indented below, after the background is applied, so the
+        // fill is told which column each line will end up starting at.
+        let prefix_width = self.prefix_width();
         let body = self.default_background.as_ref().map_or_else(
             || s.to_string(),
-            |bg| format::apply_line_background(s, Some(bg)),
+            |bg| format::apply_line_background(s, Some(bg), prefix_width),
         );
 
         // Indent each line to the current prefix column. Code content is
@@ -611,7 +614,7 @@ impl<'w> TerminalWriter<'w> {
         // passes through unchanged. With a default background active, the
         // spaces sit after the per-line background escape so the indentation
         // inherits the fill.
-        let body = indent_to_column(&body, self.prefix_width());
+        let body = indent_to_column(&body, prefix_width);
         self.output.write_str(&body)?;
 
         self.column = 0;

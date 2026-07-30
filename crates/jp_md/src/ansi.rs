@@ -4,6 +4,14 @@
 //! computation used by both the terminal renderer (`render.rs`) and the table
 //! formatter (`table.rs`).
 
+use unicode_width::UnicodeWidthStr as _;
+
+/// Columns between tab stops.
+///
+/// Terminals, and hosts that lay out their own output area, advance a tab to
+/// the next multiple of this.
+pub const TAB_STOP: usize = 8;
+
 /// SGR: Bold on.
 pub const BOLD_START: &str = "\x1b[1m";
 
@@ -302,24 +310,47 @@ fn osc_terminator_end(body: &str) -> Option<usize> {
     None
 }
 
-/// Calculate the visual width of a string, ignoring ANSI escape sequences.
+/// The visible text of `s`, with every ANSI escape sequence removed.
 ///
-/// Strips ANSI escape sequences (via the shared [`segments`] scanner), then
-/// delegates to `UnicodeWidthStr::width()` on the contiguous visible text.
-/// Measuring the visible text as a unit is what lets multi-codepoint sequences
-/// (emoji presentation via VS16, ZWJ sequences, script-specific ligatures)
-/// width correctly even when an escape sits between a base character and its
-/// combining mark.
-pub fn visual_width(s: &str) -> usize {
-    use unicode_width::UnicodeWidthStr as _;
-
+/// Joining the text runs (found via the shared [`segments`] scanner) into one
+/// string is what lets multi-codepoint sequences (emoji presentation via VS16,
+/// ZWJ sequences, script-specific ligatures) measure correctly even when an
+/// escape sits between a base character and its combining mark.
+fn visible_text(s: &str) -> String {
     let mut plain = String::new();
     for segment in segments(s) {
         if let Segment::Text(text) = segment {
             plain.push_str(text);
         }
     }
-    plain.width()
+    plain
+}
+
+/// Calculate the visual width of a string, ignoring ANSI escape sequences.
+///
+/// A tab counts as a single column.
+/// Use [`advance_column`] where the resulting cursor position matters, since a
+/// tab moves the cursor to the next tab stop instead.
+pub fn visual_width(s: &str) -> usize {
+    visible_text(s).width()
+}
+
+/// The column the cursor sits at after writing `s` from `column`.
+///
+/// ANSI escape sequences contribute nothing, and a tab moves to the next
+/// multiple of [`TAB_STOP`] — the position the display actually arrives at, so
+/// text padded to a fixed column lands there instead of overshooting by up to a
+/// tab stop per tab.
+pub fn advance_column(column: usize, s: &str) -> usize {
+    let plain = visible_text(s);
+    let mut column = column;
+    for (index, run) in plain.split('\t').enumerate() {
+        if index > 0 {
+            column = (column / TAB_STOP + 1) * TAB_STOP;
+        }
+        column += run.width();
+    }
+    column
 }
 
 #[cfg(test)]

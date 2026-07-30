@@ -1,5 +1,5 @@
 use jp_config::{AppConfig, style::typewriter::DelayDuration, types::color::Color};
-use jp_printer::{OutputFormat, SharedBuffer};
+use jp_printer::{OutputFormat, OutputWidth, SharedBuffer};
 
 use super::*;
 
@@ -41,6 +41,92 @@ fn wrap_width_keeps_the_configured_preference_on_a_wider_output() {
     assert_eq!(wrap_width(&config.style, None), 80);
 }
 
+#[test]
+fn reasoning_fill_defers_to_the_terminal_for_a_measured_width() {
+    // `\x1b[K` follows the real edge, so a window resized part-way through a
+    // response still shades whole lines. Padding to the width sampled at startup
+    // would bake that width into the output.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let renderer = ChatRenderer::new(
+        Arc::new(printer.with_output_width(OutputWidth::Terminal(40))),
+        config.style,
+    );
+
+    assert_eq!(
+        renderer.reasoning_background().map(|bg| bg.fill),
+        Some(BackgroundFill::Terminal)
+    );
+}
+
+#[test]
+fn reasoning_fill_pads_with_spaces_for_a_declared_width() {
+    // A declared width describes an area some other program lays out, and such a
+    // host does not implement the erase, so the fill has to be real characters.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let renderer = ChatRenderer::new(
+        Arc::new(printer.with_output_width(OutputWidth::Declared(40))),
+        config.style,
+    );
+
+    assert_eq!(
+        renderer.reasoning_background().map(|bg| bg.fill),
+        Some(BackgroundFill::Column(40))
+    );
+}
+
+#[test]
+fn reasoning_code_block_in_a_list_stays_within_the_declared_width() {
+    // A fenced block inside a list item is indented after its background fill is
+    // applied, so the fill has to account for the indent the renderer adds
+    // afterwards. Padding to the full width first produced `indent + width`
+    // columns, which wraps in a terminal and is clipped in a pane that doesn't.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.with_output_width(OutputWidth::Declared(40))),
+        config.style,
+    );
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: indoc::indoc! {"
+            - item
+
+              ```rust
+              let x = 1;
+              ```
+        "}
+        .into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let rendered = strip_ansi(&out.lock());
+    for line in rendered.lines() {
+        assert!(
+            line.chars().count() <= 40,
+            "line runs past the declared width: {line:?}\nfull output:\n{rendered}"
+        );
+    }
+
+    let code = rendered
+        .lines()
+        .find(|line| line.contains("let x = 1;"))
+        .expect("the code line should be rendered");
+    assert_eq!(
+        code.chars().count(),
+        40,
+        "the code line should be shaded across the full declared width: {code:?}"
+    );
+}
+
 /// A table is laid out rather than soft-wrapped, so the renderer has to fit it
 /// to the terminal width the printer reports.
 #[test]
@@ -51,7 +137,7 @@ fn test_table_is_fitted_to_the_printers_terminal_width() {
 
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
     let mut renderer = ChatRenderer::new(
-        Arc::new(printer.with_terminal_width(Some(30))),
+        Arc::new(printer.with_output_width(OutputWidth::Terminal(30))),
         config.style,
     );
 

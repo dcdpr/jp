@@ -67,6 +67,18 @@ fn column_fill_ignores_escape_bytes_when_measuring() {
 }
 
 #[test]
+fn column_fill_moves_a_tab_to_the_next_tab_stop() {
+    // Tool output is full of tabs. `unicode_width` measures one column each,
+    // while a terminal and an `fzf` pane both move the cursor to the next
+    // multiple of 8, so the plain measurement pads past the target column.
+    assert_eq!(
+        shade("a\tb\n", &column_bg(16)),
+        "\x1b[48;5;236ma\tb       \n\x1b[49m",
+        "the tab lands on column 8, so `b` ends at 9 and 7 columns remain"
+    );
+}
+
+#[test]
 fn column_fill_emits_nothing_once_the_line_reaches_the_column() {
     // An over-long line gets no padding rather than a negative one.
     assert_eq!(

@@ -47,7 +47,7 @@ use jp_config::{
         load_partials_with_inheritance,
     },
 };
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, OutputWidth, Printer};
 use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
 use jp_term::table::{DetailRow, details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
@@ -165,8 +165,7 @@ struct Globals {
     ///
     /// Detected automatically when stdout is a terminal.
     /// Set it when stdout is a pipe that still renders for a human at a known
-    /// width — an `fzf` preview pane, for instance, which exports
-    /// `$FZF_PREVIEW_COLUMNS`.
+    /// width, such as a preview pane laid out by another program.
     /// `0` means unknown, which is the default when piped: content keeps its
     /// natural width instead of being fitted to a guess.
     #[arg(long, global = true, value_name = "COLUMNS")]
@@ -394,29 +393,38 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
-/// Width in columns to lay output out against.
+/// The width to lay output out against.
 ///
-/// An explicit `--width` wins, with `0` meaning unknown.
-/// Otherwise the controlling terminal's width is used when stdout is a TTY.
+/// A `--width` given on the command line is [`OutputWidth::Declared`], with `0`
+/// meaning unknown.
+/// Otherwise the controlling terminal is measured when stdout is a TTY.
 ///
-/// `None` when stdout is piped or redirected and no width was given, so output
-/// keeps its full width for machine consumption rather than being laid out
-/// against a guessed size.
-fn detect_terminal_width(override_width: Option<u16>) -> Option<u16> {
-    if let Some(width) = override_width {
-        return (width > 0).then_some(width);
+/// [`OutputWidth::Unknown`] when stdout is piped or redirected and no width was
+/// given, so output keeps its full width for machine consumption rather than
+/// being laid out against a guessed size.
+fn detect_output_width(declared: Option<u16>) -> OutputWidth {
+    if let Some(width) = declared {
+        return if width > 0 {
+            OutputWidth::Declared(width)
+        } else {
+            OutputWidth::Unknown
+        };
     }
 
     if !stdout().is_terminal() {
-        return None;
+        return OutputWidth::Unknown;
     }
 
-    terminal::size().ok().map(|(cols, _)| cols)
+    terminal::size()
+        .ok()
+        .map_or(OutputWidth::Unknown, |(cols, _)| {
+            OutputWidth::Terminal(cols)
+        })
 }
 
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let printer =
-        Printer::terminal(format).with_terminal_width(detect_terminal_width(cli.globals.width));
+        Printer::terminal(format).with_output_width(detect_output_width(cli.globals.width));
 
     // `jp init` is a special case that doesn't need the full startup pipeline.
     if let Commands::Init(args) = &cli.command {

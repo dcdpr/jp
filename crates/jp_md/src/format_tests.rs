@@ -376,7 +376,7 @@ fn code_block_lines_are_padded_under_a_column_fill() {
         fill: BackgroundFill::Column(6),
     };
 
-    let rendered = apply_line_background("ab\ncd\n", Some(&bg));
+    let rendered = apply_line_background("ab\ncd\n", Some(&bg), 0);
     let lines: Vec<&str> = rendered.split('\n').collect();
     assert!(
         lines[0].ends_with("ab    \x1b[0m"),
@@ -399,10 +399,95 @@ fn code_block_column_fill_measures_visible_width_only() {
         fill: BackgroundFill::Column(6),
     };
 
-    let rendered = apply_line_background("a\x1b[31mb\x1b[39m\n", Some(&bg));
+    let rendered = apply_line_background("a\x1b[31mb\x1b[39m\n", Some(&bg), 0);
     assert!(
         rendered.contains("\x1b[39m    \x1b[0m"),
         "two visible columns should leave a four-space pad: {rendered:?}"
+    );
+}
+
+#[test]
+fn code_block_column_fill_counts_a_tab_to_the_next_tab_stop() {
+    // A terminal, and a host laying out its own pane, moves a tab to the next
+    // multiple of 8. Measuring it as the single column `UnicodeWidthStr` reports
+    // puts this line at 3 instead of 9, so the pad would be 13 and the line
+    // would end 6 columns past the target, wrapping or clipping.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(16),
+    };
+
+    let rendered = apply_line_background("a\tb\n", Some(&bg), 0);
+    assert_eq!(
+        rendered, "\x1b[48;5;236ma\tb       \x1b[0m\n\x1b[48;5;236m",
+        "`a` then a tab lands on column 8, so `b` ends at 9 and 7 columns remain"
+    );
+}
+
+#[test]
+fn code_block_column_fill_accounts_for_the_indent_the_caller_adds() {
+    // A code block inside a list item is indented after the background is
+    // applied. Filling to the target without counting that indent produces a
+    // line of `indent + target` columns, which wraps in a terminal and is
+    // clipped in a fixed-width pane.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\n", Some(&bg), 3);
+    assert_eq!(
+        rendered, "\x1b[48;5;236mab \x1b[0m\n\x1b[48;5;236m",
+        "three indent columns plus two of content leave a single space"
+    );
+}
+
+#[test]
+fn code_block_fill_reasserts_a_background_the_line_reset() {
+    // Highlighted lines end with `\x1b[0m`, and tool output carries whatever
+    // escapes it likes, so the pad would otherwise run under the terminal
+    // default instead of the region background.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\x1b[0m\n", Some(&bg), 0);
+    assert_eq!(
+        rendered,
+        "\x1b[48;5;236mab\x1b[0m\x1b[48;5;236m    \x1b[0m\n\x1b[48;5;236m"
+    );
+}
+
+#[test]
+fn code_block_erase_fill_reasserts_a_background_the_line_reset() {
+    // Same hazard for the erase: `\x1b[K` fills with the active background, so
+    // after a reset it would erase to the terminal default.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    };
+
+    let rendered = apply_line_background("ab\x1b[0m\n", Some(&bg), 0);
+    assert_eq!(
+        rendered,
+        "\x1b[48;5;236mab\x1b[0m\x1b[48;5;236m\x1b[K\x1b[0m\n\x1b[48;5;236m"
+    );
+}
+
+#[test]
+fn code_block_fill_leaves_a_surviving_background_alone() {
+    // A line that only changes its foreground still has the region background
+    // active, so the fill needs no extra escape.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\x1b[39m\n", Some(&bg), 0);
+    assert_eq!(
+        rendered,
+        "\x1b[48;5;236mab\x1b[39m    \x1b[0m\n\x1b[48;5;236m"
     );
 }
 
@@ -416,7 +501,7 @@ fn code_block_trailing_segment_is_not_padded() {
         fill: BackgroundFill::Column(6),
     };
 
-    let rendered = apply_line_background("ab\n", Some(&bg));
+    let rendered = apply_line_background("ab\n", Some(&bg), 0);
     assert!(
         rendered.ends_with("\x1b[0m\n\x1b[48;5;236m"),
         "trailing segment should carry no pad: {rendered:?}"

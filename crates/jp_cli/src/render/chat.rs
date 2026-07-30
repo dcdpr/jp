@@ -44,7 +44,7 @@ use jp_md::{
     },
     theme,
 };
-use jp_printer::{PrintableExt as _, Printer};
+use jp_printer::{OutputWidth, PrintableExt as _, Printer};
 use tracing::warn;
 
 use crate::timer::{LineTimer, spawn_line_timer};
@@ -136,7 +136,7 @@ pub struct ChatRenderer {
 impl ChatRenderer {
     pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
         let pretty = printer.pretty_printing_enabled();
-        let formatter = formatter_from_config(&config, pretty, printer.terminal_width());
+        let formatter = formatter_from_config(&config, pretty, printer.output_width().columns());
         // Configure the printer's bounded-latency controller from the
         // typewriter style. `max_latency = 0` (the default) leaves the
         // controller disabled, preserving the original static per-character
@@ -216,7 +216,7 @@ impl ChatRenderer {
             label,
             suffix,
             detail,
-            wrap_width(&self.config, self.printer.terminal_width()),
+            wrap_width(&self.config, self.printer.output_width().columns()),
             pretty,
         );
 
@@ -423,16 +423,16 @@ impl ChatRenderer {
                 }
                 self.code_block = Some(self.formatter.begin_code_block(language));
                 let bg = self.terminal_options(0).default_background;
-                let rendered = self
-                    .formatter
-                    .render_code_fence(&format!("{event}\n"), bg.as_ref());
+                let rendered =
+                    self.formatter
+                        .render_code_fence(&format!("{event}\n"), bg.as_ref(), indent);
                 self.print_code(&rendered, indent);
             }
             Event::FencedCodeLine { content, indent } => {
                 let bg = self.terminal_options(0).default_background;
                 let rendered = if let Some(ref mut state) = self.code_block {
                     self.formatter
-                        .render_code_line(&content, state, bg.as_ref())
+                        .render_code_line(&content, state, bg.as_ref(), indent)
                 } else {
                     content
                 };
@@ -447,9 +447,9 @@ impl ChatRenderer {
                 // visual flow of the list, so we emit the fence on
                 // its own and let the next event handle its own
                 // separation.
-                let mut rendered = self
-                    .formatter
-                    .render_code_fence(&format!("{fence}\n"), bg.as_ref());
+                let mut rendered =
+                    self.formatter
+                        .render_code_fence(&format!("{fence}\n"), bg.as_ref(), indent);
                 if indent == 0 {
                     rendered.push_str(&render_separator(bg.as_ref()));
                 }
@@ -471,7 +471,8 @@ impl ChatRenderer {
     /// Print a raw code string with the code typewriter delay.
     ///
     /// The content is already highlighted and has background applied by the
-    /// formatter's streaming code block API.
+    /// formatter's streaming code block API, which was told the same `indent`
+    /// so its line fill accounts for the spaces added here.
     /// `indent` is the visual column the renderer should put each line at (used
     /// when the code block is inside a list item).
     fn print_code(&self, content: &str, indent: usize) {
@@ -611,20 +612,21 @@ impl ChatRenderer {
 
     /// The full-width background fill configured for reasoning content, if any.
     ///
-    /// A known width pads with real spaces, which every consumer renders.
-    /// The erase-to-end-of-line escape is the fallback for an unknown width: a
-    /// terminal honors it, but a host that lays out its own sub-window — an
-    /// `fzf` preview pane — drops it, leaving the shading to stop at the last
-    /// character.
+    /// A terminal gets the erase-to-end-of-line escape: it follows the real
+    /// edge, so a window resized part-way through a response still shades whole
+    /// lines, and it leaves no trailing spaces in a copied selection.
+    /// A width declared by the caller pads with real spaces instead, because a
+    /// host that lays out its own sub-window — an `fzf` preview pane — drops
+    /// the erase, leaving the shading to stop at the last character.
     fn reasoning_background(&self) -> Option<DefaultBackground> {
         self.config
             .reasoning
             .background
             .map(|color| DefaultBackground {
                 param: crate::format::color_to_bg_param(color),
-                fill: match self.printer.terminal_width() {
-                    Some(width) => BackgroundFill::Column(usize::from(width)),
-                    None => BackgroundFill::Terminal,
+                fill: match self.printer.output_width() {
+                    OutputWidth::Declared(width) => BackgroundFill::Column(usize::from(width)),
+                    OutputWidth::Terminal(_) | OutputWidth::Unknown => BackgroundFill::Terminal,
                 },
             })
     }
@@ -834,7 +836,8 @@ impl ChatRenderer {
         self.cancel_reasoning_timer();
         self.buffer = Buffer::new();
         let pretty = self.printer.pretty_printing_enabled();
-        self.formatter = formatter_from_config(&self.config, pretty, self.printer.terminal_width());
+        self.formatter =
+            formatter_from_config(&self.config, pretty, self.printer.output_width().columns());
         self.last_content_kind = None;
         self.last_response_kind = None;
         self.pending_separator = None;
