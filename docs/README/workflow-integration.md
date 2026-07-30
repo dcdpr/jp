@@ -56,6 +56,19 @@ another process:
 jp -v 2> log.txt
 ```
 
+Output is laid out against the terminal's width, and keeps its natural width
+when piped.
+When the pipe still ends up in front of a human at a width you know, tell JP
+what it is.
+An `fzf` preview pane, which exports `$FZF_PREVIEW_COLUMNS`:
+
+```sh
+fzf --preview 'jp -F text-pretty --width "$FZF_PREVIEW_COLUMNS" conversation print {}'
+```
+
+A pipe also turns off colors and shading, so ask for them back with `-F
+text-pretty` wherever the reader is a human.
+
 JP is a single binary you call from wherever you already work; shell scripts,
 editor terminals, `git` hooks, CI pipelines, Makefiles.
 It stores state in a `.jp/` directory alongside your code, so conversations,

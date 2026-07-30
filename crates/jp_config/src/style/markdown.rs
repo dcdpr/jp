@@ -37,7 +37,13 @@ impl HrStyle {
 pub struct MarkdownConfig {
     /// Maximum line width for wrapping paragraph text.
     ///
+    /// Defaults to `80`.
     /// Set to `0` to disable wrapping entirely.
+    ///
+    /// This is a reading-comfort preference, so a wider output area does not
+    /// widen it.
+    /// A narrower one caps it: text is never wrapped past the columns
+    /// available, since the terminal would then wrap it a second time.
     #[setting(default = 80)]
     pub wrap_width: usize,
 
@@ -54,7 +60,7 @@ pub struct MarkdownConfig {
     /// `3`, and a table with more columns than fit at that minimum is rendered
     /// at the minimum and overflows the terminal.
     /// Tables in piped or redirected output are not fitted, since there is no
-    /// terminal width to fit them to.
+    /// width to fit them to — unless `--width` supplies one.
     #[setting(default = 40)]
     pub table_max_column_width: usize,
 

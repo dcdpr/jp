@@ -275,3 +275,42 @@ fn visual_width_ignores_an_osc_hyperlink() {
         4
     );
 }
+
+#[test]
+fn advance_column_counts_visible_text_from_the_starting_column() {
+    assert_eq!(advance_column(0, "hello"), 5);
+    assert_eq!(advance_column(3, "hello"), 8);
+    assert_eq!(advance_column(0, ""), 0);
+    // Escapes contribute nothing, and a wide glyph counts as two columns.
+    assert_eq!(advance_column(0, "\x1b[1m\u{6F22}\u{5B57}\x1b[22m"), 4);
+}
+
+#[test]
+fn advance_column_moves_a_tab_to_the_next_tab_stop() {
+    // `unicode_width` counts a tab as one column, but the cursor lands on the
+    // next multiple of `TAB_STOP`.
+    assert_eq!(visual_width("a\tb"), 3);
+    assert_eq!(advance_column(0, "a\tb"), 9);
+    // A tab on a tab stop still advances a full stop.
+    assert_eq!(advance_column(0, "\t"), 8);
+    assert_eq!(advance_column(8, "\t"), 16);
+    // The starting column is part of the calculation, not added afterwards.
+    assert_eq!(advance_column(5, "\tx"), 9);
+    // Consecutive tabs each move one stop.
+    assert_eq!(advance_column(0, "\t\t"), 16);
+}
+
+#[test]
+fn advance_column_returns_to_column_zero_on_a_carriage_return() {
+    // `unicode_width` measures `\r` as an ordinary column, but the cursor goes
+    // back to the start of the line, so everything before it is overwritten.
+    assert_eq!(visual_width("ab\r"), 3);
+    assert_eq!(advance_column(0, "ab\r"), 0);
+    assert_eq!(advance_column(9, "ab\r"), 0);
+    // Text after the return counts from the left margin again.
+    assert_eq!(advance_column(5, "ab\rcde"), 3);
+    // The last return wins.
+    assert_eq!(advance_column(0, "ab\rcd\re"), 1);
+    // A tab after a return measures from column 0.
+    assert_eq!(advance_column(20, "\rx\ty"), 9);
+}

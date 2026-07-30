@@ -16,8 +16,6 @@
 
 use std::fmt::{self, Write};
 
-use unicode_width::UnicodeWidthStr;
-
 use crate::{
     ansi::{self, AnsiState, Segment},
     format::{self, BackgroundFill, DefaultBackground},
@@ -57,7 +55,8 @@ pub struct ShadedWriter<W: Write> {
     ///
     /// Only meaningful for [`BackgroundFill::Column`], which needs to know how
     /// far to pad.
-    /// Counted in display columns over escape-free text runs, and reset by `\n`
+    /// Counted in display columns over escape-free text runs — with tabs
+    /// advancing to the next tab stop, as the display does — and reset by `\n`
     /// and `\r`.
     column: usize,
 
@@ -177,9 +176,7 @@ impl<W: Write> ShadedWriter<W> {
             return Ok(());
         }
         self.ensure_background()?;
-        // The run comes from a `Segment::Text`, so it carries no escape bytes
-        // and its display width is its visible width.
-        self.column += UnicodeWidthStr::width(run);
+        self.column = ansi::advance_column(self.column, run);
         self.output.write_str(run)
     }
 

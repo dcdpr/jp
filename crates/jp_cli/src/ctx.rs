@@ -71,10 +71,13 @@ pub(crate) struct Term {
     /// These are not managed by the TTY subsystem.
     pub(crate) is_tty: bool,
 
-    /// Width of the controlling terminal in columns, when stdout is a TTY.
+    /// Width in columns to lay output out against.
     ///
-    /// `None` when stdout is piped or redirected, so list output keeps its full
-    /// width for machine consumption rather than wrapping to a guessed size.
+    /// The controlling terminal's width when stdout is a TTY, or the width the
+    /// caller declared with `--width`.
+    /// `None` when stdout is piped or redirected without a declared width, so
+    /// list output keeps its full width for machine consumption rather than
+    /// wrapping to a guessed size.
     pub(crate) width: Option<u16>,
 }
 
@@ -95,7 +98,7 @@ impl Ctx {
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
         let is_tty = io::stdout().is_terminal();
-        let width = printer.terminal_width();
+        let width = printer.output_width().columns();
 
         Self {
             workspace,
