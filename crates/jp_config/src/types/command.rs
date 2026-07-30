@@ -21,9 +21,16 @@
 //! "just x {{ a | default('') }}" => ["just", "x", "{{ a | default('') }}"]
 //! ```
 //!
+//! Spans are atomic for every string-form command, not only for the ones that
+//! are rendered: tool commands are rendered by
+//! `jp_llm::tool::run_tool_command`, while `editor.cmd` runs verbatim and keeps
+//! a span as a literal argument.
+//!
 //! Malformed shell quoting (unbalanced quotes, dangling escapes) is rejected at
 //! config-parse time via [`PartialCommandConfigOrString::from_str`] rather than
 //! producing garbage at spawn time.
+//! Quoting *inside* a span is minijinja text rather than shell syntax, so it is
+//! not part of that check.
 
 use std::{fmt, str::FromStr};
 
@@ -97,6 +104,12 @@ impl FromStr for PartialCommandConfigOrString {
     type Err = BoxedError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // NUL is reserved as the placeholder delimiter used while masking
+        // template spans, and no OS accepts it in an argument anyway.
+        if s.contains('\0') {
+            return Err(format!("command string contains a NUL byte: {s:?}").into());
+        }
+
         // Validate shell quoting at parse time so malformed input fails fast
         // rather than producing garbage at spawn time. Empty / whitespace-only
         // strings are accepted (they parse to an empty token list and produce
@@ -125,9 +138,10 @@ impl CommandConfigOrString {
     ///
     /// Malformed input is normally rejected at config-parse time by
     /// [`PartialCommandConfigOrString::from_str`].
-    /// This method is defensive against direct construction in Rust code: on
-    /// `shlex::split` failure it falls back to an empty token list, which
-    /// surfaces as a spawn-time error.
+    /// This method is defensive against input that skips that check (direct
+    /// construction in Rust code, or a config format that can encode a NUL
+    /// byte): a split failure falls back to an empty token list, which surfaces
+    /// as a spawn-time error.
     #[must_use]
     pub fn command(self) -> CommandConfig {
         match self {
@@ -151,8 +165,7 @@ impl CommandConfigOrString {
 /// redirects).
 /// The `args` are shell-quoted with [`shlex::try_join`] so multi-word arguments
 /// keep their boundaries instead of being word-split by the shell (`try_join`
-/// only fails on an interior NUL byte, which a config value can't carry; a raw
-/// space-join is the fallback).
+/// only fails on an interior NUL byte; a raw space-join is the fallback).
 ///
 /// The caller wraps the result in its own shell invocation (`sh -c <line>`).
 #[must_use]
@@ -265,8 +278,14 @@ impl ToPartial for CommandConfig {
 /// never inject extra arguments.
 /// A template span may itself contain spaces (e.g. `{{ x | default('') }}`);
 /// masking the spans before the split keeps each one inside a single argument.
-/// Returns `None` on unbalanced shell quoting, mirroring [`shlex::split`].
+/// Returns `None` on unbalanced shell quoting (mirroring [`shlex::split`]) and
+/// on an interior NUL byte, which the masking step reserves for its
+/// placeholders.
 fn split_command_words(input: &str) -> Option<Vec<String>> {
+    if input.contains('\0') {
+        return None;
+    }
+
     let (masked, spans) = mask_template_spans(input);
     let words = shlex::split(&masked)?;
     Some(
@@ -281,8 +300,8 @@ fn split_command_words(input: &str) -> Option<Vec<String>> {
 /// with a NUL-delimited placeholder, returning the masked string and the
 /// original span texts in order.
 ///
-/// A config value cannot carry a NUL byte, so the placeholder cannot collide
-/// with real command text.
+/// Callers reject input containing NUL (see [`split_command_words`]), so a
+/// placeholder cannot collide with real command text.
 /// The placeholder holds no whitespace or quote characters, so `shlex` keeps it
 /// inside a single word.
 fn mask_template_spans(input: &str) -> (String, Vec<String>) {
@@ -319,7 +338,10 @@ fn find_span_open(bytes: &[u8], from: usize) -> Option<usize> {
 ///
 /// Comment spans (`{# … #}`) are raw text.
 /// Expression (`{{ … }}`) and statement (`{% … %}`) spans skip string
-/// literals, so a closer inside a quoted string does not end the span early.
+/// literals, so a closer inside a quoted string does not end the span early,
+/// and track `()`, `[]` and `{}` nesting, mirroring minijinja, which only
+/// accepts an end delimiter at nesting depth zero.
+/// In `{{ {"a": 1} }}` the first `}` closes the map, not the span.
 /// An unterminated span extends to end of input; the render step then reports
 /// the real error.
 fn find_span_end(bytes: &[u8], open: usize) -> usize {
@@ -329,6 +351,7 @@ fn find_span_end(bytes: &[u8], open: usize) -> usize {
             let closer = if kind == b'{' { b'}' } else { b'%' };
             let mut j = open + 2;
             let mut quote: Option<u8> = None;
+            let mut depth: usize = 0;
 
             while j < bytes.len() {
                 let b = bytes[j];
@@ -344,9 +367,14 @@ fn find_span_end(bytes: &[u8], open: usize) -> usize {
                 } else if b == b'\'' || b == b'"' {
                     quote = Some(b);
                     j += 1;
-                } else if b == closer && bytes.get(j + 1) == Some(&b'}') {
+                } else if depth == 0 && b == closer && bytes.get(j + 1) == Some(&b'}') {
                     return j + 2;
                 } else {
+                    match b {
+                        b'(' | b'[' | b'{' => depth += 1,
+                        b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+                        _ => {}
+                    }
                     j += 1;
                 }
             }

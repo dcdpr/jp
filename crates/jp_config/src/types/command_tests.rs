@@ -186,6 +186,59 @@ fn unterminated_template_span_is_kept_whole() {
 }
 
 #[test]
+fn template_span_with_nested_braces_stays_one_arg() {
+    // Minijinja only ends a variable block at nesting depth zero, so the `}}`
+    // that closes the two maps must not end the span.
+    let p = PartialCommandConfigOrString::from_str(r#"cmd {{ {"outer": {"inner": 1}} | tojson }}"#)
+        .unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "cmd".to_owned(),
+        args: vec![r#"{{ {"outer": {"inner": 1}} | tojson }}"#.to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn template_span_ends_at_first_depth_zero_closer() {
+    // The span ends at the `}}` that follows the balanced map, and text after it
+    // is split as ordinary shell words.
+    let p = PartialCommandConfigOrString::from_str(r#"cmd {{ {"a": 1} }} tail"#).unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "cmd".to_owned(),
+        args: vec![r#"{{ {"a": 1} }}"#.to_owned(), "tail".to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn from_str_rejects_nul_byte() {
+    let err = PartialCommandConfigOrString::from_str("echo \0").unwrap_err();
+    assert!(err.to_string().contains("NUL byte"), "got: {err}");
+}
+
+#[test]
+fn json_nul_bearing_command_is_not_rewritten_by_span_restoration() {
+    // JSON (and YAML, and JSON5) can encode an interior NUL, and that path
+    // deserializes the string variant directly without going through `from_str`.
+    // Text shaped like a span placeholder must not be substituted with real span
+    // text: the command stays unexecutable instead of turning into a different
+    // one.
+    let p: PartialCommandConfigOrString =
+        serde_json::from_str(r#""\u00000\u0000 {{ evil }}""#).unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: String::new(),
+        args: vec![],
+        shell: false,
+    });
+}
+
+#[test]
 fn from_str_ignores_quotes_inside_template_span() {
     // The apostrophe inside the comment is minijinja text, not shell quoting;
     // masking the span keeps the unbalanced-quote check from rejecting it.
