@@ -140,10 +140,15 @@ The preview needs `--width` because a pipe reports no terminal size, so nothing
 is laid out to the pane.
 `$FZF_PREVIEW_COLUMNS` is the size `fzf` exports for it.
 
-`--context` works here too: a context line carries the same coordinate as any
-other, so `{1}` and `{2}` resolve on every row.
-You may still not want it — the preview pane already shows the whole turn each
-hit came from, which is more surrounding text than `--context` gives you.
+`--context` records work here — a context line carries the same coordinate as
+any other, so `{1}` and `{2}` resolve on them — but `--context` also emits `--`
+separator rows, and selecting one gives `fzf` no ID or turn to substitute, so
+the preview shows an error.
+Filter them out (`| grep -v '^--$'`) if you want context here.
+
+Simpler to skip `--context` altogether: the preview pane already shows the whole
+turn each hit came from, which is more surrounding text than `--context` gives
+you.
 
 ## Restricting the search
 
@@ -200,12 +205,12 @@ Override with `--ignore-case` or `--case-sensitive`.
 `--output` picks *which records* you get.
 It composes with the global `--format` flag, which picks *how they're encoded*.
 
-| `--output`       | Emits                                             |
-| ---------------- | ------------------------------------------------- |
-| `hits` (default) | matching lines with their coordinates             |
-| `ids`            | the conversation ID only, one per line            |
-| `count`          | `ID:COUNT` — matching lines per conversation      |
-| `text`           | matching lines only, no coordinates or separators |
+| `--output`       | Emits                                                   |
+| ---------------- | ------------------------------------------------------- |
+| `hits` (default) | matching lines with their coordinates                   |
+| `ids`            | the conversation ID only, one per line                  |
+| `count`          | `ID:COUNT` — matching lines per conversation            |
+| `text`           | matched and context lines, no coordinates or separators |
 
 ```sh
 jp c grep --output ids 'error' | jp c archive -

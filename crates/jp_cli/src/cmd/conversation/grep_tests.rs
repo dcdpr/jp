@@ -905,7 +905,7 @@ fn max_matches_caps_matches_per_conversation() {
     )]);
 
     let grep = Grep {
-        max_matches: Some(2),
+        max_matches: NonZeroUsize::new(2),
         ..grep("mu-mark")
     };
     assert_eq!(run(grep, &mut ctx, &out), [
@@ -928,7 +928,7 @@ fn max_matches_applies_across_the_whole_conversation() {
     )]);
 
     let grep = Grep {
-        max_matches: Some(2),
+        max_matches: NonZeroUsize::new(2),
         ..grep("nu-mark")
     };
     let rendered = run(grep, &mut ctx, &out);
@@ -997,6 +997,59 @@ fn quiet_reports_a_match_through_its_exit_status_alone() {
         "",
         "--quiet must not write to the output channel"
     );
+}
+
+#[test]
+fn quiet_exits_zero_when_a_match_survives_a_failing_pattern() {
+    // `grep -q`'s rule: if a line is selected the status is 0 even if an error
+    // occurred.
+    //
+    // Both inputs live in one event, poisoning line first, so `matching_lines`
+    // reaches them in a fixed order. Splitting them across two conversations
+    // makes the test vacuous: `find_any` can return the match before the
+    // pathological one is ever scanned, so no failure gets recorded and the
+    // assertion holds for the wrong reason — which is the scheduling dependence
+    // this guards against.
+    let id = make_id(7200);
+    let (mut ctx, _out) = setup(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatRequest::from(format!("{}\naab", "a".repeat(64)).as_str()),
+            ts(),
+        )]),
+    )]);
+    ctx.term.args.quiet = true;
+
+    let grep = Grep {
+        regex: true,
+        ..grep(r"(a+)+\1b")
+    };
+    assert!(
+        grep.run(&mut ctx, vec![]).is_ok(),
+        "a found match outranks a mid-search failure"
+    );
+}
+
+#[test]
+fn quiet_exits_two_when_a_failure_leaves_no_match() {
+    // With nothing selected the failure is the only outcome, so it must not be
+    // reported as a clean no-match.
+    let id = make_id(7400);
+    let (mut ctx, _out) = setup(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatRequest::from("a".repeat(64).as_str()),
+            ts(),
+        )]),
+    )]);
+    ctx.term.args.quiet = true;
+
+    let grep = Grep {
+        regex: true,
+        ..grep(r"(a+)+\1b")
+    };
+    let error = grep.run(&mut ctx, vec![]).unwrap_err();
+    assert_eq!(error.code.get(), 2);
 }
 
 #[test]
@@ -1906,9 +1959,19 @@ fn scope_accepts_repetition_and_comma_separation() {
 fn short_flags_match_their_grep_meanings() {
     let grep = parse(&["x", "--context", "3", "-m", "2", "-r", "-s", "user"]).unwrap();
     assert_eq!(grep.context, 3);
-    assert_eq!(grep.max_matches, Some(2));
+    assert_eq!(grep.max_matches, NonZeroUsize::new(2));
     assert!(grep.regex);
     assert_eq!(grep.scopes.len(), 1);
+}
+
+#[test]
+fn max_matches_rejects_zero() {
+    // `--max-matches 0` would exhaust the budget before the first event, so
+    // every conversation comes back empty and the run reports "no matches"
+    // while matches exist — and `--quiet`, which caps at 1 internally, would
+    // disagree with it.
+    assert!(parse(&["x", "--max-matches", "1"]).is_ok());
+    assert!(parse(&["x", "--max-matches", "0"]).is_err());
 }
 
 #[test]

@@ -180,6 +180,11 @@ pub(crate) struct Matcher {
 
     /// The first failure's message, kept for the error shown to the user.
     message: Mutex<Option<String>>,
+
+    /// Whether a recorded failure short-circuits further match attempts.
+    ///
+    /// See [`Self::ungated`] for when it must be off.
+    gate_on_failure: bool,
 }
 
 impl Matcher {
@@ -207,7 +212,23 @@ impl Matcher {
             pattern,
             failed: AtomicBool::new(false),
             message: Mutex::new(None),
+            gate_on_failure: true,
         })
+    }
+
+    /// Keep recording failures, but stop short-circuiting on them.
+    ///
+    /// The short-circuit saves work when a failure will discard every result.
+    /// A caller whose answer *survives* a failure must not use it: with the
+    /// gate on, whether a worker reaches the failing input before the answering
+    /// one decides the outcome.
+    /// `grep -q` is that caller — one found match is the whole answer — and
+    /// there is no work to save there anyway, since the search stops at the
+    /// first match.
+    #[must_use]
+    pub(crate) fn ungated(mut self) -> Self {
+        self.gate_on_failure = false;
+        self
     }
 
     /// The first match failure, if any attempt has failed.
@@ -249,7 +270,7 @@ impl Matcher {
                 // attempts are wasted work — and each one can burn the full
                 // backtrack limit again. Workers mid-attempt still finish that
                 // attempt; this stops the next one.
-                if self.failed.load(Ordering::Relaxed) {
+                if self.gate_on_failure && self.failed.load(Ordering::Relaxed) {
                     return false;
                 }
 
@@ -277,7 +298,7 @@ impl Matcher {
             Pattern::Regex(re) => {
                 // Same early exit as `is_match`: a poisoned matcher stops
                 // paying the backtrack limit for results nobody will see.
-                if self.failed.load(Ordering::Relaxed) {
+                if self.gate_on_failure && self.failed.load(Ordering::Relaxed) {
                     return spans;
                 }
 

@@ -79,7 +79,7 @@ pub(crate) struct Grep {
     /// - `hits`: the matching lines with their coordinates.
     /// - `ids`: the conversation ID only.
     /// - `count`: the conversation ID and its number of matching lines.
-    /// - `text`: the matching lines with no coordinates.
+    /// - `text`: the matched and context lines with no coordinates.
     #[arg(long, value_enum, default_value_t)]
     output: OutputKind,
 
@@ -96,8 +96,11 @@ pub(crate) struct Grep {
     no_heading: bool,
 
     /// Stop after this many matching lines per conversation.
+    ///
+    /// Must be at least 1: a cap of zero would discard every match and report
+    /// the run as finding nothing.
     #[arg(long, short = 'm')]
-    max_matches: Option<usize>,
+    max_matches: Option<NonZeroUsize>,
 
     /// Show at most this many conversations, in sort order.
     ///
@@ -155,12 +158,25 @@ impl Grep {
         // as the whole answer: stop at the first match instead of collecting
         // every hit nobody will read.
         if ctx.term.args.quiet {
+            // Ungated: the gate exists to stop paying the backtrack limit for
+            // results that will be discarded, but here a single found match is
+            // the whole answer and outlives any failure. Leaving it on would
+            // make the status depend on whether a worker hit the poisoning
+            // conversation before the matching one.
+            let matcher = matcher.ungated();
             let matched = self.any_match(&ids, &matcher, &wanted, ctx);
+
+            // A found match wins over a failure, as in `grep -q`: "if -q is
+            // given and a line is selected, the exit status is 0 even if an
+            // error occurred".
+            if matched {
+                return Ok(());
+            }
             if let Some(error) = matcher.failure() {
                 return Err((2, format!("pattern matching failed: {error}")).into());
             }
 
-            return if matched { Ok(()) } else { Err(1.into()) };
+            return Err(1.into());
         }
 
         let mut groups = self.collect_hits(&ids, &matcher, &wanted, ctx);
@@ -237,7 +253,14 @@ impl Grep {
         // already-sorted id order survives the parallel pass.
         ids.par_iter()
             .map(|&id| {
-                self.collect_hits_for_id(id, matcher, wanted, needs_events, self.max_matches, ctx)
+                self.collect_hits_for_id(
+                    id,
+                    matcher,
+                    wanted,
+                    needs_events,
+                    self.max_matches.map(NonZeroUsize::get),
+                    ctx,
+                )
             })
             .filter(|group| !group.hits.is_empty())
             .collect()
@@ -546,7 +569,7 @@ enum OutputKind {
     /// The conversation ID and its number of matching lines.
     Count,
 
-    /// Matching lines with no coordinate.
+    /// Matched and context lines with no coordinate.
     Text,
 }
 
