@@ -60,7 +60,7 @@ run *ARGS:
     #!/usr/bin/env sh
     set -eu
 
-    cargo run --package jp_cli -- "$@"
+    cargo run {{quiet_flag}} --package jp_cli -- "$@"
 
 # Install the `jp` binary from your local checkout.
 [group('build')]
