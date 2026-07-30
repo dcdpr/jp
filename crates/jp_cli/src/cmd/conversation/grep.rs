@@ -44,7 +44,11 @@ pub(crate) struct Grep {
     /// Multiple words are joined with single spaces, so quoting is optional:
     /// `jp c grep two words` searches for `two words`.
     /// A pattern that starts with `-` still needs `--` ahead of it.
-    #[arg(value_name = "PATTERN", num_args = 1..)]
+    // `required` because a `Vec` positional is optional by default in clap, and
+    // `num_args` only constrains values per occurrence. Without it a bare
+    // `jp c grep` compiles the empty pattern, which matches every line of every
+    // conversation.
+    #[arg(value_name = "PATTERN", required = true, num_args = 1..)]
     pattern: Vec<String>,
 
     #[command(flatten)]
@@ -845,6 +849,20 @@ fn text_budget(columns: Option<usize>, prefix_width: usize) -> Option<usize> {
     Some(columns.saturating_sub(prefix_width).max(MIN_TEXT_WIDTH))
 }
 
+/// A hit's text fitted to the available columns.
+struct FittedText {
+    text: String,
+
+    /// Byte offset in [`Self::text`] where the text carried over from the
+    /// original ends.
+    ///
+    /// `None` when nothing was cut, so the whole string is original text.
+    /// When truncation happened this is where the appended ellipsis begins:
+    /// match spans index the original line, and the ellipsis is not part of it,
+    /// so highlighting must stop here.
+    kept: Option<usize>,
+}
+
 /// Fit a hit's text to the available columns.
 ///
 /// The text is modified only when a width budget applies: trailing whitespace
@@ -853,29 +871,44 @@ fn text_budget(columns: Option<usize>, prefix_width: usize) -> Option<usize> {
 /// With no budget — piped output — the text is returned verbatim, which is
 /// what the `TEXT` field of a piped record promises.
 /// Even trailing whitespace can be the match itself (`--regex '\s+$'`).
-fn fit_text(text: &str, columns: Option<usize>, prefix_width: usize) -> String {
-    match text_budget(columns, prefix_width) {
-        Some(budget) => truncate_to_width(text.trim_end(), budget),
-        None => text.to_owned(),
-    }
+fn fit_text(text: &str, columns: Option<usize>, prefix_width: usize) -> FittedText {
+    let Some(budget) = text_budget(columns, prefix_width) else {
+        return FittedText {
+            text: text.to_owned(),
+            kept: None,
+        };
+    };
+
+    let trimmed = text.trim_end();
+    let fitted = truncate_to_width(trimmed, budget);
+
+    // `truncate_to_width` returns the input unchanged when it already fits, and
+    // otherwise a prefix of it plus a single ellipsis character. Taking the
+    // offset of that final character avoids restating which character it is.
+    let kept =
+        (fitted != trimmed).then(|| fitted.char_indices().next_back().map_or(0, |(at, _)| at));
+
+    FittedText { text: fitted, kept }
 }
 
 /// Style each matched span within `text`, leaving the rest unstyled.
 ///
-/// `spans` are byte ranges into the hit's original text; any that fall outside
-/// `text` are dropped and one straddling its end is clipped, so a truncated
-/// line highlights only what survived.
+/// `spans` are byte ranges into the hit's *original* text.
+/// `kept` bounds how much of `text` came from that original: any span starting
+/// at or after it is dropped and one straddling it is clipped, so a truncated
+/// line highlights only what survived and never the appended ellipsis.
 /// A span whose clipped end isn't a character boundary is skipped rather than
 /// split.
-fn highlight(text: &str, spans: &[Range<usize>]) -> String {
+fn highlight(text: &str, spans: &[Range<usize>], kept: Option<usize>) -> String {
+    let boundary = kept.unwrap_or(text.len());
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
 
     for span in spans {
-        if span.start >= text.len() || span.start < cursor {
+        if span.start >= boundary || span.start < cursor {
             continue;
         }
-        let end = span.end.min(text.len());
+        let end = span.end.min(boundary);
         if !text.is_char_boundary(span.start) || !text.is_char_boundary(end) {
             continue;
         }
@@ -890,12 +923,13 @@ fn highlight(text: &str, spans: &[Range<usize>]) -> String {
 }
 
 /// Render a hit's text, styled for a match or dimmed for a context line.
-fn styled_text(hit: &Hit, text: &str, pretty: bool) -> String {
+fn styled_text(hit: &Hit, fitted: &FittedText, pretty: bool) -> String {
+    let text = fitted.text.as_str();
     if !pretty {
         return text.to_owned();
     }
     if hit.is_match {
-        return highlight(text, &hit.spans);
+        return highlight(text, &hit.spans, fitted.kept);
     }
 
     text.dim().to_string()
@@ -925,7 +959,10 @@ fn render_group_heading(
     let matches = group.match_count();
     let noun = if matches == 1 { "match" } else { "matches" };
     let stats = match group.turn_count {
-        Some(turns) => format!("{matches} {noun} · {turns} turns"),
+        Some(turns) => {
+            let turn_noun = if turns == 1 { "turn" } else { "turns" };
+            format!("{matches} {noun} · {turns} {turn_noun}")
+        }
         None => format!("{matches} {noun}"),
     };
 

@@ -200,6 +200,13 @@ case-insensitively, and any uppercase character makes the whole pattern
 case-sensitive.
 Override with `--ignore-case` or `--case-sensitive`.
 
+"Any uppercase character" counts characters anywhere in the pattern, including
+inside regex syntax — `\W`, `\S`, `\D`, `\A`, `\z` all make a pattern
+case-sensitive even when the text you're searching for is lowercase.
+The example above is case-sensitive for that reason.
+Pass `--ignore-case` explicitly when a regex needs those escapes and
+case-insensitive matching.
+
 ## What to emit
 
 `--output` picks *which records* you get.

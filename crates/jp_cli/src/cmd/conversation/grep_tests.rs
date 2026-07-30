@@ -227,7 +227,7 @@ fn heading_mode_groups_hits_under_the_conversation() {
     let rendered = run(grep("omega-mark"), &mut ctx, &out);
     assert_eq!(rendered, [
         format!(
-            "{id}  Investigating a flaky test{:24}2 matches · 1 turns",
+            "{id}  Investigating a flaky test{:25}2 matches · 1 turn",
             ""
         ),
         // The scope field is padded to the widest in the group, so the text
@@ -386,7 +386,7 @@ fn heading_singularizes_a_lone_match() {
 
     let rendered = run(grep("rho-mark"), &mut ctx, &out);
     assert!(
-        rendered[0].ends_with("1 match · 1 turns"),
+        rendered[0].ends_with("1 match · 1 turn"),
         "got: {:?}",
         rendered[0]
     );
@@ -493,7 +493,7 @@ fn heading_can_be_forced_on_when_piped() {
         ..grep("eta-mark")
     };
     assert_eq!(run(grep, &mut ctx, &out), [
-        format!("{id}  (no title)  1 match · 1 turns"),
+        format!("{id}  (no title)  1 match · 1 turn"),
         "  1:user:eta-mark".to_owned(),
     ]);
 }
@@ -646,7 +646,7 @@ fn a_terminal_fits_lines_to_its_width() {
 
 #[test]
 fn highlight_styles_only_the_matched_span() {
-    let styled = highlight("a needle here", std::slice::from_ref(&(2..8)));
+    let styled = highlight("a needle here", std::slice::from_ref(&(2..8)), None);
     assert_eq!(strip_str(&styled), "a needle here");
     assert!(
         styled.starts_with("a "),
@@ -663,19 +663,44 @@ fn highlight_styles_only_the_matched_span() {
 fn highlight_drops_spans_past_a_truncated_line() {
     // Spans are found against the full line; after truncation the ones beyond
     // the cut have nothing to point at.
-    let styled = highlight("abc", &[0..1, 10..12]);
+    let styled = highlight("abc", &[0..1, 10..12], None);
     assert_eq!(styled, format!("{}bc", "a".red().bold()));
 }
 
 #[test]
 fn highlight_clips_a_span_straddling_the_end() {
-    let styled = highlight("abc", std::slice::from_ref(&(1..9)));
+    let styled = highlight("abc", std::slice::from_ref(&(1..9)), None);
     assert_eq!(strip_str(&styled), "abc");
 }
 
 #[test]
+fn highlight_never_styles_the_truncation_ellipsis() {
+    // `spans` index the original line, but the string handed to `highlight` is a
+    // prefix of it plus `…`. Clipping to the string's length would treat the
+    // ellipsis bytes as match text; `kept` bounds it to the surviving prefix.
+    //
+    // "abc…" is 3 + 3 bytes, so the ellipsis occupies 3..6 and `kept` is 3.
+    let ellipsis_start = 3;
+
+    // A match straddling the cut keeps the visible part styled and leaves the
+    // ellipsis bare.
+    let styled = highlight("abc…", std::slice::from_ref(&(0..5)), Some(ellipsis_start));
+    assert_eq!(styled, format!("{}…", "abc".red().bold()));
+
+    // A match whose clipped end would land *inside* the ellipsis keeps its
+    // highlight. Clipping to the string length put `end` at a non-boundary, so
+    // the span was skipped whole and a partly-visible match lost its styling.
+    let styled = highlight("abc…", std::slice::from_ref(&(2..4)), Some(ellipsis_start));
+    assert_eq!(styled, format!("ab{}…", "c".red().bold()));
+
+    // A match starting at the cut is entirely invisible, so nothing is styled.
+    let styled = highlight("abc…", std::slice::from_ref(&(3..6)), Some(ellipsis_start));
+    assert_eq!(styled, "abc…");
+}
+
+#[test]
 fn highlight_leaves_multibyte_text_intact() {
-    let styled = highlight("héllo wörld", std::slice::from_ref(&(0..6)));
+    let styled = highlight("héllo wörld", std::slice::from_ref(&(0..6)), None);
     assert_eq!(strip_str(&styled), "héllo wörld");
 }
 
@@ -1962,6 +1987,18 @@ fn scope_does_not_swallow_the_pattern() {
     let grep = parse(&["--scope", "chat", "error"]).unwrap();
     assert_eq!(grep.pattern, ["error"]);
     assert_eq!(grep.scopes, vec![Scope::Chat]);
+}
+
+#[test]
+fn a_pattern_is_required() {
+    // A `Vec` positional is optional by default in clap, so without
+    // `required = true` a bare `jp c grep` parses, joins to `""`, compiles the
+    // empty regex, and matches every line of every conversation — exit 0 and a
+    // full dump where `grep`(1) prints usage and exits 2.
+    assert!(parse(&[]).is_err());
+
+    // An explicit empty pattern still matches everything, as in `grep`(1).
+    assert_eq!(parse(&[""]).unwrap().pattern, [""]);
 }
 
 #[test]
