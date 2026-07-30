@@ -9,7 +9,7 @@ use serde_json::json;
 use tracing::warn;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds},
+    cmd::{ConversationLoadRequest, Error, Output, conversation_id::FlagIds},
     ctx::Ctx,
     output::print_json,
     shared::search::{ConcreteScope, Matcher, event_lines, event_scope, title_for},
@@ -91,7 +91,11 @@ impl Grep {
         let hits = self.collect_hits(&ids, &matcher, &wanted, ctx);
 
         if hits.is_empty() {
-            return Err("No matches found.".into());
+            // Finding nothing is a result, not a failure. The status stays
+            // non-zero so a script can branch on it, but the run did what was
+            // asked, so failure-only output (the trace log location) stays quiet
+            // for a piped run.
+            return Err(Error::from("No matches found.").expected());
         }
 
         self.render(&hits, ctx);
