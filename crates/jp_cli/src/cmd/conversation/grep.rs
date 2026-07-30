@@ -413,8 +413,9 @@ impl Grep {
             for (index, group) in groups.iter().enumerate() {
                 // Without headings a conversation boundary is just another gap
                 // between groups of lines, so it gets the same `--` marker.
+                // Never styled: see `write_group_break`.
                 if separators && index > 0 {
-                    write_group_break(&mut output, "", pretty);
+                    write_group_break(&mut output, "", false);
                 }
                 render_group_lines(&mut output, group, columns, pretty, separators);
             }
@@ -895,8 +896,13 @@ fn styled_text(hit: &Hit, text: &str, pretty: bool) -> String {
 }
 
 /// Write the `--` separator that precedes a hit starting a new group.
-fn write_group_break(output: &mut String, indent: &str, pretty: bool) {
-    if pretty {
+///
+/// `styled` dims the marker, which suits a heading-mode view.
+/// Line mode must leave it bare whatever the format: the separator is the one
+/// row in that stream that isn't a record, and a consumer is told to drop it by
+/// matching `--` exactly, which styling bytes would defeat.
+fn write_group_break(output: &mut String, indent: &str, styled: bool) {
+    if styled {
         let _ = writeln!(output, "{indent}{}", "--".dim());
     } else {
         let _ = writeln!(output, "{indent}--");
@@ -1028,8 +1034,9 @@ fn render_group_lines(
     let id_styled = id_str.clone().magenta().to_string();
 
     for hit in &group.hits {
+        // Never styled: see `write_group_break`.
         if separators && hit.group_break {
-            write_group_break(output, "", pretty);
+            write_group_break(output, "", false);
         }
 
         let kind = if hit.is_match {

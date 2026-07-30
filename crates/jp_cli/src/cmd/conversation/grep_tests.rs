@@ -1486,6 +1486,48 @@ fn every_record_has_the_same_field_count_whatever_the_flags() {
 }
 
 #[test]
+fn line_mode_separators_stay_unstyled_under_a_pretty_format() {
+    // `-F text-pretty | fzf --ansi` is the advertised pipeline, and the docs tell
+    // the reader to drop separators with `grep -v '^--$'`. A dimmed `--` carries
+    // ANSI bytes, so that filter would match nothing and the row would stay
+    // selectable in `fzf`, where it has no ID or turn to preview.
+    //
+    // Asserted against the raw buffer: the `lines()` helper strips ANSI, so a
+    // stripped assertion passes whether or not the marker is styled — which is
+    // how this got past the existing separator tests.
+    let id = make_id(11_080);
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("tau-mark one\nskip\nskip\nskip\nskip\ntau-mark two"),
+                ts(),
+            )]),
+        )],
+        200,
+    );
+
+    let grep = Grep {
+        no_heading: true,
+        context: 1,
+        ..grep("tau-mark")
+    };
+    grep.run(&mut ctx, vec![]).unwrap();
+    ctx.printer.flush();
+
+    let raw = out.lock().clone();
+    assert!(
+        raw.lines().any(|line| line == "--"),
+        "a separator row must be byte-exactly `--`: {raw:?}"
+    );
+    // The coordinate fields are still styled — only the separator is bare.
+    assert!(
+        raw.contains('\x1b'),
+        "pretty line mode still styles records: {raw:?}"
+    );
+}
+
+#[test]
 fn separator_between_conversations() {
     let id_a = make_id(11_100);
     let id_b = make_id(11_200);
