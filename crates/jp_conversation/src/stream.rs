@@ -1001,6 +1001,40 @@ impl ConversationStream {
         IterTurns::new(self.iter())
     }
 
+    /// Returns each event paired with the 0-based index of the turn it belongs
+    /// to.
+    ///
+    /// Turn boundaries match [`Self::iter_turns`]: a [`TurnStart`] opens a new
+    /// turn, and events before the first `TurnStart` form an implicit leading
+    /// turn.
+    ///
+    /// Unlike `iter_turns`, no per-event configuration is resolved.
+    /// `iter_turns` clones the accumulated [`PartialAppConfig`] for every event
+    /// and materializes the whole stream up front; this walks the events once
+    /// and allocates nothing.
+    /// Prefer it whenever only event content is needed.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    pub fn iter_events_by_turn(&self) -> impl Iterator<Item = (usize, &ConversationEvent)> {
+        let mut turn = 0;
+        let mut seen_event = false;
+
+        self.events.iter().filter_map(move |internal| {
+            let InternalEvent::Event(event) = internal else {
+                return None;
+            };
+
+            // A leading `TurnStart` opens the first turn rather than closing an
+            // empty one, matching `IterTurns`.
+            if event.is_turn_start() && seen_event {
+                turn += 1;
+            }
+            seen_event = true;
+
+            Some((turn, &**event))
+        })
+    }
+
     /// Returns the number of turns in the stream.
     ///
     /// A turn is delimited by [`TurnStart`] events.
@@ -1010,7 +1044,9 @@ impl ConversationStream {
     /// [`TurnStart`]: crate::event::TurnStart
     #[must_use]
     pub fn turn_count(&self) -> usize {
-        self.iter_turns().len()
+        self.iter_events_by_turn()
+            .last()
+            .map_or(0, |(turn, _)| turn + 1)
     }
 
     /// Returns the turn that was active at the given time.

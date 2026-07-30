@@ -216,7 +216,8 @@ impl Use {
 
         // 3. Grep filter.
         let final_ids = match &self.grep {
-            Some(pattern) => search::filter_ids(ctx, &ranged, pattern),
+            Some(pattern) => search::filter_ids(ctx, &ranged, pattern)
+                .map_err(|e| format!("invalid pattern: {e}"))?,
             None => ranged,
         };
 

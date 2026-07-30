@@ -72,6 +72,7 @@ inquire = { workspace = true, features = ["crossterm"] }
 minijinja = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 rayon = { workspace = true }
+regex = { workspace = true, features = ["perf", "std", "unicode"] }
 relative-path = { workspace = true }
 reqwest = { workspace = true }
 schemars = { workspace = true }
