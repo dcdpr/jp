@@ -227,6 +227,14 @@ lifecycle.
 - **Structured log querying.** The JSON log files can be parsed with `jq`, but
   this RFD does not add a `jp log` subcommand or similar.
 
+> [!TIP]
+> [RFD D34] wraps JP's machine-readable output in a versioned `{format, version,
+> data}` envelope and explicitly leaves the observability channel out of it.
+> Two seams are this RFD's to settle: whether the post-run log report's path
+> line (today a bare `{"trace_log": "…"}` on stderr, which `.config/jp/tools`
+> parses) becomes a versioned machine record, and whether stderr tracing output
+> under `--log-format=json` earns a format address at all.
+
 ## Risks and Open Questions
 
 ### Buffer memory usage
@@ -289,3 +297,4 @@ Depends on Phase 2.
 - `crates/jp_cli/src/session.rs` — session identity resolution.
 
 [RFD 048]: ../048-four-channel-output-model.md
+[RFD D34]: D34-versioned-machine-output-envelope.md

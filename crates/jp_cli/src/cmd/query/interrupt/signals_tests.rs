@@ -74,11 +74,11 @@ fn streaming_interrupt_resume_continues_without_breaking_loop() {
 }
 
 /// When the stream has already finished by the time the menu opens, `'c'` maps
-/// to `Continue` (prefill path).
+/// to `Continue`.
 /// That path needs to break the inner loop so the outer turn loop issues a
-/// fresh request with the partial content as prefill.
+/// fresh request with the partial response as continuation context.
 #[test]
-fn streaming_interrupt_continue_breaks_for_prefill_request() {
+fn streaming_interrupt_continue_breaks_for_continuation_request() {
     let printer = make_printer();
     let mut turn_coordinator = make_turn_coordinator();
     let mut stream = ConversationStream::new_test();
@@ -99,7 +99,7 @@ fn streaming_interrupt_continue_breaks_for_prefill_request() {
 
     assert!(
         matches!(result, StreamingInterruptResult::Break),
-        "Continue (prefill) must Break so the outer loop issues the next request; got {result:?}"
+        "Continue must Break so the outer loop issues the next request; got {result:?}"
     );
 }
 

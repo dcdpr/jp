@@ -1419,24 +1419,31 @@ Interrupt Handler
      │
      │
      │
-     └─── stream dead ────▶ InterruptAction::Continue { partial }
+     └─── stream dead ────▶ InterruptAction::Continue
                                  │
                                  ▼
                             Turn Coordinator
                                  │
-                                 │ build continuation request with assistant prefill
-                                 │ send [User: Query] -> [Assistant: Partial]
+                                 │ commit partial response, reset per-request
+                                 │ state, break the inner streaming loop
+                                 │
+                                 ▼
+                            Turn Loop
+                                 │
+                                 │ rebuild Thread from conversation events
+                                 │ (build_thread)
                                  │
                                  ▼
                             LLM Provider (new stream)
                                  │
-                                 │ first chunk: "... is 42."
-                                 │ (continues exactly from where it left off)
+                                 │ encode a supported continuation request
+                                 │ first chunk, e.g.: "... is 42."
+                                 │ (best effort: no overlap merging here)
                                  │
                                  ▼
-                            Event Builder
+                            Event Builder (fresh)
                                  │
-                                 │ buffer continues accumulating
+                                 │ accumulates the continuation only
                                  │
                                  ▼
                             Turn Coordinator (state: Streaming)
@@ -1446,7 +1453,7 @@ Interrupt Handler
 
 ### Continue Flow
 
-Detailed view of the assistant prefill process:
+Detailed view of the continuation process:
 
 ```
 Before interrupt:
@@ -1463,27 +1470,45 @@ Event Builder buffers:
 User chooses "Continue", stream is dead:
 ────────────────────────────────────────
 
-1. Build continuation request with prefill:
+1. The Turn Coordinator commits the partial response:
+
+   The partial message is appended to the current turn, per-request state is
+   reset, and the inner streaming loop breaks.
+
+2. The turn loop rebuilds the Thread from the conversation events:
 
    Thread for LLM:
      [ChatRequest("What is 2+2?")]
      [ChatResponse::Reasoning("Let me think")]
-     [ChatResponse::Message("The answer")]      ← injected as prefill
+     [ChatResponse::Message("The answer")]
 
-2. Send to LLM, receive continuation:
+3. The Provider encodes continuation for the target model:
+
+   - Use native assistant prefill only when the model supports it.
+   - Otherwise retain the partial assistant response as history and append a
+     synthetic user continuation request.
+
+   Either encoding is best effort. Nothing on this path detects or merges a
+   repeated tail, so the model may repeat, bridge, or rewrite content.
+
+4. Send to the LLM and receive a continuation, for example:
 
    LLM responds: " is 4. Because 2+2=4."
 
-3. Update Event Builder:
+5. A fresh Event Builder accumulates it:
 
-   buffers[1].append(" is 4. Because 2+2=4.")
-   // Total buffer content: "The answer is 4. Because 2+2=4."
+   The continuation lands in a new EventBuilder, under whatever index the new
+   provider stream assigns:
 
-4. Continue processing:
+     new buffer = Message(" is 4. Because 2+2=4.")
 
-   More chunks arrive, appended to buffers[1]
+   The committed "The answer" exists only in the ConversationStream.
+
+6. Continue processing:
+
+   More chunks arrive, appended to the new buffer
    Eventually flush arrives
-   Complete event pushed to stream
+   A second Message event is pushed to the stream
 
 ─────────────────────────────────────────────────────────────────
 
@@ -1492,7 +1517,19 @@ Final ConversationStream (persisted):
 
   [ChatRequest("What is 2+2?")]
   [ChatResponse::Reasoning("Let me think")]
-  [ChatResponse::Message("The answer is 4. Because 2+2=4. ...")]
+  [ChatResponse::Message("The answer")]
+  [ChatResponse::Message(" is 4. Because 2+2=4. ...")]
+
+Replay renders these adjacent same-kind responses as one Markdown content
+region: TurnRenderer feeds consecutive ChatResponse events of the same kind
+through one renderer without flushing between them. Live streaming follows the
+same rule within a single provider stream, where aggregation boundaries
+(Event::Flush) do not flush the renderer.
+
+Live rendering differs: the continuation boundary finalizes the buffered
+Markdown (flush_renderer runs before the interrupt menu, and again on a stream
+retry), so the terminal starts a new region there. Only the persisted stream
+and its replay are seamless; the live gap is a known limitation.
 ```
 
 -----
@@ -1779,7 +1816,7 @@ test "events are persisted in stream order":
 
 1. Create `InterruptHandler` with context-aware menus
 2. Integrate with Turn Coordinator state machine
-3. Implement `Continue` flow using assistant prefill
+3. Implement `Continue` flow using Provider-specific continuation encoding
 4. Add integration tests for interrupt scenarios
 
 ### Phase 7: Cleanup
