@@ -23,11 +23,14 @@ use crate::{
 #[config(rename_all = "snake_case")]
 pub struct McpStartupConfig {
     /// Whether to show the startup indicator.
+    ///
+    /// Defaults to `true`.
     #[setting(default = true)]
     pub show: bool,
 
     /// Delay in seconds before showing the startup indicator.
     ///
+    /// Defaults to `4`.
     /// Servers that finish starting within this period never trigger the
     /// indicator.
     /// Set to 0 to show the indicator immediately.
@@ -35,6 +38,8 @@ pub struct McpStartupConfig {
     pub delay_secs: u32,
 
     /// Interval in milliseconds between timer updates.
+    ///
+    /// Defaults to `100`.
     #[setting(default = 100)]
     pub interval_ms: u32,
 }

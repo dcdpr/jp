@@ -101,6 +101,7 @@ use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
 use jp_storage::backend::Projection;
 use jp_task::task::TitleGeneratorTask;
+use jp_term::width::truncate_to_width;
 use jp_workspace::{ConversationHandle, ConversationLock, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
 use tool::{TerminalExecutorSource, ToolCoordinator};
@@ -579,6 +580,7 @@ impl Query {
             cfg.style.mcp_startup.clone(),
             ctx.printer.clone(),
             ctx.term.is_tty,
+            ctx.term.width,
         )
         .await?;
 
@@ -1117,11 +1119,17 @@ impl Query {
 ///
 /// Returns the first startup error, after clearing the timer line so the error
 /// renders on a clean row.
+///
+/// `width` bounds the rendered line to the terminal so a long server list wraps
+/// no further than one row, keeping the timer's single-row clear on finish
+/// sufficient.
+/// `None` leaves the line unbounded (unknown width).
 async fn await_mcp_servers(
     mut startup: StartupSet,
     config: McpStartupConfig,
     printer: Arc<Printer>,
     is_tty: bool,
+    width: Option<u16>,
 ) -> std::result::Result<(), cmd::Error> {
     if startup.joins.is_empty() {
         return Ok(());
@@ -1132,11 +1140,15 @@ async fn await_mcp_servers(
         config.show && is_tty,
         Duration::from_secs(config.delay_secs.into()),
         Duration::from_millis(config.interval_ms.into()),
-        |secs, status| {
-            format!(
-                "\r\x1b[K⏱ Starting {}… {secs:.1}s",
-                status.unwrap_or("MCP servers")
-            )
+        move |secs, status| {
+            let line = format!("⏱ Starting {}… {secs:.1}s", status.unwrap_or("MCP servers"));
+            // Truncate the visible text only; the `\r\x1b[K` control prefix
+            // must stay outside the width budget.
+            let line = match width {
+                Some(w) => truncate_to_width(&line, w.into()),
+                None => line,
+            };
+            format!("\r\x1b[K{line}")
         },
     );
     if let Some(timer) = &timer {

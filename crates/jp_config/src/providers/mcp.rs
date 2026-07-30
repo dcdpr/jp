@@ -113,6 +113,7 @@ pub struct StdioConfig {
     /// answering the MCP `initialize` request.
     /// Increase it for servers that do expensive work on startup, such as
     /// compiling from source.
+    /// Set to 0 to wait indefinitely (no timeout).
     #[setting(default = 60)]
     pub startup_timeout_secs: u32,
 }

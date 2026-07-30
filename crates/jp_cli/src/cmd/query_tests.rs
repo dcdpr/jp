@@ -1400,6 +1400,7 @@ async fn await_mcp_servers_drains_all_startups() {
         immediate_mcp_startup_config(),
         Arc::new(printer),
         false,
+        None,
     )
     .await
     .expect("all startups succeed");
@@ -1421,6 +1422,7 @@ async fn await_mcp_servers_propagates_startup_error() {
         immediate_mcp_startup_config(),
         Arc::new(printer),
         false,
+        None,
     )
     .await
     .expect_err("a failed required server must fail the wait");
@@ -1451,6 +1453,7 @@ async fn await_mcp_servers_shows_and_clears_timer_line() {
         immediate_mcp_startup_config(),
         printer.clone(),
         true,
+        None,
     ));
 
     // Let a few ticks land before releasing the startup.
@@ -1465,6 +1468,72 @@ async fn await_mcp_servers_shows_and_clears_timer_line() {
     assert!(
         chrome.contains("⏱ Starting MCP server bookworm…"),
         "timer line should name the pending server.\nChrome:\n{chrome}"
+    );
+    assert!(
+        chrome.ends_with("\r\x1b[K"),
+        "finishing the wait must leave the line cleared.\nChrome:\n{chrome}"
+    );
+}
+
+/// Drives the aggregate redraw: two servers start, one finishes while the other
+/// is still pending, then the second finishes.
+/// The line must go from both names, to the survivor alone, to cleared.
+#[tokio::test(flavor = "multi_thread")]
+async fn await_mcp_servers_redraws_as_servers_finish() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+
+    // Two independently-released tasks: releasing `bookworm` first makes
+    // `grizzly` the deterministic survivor of the mid-drain redraw.
+    let (bookworm_tx, bookworm_rx) = tokio::sync::oneshot::channel::<()>();
+    let (grizzly_tx, grizzly_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        bookworm_rx.await.ok();
+        Ok(McpServerId::new("bookworm"))
+    });
+    joins.spawn(async move {
+        grizzly_rx.await.ok();
+        Ok(McpServerId::new("grizzly"))
+    });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm"), McpServerId::new("grizzly")],
+    };
+
+    let wait = tokio::spawn(await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        printer.clone(),
+        true,
+        None,
+    ));
+
+    // Let the two-server frame render, then release `bookworm` and let the
+    // survivor-only frame render before releasing `grizzly`.
+    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+    bookworm_tx.send(()).expect("wait task is still running");
+    tokio::time::sleep(std::time::Duration::from_millis(60)).await;
+    grizzly_tx.send(()).expect("wait task is still running");
+    wait.await
+        .expect("task did not panic")
+        .expect("all startups succeed");
+    printer.flush();
+
+    let chrome = err.lock();
+    let both = chrome
+        .find("2 MCP servers (bookworm, grizzly)")
+        .expect("the aggregate two-server frame must render first");
+    let survivor = chrome
+        .find("MCP server grizzly…")
+        .expect("the survivor-only frame must render after bookworm finishes");
+    assert!(
+        both < survivor,
+        "the two-server frame must precede the survivor-only frame.\nChrome:\n{chrome}"
+    );
+    assert!(
+        !chrome.contains("MCP server bookworm…"),
+        "bookworm was never the sole pending server; it must not render alone.\nChrome:\n{chrome}"
     );
     assert!(
         chrome.ends_with("\r\x1b[K"),

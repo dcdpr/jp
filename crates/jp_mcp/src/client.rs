@@ -358,21 +358,25 @@ impl Client {
                 // Give the server time to start and answer the MCP
                 // `initialize` handshake. Configurable per server because a
                 // server that builds from source on spawn can legitimately
-                // take minutes.
-                let timeout = Duration::from_secs(config.startup_timeout_secs.into());
+                // take minutes; `0` disables the timeout entirely.
+                let serve = async { ().serve(child_process).await };
 
-                // Serve the client with timeout. Both failure paths attach
-                // the captured stderr tail: it usually names the actual
-                // problem (build output, missing dependency, lock contention).
-                let client =
-                    match tokio::time::timeout(timeout, async { ().serve(child_process).await })
-                        .await
-                    {
-                        Ok(result) => result.map_err(|error| Error::InitializeError {
-                            cmd: cmd_display,
-                            error: error.to_string(),
-                            stderr: render_stderr_tail(&stderr_tail),
-                        })?,
+                // An initialization failure attaches the captured stderr
+                // tail: it usually names the actual problem (build output,
+                // missing dependency, lock contention).
+                let init_error =
+                    |error: rmcp::service::ClientInitializeError| Error::InitializeError {
+                        cmd: cmd_display.clone(),
+                        error: error.to_string(),
+                        stderr: render_stderr_tail(&stderr_tail),
+                    };
+
+                let client = if config.startup_timeout_secs == 0 {
+                    serve.await.map_err(init_error)?
+                } else {
+                    let timeout = Duration::from_secs(config.startup_timeout_secs.into());
+                    match tokio::time::timeout(timeout, serve).await {
+                        Ok(result) => result.map_err(init_error)?,
                         Err(_) => {
                             return Err(Error::InitializeTimeout {
                                 cmd: cmd_display,
@@ -380,7 +384,8 @@ impl Client {
                                 stderr: render_stderr_tail(&stderr_tail),
                             });
                         }
-                    };
+                    }
+                };
 
                 Ok(client)
             }

@@ -165,6 +165,32 @@ async fn startup_timeout_attaches_stderr_tail() {
     }
 }
 
+// `startup_timeout_secs = 0` disables the timeout: startup must run through the
+// un-timed serve path. A child that exits immediately without speaking MCP
+// fails that path quickly, so the error is `InitializeError`, never the
+// `InitializeTimeout` that a zero-duration `tokio::time::timeout` would raise.
+#[cfg(unix)]
+#[tokio::test]
+async fn zero_startup_timeout_disables_timeout() {
+    let config = McpProviderConfig::Stdio(StdioConfig {
+        command: PathBuf::from("sh"),
+        arguments: vec!["-c".to_owned(), "exit 0".to_owned()],
+        variables: vec![],
+        checksum: None,
+        optional: false,
+        startup_timeout_secs: 0,
+    });
+
+    let error = Client::create_client(&McpServerId::new("instant"), &config)
+        .await
+        .expect_err("a child that exits without a handshake fails initialization");
+
+    assert!(
+        matches!(error, Error::InitializeError { .. }),
+        "zero timeout must take the un-timed serve path, got: {error:?}"
+    );
+}
+
 // Use a binary path that cannot exist on any sane system. This drives
 // `create_client` into a `CannotSpawnProcess` error path without depending on
 // any specific environment behavior.
