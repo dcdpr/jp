@@ -374,10 +374,7 @@ pub fn run() -> ExitCode {
         }
     }
 
-    if (code != 0
-        || env::var("JP_DEBUG")
-            .as_deref()
-            .is_ok_and(|v| v == "1" || v == "true"))
+    if should_report_trace_log(code, is_tty)
         && let Some(path) = guard.and_then(TracingGuard::persist)
     {
         if format.is_json() {
@@ -392,6 +389,32 @@ pub fn run() -> ExitCode {
     eprintln!("You can view the heap profile at https://profiler.firefox.com");
 
     ExitCode::from(code)
+}
+
+/// Whether to tell the user where the run's trace log was written.
+///
+/// A failed run always reports it: diagnosing the failure matters more than
+/// keeping the output stream clean.
+///
+/// Otherwise the report is opt-in via `JP_DEBUG`, and only when stdout is a
+/// terminal.
+/// A piped stdout means `jp` is a component in someone else's pipeline, and a
+/// program consuming it may own the screen — an `fzf` list or preview, for
+/// instance, where two uninvited lines corrupt the layout.
+/// Note that stderr's own tty-ness is the wrong test: in `jp … | fzf`, stderr
+/// *is* the terminal, which is exactly how the corruption happens.
+///
+/// Set `--log-file` to choose the path when a piped run needs to be traced;
+/// nothing has to be announced when the caller picked the destination.
+fn should_report_trace_log(code: u8, stdout_is_tty: bool) -> bool {
+    if code != 0 {
+        return true;
+    }
+
+    stdout_is_tty
+        && env::var("JP_DEBUG")
+            .as_deref()
+            .is_ok_and(|v| v == "1" || v == "true")
 }
 
 /// Width in columns to lay output out against.

@@ -22,6 +22,22 @@ use test_log::test;
 
 use super::*;
 
+#[test]
+fn a_piped_successful_run_never_announces_its_trace_log() {
+    // Two uninvited lines on stderr corrupt any program that owns the screen,
+    // and in `jp … | fzf` stderr *is* the terminal. The tty check short-circuits
+    // the env lookup, so this holds whatever `JP_DEBUG` is set to around the
+    // test run.
+    assert!(!should_report_trace_log(0, false));
+}
+
+#[test]
+fn a_failed_run_announces_its_trace_log_even_when_piped() {
+    // Diagnosing a failure beats keeping the pipeline clean.
+    assert!(should_report_trace_log(1, false));
+    assert!(should_report_trace_log(2, false));
+}
+
 fn write_config(path: &camino::Utf8Path, content: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
