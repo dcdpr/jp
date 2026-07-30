@@ -87,8 +87,9 @@ commit *ARGS: _install-jp
     msg="Give me a commit message"
 
     args=$(just _shape-args "$msg" "$@")
+    branch=$(git rev-parse --abbrev-ref HEAD)
 
-    jp query --new --local --tmp=1h --title="just commit" --cfg=personas/committer $args || exit 1
+    jp query --new --local --tmp=1h --title="just commit ($branch)" --cfg=personas/committer $args || exit 1
     git commit --amend
 
 [group('jp')]
