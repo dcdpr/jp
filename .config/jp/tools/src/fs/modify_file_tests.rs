@@ -606,12 +606,84 @@ mod format_pattern_report {
         assert_eq!(report, "", "a lone literal success stays silent");
     }
 
+    #[test]
+    fn test_multiline_matches_stay_distinguishable() {
+        // A match crossing a newline is the case the report must not flatten:
+        // both blocks start with `BEGIN`, and only what follows tells the author
+        // which one the quantifier ran into.
+        let content = "BEGIN\nsafe\nEND BEGIN\nunsafe\nEND";
+        let patterns = vec![Pattern {
+            old: r"BEGIN[\s\S]*?END".to_owned(),
+            new: "X".to_owned(),
+            paths: None,
+            regex: Some(true),
+        }];
+
+        let matches = regex_matches(content, &patterns[0]);
+        assert_eq!(matches, vec![
+            MatchTally {
+                text: "BEGIN\nsafe\nEND".to_owned(),
+                count: 1,
+            },
+            MatchTally {
+                text: "BEGIN\nunsafe\nEND".to_owned(),
+                count: 1,
+            },
+        ]);
+
+        let report = format_pattern_report(&patterns, &[PatternOutcome::Applied { matches }]);
+        assert_eq!(
+            report,
+            concat!(
+                r"Pattern #1 `BEGIN[\s\S]*?END` matched:",
+                "\n  ",
+                r#""BEGIN\nsafe\nEND""#,
+                "\n  ",
+                r#""BEGIN\nunsafe\nEND""#,
+            )
+        );
+    }
+
+    #[test]
+    fn test_long_match_keeps_both_ends_and_its_size() {
+        // An over-running quantifier shows its damage at the end of the match,
+        // so the tail survives truncation and the size disambiguates matches
+        // sharing a head.
+        let content = "0123456789".repeat(7);
+        let patterns = vec![Pattern {
+            old: r"\d+".to_owned(),
+            new: "X".to_owned(),
+            paths: None,
+            regex: Some(true),
+        }];
+
+        let matches = regex_matches(&content, &patterns[0]);
+        let report = format_pattern_report(&patterns, &[PatternOutcome::Applied { matches }]);
+        assert_eq!(
+            report,
+            "Pattern #1 `\\d+` matched:\n  \"0123456789012345678901234567890123456789\" … \
+             \"4567890123456789\" (70 chars)"
+        );
+    }
+
+    #[test]
+    fn test_many_occurrences_of_one_binding_cost_one_entry() {
+        // Occurrences are counted, not collected: ten thousand hits on a single
+        // binding hold one entry rather than ten thousand strings.
+        let replacement = Content("x".repeat(10_000))
+            .replace_regexp("x", "y", true, true)
+            .expect("pattern applies");
+
+        assert_eq!(replacement.matched.len(), 1);
+        assert_eq!(replacement.matched.get("x"), Some(&10_000));
+    }
+
     /// The tallied bindings a regex pattern produces against `content`.
     fn regex_matches(content: &str, pattern: &Pattern) -> Vec<MatchTally> {
         let replacement = Content(content.to_owned())
             .replace_regexp(&pattern.old, &pattern.new, true, true)
             .expect("pattern applies");
-        tally_matches(&replacement.matched)
+        tally_matches(replacement.matched)
     }
 
     #[test]

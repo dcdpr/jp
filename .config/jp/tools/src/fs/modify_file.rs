@@ -104,7 +104,7 @@ fn fs_modify_file_impl<R: ProcessRunner>(
 
         let use_regex = pattern.regex.unwrap_or(replace_using_regex);
         let mut applied_any = false;
-        let mut all_matched: Vec<String> = Vec::new();
+        let mut all_matched: BTreeMap<String, usize> = BTreeMap::new();
         let mut invalid = None;
 
         for target in &targets {
@@ -138,7 +138,7 @@ fn fs_modify_file_impl<R: ProcessRunner>(
                     .replace_literal(&pattern.old, &pattern.new, replace_all, case_sensitive)
                     .map(|content| Replacement {
                         content,
-                        matched: vec![],
+                        matched: BTreeMap::new(),
                     })
             };
 
@@ -146,7 +146,9 @@ fn fs_modify_file_impl<R: ProcessRunner>(
                 Ok(Replacement { content, matched }) => {
                     *current = content;
                     applied_any = true;
-                    all_matched.extend(matched);
+                    for (text, count) in matched {
+                        *all_matched.entry(text).or_default() += count;
+                    }
                 }
                 Err(ReplaceError::NotFound) => {}
                 Err(ReplaceError::Invalid(msg)) => invalid = Some(msg),
@@ -155,7 +157,7 @@ fn fs_modify_file_impl<R: ProcessRunner>(
 
         outcomes.push(if applied_any {
             PatternOutcome::Applied {
-                matches: tally_matches(&all_matched),
+                matches: tally_matches(all_matched),
             }
         } else if let Some(msg) = invalid {
             PatternOutcome::Invalid(msg)
@@ -279,26 +281,22 @@ impl PatternOutcome {
 struct Replacement {
     content: String,
 
-    /// Every matched string, in the order encountered.
+    /// Distinct matched strings, each with the number of occurrences replaced.
     /// Empty for literal patterns.
-    matched: Vec<String>,
+    ///
+    /// Keyed by the matched text rather than listing every occurrence, so a
+    /// pattern that matches a million times over a large file costs one entry
+    /// per distinct binding.
+    matched: BTreeMap<String, usize>,
 }
 
-/// Group `matched` into distinct strings with counts, most frequent first.
+/// Order `counts` most frequent first.
 ///
 /// Ties break on the text so the report is deterministic.
-fn tally_matches(matched: &[String]) -> Vec<MatchTally> {
-    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
-    for text in matched {
-        *counts.entry(text.as_str()).or_default() += 1;
-    }
-
+fn tally_matches(counts: BTreeMap<String, usize>) -> Vec<MatchTally> {
     let mut tallies: Vec<MatchTally> = counts
         .into_iter()
-        .map(|(text, count)| MatchTally {
-            text: text.to_owned(),
-            count,
-        })
+        .map(|(text, count)| MatchTally { text, count })
         .collect();
 
     tallies.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.text.cmp(&b.text)));
@@ -485,8 +483,8 @@ fn format_matched(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
         let preview = pattern_preview(&pattern.old);
         let mut section = format!("Pattern #{} `{preview}` matched:", i + 1);
         for tally in matches.iter().take(MAX_REPORTED_MATCHES) {
-            let text = pattern_preview(&tally.text);
-            let _ = write!(section, "\n  {text:?}");
+            let text = match_preview(&tally.text);
+            let _ = write!(section, "\n  {text}");
             if tally.count > 1 {
                 let _ = write!(section, " ×{}", tally.count);
             }
@@ -503,6 +501,40 @@ fn format_matched(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
     }
 
     sections.join("\n\n")
+}
+
+/// Maximum characters of a matched string rendered in full.
+const MATCH_PREVIEW_CHARS: usize = 60;
+
+/// Characters kept from the start of an elided matched string.
+const MATCH_PREVIEW_HEAD_CHARS: usize = 40;
+
+/// Characters kept from the end of an elided matched string.
+const MATCH_PREVIEW_TAIL_CHARS: usize = 16;
+
+/// Renders a matched string as a single quoted line.
+///
+/// Line breaks and other control characters are escaped, so a match spanning
+/// several lines stays on one line and two matches differing only past their
+/// first line render differently.
+/// Longer matches keep both ends and carry their character count, which keeps
+/// the tail an over-running quantifier produced visible.
+fn match_preview(s: &str) -> String {
+    let count = s.chars().count();
+    if count <= MATCH_PREVIEW_CHARS {
+        return format!("\"{}\"", s.escape_debug());
+    }
+
+    // Split on source characters rather than escaped ones, so an escape
+    // sequence is never cut in half.
+    let head: String = s.chars().take(MATCH_PREVIEW_HEAD_CHARS).collect();
+    let tail: String = s.chars().skip(count - MATCH_PREVIEW_TAIL_CHARS).collect();
+
+    format!(
+        "\"{}\" … \"{}\" ({count} chars)",
+        head.escape_debug(),
+        tail.escape_debug()
+    )
 }
 
 /// Returns a short preview of a pattern string (first line, max 60 chars).
@@ -810,16 +842,23 @@ impl Content {
             return Err(ReplaceError::NotFound);
         }
 
-        // Collected before replacing, and bounded the same way the replacement
-        // is: with `replace_all` off only the first match is rewritten, so only
-        // the first is reported.
-        let mut matched = Vec::new();
+        // Counted before replacing, and bounded the same way the replacement is:
+        // with `replace_all` off only the first match is rewritten, so only the
+        // first is counted. Tallying borrowed slices keeps the cost at one entry
+        // per distinct match, so a single-character pattern over a large file
+        // doesn't allocate per occurrence.
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
         for found in re.find_iter(&self.0) {
-            matched.push(found?.as_str().to_owned());
+            *counts.entry(found?.as_str()).or_default() += 1;
             if !replace_all {
                 break;
             }
         }
+
+        let matched: BTreeMap<String, usize> = counts
+            .into_iter()
+            .map(|(text, count)| (text.to_owned(), count))
+            .collect();
 
         let content = if replace_all {
             re.replace_all(&self.0, replace)
