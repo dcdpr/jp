@@ -1,0 +1,3 @@
+# Keep the "Open a blank issue" link in the chooser: not every report fits the
+# bug form.
+blank_issues_enabled: true
