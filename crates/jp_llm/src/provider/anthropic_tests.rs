@@ -1,8 +1,12 @@
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use jp_config::model::parameters::{
-    PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort,
+use jp_config::{
+    conversation::tool::{OneOrManyTypes, ToolParameterConfig},
+    model::{
+        id::ModelIdConfig,
+        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
+    },
 };
 use jp_conversation::{event::ChatRequest, thread::Thread};
 use jp_test::{Result, function_name};
@@ -41,6 +45,55 @@ async fn test_request_chaining() -> Result {
     if let Some(details) = request.as_model_details_mut() {
         details.max_output_tokens = Some(1152);
     }
+
+    run_test(PROVIDER, function_name!(), Some(request)).await
+}
+
+/// Records a live Fable 5 request that forces a tool call while reasoning is
+/// active.
+///
+/// This is the combination the unit tests can only assert about in the
+/// abstract: Anthropic rejects a forced `tool_choice` while thinking is on, and
+/// Fable cannot turn thinking off, so the request must go out soft-forced
+/// (`auto` plus a system nudge).
+/// A wrong gate here is a hard 400.
+#[test(tokio::test)]
+async fn test_fable_5_forced_tool_soft_forces() -> Result {
+    let id: ModelIdConfig = "anthropic/claude-fable-5".parse().unwrap();
+
+    // Mirrors what `map_model` derives for Fable 5.
+    let mut details = ModelDetails::empty(id.clone());
+    details.context_window = Some(1_000_000);
+    details.max_output_tokens = Some(128_000);
+    details.reasoning = Some(ReasoningDetails::adaptive(true, true).always_on());
+    details.structured_output = Some(true);
+    details.features = vec![
+        "interleaved-thinking",
+        "context-editing",
+        "adaptive-thinking",
+    ];
+    assert!(
+        !details.supports_disabling_thinking(),
+        "fixture must be unable to disable thinking"
+    );
+
+    let request = TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .enable_reasoning()
+        .tool("run_me", vec![("foo", ToolParameterConfig {
+            kind: OneOrManyTypes::One("string".into()),
+            default: Some("foo".into()),
+            required: false,
+            summary: None,
+            description: None,
+            examples: None,
+            enumeration: vec![],
+            items: None,
+            properties: IndexMap::default(),
+        })])
+        .tool_choice_fn("run_me")
+        .chat_request("Please run the tool, providing whatever arguments you want.");
 
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
@@ -101,6 +154,7 @@ fn test_opus_4_6_request_uses_adaptive_thinking() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -146,6 +200,7 @@ fn test_opus_4_7_xhigh_effort_mapping() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -196,6 +251,7 @@ fn test_opus_4_6_xhigh_falls_back_to_high() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -239,6 +295,7 @@ fn test_opus_4_6_max_effort_mapping() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -272,21 +329,43 @@ fn test_opus_4_6_max_effort_mapping() {
     assert_eq!(output_config.effort, Some(Effort::Max));
 }
 
+/// An API payload carrying the capability shape Anthropic reports for an
+/// adaptive-thinking model with a 1M context and 128k output ceiling.
+fn adaptive_api_model(id: &str, display_name: &str, xhigh: bool, max: bool) -> types::Model {
+    serde_json::from_value(serde_json::json!({
+        "type": "model",
+        "id": id,
+        "display_name": display_name,
+        "created_at": "",
+        "max_input_tokens": 1_000_000,
+        "max_tokens": 128_000,
+        "capabilities": {
+            "context_management": {"supported": true},
+            "structured_outputs": {"supported": true},
+            "effort": {
+                "supported": true,
+                "low": {"supported": true},
+                "medium": {"supported": true},
+                "high": {"supported": true},
+                "xhigh": {"supported": xhigh},
+                "max": {"supported": max},
+            },
+            "thinking": {
+                "supported": true,
+                "types": {"adaptive": {"supported": true}, "enabled": {"supported": false}},
+            },
+        },
+    }))
+    .unwrap()
+}
+
 /// Verify the `map_model` arm for Claude Opus 4.8 produces the expected
 /// `ModelDetails`.
 /// This is the regression test that catches typos in the declarative model
 /// table.
 #[test]
 fn test_map_model_opus_4_8() {
-    let model = types::Model {
-        id: "claude-opus-4-8".to_string(),
-        display_name: "Claude Opus 4.8".to_string(),
-        created_at: String::new(),
-        model_type: "model".to_string(),
-        max_input_tokens: 0,
-        max_tokens: 0,
-        capabilities: types::ModelCapabilities::default(),
-    };
+    let model = adaptive_api_model("claude-opus-4-8", "Claude Opus 4.8", true, true);
 
     let details = map_model(model).unwrap();
 
@@ -308,20 +387,44 @@ fn test_map_model_opus_4_8() {
     assert!(details.features.contains(&"context-editing"));
 }
 
+/// Verify the `map_model` arm for Claude Opus 5.
+///
+/// Opus 5 is adaptive like Fable 5, but unlike Fable it still accepts
+/// `thinking: disabled`, so the disabled-thinking and soft-force paths differ.
+#[test]
+fn test_map_model_opus_5() {
+    let model = adaptive_api_model("claude-opus-5", "Claude Opus 5", true, true);
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.id, (PROVIDER, "claude-opus-5").try_into().unwrap());
+    assert_eq!(details.display_name.as_deref(), Some("Claude Opus 5"));
+    assert_eq!(details.context_window, Some(1_000_000));
+    assert_eq!(details.max_output_tokens, Some(128_000));
+    assert_eq!(
+        details.knowledge_cutoff,
+        NaiveDate::from_ymd_opt(2026, 5, 1)
+    );
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::adaptive(true, true))
+    );
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    assert!(details.features.contains(&"adaptive-thinking"));
+    assert!(details.features.contains(&"interleaved-thinking"));
+    assert!(details.features.contains(&"context-editing"));
+    // Unlike Fable 5, Opus 5 can disable thinking. Like Fable, no prefill.
+    assert!(details.supports_disabling_thinking());
+    assert!(!details.supports_prefill());
+}
+
 /// Verify the `map_model` arm for Claude Fable 5 produces the expected
 /// `ModelDetails`, including the `thinking-always-on` capability that stops JP
 /// from sending `thinking: disabled` (which Fable rejects).
 #[test]
 fn test_map_model_fable_5() {
-    let model = types::Model {
-        id: "claude-fable-5".to_string(),
-        display_name: "Claude Fable 5".to_string(),
-        created_at: String::new(),
-        model_type: "model".to_string(),
-        max_input_tokens: 0,
-        max_tokens: 0,
-        capabilities: types::ModelCapabilities::default(),
-    };
+    let model = adaptive_api_model("claude-fable-5", "Claude Fable 5", true, true);
 
     let details = map_model(model).unwrap();
 
@@ -335,7 +438,7 @@ fn test_map_model_fable_5() {
     );
     assert_eq!(
         details.reasoning,
-        Some(ReasoningDetails::adaptive(true, true))
+        Some(ReasoningDetails::adaptive(true, true).always_on())
     );
     assert_eq!(details.structured_output, Some(true));
     assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
@@ -362,8 +465,12 @@ fn test_map_model_unknown_uses_api_token_limits() {
     let details = map_model(model).unwrap();
     assert_eq!(details.max_output_tokens, Some(64_000));
     assert_eq!(details.context_window, Some(200_000));
-    // Default capabilities report structured outputs as unsupported.
-    assert_eq!(details.structured_output, Some(false));
+    // The payload reports no capabilities at all, so support stays unknown
+    // rather than being read as "unsupported".
+    assert_eq!(details.structured_output, None);
+    // Absent from the override table, so cutoff and deprecation are unknown.
+    assert_eq!(details.knowledge_cutoff, None);
+    assert_eq!(details.deprecated, None);
 }
 
 /// A `0` token limit from the API means "unspecified", so it stays unknown and
@@ -383,6 +490,301 @@ fn test_map_model_unknown_zero_tokens_is_unknown() {
     let details = map_model(model).unwrap();
     assert_eq!(details.max_output_tokens, None);
     assert_eq!(details.context_window, None);
+}
+
+/// An API payload for a model absent from the table, carrying the capability
+/// shape Anthropic reports for an adaptive-thinking model.
+fn unknown_adaptive_model() -> types::Model {
+    serde_json::from_value(serde_json::json!({
+        "type": "model",
+        "id": "claude-future-99",
+        "display_name": "Claude Future 99",
+        "created_at": "",
+        "max_input_tokens": 1_000_000,
+        "max_tokens": 128_000,
+        "capabilities": {
+            "effort": {
+                "supported": true,
+                "low": {"supported": true},
+                "medium": {"supported": true},
+                "high": {"supported": true},
+                "xhigh": {"supported": true},
+                "max": {"supported": true},
+            },
+            "thinking": {
+                "supported": true,
+                "types": {"adaptive": {"supported": true}, "enabled": {"supported": false}},
+            },
+        },
+    }))
+    .unwrap()
+}
+
+/// A model whose reasoning support is unknown must not be treated as able to
+/// disable thinking.
+/// Sending `thinking: disabled` to a model that rejects it is a hard 400, while
+/// leaving thinking enabled only costs tokens.
+#[test]
+fn test_unknown_reasoning_cannot_disable_thinking() {
+    let details = ModelDetails::empty((PROVIDER, "claude-bare-99").try_into().unwrap());
+
+    assert_eq!(details.reasoning, None, "fixture must be unknown");
+    assert!(!details.supports_disabling_thinking());
+}
+
+/// Unknown models derive adaptive reasoning, including the effort ladder, from
+/// the reported capabilities.
+#[test]
+fn test_map_model_unknown_derives_adaptive_reasoning() {
+    let details = map_model(unknown_adaptive_model()).unwrap();
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::adaptive(true, true))
+    );
+}
+
+/// A model reporting only manual thinking derives budgetted reasoning.
+#[test]
+fn test_map_model_unknown_derives_budgetted_reasoning() {
+    let model: types::Model = serde_json::from_value(serde_json::json!({
+        "type": "model",
+        "id": "claude-manual-99",
+        "display_name": "Manual 99",
+        "created_at": "",
+        "max_input_tokens": 0,
+        "max_tokens": 0,
+        "capabilities": {
+            "thinking": {"supported": true, "types": {"enabled": {"supported": true}}},
+        },
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::budgetted(1_024, None))
+    );
+}
+
+/// Capabilities that say nothing about thinking leave support unknown, rather
+/// than a defaulted `false` being read as "unsupported".
+#[test]
+fn test_map_model_unknown_without_thinking_data_stays_unknown() {
+    let model: types::Model = serde_json::from_value(serde_json::json!({
+        "type": "model",
+        "id": "claude-bare-99",
+        "display_name": "Bare 99",
+        "created_at": "",
+        "max_input_tokens": 0,
+        "max_tokens": 0,
+        "capabilities": {},
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+    assert_eq!(details.reasoning, None);
+}
+
+/// Thinking reported as unsupported is recorded as known-unsupported.
+#[test]
+fn test_map_model_unknown_thinking_unsupported() {
+    let model: types::Model = serde_json::from_value(serde_json::json!({
+        "type": "model",
+        "id": "claude-nothink-99",
+        "display_name": "NoThink 99",
+        "created_at": "",
+        "max_input_tokens": 0,
+        "max_tokens": 0,
+        "capabilities": {
+            "thinking": {"supported": false, "types": {"adaptive": {"supported": false}}},
+        },
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+    assert_eq!(details.reasoning, Some(ReasoningDetails::unsupported()));
+}
+
+/// Regression for invisible reasoning: an unknown model with adaptive
+/// capabilities must send an explicit thinking block requesting summarized
+/// display.
+/// Omitting the field lets Anthropic apply its own `display: "omitted"`
+/// default, which bills thinking tokens that never reach the transcript.
+#[test]
+fn test_unknown_model_requests_summarized_thinking() {
+    let details = map_model(unknown_adaptive_model()).unwrap();
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&details, query, true, &beta).unwrap();
+
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::Adaptive {
+            display: Some(types::ThinkingDisplay::Summarized),
+        })
+    );
+}
+
+/// Capabilities are read per property: a response that reports thinking but
+/// says nothing about structured output leaves the latter unknown, rather than
+/// letting one reported capability imply the others are unsupported.
+#[test]
+fn test_map_model_unreported_capability_stays_unknown() {
+    let model: types::Model = serde_json::from_value(serde_json::json!({
+        "type": "model",
+        "id": "claude-partial-99",
+        "display_name": "Partial 99",
+        "created_at": "",
+        "max_input_tokens": 0,
+        "max_tokens": 0,
+        "capabilities": {
+            "thinking": {
+                "supported": true,
+                "types": {"adaptive": {"supported": true}},
+            },
+        },
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    // Reported, so known.
+    assert_eq!(
+        details.reasoning,
+        Some(ReasoningDetails::adaptive(false, false))
+    );
+    assert!(details.features.contains(&"interleaved-thinking"));
+
+    // Unreported, so unknown rather than false.
+    assert_eq!(details.structured_output, None);
+    assert!(!details.features.contains(&"context-editing"));
+}
+
+/// A model whose reasoning support the API never reported still gets an
+/// explicit adaptive thinking block.
+/// Sending no thinking field lets Anthropic's own default apply, which bills
+/// reasoning tokens that never reach the transcript.
+#[test]
+fn test_unknown_reasoning_infers_adaptive_thinking() {
+    let mut model = ModelDetails::empty((PROVIDER, "claude-future-99").try_into().unwrap());
+    model.max_output_tokens = Some(128_000);
+    assert_eq!(model.reasoning, None, "fixture must be unknown");
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Custom(
+        PartialCustomReasoningConfig {
+            effort: Some(ReasoningEffort::High),
+            exclude: Some(false),
+        },
+    ));
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::Adaptive {
+            display: Some(types::ThinkingDisplay::Summarized),
+        })
+    );
+    assert_eq!(request.output_config.unwrap().effort, Some(Effort::High));
+}
+
+/// An explicit `off` on a model whose support is unknown sends `thinking:
+/// disabled` rather than nothing.
+///
+/// Sending nothing takes a provider default that, on a modern model, thinks and
+/// bills for reasoning the caller turned off.
+/// A custom `base_url` may also serve a model that accepts the disable, so the
+/// endpoint is the judge.
+#[test]
+fn test_off_on_unknown_model_attempts_disable() {
+    let model = ModelDetails::empty((PROVIDER, "claude-future-99").try_into().unwrap());
+    assert_eq!(model.reasoning, None, "fixture must be unknown");
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    assert_eq!(
+        request.thinking,
+        Some(types::ExtendedThinking::Disabled),
+        "an explicit off must not be silently dropped"
+    );
+}
+
+/// An effort the model does not support clamps to the nearest supported level
+/// rather than being dropped or sent as-is.
+#[test]
+fn test_adaptive_effort_clamps_unsupported_levels() {
+    let id = (PROVIDER, "claude-test").try_into().unwrap();
+
+    // Fully supported ladder honours the request.
+    assert_eq!(
+        adaptive_effort(&id, ReasoningEffort::Max, None, true, true),
+        Some(Effort::Max)
+    );
+
+    // No `max`, so it clamps to `xhigh`.
+    assert_eq!(
+        adaptive_effort(&id, ReasoningEffort::Max, None, true, false),
+        Some(Effort::XHigh)
+    );
+
+    // Neither, so it clamps to `high`.
+    assert_eq!(
+        adaptive_effort(&id, ReasoningEffort::Max, None, false, false),
+        Some(Effort::High)
+    );
+    assert_eq!(
+        adaptive_effort(&id, ReasoningEffort::XHigh, None, false, false),
+        Some(Effort::High)
+    );
+
+    // `auto` leaves the choice to the model.
+    assert_eq!(
+        adaptive_effort(&id, ReasoningEffort::Auto, None, true, true),
+        None
+    );
 }
 
 /// A `stop_reason: "refusal"` maps to `FinishReason::Refused`, carrying the
@@ -433,11 +835,12 @@ fn test_fable_5_reasoning_off_omits_disabled_thinking() {
         display_name: Some("Claude Fable 5".to_string()),
         context_window: Some(1_000_000),
         max_output_tokens: Some(128_000),
-        reasoning: Some(ReasoningDetails::adaptive(true, true)),
+        reasoning: Some(ReasoningDetails::adaptive(true, true).always_on()),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(true),
-        features: vec!["adaptive-thinking", "thinking-always-on"],
+        prefill: None,
+        features: vec!["adaptive-thinking"],
     };
 
     let mut events = ConversationStream::new_test().with_turn("test");
@@ -476,6 +879,7 @@ fn test_opus_4_5_uses_budgetted_thinking() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec!["interleaved-thinking"],
     };
 
@@ -516,6 +920,7 @@ fn test_structured_output_sets_format() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(true),
+        prefill: None,
         features: vec![],
     };
 
@@ -577,6 +982,7 @@ fn test_schema_ignored_when_last_event_is_not_chat_request() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec![],
     };
 
@@ -631,6 +1037,7 @@ fn test_adaptive_thinking_with_structured_output() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(true),
+        prefill: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -696,6 +1103,7 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec![],
     };
 
@@ -763,11 +1171,12 @@ fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
         display_name: Some("Claude Fable 5".to_string()),
         context_window: Some(1_000_000),
         max_output_tokens: Some(128_000),
-        reasoning: Some(ReasoningDetails::adaptive(true, true)),
+        reasoning: Some(ReasoningDetails::adaptive(true, true).always_on()),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(true),
-        features: vec!["adaptive-thinking", "thinking-always-on"],
+        prefill: None,
+        features: vec!["adaptive-thinking"],
     };
 
     let query = ChatQuery {
@@ -841,11 +1250,12 @@ fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
         display_name: Some("Claude Fable 5".to_string()),
         context_window: Some(1_000_000),
         max_output_tokens: Some(128_000),
-        reasoning: Some(ReasoningDetails::adaptive(true, true)),
+        reasoning: Some(ReasoningDetails::adaptive(true, true).always_on()),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(true),
-        features: vec!["adaptive-thinking", "thinking-always-on"],
+        prefill: None,
+        features: vec!["adaptive-thinking"],
     };
 
     let mut events = ConversationStream::new_test().with_turn("test");
@@ -907,6 +1317,7 @@ fn test_forced_tool_function_multi_tool_preserves_name() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec![],
     };
 
@@ -980,6 +1391,7 @@ fn test_forced_tool_without_reasoning_no_fallback() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec![],
     };
 
@@ -1022,6 +1434,7 @@ fn test_auto_tool_choice_with_reasoning_no_fallback() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec![],
     };
 
@@ -1137,8 +1550,8 @@ fn test_find_merge_point_edge_cases() {
     }
 }
 
-/// When the last event is an assistant message and the model does NOT have the
-/// "prefill" feature, a synthetic user "continue" message is appended.
+/// When the last event is an assistant message and the model does not support
+/// prefill, a synthetic user "continue" message is appended.
 #[test]
 fn test_continue_injected_when_prefill_unsupported() {
     let model = ModelDetails {
@@ -1150,7 +1563,8 @@ fn test_continue_injected_when_prefill_unsupported() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        // No "prefill" feature.
+        // Prefill unsupported.
+        prefill: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -1186,8 +1600,8 @@ fn test_continue_injected_when_prefill_unsupported() {
     assert_eq!(request.messages.len(), 3); // user, assistant, synthetic user
 }
 
-/// When the model HAS the "prefill" feature, no synthetic message is injected
-/// even if the last event is an assistant message.
+/// When the model supports prefill, no synthetic message is injected even if
+/// the last event is an assistant message.
 #[test]
 fn test_prefill_preserved_for_supported_models() {
     let model = ModelDetails {
@@ -1199,7 +1613,8 @@ fn test_prefill_preserved_for_supported_models() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: vec!["interleaved-thinking", "prefill"],
+        prefill: Some(true),
+        features: vec!["interleaved-thinking"],
     };
 
     let mut events = ConversationStream::new_test();
@@ -1247,6 +1662,7 @@ fn test_no_injection_when_last_message_is_user() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -1282,7 +1698,8 @@ fn test_create_request_resends_signed_thinking_as_native_block() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: vec!["prefill"],
+        prefill: Some(true),
+        features: vec![],
     };
 
     let mut events = ConversationStream::new_test();
@@ -1337,7 +1754,8 @@ fn test_create_request_resends_redacted_thinking_as_native_block() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: vec!["prefill"],
+        prefill: Some(true),
+        features: vec![],
     };
 
     let mut events = ConversationStream::new_test();
@@ -1389,7 +1807,8 @@ fn test_create_request_falls_back_to_think_tags_without_signature() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: vec!["prefill"],
+        prefill: Some(true),
+        features: vec![],
     };
 
     let mut events = ConversationStream::new_test();
@@ -1445,8 +1864,9 @@ fn test_create_request_downgrades_trailing_assistant_thinking() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        // No "prefill" feature, so a synthetic continue is appended after the
+        // Prefill unsupported, so a synthetic continue is appended after the
         // (downgraded) assistant turn.
+        prefill: None,
         features: vec!["adaptive-thinking"],
     };
 
@@ -1509,9 +1929,10 @@ fn test_create_request_drops_trailing_redacted_thinking() {
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        // "prefill" keeps the assistant message as the trailing continuation
+        // Prefill keeps the assistant message as the trailing continuation
         // target (no synthetic continue).
-        features: vec!["prefill"],
+        prefill: Some(true),
+        features: vec![],
     };
 
     let mut events = ConversationStream::new_test();

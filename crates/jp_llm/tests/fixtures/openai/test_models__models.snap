@@ -17,6 +17,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -33,6 +34,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -49,6 +51,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -65,6 +68,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -81,6 +85,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -97,6 +102,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -113,6 +119,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -129,6 +136,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -145,6 +153,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -161,6 +170,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -177,6 +187,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -193,6 +204,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -209,6 +221,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -225,6 +238,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -241,6 +255,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -257,6 +272,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -273,6 +289,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -289,6 +306,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -305,6 +323,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -321,6 +340,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -352,6 +372,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -368,6 +389,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -396,6 +418,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -424,6 +447,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -455,6 +479,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -471,6 +496,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -487,6 +513,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -506,9 +533,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -523,6 +553,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -542,9 +573,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -559,6 +593,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -575,6 +610,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -594,9 +630,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -611,6 +650,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -630,9 +670,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -647,6 +690,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -678,6 +722,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -694,6 +739,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -710,6 +756,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -726,6 +773,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -742,6 +790,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -758,6 +807,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -777,9 +827,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -794,6 +847,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -813,9 +867,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -830,6 +887,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -846,6 +904,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -865,9 +924,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -882,6 +944,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -901,9 +964,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -918,6 +984,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -937,9 +1004,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -954,6 +1024,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -973,9 +1044,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -990,6 +1064,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1018,6 +1093,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1046,6 +1122,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1074,6 +1151,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1102,6 +1180,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1135,6 +1214,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1168,6 +1248,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1184,6 +1265,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1203,9 +1285,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1220,6 +1305,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1239,9 +1325,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1256,6 +1345,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1275,9 +1365,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1292,6 +1385,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1311,9 +1405,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1328,6 +1425,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1344,6 +1442,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1363,9 +1462,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1380,6 +1482,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1399,9 +1502,12 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1416,6 +1522,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1435,14 +1542,16 @@ expression: v
             16384,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: true,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -1457,6 +1566,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1478,14 +1588,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: true,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -1500,6 +1612,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1521,14 +1634,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: true,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -1541,6 +1656,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1562,9 +1678,12 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1579,6 +1698,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1600,9 +1720,12 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1617,6 +1740,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1638,9 +1762,12 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1655,6 +1782,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1674,9 +1802,12 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1691,6 +1822,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1707,6 +1839,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1723,6 +1856,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1739,6 +1873,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1755,6 +1890,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1774,9 +1910,12 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -1791,6 +1930,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1809,6 +1949,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1828,14 +1969,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: false,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -1850,6 +1993,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1871,14 +2015,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: false,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -1893,6 +2039,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1911,6 +2058,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1927,6 +2075,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1943,6 +2092,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1959,6 +2109,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1975,6 +2126,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1991,6 +2143,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2007,6 +2160,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2023,6 +2177,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2042,14 +2197,16 @@ expression: v
             16384,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2064,6 +2221,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2085,14 +2243,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2102,6 +2262,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2123,14 +2284,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2140,6 +2303,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2161,9 +2325,12 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2178,6 +2345,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2199,9 +2367,12 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2216,6 +2387,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2237,9 +2409,12 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2254,6 +2429,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2272,6 +2448,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2291,14 +2468,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2308,6 +2487,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2329,14 +2509,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2346,6 +2528,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2367,14 +2550,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -2384,6 +2569,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2405,14 +2591,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -2422,6 +2610,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2443,14 +2632,16 @@ expression: v
             16384,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2465,6 +2656,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2483,6 +2675,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2499,6 +2692,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2515,6 +2709,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2531,6 +2726,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2547,6 +2743,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2563,6 +2760,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2579,6 +2777,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2598,14 +2797,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -2620,6 +2821,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2641,14 +2843,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -2658,6 +2862,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2676,6 +2881,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2692,6 +2898,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2708,6 +2915,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2724,6 +2932,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2743,14 +2952,16 @@ expression: v
             16384,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -2765,6 +2976,7 @@ expression: v
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2786,14 +2998,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2803,6 +3017,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2824,14 +3039,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -2841,6 +3058,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2862,14 +3080,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -2879,6 +3099,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2900,14 +3121,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2917,6 +3140,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2938,14 +3162,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2955,6 +3181,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2976,14 +3203,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2993,6 +3222,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3014,14 +3244,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -3031,6 +3263,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3052,14 +3285,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -3069,6 +3304,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3087,6 +3323,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -3103,6 +3340,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -3122,14 +3360,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -3139,6 +3379,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3160,14 +3401,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -3177,6 +3420,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3198,14 +3442,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -3215,6 +3461,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
             "streaming_unsupported",
@@ -3237,14 +3484,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -3254,6 +3503,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
             "streaming_unsupported",
@@ -3273,6 +3523,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -3289,6 +3540,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -3305,6 +3557,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -3321,6 +3574,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -3340,14 +3594,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: true,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -3357,6 +3613,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
             "reasoning_pro_mode",
@@ -3381,14 +3638,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: true,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -3398,6 +3657,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
             "reasoning_pro_mode",
@@ -3422,14 +3682,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-                max: true,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -3439,6 +3701,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
             "reasoning_pro_mode",
@@ -3460,6 +3723,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -3476,6 +3740,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
 ]

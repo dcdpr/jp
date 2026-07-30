@@ -36,6 +36,214 @@ async fn sub_provider_event_metadata(model: &str, test_name: &str) -> Result {
     Ok(())
 }
 
+/// Capabilities come from the catalog rather than being left unknown.
+/// Leaving them unknown is what made unregistered models silently fall back to
+/// provider defaults.
+#[test]
+fn test_map_model_derives_capabilities() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "anthropic/claude-opus-5-fast",
+        "name": "Claude Opus 5 (Fast)",
+        "created": 1_784_912_546,
+        "context_length": 1_000_000,
+        "top_provider": {
+            "context_length": 1_000_000,
+            "max_completion_tokens": 128_000,
+            "is_moderated": true,
+        },
+        "supported_parameters": [
+            "include_reasoning", "max_tokens", "reasoning", "reasoning_effort",
+            "response_format", "stop", "structured_outputs", "tool_choice",
+            "tools", "verbosity",
+        ],
+        "reasoning": {
+            "mandatory": false,
+            "default_enabled": true,
+            "supported_efforts": ["max", "xhigh", "high", "medium", "low"],
+            "default_effort": "high",
+        },
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.context_window, Some(1_000_000));
+    assert_eq!(details.max_output_tokens, Some(128_000));
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(
+        details.reasoning,
+        Some(ModelReasoningDetails::leveled(
+            false, true, true, true, true, true
+        ))
+    );
+    assert!(details.supports_disabling_thinking());
+
+    // `created` is when OpenRouter listed the model, not a training cutoff, and
+    // this entry reports no cutoff of its own.
+    assert_eq!(details.knowledge_cutoff, None);
+}
+
+/// A reported cutoff is parsed from its `YYYY-MM-DD` form.
+#[test]
+fn test_map_model_parses_knowledge_cutoff() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/dated",
+        "name": "Dated",
+        "created": 1_784_912_546,
+        "context_length": 8_192,
+        "knowledge_cutoff": "2021-09-30",
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(
+        details.knowledge_cutoff,
+        chrono::NaiveDate::from_ymd_opt(2021, 9, 30)
+    );
+}
+
+/// An unparseable cutoff is treated as absent rather than failing the listing.
+#[test]
+fn test_map_model_ignores_malformed_knowledge_cutoff() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/bad-date",
+        "name": "Bad Date",
+        "created": 1_784_912_546,
+        "context_length": 8_192,
+        "knowledge_cutoff": "September 2021",
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.knowledge_cutoff, None);
+}
+
+/// `mandatory` reasoning is the one capability any provider reports that maps
+/// onto reasoning being impossible to turn off.
+#[test]
+fn test_map_model_mandatory_reasoning_is_always_on() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/always-thinks",
+        "name": "Always Thinks",
+        "created": 1_784_912_546,
+        "context_length": 200_000,
+        "supported_parameters": ["reasoning"],
+        "reasoning": {
+            "mandatory": true,
+            "supported_efforts": ["high", "low"],
+        },
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert!(
+        !details.supports_disabling_thinking(),
+        "mandatory reasoning must not be reported as disableable"
+    );
+}
+
+/// A model advertising no reasoning parameter at all is recorded as not
+/// reasoning, rather than left unknown.
+#[test]
+fn test_map_model_without_reasoning_is_unsupported() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/plain",
+        "name": "Plain",
+        "created": 1_784_912_546,
+        "context_length": 8_192,
+        "supported_parameters": ["max_tokens", "stop"],
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(
+        details.reasoning,
+        Some(ModelReasoningDetails::unsupported())
+    );
+    assert_eq!(details.structured_output, Some(false));
+    assert_eq!(details.max_output_tokens, None);
+}
+
+/// The serving provider's context window wins over the model's own, which may
+/// be larger than what a request can actually get.
+#[test]
+fn test_map_model_prefers_serving_provider_context_window() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/routed",
+        "name": "Routed",
+        "created": 1_784_912_546,
+        "context_length": 1_000_000,
+        "top_provider": {"context_length": 200_000, "max_completion_tokens": 64_000},
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.context_window, Some(200_000));
+    assert_eq!(details.max_output_tokens, Some(64_000));
+}
+
+/// A provider that advertises no window of its own falls back to the model's.
+#[test]
+fn test_map_model_falls_back_to_model_context_window() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/unrouted",
+        "name": "Unrouted",
+        "created": 1_784_912_546,
+        "context_length": 8_192,
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.context_window, Some(8_192));
+}
+
+/// A reasoning block naming no efforts describes nothing, so support stays
+/// unknown rather than becoming a known ladder with no rungs.
+/// Building one would send a `minimal` effort the catalog never announced.
+#[test]
+fn test_map_model_empty_supported_efforts_stays_unknown() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/undescribed",
+        "name": "Undescribed",
+        "created": 1_784_912_546,
+        "context_length": 200_000,
+        "supported_parameters": ["reasoning", "reasoning_effort"],
+        "reasoning": {"mandatory": true, "supported_efforts": []},
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.reasoning, None);
+    // Unknown support still reads as unable to disable, so nothing is lost by
+    // not preserving `mandatory` as a ladder.
+    assert!(!details.supports_disabling_thinking());
+}
+
+/// A catalog entry that lists no parameters at all reported nothing, which is
+/// not the same as the model supporting nothing.
+#[test]
+fn test_map_model_without_parameters_leaves_support_unknown() {
+    let model: response::Model = serde_json::from_value(serde_json::json!({
+        "id": "vendor/bare",
+        "name": "Bare",
+        "created": 1_784_912_546,
+        "context_length": 8_192,
+    }))
+    .unwrap();
+
+    let details = map_model(model).unwrap();
+
+    assert_eq!(details.structured_output, None);
+    assert_eq!(details.reasoning, None);
+}
+
 #[test]
 fn test_map_models_skips_invalid_catalog_entries() {
     let entry = |id: &str| response::Model {
@@ -43,6 +251,10 @@ fn test_map_models_skips_invalid_catalog_entries() {
         name: id.to_owned(),
         created: types::response::OffsetDateTimeFmt(chrono::DateTime::UNIX_EPOCH),
         context_length: 128_000,
+        top_provider: types::response::TopProvider::default(),
+        supported_parameters: vec![],
+        reasoning: None,
+        knowledge_cutoff: None,
     };
 
     // An invalid ID in the live Openrouter catalog must not fail the fetch
