@@ -155,7 +155,7 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 [[package]]
 name = "async-anthropic"
 version = "0.6.0"
-source = "git+https://github.com/JeanMertz/async-anthropic#6d2714bf7abec18e63daef27172978b695c92082"
+source = "git+https://github.com/JeanMertz/async-anthropic#669cc30e75b0dd0f2069cff5bfd9b61c6aa3b7f9"
 dependencies = [
  "backon",
  "derive_builder",
@@ -1391,7 +1391,7 @@ dependencies = [
 [[package]]
 name = "gemini_client_rs"
 version = "0.6.2"
-source = "git+https://github.com/JeanMertz/gemini-client#3e5bcf51ecbfc67cc50231b573e05c8047576ebd"
+source = "git+https://github.com/JeanMertz/gemini-client#579474f09b39ea1031420f14538c92be6c14dcc8"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2974,8 +2974,7 @@ dependencies = [
 [[package]]
 name = "ollama-rs"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f647d8676b95a6b6205e11453c9fac338d73c9cdcc011c94d1ba9c9bfea582cd"
+source = "git+https://github.com/JeanMertz/ollama-rs?rev=6270148236d2d8e199580ee8f5a529868134c0a5#6270148236d2d8e199580ee8f5a529868134c0a5"
 dependencies = [
  "async-stream",
  "log",

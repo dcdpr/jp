@@ -390,4 +390,57 @@ pub struct Model {
     pub name: String,
     pub created: OffsetDateTimeFmt,
     pub context_length: u32,
+
+    /// Routing metadata for the provider serving this model.
+    #[serde(default)]
+    pub top_provider: TopProvider,
+
+    /// Request parameters the model accepts, such as `structured_outputs` or
+    /// `reasoning`.
+    #[serde(default)]
+    pub supported_parameters: Vec<String>,
+
+    /// Reasoning support, present only for models that reason.
+    #[serde(default)]
+    pub reasoning: Option<ModelReasoning>,
+
+    /// Training data cutoff as `YYYY-MM-DD`, when the catalog reports one.
+    #[serde(default)]
+    pub knowledge_cutoff: Option<String>,
+}
+
+/// Routing metadata for the provider serving a model.
+#[derive(Debug, Default, Deserialize)]
+pub struct TopProvider {
+    /// Maximum tokens the provider will generate, when it advertises a cap.
+    #[serde(default)]
+    pub max_completion_tokens: Option<u32>,
+
+    /// Context window the provider serves, which may be smaller than the
+    /// model's own.
+    #[serde(default)]
+    pub context_length: Option<u32>,
+
+    #[serde(default)]
+    pub is_moderated: bool,
+}
+
+/// A model's advertised reasoning support.
+#[derive(Debug, Deserialize)]
+pub struct ModelReasoning {
+    /// Whether reasoning cannot be turned off.
+    #[serde(default)]
+    pub mandatory: bool,
+
+    /// Whether reasoning runs unless the caller opts out.
+    #[serde(default)]
+    pub default_enabled: bool,
+
+    /// Effort levels the model accepts, such as `["max", "high", "low"]`.
+    #[serde(default)]
+    pub supported_efforts: Vec<String>,
+
+    /// Effort applied when the caller does not choose one.
+    #[serde(default)]
+    pub default_effort: Option<String>,
 }

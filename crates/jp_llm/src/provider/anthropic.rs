@@ -19,7 +19,7 @@ use jp_config::{
     assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::{
         id::{Name, ProviderId},
-        parameters::ReasoningEffort,
+        parameters::{ReasoningConfig, ReasoningEffort},
     },
     providers::llm::anthropic::AnthropicConfig,
 };
@@ -38,7 +38,7 @@ use crate::{
     },
     event::{Event, EventMatcher, EventPart, EventPatch, FinishReason, PatchAction, ToolCallPart},
     event_builder::EventBuilder,
-    model::{ModelDeprecation, ModelDetails, ReasoningDetails},
+    model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
     query::ChatQuery,
     stream::{EventStream, chain::find_merge_point, with_tool_call_keepalive},
     tool::ToolDefinition,
@@ -1146,8 +1146,13 @@ fn create_request(
     // Whether this request runs with thinking active. Configuring reasoning
     // turns it on; so does a model that always thinks (Fable 5), which keeps
     // thinking on even when `reasoning = off` because it cannot honor a
-    // `thinking: disabled` it does not support. The disabled-thinking branch
-    // below derives from the same predicate, so the two cannot disagree.
+    // `thinking: disabled` it does not support.
+    //
+    // A model whose support is unknown counts as active even when the branch
+    // below attempts a disable for it: forced-tool soft-forcing exists to avoid
+    // a 400 this code can predict, and staying conservative there costs only a
+    // system nudge, whereas hard-forcing against an endpoint that ignored the
+    // disable is a hard error.
     let thinking_active = reasoning_config.is_some() || !model.supports_disabling_thinking();
 
     // See: <https://docs.claude.com/en/docs/build-with-claude/extended-thinking#extended-thinking-with-tool-use>
@@ -1217,9 +1222,9 @@ fn create_request(
     let supports_thinking = model.reasoning.is_some_and(|r| !r.is_unsupported());
 
     if let Some(config) = reasoning_config {
-        match model.reasoning {
+        match model.reasoning.and_then(|r| r.mode()) {
             // Adaptive thinking for Opus 4.6+
-            Some(ReasoningDetails::Adaptive {
+            Some(ReasoningMode::Adaptive {
                 xhigh: supports_xhigh,
                 max: supports_max,
             }) => {
@@ -1230,29 +1235,17 @@ fn create_request(
                     display: Some(types::ThinkingDisplay::Summarized),
                 });
 
-                effort = match config
-                    .effort
-                    .abs_to_rel(model.max_output_tokens)
-                    .unwrap_or(ReasoningEffort::Auto)
-                {
-                    ReasoningEffort::Max if supports_max => Some(Effort::Max),
-                    ReasoningEffort::Max | ReasoningEffort::XHigh if supports_xhigh => {
-                        Some(Effort::XHigh)
-                    }
-                    ReasoningEffort::Max
-                    | ReasoningEffort::XHigh
-                    | ReasoningEffort::High
-                    | ReasoningEffort::Absolute(_) => Some(Effort::High),
-                    ReasoningEffort::Medium => Some(Effort::Medium),
-                    ReasoningEffort::Low | ReasoningEffort::Xlow | ReasoningEffort::None => {
-                        Some(Effort::Low)
-                    }
-                    ReasoningEffort::Auto => None,
-                };
+                effort = adaptive_effort(
+                    &model.id,
+                    config.effort,
+                    model.max_output_tokens,
+                    supports_xhigh,
+                    supports_max,
+                );
             }
 
             // Budget-based thinking for older models
-            Some(ReasoningDetails::Budgetted {
+            Some(ReasoningMode::Budgetted {
                 min_tokens,
                 max_tokens: reasoning_max_tokens,
             }) => {
@@ -1281,8 +1274,49 @@ fn create_request(
                 });
             }
 
-            // Other reasoning details (Leveled, Unsupported) - no thinking config
-            _ => {}
+            // Support is unknown, meaning the API reported no thinking
+            // capability. Infer adaptive: every Anthropic model from Opus 4.7
+            // onwards accepts only that mode, and sending no thinking field at
+            // all lets the provider default apply, which on modern models means
+            // thinking runs with `display: "omitted"` and bills reasoning tokens
+            // that never reach the transcript.
+            None if model.reasoning.is_none() => {
+                debug!(
+                    id = %model.id,
+                    inferred = true,
+                    "No reasoning capability reported; inferring adaptive thinking."
+                );
+
+                builder.thinking(types::ExtendedThinking::Adaptive {
+                    display: Some(types::ThinkingDisplay::Summarized),
+                });
+
+                // Both flags are deliberately optimistic. Support here is
+                // inferred, so there is no reported ladder to clamp against, and
+                // clamping on a guess would silently under-deliver an explicit
+                // setting on a model that does support the level. An unsupported
+                // effort fails as a visible provider error instead.
+                effort = adaptive_effort(
+                    &model.id,
+                    config.effort,
+                    model.max_output_tokens,
+                    true,
+                    true,
+                );
+            }
+
+            // Leveled carries no Anthropic thinking mode, and a known
+            // `Unsupported` never reaches here because `custom_reasoning_config`
+            // already returned `None` for it.
+            other => {
+                warn!(
+                    id = %model.id,
+                    ?other,
+                    "Reasoning is configured but no Anthropic thinking mode is known for this \
+                     model. Sending no thinking configuration; reasoning may be billed without \
+                     being returned."
+                );
+            }
         }
     } else if supports_thinking && !thinking_active {
         // Reasoning is off and the model can disable thinking, so disable it
@@ -1291,6 +1325,24 @@ fn create_request(
         // Models that always think never reach here (`thinking_active` stays
         // true for them); omitting the field lets them think adaptively, the
         // only mode they support.
+        builder.thinking(types::ExtendedThinking::Disabled);
+    } else if model.reasoning.is_none()
+        && matches!(parameters.reasoning, Some(ReasoningConfig::Off))
+    {
+        // Support is unknown and the caller explicitly turned reasoning off, so
+        // attempt the disable and let the endpoint be the judge. Sending nothing
+        // would take a provider default that, on modern models, thinks and bills
+        // for reasoning the caller asked not to have. A rejected disable is a
+        // visible error; silently billing is not.
+        //
+        // The endpoint matters here: a custom `base_url` may serve a model that
+        // accepts a disable even where the canonical API would not.
+        debug!(
+            id = %model.id,
+            inferred = true,
+            "No reasoning capability reported; attempting the requested disable."
+        );
+
         builder.thinking(types::ExtendedThinking::Disabled);
     }
 
@@ -1339,201 +1391,257 @@ fn create_request(
         .map_err(Into::into)
 }
 
-#[expect(clippy::too_many_lines)]
-fn map_model(model: types::Model) -> Result<ModelDetails> {
-    #[expect(clippy::match_same_arms)]
-    let details = match model.id.as_str() {
-        "claude-fable-5" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(1_000_000),
-            max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::adaptive(true, true)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec![
-                "interleaved-thinking",
-                "context-editing",
-                "adaptive-thinking",
-                "thinking-always-on",
-            ],
-        },
-        "claude-opus-4-8" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(1_000_000),
-            max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::adaptive(true, true)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec![
-                "interleaved-thinking",
-                "context-editing",
-                "adaptive-thinking",
-            ],
-        },
-        "claude-opus-4-7" | "claude-opus-4-7-20260416" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(1_000_000),
-            max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::adaptive(true, true)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec![
-                "interleaved-thinking",
-                "context-editing",
-                "adaptive-thinking",
-            ],
-        },
-        "claude-sonnet-5" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(1_000_000),
-            max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::adaptive(true, true)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec![
-                "interleaved-thinking",
-                "context-editing",
-                "adaptive-thinking",
-            ],
-        },
-        "claude-sonnet-4-6" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(1_000_000),
-            max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::adaptive(false, true)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec![
-                "interleaved-thinking",
-                "context-editing",
-                "adaptive-thinking",
-            ],
-        },
-        "claude-opus-4-6" | "claude-opus-4-6-20260205" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(1_000_000),
-            max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::adaptive(false, true)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 5, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec![
-                "interleaved-thinking",
-                "context-editing",
-                "adaptive-thinking",
-            ],
-        },
-        "claude-opus-4-5" | "claude-opus-4-5-20251101" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec!["interleaved-thinking", "context-editing", "prefill"],
-        },
-        "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec!["interleaved-thinking", "context-editing", "prefill"],
-        },
-        "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(1_000_000),
-            max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 7, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec!["interleaved-thinking", "context-editing", "prefill"],
-        },
-        "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(32_000),
-            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(true),
-            features: vec!["interleaved-thinking", "context-editing", "prefill"],
-        },
-        "claude-opus-4-0" | "claude-opus-4-20250514" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(32_000),
-            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(false),
-            features: vec!["interleaved-thinking", "context-editing", "prefill"],
-        },
-        "claude-sonnet-4-0" | "claude-sonnet-4-20250514" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(1_000_000),
-            max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 3, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
-            structured_output: Some(false),
-            features: vec!["interleaved-thinking", "context-editing", "prefill"],
-        },
-        "claude-3-haiku-20240307" => ModelDetails {
-            id: (PROVIDER, model.id).try_into()?,
-            display_name: Some(model.display_name),
-            context_window: Some(200_000),
-            max_output_tokens: Some(4_096),
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: claude-haiku-4-5-20251001",
-                Some(NaiveDate::from_ymd_opt(2026, 4, 20).unwrap()),
-            )),
-            structured_output: Some(false),
-            features: vec!["prefill"],
-        },
-        id => {
-            debug!(model = id, ?model, "Missing model details.");
+/// Derive reasoning support from the API-reported model capabilities.
+///
+/// This is the sole source of reasoning support: every model goes through it,
+/// and the override table carries no mode or ladder of its own, only an
+/// `always_on` flag applied to the result.
+/// A model newer than this binary therefore still receives an explicit thinking
+/// configuration rather than falling back to the provider default, which bills
+/// for thinking tokens the caller never sees.
+///
+/// Returns `None` when the capabilities report nothing about thinking, leaving
+/// support genuinely unknown.
+fn derive_reasoning(capabilities: &types::ModelCapabilities) -> Option<ReasoningDetails> {
+    let thinking = &capabilities.thinking;
 
-            // Unknown model: source what we can from the API. A `0` token limit
-            // means "unspecified", so treat it as unknown and let the request
-            // fall back to its default rather than capping at zero.
-            let max_output_tokens = (model.max_tokens != 0).then_some(model.max_tokens);
-            let context_window = (model.max_input_tokens != 0).then_some(model.max_input_tokens);
-            let structured_output = Some(model.capabilities.structured_outputs.supported);
+    // Reported as unsupported, which is distinct from unreported.
+    if thinking.supported == Some(false) {
+        return Some(ReasoningDetails::unsupported());
+    }
 
-            let mut details = ModelDetails::empty((PROVIDER, id).try_into()?);
-            details.display_name = Some(id.to_string());
-            details.max_output_tokens = max_output_tokens;
-            details.context_window = context_window;
-            details.structured_output = structured_output;
-            details
-        }
+    // Adaptive wins when a model reports both: it is the mode that carries an
+    // effort ladder, and the only one newer models accept.
+    if thinking.supports("adaptive") {
+        let effort = &capabilities.effort;
+        return Some(ReasoningDetails::adaptive(
+            effort.supports("xhigh"),
+            effort.supports("max"),
+        ));
+    }
+
+    // 1024 is Anthropic's documented minimum manual thinking budget.
+    if thinking.supports("enabled") {
+        return Some(ReasoningDetails::budgetted(1_024, None));
+    }
+
+    // Nothing reported about thinking, or reported as supported without naming a
+    // mode: support stays unknown.
+    None
+}
+
+/// Map a reasoning effort onto Anthropic's `effort` parameter.
+///
+/// An effort the model does not support clamps to the nearest supported level
+/// and warns: sending a level the model rejects is a request error, and
+/// silently dropping the caller's setting is worse.
+fn adaptive_effort(
+    id: &jp_config::model::id::ModelIdConfig,
+    effort: ReasoningEffort,
+    max_output_tokens: Option<u32>,
+    supports_xhigh: bool,
+    supports_max: bool,
+) -> Option<Effort> {
+    let requested = effort
+        .abs_to_rel(max_output_tokens)
+        .unwrap_or(ReasoningEffort::Auto);
+
+    let mapped = match requested {
+        ReasoningEffort::Max if supports_max => Some(Effort::Max),
+        ReasoningEffort::Max | ReasoningEffort::XHigh if supports_xhigh => Some(Effort::XHigh),
+        ReasoningEffort::Max
+        | ReasoningEffort::XHigh
+        | ReasoningEffort::High
+        | ReasoningEffort::Absolute(_) => Some(Effort::High),
+        ReasoningEffort::Medium => Some(Effort::Medium),
+        ReasoningEffort::Low | ReasoningEffort::Xlow | ReasoningEffort::None => Some(Effort::Low),
+        ReasoningEffort::Auto => None,
     };
 
-    Ok(details)
+    let clamped = matches!(
+        (requested, mapped.as_ref()),
+        (ReasoningEffort::Max, Some(Effort::XHigh | Effort::High))
+            | (ReasoningEffort::XHigh, Some(Effort::High))
+    );
+
+    if clamped {
+        warn!(
+            %id,
+            ?requested,
+            ?mapped,
+            "Model does not support the requested reasoning effort; clamping to the nearest \
+             supported level."
+        );
+    }
+
+    mapped
+}
+
+/// Model facts the capabilities API does not report.
+///
+/// Everything else (token limits, reasoning mode and effort ladder, structured
+/// output, feature flags) is derived from the API, so a newly released model
+/// only needs an entry here when one of these four differs from the defaults.
+#[derive(Debug, Clone)]
+struct ModelOverrides {
+    /// Training data cutoff.
+    ///
+    /// See: <https://support.claude.com/en/articles/8114494>
+    knowledge_cutoff: Option<NaiveDate>,
+
+    /// Deprecation status.
+    ///
+    /// See:
+    /// <https://platform.claude.com/docs/en/about-claude/model-deprecations>
+    deprecated: ModelDeprecation,
+
+    /// Whether a trailing assistant message may be used as a prefill.
+    /// Rejected from Opus 4.7 onwards.
+    prefill: bool,
+
+    /// Whether reasoning cannot be turned off, as on Fable 5.
+    always_on: bool,
+}
+
+impl Default for ModelOverrides {
+    fn default() -> Self {
+        Self {
+            knowledge_cutoff: None,
+            deprecated: ModelDeprecation::Active,
+            prefill: false,
+            always_on: false,
+        }
+    }
+}
+
+/// Look up the facts the capabilities API cannot supply.
+///
+/// Returns `None` for a model absent from this table, leaving its cutoff and
+/// deprecation status unknown rather than asserting defaults for a model this
+/// binary predates.
+#[expect(clippy::match_same_arms)]
+fn model_overrides(id: &str) -> Option<ModelOverrides> {
+    let cutoff = |year, month| NaiveDate::from_ymd_opt(year, month, 1);
+
+    Some(match id {
+        "claude-fable-5" => ModelOverrides {
+            knowledge_cutoff: cutoff(2026, 1),
+            always_on: true,
+            ..Default::default()
+        },
+        "claude-opus-5" => ModelOverrides {
+            knowledge_cutoff: cutoff(2026, 5),
+            ..Default::default()
+        },
+        "claude-sonnet-5" => ModelOverrides {
+            knowledge_cutoff: cutoff(2026, 1),
+            ..Default::default()
+        },
+        "claude-opus-4-8" => ModelOverrides {
+            knowledge_cutoff: cutoff(2026, 1),
+            ..Default::default()
+        },
+        "claude-opus-4-7" | "claude-opus-4-7-20260416" => ModelOverrides {
+            knowledge_cutoff: cutoff(2026, 1),
+            ..Default::default()
+        },
+        "claude-sonnet-4-6" => ModelOverrides {
+            knowledge_cutoff: cutoff(2025, 8),
+            ..Default::default()
+        },
+        "claude-opus-4-6" | "claude-opus-4-6-20260205" => ModelOverrides {
+            knowledge_cutoff: cutoff(2025, 8),
+            ..Default::default()
+        },
+        "claude-opus-4-5" | "claude-opus-4-5-20251101" => ModelOverrides {
+            knowledge_cutoff: cutoff(2025, 8),
+            prefill: true,
+            ..Default::default()
+        },
+        "claude-haiku-4-5" | "claude-haiku-4-5-20251001" => ModelOverrides {
+            knowledge_cutoff: cutoff(2025, 7),
+            prefill: true,
+            ..Default::default()
+        },
+        "claude-sonnet-4-5" | "claude-sonnet-4-5-20250929" => ModelOverrides {
+            knowledge_cutoff: cutoff(2025, 7),
+            prefill: true,
+            ..Default::default()
+        },
+        "claude-opus-4-1" | "claude-opus-4-1-20250805" => ModelOverrides {
+            knowledge_cutoff: cutoff(2025, 3),
+            deprecated: ModelDeprecation::deprecated(
+                &"recommended replacement: claude-opus-5",
+                NaiveDate::from_ymd_opt(2026, 8, 5),
+            ),
+            prefill: true,
+            ..Default::default()
+        },
+        _ => return None,
+    })
+}
+
+/// Derive the provider feature flags from the reported capabilities.
+///
+/// Each flag is added only when the API reports its capability as supported, so
+/// an unreported capability yields no flag rather than a false one.
+fn derive_features(capabilities: &types::ModelCapabilities) -> Vec<&'static str> {
+    let mut features = vec![];
+
+    // Every thinking-capable Claude 4 model supports interleaved thinking,
+    // automatically under adaptive mode and via beta header otherwise.
+    if capabilities.thinking.supported == Some(true) {
+        features.push("interleaved-thinking");
+    }
+    if capabilities.context_management.supported == Some(true) {
+        features.push("context-editing");
+    }
+    if capabilities.thinking.supports("adaptive") {
+        features.push("adaptive-thinking");
+    }
+
+    features
+}
+
+fn map_model(model: types::Model) -> Result<ModelDetails> {
+    let overrides = model_overrides(model.id.as_str());
+    if overrides.is_none() {
+        debug!(
+            model = %model.id,
+            "Model absent from the override table; cutoff and deprecation unknown."
+        );
+    }
+
+    let known = overrides.is_some();
+    let overrides = overrides.unwrap_or_default();
+
+    // A `0` token limit means "unspecified", so treat it as unknown and let the
+    // request fall back to its default rather than capping at zero.
+    let context_window = (model.max_input_tokens != 0).then_some(model.max_input_tokens);
+    let max_output_tokens = (model.max_tokens != 0).then_some(model.max_tokens);
+    // Reported per property, so an unreported capability stays unknown.
+    let structured_output = model.capabilities.structured_outputs.supported;
+    let features = derive_features(&model.capabilities);
+
+    let mut reasoning = derive_reasoning(&model.capabilities);
+    if overrides.always_on {
+        reasoning = reasoning.map(ReasoningDetails::always_on);
+    }
+
+    Ok(ModelDetails {
+        id: (PROVIDER, model.id).try_into()?,
+        display_name: Some(model.display_name),
+        context_window,
+        max_output_tokens,
+        reasoning,
+        knowledge_cutoff: overrides.knowledge_cutoff,
+        deprecated: known.then_some(overrides.deprecated),
+        structured_output,
+        // Only a model in the table has a known answer; the API reports nothing
+        // about prefill.
+        prefill: known.then_some(overrides.prefill),
+        features,
+    })
 }
 
 fn map_event(

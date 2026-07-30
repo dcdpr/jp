@@ -465,7 +465,7 @@ impl ToolRenderer {
                 // highlight_line expects the trailing newline.
                 let with_nl = format!("{line}\n");
                 if let Some(ref mut state) = code_state {
-                    let rendered = self.formatter.render_code_line(&with_nl, state, None);
+                    let rendered = self.formatter.render_code_line(&with_nl, state, None, 0);
                     output.push_str(&rendered);
                 } else {
                     output.push_str(line);

@@ -246,11 +246,11 @@ impl<'w> TerminalWriter<'w> {
 
         // Emit everything up to (and including escapes anchored at) break_pos.
         let first_part = self.merge_escapes(0, break_pos);
-        // Visual width of what we just emitted, which is the width of
-        // the wrapped line up to the break point. `self.column` still
-        // reflects the full unwrapped buffer width, so we can't reuse
-        // it for line-fill calculations.
-        let first_part_width = ansi::visual_width(&first_part);
+        // The column the cursor reaches at the break point, which is where the
+        // wrapped line's fill starts. `self.column` still reflects the full
+        // unwrapped buffer width, so we can't reuse it here.
+        // The prefix is part of `wrap_buffer`, so this line starts at column 0.
+        let first_part_width = ansi::advance_column(0, &first_part);
         self.output.write_str(&first_part)?;
 
         // Partition the escapes:
@@ -323,7 +323,9 @@ impl<'w> TerminalWriter<'w> {
         // bring it back up to `attrs`.
         self.batch_initial_attrs = AnsiState::default();
 
-        self.column = self.prefix_width() + ansi::visual_width(&rest);
+        // `rest` carries no prefix of its own, so it advances from the column
+        // the freshly written prefix leaves the cursor at.
+        self.column = ansi::advance_column(self.prefix_width(), &rest);
         self.last_breakable = 0;
         self.begin_line = false;
         self.begin_content = false;
@@ -542,7 +544,13 @@ impl<'w> TerminalWriter<'w> {
                 // Per-char width: O(1). May be off by 1 for VS16/ZWJ
                 // sequences, but using visual_width(&wrap_buffer) here
                 // would be O(n) per char → O(n²) per line.
-                self.column += unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                // A tab is measured as the cursor move the display makes, since
+                // `UnicodeWidthChar` reports no width for it at all.
+                if c == '\t' {
+                    self.column = (self.column / ansi::TAB_STOP + 1) * ansi::TAB_STOP;
+                } else {
+                    self.column += unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+                }
                 self.begin_line = false;
                 self.begin_content = self.begin_content && bytes[i].is_ascii_digit();
             }
@@ -599,9 +607,12 @@ impl<'w> TerminalWriter<'w> {
             self.need_cr -= 1;
         }
 
+        // The body is indented below, after the background is applied, so the
+        // fill is told which column each line will end up starting at.
+        let prefix_width = self.prefix_width();
         let body = self.default_background.as_ref().map_or_else(
             || s.to_string(),
-            |bg| format::apply_line_background(s, Some(bg)),
+            |bg| format::apply_line_background(s, Some(bg), prefix_width),
         );
 
         // Indent each line to the current prefix column. Code content is
@@ -611,7 +622,7 @@ impl<'w> TerminalWriter<'w> {
         // passes through unchanged. With a default background active, the
         // spaces sit after the per-line background escape so the indentation
         // inherits the fill.
-        let body = indent_to_column(&body, self.prefix_width());
+        let body = indent_to_column(&body, prefix_width);
         self.output.write_str(&body)?;
 
         self.column = 0;

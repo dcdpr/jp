@@ -29,6 +29,248 @@ async fn test_gemini_3_reasoning() -> std::result::Result<(), Box<dyn std::error
     run_test(PROVIDER, function_name!(), Some(request)).await
 }
 
+/// Regression: when reasoning support is unknown (a model newer than this
+/// binary) and reasoning is configured, the request must still ask for
+/// thoughts.
+/// Sending no thinking config lets Gemini think while withholding the thoughts,
+/// billing reasoning tokens that never reach the transcript.
+#[test]
+fn test_unknown_model_requests_thoughts() {
+    let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+    assert_eq!(model.reasoning, None, "fixture must have unknown reasoning");
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Auto);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("thinking config must be sent for an unknown model");
+    assert!(
+        thinking.include_thoughts,
+        "thoughts must be requested so reasoning reaches the transcript"
+    );
+}
+
+/// End-to-end: the API's `thinking` flag overrides the table, so a model the
+/// API reports as not thinking is never configured for it.
+///
+/// The fixture must be a model the table *does* carry a ladder for, otherwise
+/// the catch-all supplies `None` and the override is never exercised.
+#[test]
+fn test_map_model_thinking_flag_overrides_table() {
+    let model = types::Model {
+        base_model_id: "gemini-2.5-flash".to_owned(),
+        display_name: "Gemini 2.5 Flash".to_owned(),
+        input_token_limit: 1_048_576,
+        output_token_limit: 65_536,
+        thinking: false,
+        ..Default::default()
+    };
+
+    // The table entry this overrides.
+    assert!(
+        map_model(types::Model {
+            base_model_id: "gemini-2.5-flash".to_owned(),
+            thinking: true,
+            ..Default::default()
+        })
+        .reasoning
+        .is_some_and(|r| r.is_budgetted()),
+        "fixture must target a model the table gives a ladder"
+    );
+
+    let details = map_model(model);
+
+    assert_eq!(details.reasoning, Some(ReasoningDetails::unsupported()));
+    assert_eq!(details.context_window, Some(1_048_576));
+    assert_eq!(details.max_output_tokens, Some(65_536));
+}
+
+/// A model whose ladder is unknown still honours the caller's effort.
+/// Dropping it would make `-r high` silently do nothing on any thinking model
+/// newer than this binary, which is most of Gemini's current catalog.
+#[test]
+fn test_unknown_thinking_level_honours_requested_effort() {
+    assert_eq!(
+        effort_to_thinking_level(ReasoningEffort::High, None),
+        Some(types::ThinkingLevel::High)
+    );
+    assert_eq!(
+        effort_to_thinking_level(ReasoningEffort::Low, None),
+        Some(types::ThinkingLevel::Low)
+    );
+    assert_eq!(
+        effort_to_thinking_level(ReasoningEffort::Medium, None),
+        Some(types::ThinkingLevel::Medium)
+    );
+
+    // Efforts above `high` clamp down rather than being dropped.
+    assert_eq!(
+        effort_to_thinking_level(ReasoningEffort::Max, None),
+        Some(types::ThinkingLevel::High)
+    );
+
+    // `auto` leaves the choice to the model.
+    assert_eq!(effort_to_thinking_level(ReasoningEffort::Auto, None), None);
+}
+
+/// An explicit `off` on a model whose support is unknown sends the documented
+/// disable rather than nothing.
+///
+/// Sending nothing takes a provider default that, on a modern model, thinks and
+/// bills for reasoning the caller turned off.
+/// A custom `base_url` may also serve a model that accepts the disable, so the
+/// endpoint is the judge.
+#[test]
+fn test_off_on_unknown_model_attempts_disable() {
+    let model = ModelDetails::empty((PROVIDER, "gemini-future-99").try_into().unwrap());
+    assert_eq!(model.reasoning, None, "fixture must be unknown");
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("an explicit off must not be silently dropped");
+
+    assert!(!thinking.include_thoughts);
+    assert_eq!(thinking.thinking_budget, Some(0));
+}
+
+/// A leveled model that cannot turn reasoning off must not be sent
+/// `thinking_budget: 0` when reasoning is off: that both disables a model which
+/// rejects being disabled and uses the budget form for a level-based model.
+/// Its lowest supported level is requested with the thoughts withheld instead.
+#[test]
+fn test_off_on_always_on_leveled_model_uses_lowest_level() {
+    let mut model = ModelDetails::empty((PROVIDER, "gemini-3-pro-preview").try_into().unwrap());
+    model.max_output_tokens = Some(65_536);
+    // Mirrors the table entry: low and high only, reasoning always on.
+    model.reasoning =
+        Some(ReasoningDetails::leveled(false, true, false, true, false, false).always_on());
+
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Off);
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let (request, _) = create_request(&model, query).unwrap();
+
+    let thinking = request
+        .generation_config
+        .and_then(|c| c.thinking_config)
+        .expect("an always-on model still gets a thinking config");
+
+    assert!(!thinking.include_thoughts, "thoughts are withheld");
+    assert_eq!(
+        thinking.thinking_budget, None,
+        "a level-based model takes no token budget"
+    );
+    assert_eq!(thinking.thinking_level, Some(types::ThinkingLevel::Low));
+}
+
+/// A model the API reports as not thinking is recorded as not reasoning, even
+/// when the built-in table claims a ladder for it.
+/// Sending a thinking budget to such a model configures a mode it does not
+/// have.
+#[test]
+fn test_apply_thinking_support_overrides_table() {
+    let table = Some(ReasoningDetails::budgetted(0, Some(24_576)));
+
+    assert_eq!(
+        apply_thinking_support(table, false),
+        Some(ReasoningDetails::unsupported())
+    );
+}
+
+/// A thinking model keeps whatever the table says, including "unknown", since
+/// the API reports no effort levels to derive a ladder from.
+#[test]
+fn test_apply_thinking_support_keeps_table_when_thinking() {
+    let table = Some(ReasoningDetails::leveled(
+        false, true, true, true, false, false,
+    ));
+
+    assert_eq!(apply_thinking_support(table, true), table);
+    assert_eq!(apply_thinking_support(None, true), None);
+}
+
+/// Records a live request for a Gemini model absent from the built-in table,
+/// with an explicit effort.
+///
+/// Validates the inference the unit tests cannot: that a model newer than this
+/// binary accepts a `thinking_level`, rather than the token-budget form 2.x
+/// models take.
+/// Most of Gemini's current catalog reaches this path.
+#[test(tokio::test)]
+async fn test_unknown_model_inferred_thinking_level()
+-> std::result::Result<(), Box<dyn std::error::Error>> {
+    let id: ModelIdConfig = "google/gemini-3.5-flash".parse().unwrap();
+
+    // Mirrors what `map_model` derives: limits from the API, and no reasoning
+    // ladder because the model is absent from the table.
+    let mut details = ModelDetails::empty(id.clone());
+    details.context_window = Some(1_048_576);
+    details.max_output_tokens = Some(65_536);
+    assert_eq!(details.reasoning, None, "fixture must be unknown");
+
+    let request = TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .reasoning(Some(PartialReasoningConfig::Custom(
+            PartialCustomReasoningConfig {
+                effort: Some(ReasoningEffort::High),
+                exclude: Some(false),
+            },
+        )))
+        .event(ChatRequest::from("What is 2 + 2?"));
+
+    run_test(PROVIDER, function_name!(), Some(request)).await
+}
+
 mod thought_signature_recovery {
     use gemini_client_rs::types;
 
