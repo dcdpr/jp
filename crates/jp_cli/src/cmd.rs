@@ -9,7 +9,7 @@ pub(crate) mod plugin;
 mod query;
 pub(crate) mod target;
 pub(crate) mod time;
-pub(crate) mod turn_range;
+pub(crate) mod turn_selection;
 
 use std::{fmt, num::NonZeroU8};
 

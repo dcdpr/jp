@@ -4,15 +4,14 @@ use jp_config::{
     },
     style::{reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
-use jp_conversation::{compaction::resolve_range, stream::TurnOrigin};
+use jp_conversation::stream::TurnOrigin;
 use jp_llm::tool::InvocationContext;
 use jp_workspace::ConversationHandle;
 
 use crate::{
     cmd::{
-        ConversationLoadRequest, Output,
-        conversation_id::PositionalIds,
-        turn_range::{Bound, TurnRange},
+        ConversationLoadRequest, Output, conversation_id::PositionalIds,
+        turn_selection::TurnSelection,
     },
     ctx::Ctx,
     render::{ConfigSource, TurnRenderer},
@@ -63,7 +62,7 @@ pub(crate) struct Print {
     ///
     /// Without any selector, prints the whole conversation.
     #[command(flatten)]
-    range: TurnRange,
+    range: TurnSelection,
 
     /// Use the current workspace config instead of the per-turn config.
     ///
@@ -133,7 +132,7 @@ impl Print {
     fn print_conversation(
         ctx: &mut Ctx,
         handle: &ConversationHandle,
-        range: &TurnRange,
+        range: &TurnSelection,
         current_config: bool,
         print_style: Option<PrintStyle>,
         compacted: bool,
@@ -193,43 +192,16 @@ impl Print {
         );
         renderer.set_user_only(user_only);
 
-        // `--last 0` / `--first 0` explicitly selects nothing.
-        if range.is_empty() {
+        range.validate()?;
+        range.check_turn_range(raw_count)?;
+
+        // Resolved against the raw stream, before projection, so the selection
+        // lines up with the header numbers.
+        let selected = range.resolve(&events);
+        if selected.is_empty() {
             renderer.flush();
             return Ok(());
         }
-
-        // `--turn` names specific turns; an out-of-range endpoint is an error.
-        if let Some(n) = range.turn_out_of_range(raw_count) {
-            return Err(
-                format!("turn {n} out of range (conversation has {raw_count} turns)").into(),
-            );
-        }
-
-        let from = match range.resolve_from(&events) {
-            Bound::Empty => {
-                renderer.flush();
-                return Ok(());
-            }
-            Bound::Default => None,
-            Bound::At(b) => Some(b),
-        };
-        let to = match range.resolve_to(&events) {
-            Bound::Empty => {
-                renderer.flush();
-                return Ok(());
-            }
-            Bound::Default => None,
-            Bound::At(b) => Some(b),
-        };
-
-        // The selected raw 0-based turn range. A `from > to` or otherwise empty
-        // range selects nothing. Resolved against the raw stream, before
-        // projection, so it lines up with the header numbers.
-        let Some(selected) = resolve_range(&events, from, to) else {
-            renderer.flush();
-            return Ok(());
-        };
 
         // Project for rendering when compacted; `origins` maps each rendered
         // turn back to the raw turn number(s) it represents for the header.
@@ -245,7 +217,7 @@ impl Print {
         );
 
         for (turn, origin) in events.iter_turns().zip(&origins) {
-            if origin.overlaps(selected.from_turn, selected.to_turn) {
+            if selected.overlaps_origin(*origin) {
                 renderer.render_turn(&turn, *origin);
             }
         }

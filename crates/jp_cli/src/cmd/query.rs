@@ -1049,8 +1049,9 @@ impl Query {
             &events,
             cfg,
             &rules,
-            crate::cmd::turn_range::Bound::Default,
-            crate::cmd::turn_range::Bound::Default,
+            // `--compact` on a query applies the configured rules to the whole
+            // conversation; there are no turn-selection flags to honour.
+            &crate::cmd::turn_selection::TurnSelection::default(),
             // `--compact` on a query is a quick adjunct; apply it silently so
             // compaction details don't clutter the query output.
             None,

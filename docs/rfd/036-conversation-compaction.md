@@ -465,7 +465,7 @@ Composability lets users tailor the operation.
 - **Conversation merging.** Combining two conversations into one.
   Related but distinct.
 - **Conversation rollback.** Undoing specific turns.
-  The `fork` command with `--until` already covers this.
+  The `fork` command with `--to` already covers this.
 - **Token counting accuracy.** This RFD uses the existing char-based heuristic
   for token estimation.
   Accurate token counting (per-provider tokenizer) is orthogonal.

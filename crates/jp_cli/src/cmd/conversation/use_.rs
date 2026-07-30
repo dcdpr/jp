@@ -18,9 +18,9 @@ use crate::{
 ///
 /// Without flags, `jp c use [ID]` activates the given conversation (or opens a
 /// picker when no target is provided).
-/// `--grep` and `--from`/`--until` restrict the picker's candidate set; when
-/// the combined filter leaves a single conversation, it is activated directly
-/// without prompting.
+/// `--grep` and `--created-since`/`--created-before` restrict the picker's
+/// candidate set; when the combined filter leaves a single conversation, it is
+/// activated directly without prompting.
 #[derive(Debug, clap::Args)]
 pub(crate) struct Use {
     #[command(flatten)]
@@ -33,7 +33,7 @@ pub(crate) struct Use {
     /// Case-insensitive unless the pattern contains an uppercase character
     /// (smart-case).
     /// Composable with target keywords (`?`, `?p`, `?s`, `?a`) and with
-    /// `--from` / `--until`.
+    /// `--created-since` / `--created-before`.
     #[arg(long)]
     grep: Option<String>,
 
@@ -51,7 +51,8 @@ impl Use {
             .any(ConversationTarget::is_archived)
     }
 
-    /// Whether any candidate-set filter (`--grep`, `--from`, `--until`) is set.
+    /// Whether any candidate-set filter (`--grep`, `--created-since`,
+    /// `--created-before`) is set.
     /// When true, `Use` resolves its handle internally instead of going through
     /// the standard pipeline.
     fn has_filter(&self) -> bool {

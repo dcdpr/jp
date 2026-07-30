@@ -23,7 +23,8 @@ pub(crate) struct Rm {
     #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Remove all conversations created in a `[--from, --until)` range.
+    /// Remove all conversations created in a `[--created-since,
+    /// --created-before)` range.
     #[command(flatten)]
     range: CreationRange,
 
@@ -76,9 +77,9 @@ impl Rm {
     ///
     /// Extracted from `run` so the filter step can be exercised in tests
     /// without driving the async confirmation/lock path.
-    /// This is the load-bearing line between `--from/--until` and actual
-    /// deletion; regressing it would silently turn a range delete into a full
-    /// wipe.
+    /// This is the dividing line between `--created-since`/`--created-before`
+    /// and actual deletion; regressing it would silently turn a range delete
+    /// into a full wipe.
     fn resolve_filtered(
         &self,
         workspace: &Workspace,

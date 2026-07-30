@@ -189,7 +189,7 @@ fn retain_last_turns_zero_clears() {
 }
 
 #[test]
-fn retain_first_turns_keeps_first_n() {
+fn retain_turns_keeps_a_leading_window() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
         ConversationEvent::new(TurnStart, ts(0, 0, 0)),
@@ -202,7 +202,7 @@ fn retain_first_turns_keeps_first_n() {
         ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
     ]);
 
-    stream.retain_first_turns(1);
+    stream.retain_turns(|index| index == 0);
 
     let turns: Vec<_> = stream.iter_turns().collect();
     assert_eq!(turns.len(), 1);
@@ -214,33 +214,7 @@ fn retain_first_turns_keeps_first_n() {
 }
 
 #[test]
-fn retain_first_turns_noop_when_fewer_turns() {
-    let mut stream = ConversationStream::new_test();
-    stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
-        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
-    ]);
-
-    stream.retain_first_turns(5);
-
-    assert_eq!(stream.iter_turns().len(), 1);
-}
-
-#[test]
-fn retain_first_turns_zero_clears() {
-    let mut stream = ConversationStream::new_test();
-    stream.extend(vec![
-        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
-        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
-    ]);
-
-    stream.retain_first_turns(0);
-
-    assert_eq!(stream.iter_turns().len(), 0);
-}
-
-#[test]
-fn retain_first_and_last_turns_keeps_both_windows() {
+fn retain_turns_keeps_two_windows() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
         ConversationEvent::new(TurnStart, ts(0, 0, 0)),
@@ -253,8 +227,8 @@ fn retain_first_and_last_turns_keeps_both_windows() {
         ConversationEvent::new(ChatRequest::from("Q4"), ts(0, 3, 1)),
     ]);
 
-    // 4 turns, keep first 1 + last 2 — drop turn 2.
-    stream.retain_first_and_last_turns(1, 2);
+    // Keep the first turn and the last two, dropping turn 2.
+    stream.retain_turns(|index| index == 0 || index >= 2);
 
     let requests: Vec<_> = stream
         .iter()
@@ -265,25 +239,62 @@ fn retain_first_and_last_turns_keeps_both_windows() {
 }
 
 #[test]
-fn retain_first_and_last_turns_noop_when_fits() {
+fn retain_turns_noop_when_every_turn_is_kept() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
         ConversationEvent::new(TurnStart, ts(0, 0, 0)),
         ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
-        ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
-        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
-        ConversationEvent::new(ChatRequest::from("Q3"), ts(0, 2, 1)),
     ]);
 
-    // 3 turns; first 2 + last 2 = 4 >= 3, no-op.
-    stream.retain_first_and_last_turns(2, 2);
+    stream.retain_turns(|index| index < 5);
 
-    assert_eq!(stream.iter_turns().len(), 3);
+    assert_eq!(stream.iter_turns().len(), 1);
 }
 
 #[test]
-fn retain_first_and_last_turns_zero_zero_clears() {
+fn retain_turns_numbers_an_implicit_leading_turn_like_iter_turns() {
+    // `[A, TurnStart, B]` is turn 0 = `[A]` and turn 1 = `[TurnStart, B]`:
+    // a `TurnStart` opens a turn only when the current one already holds an
+    // event. A predicate built from resolved turn positions must agree, or
+    // `--first 1` on a fork keeps B instead of A.
+    let events = || {
+        vec![
+            ConversationEvent::new(ChatRequest::from("A"), ts(0, 0, 0)),
+            ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+            ConversationEvent::new(ChatRequest::from("B"), ts(0, 1, 1)),
+        ]
+    };
+
+    let mut stream = ConversationStream::new_test();
+    stream.extend(events());
+    assert_eq!(
+        stream.iter_turns().len(),
+        2,
+        "fixture has an implicit turn 0"
+    );
+
+    stream.retain_turns(|index| index == 0);
+    let requests: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.as_chat_request())
+        .map(|r| r.content.clone())
+        .collect();
+    assert_eq!(requests, vec!["A"], "turn 0 is the unmarked prefix");
+
+    let mut stream = ConversationStream::new_test();
+    stream.extend(events());
+
+    stream.retain_turns(|index| index == 1);
+    let requests: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.as_chat_request())
+        .map(|r| r.content.clone())
+        .collect();
+    assert_eq!(requests, vec!["B"], "turn 1 is the marked suffix");
+}
+
+#[test]
+fn retain_turns_keeping_nothing_clears() {
     let mut stream = ConversationStream::new_test();
     stream.extend(vec![
         ConversationEvent::new(TurnStart, ts(0, 0, 0)),
@@ -292,7 +303,7 @@ fn retain_first_and_last_turns_zero_zero_clears() {
         ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
     ]);
 
-    stream.retain_first_and_last_turns(0, 0);
+    stream.retain_turns(|_| false);
 
     assert_eq!(stream.iter_turns().len(), 0);
 }

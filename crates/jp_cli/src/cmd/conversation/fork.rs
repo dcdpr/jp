@@ -6,7 +6,10 @@ use jp_workspace::{ConversationHandle, ConversationLock};
 use tracing::debug;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds, time::TimeThreshold},
+    cmd::{
+        ConversationLoadRequest, Output, conversation_id::PositionalIds,
+        turn_selection::TurnSelection,
+    },
     ctx::Ctx,
 };
 
@@ -18,37 +21,16 @@ pub(crate) struct Fork {
     #[arg(short, long, default_value = "false")]
     activate: bool,
 
-    /// Ignore all conversation events before the specified timestamp.
+    /// Which turns the fork inherits.
     ///
-    /// Inclusive: an event at exactly this timestamp is kept.
-    /// Timestamp can be relative (5days, 2mins, etc) or absolute.
-    /// Composes with `--until` to form a half-open `[from, until)` range.
-    #[arg(long)]
-    from: Option<TimeThreshold>,
-
-    /// Ignore all conversation events at or after the specified timestamp.
-    ///
-    /// Exclusive: an event at exactly this timestamp is dropped.
-    /// Timestamp can be relative (5days, 2mins, etc) or absolute.
-    /// Composes with `--from` to form a half-open `[from, until)` range.
-    #[arg(long)]
-    until: Option<TimeThreshold>,
-
-    /// Fork the first N turns of the conversation.
-    /// Defaults to 1.
-    ///
-    /// Can be combined with `--last` to keep both the leading and trailing
-    /// windows while dropping the turns in between.
-    #[arg(long, short = 'f')]
-    first: Option<Option<usize>>,
-
-    /// Fork the last N turns of the conversation.
-    /// Defaults to 1.
-    ///
-    /// Can be combined with `--first` to keep both the leading and trailing
-    /// windows while dropping the turns in between.
-    #[arg(long, short = 'l')]
-    last: Option<Option<usize>>,
+    /// Without any selector, the fork inherits every turn.
+    /// `--from`/`--to` bound the inherited range; `--first N`/`--last N`
+    /// inherit the first or last N turns (both together keep each window and
+    /// drop the turns in between); `--turn N` inherits a single turn, or
+    /// `--turn A..B` an inclusive range.
+    /// `--keep-first`/`--keep-last` drop turns at either end of the selection.
+    #[command(flatten)]
+    range: TurnSelection,
 
     /// Fork without inheriting any turns.
     ///
@@ -60,7 +42,9 @@ pub(crate) struct Fork {
     #[arg(
         short = 'N',
         long,
-        conflicts_with_all = ["from", "until", "first", "last", "compact"]
+        conflicts_with_all = [
+            "from", "to", "turn", "first", "last", "keep_first", "keep_last", "compact",
+        ]
     )]
     no_turns: bool,
 
@@ -79,6 +63,17 @@ impl Fork {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+        self.range.validate()?;
+
+        // Reject an out-of-range `--turn` against every source before forking any
+        // of them: `fork` accepts multiple sources, and checking inside the loop
+        // would leave the earlier forks created when a later source turns out to
+        // be too short.
+        for source in handles {
+            self.range
+                .check_turn_range(ctx.workspace.events(source)?.turn_count())?;
+        }
+
         for source in handles {
             // `--no-turns` folds the source's effective config (base + every
             // delta) into a fresh base config; resolving it here lets the
@@ -103,25 +98,17 @@ impl Fork {
                         .with_created_at(events.created_at);
                     return;
                 }
-                // `retain` invalidates compaction overlays from the earliest
-                // removed turn onward (overlays confined to the untouched prefix
-                // survive), so a time filter that strips whole turns *or* events
-                // inside a surviving turn can't leave a stale overlay pointing at
-                // — or summarizing — content no longer in the fork. The
-                // `--first`/`--last` helpers below inherit the same guarantee.
-                events.retain(|event| {
-                    self.from.is_none_or(|t| event.timestamp >= *t)
-                        && self.until.is_none_or(|t| event.timestamp < *t)
-                });
-
-                let first = self.first.map(|v| v.unwrap_or(1));
-                let last = self.last.map(|v| v.unwrap_or(1));
-                match (first, last) {
-                    (None, None) => {}
-                    (Some(f), None) => events.retain_first_turns(f),
-                    (None, Some(l)) => events.retain_last_turns(l),
-                    (Some(f), Some(l)) => events.retain_first_and_last_turns(f, l),
+                if !self.range.is_set() {
+                    return;
                 }
+
+                // `retain_turns` invalidates compaction overlays from the
+                // earliest removed turn onward (overlays confined to the
+                // untouched prefix survive), so a selection that drops turns
+                // can't leave a stale overlay pointing at — or summarizing —
+                // content no longer in the fork.
+                let selected = self.range.resolve(events);
+                events.retain_turns(|index| selected.contains(index));
             })?;
 
             if self.compact.should_compact() {
@@ -131,12 +118,13 @@ impl Fork {
                     .compact
                     .effective_rules(&cfg.conversation.compaction.rules)
                     .map_err(|e| crate::error::Error::Compaction(e.to_string()))?;
+                // The fork's turn selection has already been applied to the
+                // stream, so compaction covers the whole fork.
                 let compactions = super::compact::build_compaction_events(
                     &events_snapshot,
                     &cfg,
                     &rules,
-                    crate::cmd::turn_range::Bound::Default,
-                    crate::cmd::turn_range::Bound::Default,
+                    &TurnSelection::default(),
                     // Compaction during a fork is an implicit adjunct; only an
                     // explicit `jp c compact` reports compaction details.
                     None,
