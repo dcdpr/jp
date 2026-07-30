@@ -750,7 +750,14 @@ fn case_sensitive_overrides_smart_case() {
         case_sensitive: true,
         ..grep("wasm")
     };
-    assert!(grep.run(&mut ctx, vec![]).is_err());
+
+    let error = grep.run(&mut ctx, vec![]).unwrap_err();
+
+    // Non-zero, so a script can branch on "found nothing", but marked expected:
+    // `JP_DEBUG=1 jp c grep ... | fzf` must not get the trace log location
+    // printed into fzf's terminal just because nothing matched.
+    assert_eq!(error.code.get(), 1);
+    assert!(error.expected);
 }
 
 #[test]
@@ -1066,6 +1073,10 @@ fn quiet_fails_without_a_match() {
 
     let error = grep("pi-mark").run(&mut ctx, vec![]).unwrap_err();
     assert_eq!(error.code.get(), 1);
+    // This path bypasses `render_empty`, so it carries the expected marker
+    // itself. Without it, `JP_DEBUG=1 jp c grep -q ... | fzf` announces the
+    // trace log into the pipe on every empty search.
+    assert!(error.expected);
 }
 
 // --- exit status ------------------------------------------------------------
@@ -1084,6 +1095,9 @@ fn no_match_exits_one_and_stays_silent_when_piped() {
     let error = grep("nonexistent").run(&mut ctx, vec![]).unwrap_err();
     assert_eq!(error.code.get(), 1);
     assert_eq!(error.message, None);
+    // Non-zero so a script can branch on "found nothing", but not a failure:
+    // failure-only diagnostics stay quiet for a piped run.
+    assert!(error.expected);
     ctx.printer.flush();
     assert_eq!(out.lock().clone(), "");
 }

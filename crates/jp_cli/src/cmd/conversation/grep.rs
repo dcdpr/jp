@@ -13,7 +13,7 @@ use serde_json::json;
 use tracing::warn;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::FlagIds},
+    cmd::{ConversationLoadRequest, Error, Output, conversation_id::FlagIds},
     ctx::Ctx,
     output::print_json,
     shared::search::{
@@ -176,7 +176,10 @@ impl Grep {
                 return Err((2, format!("pattern matching failed: {error}")).into());
             }
 
-            return Err(1.into());
+            // Marked expected for the same reason `render_empty` is: finding
+            // nothing is a result, not a failure. This path bypasses
+            // `render_empty` entirely, so it carries the marker itself.
+            return Err(Error::from(1).expected());
         }
 
         let mut groups = self.collect_hits(&ids, &matcher, &wanted, ctx);
@@ -226,15 +229,18 @@ impl Grep {
     ///
     /// JSON consumers get a well-formed empty result; a terminal gets a short
     /// note on the chrome channel; a pipe gets nothing at all, matching `grep`.
-    /// The status is always 1.
-    fn render_empty(ctx: &Ctx) -> crate::cmd::Error {
+    ///
+    /// The status is always 1, marked expected: it is non-zero so a script can
+    /// branch on it, but the run did what was asked, so failure-only output
+    /// (the trace log location) stays quiet for a piped run.
+    fn render_empty(ctx: &Ctx) -> Error {
         if ctx.printer.format().is_json() {
             print_json(&ctx.printer, &json!([]));
         } else if ctx.printer.pretty_printing_enabled() {
             ctx.printer.eprintln("No matches.".dim().to_string());
         }
 
-        1.into()
+        Error::from(1).expected()
     }
 
     fn collect_hits(
