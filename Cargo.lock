@@ -2286,7 +2286,6 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
- "unicode-width",
  "url",
  "which",
  "windows-sys 0.61.0",
@@ -2557,6 +2556,8 @@ dependencies = [
  "comfy-table",
  "serde_json",
  "strip-ansi-escapes",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]
