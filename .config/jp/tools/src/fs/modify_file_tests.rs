@@ -288,6 +288,7 @@ mod apply_patterns_content {
             let c = Content(current.clone());
             let result = if regex {
                 c.replace_regexp(&pattern.old, &pattern.new, true, true)
+                    .map(|r| r.content)
             } else {
                 c.replace_literal(&pattern.old, &pattern.new, true, true)
             };
@@ -295,7 +296,7 @@ mod apply_patterns_content {
             match result {
                 Ok(after) => {
                     current = after;
-                    outcomes.push(PatternOutcome::Applied);
+                    outcomes.push(PatternOutcome::applied());
                 }
                 Err(ReplaceError::NotFound) => {
                     outcomes.push(PatternOutcome::NotFound);
@@ -325,42 +326,42 @@ mod apply_patterns_content {
                 old: "hello world",
                 new: "hello universe",
                 expected: "hello universe\n",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("delete_content", TestCase {
                 content: "hello world\n",
                 old: "hello world",
                 new: "",
                 expected: "\n",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("replace_with_multiple_lines", TestCase {
                 content: "hello world\n",
                 old: "hello world",
                 new: "hello\nworld\n",
                 expected: "hello\nworld\n\n",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("replace_without_trailing_newline", TestCase {
                 content: "hello world\nhello universe",
                 old: "hello world",
                 new: "hello there",
                 expected: "hello there\nhello universe",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("replace_subset_of_line", TestCase {
                 content: "hello world how are you doing?",
                 old: "world",
                 new: "universe",
                 expected: "hello universe how are you doing?",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("replace_across_multiple_lines", TestCase {
                 content: "hello world\nhow are you doing?",
                 old: "world\nhow",
                 new: "universe\nwhat",
                 expected: "hello universe\nwhat are you doing?",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("pattern_not_found", TestCase {
                 content: "hello world how are you doing?",
@@ -398,8 +399,8 @@ mod apply_patterns_content {
         let (result, outcomes) = apply("aaa bbb ccc", &patterns, false);
         assert_eq!(result, "aaa yyy");
         assert_eq!(outcomes, vec![
-            PatternOutcome::Applied,
-            PatternOutcome::Applied,
+            PatternOutcome::applied(),
+            PatternOutcome::applied(),
         ]);
     }
 
@@ -424,7 +425,7 @@ mod apply_patterns_content {
         assert_eq!(result, "hello earth");
         assert_eq!(outcomes, vec![
             PatternOutcome::NotFound,
-            PatternOutcome::Applied,
+            PatternOutcome::applied(),
         ]);
     }
 
@@ -525,8 +526,97 @@ mod format_pattern_report {
     use super::*;
 
     #[test]
+    fn test_regex_report_names_what_the_engine_bound() {
+        // The bug this reporting exists to surface: a quantified class that
+        // contains the delimiter following it runs past the intended boundary.
+        // `[a-z-]+` before `-` swallows `user-line`, so a scope-then-text
+        // pattern silently captures part of the text as the scope.
+        //
+        // The diff shows the wrong *result*; only this report shows the wrong
+        // *binding*, which is what tells the author their pattern is at fault
+        // rather than their replacement.
+        let content = "{id}-1-user-before\n{id}-1-user-line-two\n";
+        let patterns = vec![Pattern {
+            old: r"\{id\}-(\d+)-([a-z-]+)-".to_owned(),
+            new: "{id}:$1:$2:c:".to_owned(),
+            paths: None,
+            regex: Some(true),
+        }];
+
+        let matches = regex_matches(content, &patterns[0]);
+        assert_eq!(
+            matches,
+            vec![
+                MatchTally {
+                    text: "{id}-1-user-".to_owned(),
+                    count: 1,
+                },
+                MatchTally {
+                    text: "{id}-1-user-line-".to_owned(),
+                    count: 1,
+                },
+            ],
+            "the over-captured binding must be listed, not just the intended one"
+        );
+
+        let report = format_pattern_report(&patterns, &[PatternOutcome::Applied { matches }]);
+        assert!(
+            report.contains(r#""{id}-1-user-line-""#),
+            "report must name the over-capture: {report}"
+        );
+    }
+
+    #[test]
+    fn test_repeated_match_is_tallied_once_with_a_count() {
+        let content = "a1 a2 a3";
+        let pattern = Pattern {
+            old: r"a\d".to_owned(),
+            new: "b".to_owned(),
+            paths: None,
+            regex: Some(true),
+        };
+
+        // Three distinct bindings, so three entries rather than one ×3.
+        assert_eq!(regex_matches(content, &pattern).len(), 3);
+
+        // Identical bindings collapse into one entry carrying the count.
+        let pattern = Pattern {
+            old: "a".to_owned(),
+            new: "b".to_owned(),
+            paths: None,
+            regex: Some(true),
+        };
+        assert_eq!(regex_matches(content, &pattern), vec![MatchTally {
+            text: "a".to_owned(),
+            count: 3,
+        }]);
+    }
+
+    #[test]
+    fn test_literal_patterns_report_no_matches() {
+        // A literal pattern matches itself, so listing it would be noise.
+        let content = "hello world";
+        let replacement = Content(content.to_owned())
+            .replace_literal("world", "there", true, true)
+            .unwrap();
+        assert_eq!(replacement, "hello there");
+
+        let patterns = pat("world", "there");
+        let report = format_pattern_report(&patterns, &[PatternOutcome::applied()]);
+        assert_eq!(report, "", "a lone literal success stays silent");
+    }
+
+    /// The tallied bindings a regex pattern produces against `content`.
+    fn regex_matches(content: &str, pattern: &Pattern) -> Vec<MatchTally> {
+        let replacement = Content(content.to_owned())
+            .replace_regexp(&pattern.old, &pattern.new, true, true)
+            .expect("pattern applies");
+        tally_matches(&replacement.matched)
+    }
+
+    #[test]
     fn test_single_success_is_empty() {
-        let outcomes = vec![PatternOutcome::Applied];
+        let outcomes = vec![PatternOutcome::applied()];
         assert_eq!(format_pattern_report(&pat("a", "b"), &outcomes), "");
     }
 
@@ -546,7 +636,7 @@ mod format_pattern_report {
                 regex: None,
             },
         ];
-        let outcomes = vec![PatternOutcome::Applied, PatternOutcome::Applied];
+        let outcomes = vec![PatternOutcome::applied(), PatternOutcome::applied()];
         assert_eq!(
             format_pattern_report(&patterns, &outcomes),
             "2/2 patterns applied."
@@ -569,7 +659,7 @@ mod format_pattern_report {
                 regex: None,
             },
         ];
-        let outcomes = vec![PatternOutcome::Applied, PatternOutcome::NotFound];
+        let outcomes = vec![PatternOutcome::applied(), PatternOutcome::NotFound];
         let report = format_pattern_report(&patterns, &outcomes);
         assert!(report.contains("1/2 patterns applied."), "report: {report}");
         assert!(report.contains("#2:"), "report: {report}");
@@ -594,7 +684,7 @@ mod format_pattern_report {
         ];
         let outcomes = vec![
             PatternOutcome::Invalid("unclosed group".to_owned()),
-            PatternOutcome::Applied,
+            PatternOutcome::applied(),
         ];
         let report = format_pattern_report(&patterns, &outcomes);
         assert!(report.contains("1/2 patterns applied."), "report: {report}");
@@ -781,6 +871,7 @@ mod content {
             let c = Content(tc.content.to_owned());
             let result = if tc.use_regex {
                 c.replace_regexp(tc.old, tc.new, false, tc.case_sensitive)
+                    .map(|r| r.content)
             } else {
                 c.replace_literal(tc.old, tc.new, false, tc.case_sensitive)
             };
@@ -847,6 +938,7 @@ mod content {
             let c = Content(tc.content.to_owned());
             let result = if tc.use_regex {
                 c.replace_regexp(tc.old, tc.new, tc.replace_all, true)
+                    .map(|r| r.content)
             } else {
                 c.replace_literal(tc.old, tc.new, tc.replace_all, true)
             };
@@ -860,7 +952,8 @@ mod content {
     fn test_regexp_no_match_is_not_found() {
         let c = Content("hello world".to_owned());
         assert_eq!(
-            c.replace_regexp("goodbye", "x", true, true),
+            c.replace_regexp("goodbye", "x", true, true)
+                .map(|r| r.content),
             Err(ReplaceError::NotFound)
         );
     }
@@ -872,7 +965,8 @@ mod content {
     fn test_regexp_parens_are_groups_not_literals() {
         let c = Content("stream(event_source).await".to_owned());
         assert_eq!(
-            c.replace_regexp("stream(event_source).await", "x", true, true),
+            c.replace_regexp("stream(event_source).await", "x", true, true)
+                .map(|r| r.content),
             Err(ReplaceError::NotFound)
         );
     }
@@ -881,7 +975,8 @@ mod content {
     fn test_regexp_invalid_pattern_is_invalid() {
         let c = Content("hello world".to_owned());
         assert_matches!(
-            c.replace_regexp("fn stream(", "x", true, true),
+            c.replace_regexp("fn stream(", "x", true, true)
+                .map(|r| r.content),
             Err(ReplaceError::Invalid(_))
         );
     }

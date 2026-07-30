@@ -5,6 +5,7 @@
 
 use std::{
     collections::BTreeMap,
+    fmt::Write as _,
     fs::{self},
     ops::{Deref, DerefMut},
 };
@@ -103,6 +104,7 @@ fn fs_modify_file_impl<R: ProcessRunner>(
 
         let use_regex = pattern.regex.unwrap_or(replace_using_regex);
         let mut applied_any = false;
+        let mut all_matched: Vec<String> = Vec::new();
         let mut invalid = None;
 
         for target in &targets {
@@ -132,13 +134,19 @@ fn fs_modify_file_impl<R: ProcessRunner>(
             let result = if use_regex {
                 contents.replace_regexp(&pattern.old, &pattern.new, replace_all, case_sensitive)
             } else {
-                contents.replace_literal(&pattern.old, &pattern.new, replace_all, case_sensitive)
+                contents
+                    .replace_literal(&pattern.old, &pattern.new, replace_all, case_sensitive)
+                    .map(|content| Replacement {
+                        content,
+                        matched: vec![],
+                    })
             };
 
             match result {
-                Ok(after) => {
-                    *current = after;
+                Ok(Replacement { content, matched }) => {
+                    *current = content;
                     applied_any = true;
+                    all_matched.extend(matched);
                 }
                 Err(ReplaceError::NotFound) => {}
                 Err(ReplaceError::Invalid(msg)) => invalid = Some(msg),
@@ -146,7 +154,9 @@ fn fs_modify_file_impl<R: ProcessRunner>(
         }
 
         outcomes.push(if applied_any {
-            PatternOutcome::Applied
+            PatternOutcome::Applied {
+                matches: tally_matches(&all_matched),
+            }
         } else if let Some(msg) = invalid {
             PatternOutcome::Invalid(msg)
         } else {
@@ -227,13 +237,72 @@ pub(crate) struct Pattern {
 #[derive(Debug, PartialEq)]
 enum PatternOutcome {
     /// The pattern was found and replaced.
-    Applied,
+    Applied {
+        /// Distinct text the pattern bound to, with occurrence counts, most
+        /// frequent first.
+        ///
+        /// Only populated for regex patterns: a literal pattern matches itself,
+        /// so there is nothing the caller doesn't already know.
+        /// For a regex, this is the one thing the author can't see — what the
+        /// engine *actually* captured, as opposed to what the pattern was meant
+        /// to capture.
+        /// A quantifier that ran past its intended boundary shows up here as an
+        /// unexpected entry, before the diff has to be read.
+        matches: Vec<MatchTally>,
+    },
 
     /// The pattern was not found in the content.
     NotFound,
 
     /// The pattern is not a valid regex.
     Invalid(String),
+}
+
+/// One distinct matched string and how many times it was replaced.
+#[derive(Debug, PartialEq)]
+struct MatchTally {
+    text: String,
+    count: usize,
+}
+
+impl PatternOutcome {
+    /// An applied outcome that captured nothing, as a literal pattern always
+    /// does.
+    #[cfg(test)]
+    fn applied() -> Self {
+        Self::Applied { matches: vec![] }
+    }
+}
+
+/// A successful replacement: the new content, plus what the pattern matched.
+#[derive(Debug)]
+struct Replacement {
+    content: String,
+
+    /// Every matched string, in the order encountered.
+    /// Empty for literal patterns.
+    matched: Vec<String>,
+}
+
+/// Group `matched` into distinct strings with counts, most frequent first.
+///
+/// Ties break on the text so the report is deterministic.
+fn tally_matches(matched: &[String]) -> Vec<MatchTally> {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for text in matched {
+        *counts.entry(text.as_str()).or_default() += 1;
+    }
+
+    let mut tallies: Vec<MatchTally> = counts
+        .into_iter()
+        .map(|(text, count)| MatchTally {
+            text: text.to_owned(),
+            count,
+        })
+        .collect();
+
+    tallies.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.text.cmp(&b.text)));
+    tallies
 }
 
 /// Why a replacement could not be performed.
@@ -313,14 +382,15 @@ fn validate_paths(default_path: Option<&str>, patterns: &[Pattern]) -> Result<()
 
 /// Formats a report of pattern outcomes.
 ///
-/// Returns empty string when there is a single pattern that succeeded.
-/// Shows a summary when there are multiple patterns, and details which patterns
-/// were not found or were invalid.
+/// Returns empty string when a single literal pattern succeeded and there is
+/// nothing to say.
+/// Shows a summary when there are multiple patterns, details which patterns
+/// were not found or invalid, and lists what each regex pattern matched.
 fn format_pattern_report(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
     let total = outcomes.len();
     let applied = outcomes
         .iter()
-        .filter(|o| matches!(o, PatternOutcome::Applied))
+        .filter(|o| matches!(o, PatternOutcome::Applied { .. }))
         .count();
     let not_found: Vec<_> = patterns
         .iter()
@@ -338,18 +408,36 @@ fn format_pattern_report(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> S
         })
         .collect();
 
-    // Single pattern, succeeded: no report.
-    if applied == total && total <= 1 {
+    let matched = format_matched(patterns, outcomes);
+
+    // Single pattern, succeeded, nothing captured worth reporting: no report.
+    if applied == total && total <= 1 && matched.is_empty() {
         return String::new();
     }
 
-    // All succeeded, multiple patterns: brief summary.
+    // All succeeded: summary, plus whatever the regexes captured.
     if applied == total {
-        return format!("{applied}/{total} patterns applied.");
+        let mut report = if total <= 1 {
+            String::new()
+        } else {
+            format!("{applied}/{total} patterns applied.")
+        };
+        if !matched.is_empty() {
+            if !report.is_empty() {
+                report.push_str("\n\n");
+            }
+            report.push_str(&matched);
+        }
+        return report;
     }
 
     // Some or all failed: detailed report.
     let mut report = format!("{applied}/{total} patterns applied.");
+
+    if !matched.is_empty() {
+        report.push_str("\n\n");
+        report.push_str(&matched);
+    }
 
     if !not_found.is_empty() {
         report.push_str("\n\nPatterns not found:");
@@ -368,6 +456,53 @@ fn format_pattern_report(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> S
     }
 
     report
+}
+
+/// Maximum distinct matched strings listed per pattern.
+///
+/// A pattern that binds to more shapes than this has already told the reader
+/// what they need to know.
+const MAX_REPORTED_MATCHES: usize = 8;
+
+/// Lists what each regex pattern actually matched.
+///
+/// Empty when no pattern captured anything, which is every literal-only call.
+/// This is the part a regex author can't otherwise see: the pattern says what
+/// was intended and the diff says what resulted, but only this says what the
+/// engine bound — so a quantifier that ate past its boundary is visible here
+/// without reading a single diff hunk.
+fn format_matched(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
+    let mut sections = Vec::new();
+
+    for (i, (pattern, outcome)) in patterns.iter().zip(outcomes.iter()).enumerate() {
+        let PatternOutcome::Applied { matches } = outcome else {
+            continue;
+        };
+        if matches.is_empty() {
+            continue;
+        }
+
+        let preview = pattern_preview(&pattern.old);
+        let mut section = format!("Pattern #{} `{preview}` matched:", i + 1);
+        for tally in matches.iter().take(MAX_REPORTED_MATCHES) {
+            let text = pattern_preview(&tally.text);
+            let _ = write!(section, "\n  {text:?}");
+            if tally.count > 1 {
+                let _ = write!(section, " ×{}", tally.count);
+            }
+        }
+        if matches.len() > MAX_REPORTED_MATCHES {
+            let _ = write!(
+                section,
+                "\n  …and {} more distinct match(es)",
+                matches.len() - MAX_REPORTED_MATCHES
+            );
+        }
+
+        sections.push(section);
+    }
+
+    sections.join("\n\n")
 }
 
 /// Returns a short preview of a pattern string (first line, max 60 chars).
@@ -653,13 +788,17 @@ impl Content {
     }
 
     /// Replace occurrences of a regex pattern.
+    ///
+    /// The returned [`Replacement`] carries the text each match bound to, so a
+    /// caller can report what the pattern captured rather than only what it
+    /// produced.
     fn replace_regexp(
         &self,
         find: &str,
         replace: &str,
         replace_all: bool,
         case_sensitive: bool,
-    ) -> Result<String, ReplaceError> {
+    ) -> Result<Replacement, ReplaceError> {
         let re = RegexBuilder::new(find)
             .case_insensitive(!case_sensitive)
             .multi_line(true)
@@ -671,13 +810,27 @@ impl Content {
             return Err(ReplaceError::NotFound);
         }
 
-        let result = if replace_all {
+        // Collected before replacing, and bounded the same way the replacement
+        // is: with `replace_all` off only the first match is rewritten, so only
+        // the first is reported.
+        let mut matched = Vec::new();
+        for found in re.find_iter(&self.0) {
+            matched.push(found?.as_str().to_owned());
+            if !replace_all {
+                break;
+            }
+        }
+
+        let content = if replace_all {
             re.replace_all(&self.0, replace)
         } else {
             re.replace(&self.0, replace)
         };
 
-        Ok(result.to_string())
+        Ok(Replacement {
+            content: content.to_string(),
+            matched,
+        })
     }
 }
 
