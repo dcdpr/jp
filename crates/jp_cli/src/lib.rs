@@ -184,8 +184,9 @@ struct Globals {
     /// Write the full tracing log to the given file.
     ///
     /// Use `-` to stream logs to stderr instead.
-    /// When unset, the log is written to a temporary file whose path is printed
-    /// when a run fails or `JP_DEBUG=1` is set.
+    /// When unset, the log is written to a temporary file, which is kept and
+    /// its path printed when a run fails, or when `JP_DEBUG=1` is set and
+    /// stdout is a terminal.
     #[arg(long, global = true, value_name = "PATH")]
     log_file: Option<String>,
 
@@ -356,11 +357,17 @@ pub fn run() -> ExitCode {
     );
 
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
-    let (code, output) = match run_inner(cli, format) {
-        Ok(()) => (0, None),
+    let (code, outcome, output) = match run_inner(cli, format) {
+        Ok(()) => (0, RunOutcome::AsExpected, None),
         Err(error) => {
-            let (code, msg) = parse_error(error.into(), format);
-            (code, Some(msg))
+            let error = cmd::Error::from(error);
+            let outcome = if error.expected {
+                RunOutcome::AsExpected
+            } else {
+                RunOutcome::Failed
+            };
+            let (code, msg) = parse_error(error, format);
+            (code, outcome, Some(msg))
         }
     };
 
@@ -374,7 +381,13 @@ pub fn run() -> ExitCode {
         }
     }
 
-    if should_report_trace_log(code, is_tty)
+    // Read here rather than inside the policy, which stays a pure function of
+    // its inputs.
+    let debug_enabled = env::var("JP_DEBUG")
+        .as_deref()
+        .is_ok_and(|v| v == "1" || v == "true");
+
+    if should_report_trace_log(outcome, is_tty, debug_enabled)
         && let Some(path) = guard.and_then(TracingGuard::persist)
     {
         if format.is_json() {
@@ -391,30 +404,40 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
+/// How a run ended, as far as reporting its trace log goes.
+#[derive(Debug, Clone, Copy)]
+enum RunOutcome {
+    /// The run did what was asked: it either succeeded, or exited non-zero to
+    /// report a result.
+    /// `jp conversation grep` exits 1 when it finds nothing.
+    AsExpected,
+
+    /// The run failed.
+    Failed,
+}
+
 /// Whether to tell the user where the run's trace log was written.
 ///
 /// A failed run always reports it: diagnosing the failure matters more than
 /// keeping the output stream clean.
+/// The exit status alone doesn't answer this, since a command can exit non-zero
+/// to report a result rather than a failure.
 ///
-/// Otherwise the report is opt-in via `JP_DEBUG`, and only when stdout is a
-/// terminal.
+/// Every other run makes the report opt-in via `JP_DEBUG`, and only when stdout
+/// is a terminal.
 /// A piped stdout means `jp` is a component in someone else's pipeline, and a
-/// program consuming it may own the screen — an `fzf` list or preview, for
+/// program consuming it may own the screen: an `fzf` list or preview, for
 /// instance, where two uninvited lines corrupt the layout.
 /// Note that stderr's own tty-ness is the wrong test: in `jp … | fzf`, stderr
 /// *is* the terminal, which is exactly how the corruption happens.
 ///
 /// Set `--log-file` to choose the path when a piped run needs to be traced;
 /// nothing has to be announced when the caller picked the destination.
-fn should_report_trace_log(code: u8, stdout_is_tty: bool) -> bool {
-    if code != 0 {
-        return true;
+fn should_report_trace_log(outcome: RunOutcome, stdout_is_tty: bool, debug_enabled: bool) -> bool {
+    match outcome {
+        RunOutcome::Failed => true,
+        RunOutcome::AsExpected => stdout_is_tty && debug_enabled,
     }
-
-    stdout_is_tty
-        && env::var("JP_DEBUG")
-            .as_deref()
-            .is_ok_and(|v| v == "1" || v == "true")
 }
 
 /// Width in columns to lay output out against.
@@ -969,7 +992,7 @@ pub struct TracingGuard {
 /// Where the full trace log is written.
 enum TraceSink {
     /// A delete-on-drop temp file, kept only when [`TracingGuard::persist`] is
-    /// called (a failed run, or `JP_DEBUG=1`).
+    /// called (a failed run, or `JP_DEBUG=1` with stdout on a terminal).
     Temp(NamedUtf8TempFile),
     /// A caller-chosen path (`--log-file <path>`).
     /// The file always persists.
@@ -1031,9 +1054,9 @@ fn configure_logging(
     let file_env_filter = tracing_subscriber::EnvFilter::new(file_filter.join(","));
 
     // An explicit `--log-file <path>` pins the trace log to that path;
-    // otherwise it goes to a delete-on-drop temp file that is only kept when
-    // the run fails or `JP_DEBUG=1` is set. (`-` selects the stderr layer
-    // below, not a file path.)
+    // otherwise it goes to a delete-on-drop temp file that is only kept when the
+    // run fails, or when `JP_DEBUG=1` is set and stdout is a terminal. (`-`
+    // selects the stderr layer below, not a file path.)
     let (file_writer, sink) = match log_file {
         Some(path) if path != "-" => {
             let file = fs::File::create(path).ok()?;

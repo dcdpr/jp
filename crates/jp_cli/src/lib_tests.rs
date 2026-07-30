@@ -25,17 +25,33 @@ use super::*;
 #[test]
 fn a_piped_successful_run_never_announces_its_trace_log() {
     // Two uninvited lines on stderr corrupt any program that owns the screen,
-    // and in `jp … | fzf` stderr *is* the terminal. The tty check short-circuits
-    // the env lookup, so this holds whatever `JP_DEBUG` is set to around the
-    // test run.
-    assert!(!should_report_trace_log(0, false));
+    // and in `jp … | fzf` stderr *is* the terminal. `JP_DEBUG` is pinned on
+    // here because it's the only reason a non-failing run would print at all.
+    assert!(!should_report_trace_log(
+        RunOutcome::AsExpected,
+        false,
+        true
+    ));
+}
+
+#[test]
+fn a_successful_run_on_a_terminal_announces_its_trace_log_only_under_jp_debug() {
+    assert!(should_report_trace_log(RunOutcome::AsExpected, true, true));
+    assert!(!should_report_trace_log(
+        RunOutcome::AsExpected,
+        true,
+        false
+    ));
 }
 
 #[test]
 fn a_failed_run_announces_its_trace_log_even_when_piped() {
-    // Diagnosing a failure beats keeping the pipeline clean.
-    assert!(should_report_trace_log(1, false));
-    assert!(should_report_trace_log(2, false));
+    // Diagnosing a failure beats keeping the pipeline clean, so neither the tty
+    // nor `JP_DEBUG` has a say. A command that exits non-zero to report a
+    // result (`grep` finding nothing) is `AsExpected`, not `Failed`, and takes
+    // the rules above instead.
+    assert!(should_report_trace_log(RunOutcome::Failed, false, false));
+    assert!(should_report_trace_log(RunOutcome::Failed, true, false));
 }
 
 fn write_config(path: &camino::Utf8Path, content: &str) {

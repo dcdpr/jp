@@ -199,7 +199,14 @@ fn test_grep_no_matches() {
         pattern: "nonexistent".into(),
         ..Default::default()
     };
-    assert!(grep.run(&mut ctx, vec![]).is_err());
+
+    let error = grep.run(&mut ctx, vec![]).unwrap_err();
+
+    // Non-zero, so a script can branch on "found nothing", but marked expected:
+    // `JP_DEBUG=1 jp c grep ... | fzf` must not get the trace log location
+    // printed into fzf's terminal just because nothing matched.
+    assert_eq!(error.code.get(), 1);
+    assert!(error.expected);
 }
 
 #[test]
