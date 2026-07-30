@@ -34,6 +34,26 @@ use crate::{
     id::{McpServerId, McpToolId},
 };
 
+/// A batch of MCP servers starting in the background.
+///
+/// Returned by [`Client::run_services`].
+/// Await the tasks in [`joins`] to learn when each server finishes starting;
+/// [`pending`] names the servers the batch is starting, so callers can report
+/// which ones are still booting.
+///
+/// [`joins`]: Self::joins
+/// [`pending`]: Self::pending
+pub struct StartupSet {
+    /// One task per starting server.
+    /// Each resolves to the id of the server it started (also for `optional`
+    /// servers that failed and were skipped), or to the startup error for a
+    /// required server.
+    pub joins: JoinSet<Result<McpServerId>>,
+
+    /// Ids of the servers being started, sorted by name.
+    pub pending: Vec<McpServerId>,
+}
+
 /// Outcome of attempting to start an MCP server.
 enum SpawnOutcome {
     /// Server started successfully.
@@ -166,7 +186,7 @@ impl Client {
         &mut self,
         server_ids: HashSet<McpServerId>,
         handle: Handle,
-    ) -> Result<JoinSet<Result<()>>> {
+    ) -> Result<StartupSet> {
         let mut clients = self.services.write().await;
         let servers_to_stop: Vec<_> = clients
             .keys()
@@ -181,7 +201,8 @@ impl Client {
         }
 
         let _guard = handle.enter();
-        let mut joins = JoinSet::<Result<()>>::new();
+        let mut joins = JoinSet::<Result<McpServerId>>::new();
+        let mut pending = Vec::new();
         for server_id in server_ids {
             // Determine which servers to start (in configs but not currently
             // active)
@@ -190,6 +211,7 @@ impl Client {
             }
 
             trace!(id = %server_id, "Starting MCP server.");
+            pending.push(server_id.clone());
 
             joins.spawn({
                 let servers = self.servers.clone();
@@ -206,12 +228,16 @@ impl Client {
                         }
                         SpawnOutcome::OptionalFailed => {}
                     }
-                    Ok(())
+                    Ok(server_id)
                 }
             });
         }
 
-        Ok(joins)
+        // `server_ids` is a set, so spawn order is nondeterministic; sort for
+        // a stable presentation order.
+        pending.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+
+        Ok(StartupSet { joins, pending })
     }
 
     /// Check whether a server has an active running service.
@@ -329,17 +355,32 @@ impl Client {
                     spawn_stderr_forwarder(stderr, id.clone(), Arc::clone(&stderr_tail));
                 }
 
-                // Create a timeout for the connection
-                let timeout = Duration::from_mins(1);
+                // Give the server time to start and answer the MCP
+                // `initialize` handshake. Configurable per server because a
+                // server that builds from source on spawn can legitimately
+                // take minutes.
+                let timeout = Duration::from_secs(config.startup_timeout_secs.into());
 
-                // Serve the client with timeout
-                let client = tokio::time::timeout(timeout, async { ().serve(child_process).await })
-                    .await?
-                    .map_err(|error| Error::InitializeError {
-                        cmd: cmd_display,
-                        error: error.to_string(),
-                        stderr: render_stderr_tail(&stderr_tail),
-                    })?;
+                // Serve the client with timeout. Both failure paths attach
+                // the captured stderr tail: it usually names the actual
+                // problem (build output, missing dependency, lock contention).
+                let client =
+                    match tokio::time::timeout(timeout, async { ().serve(child_process).await })
+                        .await
+                    {
+                        Ok(result) => result.map_err(|error| Error::InitializeError {
+                            cmd: cmd_display,
+                            error: error.to_string(),
+                            stderr: render_stderr_tail(&stderr_tail),
+                        })?,
+                        Err(_) => {
+                            return Err(Error::InitializeTimeout {
+                                cmd: cmd_display,
+                                timeout_secs: config.startup_timeout_secs,
+                                stderr: render_stderr_tail(&stderr_tail),
+                            });
+                        }
+                    };
 
                 Ok(client)
             }

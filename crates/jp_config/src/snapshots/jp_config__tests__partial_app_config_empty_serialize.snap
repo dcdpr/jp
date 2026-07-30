@@ -105,6 +105,11 @@ PartialAppConfig {
             theme: None,
             hr_style: None,
         },
+        mcp_startup: PartialMcpStartupConfig {
+            show: None,
+            delay_secs: None,
+            interval_ms: None,
+        },
         reasoning: PartialReasoningConfig {
             display: None,
             summary_model: None,

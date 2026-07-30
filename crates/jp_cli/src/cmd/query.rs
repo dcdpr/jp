@@ -81,7 +81,7 @@ use jp_config::{
     },
     fs::{expand_tilde, load_partial},
     model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
-    style::reasoning::ReasoningDisplayConfig,
+    style::{mcp_startup::McpStartupConfig, reasoning::ReasoningDisplayConfig},
 };
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, ConversationStream,
@@ -97,6 +97,7 @@ use jp_llm::{
         tool_definitions,
     },
 };
+use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
 use jp_storage::backend::Projection;
 use jp_task::task::TitleGeneratorTask;
@@ -131,6 +132,7 @@ use crate::{
     parser::AttachmentUrlOrPath,
     render::TurnView,
     signals::SignalRouter,
+    timer::spawn_line_timer,
 };
 
 type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -403,7 +405,7 @@ impl Query {
             self.apply_pre_query_compaction(&lock, &cfg).await?;
         }
 
-        let mut mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
+        let mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
 
         let conv_title = lock.metadata().title.clone();
 
@@ -570,10 +572,15 @@ impl Query {
             }
         }
 
-        // Wait for all MCP servers to finish loading.
-        while let Some(result) = mcp_servers_handle.join_next().await {
-            result??;
-        }
+        // Wait for all MCP servers to finish loading, showing a timer line
+        // when the wait takes long enough to be noticeable.
+        await_mcp_servers(
+            mcp_servers_handle,
+            cfg.style.mcp_startup.clone(),
+            ctx.printer.clone(),
+            ctx.term.is_tty,
+        )
+        .await?;
 
         let forced_tool = cfg.assistant.tool_choice.function_name();
         let tools =
@@ -1099,6 +1106,81 @@ impl Query {
             LockOutcome::NewConversation => self.create_new_conversation(ctx),
             LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None),
         }
+    }
+}
+
+/// Wait for background MCP server startups to complete.
+///
+/// Shows a single aggregate timer line on stderr once the wait exceeds the
+/// configured delay, updating the listed server names as startups finish.
+/// Servers that finish within the delay never trigger the line.
+///
+/// Returns the first startup error, after clearing the timer line so the error
+/// renders on a clean row.
+async fn await_mcp_servers(
+    mut startup: StartupSet,
+    config: McpStartupConfig,
+    printer: Arc<Printer>,
+    is_tty: bool,
+) -> std::result::Result<(), cmd::Error> {
+    if startup.joins.is_empty() {
+        return Ok(());
+    }
+
+    let timer = spawn_line_timer(
+        printer,
+        config.show && is_tty,
+        Duration::from_secs(config.delay_secs.into()),
+        Duration::from_millis(config.interval_ms.into()),
+        |secs, status| {
+            format!(
+                "\r\x1b[K⏱ Starting {}… {secs:.1}s",
+                status.unwrap_or("MCP servers")
+            )
+        },
+    );
+    if let Some(timer) = &timer {
+        timer.set_status(mcp_startup_status(&startup.pending));
+    }
+
+    let result = loop {
+        match startup.joins.join_next().await {
+            None => break Ok(()),
+            Some(Err(error)) => break Err(error.into()),
+            Some(Ok(Err(error))) => break Err(error.into()),
+            Some(Ok(Ok(id))) => {
+                startup.pending.retain(|pending| pending != &id);
+                if let Some(timer) = &timer
+                    && !startup.pending.is_empty()
+                {
+                    timer.set_status(mcp_startup_status(&startup.pending));
+                }
+            }
+        }
+    };
+
+    if let Some(timer) = timer {
+        timer.finish().await;
+    }
+
+    result
+}
+
+/// Render the pending-server fragment for the MCP startup timer line.
+///
+/// One server renders as `MCP server bookworm`; several render as `2 MCP
+/// servers (bookworm, grizzly)`.
+fn mcp_startup_status(pending: &[McpServerId]) -> String {
+    match pending {
+        [id] => format!("MCP server {id}"),
+        ids => format!(
+            "{} MCP servers ({})",
+            ids.len(),
+            ids.iter()
+                .map(McpServerId::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     }
 }
 

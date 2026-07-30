@@ -37,6 +37,10 @@ impl PartialConfigDelta for PartialMcpProviderConfig {
                 variables: delta_opt_vec(prev.variables.as_ref(), next.variables),
                 checksum: delta_opt_partial(prev.checksum.as_ref(), next.checksum),
                 optional: delta_opt(prev.optional.as_ref(), next.optional),
+                startup_timeout_secs: delta_opt(
+                    prev.startup_timeout_secs.as_ref(),
+                    next.startup_timeout_secs,
+                ),
             }),
         }
     }
@@ -100,6 +104,17 @@ pub struct StdioConfig {
     /// server failed to start.
     #[setting(default)]
     pub optional: bool,
+
+    /// Timeout in seconds for the server to start and complete the MCP
+    /// handshake.
+    ///
+    /// Defaults to `60`.
+    /// The window covers everything from spawning the command to the server
+    /// answering the MCP `initialize` request.
+    /// Increase it for servers that do expensive work on startup, such as
+    /// compiling from source.
+    #[setting(default = 60)]
+    pub startup_timeout_secs: u32,
 }
 
 impl AssignKeyValue for PartialStdioConfig {
@@ -111,6 +126,7 @@ impl AssignKeyValue for PartialStdioConfig {
             _ if kv.p("env") => kv.try_some_vec_of_strings(&mut self.variables)?,
             _ if kv.p("binary_checksum") => self.checksum.assign(kv)?,
             "optional" => self.optional = kv.try_some_bool()?,
+            "startup_timeout_secs" => self.startup_timeout_secs = kv.try_some_u32()?,
             _ => return missing_key(&kv),
         }
 
@@ -128,6 +144,10 @@ impl ToPartial for StdioConfig {
             variables: partial_opt(&self.variables, defaults.variables),
             checksum: partial_opt_config(self.checksum.as_ref(), defaults.checksum),
             optional: partial_opt(&self.optional, defaults.optional),
+            startup_timeout_secs: partial_opt(
+                &self.startup_timeout_secs,
+                defaults.startup_timeout_secs,
+            ),
         }
     }
 }

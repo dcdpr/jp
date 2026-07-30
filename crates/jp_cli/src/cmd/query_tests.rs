@@ -1357,3 +1357,117 @@ fn pending_trim_default_is_noop() {
         "a default PendingStreamTrim must not mutate the stream"
     );
 }
+
+#[test]
+fn mcp_startup_status_single_server() {
+    assert_eq!(
+        mcp_startup_status(&[McpServerId::new("bookworm")]),
+        "MCP server bookworm"
+    );
+}
+
+#[test]
+fn mcp_startup_status_multiple_servers() {
+    assert_eq!(
+        mcp_startup_status(&[McpServerId::new("bookworm"), McpServerId::new("grizzly")]),
+        "2 MCP servers (bookworm, grizzly)"
+    );
+}
+
+/// Timer settings that render immediately, so tests don't wait out a delay.
+fn immediate_mcp_startup_config() -> McpStartupConfig {
+    McpStartupConfig {
+        show: true,
+        delay_secs: 0,
+        interval_ms: 10,
+    }
+}
+
+#[tokio::test]
+async fn await_mcp_servers_drains_all_startups() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async { Ok(McpServerId::new("bookworm")) });
+    joins.spawn(async { Ok(McpServerId::new("grizzly")) });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm"), McpServerId::new("grizzly")],
+    };
+
+    await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        Arc::new(printer),
+        false,
+    )
+    .await
+    .expect("all startups succeed");
+}
+
+#[tokio::test]
+async fn await_mcp_servers_propagates_startup_error() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async { Err(jp_mcp::Error::UnknownServer(McpServerId::new("bookworm"))) });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm")],
+    };
+
+    let error = await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        Arc::new(printer),
+        false,
+    )
+    .await
+    .expect_err("a failed required server must fail the wait");
+
+    assert_eq!(error.message.as_deref(), Some("MCP error"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn await_mcp_servers_shows_and_clears_timer_line() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+
+    // Hold the startup window open until the test releases it, so the timer
+    // is guaranteed to tick while the server is still "starting".
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        release_rx.await.ok();
+        Ok(McpServerId::new("bookworm"))
+    });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm")],
+    };
+
+    let wait = tokio::spawn(await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        printer.clone(),
+        true,
+    ));
+
+    // Let a few ticks land before releasing the startup.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    release_tx.send(()).expect("wait task is still running");
+    wait.await
+        .expect("task did not panic")
+        .expect("startup succeeds");
+    printer.flush();
+
+    let chrome = err.lock();
+    assert!(
+        chrome.contains("⏱ Starting MCP server bookworm…"),
+        "timer line should name the pending server.\nChrome:\n{chrome}"
+    );
+    assert!(
+        chrome.ends_with("\r\x1b[K"),
+        "finishing the wait must leave the line cleared.\nChrome:\n{chrome}"
+    );
+}
