@@ -161,6 +161,17 @@ struct Globals {
     #[arg(short = 'w', long, global = true)]
     workspace: Option<WorkspaceIdOrPath>,
 
+    /// Lay output out against this many columns.
+    ///
+    /// Detected automatically when stdout is a terminal.
+    /// Set it when stdout is a pipe that still renders for a human at a known
+    /// width — an `fzf` preview pane, for instance, which exports
+    /// `$FZF_PREVIEW_COLUMNS`.
+    /// `0` means unknown, which is the default when piped: content keeps its
+    /// natural width instead of being fitted to a guess.
+    #[arg(long, global = true, value_name = "COLUMNS")]
+    width: Option<u16>,
+
     /// The format of the log output written to stderr.
     ///
     /// Defaults to "text" when stderr is a terminal, and "json" when stderr is
@@ -383,11 +394,19 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
-/// Width of the controlling terminal in columns, when stdout is a TTY.
+/// Width in columns to lay output out against.
 ///
-/// `None` when stdout is piped or redirected, so output keeps its full width
-/// for machine consumption rather than being laid out against a guessed size.
-fn detect_terminal_width() -> Option<u16> {
+/// An explicit `--width` wins, with `0` meaning unknown.
+/// Otherwise the controlling terminal's width is used when stdout is a TTY.
+///
+/// `None` when stdout is piped or redirected and no width was given, so output
+/// keeps its full width for machine consumption rather than being laid out
+/// against a guessed size.
+fn detect_terminal_width(override_width: Option<u16>) -> Option<u16> {
+    if let Some(width) = override_width {
+        return (width > 0).then_some(width);
+    }
+
     if !stdout().is_terminal() {
         return None;
     }
@@ -396,7 +415,8 @@ fn detect_terminal_width() -> Option<u16> {
 }
 
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
-    let printer = Printer::terminal(format).with_terminal_width(detect_terminal_width());
+    let printer =
+        Printer::terminal(format).with_terminal_width(detect_terminal_width(cli.globals.width));
 
     // `jp init` is a special case that doesn't need the full startup pipeline.
     if let Commands::Init(args) = &cli.command {
