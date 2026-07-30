@@ -72,6 +72,82 @@ fn render_includes_hot_leaves_table() {
 }
 
 #[test]
+fn render_reports_self_time_not_inclusive_totals() {
+    // The fixture is a straight chain 100 -> 100 -> 80 -> 60, so self time is
+    // 0, 20, 20, 60. A self-time table must surface the leaf, not the root that
+    // merely contains it.
+    let report = render(
+        &fixture_threads(),
+        &fixture_launch(),
+        &["c".into()],
+        "x.txt",
+    );
+
+    let start = report.find("## Hot code").expect("self-time section");
+    let end = report[start..]
+        .find("## Hot leaves")
+        .map_or(report.len(), |off| start + off);
+    let section = &report[start..end];
+
+    assert!(
+        section.contains("| 60 | 60.0% | `PartialAppConfig::clone` |"),
+        "leaf should dominate self time; section was:\n{section}"
+    );
+    assert!(
+        !section.contains("`jp_cli::run`"),
+        "a frame that only calls others has no self time; section was:\n{section}"
+    );
+}
+
+#[test]
+fn render_hot_code_spans_worker_threads_and_excludes_parked_frames() {
+    // A parked main thread plus a busy worker: the report must attribute the
+    // work to the worker rather than showing only the latch wait.
+    let threads = vec![
+        Thread {
+            header: "Thread_1  com.apple.main-thread".into(),
+            frames: vec![
+                Frame {
+                    depth: 0,
+                    samples: 90,
+                    symbol: "jp_cli::run".into(),
+                },
+                Frame {
+                    depth: 1,
+                    samples: 90,
+                    symbol: "_pthread_cond_wait".into(),
+                },
+            ],
+        },
+        Thread {
+            header: "Thread_2".into(),
+            frames: vec![
+                Frame {
+                    depth: 0,
+                    samples: 90,
+                    symbol: "rayon worker".into(),
+                },
+                Frame {
+                    depth: 1,
+                    samples: 70,
+                    symbol: "serde_json::from_str".into(),
+                },
+            ],
+        },
+    ];
+    let report = render(&threads, &fixture_launch(), &["c".into()], "x.txt");
+
+    assert!(
+        report.contains("`serde_json::from_str`"),
+        "worker-thread work must appear:\n{report}"
+    );
+    assert!(
+        report.contains("Parked/idle: 90"),
+        "parked samples must be reported, not silently dropped:\n{report}"
+    );
+}
+
+#[test]
 fn render_includes_top_stacks() {
     let report = render(
         &fixture_threads(),

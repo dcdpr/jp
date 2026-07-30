@@ -1,22 +1,25 @@
 //! Render parsed `sample(1)` output as a Markdown report.
 //!
-//! Three sections — all sized to fit comfortably in an assistant's context
+//! Four sections, all sized to fit comfortably in an assistant's context
 //! window:
 //!
-//! 1. Headline stats: total samples, wall-clock duration, exit status.
-//! 2. Top hot leaves across the main thread, aggregated by demangled symbol.
-//! 3. The deepest stacks on the main thread, with their frames.
+//! 1. Headline stats: thread count, wall-clock duration, exit status.
+//! 2. Hot code by *self* time across every thread — where cycles actually go.
+//! 3. Inclusive totals on the main thread — which call paths dominate.
+//! 4. The heaviest stacks on the main thread, with their frames.
 //!
-//! "Main thread" here means the first thread emitted by `sample(1)`, which is
-//! the one tied to the process's primary dispatch queue.
-//! Worker threads parked in `kevent` / `pthread_cond_wait` carry no signal for
-//! a CLI profiling run, so we deliberately omit them.
+//! Section 2 spans all threads on purpose.
+//! `jp` parallelizes with rayon, so on a workload like `conversation grep` the
+//! main thread is parked on a latch and every frame worth reading lives on a
+//! worker.
+//! Idle parking frames are partitioned out and reported as one total rather
+//! than dropped, so the numbers still reconcile.
 
 use std::{fmt::Write as _, time::Duration};
 
 use crate::debug_jp::util::{
     launch::LaunchResult,
-    profile_sampling_parse::{Frame, Thread},
+    profile_sampling_parse::{Frame, Thread, is_idle_symbol, self_samples_by_symbol},
 };
 
 /// Top-N for each section.
@@ -38,6 +41,7 @@ pub(crate) fn render(
     let _ = writeln!(out, "**Command:** `jp {}`\n", args.join(" "));
     write_run_stats(&mut out, launch);
     write_headline(&mut out, threads);
+    write_hot_code(&mut out, threads);
     write_hot_leaves(&mut out, threads);
     write_hot_stacks(&mut out, threads);
     let _ = writeln!(out, "\n---\n\n*Raw `sample(1)` output: `{sample_path}`*");
@@ -91,10 +95,55 @@ fn write_headline(out: &mut String, threads: &[Thread]) {
     let _ = writeln!(out);
 }
 
+/// Self-time leaderboard across every thread, with idle parking separated out.
+fn write_hot_code(out: &mut String, threads: &[Thread]) {
+    let _ = writeln!(
+        out,
+        "## Hot code (self time, all threads, top {TOP_LEAVES})"
+    );
+    let _ = writeln!(out);
+
+    let all = self_samples_by_symbol(threads);
+    if all.is_empty() {
+        let _ = writeln!(out, "*No data.*\n");
+        return;
+    }
+
+    let (idle, busy): (Vec<_>, Vec<_>) = all
+        .into_iter()
+        .partition(|(symbol, _)| is_idle_symbol(symbol));
+    let idle_total: u64 = idle.iter().map(|entry| entry.1).sum();
+    let busy_total: u64 = busy.iter().map(|entry| entry.1).sum();
+
+    let _ = writeln!(
+        out,
+        "Working: **{busy_total}** samples. Parked/idle: {idle_total} (excluded below).\n"
+    );
+    let _ = writeln!(out, "| Self | Share | Symbol |");
+    let _ = writeln!(out, "| ---: | ----: | :----- |");
+    for (symbol, samples) in busy.iter().take(TOP_LEAVES) {
+        // Percent to one decimal, in integer arithmetic: sample counts are far
+        // below the range where the f64 cast would matter, but the lint is right
+        // that the cast has no business here.
+        let tenths = samples
+            .saturating_mul(1000)
+            .checked_div(busy_total)
+            .unwrap_or(0);
+        let _ = writeln!(
+            out,
+            "| {samples} | {}.{}% | `{}` |",
+            tenths / 10,
+            tenths % 10,
+            escape_pipes(symbol)
+        );
+    }
+    let _ = writeln!(out);
+}
+
 fn write_hot_leaves(out: &mut String, threads: &[Thread]) {
     let _ = writeln!(
         out,
-        "## Hot leaves (main thread, top {TOP_LEAVES} by self-sum)"
+        "## Hot leaves (main thread, top {TOP_LEAVES}, inclusive)"
     );
     let _ = writeln!(out);
     let Some(main) = threads.first() else {
