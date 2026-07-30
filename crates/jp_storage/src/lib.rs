@@ -7,11 +7,7 @@ pub mod load;
 pub mod trash;
 pub mod validate;
 
-use std::{
-    fs,
-    io::{self, BufReader},
-    time::SystemTime,
-};
+use std::{fs, io, time::SystemTime};
 
 use camino::{Utf8DirEntry, Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, NaiveDateTime, Utc};
@@ -899,10 +895,9 @@ fn get_expiring_timestamp(root: &Utf8Path) -> Option<DateTime<Utc>> {
         expires_at: Option<Box<serde_json::value::RawValue>>,
     }
     let path = root.join(METADATA_FILE);
-    let file = fs::File::open(&path).ok()?;
-    let reader = BufReader::new(file);
+    let bytes = fs::read(&path).ok()?;
 
-    let conversation: RawConversation = match serde_json::from_reader(reader) {
+    let conversation: RawConversation = match serde_json::from_slice(&bytes) {
         Ok(conversation) => conversation,
         Err(error) => {
             warn!(%error, path = %path, "Error parsing JSON metadata file.");
