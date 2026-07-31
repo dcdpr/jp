@@ -1629,9 +1629,9 @@ The OpenAI provider does this for reasoning summary parts: on each
 Without it, a part opening with `**Header**` parses as bold continuing the
 previous part's last sentence.
 
-Segmentation therefore lands in the stored reasoning text, and every consumer
-of a conversation — replay, the web view, `jp c grep`, export — reads it from
-the text with no rule to re-implement.
+Segmentation therefore lands in the stored reasoning text, and every consumer of
+a conversation — replay, the web view, `jp c grep`, export — reads it from the
+text with no rule to re-implement.
 
 #### Why not one block per response
 
@@ -1641,9 +1641,9 @@ some providers cannot comply with it.
 Anthropic interrupts a `thinking` content block with an opaque
 `redacted_thinking` block and resumes the thinking in a third block, splitting
 one region of reasoning mid-word across three items.
-Each `thinking` block carries its own signature, and a `ConversationEvent`
-holds one `anthropic_thinking_signature`, so merging the halves upstream drops
-a signature and the next request fails signature validation.
+Each `thinking` block carries its own signature, and a `ConversationEvent` holds
+one `anthropic_thinking_signature`, so merging the halves upstream drops a
+signature and the next request fails signature validation.
 The three items have to stay three events, which leaves the renderer to join
 them.
 
