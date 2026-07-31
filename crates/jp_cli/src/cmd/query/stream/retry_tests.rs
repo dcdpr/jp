@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use jp_config::{
     AppConfig,
-    assistant::request::{CachePolicy, RequestConfig},
+    assistant::request::{CachePolicy, MaxResponseBytes, RequestConfig},
 };
 use jp_conversation::{
     Conversation,
@@ -21,7 +21,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         base_backoff_ms: 1, // 1ms for fast tests
         max_backoff_secs: 1,
         stream_idle_timeout_secs: 120,
-        max_response_bytes: 1_048_576,
+        max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
     StreamRetryState::new(config, false)
@@ -86,7 +86,7 @@ fn backoff_uses_retry_after_when_present() {
         base_backoff_ms: 1,
         max_backoff_secs: 120,
         stream_idle_timeout_secs: 120,
-        max_response_bytes: 1_048_576,
+        max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
     let state = StreamRetryState::new(config, false);
@@ -343,7 +343,7 @@ async fn interrupt_during_backoff_cuts_wait_short() {
         base_backoff_ms: 1,
         max_backoff_secs: 120,
         stream_idle_timeout_secs: 120,
-        max_response_bytes: 1_048_576,
+        max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
     let mut retry_state = StreamRetryState::new(config, false);

@@ -183,6 +183,7 @@ fn generate_enum_schema(
         .iter()
         .all(|v| matches!(v.value.fields, Fields::Unit));
     let mut default_index = None;
+    let mut expanded_index = None;
 
     let variants_types = variants
         .iter()
@@ -190,6 +191,10 @@ fn generate_enum_schema(
         .filter_map(|(i, v)| {
             if v.is_default() {
                 default_index = Some(i);
+            }
+
+            if v.args.expanded {
+                expanded_index = Some(i);
             }
 
             if v.is_excluded() {
@@ -200,6 +205,10 @@ fn generate_enum_schema(
         })
         .collect::<Vec<_>>();
 
+    let expanded = expanded_index.map_or_else(
+        || quote! {},
+        |index| quote! { union = union.with_expanded_index(#index); },
+    );
     let default_index = map_option_argument_quote(default_index);
 
     if is_all_unit_enum {
@@ -217,12 +226,16 @@ fn generate_enum_schema(
         quote! {
             #deprecated
             #description
-            schema.union(UnionType::from_schemas(
+
+            let mut union = UnionType::from_schemas(
                 [
                     #(#variants_types),*
                 ],
                 #default_index,
-            ))
+            );
+            #expanded
+
+            schema.union(union)
         }
     }
 }

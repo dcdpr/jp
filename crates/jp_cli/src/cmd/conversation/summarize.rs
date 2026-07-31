@@ -96,7 +96,7 @@ pub async fn generate_summary(
         stream,
         instructions,
         &user_message,
-        app_cfg.assistant.request.max_response_bytes,
+        app_cfg.assistant.request.max_response_bytes.bytes(),
     )
     .await
 }
@@ -121,7 +121,7 @@ async fn summarize_stream(
     mut stream: ConversationStream,
     instructions: &str,
     user_message: &str,
-    max_response_bytes: u32,
+    max_response_bytes: Option<u64>,
 ) -> Result<String> {
     let retry_config = RetryConfig::default().with_max_response_bytes(max_response_bytes);
 

@@ -92,6 +92,22 @@ pub const ENV_PREFIX: &str = "JP_CFG_";
 /// Convenience type for boxed errors.
 type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 
+/// What a user can write at a config path.
+///
+/// A path takes a value, names the keys of a nested block, or both when a block
+/// also accepts a shorthand value.
+enum Addressable {
+    /// A value at this path, with nothing nested under it.
+    Value,
+
+    /// Keys under this path, with no value at the path itself.
+    Keys(Schema),
+
+    /// Either a shorthand value at this path, or the keys of the form it
+    /// abbreviates.
+    ValueOrKeys(Schema),
+}
+
 /// The global configuration for Jean Pierre.
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
@@ -279,7 +295,7 @@ impl ToPartial for AppConfig {
     fn to_partial(&self) -> Self::Partial {
         let defaults = Self::Partial::default();
 
-        Self::Partial {
+        let mut partial = Self::Partial {
             inherit: partial_opt(&self.inherit, defaults.inherit),
             config_load_paths: partial_opt(&self.config_load_paths, defaults.config_load_paths),
             extends: partial_opt(&self.extends, defaults.extends),
@@ -292,7 +308,19 @@ impl ToPartial for AppConfig {
             providers: self.providers.to_partial(),
             plugins: self.plugins.to_partial(),
             user: self.user.to_partial(),
-        }
+        };
+
+        // Inquiry settings are resolved by inheriting from the top-level
+        // assistant, so a field that merely equals the assistant's value holds
+        // no choice of the user's. Keeping only the differences is what lets a
+        // later layer that changes `assistant` still reach the inquiry: a
+        // recorded copy of the inherited value would pin it instead.
+        partial.conversation.inquiry.assistant = self
+            .assistant
+            .to_partial()
+            .delta(partial.conversation.inquiry.assistant);
+
+        partial
     }
 }
 
@@ -315,7 +343,17 @@ impl AppConfig {
     ///
     /// Returns an error if `default_values` fails, if the partial is missing
     /// required fields, or if the resolved configuration fails validation.
-    pub fn from_partial_with_defaults(partial: PartialAppConfig) -> Result<Self, ConfigError> {
+    pub fn from_partial_with_defaults(mut partial: PartialAppConfig) -> Result<Self, ConfigError> {
+        // Inquiry settings inherit from the top-level assistant. This runs
+        // before the `#[setting(default)]` layer below, so an unset inquiry
+        // field takes the user's configured assistant value rather than the
+        // type's default.
+        partial.conversation.inquiry.assistant = partial
+            .conversation
+            .inquiry
+            .assistant
+            .fill_from(partial.assistant.clone());
+
         let partial = match PartialAppConfig::default_values(&())? {
             Some(defaults) => partial.fill_from(defaults),
             None => partial,
@@ -386,14 +424,57 @@ impl AppConfig {
                     format!("{prefix}.{name}")
                 };
 
-                match field.schema.ty {
-                    SchemaType::Struct(_) => stack.push((field.schema, path)),
-                    _ => output.push(path),
+                match Self::addressable(field.schema) {
+                    Addressable::Value => output.push(path),
+                    Addressable::Keys(inner) => stack.push((inner, path)),
+                    Addressable::ValueOrKeys(inner) => {
+                        output.push(path.clone());
+                        stack.push((inner, path));
+                    }
                 }
             }
         }
 
         output
+    }
+
+    /// What a schema lets a user write at its own path.
+    ///
+    /// `Option<T>` wraps a named union in a second union rather than merging
+    /// into it, so this recurses through both levels.
+    fn addressable(schema: Schema) -> Addressable {
+        let SchemaType::Union(union) = schema.ty else {
+            return match schema.ty {
+                SchemaType::Struct(_) => Addressable::Keys(schema),
+                _ => Addressable::Value,
+            };
+        };
+
+        // A union naming an expanded form describes one value written several
+        // ways: the shorthand goes at this path, and the expanded form names the
+        // keys. Both are writable, so both are reported.
+        if let Some(expanded) = union.expanded_variant() {
+            return match Self::addressable(expanded.clone()) {
+                Addressable::Keys(inner) | Addressable::ValueOrKeys(inner) => {
+                    Addressable::ValueOrKeys(inner)
+                }
+                Addressable::Value => Addressable::Value,
+            };
+        }
+
+        // Otherwise the variants are distinct values. Only `Option<T>` resolves
+        // to something addressable, since dropping null leaves one shape; a union
+        // of several real shapes has no single set of keys, and which keys apply
+        // depends on what the user wrote (`editor.cmd = "code"` has no `args`).
+        let mut variants = union
+            .variants_types
+            .into_iter()
+            .filter(|variant| !matches!(variant.ty, SchemaType::Null));
+
+        match (variants.next(), variants.next()) {
+            (Some(only), None) => Self::addressable(*only),
+            _ => Addressable::Value,
+        }
     }
 
     /// Return a list of all environment variable names in the configuration.
@@ -469,11 +550,15 @@ impl AppConfig {
             .resolve_in_place(aliases)
             .map_err(|e| Error::Custom(format!("assistant.model.id: {e}").into()))?;
 
-        if let Some(ref mut model) = self.conversation.inquiry.assistant.model {
-            model.id.resolve_in_place(aliases).map_err(|e| {
+        self.conversation
+            .inquiry
+            .assistant
+            .model
+            .id
+            .resolve_in_place(aliases)
+            .map_err(|e| {
                 Error::Custom(format!("conversation.inquiry.assistant.model.id: {e}").into())
             })?;
-        }
 
         if let Some(ref mut model) = self.conversation.title.generate.model {
             model.id.resolve_in_place(aliases).map_err(|e| {
@@ -585,10 +670,12 @@ impl PartialAppConfig {
         aliases: &indexmap::IndexMap<String, model::id::ModelIdOrAliasConfig>,
     ) {
         self.assistant.model.id.resolve_in_place(aliases);
-
-        if let Some(ref mut model) = self.conversation.inquiry.assistant.model {
-            model.id.resolve_in_place(aliases);
-        }
+        self.conversation
+            .inquiry
+            .assistant
+            .model
+            .id
+            .resolve_in_place(aliases);
 
         if let Some(ref mut model) = self.conversation.title.generate.model {
             model.id.resolve_in_place(aliases);

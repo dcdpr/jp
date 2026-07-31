@@ -13,22 +13,17 @@ use serde::{Deserialize, Serialize};
 use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    assistant::{
-        request::{PartialRequestConfig, RequestConfig},
-        sections::SectionConfig,
-        tool_choice::ToolChoice,
-    },
+    assistant::{AssistantConfig, PartialAssistantConfig},
     conversation::{
         attachment::{AttachmentConfig, PartialAttachmentConfig},
         compaction::{CompactionConfig, PartialCompactionConfig},
         title::{PartialTitleConfig, TitleConfig},
         tool::{PartialToolsConfig, ToolsConfig},
     },
-    delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_vec},
-    fill::{self, FillDefaults},
+    delta::{PartialConfigDelta, delta_opt},
+    fill::FillDefaults,
     internal::merge::vec_with_strategy,
-    model::{ModelConfig, PartialModelConfig},
-    partial::{ToPartial, partial_opt, partial_opts},
+    partial::{ToPartial, partial_opt},
     types::vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
     validate::Validator,
 };
@@ -177,11 +172,15 @@ impl ToPartial for ConversationConfig {
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct InquiryConfig {
-    /// Assistant overrides for inquiry requests.
+    /// Assistant settings for inquiry requests.
     ///
-    /// Unset fields fall back to the parent assistant config.
+    /// Accepts every key from the top-level `assistant` section.
+    /// Keys left unset here take the value from `assistant`, so
+    /// `conversation.inquiry.assistant.model.id` can point an inquiry at a
+    /// cheaper model while its system prompt and request settings stay whatever
+    /// the main assistant uses.
     #[setting(nested)]
-    pub assistant: AssistantOverrideConfig,
+    pub assistant: AssistantConfig,
 }
 
 impl AssignKeyValue for PartialInquiryConfig {
@@ -216,95 +215,6 @@ impl ToPartial for InquiryConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
             assistant: self.assistant.to_partial(),
-        }
-    }
-}
-
-/// Assistant configuration overrides for inquiry requests.
-///
-/// Mirrors [`AssistantConfig`] but with all fields optional and no defaults.
-/// Unset fields are filled from the parent assistant config at runtime.
-///
-/// [`AssistantConfig`]: crate::assistant::AssistantConfig
-#[derive(Debug, Clone, PartialEq, Config)]
-#[config(rename_all = "snake_case")]
-pub struct AssistantOverrideConfig {
-    /// Override the system prompt for inquiry requests.
-    pub system_prompt: Option<String>,
-
-    /// Override the system prompt sections.
-    #[setting(nested, merge = schematic::merge::append_vec)]
-    pub system_prompt_sections: Vec<SectionConfig>,
-
-    /// Override the tool choice.
-    pub tool_choice: Option<ToolChoice>,
-
-    /// Override the model.
-    #[setting(nested)]
-    pub model: Option<ModelConfig>,
-
-    /// Override request behavior (retries, caching).
-    #[setting(nested)]
-    pub request: Option<RequestConfig>,
-}
-
-impl AssignKeyValue for PartialAssistantOverrideConfig {
-    fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
-        match kv.key_string().as_str() {
-            "" => kv.try_merge_object(self)?,
-            "system_prompt" => self.system_prompt = kv.try_some_string()?,
-            _ if kv.p("system_prompt_sections") => {
-                kv.try_vec_of_nested(&mut self.system_prompt_sections)?;
-            }
-            "tool_choice" => self.tool_choice = kv.try_some_from_str()?,
-            _ if kv.p("model") => self.model.assign(kv)?,
-            _ if kv.p("request") => self.request.assign(kv)?,
-            _ => return missing_key(&kv),
-        }
-
-        Ok(())
-    }
-}
-
-impl PartialConfigDelta for PartialAssistantOverrideConfig {
-    fn delta(&self, next: Self) -> Self {
-        Self {
-            system_prompt: delta_opt(self.system_prompt.as_ref(), next.system_prompt),
-            system_prompt_sections: delta_vec(
-                &self.system_prompt_sections,
-                next.system_prompt_sections,
-            ),
-            tool_choice: delta_opt(self.tool_choice.as_ref(), next.tool_choice),
-            model: delta_opt_partial(self.model.as_ref(), next.model),
-            request: delta_opt_partial(self.request.as_ref(), next.request),
-        }
-    }
-}
-
-impl FillDefaults for PartialAssistantOverrideConfig {
-    fn fill_from(self, defaults: Self) -> Self {
-        Self {
-            system_prompt: self.system_prompt.or(defaults.system_prompt),
-            system_prompt_sections: self.system_prompt_sections,
-            tool_choice: self.tool_choice.or(defaults.tool_choice),
-            model: fill::fill_opt(self.model, defaults.model),
-            request: fill::fill_opt(self.request, defaults.request),
-        }
-    }
-}
-
-impl ToPartial for AssistantOverrideConfig {
-    fn to_partial(&self) -> Self::Partial {
-        Self::Partial {
-            system_prompt: partial_opts(self.system_prompt.as_ref(), None),
-            system_prompt_sections: self
-                .system_prompt_sections
-                .iter()
-                .map(ToPartial::to_partial)
-                .collect(),
-            tool_choice: partial_opts(self.tool_choice.as_ref(), None),
-            model: self.model.as_ref().map(ToPartial::to_partial),
-            request: self.request.as_ref().map(ToPartial::to_partial),
         }
     }
 }
