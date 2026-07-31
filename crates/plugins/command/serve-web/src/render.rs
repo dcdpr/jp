@@ -5,6 +5,8 @@
 //! The host decodes base64-encoded storage fields before sending, so values
 //! arrive as plain text.
 
+use std::mem;
+
 use serde_json::Value;
 
 /// A pre-rendered event ready for the detail view template.
@@ -29,18 +31,80 @@ pub(crate) enum RenderedEvent {
     },
 }
 
+/// Which kind of text a [`PendingText`] region holds.
+#[derive(Clone, Copy, PartialEq)]
+enum TextKind {
+    Message,
+    Reasoning,
+}
+
+/// Accumulates consecutive text-bearing chat responses of one kind, so a region
+/// split across several events is parsed as markdown once.
+///
+/// A provider may deliver one region of text as several events: Anthropic
+/// interrupts a thinking block with an opaque `redacted_thinking` block and
+/// resumes the thinking after it, splitting the text mid-word.
+/// Parsing each event on its own would break any markdown construct spanning
+/// the split and show a block boundary the reader never saw.
+/// Segmentation *within* a region travels in the text as blank lines.
+#[derive(Default)]
+struct PendingText {
+    kind: Option<TextKind>,
+    text: String,
+}
+
+impl PendingText {
+    /// Append `text` to the open region, closing the previous one first when it
+    /// held a different kind.
+    fn push(&mut self, kind: TextKind, text: &str, out: &mut Vec<RenderedEvent>) {
+        if self.kind != Some(kind) {
+            self.flush(out);
+            self.kind = Some(kind);
+        }
+        self.text.push_str(text);
+    }
+
+    /// Close the open region, emitting it as a single rendered event.
+    ///
+    /// A region that holds only whitespace is dropped: an event carrying no
+    /// text (a redacted thinking payload, for instance) has nothing to show.
+    fn flush(&mut self, out: &mut Vec<RenderedEvent>) {
+        let Some(kind) = self.kind.take() else {
+            return;
+        };
+
+        let text = mem::take(&mut self.text);
+        if text.trim().is_empty() {
+            return;
+        }
+
+        let html = markdown_to_html(&text);
+        out.push(match kind {
+            TextKind::Message => RenderedEvent::AssistantMessage { html },
+            TextKind::Reasoning => RenderedEvent::Reasoning { html },
+        });
+    }
+}
+
 /// Render raw JSON events into [`RenderedEvent`]s for the detail view.
 ///
 /// Events come from the host's `read_events` response with base64 fields
 /// already decoded to plain text.
 pub(crate) fn render_events(events: &[Value]) -> Vec<RenderedEvent> {
     let mut out = Vec::new();
+    let mut pending = PendingText::default();
     let mut is_first_turn = true;
 
     for event in events {
         let Some(event_type) = event.get("type").and_then(Value::as_str) else {
             continue;
         };
+
+        // Anything that is not more text of the same kind closes the open
+        // region, so it renders ahead of whatever follows it.
+        if event_type != "chat_response" {
+            pending.flush(&mut out);
+        }
 
         match event_type {
             "turn_start" => {
@@ -58,7 +122,7 @@ pub(crate) fn render_events(events: &[Value]) -> Vec<RenderedEvent> {
                 }
             }
 
-            "chat_response" => render_chat_response(event, &mut out),
+            "chat_response" => render_chat_response(event, &mut pending, &mut out),
 
             "tool_call_request" => {
                 let name = event
@@ -84,21 +148,24 @@ pub(crate) fn render_events(events: &[Value]) -> Vec<RenderedEvent> {
         }
     }
 
+    pending.flush(&mut out);
+
     out
 }
 
 /// Handle the untagged `ChatResponse` variants by checking which key is
 /// present.
-fn render_chat_response(event: &Value, out: &mut Vec<RenderedEvent>) {
+///
+/// Message and reasoning text joins the open region in `pending`.
+/// A structured response is a discrete JSON value, so it closes the region and
+/// is emitted on its own.
+fn render_chat_response(event: &Value, pending: &mut PendingText, out: &mut Vec<RenderedEvent>) {
     if let Some(msg) = event.get("message").and_then(Value::as_str) {
-        out.push(RenderedEvent::AssistantMessage {
-            html: markdown_to_html(msg),
-        });
+        pending.push(TextKind::Message, msg, out);
     } else if let Some(reasoning) = event.get("reasoning").and_then(Value::as_str) {
-        out.push(RenderedEvent::Reasoning {
-            html: markdown_to_html(reasoning),
-        });
+        pending.push(TextKind::Reasoning, reasoning, out);
     } else if let Some(data) = event.get("data") {
+        pending.flush(out);
         let json = serde_json::to_string_pretty(data).unwrap_or_else(|_| data.to_string());
         out.push(RenderedEvent::Structured { json });
     }

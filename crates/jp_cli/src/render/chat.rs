@@ -508,9 +508,8 @@ impl ChatRenderer {
     }
 
     fn print_block(&mut self, block: &str, indent: usize, terminal: bool) {
-        // Skip whitespace-only blocks. These can appear when the LLM emits
-        // blank text content blocks (e.g. "\n\n" between interleaved thinking
-        // blocks) that survive a buffer flush.
+        // A whitespace-only block has nothing to print, and emitting it would
+        // add a stray line to the region's spacing.
         if block.trim().is_empty() {
             return;
         }
@@ -665,21 +664,6 @@ impl ChatRenderer {
         self.emit_pending_separator(false);
     }
 
-    /// Close the block region of the chat response that just ended.
-    ///
-    /// Each `ChatResponse` is a self-contained block of assistant output: two
-    /// consecutive reasoning events are two blocks, not one paragraph
-    /// continued.
-    /// Committing the buffered markdown here keeps the next event's opening
-    /// text from being parsed as a continuation of this one's last paragraph.
-    ///
-    /// The deferred separator is left pending, so the following content still
-    /// decides its shading: another reasoning block keeps the gap inside the
-    /// reasoning region, a message ends the region with a plain blank line.
-    pub fn end_response(&mut self) {
-        self.drain_buffer();
-    }
-
     /// Drain the buffer's end-of-region events to the printer, committing
     /// buffered blocks and closing any open code block.
     ///
@@ -731,8 +715,8 @@ impl ChatRenderer {
     ///
     /// `Static` writes its `reasoning...` line at the transition whatever the
     /// chunk holds.
-    /// `Full` renders the chunk as-is, so a whitespace-only one (interleaved
-    /// thinking emits them between tool calls) puts nothing on screen.
+    /// `Full` renders the chunk as-is, so a whitespace-only one puts nothing on
+    /// screen.
     /// `Truncate` answers for the text it would actually render, elision marker
     /// included — whitespace that fills the remaining budget still shows a
     /// `...`, while everything past the budget shows nothing.

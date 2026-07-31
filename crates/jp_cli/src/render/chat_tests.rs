@@ -443,13 +443,46 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
     assert!(output.contains("Answer"), "Message content should follow");
 }
 
-/// Two consecutive reasoning events are two blocks, not one paragraph
-/// continued.
-/// The first event's text ends mid-paragraph (no trailing newline), so without
-/// a region boundary the markdown buffer joins the next event's opening heading
-/// onto it.
+/// Consecutive reasoning events form one markdown region: text that ends
+/// mid-word in one event and resumes in the next joins into a single word.
+///
+/// This is what a provider relies on when it splits one region of reasoning
+/// across several events — Anthropic interrupts a thinking block with an
+/// opaque `redacted_thinking` block, which reaches the renderer as a reasoning
+/// event holding no text.
 #[test]
-fn test_consecutive_reasoning_events_render_as_separate_blocks() {
+fn test_consecutive_reasoning_events_form_one_region() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "I can test this directly by ver".into(),
+    });
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: String::new(),
+    });
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "ifying the return value.".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(
+        strip_ansi(&out.lock()),
+        "I can test this directly by verifying the return value.\n\n"
+    );
+}
+
+/// A provider-supplied blank line splits one reasoning region into two blocks.
+///
+/// This is the channel a provider uses to segment reasoning it delivers as one
+/// continuous text stream: without the blank line, the next part's leading
+/// `**Header**` parses as bold continuing the previous part's last sentence
+/// instead of opening a block of its own.
+#[test]
+fn test_provider_supplied_separator_splits_reasoning_blocks() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = None;
@@ -458,38 +491,34 @@ fn test_consecutive_reasoning_events_render_as_separate_blocks() {
     renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "First section.".into(),
     });
-    renderer.end_response();
     renderer.render_response(&ChatResponse::Reasoning {
-        reasoning: "Second section.".into(),
+        reasoning: "\n\n".into(),
     });
-    renderer.end_response();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "**Second section**".into(),
+    });
     renderer.flush();
     renderer.printer.flush();
 
     assert_eq!(
         strip_ansi(&out.lock()),
-        "First section.\n\nSecond section.\n\n"
+        "First section.\n\n**Second section**\n\n"
     );
 }
 
-/// A reasoning-to-reasoning event boundary stays inside the reasoning region:
-/// the gap it creates carries the reasoning background, exactly as the gap
-/// between two paragraphs of a single event does.
+/// The gap between two reasoning blocks stays inside the reasoning region and
+/// carries its background; the gap where reasoning gives way to a message does
+/// not.
 #[test]
-fn test_reasoning_event_boundary_gap_is_shaded() {
+fn test_reasoning_block_gap_is_shaded() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = Some(Color::Ansi256(236));
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render_response(&ChatResponse::Reasoning {
-        reasoning: "First section.".into(),
+        reasoning: "First section.\n\nSecond section.".into(),
     });
-    renderer.end_response();
-    renderer.render_response(&ChatResponse::Reasoning {
-        reasoning: "Second section.".into(),
-    });
-    renderer.end_response();
     renderer.render_response(&ChatResponse::Message {
         message: "Answer\n\n".into(),
     });
@@ -500,8 +529,8 @@ fn test_reasoning_event_boundary_gap_is_shaded() {
     assert_eq!(
         output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
         1,
-        "expected one shaded separator at the event boundary and an unshaded one before the \
-         message, got: {output:?}"
+        "expected one shaded separator between the reasoning blocks and an unshaded one before \
+         the message, got: {output:?}"
     );
 }
 

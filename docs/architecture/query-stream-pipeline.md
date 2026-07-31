@@ -1602,6 +1602,59 @@ In this case, the output order is: message → reasoning → message → tool ca
 - However, tool call RESPONSES sent to the LLM MUST be in request order
 - The Tool Coordinator handles this reordering internally
 
+### Response Segmentation
+
+A turn's assistant output arrives as a sequence of `ChatResponse` events.
+Where the visual breaks between them come from depends on whether the response
+carries text.
+
+**Text-bearing responses** (`Message`, `Reasoning`) concatenate.
+Consecutive responses of the same kind form one markdown region, and the
+response boundary is not a block boundary.
+The separation between two segments travels *in the content*, as a blank line.
+
+**Discrete-value responses** (`Structured`) are framed by the boundary.
+Each one is a complete JSON value, and a fence cannot be expressed inside the
+value, so `TurnView::end_chat_response` terminates the `json` fence when the
+provider closes the item.
+Two consecutive structured responses render as two fences.
+
+#### Providers own text segmentation
+
+A provider that delivers reasoning in segments emits the blank line between
+them.
+The OpenAI provider does this for reasoning summary parts: on each
+`ReasoningSummaryPartAdded` after the first, `map_event` emits
+`Event::reasoning(index, "\n\n")` at the same index as the summary text.
+Without it, a part opening with `**Header**` parses as bold continuing the
+previous part's last sentence.
+
+Segmentation *within* a region therefore lands in the stored reasoning text, and
+no consumer re-derives where the breaks go.
+
+Joining adjacent same-kind responses is a separate rule, and each consumer
+applies it for itself: the terminal renderer keeps one markdown buffer open
+across events, and the web view accumulates them before parsing.
+`jp c grep` does neither — `shared::search::event_lines` searches one event's
+text at a time, so a word split across two reasoning events is not matchable.
+
+#### Why not one block per response
+
+The symmetric rule, "every `ChatResponse` is its own block", is not available:
+some providers cannot comply with it.
+
+Anthropic interrupts a `thinking` content block with an opaque
+`redacted_thinking` block and resumes the thinking in a third block, splitting
+one region of reasoning mid-word across three items.
+Each `thinking` block carries its own signature, and a `ConversationEvent` holds
+one `anthropic_thinking_signature`, so merging the halves upstream drops a
+signature and the next request fails signature validation.
+The three items have to stay three events, which leaves the renderer to join
+them.
+
+A provider that forgets its separator produces glued text — a formatting bug,
+local to that provider module, fixable there.
+
 ### Display Configuration
 
 Reasoning display modes (applied in Markdown Renderer):

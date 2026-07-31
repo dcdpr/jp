@@ -129,7 +129,7 @@ impl TurnView {
         self.assistant_header_rendered = false;
     }
 
-    /// Render a complete chat response, closing its block region.
+    /// Render a complete chat response, closing its response item.
     ///
     /// Use this when `resp` holds an entire response (replaying a stored
     /// event); use [`render_chat_response_chunk`] for a fragment of one still
@@ -145,9 +145,11 @@ impl TurnView {
     /// emitting the assistant role header first if it hasn't been emitted yet
     /// for this turn.
     ///
-    /// The caller owns the response boundary: call [`end_chat_response`] once
-    /// the provider closes the item, otherwise the next response's opening text
-    /// continues this one's last paragraph.
+    /// Consecutive text-bearing responses of the same kind form one markdown
+    /// region; the separation between them comes from separators in the
+    /// content, not from the response boundary.
+    /// Call [`end_chat_response`] when the provider closes the item, so that a
+    /// structured response's `json` fence is terminated.
     ///
     /// Dispatches structured responses to the structured renderer and
     /// everything else (messages, reasoning) to the chat renderer.
@@ -162,8 +164,8 @@ impl TurnView {
         // Visible assistant content supplies its own spacing, so a preceding
         // tool block no longer owes a separator before the next tool call.
         // Reasoning that renders nothing must not clear that debt: the display
-        // mode may swallow it, and even a rendering mode puts nothing on screen
-        // for the whitespace-only chunks interleaved thinking emits.
+        // mode may swallow it, and a whitespace-only chunk puts nothing on
+        // screen even in a rendering mode.
         let clears_debt = match resp {
             ChatResponse::Reasoning { reasoning } => {
                 self.chat.reasoning_supplies_separation(reasoning)
@@ -183,20 +185,24 @@ impl TurnView {
         }
     }
 
-    /// Close the block region of the chat response that just ended.
+    /// Close the response item the provider just finished.
     ///
-    /// Closes whichever renderer holds the response: a structured response's
-    /// `json` fence, or the chat renderer's buffered markdown.
-    /// Two consecutive structured responses are two fenced blocks, just as two
-    /// consecutive reasoning responses are two markdown blocks.
+    /// A structured response is a discrete JSON value whose framing cannot be
+    /// expressed inside the value itself, so its `json` fence is terminated
+    /// here: two consecutive structured responses render as two fences rather
+    /// than one fence holding both values.
+    ///
+    /// Text-bearing responses (messages, reasoning) are left open.
+    /// Consecutive ones of the same kind form a single markdown region, and
+    /// their segmentation travels in the content as blank lines, put there by
+    /// the provider that knows where one segment ends.
     ///
     /// Only streaming callers need this: [`render_chat_response`] already ends
-    /// the region of the complete response it renders.
+    /// the item of the complete response it renders.
     ///
     /// [`render_chat_response`]: Self::render_chat_response
     pub fn end_chat_response(&mut self) {
         self.structured.flush();
-        self.chat.end_response();
     }
 
     /// Resolve the tool-call boundary, returning the background the tool's

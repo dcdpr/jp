@@ -299,10 +299,9 @@ impl TurnCoordinator {
                     .cloned()
                     .map_or(CommittedEvent::None, CommittedEvent::ToolCallRequest);
 
-                // The provider closed this item, so the region opened by the
-                // chunks rendered above ends here: a following response of the
-                // same kind starts a new block rather than continuing this
-                // one's last paragraph.
+                // The provider closed this item. A structured response's `json`
+                // fence is terminated here; a text-bearing one stays open, so
+                // consecutive reasoning or message items form a single region.
                 if event.is_chat_response() {
                     self.view.end_chat_response();
                 }
