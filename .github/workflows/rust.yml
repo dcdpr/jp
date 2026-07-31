@@ -96,7 +96,10 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        task: [lint, fmt, fmt-comments, fmt-markdown, test, docs, coverage, deny, insta, shear, vet]
+        # EXPERIMENT: trimmed to `test` while measuring Windows CI overhead.
+        # Restore before merging:
+        # [lint, fmt, fmt-comments, fmt-markdown, test, docs, coverage, deny, insta, shear, vet]
+        task: [test]
         include:
           - task: test
             os: windows-latest
@@ -142,6 +145,21 @@ jobs:
           if [ "$run" != "true" ]; then
             echo "Skipping $TASK because no relevant files changed."
           fi
+      # Defender scans every file cargo, rustc and tar touch. The cache restore
+      # extracts ~4 GB of small files and cargo re-hydrates `registry/src` on
+      # top of that, so the scan tax dominates the job.
+      - name: Exclude build directories from Defender scanning
+        if: ${{ steps.task.outputs.run == 'true' && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          try {
+            "realtime protection: $((Get-MpComputerStatus).RealTimeProtectionEnabled)"
+            Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE", "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup", "$env:RUNNER_TEMP"
+            Add-MpPreference -ExclusionProcess "cargo.exe", "rustc.exe", "sccache.exe", "tar.exe", "zstd.exe", "rust-lld.exe", "link.exe"
+            "excluded paths: $((Get-MpPreference).ExclusionPath -join '; ')"
+          } catch {
+            "::warning::could not configure Defender exclusions: $_"
+          }
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
       - if: ${{ steps.task.outputs.run == 'true' }}
@@ -150,7 +168,11 @@ jobs:
         with:
           path: |
             ~/.rustup
-          key: toolchain-${{ matrix.task }}${{ matrix.cache_suffix }}
+          key: toolchain-${{ matrix.task }}${{ matrix.cache_suffix }}-${{ hashFiles('rust-toolchain.toml') }}
+          # Prefix match, so a toolchain bump falls back to the previous entry
+          # instead of paying for a full rustup download.
+          restore-keys: |
+            toolchain-${{ matrix.task }}${{ matrix.cache_suffix }}
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
       - if: ${{ steps.task.outputs.run == 'true' }}
@@ -171,6 +193,15 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+      # PROBE: `cargo nextest run` starts with a silent `cargo metadata`, which
+      # has to re-extract every `.crate` into `registry/src` because
+      # `rust-cache` strips that directory before saving. Running it as its own
+      # step attributes that cost instead of hiding it inside the test step.
+      # Remove once measured.
+      - name: Warm the registry source tree (timing probe)
+        if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'test' }}
+        shell: bash
+        run: cargo metadata --locked --format-version 1 > /dev/null
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: just ${{ matrix.task }}-ci
       - if: ${{ matrix.task == 'coverage' && steps.task.outputs.run == 'true' }}
