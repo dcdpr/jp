@@ -55,6 +55,16 @@ const CONTINUATION_EDGE: char = '┆';
 /// Marks a header cell cut short because it did not fit its column.
 const TRUNCATION_MARKER: char = '…';
 
+/// How many clusters past the limit to keep measuring for a sequence that
+/// narrows back under it.
+///
+/// Every width-collapsing rule in `unicode-width` reduces a run of two or three
+/// clusters, so a prefix that has overshot recovers within a cluster or two if
+/// it recovers at all.
+/// Probing a bounded distance keeps a long cell from turning the scan
+/// quadratic.
+const MAX_LIGATURE_PROBES: usize = 8;
+
 /// Options for table formatting.
 pub struct TableOptions {
     /// Upper bound on the visual width of any single column.
@@ -391,8 +401,15 @@ fn longest_fitting_prefix(text: &str, base: usize, limit: usize) -> (usize, usiz
     // that render it wider stay inside a single cluster and so are already
     // counted by measuring the cluster whole. A prefix under the sum therefore
     // fits for certain, at O(1) per cluster.
+    //
+    // Past the limit the exact width decides, and it is not monotonic: a
+    // Tifinagh joiner costs a column on its own and none once the consonant
+    // after it completes the ligature. So an overshooting prefix is not the end
+    // of the scan, it is the start of a bounded probe for one that narrows back
+    // under.
     let mut end = 0;
     let mut sum = base;
+    let mut probes = 0;
     let mut measurements = 0;
 
     for (offset, cluster) in text.grapheme_indices(true) {
@@ -403,18 +420,24 @@ fn longest_fitting_prefix(text: &str, base: usize, limit: usize) -> (usize, usiz
             continue;
         }
 
-        // Only once the sum passes the limit does the exact width decide, and
-        // that is the measurement worth counting.
+        if probes == MAX_LIGATURE_PROBES {
+            break;
+        }
+        probes += 1;
         measurements += 1;
+
         let exact = base + text[..candidate].width();
         if exact > limit {
-            break;
+            continue;
         }
 
         // The exact width supersedes the estimate, so a cluster that renders
         // narrower than its parts cannot leave the sum over-counting.
         end = candidate;
         sum = exact;
+        // A sequence closed and brought the prefix back under the limit; allow a
+        // fresh run of probes for the next one.
+        probes = 0;
     }
 
     (end, measurements)

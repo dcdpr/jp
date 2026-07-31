@@ -1,6 +1,14 @@
 use super::*;
 use crate::format::HrStyle;
 
+/// Tifinagh consonant, consonant joiner, consonant: a ligature that renders in
+/// one column, having cost two before the final consonant closed it.
+const TIFINAGH_LIGATURE: &str = "\u{2D4F}\u{2D7F}\u{2D3E}";
+
+/// Arabic Lam followed by Alef: two grapheme clusters that ligate into a single
+/// column.
+const LAM_ALEF: &str = "\u{0644}\u{0627}";
+
 /// Character positions of the column edges on a rendered line.
 ///
 /// A continuation line opens with [`CONTINUATION_EDGE`] instead of `|`, and
@@ -126,16 +134,57 @@ fn test_truncate_drops_the_space_before_the_marker() {
 }
 
 #[test]
+fn test_tifinagh_ligature_narrows_once_completed() {
+    // The premise the prefix scan depends on. The joiner extends the first
+    // consonant's cluster and costs a column there, and completing the ligature
+    // drops the total to one, so prefix width is not monotonic. If this changes
+    // upstream, the test below stops testing what it claims to.
+    assert_eq!(TIFINAGH_LIGATURE.graphemes(true).collect::<Vec<_>>(), [
+        "\u{2D4F}\u{2D7F}",
+        "\u{2D3E}"
+    ]);
+    assert_eq!(ansi::visual_width("\u{2D4F}\u{2D7F}"), 2);
+    assert_eq!(ansi::visual_width(TIFINAGH_LIGATURE), 1);
+}
+
+#[test]
+fn test_truncate_keeps_a_narrowing_sequence_that_fits() {
+    // The ligature's first cluster is two columns and the completed ligature is
+    // one, so the prefix dips back under the budget as the sequence closes.
+    // Stopping at the first overshoot keeps `A` alone and drops content the
+    // column had room for.
+    let input = format!("A{TIFINAGH_LIGATURE}xy");
+    assert_eq!(ansi::visual_width(&input), 4);
+
+    let truncated = truncate_to_visual_width(&input, 3);
+    assert_eq!(truncated, format!("A{TIFINAGH_LIGATURE}\u{2026}"));
+    assert_eq!(ansi::visual_width(&truncated), 3);
+}
+
+#[test]
 fn test_prefix_scan_measures_the_limit_not_the_input() {
     // Measuring is the expensive step, so its count has to follow the limit
-    // rather than the size of the cell. The running sum of cluster widths bounds
-    // the width from above, so ASCII takes exactly one exact measurement: the
-    // one that confirms the overshoot.
+    // rather than the size of the cell. ASCII never narrows, so every probe past
+    // the overshoot is wasted and the cap is what ends the scan.
     let (_, short) = longest_fitting_prefix(&"x".repeat(500), 0, 9);
     let (_, long) = longest_fitting_prefix(&"x".repeat(100_000), 0, 9);
 
     assert_eq!(short, long, "measurement count grew with the input");
-    assert_eq!(long, 1, "{long} measurements for a 9-column limit");
+    assert!(
+        long <= MAX_LIGATURE_PROBES,
+        "{long} measurements for a 9-column limit"
+    );
+}
+
+#[test]
+fn test_prefix_scan_measurements_stay_bounded_across_ligatures() {
+    // Ligatures are why the exact measurement exists at all, so the bound has to
+    // hold for an input made entirely of them, where a probe that finds a
+    // fitting prefix starts a fresh run.
+    let (_, short) = longest_fitting_prefix(&LAM_ALEF.repeat(250), 0, 2);
+    let (_, long) = longest_fitting_prefix(&LAM_ALEF.repeat(50_000), 0, 2);
+
+    assert_eq!(short, long, "measurement count grew with the input");
 }
 
 #[test]
@@ -152,7 +201,8 @@ fn test_truncate_measures_a_cluster_split_across_an_escape() {
     // The escape hides the variation selector from the run it would have been
     // segmented with, but the visible text is a two-column emoji heart, not a
     // one-column text heart plus a zero-width selector. Trusting the runs kept
-    // nine columns against a budget of eight, pushing the header row out of
+    // `A` plus the heart at three columns and then added the marker: four
+    // against a `max_width` of three, which pushed the header row out of
     // alignment with the rest of the table.
     let truncated = truncate_to_visual_width("A\u{2764}\x1b[31m\u{FE0F}xyz", 3);
     assert_eq!(truncated, "A…");
