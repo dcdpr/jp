@@ -25,7 +25,7 @@
 //!
 //! [`StreamError::is_retryable`]: jp_llm::StreamError::is_retryable
 
-use std::{fmt::Write as _, sync::Arc};
+use std::{fmt, fmt::Write as _, mem, sync::Arc};
 
 use jp_config::assistant::request::RequestConfig;
 use jp_llm::{StreamError, exponential_backoff};
@@ -34,6 +34,53 @@ use jp_workspace::ConversationMut;
 use tracing::{error, warn};
 
 use crate::{cmd::query::turn::TurnCoordinator, error::Error, signals::SignalRouter};
+
+/// How many provider-requested rebuilds a turn may attempt in a row.
+///
+/// Every rebuild re-sends the whole conversation, so a repair costs the round
+/// count times the conversation size.
+/// A repair needing more rounds than this is not worth paying for; the turn
+/// reports the dead end instead.
+///
+/// Anthropic repairs a wedged turn in one round, and one round per affected
+/// message after that.
+/// Google's rejection carries no position, so its repair walks one signature
+/// per round and a long conversation can exceed this, surfacing as an error
+/// rather than a large bill.
+///
+/// The count resets once a cycle produces its first successful event, so a turn
+/// that repairs, streams, and later repairs again gets a fresh allowance.
+pub(crate) const MAX_CONSECUTIVE_REBUILDS: u32 = 10;
+
+/// Why a provider-requested rebuild was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildRefusal {
+    /// The preceding patch changed nothing, so the rebuilt request would be
+    /// identical to the one the provider just rejected.
+    NoProgress,
+
+    /// The turn has rebuilt as many times in a row as it is allowed to.
+    LimitReached {
+        /// The allowance that was reached.
+        limit: u32,
+    },
+}
+
+impl fmt::Display for RebuildRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoProgress => f.write_str(
+                "the provider asked to rebuild the request but sent no fix that changed it, so \
+                 resending would fail the same way",
+            ),
+            Self::LimitReached { limit } => write!(
+                f,
+                "the provider asked to rebuild the request {limit} times in a row without \
+                 producing a usable response"
+            ),
+        }
+    }
+}
 
 /// Tracks retry state for stream errors within a single turn.
 ///
@@ -47,6 +94,14 @@ pub struct StreamRetryState {
 
     /// Number of consecutive stream failures without a successful cycle.
     consecutive_failures: u32,
+
+    /// Whether the most recent provider patch set changed the conversation
+    /// stream in a way that makes a rebuild worth sending.
+    patch_changed_stream: bool,
+
+    /// Number of consecutive provider-requested rebuilds without a successful
+    /// cycle.
+    consecutive_rebuilds: u32,
 
     /// Whether a temporary retry notification line is currently displayed.
     ///
@@ -64,6 +119,8 @@ impl StreamRetryState {
         Self {
             config,
             consecutive_failures: 0,
+            patch_changed_stream: false,
+            consecutive_rebuilds: 0,
             line_active: false,
             is_tty,
         }
@@ -77,6 +134,49 @@ impl StreamRetryState {
     /// mid-response) don't permanently consume the retry budget.
     pub fn reset(&mut self) {
         self.consecutive_failures = 0;
+        self.patch_changed_stream = false;
+        self.consecutive_rebuilds = 0;
+    }
+
+    /// Record the outcome of a provider patch set.
+    ///
+    /// `applied` is how many events it changed, and `shrinks` whether every
+    /// action in the set strictly shrinks the stream (see
+    /// [`PatchAction::shrinks_stream`]).
+    /// A rebuild is only worth sending when both hold: an unchanged stream
+    /// rebuilds to an identical request, and a set that can grow the stream
+    /// gives no guarantee the loop ends.
+    ///
+    /// [`PatchAction::shrinks_stream`]: jp_llm::event::PatchAction::shrinks_stream
+    pub fn record_patch(&mut self, applied: usize, shrinks: bool) {
+        self.patch_changed_stream = applied > 0 && shrinks;
+    }
+
+    /// Authorize a provider-requested rebuild, or explain why it is refused.
+    ///
+    /// A provider that patches the conversation stream and asks for a rebuild
+    /// reports no error, so these attempts never reach [`handle_stream_error`]
+    /// and consume no part of the stream-error budget.
+    /// They are bounded two ways: each rebuild must follow a patch that made
+    /// progress, which is what guarantees the loop ends, and the number in a
+    /// row is capped, which keeps a terminating-but-expensive repair from
+    /// running up a bill.
+    ///
+    /// Consumes the record of the preceding patch, so one patch cannot
+    /// authorize two rebuilds.
+    pub fn authorize_rebuild(&mut self) -> Result<(), RebuildRefusal> {
+        if !mem::take(&mut self.patch_changed_stream) {
+            return Err(RebuildRefusal::NoProgress);
+        }
+
+        self.consecutive_rebuilds += 1;
+        if self.consecutive_rebuilds > MAX_CONSECUTIVE_REBUILDS {
+            return Err(RebuildRefusal::LimitReached {
+                limit: MAX_CONSECUTIVE_REBUILDS,
+            });
+        }
+
+        Ok(())
     }
 
     /// Clear the retry notification line if one is currently displayed.

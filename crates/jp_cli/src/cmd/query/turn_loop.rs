@@ -27,7 +27,7 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
-    Provider,
+    Error as LlmError, Provider,
     error::StreamError,
     event::{Event, EventPart, ToolCallPart},
     model::ModelDetails,
@@ -547,11 +547,29 @@ pub(super) async fn run_turn_loop(
                             // from a misbehaving provider commits nothing and
                             // so cannot drive a double dispatch.
                             let (action, committed) = conv.update_events(|stream| {
-                                handle_llm_event(event, &mut turn_coordinator, stream)
+                                handle_llm_event(
+                                    event,
+                                    &mut turn_coordinator,
+                                    stream,
+                                    &mut stream_retry,
+                                )
                             });
                             match action {
                                 LoopAction::Continue => {}
                                 LoopAction::Break => break,
+                                // The repair cannot or should not continue.
+                                // Persist what was streamed and surface the dead
+                                // end, which the refusal describes.
+                                LoopAction::RebuildRefused(refusal) => {
+                                    if let Err(err) = conv.flush() {
+                                        warn!("Failed to persist before abort: {err}");
+                                    }
+
+                                    return Err(LlmError::Stream(StreamError::other(
+                                        refusal.to_string(),
+                                    ))
+                                    .into());
+                                }
                             }
 
                             // On a flushed tool-call request: clear the temp

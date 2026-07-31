@@ -2240,12 +2240,23 @@ mod thinking_signature_recovery {
 
     use crate::{
         error::StreamError,
-        event::{EventMatcher, PatchAction},
+        event::{EventMatcher, EventPatch, PatchAction},
         provider::anthropic::{
             build_thinking_patches, find_oldest_thinking_block, identify_thinking_block,
-            is_invalid_thinking_signature, parse_signature_error_position, resolve_turn_position,
+            is_thinking_block_rejection, parse_signature_error_position, resolve_turn_position,
         },
     };
+
+    /// The `(metadata_key, metadata_value)` each patch targets, in order.
+    fn patch_targets(patches: &[EventPatch]) -> Vec<(&str, &str)> {
+        patches
+            .iter()
+            .map(|patch| {
+                let EventMatcher::MetadataValue { key, value } = &patch.matcher;
+                (key.as_str(), value.as_str())
+            })
+            .collect()
+    }
 
     fn make_thinking(text: &str, sig: &str) -> types::MessageContent {
         types::MessageContent::Thinking(types::Thinking {
@@ -2333,19 +2344,29 @@ mod thinking_signature_recovery {
             "api error: invalid_request_error: messages.1.content.0: Invalid `signature` in \
              `thinking` block",
         );
-        assert!(is_invalid_thinking_signature(&error));
+        assert!(is_thinking_block_rejection(&error));
+    }
+
+    #[test]
+    fn detects_unmodifiable_thinking_error() {
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.9.content.89: `thinking` or \
+             `redacted_thinking` blocks in the latest assistant message cannot be modified. These \
+             blocks must remain as they were in the original response.",
+        );
+        assert!(is_thinking_block_rejection(&error));
     }
 
     #[test]
     fn ignores_unrelated_errors() {
         let error = StreamError::other("api error: rate_limit_error: too many requests");
-        assert!(!is_invalid_thinking_signature(&error));
+        assert!(!is_thinking_block_rejection(&error));
     }
 
     #[test]
     fn ignores_retryable_errors() {
         let error = StreamError::transient("server error with signature and thinking");
-        assert!(!is_invalid_thinking_signature(&error));
+        assert!(!is_thinking_block_rejection(&error));
     }
 
     #[test]
@@ -2501,6 +2522,190 @@ mod thinking_signature_recovery {
         assert!(build_thinking_patches(&request, &error).is_none());
     }
 
+    /// A tool-use loop whose newest assistant message interleaves redacted and
+    /// signed thinking blocks before its tool call, and which ends with the
+    /// matching tool result.
+    ///
+    /// Turn 1 spans messages 1 through 4, flattening to: `[thinking(0),
+    /// tool_use(1), tool_result(2), r0(3), r1(4), sig_3(5), r2(6), sig_5(7),
+    /// tool_use(8), tool_result(9)]`
+    fn interleaved_thinking_conversation() -> Vec<types::Message> {
+        vec![
+            msg(MessageRole::User, vec![make_text("hello")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("early", "sig_early"),
+                make_tool_use("tu1"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu1")]),
+            msg(MessageRole::Assistant, vec![
+                make_redacted("r0"),
+                make_redacted("r1"),
+                make_thinking("t3", "sig_3"),
+                make_redacted("r2"),
+                make_thinking("t5", "sig_5"),
+                make_tool_use("tu2"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu2")]),
+        ]
+    }
+
+    /// Anthropic requires the latest assistant message to carry its thinking
+    /// blocks back exactly as generated, so downgrading only the block named in
+    /// the error is rejected on the next request with `cannot be modified`.
+    #[test]
+    fn latest_assistant_message_downgrades_every_thinking_block() {
+        let request = request(interleaved_thinking_conversation());
+
+        // Flat index 5 is the first signed block in the newest assistant
+        // message.
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.5: Invalid `signature` in \
+             `thinking` block",
+        );
+
+        let patches = build_thinking_patches(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [
+            ("anthropic_redacted_thinking", "r0"),
+            ("anthropic_redacted_thinking", "r1"),
+            ("anthropic_thinking_signature", "sig_3"),
+            ("anthropic_redacted_thinking", "r2"),
+            ("anthropic_thinking_signature", "sig_5"),
+        ]);
+    }
+
+    /// The rejected block often sits in the middle of the final turn rather
+    /// than in its last assistant message: Anthropic reports a position in the
+    /// turn, and the trailing assistant message has already been rewritten as
+    /// `<think>` text by [`downgrade_trailing_thinking`].
+    /// Every thinking block in the named message still has to go.
+    ///
+    /// [`downgrade_trailing_thinking`]: super::super::downgrade_trailing_thinking
+    #[test]
+    fn mid_turn_message_downgrades_every_thinking_block() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("hello")]),
+            msg(MessageRole::Assistant, vec![
+                make_redacted("r0"),
+                make_thinking("t1", "sig_1"),
+                make_redacted("r2"),
+                make_tool_use("tu1"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu1")]),
+            // The trailing assistant message carries no native thinking.
+            msg(MessageRole::Assistant, vec![make_text("answer")]),
+        ]);
+
+        // Flat index 1 is the signed block in messages[1], which is in the final
+        // turn but is not its last assistant message.
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.1: `thinking` or \
+             `redacted_thinking` blocks in the latest assistant message cannot be modified.",
+        );
+
+        let patches = build_thinking_patches(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [
+            ("anthropic_redacted_thinking", "r0"),
+            ("anthropic_thinking_signature", "sig_1"),
+            ("anthropic_redacted_thinking", "r2"),
+        ]);
+    }
+
+    /// A fresh user prompt opens a new turn without an assistant reply yet, but
+    /// Anthropic still calls the preceding assistant turn "the latest assistant
+    /// message".
+    /// A wedged turn must therefore be repaired on the first request of the
+    /// next turn, before any tool call has run.
+    #[test]
+    fn new_prompt_after_wedged_turn_downgrades_every_thinking_block() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("first prompt")]),
+            msg(MessageRole::Assistant, vec![
+                make_redacted("r0"),
+                make_thinking("t1", "sig_1"),
+                make_tool_use("tu1"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu1")]),
+            msg(MessageRole::Assistant, vec![make_text("answer")]),
+            msg(MessageRole::User, vec![make_text("second prompt")]),
+        ]);
+
+        // Turn 1 spans messages 1 through 3; flat index 1 is the signed block in
+        // messages[1].
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.1: `thinking` or \
+             `redacted_thinking` blocks in the latest assistant message cannot be modified.",
+        );
+
+        let patches = build_thinking_patches(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [
+            ("anthropic_redacted_thinking", "r0"),
+            ("anthropic_thinking_signature", "sig_1"),
+        ]);
+    }
+
+    /// Turns before the final one carry no immutability constraint, so a stale
+    /// signature there is repaired in place, leaving that turn's other
+    /// reasoning native.
+    #[test]
+    fn earlier_turn_downgrades_only_the_named_block() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("first")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t0", "sig_0"),
+                make_thinking("t1", "sig_1"),
+                make_text("answer"),
+            ]),
+            msg(MessageRole::User, vec![make_text("second")]),
+            msg(MessageRole::Assistant, vec![make_thinking("t2", "sig_2")]),
+        ]);
+
+        // Turn 1 is messages[1], two turns back from the final one.
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.1: Invalid `signature` in \
+             `thinking` block",
+        );
+
+        let patches = build_thinking_patches(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [(
+            "anthropic_thinking_signature",
+            "sig_1"
+        )]);
+    }
+
+    /// A conversation left half-downgraded by an earlier one-block-at-a-time
+    /// repair is unsendable: the message holds native thinking blocks next to
+    /// the `<think>` text that replaced its siblings.
+    /// The remaining native blocks all have to go.
+    #[test]
+    fn unmodifiable_error_heals_a_half_downgraded_message() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("hello")]),
+            msg(MessageRole::Assistant, vec![
+                make_redacted("r0"),
+                make_text("<think>\nt3\n</think>\n\n"),
+                make_redacted("r1"),
+                make_tool_use("tu1"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu1")]),
+        ]);
+
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.0: `thinking` or \
+             `redacted_thinking` blocks in the latest assistant message cannot be modified.",
+        );
+
+        let patches = build_thinking_patches(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [
+            ("anthropic_redacted_thinking", "r0"),
+            ("anthropic_redacted_thinking", "r1"),
+        ]);
+    }
+
     /// Reproduce the exact message structure from the user's failing request:
     /// two assistant turns with tool-use loops, separated by a user message.
     fn tool_use_conversation() -> Vec<types::Message> {
@@ -2592,6 +2797,148 @@ mod thinking_signature_recovery {
 
         assert_eq!(resolve_turn_position(&msgs, 99, 0), None);
         assert_eq!(resolve_turn_position(&msgs, 1, 999), None);
+    }
+
+    /// Message shape of the request that failed in the field, as `(kind,
+    /// block_count)` per message: `p` a user prompt, `u` a user tool result,
+    /// `a` an assistant message.
+    ///
+    /// Only roles and block counts drive [`resolve_turn_position`], so blocks
+    /// are placeholders everywhere except the final assistant message, which
+    /// carries the real interleaving of redacted and signed thinking.
+    /// The five prompts at messages 0, 26, 30, 34 and 36 are what make the
+    /// closing tool-use loop Anthropic's turn 9.
+    #[rustfmt::skip]
+    const INCIDENT_SHAPE: &[(char, usize)] = &[
+        ('p',11), ('a',4), ('u',2), ('a',3), ('u',2), ('a',3), // 0
+        ('u',2),  ('a',2), ('u',1), ('a',2), ('u',1), ('a',1), // 6
+        ('u',1),  ('a',3), ('u',2), ('a',2), ('u',1), ('a',2), // 12
+        ('u',1),  ('a',3), ('u',2), ('a',2), ('u',1), ('a',2), // 18
+        ('u',1),  ('a',2), ('p',1), ('a',4), ('u',2), ('a',2), // 24
+        ('p',1),  ('a',4), ('u',2), ('a',1), ('p',1), ('a',1), // 30
+        ('p',1),  ('a',4), ('u',2), ('a',2), ('u',1), ('a',1), // 36
+        ('u',1),  ('a',3), ('u',2), ('a',2), ('u',1), ('a',2), // 42
+        ('u',1),  ('a',3), ('u',1), ('a',2), ('u',1), ('a',1), // 48
+        ('u',1),  ('a',2), ('u',1), ('a',2), ('u',1), ('a',2), // 54
+        ('u',1),  ('a',1), ('u',1), ('a',1), ('u',1), ('a',2), // 60
+        ('u',1),  ('a',2), ('u',1), ('a',1), ('u',1), ('a',2), // 66
+        ('u',1),  ('a',1), ('u',1), ('a',2), ('u',1), ('a',1), // 72
+        ('u',1),  ('a',2), ('u',1), ('a',1), ('u',1), ('a',1), // 78
+        ('u',1),  ('a',1), ('u',1), ('a',1), ('u',1), ('a',2), // 84
+        ('u',1),  ('a',1), ('u',1), ('a',3), ('u',1), ('a',2), // 90
+        ('u',1),  ('a',9), ('u',1),                            // 96
+    ];
+
+    /// The newest assistant message of [`INCIDENT_SHAPE`], at index 97: three
+    /// redacted blocks, then signed thinking alternating with redacted, then
+    /// the tool call.
+    fn incident_newest_message() -> types::Message {
+        msg(MessageRole::Assistant, vec![
+            make_redacted("r0"),
+            make_redacted("r1"),
+            make_redacted("r2"),
+            make_thinking("t3", "sig_3"),
+            make_redacted("r4"),
+            make_thinking("t5", "sig_5"),
+            make_redacted("r6"),
+            make_thinking("t7", "sig_7"),
+            make_tool_use("tu"),
+        ])
+    }
+
+    fn incident_messages() -> Vec<types::Message> {
+        INCIDENT_SHAPE
+            .iter()
+            .enumerate()
+            .map(|(idx, &(kind, count))| {
+                if idx == 97 {
+                    return incident_newest_message();
+                }
+
+                let blocks = (0..count)
+                    .map(|_| match kind {
+                        'u' => make_tool_result("tu"),
+                        _ => make_text("filler"),
+                    })
+                    .collect();
+
+                let role = if kind == 'a' {
+                    MessageRole::Assistant
+                } else {
+                    MessageRole::User
+                };
+
+                msg(role, blocks)
+            })
+            .collect()
+    }
+
+    /// Only a user message that isn't purely tool results opens a new turn, so
+    /// the five prompts in the recorded request produce ten turns rather than
+    /// one turn per request/response pair.
+    #[test]
+    fn incident_turn_boundaries_follow_user_prompts() {
+        let msgs = incident_messages();
+        assert_eq!(msgs.len(), 99);
+
+        assert_eq!(resolve_turn_position(&msgs, 0, 0), Some((0, 0)));
+        assert_eq!(resolve_turn_position(&msgs, 2, 0), Some((26, 0)));
+        assert_eq!(resolve_turn_position(&msgs, 4, 0), Some((30, 0)));
+        assert_eq!(resolve_turn_position(&msgs, 6, 0), Some((34, 0)));
+        assert_eq!(resolve_turn_position(&msgs, 8, 0), Some((36, 0)));
+        assert_eq!(resolve_turn_position(&msgs, 9, 0), Some((37, 0)));
+    }
+
+    /// Every position Anthropic named across the four failed requests, mapped
+    /// against the recorded message shape.
+    ///
+    /// Turn 9 spans messages 37 to 98, and messages 37 to 96 contribute 85
+    /// blocks, so the newest assistant message begins at flat index 85.
+    #[test]
+    fn incident_positions_resolve_to_the_blocks_the_api_named() {
+        let msgs = incident_messages();
+
+        // The three signed thinking blocks, rejected one per request.
+        assert_eq!(resolve_turn_position(&msgs, 9, 88), Some((97, 3)));
+        assert_eq!(resolve_turn_position(&msgs, 9, 90), Some((97, 5)));
+        assert_eq!(resolve_turn_position(&msgs, 9, 92), Some((97, 7)));
+
+        // `messages.9.content.89` from the final rejection is a redacted block:
+        // by then every signed block had already been rewritten as text.
+        assert_eq!(resolve_turn_position(&msgs, 9, 89), Some((97, 4)));
+
+        // Message boundaries either side of the thinking blocks.
+        assert_eq!(resolve_turn_position(&msgs, 9, 85), Some((97, 0)));
+        assert_eq!(resolve_turn_position(&msgs, 9, 93), Some((97, 8)));
+        assert_eq!(resolve_turn_position(&msgs, 9, 94), Some((98, 0)));
+    }
+
+    /// End to end on the recorded request: one round strips all eight thinking
+    /// blocks from the newest assistant message, leaving text and tool use.
+    ///
+    /// The field failure took three rounds, one signed block each, and each
+    /// round left the message in the half-rewritten state the API rejects.
+    #[test]
+    fn incident_request_downgrades_the_whole_newest_message() {
+        let request = request(incident_messages());
+
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.9.content.88: Invalid `signature` in \
+             `thinking` block",
+        );
+
+        let patches = build_thinking_patches(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [
+            ("anthropic_redacted_thinking", "r0"),
+            ("anthropic_redacted_thinking", "r1"),
+            ("anthropic_redacted_thinking", "r2"),
+            ("anthropic_thinking_signature", "sig_3"),
+            ("anthropic_redacted_thinking", "r4"),
+            ("anthropic_thinking_signature", "sig_5"),
+            ("anthropic_redacted_thinking", "r6"),
+            ("anthropic_thinking_signature", "sig_7"),
+        ]);
     }
 
     #[test]

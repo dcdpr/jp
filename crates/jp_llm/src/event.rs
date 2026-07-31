@@ -181,6 +181,27 @@ pub enum PatchAction {
     RemoveMetadata(String),
 }
 
+impl PatchAction {
+    /// Whether applying this action strictly shrinks the conversation stream.
+    ///
+    /// A provider-driven repair loop rebuilds the request after every applied
+    /// patch, so it terminates only if each round shrinks a finite measure.
+    /// Producing a change is not enough: an action that sets a fresh value or
+    /// appends content can change an event on every round forever.
+    ///
+    /// An action that cannot guarantee shrinkage returns `false`, and the
+    /// repair loop refuses to rebuild rather than risk an unbounded number of
+    /// requests.
+    /// Answer this deliberately when adding a variant; `false` is the safe
+    /// answer.
+    #[must_use]
+    pub const fn shrinks_stream(&self) -> bool {
+        match self {
+            Self::RemoveMetadata(_) => true,
+        }
+    }
+}
+
 /// Apply provider-issued patches to the events already in `stream`, returning
 /// how many events it changed.
 ///
