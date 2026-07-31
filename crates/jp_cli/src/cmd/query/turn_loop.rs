@@ -579,6 +579,12 @@ pub(super) async fn run_turn_loop(
                                 // Persist what was streamed and surface the dead
                                 // end, which the refusal describes.
                                 LoopAction::RebuildRefused(refusal) => {
+                                    // A repair cycle renders nothing, so no event
+                                    // reached the clear above. Retire any retry
+                                    // line before the commit below flushes
+                                    // buffered output, which would otherwise land
+                                    // after the parked cursor.
+                                    stream_retry.clear_line(&printer);
                                     commit_partial_response(&mut turn_coordinator, &conv, &printer);
                                     if let Err(err) = conv.flush() {
                                         warn!("Failed to persist before abort: {err}");

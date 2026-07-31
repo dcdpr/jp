@@ -5745,6 +5745,111 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
     );
 }
 
+/// A refused rebuild ends the turn, so a retry line left by an earlier cycle
+/// has to be retired first.
+///
+/// A repair cycle renders nothing, so no event reaches the clear on the success
+/// path, and the final error would otherwise be written onto the notification.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_refused_rebuild_clears_the_retry_line() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        // The waiting indicator writes its own erase sequences, which would
+        // blur what this test asserts.
+        config.style.streaming.progress.show = false;
+        // Keep the retry backoff out of the test's runtime.
+        config.assistant.request.base_backoff_ms = 1;
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        // First cycle: a retryable error, which writes the retry notification and
+        // leaves the cursor parked at the end of it.
+        // Second cycle: a patch matching no event, so the rebuild that follows is
+        // refused for lack of progress and the turn aborts.
+        let provider: Arc<dyn Provider> = Arc::new(PacedMockProvider::new(Duration::ZERO, vec![
+            vec![(
+                Duration::ZERO,
+                Err(StreamError::transient("simulated hiccup")),
+            )],
+            vec![
+                (
+                    Duration::ZERO,
+                    Ok(Event::Patch(vec![EventPatch {
+                        matcher: EventMatcher::MetadataValue {
+                            key: "absent_key".into(),
+                            value: "absent_value".into(),
+                        },
+                        action: PatchAction::RemoveMetadata("absent_key".into()),
+                    }])),
+                ),
+                (Duration::ZERO, Ok(Event::Finished(FinishReason::Retry))),
+            ],
+        ]));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true, // is_tty
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("answer this"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "a rebuild without progress must abort the turn"
+        );
+
+        printer.flush();
+
+        let chrome = err.lock();
+        assert!(
+            chrome.contains("retrying (1/"),
+            "the first cycle should have written a retry notice.\nChrome:\n{chrome}"
+        );
+        // The notice writes its own `\r\x1b[K` prefix, so occurrences cannot be
+        // counted. What distinguishes a retired line is that the erase is the
+        // last thing written, leaving the terminal clean for the final error.
+        assert!(
+            chrome.ends_with("\r\x1b[K"),
+            "the retry line must be retired before the turn aborts.\nChrome:\n{chrome:?}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
 /// Content streamed before a refused rebuild survives the abort.
 ///
 /// A part sits in the coordinator's event builder until a flush or terminal
