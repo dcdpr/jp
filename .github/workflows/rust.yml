@@ -96,24 +96,21 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        # EXPERIMENT: trimmed to `test` while measuring Windows CI overhead.
-        # Restore before merging:
-        # [lint, fmt, fmt-comments, fmt-markdown, test, docs, coverage, deny, insta, shear, vet]
-        task: [test]
+        task: [lint, fmt, fmt-comments, fmt-markdown, test, docs, coverage, deny, insta, shear, vet]
         include:
           - task: test
             os: windows-latest
             name_suffix: " (windows)"
             cache_suffix: "-windows"
-            # EXPERIMENT: stop caching `target/` on Windows and let sccache
-            # carry compilation instead. Dropping the path also changes the
-            # `actions/cache` version hash, so the existing 3.9 GB entry no
-            # longer matches and a registry-only entry is written in its place.
-            # `cache_save` keeps that entry warm on this branch so the second
-            # run onwards measures the steady state rather than a cold start.
-            # Revert both before merging.
+            # Restoring a 3.9 GB `target/` cache costs Windows more than
+            # compiling from a warm sccache does, so this job caches only
+            # `~/.cargo` and lets sccache carry compilation.
             cache_targets: "false"
-            cache_save: "true"
+            # Windows pays a steep per-file cost to unpack, compile and link, so
+            # PR runs cover only the crates that make up `jp` itself. The Linux
+            # `test` job still builds and tests everything on every PR, and
+            # `main` covers the full workspace on Windows too.
+            scope: ${{ github.ref == 'refs/heads/main' && 'workspace' || 'jp-only' }}
     name: ${{ matrix.task }}${{ matrix.name_suffix }}
     # A run without a target cache falls back to a full build. Cap it so a
     # pathological run doesn't burn an hour of Windows minutes unnoticed.
@@ -179,7 +176,7 @@ jobs:
           cache-bin: false
           cache-workspace-crates: true
           cache-targets: ${{ matrix.cache_targets || 'true' }}
-          save-if: ${{ matrix.cache_save == 'true' || github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # V0.10
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
@@ -201,7 +198,7 @@ jobs:
         shell: bash
         run: cargo metadata --locked --format-version 1 > /dev/null
       - if: ${{ steps.task.outputs.run == 'true' }}
-        run: just ${{ matrix.task }}-ci
+        run: just ${{ matrix.task }}-ci ${{ matrix.scope }}
       - if: ${{ matrix.task == 'coverage' && steps.task.outputs.run == 'true' }}
         uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2
         with:
