@@ -885,12 +885,23 @@ async fn build_inquiry_backend(
 
     // Same fallback for the output ceiling: an inquiry can be held to a tighter
     // (or looser) ceiling than the parent assistant.
+    //
+    // `AssistantOverrideConfig::request` is a resolved `RequestConfig`, so a
+    // block where the user set only a sibling field (say `cache`) arrives here
+    // with every other field at Rust's `Default` rather than its schematic
+    // default. A `0` therefore cannot be distinguished from "unset", and reading
+    // it as the ceiling's disable sentinel would silently drop the runaway guard
+    // for every inquiry. Treat it as "inherit" instead, matching the block's
+    // documented unset-means-inherit rule. A per-question override carries real
+    // `Option`s, so `0` still disables the ceiling there.
     let default_max_response_bytes = inquiry_override
         .request
         .as_ref()
-        .map_or(cfg.assistant.request.max_response_bytes, |request| {
-            request.max_response_bytes
-        });
+        .map_or(0, |request| request.max_response_bytes);
+    let default_max_response_bytes = match default_max_response_bytes {
+        0 => cfg.assistant.request.max_response_bytes,
+        bytes => bytes,
+    };
 
     // Track providers we've already constructed to avoid duplicates.
     let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();

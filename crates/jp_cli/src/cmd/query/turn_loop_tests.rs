@@ -16,8 +16,11 @@ use futures::{StreamExt as _, stream};
 use indexmap::IndexMap;
 use inquire::InquireError;
 use jp_config::{
-    AppConfig,
-    assistant::{PartialAssistantConfig, request::RequestConfig},
+    AppConfig, PartialAppConfig,
+    assistant::{
+        PartialAssistantConfig,
+        request::{CachePolicy, PartialRequestConfig, RequestConfig},
+    },
     conversation::tool::{
         CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
         style::{DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle},
@@ -4552,6 +4555,54 @@ async fn inquiry_ceiling_honors_the_global_inquiry_override() {
             .max_response_bytes,
         4096,
         "the global inquiry override must win over the parent assistant"
+    );
+}
+
+/// A partially-set inquiry request block must not disable the ceiling.
+///
+/// Built through the real loading path rather than by hand: because
+/// `AssistantOverrideConfig::request` is a resolved struct, setting only a
+/// sibling field leaves `max_response_bytes` at `0`, which is the ceiling's
+/// disable sentinel.
+/// Reading it verbatim would silently drop the runaway guard for every inquiry.
+#[tokio::test]
+async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(500_000);
+
+    partial.conversation.inquiry.assistant.request = Some(PartialRequestConfig {
+        cache: Some(CachePolicy::Off),
+        ..PartialRequestConfig::default()
+    });
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    // The resolution the guard has to cope with: the block is present, and its
+    // ceiling field is a zero the user never asked for.
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .request
+            .expect("the block is set")
+            .max_response_bytes,
+        0
+    );
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        500_000,
+        "an unset inquiry ceiling must inherit the parent, not disable the guard"
     );
 }
 

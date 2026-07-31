@@ -95,6 +95,8 @@ pub struct RequestConfig {
     /// Inquiry requests can be held to their own ceiling via
     /// `conversation.inquiry.assistant.request.max_response_bytes`, or per
     /// question via a question's assistant target.
+    /// In the `conversation.inquiry` block, `0` means "inherit this ceiling"
+    /// rather than "disable it"; disable it per question instead.
     ///
     /// The ceiling counts bytes rather than tokens because tokens cannot be
     /// counted locally; four bytes per token is a rough guide.
