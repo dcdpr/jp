@@ -6,6 +6,7 @@ use std::{
 
 use async_stream::stream;
 use futures::{Stream, StreamExt as _};
+use serde_json::{Map, Value};
 use tokio::time::timeout;
 
 use crate::{
@@ -102,14 +103,19 @@ fn with_idle_timeout_at(
 /// without bound.
 ///
 /// Counts the bytes of generated content: assistant messages, reasoning,
-/// structured output, tool-call arguments, and the identity of each tool call.
+/// structured output, tool-call arguments, the identity of each tool call, and
+/// any retained metadata carried alongside them.
+/// Metadata matters because several providers put generated payload there
+/// rather than in the content field: Anthropic sends redacted thinking as an
+/// empty reasoning part with the data in metadata, and OpenAI attaches
+/// encrypted reasoning content to a flush.
 /// Once the running total passes `max_bytes`, the returned stream yields a
 /// non-retryable [`StreamErrorKind::OutputLimit`] error and ends.
 /// The event that crosses the threshold is forwarded before the error, so
 /// content the provider has already generated is never withheld; the total may
 /// therefore overshoot `max_bytes` by up to the size of one event.
 ///
-/// Non-content events (flushes, patches, keep-alives) do not count.
+/// Patches and keep-alives carry nothing generated and do not count.
 ///
 /// The count covers bytes delivered downstream, which is not the same as bytes
 /// the provider billed for.
@@ -159,22 +165,40 @@ pub fn output_limit_bytes(configured: u32) -> Option<u64> {
 ///
 /// A tool call's `id` and `name` are generated response bytes too, so a stream
 /// of nothing but tool-call openings still advances the total.
+/// Metadata counts on both parts and flushes, since a provider may deliver
+/// reasoning payload there with an empty content field.
 ///
-/// Errors and non-content events count as zero.
+/// Errors, patches and keep-alives count as zero.
 fn content_byte_size(item: &Result<Event, StreamError>) -> u64 {
-    let Ok(Event::Part { part, .. }) = item else {
-        return 0;
-    };
+    let size = match item {
+        Ok(Event::Part { part, metadata, .. }) => {
+            let content = match part {
+                EventPart::Message(text)
+                | EventPart::Reasoning(text)
+                | EventPart::Structured(text) => text.len(),
+                EventPart::ToolCall(ToolCallPart::ArgumentChunk(json)) => json.len(),
+                EventPart::ToolCall(ToolCallPart::Start { id, name }) => id.len() + name.len(),
+            };
 
-    let size = match part {
-        EventPart::Message(text) | EventPart::Reasoning(text) | EventPart::Structured(text) => {
-            text.len()
+            content + metadata_byte_size(metadata)
         }
-        EventPart::ToolCall(ToolCallPart::ArgumentChunk(json)) => json.len(),
-        EventPart::ToolCall(ToolCallPart::Start { id, name }) => id.len() + name.len(),
+        Ok(Event::Flush { metadata, .. }) => metadata_byte_size(metadata),
+        _ => 0,
     };
 
     size as u64
+}
+
+/// Byte size of the retained payload in an event's metadata.
+///
+/// Only string values count: those carry the provider payloads that would
+/// otherwise escape the ceiling (thinking signatures, redacted thinking,
+/// encrypted reasoning content, thought signatures).
+fn metadata_byte_size(metadata: &Map<String, Value>) -> usize {
+    metadata
+        .values()
+        .map(|value| value.as_str().map_or(0, str::len))
+        .sum()
 }
 
 /// Inject a synthetic [`Event::KeepAlive`] every `interval` while a tool call

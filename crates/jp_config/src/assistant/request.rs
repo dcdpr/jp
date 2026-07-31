@@ -92,6 +92,10 @@ pub struct RequestConfig {
     /// generation, summarization, tool inquiries) keep no partial result: they
     /// fail outright.
     ///
+    /// Inquiry requests can be held to their own ceiling via
+    /// `conversation.inquiry.assistant.request.max_response_bytes`, or per
+    /// question via a question's assistant target.
+    ///
     /// The ceiling counts bytes rather than tokens because tokens cannot be
     /// counted locally; four bytes per token is a rough guide.
     /// It counts the bytes JP receives, which can be fewer than the bytes

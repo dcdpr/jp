@@ -7,6 +7,7 @@ use std::{
 };
 
 use futures::{StreamExt as _, future, stream};
+use serde_json::Map;
 
 use super::{
     output_limit_bytes, with_idle_timeout, with_idle_timeout_at, with_output_limit,
@@ -14,7 +15,7 @@ use super::{
 };
 use crate::{
     StreamError, StreamErrorKind,
-    event::{Event, FinishReason},
+    event::{Event, EventPart, FinishReason},
 };
 
 #[tokio::test(start_paused = true)]
@@ -123,8 +124,8 @@ async fn output_under_the_ceiling_passes_through_untouched() {
 
 #[tokio::test]
 async fn non_content_events_do_not_count_toward_the_ceiling() {
-    // Flushes, keep-alives, and patches carry no generated content, so a stream
-    // of nothing but those must survive a 1-byte ceiling.
+    // Keep-alives, patches, and metadata-free flushes carry nothing generated,
+    // so a stream of nothing but those must survive a 1-byte ceiling.
     let inner = stream::iter(vec![
         Ok(Event::flush(0)),
         Ok(Event::KeepAlive),
@@ -137,6 +138,72 @@ async fn non_content_events_do_not_count_toward_the_ceiling() {
 
     assert_eq!(items.len(), 4, "no extra error item is appended");
     assert!(items.iter().all(Result::is_ok), "got: {items:?}");
+}
+
+#[tokio::test]
+async fn retained_part_metadata_counts_toward_the_ceiling() {
+    // Anthropic delivers redacted thinking as an empty reasoning part with the
+    // payload in metadata. Counting only the content field would let an
+    // arbitrarily large retained payload through at zero counted bytes.
+    let payload = "0123456789".repeat(4);
+    let inner = stream::iter(vec![
+        Ok(Event::Part {
+            index: 0,
+            part: EventPart::Reasoning(String::new()),
+            metadata: Map::from_iter([(
+                "anthropic_redacted_thinking".to_owned(),
+                payload.clone().into(),
+            )]),
+        }),
+        Ok(Event::Part {
+            index: 0,
+            part: EventPart::Reasoning(String::new()),
+            metadata: Map::from_iter([("anthropic_redacted_thinking".to_owned(), payload.into())]),
+        }),
+    ])
+    .boxed();
+
+    // 40 metadata bytes per part against a 50-byte ceiling: the second crosses.
+    let mut wrapped = with_output_limit(inner, 50);
+
+    assert!(
+        wrapped.next().await.expect("the first part").is_ok(),
+        "the first part is under the ceiling"
+    );
+    assert!(wrapped.next().await.expect("the second part").is_ok());
+
+    let err = wrapped
+        .next()
+        .await
+        .expect("an item before the stream ends")
+        .expect_err("an output limit error");
+    assert_eq!(err.kind, StreamErrorKind::OutputLimit);
+}
+
+#[tokio::test]
+async fn retained_flush_metadata_counts_toward_the_ceiling() {
+    // OpenAI attaches encrypted reasoning content to the flush rather than to a
+    // part, so a flush is not automatically free.
+    let inner = stream::iter(vec![Ok(Event::flush_with_metadata_field(
+        0,
+        "openai_encrypted_content",
+        "0123456789".repeat(4),
+    ))])
+    .boxed();
+
+    let mut wrapped = with_output_limit(inner, 25);
+
+    assert!(
+        wrapped.next().await.expect("the flush").is_ok(),
+        "the flush is forwarded before the guard errors"
+    );
+
+    let err = wrapped
+        .next()
+        .await
+        .expect("an item before the stream ends")
+        .expect_err("an output limit error");
+    assert_eq!(err.kind, StreamErrorKind::OutputLimit);
 }
 
 #[tokio::test]

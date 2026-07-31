@@ -883,6 +883,15 @@ async fn build_inquiry_backend(
         .clone()
         .or_else(|| cfg.assistant.system_prompt.clone());
 
+    // Same fallback for the output ceiling: an inquiry can be held to a tighter
+    // (or looser) ceiling than the parent assistant.
+    let default_max_response_bytes = inquiry_override
+        .request
+        .as_ref()
+        .map_or(cfg.assistant.request.max_response_bytes, |request| {
+            request.max_response_bytes
+        });
+
     // Track providers we've already constructed to avoid duplicates.
     let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();
 
@@ -930,7 +939,7 @@ async fn build_inquiry_backend(
             model: inquiry_model,
             system_prompt: default_system_prompt,
             sections: sections.clone(),
-            max_response_bytes: cfg.assistant.request.max_response_bytes,
+            max_response_bytes: default_max_response_bytes,
         }
     } else {
         providers.insert(model.id.provider, Arc::clone(&provider));
@@ -940,7 +949,7 @@ async fn build_inquiry_backend(
             model: model.clone(),
             system_prompt: default_system_prompt,
             sections: sections.clone(),
-            max_response_bytes: cfg.assistant.request.max_response_bytes,
+            max_response_bytes: default_max_response_bytes,
         }
     };
 
@@ -1030,12 +1039,20 @@ async fn build_inquiry_overrides(
                 .map(|s| s.to_string())
                 .or_else(|| default_config.system_prompt.clone());
 
+            // Output ceiling follows the same order. `default_config` already
+            // carries the global-inquiry-or-parent value, so an unset
+            // per-question ceiling inherits it.
+            let max_response_bytes = per_q
+                .request
+                .max_response_bytes
+                .unwrap_or(default_config.max_response_bytes);
+
             overrides.insert((tool_name.to_owned(), question_id.clone()), InquiryConfig {
                 provider: inq_provider,
                 model: inq_model,
                 system_prompt,
                 sections: default_config.sections.clone(),
-                max_response_bytes: default_config.max_response_bytes,
+                max_response_bytes,
             });
         }
     }

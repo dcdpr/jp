@@ -192,7 +192,10 @@ impl LlmInquiryBackend {
     }
 
     /// Look up the effective config for this tool/question pair.
-    fn config_for(&self, tool_name: &str, question_id: &str) -> &InquiryConfig {
+    ///
+    /// Returns the per-question override when one exists, otherwise the default
+    /// built from the global inquiry config merged with the parent assistant.
+    pub(crate) fn config_for(&self, tool_name: &str, question_id: &str) -> &InquiryConfig {
         self.overrides
             .get(&(tool_name.to_owned(), question_id.to_owned()))
             .unwrap_or(&self.default_config)

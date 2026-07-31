@@ -17,6 +17,7 @@ use indexmap::IndexMap;
 use inquire::InquireError;
 use jp_config::{
     AppConfig,
+    assistant::{PartialAssistantConfig, request::RequestConfig},
     conversation::tool::{
         CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
         style::{DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle},
@@ -4522,6 +4523,87 @@ fn inquiry_mock_model() -> ModelDetails {
         provider: ProviderId::Test,
         name: "inquiry-mock".parse().expect("valid name"),
     })
+}
+
+/// The global inquiry override for the output ceiling wins over the parent
+/// assistant's value.
+///
+/// `conversation.inquiry.assistant.request.max_response_bytes` is a public key,
+/// so reading the parent value here would silently ignore it.
+#[tokio::test]
+async fn inquiry_ceiling_honors_the_global_inquiry_override() {
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 999_999;
+    config.conversation.inquiry.assistant.request = Some(RequestConfig {
+        max_response_bytes: 4096,
+        ..config.assistant.request
+    });
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        4096,
+        "the global inquiry override must win over the parent assistant"
+    );
+}
+
+/// A per-question ceiling wins over the global inquiry override, which in turn
+/// wins over the parent assistant (RFD 034's resolution order).
+#[tokio::test]
+async fn inquiry_ceiling_honors_the_per_question_override() {
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 999_999;
+    config.conversation.inquiry.assistant.request = Some(RequestConfig {
+        max_response_bytes: 4096,
+        ..config.assistant.request
+    });
+
+    let mut per_question = PartialAssistantConfig::default();
+    per_question.request.max_response_bytes = Some(512);
+
+    let mut tool = inquiry_tool_config(&["confirm"]);
+    tool.questions
+        .insert("confirm".to_string(), QuestionConfig {
+            target: QuestionTarget::Assistant(Box::new(per_question)),
+            answer: None,
+        });
+    config
+        .conversation
+        .tools
+        .insert("inquiry_tool".to_string(), tool);
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("inquiry_tool", "confirm")
+            .max_response_bytes,
+        512,
+        "the per-question override must win over the global inquiry value"
+    );
+
+    // A question without its own ceiling still inherits the global inquiry
+    // value, not the parent assistant's.
+    assert_eq!(
+        backend
+            .config_for("inquiry_tool", "other")
+            .max_response_bytes,
+        4096,
+        "an unset per-question ceiling falls back to the global inquiry value"
+    );
 }
 
 /// Tool has one boolean question with `QuestionTarget::Assistant`.
