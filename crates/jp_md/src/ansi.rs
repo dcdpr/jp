@@ -227,6 +227,15 @@ fn consume_color<'a, I: Iterator<Item = &'a str>>(prefix: &str, tokens: &mut I) 
     }
 }
 
+/// Whether `esc` is an SGR sequence (`\x1b[…m`).
+///
+/// SGR is the only family [`AnsiState`] tracks, so this doubles as the test for
+/// whether an escape's effect can be closed with [`RESET`] or re-opened after a
+/// line break.
+pub fn is_sgr(esc: &str) -> bool {
+    esc.starts_with("\x1b[") && esc.ends_with('m')
+}
+
 /// A lexical segment of a string that may contain ANSI escape sequences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment<'a> {
@@ -316,7 +325,10 @@ fn osc_terminator_end(body: &str) -> Option<usize> {
 /// string is what lets multi-codepoint sequences (emoji presentation via VS16,
 /// ZWJ sequences, script-specific ligatures) measure correctly even when an
 /// escape sits between a base character and its combining mark.
-fn visible_text(s: &str) -> String {
+/// Grapheme cluster boundaries are a property of this text, not of the escape
+/// separated runs it was built from, so anything measuring or cutting on
+/// cluster boundaries has to work from here.
+pub fn visible_text(s: &str) -> String {
     let mut plain = String::new();
     for segment in segments(s) {
         if let Segment::Text(text) = segment {

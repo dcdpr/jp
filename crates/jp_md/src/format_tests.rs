@@ -1352,7 +1352,11 @@ fn test_table_is_fitted_to_the_terminal_width() {
 
     let actual = formatter.format_terminal(input).unwrap();
 
-    let rows: Vec<&str> = actual.lines().filter(|l| l.starts_with('|')).collect();
+    // Wrapped rows continue on a line opening with `┆` rather than `|`.
+    let rows: Vec<&str> = actual
+        .lines()
+        .filter(|l| l.starts_with('|') || l.starts_with('┆'))
+        .collect();
     assert!(rows.len() > 3, "expected wrapped rows:\n{actual}");
     for row in rows {
         assert_eq!(

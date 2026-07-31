@@ -29,6 +29,7 @@ expression: "AppConfig::fields()"
     "style.mcp_startup.interval_ms",
     "style.mcp_startup.show",
     "style.markdown.hr_style",
+    "style.markdown.table_continuation_edge",
     "style.markdown.table_max_column_width",
     "style.markdown.theme",
     "style.markdown.wrap_width",
