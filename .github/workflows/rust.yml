@@ -105,7 +105,19 @@ jobs:
             os: windows-latest
             name_suffix: " (windows)"
             cache_suffix: "-windows"
+            # EXPERIMENT: stop caching `target/` on Windows and let sccache
+            # carry compilation instead. Dropping the path also changes the
+            # `actions/cache` version hash, so the existing 3.9 GB entry no
+            # longer matches and a registry-only entry is written in its place.
+            # `cache_save` keeps that entry warm on this branch so the second
+            # run onwards measures the steady state rather than a cold start.
+            # Revert both before merging.
+            cache_targets: "false"
+            cache_save: "true"
     name: ${{ matrix.task }}${{ matrix.name_suffix }}
+    # A run without a target cache falls back to a full build. Cap it so a
+    # pathological run doesn't burn an hour of Windows minutes unnoticed.
+    timeout-minutes: 60
     steps:
       - name: Decide whether to run task
         id: task
@@ -145,21 +157,6 @@ jobs:
           if [ "$run" != "true" ]; then
             echo "Skipping $TASK because no relevant files changed."
           fi
-      # Defender scans every file cargo, rustc and tar touch. The cache restore
-      # extracts ~4 GB of small files and cargo re-hydrates `registry/src` on
-      # top of that, so the scan tax dominates the job.
-      - name: Exclude build directories from Defender scanning
-        if: ${{ steps.task.outputs.run == 'true' && runner.os == 'Windows' }}
-        shell: pwsh
-        run: |
-          try {
-            "realtime protection: $((Get-MpComputerStatus).RealTimeProtectionEnabled)"
-            Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE", "$env:USERPROFILE\.cargo", "$env:USERPROFILE\.rustup", "$env:RUNNER_TEMP"
-            Add-MpPreference -ExclusionProcess "cargo.exe", "rustc.exe", "sccache.exe", "tar.exe", "zstd.exe", "rust-lld.exe", "link.exe"
-            "excluded paths: $((Get-MpPreference).ExclusionPath -join '; ')"
-          } catch {
-            "::warning::could not configure Defender exclusions: $_"
-          }
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
       - if: ${{ steps.task.outputs.run == 'true' }}
@@ -181,7 +178,8 @@ jobs:
           key: ${{ matrix.task }}
           cache-bin: false
           cache-workspace-crates: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-targets: ${{ matrix.cache_targets || 'true' }}
+          save-if: ${{ matrix.cache_save == 'true' || github.ref == 'refs/heads/main' }}
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # V0.10
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
@@ -193,12 +191,12 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-      # PROBE: `cargo nextest run` starts with a silent `cargo metadata`, which
-      # has to re-extract every `.crate` into `registry/src` because
-      # `rust-cache` strips that directory before saving. Running it as its own
-      # step attributes that cost instead of hiding it inside the test step.
-      # Remove once measured.
-      - name: Warm the registry source tree (timing probe)
+      # `rust-cache` strips `~/.cargo/registry/src` before saving, so the first
+      # cargo invocation of the job re-extracts every `.crate` archive. That is
+      # the single most expensive non-build phase on Windows. Doing it in a
+      # named step keeps the cost visible instead of burying it in the silent
+      # `cargo metadata` that `cargo nextest run` shells out to on startup.
+      - name: Warm the registry source tree
         if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'test' }}
         shell: bash
         run: cargo metadata --locked --format-version 1 > /dev/null
