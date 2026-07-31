@@ -507,19 +507,23 @@ pub(super) async fn run_turn_loop(
                             // successful streams (rate-limited mid-response)
                             // don't permanently consume the retry budget.
                             //
-                            // Patches, keep-alives and rebuild requests are
-                            // excluded: a repair cycle consists only of those, so
-                            // counting them would clear the rebuild budget on
-                            // every rebuilt request and its cap could never be
-                            // reached. `reset` also drops the pending patch
-                            // record, which a rebuild request needs intact to be
-                            // authorized at all.
-                            let advances_cycle = !matches!(
-                                event,
-                                Event::Patch(_)
-                                    | Event::KeepAlive
-                                    | Event::Finished(FinishReason::Retry)
-                            );
+                            // Only a content part or a non-repair terminal event
+                            // counts. A repair cycle is made of patches,
+                            // keep-alives, part-less flushes and the rebuild
+                            // request itself; counting any of them clears the
+                            // rebuild budget on every rebuilt request, so its cap
+                            // could never be reached. `reset` also drops the
+                            // pending patch record, which a rebuild request needs
+                            // intact to be authorized at all.
+                            //
+                            // A content-bearing flush is always preceded by a
+                            // `Part` for the same index, which already reset, so
+                            // excluding `Flush` here loses nothing.
+                            let advances_cycle = match &event {
+                                Event::Part { .. } => true,
+                                Event::Finished(reason) => *reason != FinishReason::Retry,
+                                Event::Flush { .. } | Event::Patch(_) | Event::KeepAlive => false,
+                            };
                             if !received_provider_event && advances_cycle {
                                 received_provider_event = true;
                                 stream_retry.clear_line(&printer);

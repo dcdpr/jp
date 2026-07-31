@@ -5634,8 +5634,14 @@ const REBUILD_PATCH_VALUE: &str = "stale";
 ///
 /// This is the shape a provider repair actually takes.
 /// The rejection is a request-validation error, so nothing streams before it.
+///
+/// The leading flush has no buffered part behind it, so it commits nothing.
+/// It is here because a cycle that renders nothing must not count as progress:
+/// if it did, the rebuild budget would reset on every rebuilt request and the
+/// cap could never be reached.
 fn repair_cycle(round: u32) -> Vec<Event> {
     vec![
+        Event::flush(0),
         Event::Patch(vec![EventPatch {
             matcher: EventMatcher::MetadataValue {
                 key: rebuild_patch_key(round),

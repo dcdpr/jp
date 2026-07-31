@@ -2242,10 +2242,24 @@ mod thinking_signature_recovery {
         error::StreamError,
         event::{EventMatcher, EventPatch, PatchAction},
         provider::anthropic::{
-            build_thinking_patches, find_oldest_thinking_block, identify_thinking_block,
-            is_thinking_block_rejection, parse_signature_error_position, resolve_turn_position,
+            ThinkingRejection, build_thinking_patches, classify_thinking_rejection,
+            find_oldest_thinking_block, identify_thinking_block, parse_signature_error_position,
+            resolve_turn_position,
         },
     };
+
+    /// Build patches the way the provider does: classify the error, then
+    /// repair.
+    ///
+    /// Going through the classifier keeps these expectations honest about which
+    /// rejection kind each error text produces.
+    fn patches_for(
+        request: &types::CreateMessagesRequest,
+        error: &StreamError,
+    ) -> Option<Vec<EventPatch>> {
+        let rejection = classify_thinking_rejection(error).expect("a thinking-block rejection");
+        build_thinking_patches(request, error, rejection)
+    }
 
     /// The `(metadata_key, metadata_value)` each patch targets, in order.
     fn patch_targets(patches: &[EventPatch]) -> Vec<(&str, &str)> {
@@ -2344,7 +2358,10 @@ mod thinking_signature_recovery {
             "api error: invalid_request_error: messages.1.content.0: Invalid `signature` in \
              `thinking` block",
         );
-        assert!(is_thinking_block_rejection(&error));
+        assert_eq!(
+            classify_thinking_rejection(&error),
+            Some(ThinkingRejection::InvalidSignature)
+        );
     }
 
     #[test]
@@ -2354,19 +2371,22 @@ mod thinking_signature_recovery {
              `redacted_thinking` blocks in the latest assistant message cannot be modified. These \
              blocks must remain as they were in the original response.",
         );
-        assert!(is_thinking_block_rejection(&error));
+        assert_eq!(
+            classify_thinking_rejection(&error),
+            Some(ThinkingRejection::UnmodifiableTurn)
+        );
     }
 
     #[test]
     fn ignores_unrelated_errors() {
         let error = StreamError::other("api error: rate_limit_error: too many requests");
-        assert!(!is_thinking_block_rejection(&error));
+        assert_eq!(classify_thinking_rejection(&error), None);
     }
 
     #[test]
     fn ignores_retryable_errors() {
         let error = StreamError::transient("server error with signature and thinking");
-        assert!(!is_thinking_block_rejection(&error));
+        assert_eq!(classify_thinking_rejection(&error), None);
     }
 
     #[test]
@@ -2472,7 +2492,7 @@ mod thinking_signature_recovery {
              `thinking` block",
         );
 
-        let patches = build_thinking_patches(&request, &error).unwrap();
+        let patches = patches_for(&request, &error).unwrap();
         assert_eq!(patches.len(), 1);
         assert_eq!(patches[0].matcher, EventMatcher::MetadataValue {
             key: "anthropic_thinking_signature".to_owned(),
@@ -2499,7 +2519,7 @@ mod thinking_signature_recovery {
             "api error: invalid_request_error: Invalid `signature` in `thinking` block",
         );
 
-        let patches = build_thinking_patches(&request, &error).unwrap();
+        let patches = patches_for(&request, &error).unwrap();
         assert_eq!(patches.len(), 1);
         assert_eq!(patches[0].matcher, EventMatcher::MetadataValue {
             key: "anthropic_thinking_signature".to_owned(),
@@ -2519,7 +2539,96 @@ mod thinking_signature_recovery {
              `thinking` block",
         );
 
-        assert!(build_thinking_patches(&request, &error).is_none());
+        assert!(patches_for(&request, &error).is_none());
+    }
+
+    /// Anthropic's unmodifiable-blocks message concerns the latest assistant
+    /// turn by definition, so a rejection carrying no `messages.N.content.M`
+    /// still identifies where to repair.
+    ///
+    /// Reaching past that turn cannot satisfy the complaint and costs a valid
+    /// signature per attempt.
+    #[test]
+    fn unmodifiable_error_without_a_position_downgrades_the_final_turn() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("first")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("early", "sig_early"),
+                make_text("answer"),
+            ]),
+            msg(MessageRole::User, vec![make_text("second")]),
+            msg(MessageRole::Assistant, vec![
+                make_redacted("r0"),
+                make_thinking("t1", "sig_1"),
+                make_tool_use("tu1"),
+            ]),
+            msg(MessageRole::User, vec![make_tool_result("tu1")]),
+        ]);
+
+        let error = StreamError::other(
+            "api error: invalid_request_error: `thinking` or `redacted_thinking` blocks in the \
+             latest assistant message cannot be modified.",
+        );
+
+        let patches = patches_for(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [
+            ("anthropic_redacted_thinking", "r0"),
+            ("anthropic_thinking_signature", "sig_1"),
+        ]);
+    }
+
+    /// A position that parses but does not resolve is no better than none, so
+    /// it takes the same turn-scoped path.
+    #[test]
+    fn unmodifiable_error_with_an_unresolvable_position_downgrades_the_final_turn() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("first")]),
+            msg(MessageRole::Assistant, vec![make_thinking(
+                "early",
+                "sig_early",
+            )]),
+            msg(MessageRole::User, vec![make_text("second")]),
+            msg(MessageRole::Assistant, vec![make_thinking("t1", "sig_1")]),
+        ]);
+
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.999: `thinking` or \
+             `redacted_thinking` blocks in the latest assistant message cannot be modified.",
+        );
+
+        let patches = patches_for(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [(
+            "anthropic_thinking_signature",
+            "sig_1"
+        )]);
+    }
+
+    /// A stale signature can sit anywhere, so a position-less rejection of that
+    /// kind still starts at the oldest block and walks forward over rounds.
+    #[test]
+    fn signature_error_without_a_position_falls_back_to_the_oldest_block() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("first")]),
+            msg(MessageRole::Assistant, vec![make_thinking(
+                "early",
+                "sig_early",
+            )]),
+            msg(MessageRole::User, vec![make_text("second")]),
+            msg(MessageRole::Assistant, vec![make_thinking("t1", "sig_1")]),
+        ]);
+
+        let error = StreamError::other(
+            "api error: invalid_request_error: Invalid `signature` in `thinking` block",
+        );
+
+        let patches = patches_for(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [(
+            "anthropic_thinking_signature",
+            "sig_early"
+        )]);
     }
 
     /// A tool-use loop whose newest assistant message interleaves redacted and
@@ -2563,7 +2672,7 @@ mod thinking_signature_recovery {
              `thinking` block",
         );
 
-        let patches = build_thinking_patches(&request, &error).unwrap();
+        let patches = patches_for(&request, &error).unwrap();
 
         assert_eq!(patch_targets(&patches), [
             ("anthropic_redacted_thinking", "r0"),
@@ -2603,7 +2712,7 @@ mod thinking_signature_recovery {
              `redacted_thinking` blocks in the latest assistant message cannot be modified.",
         );
 
-        let patches = build_thinking_patches(&request, &error).unwrap();
+        let patches = patches_for(&request, &error).unwrap();
 
         assert_eq!(patch_targets(&patches), [
             ("anthropic_redacted_thinking", "r0"),
@@ -2638,7 +2747,7 @@ mod thinking_signature_recovery {
              `redacted_thinking` blocks in the latest assistant message cannot be modified.",
         );
 
-        let patches = build_thinking_patches(&request, &error).unwrap();
+        let patches = patches_for(&request, &error).unwrap();
 
         assert_eq!(patch_targets(&patches), [
             ("anthropic_redacted_thinking", "r0"),
@@ -2668,7 +2777,7 @@ mod thinking_signature_recovery {
              `thinking` block",
         );
 
-        let patches = build_thinking_patches(&request, &error).unwrap();
+        let patches = patches_for(&request, &error).unwrap();
 
         assert_eq!(patch_targets(&patches), [(
             "anthropic_thinking_signature",
@@ -2698,7 +2807,7 @@ mod thinking_signature_recovery {
              `redacted_thinking` blocks in the latest assistant message cannot be modified.",
         );
 
-        let patches = build_thinking_patches(&request, &error).unwrap();
+        let patches = patches_for(&request, &error).unwrap();
 
         assert_eq!(patch_targets(&patches), [
             ("anthropic_redacted_thinking", "r0"),
@@ -2927,7 +3036,7 @@ mod thinking_signature_recovery {
              `thinking` block",
         );
 
-        let patches = build_thinking_patches(&request, &error).unwrap();
+        let patches = patches_for(&request, &error).unwrap();
 
         assert_eq!(patch_targets(&patches), [
             ("anthropic_redacted_thinking", "r0"),

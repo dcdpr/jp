@@ -310,10 +310,11 @@ fn call(
             // accept as a 400 `invalid_request_error`. Emit a patch to strip the
             // offending metadata and ask the caller to retry.
             if let Err(ref err) = result
-                && is_thinking_block_rejection(err)
-                && let Some(patches) = build_thinking_patches(&request, err)
+                && let Some(rejection) = classify_thinking_rejection(err)
+                && let Some(patches) = build_thinking_patches(&request, err, rejection)
             {
                 warn!(
+                    ?rejection,
                     patches = patches.len(),
                     "Thinking block rejected by the API, patching history and retrying: {err}"
                 );
@@ -689,21 +690,50 @@ fn soft_force_retry(
     }))
 }
 
-/// Returns `true` if the error is an Anthropic `invalid_request_error` about a
-/// `thinking` block the API refuses to accept.
+/// Why the API refused a thinking block.
 ///
-/// Two rejections fall in this class: an invalid `signature` on a thinking
-/// block, and thinking blocks in the latest assistant message having been
-/// modified.
-/// Both are repaired the same way, by replaying the reasoning as `<think>` text
-/// instead of a native thinking block.
-fn is_thinking_block_rejection(error: &StreamError) -> bool {
-    let message = error.message();
+/// Both kinds are repaired the same way, by replaying the reasoning as
+/// `<think>` text instead of a native thinking block.
+/// They differ in where the offending block can be, which is what decides where
+/// to look when the error carries no usable position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThinkingRejection {
+    /// An invalid `signature` on a thinking block.
+    ///
+    /// Any block in the request can carry a stale signature.
+    InvalidSignature,
 
-    error.kind == StreamErrorKind::Other
-        && message.contains("invalid_request_error")
-        && message.contains("thinking")
-        && (message.contains("signature") || message.contains("cannot be modified"))
+    /// Thinking blocks in the latest assistant message were modified.
+    ///
+    /// This always concerns the final assistant turn, whatever position the
+    /// message names.
+    UnmodifiableTurn,
+}
+
+/// Classify an Anthropic `invalid_request_error` about a `thinking` block the
+/// API refuses to accept.
+///
+/// Returns `None` for every other error.
+fn classify_thinking_rejection(error: &StreamError) -> Option<ThinkingRejection> {
+    if error.kind != StreamErrorKind::Other {
+        return None;
+    }
+
+    let message = error.message();
+    if !(message.contains("invalid_request_error") && message.contains("thinking")) {
+        return None;
+    }
+
+    // Tested before the signature wording: the unmodifiable-blocks message names
+    // `thinking` blocks without mentioning a signature, and when a request draws
+    // both complaints the turn-scoped one is the more specific.
+    if message.contains("cannot be modified") {
+        return Some(ThinkingRejection::UnmodifiableTurn);
+    }
+
+    message
+        .contains("signature")
+        .then_some(ThinkingRejection::InvalidSignature)
 }
 
 /// Extract the `(turn_index, flat_content_index)` from an Anthropic error
@@ -806,15 +836,19 @@ fn is_tool_result_message(msg: &types::Message) -> bool {
 /// Blocks in earlier turns are downgraded individually, keeping the rest of
 /// their reasoning native.
 ///
+/// When the error carries no usable position, [`fallback_thinking_block`] picks
+/// where to look based on `rejection`.
+///
 /// Returns `None` if no thinking block can be located.
 fn build_thinking_patches(
     request: &types::CreateMessagesRequest,
     error: &StreamError,
+    rejection: ThinkingRejection,
 ) -> Option<Vec<EventPatch>> {
     let api_position = parse_signature_error_position(error.message());
     let (msg_idx, content_idx) = api_position
         .and_then(|(turn, flat)| resolve_turn_position(&request.messages, turn, flat))
-        .or_else(|| find_oldest_thinking_block(request))?;
+        .or_else(|| fallback_thinking_block(request, rejection))?;
 
     debug!(
         ?api_position,
@@ -840,11 +874,44 @@ fn build_thinking_patches(
         return Some(patches);
     }
 
-    // The located position held no thinking block. Fall back to the oldest one.
-    let (msg_idx, content_idx) = find_oldest_thinking_block(request)?;
+    // The located position held no thinking block.
+    let (msg_idx, content_idx) = fallback_thinking_block(request, rejection)?;
     let (key, value) = identify_thinking_block(request, msg_idx, content_idx)?;
 
     Some(vec![thinking_patch(key, value)])
+}
+
+/// Where to look for the offending thinking block when the error carries no
+/// position, or names one that does not resolve.
+///
+/// A turn-scoped rejection identifies the final assistant turn even without a
+/// position, so the search stays inside it: stripping a block from an earlier
+/// turn cannot satisfy that complaint, and costs a valid signature per attempt.
+/// A stale signature can sit anywhere, so that search starts at the oldest
+/// block and later rounds walk forward.
+fn fallback_thinking_block(
+    request: &types::CreateMessagesRequest,
+    rejection: ThinkingRejection,
+) -> Option<(usize, usize)> {
+    match rejection {
+        ThinkingRejection::UnmodifiableTurn => last_turn_thinking_block(request),
+        ThinkingRejection::InvalidSignature => find_oldest_thinking_block(request),
+    }
+}
+
+/// The newest thinking-bearing message in the final assistant turn, with the
+/// content index of its first thinking block.
+///
+/// Returns `None` when that turn carries no native thinking block, which leaves
+/// the caller reporting the error rather than patching something unrelated.
+fn last_turn_thinking_block(request: &types::CreateMessagesRequest) -> Option<(usize, usize)> {
+    let turn = last_assistant_turn(&request.messages)?;
+
+    turn.rev().find_map(|msg_idx| {
+        thinking_block_indices(request, msg_idx)
+            .first()
+            .map(|&content_idx| (msg_idx, content_idx))
+    })
 }
 
 /// Build the patch that strips a thinking block's provider metadata, so the
