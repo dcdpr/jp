@@ -18,7 +18,8 @@ use jp_llm::{
     provider::mock::MockProvider,
     tool::{InvocationContext, builtin::BuiltinExecutors, executor::ExecutorSource},
 };
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_term::width::display_width;
 use jp_workspace::{ConversationHandle, Workspace};
 use relative_path::RelativePathBuf;
 use serde_json::Value;
@@ -1356,4 +1357,243 @@ fn pending_trim_default_is_noop() {
         before,
         "a default PendingStreamTrim must not mutate the stream"
     );
+}
+
+#[test]
+fn mcp_startup_status_single_server() {
+    assert_eq!(
+        mcp_startup_status(&[McpServerId::new("bookworm")]),
+        "MCP server bookworm"
+    );
+}
+
+#[test]
+fn mcp_startup_status_multiple_servers() {
+    assert_eq!(
+        mcp_startup_status(&[McpServerId::new("bookworm"), McpServerId::new("grizzly")]),
+        "2 MCP servers (bookworm, grizzly)"
+    );
+}
+
+/// Timer settings that render immediately, so tests don't wait out a delay.
+fn immediate_mcp_startup_config() -> McpStartupConfig {
+    McpStartupConfig {
+        show: true,
+        delay_secs: 0,
+        interval_ms: 10,
+    }
+}
+
+#[tokio::test]
+async fn await_mcp_servers_drains_all_startups() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async { Ok(McpServerId::new("bookworm")) });
+    joins.spawn(async { Ok(McpServerId::new("grizzly")) });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm"), McpServerId::new("grizzly")],
+    };
+
+    await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        Arc::new(printer),
+        false,
+        None,
+    )
+    .await
+    .expect("all startups succeed");
+}
+
+#[tokio::test]
+async fn await_mcp_servers_propagates_startup_error() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async { Err(jp_mcp::Error::UnknownServer(McpServerId::new("bookworm"))) });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm")],
+    };
+
+    let error = await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        Arc::new(printer),
+        false,
+        None,
+    )
+    .await
+    .expect_err("a failed required server must fail the wait");
+
+    assert_eq!(error.message.as_deref(), Some("MCP error"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn await_mcp_servers_shows_and_clears_timer_line() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+
+    // Hold the startup window open until the test releases it, so the timer
+    // is guaranteed to tick while the server is still "starting".
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        release_rx.await.ok();
+        Ok(McpServerId::new("bookworm"))
+    });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm")],
+    };
+
+    let wait = tokio::spawn(await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        printer.clone(),
+        true,
+        None,
+    ));
+
+    // Let a few ticks land before releasing the startup.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    release_tx.send(()).expect("wait task is still running");
+    wait.await
+        .expect("task did not panic")
+        .expect("startup succeeds");
+    printer.flush();
+
+    let chrome = err.lock();
+    assert!(
+        chrome.contains("⏱ Starting MCP server bookworm…"),
+        "timer line should name the pending server.\nChrome:\n{chrome}"
+    );
+    assert!(
+        chrome.ends_with("\r\x1b[K"),
+        "finishing the wait must leave the line cleared.\nChrome:\n{chrome}"
+    );
+}
+
+/// Poll `err` until `needle` appears, failing after a hard timeout.
+///
+/// Synchronizes on the rendered output instead of a fixed sleep: the timer
+/// writes frames from its own task, so tests wait for the frame to land rather
+/// than guessing how long that takes.
+async fn wait_for_frame(err: &SharedBuffer, needle: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !err.lock().contains(needle) {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("frame {needle:?} never rendered"));
+}
+
+/// Drives the aggregate redraw: two servers start, one finishes while the other
+/// is still pending, then the second finishes.
+/// The line must go from both names, to the survivor alone, to cleared.
+#[tokio::test(flavor = "multi_thread")]
+async fn await_mcp_servers_redraws_as_servers_finish() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+
+    // Two independently-released tasks: releasing `bookworm` first makes
+    // `grizzly` the deterministic survivor of the mid-drain redraw.
+    let (bookworm_tx, bookworm_rx) = tokio::sync::oneshot::channel::<()>();
+    let (grizzly_tx, grizzly_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        bookworm_rx.await.ok();
+        Ok(McpServerId::new("bookworm"))
+    });
+    joins.spawn(async move {
+        grizzly_rx.await.ok();
+        Ok(McpServerId::new("grizzly"))
+    });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm"), McpServerId::new("grizzly")],
+    };
+
+    let wait = tokio::spawn(await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        printer.clone(),
+        true,
+        None,
+    ));
+
+    // Advance on the rendered frames, not the clock: wait until each frame is
+    // actually in the buffer before releasing the next server, so a slow timer
+    // task can't make the release outrun the redraw it's supposed to observe.
+    wait_for_frame(&err, "2 MCP servers (bookworm, grizzly)").await;
+    bookworm_tx.send(()).expect("wait task is still running");
+    wait_for_frame(&err, "MCP server grizzly…").await;
+    grizzly_tx.send(()).expect("wait task is still running");
+    wait.await
+        .expect("task did not panic")
+        .expect("all startups succeed");
+    printer.flush();
+
+    let chrome = err.lock();
+    let both = chrome
+        .find("2 MCP servers (bookworm, grizzly)")
+        .expect("the aggregate two-server frame must render first");
+    let survivor = chrome
+        .find("MCP server grizzly…")
+        .expect("the survivor-only frame must render after bookworm finishes");
+    assert!(
+        both < survivor,
+        "the two-server frame must precede the survivor-only frame.\nChrome:\n{chrome}"
+    );
+    assert!(
+        !chrome.contains("MCP server bookworm…"),
+        "bookworm was never the sole pending server; it must not render alone.\nChrome:\n{chrome}"
+    );
+    assert!(
+        chrome.ends_with("\r\x1b[K"),
+        "finishing the wait must leave the line cleared.\nChrome:\n{chrome}"
+    );
+}
+
+#[test]
+fn mcp_startup_line_renders_full_when_it_fits() {
+    assert_eq!(
+        mcp_startup_line(4.2, Some("MCP server bookworm"), Some(80)),
+        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
+    );
+    // Unknown width leaves the line unbounded.
+    assert_eq!(
+        mcp_startup_line(4.2, Some("MCP server bookworm"), None),
+        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
+    );
+}
+
+// A long server list forced to truncate must keep the elapsed-time suffix: the
+// whole point of the line is the moving timer, so truncation has to fall on the
+// server list, not the `Ns` tail. Testing the pure formatter at a fixed `secs`
+// pins the invariant without depending on when the timer task first ticks.
+#[test]
+fn mcp_startup_line_truncation_preserves_timer_suffix() {
+    let long = "MCP server bookworm-with-a-very-long-descriptive-server-name";
+    let line = mcp_startup_line(12.3, Some(long), Some(30));
+
+    assert!(line.ends_with(" 12.3s"), "suffix must survive: {line:?}");
+    assert!(line.contains('…'), "server list must truncate: {line:?}");
+    // The visible text (control prefix stripped) must fit the declared width.
+    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
+    assert!(display_width(visible) <= 30, "must fit width: {line:?}");
+}
+
+// A terminal too narrow for even the prefix and suffix still keeps a moving
+// timer rather than a static stub.
+#[test]
+fn mcp_startup_line_ultra_narrow_keeps_bounded_timer() {
+    let line = mcp_startup_line(7.0, Some("MCP server bookworm"), Some(6));
+
+    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
+    assert!(display_width(visible) <= 6, "must fit width: {line:?}");
+    assert!(visible.contains("7.0s"), "timer must survive: {line:?}");
 }

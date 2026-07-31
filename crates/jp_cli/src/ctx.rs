@@ -8,15 +8,12 @@ use std::{
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
-use jp_mcp::id::McpServerId;
+use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
 use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
-use tokio::{
-    runtime::{Handle, Runtime},
-    task::JoinSet,
-};
+use tokio::runtime::{Handle, Runtime};
 
 use crate::{Globals, Result, signals::SignalRouter};
 
@@ -172,9 +169,7 @@ impl Ctx {
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
-    pub(crate) async fn configure_active_mcp_servers(
-        &mut self,
-    ) -> Result<JoinSet<std::result::Result<(), jp_mcp::Error>>> {
+    pub(crate) async fn configure_active_mcp_servers(&mut self) -> Result<StartupSet> {
         let mut server_ids = HashSet::new();
 
         for (_name, cfg) in self.config.conversation.tools.iter() {

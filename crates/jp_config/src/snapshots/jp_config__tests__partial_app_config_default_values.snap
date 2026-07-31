@@ -203,6 +203,17 @@ Ok(
                     ),
                     hr_style: None,
                 },
+                mcp_startup: PartialMcpStartupConfig {
+                    show: Some(
+                        true,
+                    ),
+                    delay_secs: Some(
+                        4,
+                    ),
+                    interval_ms: Some(
+                        100,
+                    ),
+                },
                 reasoning: PartialReasoningConfig {
                     display: None,
                     summary_model: None,

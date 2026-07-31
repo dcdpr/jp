@@ -102,6 +102,11 @@ expression: v
         "theme": "gruvbox-dark",
         "hr_style": "line"
       },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100
+      },
       "reasoning": {
         "display": "full",
         "background": 236,
