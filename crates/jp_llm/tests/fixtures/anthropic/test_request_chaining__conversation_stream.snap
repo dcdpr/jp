@@ -101,6 +101,7 @@ expression: v
       "markdown": {
         "wrap_width": 80,
         "table_max_column_width": 40,
+        "table_continuation_edge": true,
         "theme": "gruvbox-dark",
         "hr_style": "line"
       },

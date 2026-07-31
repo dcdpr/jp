@@ -1,6 +1,19 @@
 use super::*;
 use crate::format::HrStyle;
 
+/// Character positions of the column edges on a rendered line.
+///
+/// A continuation line opens with [`CONTINUATION_EDGE`] instead of `|`, and
+/// that glyph is three bytes wide, so edges are counted in characters rather
+/// than byte offsets.
+fn column_edges(line: &str) -> Vec<usize> {
+    line.chars()
+        .enumerate()
+        .filter(|(_, c)| *c == '|' || *c == CONTINUATION_EDGE)
+        .map(|(i, _)| i)
+        .collect()
+}
+
 #[test]
 fn test_pad_cell_left() {
     assert_eq!(pad_cell("hi", 10, TableAlignment::Left), "hi        ");
@@ -88,6 +101,36 @@ fn test_wrap_ansi_state_continues() {
         "second line should reopen bold: {:?}",
         lines[1]
     );
+}
+
+#[test]
+fn test_truncate_fits_unchanged() {
+    assert_eq!(truncate_to_visual_width("hello", 10), "hello");
+    assert_eq!(truncate_to_visual_width("hello", 5), "hello");
+}
+
+#[test]
+fn test_truncate_unlimited() {
+    assert_eq!(truncate_to_visual_width("hello world", 0), "hello world");
+}
+
+#[test]
+fn test_truncate_marks_the_cut() {
+    // The marker takes the last column, so the result still fits the width.
+    assert_eq!(truncate_to_visual_width("abcdefghij", 5), "abcd…");
+}
+
+#[test]
+fn test_truncate_drops_the_space_before_the_marker() {
+    assert_eq!(truncate_to_visual_width("ab cdef", 4), "ab…");
+}
+
+#[test]
+fn test_truncate_closes_open_ansi_state() {
+    // Bold opens before the cut, so it has to be closed or it bleeds into the
+    // rest of the line.
+    let input = "\x1b[1m**bold text**\x1b[22m";
+    assert_eq!(truncate_to_visual_width(input, 6), "\x1b[1m**bol…\x1b[0m");
 }
 
 #[test]
@@ -245,20 +288,15 @@ fn test_format_simple_table() {
         assert!(line.ends_with('|'), "line should end with |: {line}");
     }
 
-    // Pipe positions should be consistent across all content rows.
-    let pipe_positions: Vec<Vec<usize>> = lines
+    // Column edges should be consistent across all content rows.
+    let edges: Vec<Vec<usize>> = lines
         .iter()
         .enumerate()
         .filter(|(i, _)| *i != 1) // skip separator
-        .map(|(_, line)| {
-            line.char_indices()
-                .filter(|(_, c)| *c == '|')
-                .map(|(i, _)| i)
-                .collect()
-        })
+        .map(|(_, line)| column_edges(line))
         .collect();
-    for (i, pos) in pipe_positions.iter().enumerate().skip(1) {
-        assert_eq!(*pos, pipe_positions[0], "pipe positions differ at row {i}");
+    for (i, row_edges) in edges.iter().enumerate().skip(1) {
+        assert_eq!(*row_edges, edges[0], "column edges differ at row {i}");
     }
 }
 
@@ -317,7 +355,7 @@ fn test_format_table_with_wrapping() {
     let plain: String = result
         .lines()
         .flat_map(|l| l.chars())
-        .filter(|c| !c.is_control() && *c != '|')
+        .filter(|c| !c.is_control() && *c != '|' && *c != CONTINUATION_EDGE)
         .collect();
     let normalized: String = plain.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
@@ -361,27 +399,19 @@ fn test_format_table_wrapping_respects_alignment() {
     )
     .expect("should format");
 
-    // All data lines should have consistent pipe positions.
+    // All data lines should have consistent column edge positions.
     let data_lines: Vec<&str> = result
         .lines()
         .enumerate()
         .filter(|(i, _)| *i != 1) // skip separator
         .map(|(_, l)| l)
         .collect();
-    let first_pipes: Vec<usize> = data_lines[0]
-        .char_indices()
-        .filter(|(_, c)| *c == '|')
-        .map(|(i, _)| i)
-        .collect();
+    let first_edges = column_edges(data_lines[0]);
     for (i, line) in data_lines.iter().enumerate().skip(1) {
-        let pipes: Vec<usize> = line
-            .char_indices()
-            .filter(|(_, c)| *c == '|')
-            .map(|(i, _)| i)
-            .collect();
         assert_eq!(
-            pipes, first_pipes,
-            "pipe positions differ at data line {i}: {line:?}"
+            column_edges(line),
+            first_edges,
+            "column edges differ at data line {i}: {line:?}"
         );
     }
 
@@ -398,6 +428,137 @@ fn test_format_table_wrapping_respects_alignment() {
     assert!(
         right_cell.starts_with("  "),
         "right-aligned continuation should have leading spaces: {right_cell:?}"
+    );
+}
+
+/// A line that continues the row above opens with the continuation edge instead
+/// of `|`, so a reader can tell a wrapped row from the next one.
+/// Only the opening delimiter changes: GFM makes a row's leading `|` optional,
+/// so a continuation line pasted into a markdown document still splits into the
+/// right columns on the pipes that remain.
+#[test]
+fn test_wrapped_rows_open_with_the_continuation_edge() {
+    let arena = comrak::Arena::new();
+    let options = comrak::Options {
+        extension: comrak::options::Extension {
+            table: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let input = "| Name | Desc |\n| --- | --- |\n| a | one two three |\n";
+    let root = comrak::parse_document(&arena, input, &options);
+    let table_node = root.first_child().expect("should have table");
+    let theme = crate::theme::resolve(None);
+    let opts = TableOptions::new(9);
+    let hr_opts = crate::render::HrOptions {
+        style: HrStyle::Markdown,
+    };
+    let result = format_table(
+        table_node,
+        RenderOptions {
+            width: 0,
+            terminal_width: None,
+            table_options: &opts,
+            hr_options: &hr_opts,
+            theme: &theme,
+            default_background: None,
+            inline_code_bg: None,
+            indent: 0,
+        },
+        None,
+    )
+    .expect("should format");
+
+    assert_eq!(
+        result,
+        "| Name | Desc      |\n|------|-----------|\n| a    | one two   |\n┆      | three     |\n"
+    );
+}
+
+/// Opting out returns every line to `|`, for output that has to stay a valid
+/// markdown table row by row.
+#[test]
+fn test_continuation_edge_can_be_disabled() {
+    let arena = comrak::Arena::new();
+    let options = comrak::Options {
+        extension: comrak::options::Extension {
+            table: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let input = "| Name | Desc |\n| --- | --- |\n| a | one two three |\n";
+    let root = comrak::parse_document(&arena, input, &options);
+    let table_node = root.first_child().expect("should have table");
+    let theme = crate::theme::resolve(None);
+    let opts = TableOptions::new(9).continuation_edge(false);
+    let hr_opts = crate::render::HrOptions {
+        style: HrStyle::Markdown,
+    };
+    let result = format_table(
+        table_node,
+        RenderOptions {
+            width: 0,
+            terminal_width: None,
+            table_options: &opts,
+            hr_options: &hr_opts,
+            theme: &theme,
+            default_background: None,
+            inline_code_bg: None,
+            indent: 0,
+        },
+        None,
+    )
+    .expect("should format");
+
+    assert_eq!(
+        result,
+        "| Name | Desc      |\n|------|-----------|\n| a    | one two   |\n|      | three     |\n"
+    );
+}
+
+/// A header cell wider than its column is truncated, not wrapped, so the
+/// separator stays on the second line.
+/// A wrapped header pushes the separator down, and a markdown parser reading
+/// that output promotes the header's own tail to the header row.
+#[test]
+fn test_wide_header_is_truncated_not_wrapped() {
+    let arena = comrak::Arena::new();
+    let options = comrak::Options {
+        extension: comrak::options::Extension {
+            table: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let input = "| Alpha heading | Beta |\n| --- | --- |\n| a | b |\n";
+    let root = comrak::parse_document(&arena, input, &options);
+    let table_node = root.first_child().expect("should have table");
+    let theme = crate::theme::resolve(None);
+    let opts = TableOptions::new(9);
+    let hr_opts = crate::render::HrOptions {
+        style: HrStyle::Markdown,
+    };
+    let result = format_table(
+        table_node,
+        RenderOptions {
+            width: 0,
+            terminal_width: None,
+            table_options: &opts,
+            hr_options: &hr_opts,
+            theme: &theme,
+            default_background: None,
+            inline_code_bg: None,
+            indent: 0,
+        },
+        None,
+    )
+    .expect("should format");
+
+    assert_eq!(
+        result,
+        "| Alpha he… | Beta |\n|-----------|------|\n| a         | b    |\n"
     );
 }
 

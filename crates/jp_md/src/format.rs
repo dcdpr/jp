@@ -116,6 +116,9 @@ pub struct Formatter {
     /// `0` = unlimited.
     table_max_column_width: usize,
 
+    /// Whether the continuation lines of a wrapped table row are marked.
+    table_continuation_edge: bool,
+
     /// Resolved syntax highlighting theme.
     theme: Theme,
 
@@ -142,6 +145,7 @@ impl fmt::Debug for Formatter {
         f.debug_struct("Formatter")
             .field("width", &self.width)
             .field("table_max_column_width", &self.table_max_column_width)
+            .field("table_continuation_edge", &self.table_continuation_edge)
             .field("theme", &"<syntect::Theme>")
             .field("hr_style", &self.hr_style)
             .field("terminal_width", &self.terminal_width)
@@ -163,6 +167,7 @@ impl Formatter {
         Self {
             width: DEFAULT_WIDTH,
             table_max_column_width: DEFAULT_TABLE_MAX_COL_WIDTH,
+            table_continuation_edge: true,
             theme: theme::resolve(None),
             hr_style: HrStyle::default(),
             terminal_width: None,
@@ -178,6 +183,7 @@ impl Formatter {
         Self {
             width,
             table_max_column_width: DEFAULT_TABLE_MAX_COL_WIDTH,
+            table_continuation_edge: true,
             theme: theme::resolve(None),
             hr_style: HrStyle::default(),
             terminal_width: None,
@@ -189,6 +195,13 @@ impl Formatter {
     #[must_use]
     pub const fn table_max_column_width(mut self, width: usize) -> Self {
         self.table_max_column_width = width;
+        self
+    }
+
+    /// Set whether the continuation lines of a wrapped table row are marked.
+    #[must_use]
+    pub const fn table_continuation_edge(mut self, enabled: bool) -> Self {
+        self.table_continuation_edge = enabled;
         self
     }
 
@@ -286,7 +299,8 @@ impl Formatter {
         let comrak_options = self.parse_options();
         let arena = Arena::new();
         let ast = comrak::parse_document(&arena, text, &comrak_options);
-        let table_options = TableOptions::new(self.table_max_column_width);
+        let table_options = TableOptions::new(self.table_max_column_width)
+            .continuation_edge(self.table_continuation_edge);
         let hr_options = HrOptions {
             style: self.hr_style,
         };

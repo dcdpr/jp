@@ -198,6 +198,9 @@ Ok(
                     table_max_column_width: Some(
                         40,
                     ),
+                    table_continuation_edge: Some(
+                        true,
+                    ),
                     theme: Some(
                         "gruvbox-dark",
                     ),

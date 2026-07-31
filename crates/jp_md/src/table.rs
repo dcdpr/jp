@@ -9,7 +9,9 @@
 //! that fits keeps its natural widths, and one that does not has its widest
 //! columns narrowed until the whole table fits.
 //! Cell content that exceeds its fitted column width is word-wrapped across
-//! multiple visual rows, preserving ANSI formatting state across line breaks.
+//! multiple visual lines, preserving ANSI formatting state across line breaks.
+//! A line that continues the row above opens with [`CONTINUATION_EDGE`] rather
+//! than `|`, so a wrapped row reads as one row instead of several.
 //!
 //! # Usage
 //!
@@ -39,6 +41,18 @@ const MIN_COLUMN_WIDTH: usize = 3;
 /// space on either side of the cell.
 const COLUMN_CHROME: usize = 3;
 
+/// Opens a line that continues the row above rather than starting a new one.
+///
+/// Only the row's opening delimiter takes this glyph; the inner and trailing
+/// `|` stay put.
+/// GFM treats a row's leading `|` as optional, so a continuation line pasted
+/// into a markdown document still splits into the right columns on the pipes
+/// that remain.
+const CONTINUATION_EDGE: char = '┆';
+
+/// Marks a header cell cut short because it did not fit its column.
+const TRUNCATION_MARKER: char = '…';
+
 /// Options for table formatting.
 pub struct TableOptions {
     /// Upper bound on the visual width of any single column.
@@ -48,12 +62,27 @@ pub struct TableOptions {
     /// A column can still end up narrower than this, when the table would
     /// otherwise not fit the available width.
     pub max_column_width: usize,
+
+    /// Whether a line continuing the row above opens with [`CONTINUATION_EDGE`]
+    /// instead of `|`.
+    pub continuation_edge: bool,
 }
 
 impl TableOptions {
-    /// Create a new `TableOptions` with the given column width.
+    /// Create a new `TableOptions` with the given column width, marking the
+    /// continuation lines of wrapped rows.
     pub const fn new(max_column_width: usize) -> Self {
-        Self { max_column_width }
+        Self {
+            max_column_width,
+            continuation_edge: true,
+        }
+    }
+
+    /// Set whether continuation lines are marked.
+    #[must_use]
+    pub const fn continuation_edge(mut self, enabled: bool) -> Self {
+        self.continuation_edge = enabled;
+        self
     }
 }
 
@@ -73,7 +102,8 @@ impl TableOptions {
 ///    `width: 0` to disable wrapping inside cells).
 /// 3. Computes natural visual column widths (ignoring ANSI bytes) and fits them
 ///    to `budget`.
-/// 4. Word-wraps cells that exceed their fitted column width.
+/// 4. Word-wraps cells that exceed their fitted column width, opening each
+///    continuation line with [`CONTINUATION_EDGE`].
 /// 5. Pads and aligns cells according to the table's alignment markers.
 pub fn format_table(
     node: Node<'_>,
@@ -101,18 +131,31 @@ pub fn format_table(
     let mut out = String::new();
 
     for (row_idx, row) in rows.iter().enumerate() {
-        // Wrap each cell's content into lines that fit the column width.
+        let is_header = row_idx == 0;
+
+        // Wrap each cell's content into lines that fit the column width. The
+        // header is truncated to a single line instead: wrapping it would push
+        // the separator off the second line, and a markdown parser reading this
+        // output then promotes the header's own tail to the header row.
         let wrapped: Vec<Vec<String>> = (0..num_cols)
             .map(|col| {
                 let content = row.get(col).map_or("", |c| c.rendered.as_str());
-                wrap_to_visual_width(content, col_widths[col])
+                if is_header {
+                    vec![truncate_to_visual_width(content, col_widths[col])]
+                } else {
+                    wrap_to_visual_width(content, col_widths[col])
+                }
             })
             .collect();
 
         let max_lines = wrapped.iter().map(Vec::len).max().unwrap_or(1);
 
         for line_idx in 0..max_lines {
-            out.push('|');
+            if line_idx == 0 || !options.table_options.continuation_edge {
+                out.push('|');
+            } else {
+                out.push(CONTINUATION_EDGE);
+            }
             for (col, col_lines) in wrapped.iter().enumerate() {
                 if col >= num_cols {
                     break;
@@ -126,7 +169,7 @@ pub fn format_table(
         }
 
         // Separator line after header row.
-        if row_idx == 0 {
+        if is_header {
             out.push('|');
             for (col, align) in alignments.iter().enumerate() {
                 let w = col_widths[col];
@@ -321,6 +364,55 @@ fn pad_cell(content: &str, target_width: usize, alignment: TableAlignment) -> St
             format!("{content}{}", " ".repeat(pad))
         }
     }
+}
+
+/// Truncate a string (possibly containing ANSI escapes) to a maximum visual
+/// width, marking the cut with [`TRUNCATION_MARKER`].
+///
+/// Content that already fits, and any content at all when `max_width` is `0`,
+/// is returned unchanged.
+/// The marker takes the last column, so `max_width` still bounds the result.
+/// ANSI state left open at the cut is closed, so styling does not leak into the
+/// rest of the line.
+fn truncate_to_visual_width(content: &str, max_width: usize) -> String {
+    if max_width == 0 || ansi::visual_width(content) <= max_width {
+        return content.to_string();
+    }
+
+    let keep = max_width - 1;
+    let mut out = String::new();
+    let mut state = AnsiState::default();
+
+    'segments: for segment in ansi::segments(content) {
+        let text = match segment {
+            Segment::Escape(escape) => {
+                state.update(escape);
+                out.push_str(escape);
+                continue;
+            }
+            Segment::Text(text) => text,
+        };
+
+        for c in text.chars() {
+            out.push(c);
+            if ansi::visual_width(&out) > keep {
+                out.pop();
+                break 'segments;
+            }
+        }
+    }
+
+    // An escape never ends in a space, so this only trims visible padding.
+    while out.ends_with(' ') {
+        out.pop();
+    }
+
+    out.push(TRUNCATION_MARKER);
+    if state.is_active() {
+        out.push_str(RESET);
+    }
+
+    out
 }
 
 /// Word-wrap a string (possibly containing ANSI escapes) to a maximum visual

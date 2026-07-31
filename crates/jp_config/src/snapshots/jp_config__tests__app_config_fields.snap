@@ -26,6 +26,7 @@ expression: "AppConfig::fields()"
     "style.reasoning.extend_across_tool_calls",
     "style.reasoning.summary_model",
     "style.markdown.hr_style",
+    "style.markdown.table_continuation_edge",
     "style.markdown.table_max_column_width",
     "style.markdown.theme",
     "style.markdown.wrap_width",

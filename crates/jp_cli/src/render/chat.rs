@@ -974,6 +974,7 @@ fn formatter_from_config(
     Formatter::with_width(wrap_width(config, terminal_width))
         .terminal_width(terminal_width.map_or(0, usize::from))
         .table_max_column_width(config.markdown.table_max_column_width)
+        .table_continuation_edge(config.markdown.table_continuation_edge)
         .theme(theme_name)
         .pretty_hr(pretty && config.markdown.hr_style.is_line())
         .inline_code_bg(

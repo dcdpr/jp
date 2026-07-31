@@ -150,7 +150,11 @@ fn test_table_is_fitted_to_the_printers_terminal_width() {
     renderer.printer.flush();
 
     let rendered = strip_ansi(&out.lock());
-    let rows: Vec<&str> = rendered.lines().filter(|l| l.starts_with('|')).collect();
+    // Wrapped rows continue on a line opening with `┆` rather than `|`.
+    let rows: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.starts_with('|') || l.starts_with('┆'))
+        .collect();
     assert!(rows.len() > 3, "expected wrapped rows:\n{rendered}");
     for row in rows {
         assert_eq!(
@@ -159,6 +163,41 @@ fn test_table_is_fitted_to_the_printers_terminal_width() {
             "row should fit the reported terminal width: {row:?}"
         );
     }
+}
+
+/// The continuation edge is configurable, so the rendered table has to follow
+/// `style.markdown.table_continuation_edge` rather than a hardcoded default.
+#[test]
+fn test_table_continuation_edge_follows_the_config() {
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 80;
+    config.style.markdown.table_max_column_width = 40;
+    config.style.markdown.table_continuation_edge = false;
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.with_output_width(OutputWidth::Terminal(30))),
+        config.style,
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "| Alpha heading | Beta heading |\n| --- | --- |\n| first cell content | second \
+                  cell content |\n\n"
+            .into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    // The fourth line means the data row wrapped, so there is a continuation
+    // line for the setting to act on.
+    let rendered = strip_ansi(&out.lock());
+    let rows: Vec<&str> = rendered.lines().filter(|l| l.contains('|')).collect();
+    assert_eq!(rows, vec![
+        "| Alpha headi… | Beta headi… |",
+        "|--------------|-------------|",
+        "| first cell   | second cell |",
+        "| content      | content     |",
+    ]);
 }
 
 #[test]
