@@ -1,4 +1,4 @@
-use std::{env, mem, time::Duration};
+use std::{env, mem, ops::RangeInclusive, time::Duration};
 
 use async_anthropic::{
     Client,
@@ -262,9 +262,9 @@ impl ForcedToolFallback {
 /// issued with thinking disabled and the original forced `tool_choice`
 /// restored.
 ///
-/// If the API rejects the request due to an invalid thinking-block signature,
-/// emits [`Event::Patch`] instructions to fix the conversation stream and
-/// finishes with [`FinishReason::Retry`] so the caller can rebuild and retry.
+/// If the API rejects a thinking block in the request, emits [`Event::Patch`]
+/// instructions to fix the conversation stream and finishes with
+/// [`FinishReason::Retry`] so the caller can rebuild and retry.
 fn call(
     client: Client,
     request: types::CreateMessagesRequest,
@@ -306,14 +306,18 @@ fn call(
 
         pin_mut!(stream);
         while let Some(result) = stream.next().await {
-            // Anthropic rejects requests with stale thinking signatures as a
-            // 400 `invalid_request_error`. Emit a patch to strip the offending
-            // metadata and ask the caller to retry.
+            // Anthropic rejects requests carrying thinking blocks it won't
+            // accept as a 400 `invalid_request_error`. Emit a patch to strip the
+            // offending metadata and ask the caller to retry.
             if let Err(ref err) = result
-                && is_invalid_thinking_signature(err)
-                && let Some(patches) = build_thinking_patches(&request, err)
+                && let Some(rejection) = classify_thinking_rejection(err)
+                && let Some(patches) = build_thinking_patches(&request, err, rejection)
             {
-                warn!("Invalid thinking signature, requesting retry.");
+                warn!(
+                    ?rejection,
+                    patches = patches.len(),
+                    "Thinking block rejected by the API, patching history and retrying: {err}"
+                );
                 yield Event::Patch(patches);
                 yield Event::Finished(FinishReason::Retry);
                 return;
@@ -686,13 +690,50 @@ fn soft_force_retry(
     }))
 }
 
-/// Returns `true` if the error is an Anthropic `invalid_request_error`
-/// complaining about an invalid `signature` in a `thinking` block.
-fn is_invalid_thinking_signature(error: &StreamError) -> bool {
-    error.kind == StreamErrorKind::Other
-        && error.message().contains("invalid_request_error")
-        && error.message().contains("signature")
-        && error.message().contains("thinking")
+/// Why the API refused a thinking block.
+///
+/// Both kinds are repaired the same way, by replaying the reasoning as
+/// `<think>` text instead of a native thinking block.
+/// They differ in where the offending block can be, which is what decides where
+/// to look when the error carries no usable position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ThinkingRejection {
+    /// An invalid `signature` on a thinking block.
+    ///
+    /// Any block in the request can carry a stale signature.
+    InvalidSignature,
+
+    /// Thinking blocks in the latest assistant message were modified.
+    ///
+    /// This always concerns the final assistant turn, whatever position the
+    /// message names.
+    UnmodifiableTurn,
+}
+
+/// Classify an Anthropic `invalid_request_error` about a `thinking` block the
+/// API refuses to accept.
+///
+/// Returns `None` for every other error.
+fn classify_thinking_rejection(error: &StreamError) -> Option<ThinkingRejection> {
+    if error.kind != StreamErrorKind::Other {
+        return None;
+    }
+
+    let message = error.message();
+    if !(message.contains("invalid_request_error") && message.contains("thinking")) {
+        return None;
+    }
+
+    // Tested before the signature wording: the unmodifiable-blocks message names
+    // `thinking` blocks without mentioning a signature, and when a request draws
+    // both complaints the turn-scoped one is the more specific.
+    if message.contains("cannot be modified") {
+        return Some(ThinkingRejection::UnmodifiableTurn);
+    }
+
+    message
+        .contains("signature")
+        .then_some(ThinkingRejection::InvalidSignature)
 }
 
 /// Extract the `(turn_index, flat_content_index)` from an Anthropic error
@@ -780,36 +821,159 @@ fn is_tool_result_message(msg: &types::Message) -> bool {
             .all(|c| matches!(c, types::MessageContent::ToolResult(_)))
 }
 
-/// Build [`EventPatch`] instructions for the thinking block identified by the
-/// API error.
-/// The caller yields these as [`Event::Patch`] so the CLI can remove the stale
-/// signature metadata from the persisted conversation stream.
+/// Build [`EventPatch`] instructions for the thinking blocks the API refused.
+/// The caller yields these as [`Event::Patch`] so the CLI can remove the
+/// provider metadata from the persisted conversation stream.
 /// On the next request rebuild, [`convert_event`] will fall through to the
 /// `<think>` tag path for events that no longer carry a signature.
 ///
-/// Returns `None` if the offending block cannot be located.
+/// A block anywhere in the final assistant turn downgrades every thinking and
+/// redacted-thinking block in the message holding it.
+/// Anthropic treats that whole turn as one assistant message and requires its
+/// thinking blocks back exactly as generated, so rewriting a subset is rejected
+/// with `thinking blocks ... cannot be modified`; rewriting all of a message's
+/// blocks leaves text and tool use, which the API accepts.
+/// Blocks in earlier turns are downgraded individually, keeping the rest of
+/// their reasoning native.
+///
+/// When the error carries no usable position, [`fallback_thinking_block`] picks
+/// where to look based on `rejection`.
+///
+/// Returns `None` if no thinking block can be located.
 fn build_thinking_patches(
     request: &types::CreateMessagesRequest,
     error: &StreamError,
+    rejection: ThinkingRejection,
 ) -> Option<Vec<EventPatch>> {
     let api_position = parse_signature_error_position(error.message());
     let (msg_idx, content_idx) = api_position
         .and_then(|(turn, flat)| resolve_turn_position(&request.messages, turn, flat))
-        .or_else(|| find_oldest_thinking_block(request))?;
+        .or_else(|| fallback_thinking_block(request, rejection))?;
 
-    let (key, value) = identify_thinking_block(request, msg_idx, content_idx).or_else(|| {
-        // Resolved position wasn't a thinking block. Fall back to oldest.
-        let (msg, idx) = find_oldest_thinking_block(request)?;
-        identify_thinking_block(request, msg, idx)
-    })?;
+    debug!(
+        ?api_position,
+        msg_idx, content_idx, "Located the thinking block rejected by the API."
+    );
 
-    Some(vec![EventPatch {
+    let in_final_turn =
+        last_assistant_turn(&request.messages).is_some_and(|turn| turn.contains(&msg_idx));
+
+    let content_indices = if in_final_turn {
+        thinking_block_indices(request, msg_idx)
+    } else {
+        vec![content_idx]
+    };
+
+    let patches: Vec<EventPatch> = content_indices
+        .into_iter()
+        .filter_map(|idx| identify_thinking_block(request, msg_idx, idx))
+        .map(|(key, value)| thinking_patch(key, value))
+        .collect();
+
+    if !patches.is_empty() {
+        return Some(patches);
+    }
+
+    // The located position held no thinking block.
+    let (msg_idx, content_idx) = fallback_thinking_block(request, rejection)?;
+    let (key, value) = identify_thinking_block(request, msg_idx, content_idx)?;
+
+    Some(vec![thinking_patch(key, value)])
+}
+
+/// Where to look for the offending thinking block when the error carries no
+/// position, or names one that does not resolve.
+///
+/// A turn-scoped rejection identifies the final assistant turn even without a
+/// position, so the search stays inside it: stripping a block from an earlier
+/// turn cannot satisfy that complaint, and costs a valid signature per attempt.
+/// A stale signature can sit anywhere, so that search starts at the oldest
+/// block and later rounds walk forward.
+fn fallback_thinking_block(
+    request: &types::CreateMessagesRequest,
+    rejection: ThinkingRejection,
+) -> Option<(usize, usize)> {
+    match rejection {
+        ThinkingRejection::UnmodifiableTurn => last_turn_thinking_block(request),
+        ThinkingRejection::InvalidSignature => find_oldest_thinking_block(request),
+    }
+}
+
+/// The newest thinking-bearing message in the final assistant turn, with the
+/// content index of its first thinking block.
+///
+/// Returns `None` when that turn carries no native thinking block, which leaves
+/// the caller reporting the error rather than patching something unrelated.
+fn last_turn_thinking_block(request: &types::CreateMessagesRequest) -> Option<(usize, usize)> {
+    let turn = last_assistant_turn(&request.messages)?;
+
+    turn.rev().find_map(|msg_idx| {
+        thinking_block_indices(request, msg_idx)
+            .first()
+            .map(|&content_idx| (msg_idx, content_idx))
+    })
+}
+
+/// Build the patch that strips a thinking block's provider metadata, so the
+/// event is replayed as `<think>` text rather than a native thinking block.
+fn thinking_patch(key: &'static str, value: String) -> EventPatch {
+    EventPatch {
         matcher: EventMatcher::MetadataValue {
             key: key.to_owned(),
             value,
         },
         action: PatchAction::RemoveMetadata(key.to_owned()),
-    }])
+    }
+}
+
+/// Returns `true` for a native `thinking` or `redacted_thinking` content block.
+fn is_thinking_block(content: &types::MessageContent) -> bool {
+    matches!(
+        content,
+        types::MessageContent::Thinking(_) | types::MessageContent::RedactedThinking { .. }
+    )
+}
+
+/// Messages that make up the final assistant turn.
+///
+/// Anthropic groups an assistant turn from its first assistant message through
+/// every following tool-result and assistant message, and treats that whole
+/// span as one "latest assistant message".
+/// The span ends at the last assistant message and begins right after the most
+/// recent user message before it that is not purely tool results.
+/// A user prompt appended after the turn opens the next turn without shortening
+/// this one, so a wedged turn is still repairable on the first request of the
+/// following turn.
+///
+/// Returns `None` when the request holds no assistant message.
+fn last_assistant_turn(messages: &[types::Message]) -> Option<RangeInclusive<usize>> {
+    let end = messages
+        .iter()
+        .rposition(|msg| msg.role == types::MessageRole::Assistant)?;
+
+    let start = messages[..end]
+        .iter()
+        .rposition(|msg| msg.role == types::MessageRole::User && !is_tool_result_message(msg))
+        .map_or(0, |idx| idx + 1);
+
+    Some(start..=end)
+}
+
+/// Content indices of every thinking and redacted-thinking block in one
+/// message, in order.
+fn thinking_block_indices(request: &types::CreateMessagesRequest, msg_idx: usize) -> Vec<usize> {
+    let Some(message) = request.messages.get(msg_idx) else {
+        return vec![];
+    };
+
+    message
+        .content
+        .0
+        .iter()
+        .enumerate()
+        .filter(|(_, content)| is_thinking_block(content))
+        .map(|(idx, _)| idx)
+        .collect()
 }
 
 /// Find the first (oldest) `Thinking` or `RedactedThinking` content block in
@@ -819,10 +983,7 @@ fn build_thinking_patches(
 fn find_oldest_thinking_block(request: &types::CreateMessagesRequest) -> Option<(usize, usize)> {
     for (i, msg) in request.messages.iter().enumerate() {
         for (j, content) in msg.content.0.iter().enumerate() {
-            if matches!(
-                content,
-                types::MessageContent::Thinking(_) | types::MessageContent::RedactedThinking { .. }
-            ) {
+            if is_thinking_block(content) {
                 return Some((i, j));
             }
         }

@@ -25,7 +25,7 @@
 //!
 //! [`StreamError::is_retryable`]: jp_llm::StreamError::is_retryable
 
-use std::{fmt::Write as _, sync::Arc};
+use std::{fmt, fmt::Write as _, mem, sync::Arc};
 
 use jp_config::assistant::request::RequestConfig;
 use jp_llm::{StreamError, exponential_backoff};
@@ -34,6 +34,53 @@ use jp_workspace::ConversationMut;
 use tracing::{error, warn};
 
 use crate::{cmd::query::turn::TurnCoordinator, error::Error, signals::SignalRouter};
+
+/// How many provider-requested rebuilds a turn may attempt in a row.
+///
+/// Every rebuild re-sends the whole conversation, so a repair costs the round
+/// count times the conversation size.
+/// A repair needing more rounds than this is not worth paying for; the turn
+/// reports the dead end instead.
+///
+/// Anthropic repairs a wedged turn in one round, and one round per affected
+/// message after that.
+/// Google's rejection carries no position, so its repair walks one signature
+/// per round and a long conversation can exceed this, surfacing as an error
+/// rather than a large bill.
+///
+/// The count resets once a cycle produces its first successful event, so a turn
+/// that repairs, streams, and later repairs again gets a fresh allowance.
+pub(crate) const MAX_CONSECUTIVE_REBUILDS: u32 = 10;
+
+/// Why a provider-requested rebuild was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RebuildRefusal {
+    /// The preceding patch changed nothing, so the rebuilt request would be
+    /// identical to the one the provider just rejected.
+    NoProgress,
+
+    /// The turn has rebuilt as many times in a row as it is allowed to.
+    LimitReached {
+        /// The allowance that was reached.
+        limit: u32,
+    },
+}
+
+impl fmt::Display for RebuildRefusal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoProgress => f.write_str(
+                "the provider asked to rebuild the request but sent no fix that changed it, so \
+                 resending would fail the same way",
+            ),
+            Self::LimitReached { limit } => write!(
+                f,
+                "the provider asked to rebuild the request {limit} times in a row without \
+                 producing a usable response"
+            ),
+        }
+    }
+}
 
 /// Tracks retry state for stream errors within a single turn.
 ///
@@ -47,6 +94,21 @@ pub struct StreamRetryState {
 
     /// Number of consecutive stream failures without a successful cycle.
     consecutive_failures: u32,
+
+    /// Whether any provider patch set in this cycle changed the conversation
+    /// stream.
+    patch_changed_stream: bool,
+
+    /// Whether every provider patch set in this cycle strictly shrinks the
+    /// stream.
+    ///
+    /// Accumulated rather than replaced, so a later set that shrinks cannot
+    /// erase an earlier one that may not.
+    patch_sets_shrink: bool,
+
+    /// Number of consecutive provider-requested rebuilds without a successful
+    /// cycle.
+    consecutive_rebuilds: u32,
 
     /// Whether a temporary retry notification line is currently displayed.
     ///
@@ -64,6 +126,9 @@ impl StreamRetryState {
         Self {
             config,
             consecutive_failures: 0,
+            patch_changed_stream: false,
+            patch_sets_shrink: true,
+            consecutive_rebuilds: 0,
             line_active: false,
             is_tty,
         }
@@ -77,6 +142,56 @@ impl StreamRetryState {
     /// mid-response) don't permanently consume the retry budget.
     pub fn reset(&mut self) {
         self.consecutive_failures = 0;
+        self.patch_changed_stream = false;
+        self.patch_sets_shrink = true;
+        self.consecutive_rebuilds = 0;
+    }
+
+    /// Record the outcome of one provider patch set.
+    ///
+    /// `applied` is how many events it changed, and `shrinks` whether every
+    /// action in the set strictly shrinks the stream (see
+    /// [`PatchAction::shrinks_stream`]).
+    ///
+    /// Outcomes accumulate until a rebuild consumes them, because a provider
+    /// may send several patch sets before asking for the rebuild: the rebuilt
+    /// request differs if any set changed the stream, and the loop only
+    /// terminates if every set shrinks it.
+    ///
+    /// [`PatchAction::shrinks_stream`]: jp_llm::event::PatchAction::shrinks_stream
+    pub fn record_patch(&mut self, applied: usize, shrinks: bool) {
+        self.patch_changed_stream |= applied > 0;
+        self.patch_sets_shrink &= shrinks;
+    }
+
+    /// Authorize a provider-requested rebuild, or explain why it is refused.
+    ///
+    /// A provider that patches the conversation stream and asks for a rebuild
+    /// reports no error, so these attempts never reach [`handle_stream_error`]
+    /// and consume no part of the stream-error budget.
+    /// They are bounded two ways: each rebuild must follow a patch that made
+    /// progress, which is what guarantees the loop ends, and the number in a
+    /// row is capped, which keeps a terminating-but-expensive repair from
+    /// running up a bill.
+    ///
+    /// Consumes the accumulated patch record, so one patch cannot authorize two
+    /// rebuilds.
+    pub fn authorize_rebuild(&mut self) -> Result<(), RebuildRefusal> {
+        let changed = mem::take(&mut self.patch_changed_stream);
+        let shrinks = mem::replace(&mut self.patch_sets_shrink, true);
+
+        if !(changed && shrinks) {
+            return Err(RebuildRefusal::NoProgress);
+        }
+
+        self.consecutive_rebuilds += 1;
+        if self.consecutive_rebuilds > MAX_CONSECUTIVE_REBUILDS {
+            return Err(RebuildRefusal::LimitReached {
+                limit: MAX_CONSECUTIVE_REBUILDS,
+            });
+        }
+
+        Ok(())
     }
 
     /// Clear the retry notification line if one is currently displayed.
@@ -140,6 +255,36 @@ impl StreamRetryState {
     }
 }
 
+/// Flush buffered output and commit any unflushed partial assistant content to
+/// the conversation stream.
+///
+/// Content sits in the coordinator's event builder until a flush or terminal
+/// event reaches it, so persisting the conversation alone would drop text the
+/// user already saw on screen.
+/// Call this before ending a turn on any path that bypasses the coordinator's
+/// own terminal handling.
+pub fn commit_partial_response(
+    turn_coordinator: &mut TurnCoordinator,
+    conv: &ConversationMut,
+    printer: &Arc<Printer>,
+) {
+    turn_coordinator.flush_renderer();
+    printer.flush_instant();
+
+    let partial = turn_coordinator.peek_partial_events();
+    if partial.is_empty() {
+        return;
+    }
+
+    conv.update_events(|stream| {
+        let mut turn = stream.current_turn_mut();
+        for response in partial {
+            turn = turn.add_chat_response(response);
+        }
+        turn.build().expect("Invalid ConversationStream state");
+    });
+}
+
 /// Outcome of [`handle_stream_error`].
 #[derive(Debug)]
 pub enum StreamErrorOutcome {
@@ -175,18 +320,7 @@ pub async fn handle_stream_error(
     // to the stream BEFORE deciding whether to retry or abort. Streamed text
     // the user already saw must never be dropped just because the error turned
     // out to be fatal.
-    turn_coordinator.flush_renderer();
-    printer.flush_instant();
-    let partial = turn_coordinator.peek_partial_events();
-    if !partial.is_empty() {
-        conv.update_events(|stream| {
-            let mut turn = stream.current_turn_mut();
-            for response in partial {
-                turn = turn.add_chat_response(response);
-            }
-            turn.build().expect("Invalid ConversationStream state");
-        });
-    }
+    commit_partial_response(turn_coordinator, conv, printer);
 
     if !retry_state.can_retry(&error) {
         // Clear the temp line before printing the final error so it doesn't

@@ -25,7 +25,7 @@ use jp_config::{
     model::id::{self, ProviderId},
 };
 use jp_conversation::{
-    Conversation,
+    Conversation, ConversationEvent,
     event::{ChatRequest, ChatResponse, InquirySource, ToolCallRequest, TurnStart},
 };
 use jp_inquire::{
@@ -35,7 +35,7 @@ use jp_inquire::{
 use jp_llm::{
     Error as LlmError, EventStream, Provider,
     error::StreamError,
-    event::{Event, FinishReason},
+    event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::ModelDetails,
     provider::mock::MockProvider,
     query::ChatQuery,
@@ -58,7 +58,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::{
-    cmd::query::tool::{ToolCoordinator, executor::TerminalExecutorSource},
+    cmd::query::{
+        stream::retry::MAX_CONSECUTIVE_REBUILDS,
+        tool::{ToolCoordinator, executor::TerminalExecutorSource},
+    },
     signals::testing::{detached_router, test_router},
 };
 
@@ -5617,5 +5620,306 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
             .windows(b"Calling tool".len())
             .any(|w| w == b"Calling tool"),
         "the shaded header text should still be present.\nChrome:\n{chrome:?}"
+    );
+}
+
+/// Metadata key a provider repair patch targets in the rebuild tests.
+fn rebuild_patch_key(round: u32) -> String {
+    format!("stale_signature_{round}")
+}
+
+const REBUILD_PATCH_VALUE: &str = "stale";
+
+/// One repair cycle: strip the metadata for `round`, then ask for a rebuild.
+///
+/// This is the shape a provider repair actually takes.
+/// The rejection is a request-validation error, so nothing streams before it.
+///
+/// The leading flush has no buffered part behind it, so it commits nothing.
+/// It is here because a cycle that renders nothing must not count as progress:
+/// if it did, the rebuild budget would reset on every rebuilt request and the
+/// cap could never be reached.
+fn repair_cycle(round: u32) -> Vec<Event> {
+    vec![
+        Event::flush(0),
+        Event::Patch(vec![EventPatch {
+            matcher: EventMatcher::MetadataValue {
+                key: rebuild_patch_key(round),
+                value: REBUILD_PATCH_VALUE.to_owned(),
+            },
+            action: PatchAction::RemoveMetadata(rebuild_patch_key(round)),
+        }]),
+        Event::Finished(FinishReason::Retry),
+    ]
+}
+
+/// Seed one assistant event carrying a distinct patchable key per round, so
+/// every repair cycle has something of its own to remove and therefore makes
+/// real progress.
+fn seed_patchable_metadata(lock: &jp_workspace::ConversationLock, rounds: u32) {
+    lock.as_mut().update_events(|stream| {
+        // A complete prior turn: an incomplete trailing turn would be trimmed
+        // when the loop starts its own.
+        stream.start_turn(ChatRequest::from("earlier question"));
+
+        let mut event = ConversationEvent::now(ChatResponse::reasoning("thinking"));
+        for round in 0..rounds {
+            event
+                .metadata
+                .insert(rebuild_patch_key(round), REBUILD_PATCH_VALUE.into());
+        }
+
+        stream
+            .current_turn_mut()
+            .add_event(event)
+            .build()
+            .expect("valid stream");
+    });
+}
+
+/// A provider that keeps patching and asking for a rebuild is stopped by the
+/// consecutive-rebuild cap.
+///
+/// Every cycle here makes genuine progress, so the progress guard never fires
+/// and the cap is the only thing that can end the turn.
+/// The mock is scripted with exactly one cycle more than the cap allows: if the
+/// cap regresses, the loop asks for a further batch and the mock panics rather
+/// than looping silently.
+#[tokio::test]
+async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let config = AppConfig::new_test();
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let rounds = MAX_CONSECUTIVE_REBUILDS + 1;
+    seed_patchable_metadata(&lock, rounds);
+
+    let batches = (0..rounds).map(repair_cycle).collect();
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_batches(batches));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (router, _signals) = test_router();
+    let router = Arc::new(router);
+
+    let result = run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("repair this"),
+        InvocationContext::default(),
+        PendingStreamTrim::default(),
+    )
+    .await;
+
+    let error = result.expect_err("the turn must abort once the rebuild cap is reached");
+    // The outer error only renders "LLM error"; the refusal is in the source.
+    let message = format!("{error:?}");
+    assert!(
+        message.contains("times in a row"),
+        "the abort should name the rebuild cap.\nError:\n{message}"
+    );
+}
+
+/// A refused rebuild ends the turn, so a retry line left by an earlier cycle
+/// has to be retired first.
+///
+/// A repair cycle renders nothing, so no event reaches the clear on the success
+/// path, and the final error would otherwise be written onto the notification.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_refused_rebuild_clears_the_retry_line() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        // The waiting indicator writes its own erase sequences, which would
+        // blur what this test asserts.
+        config.style.streaming.progress.show = false;
+        // Keep the retry backoff out of the test's runtime.
+        config.assistant.request.base_backoff_ms = 1;
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        // First cycle: a retryable error, which writes the retry notification and
+        // leaves the cursor parked at the end of it.
+        // Second cycle: a patch matching no event, so the rebuild that follows is
+        // refused for lack of progress and the turn aborts.
+        let provider: Arc<dyn Provider> = Arc::new(PacedMockProvider::new(Duration::ZERO, vec![
+            vec![(
+                Duration::ZERO,
+                Err(StreamError::transient("simulated hiccup")),
+            )],
+            vec![
+                (
+                    Duration::ZERO,
+                    Ok(Event::Patch(vec![EventPatch {
+                        matcher: EventMatcher::MetadataValue {
+                            key: "absent_key".into(),
+                            value: "absent_value".into(),
+                        },
+                        action: PatchAction::RemoveMetadata("absent_key".into()),
+                    }])),
+                ),
+                (Duration::ZERO, Ok(Event::Finished(FinishReason::Retry))),
+            ],
+        ]));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true, // is_tty
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("answer this"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "a rebuild without progress must abort the turn"
+        );
+
+        printer.flush();
+
+        let chrome = err.lock();
+        assert!(
+            chrome.contains("retrying (1/"),
+            "the first cycle should have written a retry notice.\nChrome:\n{chrome}"
+        );
+        // The notice writes its own `\r\x1b[K` prefix, so occurrences cannot be
+        // counted. What distinguishes a retired line is that the erase is the
+        // last thing written, leaving the terminal clean for the final error.
+        assert!(
+            chrome.ends_with("\r\x1b[K"),
+            "the retry line must be retired before the turn aborts.\nChrome:\n{chrome:?}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// Content streamed before a refused rebuild survives the abort.
+///
+/// A part sits in the coordinator's event builder until a flush or terminal
+/// event reaches it, and the rebuild request is intercepted before the
+/// coordinator sees it, so persisting the conversation alone would drop text
+/// the user already saw.
+#[tokio::test]
+async fn test_refused_rebuild_persists_streamed_content() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let config = AppConfig::new_test();
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    // No patch precedes the rebuild request, so it is refused for lack of
+    // progress while a streamed part is still unflushed.
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_batches(vec![vec![
+        Event::message(0, "partial answer"),
+        Event::Finished(FinishReason::Retry),
+    ]]));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (router, _signals) = test_router();
+    let router = Arc::new(router);
+
+    let result = run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("answer this"),
+        InvocationContext::default(),
+        PendingStreamTrim::default(),
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "a rebuild without a preceding patch must abort the turn"
+    );
+
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+
+    assert!(
+        content.contains("partial answer"),
+        "streamed content must survive the abort.\nFile contents:\n{content}"
     );
 }

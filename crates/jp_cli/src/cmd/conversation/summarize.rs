@@ -105,7 +105,7 @@ pub async fn generate_summary(
 /// A provider that answers with [`FinishReason::Retry`] supplies patches that
 /// make the request acceptable; each round applies them to `stream` and
 /// resends.
-/// Providers degrade one bad event per round (see Anthropic's
+/// Providers degrade a bounded subset of bad events per round (see Anthropic's
 /// `build_thinking_patches` and Google's `build_thought_signature_patch`), so a
 /// stream carrying several bad events legitimately needs several rounds.
 ///

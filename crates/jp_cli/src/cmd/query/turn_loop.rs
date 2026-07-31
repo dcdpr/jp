@@ -27,9 +27,9 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
-    Provider,
+    Error as LlmError, Provider,
     error::StreamError,
-    event::{Event, EventPart, ToolCallPart},
+    event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
     query::ChatQuery,
@@ -48,7 +48,7 @@ use super::{
         LoopAction, StreamingInterruptResult, handle_llm_event, handle_streaming_interrupt,
         reply_edit_mode,
     },
-    stream::{StreamErrorOutcome, StreamRetryState, handle_stream_error},
+    stream::{StreamErrorOutcome, StreamRetryState, commit_partial_response, handle_stream_error},
     tool::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
         ToolRenderer, build_execution_plan,
@@ -502,11 +502,29 @@ pub(super) async fn run_turn_loop(
                                 }
                             };
 
-                            // Reset the retry counter on the first successful
+                            // Reset the retry counters on the first successful
                             // event in this cycle. This ensures that partially
                             // successful streams (rate-limited mid-response)
                             // don't permanently consume the retry budget.
-                            if !received_provider_event {
+                            //
+                            // Only a content part or a non-repair terminal event
+                            // counts. A repair cycle is made of patches,
+                            // keep-alives, part-less flushes and the rebuild
+                            // request itself; counting any of them clears the
+                            // rebuild budget on every rebuilt request, so its cap
+                            // could never be reached. `reset` also drops the
+                            // pending patch record, which a rebuild request needs
+                            // intact to be authorized at all.
+                            //
+                            // A content-bearing flush is always preceded by a
+                            // `Part` for the same index, which already reset, so
+                            // excluding `Flush` here loses nothing.
+                            let advances_cycle = match &event {
+                                Event::Part { .. } => true,
+                                Event::Finished(reason) => *reason != FinishReason::Retry,
+                                Event::Flush { .. } | Event::Patch(_) | Event::KeepAlive => false,
+                            };
+                            if !received_provider_event && advances_cycle {
                                 received_provider_event = true;
                                 stream_retry.clear_line(&printer);
                                 stream_retry.reset();
@@ -547,11 +565,36 @@ pub(super) async fn run_turn_loop(
                             // from a misbehaving provider commits nothing and
                             // so cannot drive a double dispatch.
                             let (action, committed) = conv.update_events(|stream| {
-                                handle_llm_event(event, &mut turn_coordinator, stream)
+                                handle_llm_event(
+                                    event,
+                                    &mut turn_coordinator,
+                                    stream,
+                                    &mut stream_retry,
+                                )
                             });
                             match action {
                                 LoopAction::Continue => {}
                                 LoopAction::Break => break,
+                                // The repair cannot or should not continue.
+                                // Persist what was streamed and surface the dead
+                                // end, which the refusal describes.
+                                LoopAction::RebuildRefused(refusal) => {
+                                    // A repair cycle renders nothing, so no event
+                                    // reached the clear above. Retire any retry
+                                    // line before the commit below flushes
+                                    // buffered output, which would otherwise land
+                                    // after the parked cursor.
+                                    stream_retry.clear_line(&printer);
+                                    commit_partial_response(&mut turn_coordinator, &conv, &printer);
+                                    if let Err(err) = conv.flush() {
+                                        warn!("Failed to persist before abort: {err}");
+                                    }
+
+                                    return Err(LlmError::Stream(StreamError::other(
+                                        refusal.to_string(),
+                                    ))
+                                    .into());
+                                }
                             }
 
                             // On a flushed tool-call request: clear the temp
