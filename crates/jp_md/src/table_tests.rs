@@ -126,16 +126,13 @@ fn test_truncate_drops_the_space_before_the_marker() {
 }
 
 #[test]
-fn test_cluster_scan_measures_the_limit_not_the_input() {
-    // Measuring the whole buffer is the expensive step, so its count has to
-    // follow the limit rather than the size of the cell. The running sum of
-    // cluster widths bounds the width from above, so ASCII takes exactly one
-    // exact measurement: the one that confirms the overshoot.
-    let mut out = String::new();
-    let (_, short) = push_clusters_within(&mut out, &"x".repeat(500), 9);
-
-    out.clear();
-    let (_, long) = push_clusters_within(&mut out, &"x".repeat(100_000), 9);
+fn test_prefix_scan_measures_the_limit_not_the_input() {
+    // Measuring is the expensive step, so its count has to follow the limit
+    // rather than the size of the cell. The running sum of cluster widths bounds
+    // the width from above, so ASCII takes exactly one exact measurement: the
+    // one that confirms the overshoot.
+    let (_, short) = longest_fitting_prefix(&"x".repeat(500), 0, 9);
+    let (_, long) = longest_fitting_prefix(&"x".repeat(100_000), 0, 9);
 
     assert_eq!(short, long, "measurement count grew with the input");
     assert_eq!(long, 1, "{long} measurements for a 9-column limit");
@@ -148,6 +145,28 @@ fn test_truncate_drops_a_hyperlink_it_cannot_close() {
     // following cell, and the rest of the output, linked.
     let input = "\x1b]8;;url\x1b\\abcdef\x1b]8;;\x1b\\";
     assert_eq!(truncate_to_visual_width(input, 4), "abc…");
+}
+
+#[test]
+fn test_truncate_measures_a_cluster_split_across_an_escape() {
+    // The escape hides the variation selector from the run it would have been
+    // segmented with, but the visible text is a two-column emoji heart, not a
+    // one-column text heart plus a zero-width selector. Trusting the runs kept
+    // nine columns against a budget of eight, pushing the header row out of
+    // alignment with the rest of the table.
+    let truncated = truncate_to_visual_width("A\u{2764}\x1b[31m\u{FE0F}xyz", 3);
+    assert_eq!(truncated, "A…");
+    assert_eq!(ansi::visual_width(&truncated), 2);
+}
+
+#[test]
+fn test_truncate_closes_an_untracked_sgr_attribute() {
+    // `AnsiState` tracks neither inverse video nor its `27` closer, so whether a
+    // reset is owed cannot depend on what it recognized: the closer here is in
+    // the dropped suffix, and without the reset the attribute runs on through
+    // every following cell.
+    let input = "\x1b[7mabcdefghij\x1b[27m";
+    assert_eq!(truncate_to_visual_width(input, 6), "\x1b[7mabcde…\x1b[0m");
 }
 
 #[test]

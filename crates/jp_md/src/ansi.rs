@@ -325,7 +325,10 @@ fn osc_terminator_end(body: &str) -> Option<usize> {
 /// string is what lets multi-codepoint sequences (emoji presentation via VS16,
 /// ZWJ sequences, script-specific ligatures) measure correctly even when an
 /// escape sits between a base character and its combining mark.
-fn visible_text(s: &str) -> String {
+/// Grapheme cluster boundaries are a property of this text, not of the escape
+/// separated runs it was built from, so anything measuring or cutting on
+/// cluster boundaries has to work from here.
+pub fn visible_text(s: &str) -> String {
     let mut plain = String::new();
     for segment in segments(s) {
         if let Segment::Text(text) = segment {
