@@ -31,7 +31,7 @@ use jp_openrouter::{
         tool::{self, FunctionCall, Tool, ToolCall, ToolFunction},
     },
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
@@ -165,13 +165,13 @@ struct AggregationState {
 /// provider.
 /// The same applies to Anthropic, and other providers for which Openrouter has
 /// provider-specific metadata support.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[derive(Default, Serialize)]
 struct MultiProviderMetadata {
-    // NOTE: This has to remain in sync with
-    // `crate::provider::openai::ENCODED_PAYLOAD_KEY`.
-    //
-    // If this proves difficult (here or in other fields), we will have to find
-    // a working solution.
+    // Each field name below is the metadata key itself, so it has to match the
+    // owning provider's constant exactly:
+    // `crate::provider::openai::ENCRYPTED_CONTENT_KEY`,
+    // `anthropic::THINKING_SIGNATURE_KEY`, `anthropic::REDACTED_THINKING_KEY`,
+    // and `google::THOUGHT_SIGNATURE_KEY`.
     #[serde(skip_serializing_if = "Option::is_none")]
     openai_encrypted_content: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -251,35 +251,14 @@ impl MultiProviderMetadata {
 
 impl From<MultiProviderMetadata> for Map<String, Value> {
     fn from(val: MultiProviderMetadata) -> Self {
-        let mut map = Map::new();
-
-        if let Some(v) = val.openai_encrypted_content {
-            map.insert("openai_encrypted_content".into(), v);
+        // The field names are the metadata keys and the `skip_serializing_if`
+        // attributes drop the absent ones, so serializing is the conversion.
+        // Every field is already a `Value` or a `Vec` of them, which cannot
+        // fail to serialize and cannot produce anything but an object.
+        match serde_json::to_value(val) {
+            Ok(Value::Object(map)) => map,
+            _ => Map::new(),
         }
-
-        if let Some(v) = val.anthropic_thinking_signature {
-            map.insert("anthropic_thinking_signature".into(), v);
-        }
-
-        if let Some(v) = val.anthropic_redacted_thinking {
-            map.insert("anthropic_redacted_thinking".into(), v);
-        }
-
-        if let Some(v) = val.google_thought_signature {
-            map.insert("google_thought_signature".into(), v);
-        }
-
-        let metadata = val
-            .openrouter_metadata
-            .into_iter()
-            .map(Value::from)
-            .collect::<Vec<_>>();
-
-        if !metadata.is_empty() {
-            map.insert("openrouter_metadata".into(), metadata.into());
-        }
-
-        map
     }
 }
 

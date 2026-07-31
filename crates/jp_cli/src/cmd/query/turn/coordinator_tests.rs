@@ -62,15 +62,16 @@ fn test_transitions_to_executing_on_tool_call() {
     assert_eq!(tool_calls[0].id, "call_1");
 }
 
-/// A provider response carrying two reasoning items produces two reasoning
-/// events, and the second must not continue the first's paragraph.
+/// Reasoning items split across several provider items form one region, so text
+/// broken mid-word across the split renders as a single word.
 ///
-/// Pins the live path specifically: the renderer sees per-delta calls, so the
-/// only signal that item 0 is complete is its `Event::Flush`.
-/// Item 0's text ends mid-paragraph, so without a boundary there the markdown
-/// buffer glues item 1's opening text onto it.
+/// Reproduces Anthropic's redaction shape: a thinking block is interrupted by
+/// an opaque `redacted_thinking` block, which arrives as its own item holding
+/// no text, and the thinking continues in the item after it.
+/// Each item carries its own signature, so the three cannot be merged upstream
+/// — the renderer has to treat them as one region.
 #[test]
-fn consecutive_reasoning_events_render_as_separate_blocks() {
+fn reasoning_items_split_by_a_redacted_item_render_as_one_region() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
@@ -82,22 +83,42 @@ fn consecutive_reasoning_events_render_as_separate_blocks() {
         style,
         None,
         None,
-        Some("openai/test".into()),
+        Some("anthropic/test".into()),
     );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("hello"));
 
-    coordinator.handle_event(&mut stream, Event::reasoning(0, "First section."));
+    coordinator.handle_event(
+        &mut stream,
+        Event::reasoning(0, "I can test this directly by ver"),
+    );
     coordinator.handle_event(&mut stream, Event::flush(0));
-    coordinator.handle_event(&mut stream, Event::reasoning(1, "Second section."));
+    coordinator.handle_event(
+        &mut stream,
+        Event::reasoning(1, "").with_metadata_field("anthropic_redacted_thinking", "AAAA"),
+    );
     coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::reasoning(2, "ifying the return value."));
+    coordinator.handle_event(&mut stream, Event::flush(2));
     coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    // The three items stay three stored events: the redacted payload has to
+    // survive into the stream for the next request to replay it.
+    let reasoning_count = stream
+        .iter()
+        .filter(|e| {
+            e.event
+                .as_chat_response()
+                .is_some_and(ChatResponse::is_reasoning)
+        })
+        .count();
+    assert_eq!(reasoning_count, 3, "expected three stored reasoning events");
 
     printer.flush();
     let output = strip_ansi(&out.lock());
     assert!(
-        output.ends_with("First section.\n\nSecond section.\n\n"),
-        "reasoning items must render as separate blocks, got: {output:?}"
+        output.ends_with("I can test this directly by verifying the return value.\n\n"),
+        "reasoning items must form one region, got: {output:?}"
     );
 }
 

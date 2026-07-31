@@ -99,17 +99,60 @@ fn prints_user_message() {
     assert!(output.contains("Hello world"), "got: {output}");
 }
 
-/// Replay renders each stored event whole, so two consecutive reasoning events
-/// must be separated even when the first one's text ends mid-paragraph.
+/// Replay joins consecutive stored reasoning events into one region, so text
+/// broken mid-word across two events renders as a single word.
+///
+/// This is Anthropic's redaction shape as it lands on disk: a thinking block,
+/// an opaque `redacted_thinking` block stored as a reasoning event with no
+/// text, and the thinking continuing in the event after it.
 #[test]
-fn prints_consecutive_reasoning_events_as_separate_blocks() {
+fn prints_reasoning_events_split_by_a_redacted_event_as_one_region() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+
+    let (mut ctx, id, out, _err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(
+            ChatResponse::reasoning("I can test this directly by ver"),
+            ts(0, 0, 0),
+        ),
+        ConversationEvent::new(ChatResponse::reasoning(""), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("ifying the return value."),
+            ts(0, 0, 2),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("I can test this directly by verifying the return value."),
+        "stored reasoning events must render as one region, got: {output:?}"
+    );
+}
+
+/// A blank line stored inside the reasoning text splits it into two blocks,
+/// whether it arrived as its own event or inside one.
+#[test]
+fn prints_reasoning_separator_as_a_block_break() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = None;
 
     let (mut ctx, id, out, _err, _rt) = setup_ctx_with_config(config, vec![
         ConversationEvent::new(ChatResponse::reasoning("First section."), ts(0, 0, 0)),
-        ConversationEvent::new(ChatResponse::reasoning("Second section."), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::reasoning("\n\nSecond section."), ts(0, 0, 1)),
     ]);
 
     let print = Print {
@@ -127,7 +170,7 @@ fn prints_consecutive_reasoning_events_as_separate_blocks() {
     let output = strip_ansi(&out.lock());
     assert!(
         output.contains("First section.\n\nSecond section."),
-        "stored reasoning events must render as separate blocks, got: {output:?}"
+        "a stored separator must break the region into blocks, got: {output:?}"
     );
 }
 

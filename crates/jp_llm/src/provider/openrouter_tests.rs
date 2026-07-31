@@ -280,6 +280,42 @@ fn test_map_models_skips_invalid_catalog_entries() {
     );
 }
 
+/// The metadata map is keyed by the struct's field names, in field order, and
+/// carries only the fields that hold a value.
+///
+/// Pins the exact shape because these keys are a wire contract: they are
+/// persisted in conversation event metadata and read back by the provider that
+/// owns each one.
+#[test]
+fn multi_provider_metadata_maps_present_fields_only() {
+    let metadata = MultiProviderMetadata {
+        openai_encrypted_content: Some("enc".into()),
+        anthropic_thinking_signature: None,
+        anthropic_redacted_thinking: Some("redacted".into()),
+        google_thought_signature: None,
+        openrouter_metadata: vec![Map::from_iter([(
+            "field".to_owned(),
+            "anthropic_redacted_thinking".into(),
+        )])],
+    };
+
+    let map = Map::from(metadata);
+
+    assert_eq!(
+        serde_json::to_string(&map).unwrap(),
+        r#"{"openai_encrypted_content":"enc","anthropic_redacted_thinking":"redacted","openrouter_metadata":[{"field":"anthropic_redacted_thinking"}]}"#
+    );
+}
+
+/// A metadata value the sub-provider did not report is absent from the map, and
+/// an empty `openrouter_metadata` list is omitted rather than emitted as `[]`.
+#[test]
+fn multi_provider_metadata_omits_absent_fields() {
+    let map = Map::from(MultiProviderMetadata::default());
+
+    assert_eq!(serde_json::to_string(&map).unwrap(), "{}");
+}
+
 async fn run_test(
     test_name: impl AsRef<str>,
     requests: impl IntoIterator<Item = TestRequest>,
