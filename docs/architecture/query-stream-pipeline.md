@@ -1629,9 +1629,14 @@ The OpenAI provider does this for reasoning summary parts: on each
 Without it, a part opening with `**Header**` parses as bold continuing the
 previous part's last sentence.
 
-Segmentation therefore lands in the stored reasoning text, and every consumer of
-a conversation — replay, the web view, `jp c grep`, export — reads it from the
-text with no rule to re-implement.
+Segmentation *within* a region therefore lands in the stored reasoning text, and
+no consumer re-derives where the breaks go.
+
+Joining adjacent same-kind responses is a separate rule, and each consumer
+applies it for itself: the terminal renderer keeps one markdown buffer open
+across events, and the web view accumulates them before parsing.
+`jp c grep` does neither — `shared::search::event_lines` searches one event's
+text at a time, so a word split across two reasoning events is not matchable.
 
 #### Why not one block per response
 

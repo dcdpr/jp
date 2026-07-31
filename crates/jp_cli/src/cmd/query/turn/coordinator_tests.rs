@@ -2,7 +2,7 @@ use jp_config::{AppConfig, style::reasoning::ReasoningDisplayConfig};
 use jp_conversation::event::{ChatResponse, ToolCallRequest};
 use jp_llm::event::FinishReason;
 use jp_printer::{OutputFormat, Printer};
-use serde_json::{Map, json};
+use serde_json::{Map, Value, json};
 
 use super::{super::state::TurnState, *};
 use crate::cmd::query::interrupt::InterruptAction;
@@ -102,17 +102,19 @@ fn reasoning_items_split_by_a_redacted_item_render_as_one_region() {
     coordinator.handle_event(&mut stream, Event::flush(2));
     coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
-    // The three items stay three stored events: the redacted payload has to
-    // survive into the stream for the next request to replay it.
-    let reasoning_count = stream
+    // Carrying the redacted payload is the only reason the content-less event
+    // is kept, so pin the payload rather than the event count: the next request
+    // has to replay it as a `redacted_thinking` block.
+    let redacted: Vec<_> = stream
         .iter()
-        .filter(|e| {
-            e.event
-                .as_chat_response()
-                .is_some_and(ChatResponse::is_reasoning)
-        })
-        .count();
-    assert_eq!(reasoning_count, 3, "expected three stored reasoning events");
+        .filter_map(|e| e.event.metadata.get("anthropic_redacted_thinking"))
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(
+        redacted,
+        ["AAAA"],
+        "the redacted payload must survive into the stream"
+    );
 
     printer.flush();
     let output = strip_ansi(&out.lock());

@@ -33,7 +33,7 @@ use jp_openrouter::{
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use super::{EventStream, ModelDetails};
 use crate::{
@@ -257,7 +257,14 @@ impl From<MultiProviderMetadata> for Map<String, Value> {
         // fail to serialize and cannot produce anything but an object.
         match serde_json::to_value(val) {
             Ok(Value::Object(map)) => map,
-            _ => Map::new(),
+            other => {
+                error!(
+                    ?other,
+                    "MultiProviderMetadata did not serialize to an object; dropping provider \
+                     metadata for this event"
+                );
+                Map::new()
+            }
         }
     }
 }
