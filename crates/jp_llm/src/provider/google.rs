@@ -104,17 +104,26 @@ fn call(
         tokio::pin!(stream);
         while let Some(event) = stream.next().await {
             // Google rejects requests with stale thought signatures as a
-            // 400 "Corrupted thought signature." Emit a patch to strip the
-            // oldest one and ask the caller to retry.
+            // 400 "Corrupted thought signature." Emit a patch to strip one from
+            // the current turn and ask the caller to retry.
             if let Err(ref err) = event
                 && is_corrupted_thought_signature(err)
             {
-                tracing::warn!("Corrupted thought signature, requesting retry.");
                 if let Some(patches) = build_thought_signature_patch(&request) {
+                    tracing::warn!(
+                        "Corrupted thought signature, patching history and retrying: {err}"
+                    );
                     yield Ok(Event::Patch(patches));
                     yield Ok(Event::Finished(FinishReason::Retry));
                     return;
                 }
+
+                // Nothing in the current turn can be stripped, so the error is
+                // reported instead of answered with an ineffective retry.
+                tracing::warn!(
+                    "Corrupted thought signature, but the current turn carries none to strip: \
+                     {err}"
+                );
             }
 
             for event in map_response(event?, &mut state, is_structured).map_err(|e| StreamError::other(e.to_string()))? {
@@ -1192,15 +1201,27 @@ fn is_corrupted_thought_signature(err: &StreamError) -> bool {
     err.kind == StreamErrorKind::Other && err.message().contains("Corrupted thought signature")
 }
 
-/// Build a patch to remove the oldest `google_thought_signature` from the
-/// conversation.
-/// Google's error doesn't identify which block is bad, so we degrade one at a
-/// time starting from the oldest.
+/// Build a patch to remove one `google_thought_signature` from the current
+/// turn.
+///
+/// Google validates thought signatures only within the current turn, so a
+/// signature from an earlier turn is never the one it rejected; stripping one
+/// would degrade the conversation without changing the outcome.
+/// The search is therefore scoped to the current turn, and the error is
+/// reported unchanged when that turn holds no strippable signature.
+///
+/// Google's error doesn't say which signature is bad, so within the turn they
+/// are degraded one per round.
+/// A turn holds a handful of steps, which bounds the walk.
+///
+/// See
+/// <https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thought-signatures>.
 fn build_thought_signature_patch(
     request: &types::GenerateContentRequest,
 ) -> Option<Vec<EventPatch>> {
     let sig = request
         .contents
+        .get(current_turn_start(&request.contents)..)?
         .iter()
         .flat_map(|content| &content.parts)
         .filter_map(|part| part.thought_signature.as_ref())
@@ -1213,6 +1234,32 @@ fn build_thought_signature_patch(
         },
         action: PatchAction::RemoveMetadata(THOUGHT_SIGNATURE_KEY.to_owned()),
     }])
+}
+
+/// Index of the content that begins the current turn.
+///
+/// Google defines a turn as beginning at the most recent user message that is
+/// not a function response, so a tool-use loop of any length is one turn: its
+/// function responses are user messages but do not start a new one.
+///
+/// Returns `0` when no such message exists.
+fn current_turn_start(contents: &[types::Content]) -> usize {
+    contents
+        .iter()
+        .rposition(|content| {
+            matches!(content.role, Some(types::Role::User))
+                && !is_function_response_content(content)
+        })
+        .unwrap_or(0)
+}
+
+/// Returns `true` if every part of the content is a function response.
+fn is_function_response_content(content: &types::Content) -> bool {
+    !content.parts.is_empty()
+        && content
+            .parts
+            .iter()
+            .all(|part| matches!(part.data, types::ContentData::FunctionResponse(_)))
 }
 
 #[cfg(test)]
