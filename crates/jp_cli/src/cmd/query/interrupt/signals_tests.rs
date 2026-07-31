@@ -46,6 +46,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         base_backoff_ms: 1,
         max_backoff_secs: 1,
         stream_idle_timeout_secs: 120,
+        max_response_bytes: 1_048_576,
         cache: CachePolicy::default(),
     };
     StreamRetryState::new(config, false)

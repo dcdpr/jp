@@ -31,10 +31,11 @@ use jp_llm::{
     error::StreamError,
     event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
+    output_limit_bytes,
     provider::get_provider,
     query::ChatQuery,
     tool::{InvocationContext, ToolDefinition, executor::Executor},
-    with_idle_timeout,
+    with_idle_timeout, with_output_limit,
 };
 use jp_printer::{ErrChannel, Printer};
 use jp_workspace::{ConversationLock, ConversationMut};
@@ -206,6 +207,7 @@ pub(super) async fn run_turn_loop(
         0 => None,
         secs => Some(Duration::from_secs(u64::from(secs))),
     };
+    let output_limit = output_limit_bytes(cfg.assistant.request.max_response_bytes);
     let mut turn_coordinator = TurnCoordinator::new(
         printer.clone(),
         cfg.style.clone(),
@@ -340,6 +342,14 @@ pub(super) async fn run_turn_loop(
                 }
                 let raw_stream = match idle_timeout {
                     Some(idle) => with_idle_timeout(raw_stream, idle),
+                    None => raw_stream,
+                };
+                // Wrapped outside the provider stream, so the bytes of every
+                // chained continuation accumulate against a single ceiling
+                // rather than resetting per link. Bytes the provider discards
+                // while merging those links are billed but never seen here.
+                let raw_stream = match output_limit {
+                    Some(max) => with_output_limit(raw_stream, max),
                     None => raw_stream,
                 };
                 let llm_stream = StreamSource::Llm(
@@ -873,6 +883,26 @@ async fn build_inquiry_backend(
         .clone()
         .or_else(|| cfg.assistant.system_prompt.clone());
 
+    // Same fallback for the output ceiling: an inquiry can be held to a tighter
+    // (or looser) ceiling than the parent assistant.
+    //
+    // `AssistantOverrideConfig::request` is a resolved `RequestConfig`, so a
+    // block where the user set only a sibling field (say `cache`) arrives here
+    // with every other field at Rust's `Default` rather than its schematic
+    // default. A `0` therefore cannot be distinguished from "unset", and reading
+    // it as the ceiling's disable sentinel would silently drop the runaway guard
+    // for every inquiry. Treat it as "inherit" instead, matching the block's
+    // documented unset-means-inherit rule. A per-question override carries real
+    // `Option`s, so `0` still disables the ceiling there.
+    let default_max_response_bytes = inquiry_override
+        .request
+        .as_ref()
+        .map_or(0, |request| request.max_response_bytes);
+    let default_max_response_bytes = match default_max_response_bytes {
+        0 => cfg.assistant.request.max_response_bytes,
+        bytes => bytes,
+    };
+
     // Track providers we've already constructed to avoid duplicates.
     let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();
 
@@ -920,6 +950,7 @@ async fn build_inquiry_backend(
             model: inquiry_model,
             system_prompt: default_system_prompt,
             sections: sections.clone(),
+            max_response_bytes: default_max_response_bytes,
         }
     } else {
         providers.insert(model.id.provider, Arc::clone(&provider));
@@ -929,6 +960,7 @@ async fn build_inquiry_backend(
             model: model.clone(),
             system_prompt: default_system_prompt,
             sections: sections.clone(),
+            max_response_bytes: default_max_response_bytes,
         }
     };
 
@@ -1018,11 +1050,20 @@ async fn build_inquiry_overrides(
                 .map(|s| s.to_string())
                 .or_else(|| default_config.system_prompt.clone());
 
+            // Output ceiling follows the same order. `default_config` already
+            // carries the global-inquiry-or-parent value, so an unset
+            // per-question ceiling inherits it.
+            let max_response_bytes = per_q
+                .request
+                .max_response_bytes
+                .unwrap_or(default_config.max_response_bytes);
+
             overrides.insert((tool_name.to_owned(), question_id.clone()), InquiryConfig {
                 provider: inq_provider,
                 model: inq_model,
                 system_prompt,
                 sections: default_config.sections.clone(),
+                max_response_bytes,
             });
         }
     }

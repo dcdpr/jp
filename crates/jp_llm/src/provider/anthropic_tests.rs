@@ -9,7 +9,10 @@ use jp_config::{
     },
 };
 use jp_conversation::{event::ChatRequest, thread::Thread};
-use jp_test::{Result, function_name};
+use jp_test::{
+    Result, function_name,
+    mock::{MockServer, POST},
+};
 use serde_json::Map;
 use test_log::test;
 
@@ -29,6 +32,119 @@ async fn test_redacted_thinking() -> Result {
     ];
 
     run_test(PROVIDER, function_name!(), requests).await
+}
+
+/// An SSE response that always truncates on `max_tokens`, which is the
+/// condition that triggers a continuation request.
+fn max_tokens_sse_body() -> String {
+    [
+        r"event: message_start",
+        r#"data: {"type":"message_start","message":{"model":"claude-test","id":"msg_test","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":1}}}"#,
+        "",
+        r"event: content_block_start",
+        r#"data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+        "",
+        r"event: content_block_delta",
+        r#"data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"and on and on"}}"#,
+        "",
+        r"event: content_block_stop",
+        r#"data: {"type":"content_block_stop","index":0}"#,
+        "",
+        r"event: message_delta",
+        r#"data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null},"usage":{"input_tokens":1,"output_tokens":1}}"#,
+        "",
+        r"event: message_stop",
+        r#"data: {"type":"message_stop"}"#,
+        "",
+    ]
+    .join("\n")
+}
+
+/// A model that truncates on every request must stop chaining once the
+/// continuation budget is spent, rather than continuing forever.
+///
+/// This drives the real `call` -\> `chain` -\> `call` recursion against a
+/// server that always answers `max_tokens`, so it fails if the budget stops
+/// being decremented or a continuation is handed the original budget.
+#[test(tokio::test)]
+async fn chaining_is_bounded_by_the_continuation_budget() {
+    let server = MockServer::start_async().await;
+    let endpoint = server
+        .mock_async(|when, then| {
+            when.method(POST).path("/v1/messages");
+            then.status(200)
+                .header("content-type", "text/event-stream; charset=utf-8")
+                .body(max_tokens_sse_body());
+        })
+        .await;
+
+    let mut builder = Client::builder();
+    builder
+        .api_key("test-key")
+        .base_url(server.base_url())
+        .version("2023-06-01");
+    let client = builder.build().expect("a client for the mock server");
+
+    let request = types::CreateMessagesRequestBuilder::default()
+        .model("claude-test".to_owned())
+        .messages(vec![types::Message {
+            role: types::MessageRole::User,
+            content: types::MessageContentList(vec![types::MessageContent::Text(
+                "go on then".into(),
+            )]),
+        }])
+        .max_tokens(16)
+        .stream(true)
+        .build()
+        .expect("a valid request");
+
+    let events: Vec<_> = call(client, request, MAX_CHAIN_DEPTH, false, None)
+        .collect()
+        .await;
+
+    assert!(
+        events.iter().all(std::result::Result::is_ok),
+        "the chain should end cleanly, got: {events:?}"
+    );
+
+    // One initial request plus MAX_CHAIN_DEPTH continuations. An off-by-one in
+    // the budget shows up here as a different count; a budget that never
+    // decrements never stops.
+    assert_eq!(
+        endpoint.calls_async().await,
+        usize::from(MAX_CHAIN_DEPTH) + 1,
+        "a model that always truncates must exhaust the continuation budget and stop"
+    );
+}
+
+#[test]
+fn chaining_stops_when_the_budget_is_exhausted() {
+    let max_tokens = Event::Finished(FinishReason::MaxTokens);
+
+    assert!(
+        should_chain(&max_tokens, false, MAX_CHAIN_DEPTH),
+        "the initial request may use its continuation budget"
+    );
+    assert!(
+        should_chain(&max_tokens, false, 1),
+        "the final remaining continuation may be used"
+    );
+    assert!(
+        !should_chain(&max_tokens, false, 0),
+        "an exhausted budget must terminate the response"
+    );
+    assert!(
+        !should_chain(&max_tokens, true, MAX_CHAIN_DEPTH),
+        "tool calls cannot be continued without their results"
+    );
+    assert!(
+        !should_chain(
+            &Event::Finished(FinishReason::Completed),
+            false,
+            MAX_CHAIN_DEPTH,
+        ),
+        "a completed response must not be continued"
+    );
 }
 
 #[test(tokio::test)]

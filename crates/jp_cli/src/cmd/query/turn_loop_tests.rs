@@ -16,7 +16,11 @@ use futures::{StreamExt as _, stream};
 use indexmap::IndexMap;
 use inquire::InquireError;
 use jp_config::{
-    AppConfig,
+    AppConfig, PartialAppConfig,
+    assistant::{
+        PartialAssistantConfig,
+        request::{CachePolicy, PartialRequestConfig, RequestConfig},
+    },
     conversation::tool::{
         CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
         style::{DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle},
@@ -190,6 +194,49 @@ impl Provider for AlwaysPrematureProvider {
         Ok(Box::pin(stream::iter(
             Vec::<Result<Event, StreamError>>::new(),
         )))
+    }
+}
+
+/// A provider that streams content without end, counting calls so a test can
+/// assert the response was not re-requested.
+///
+/// After its parts the stream stays pending forever and it never sends a
+/// terminal `Finished`, so the output ceiling is the only thing that can end
+/// it.
+/// A test built on this fixture hangs if the ceiling never fires, rather than
+/// falling through to the retry path and passing for the wrong reason.
+#[derive(Debug, Default)]
+struct RunawayProvider {
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl Provider for RunawayProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: name.clone(),
+        }))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+
+        // 7 bytes, then 40 bytes per part.
+        let mut events = vec![Event::message(0, "runaway")];
+        events.extend(std::iter::repeat_with(|| Event::message(0, "0123456789".repeat(4))).take(9));
+
+        Ok(Box::pin(
+            stream::iter(events.into_iter().map(Ok)).chain(stream::pending()),
+        ))
     }
 }
 
@@ -689,6 +736,94 @@ async fn premature_stream_end_exhausts_retry_budget() {
         provider.calls.load(Ordering::SeqCst),
         3,
         "provider should be called once per attempt across the retry budget"
+    );
+}
+
+/// A response that runs past `assistant.request.max_response_bytes` ends the
+/// turn with an error, is not re-requested, and keeps the content streamed
+/// before the ceiling was reached.
+#[tokio::test]
+async fn output_ceiling_ends_turn_without_re_requesting() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 64;
+    // A retry budget is left in place so the call-count assertion below has
+    // something to catch: were the ceiling classified as retryable, the loop
+    // would re-request the response instead of ending the turn.
+    config.assistant.request.max_retries = 5;
+    config.assistant.request.base_backoff_ms = 0;
+    // The fixture never goes idle-silent before the ceiling fires, but an
+    // enabled idle timeout would give the loop a second way out; disable it so
+    // only the ceiling can end this turn.
+    config.assistant.request.stream_idle_timeout_secs = 0;
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    let provider = Arc::new(RunawayProvider::default());
+    let dyn_provider: Arc<dyn Provider> = provider.clone();
+    let model = dyn_provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let router = detached_router();
+
+    let result = timeout(
+        Duration::from_secs(5),
+        run_turn_loop(
+            dyn_provider,
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("hi"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        ),
+    )
+    .await
+    .expect("the output ceiling should end the turn, not hang it");
+
+    let Err(Error::Llm(jp_llm::Error::Stream(error))) = result else {
+        panic!("expected a stream error from the output ceiling, got: {result:?}");
+    };
+    assert_eq!(error.kind, jp_llm::StreamErrorKind::OutputLimit);
+
+    assert_eq!(
+        provider.calls.load(Ordering::SeqCst),
+        1,
+        "a response that breached the ceiling must not be re-requested"
+    );
+
+    // Option 1 of the ceiling design: the turn ends, but content the user
+    // already saw stays in the conversation.
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+    assert!(
+        content.contains("runaway"),
+        "content streamed before the ceiling must be persisted.\nFile contents:\n{content}"
     );
 }
 
@@ -4391,6 +4526,135 @@ fn inquiry_mock_model() -> ModelDetails {
         provider: ProviderId::Test,
         name: "inquiry-mock".parse().expect("valid name"),
     })
+}
+
+/// The global inquiry override for the output ceiling wins over the parent
+/// assistant's value.
+///
+/// `conversation.inquiry.assistant.request.max_response_bytes` is a public key,
+/// so reading the parent value here would silently ignore it.
+#[tokio::test]
+async fn inquiry_ceiling_honors_the_global_inquiry_override() {
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 999_999;
+    config.conversation.inquiry.assistant.request = Some(RequestConfig {
+        max_response_bytes: 4096,
+        ..config.assistant.request
+    });
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        4096,
+        "the global inquiry override must win over the parent assistant"
+    );
+}
+
+/// A partially-set inquiry request block must not disable the ceiling.
+///
+/// Built through the real loading path rather than by hand: because
+/// `AssistantOverrideConfig::request` is a resolved struct, setting only a
+/// sibling field leaves `max_response_bytes` at `0`, which is the ceiling's
+/// disable sentinel.
+/// Reading it verbatim would silently drop the runaway guard for every inquiry.
+#[tokio::test]
+async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(500_000);
+
+    partial.conversation.inquiry.assistant.request = Some(PartialRequestConfig {
+        cache: Some(CachePolicy::Off),
+        ..PartialRequestConfig::default()
+    });
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    // The resolution the guard has to cope with: the block is present, and its
+    // ceiling field is a zero the user never asked for.
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .request
+            .expect("the block is set")
+            .max_response_bytes,
+        0
+    );
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        500_000,
+        "an unset inquiry ceiling must inherit the parent, not disable the guard"
+    );
+}
+
+/// A per-question ceiling wins over the global inquiry override, which in turn
+/// wins over the parent assistant (RFD 034's resolution order).
+#[tokio::test]
+async fn inquiry_ceiling_honors_the_per_question_override() {
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 999_999;
+    config.conversation.inquiry.assistant.request = Some(RequestConfig {
+        max_response_bytes: 4096,
+        ..config.assistant.request
+    });
+
+    let mut per_question = PartialAssistantConfig::default();
+    per_question.request.max_response_bytes = Some(512);
+
+    let mut tool = inquiry_tool_config(&["confirm"]);
+    tool.questions
+        .insert("confirm".to_string(), QuestionConfig {
+            target: QuestionTarget::Assistant(Box::new(per_question)),
+            answer: None,
+        });
+    config
+        .conversation
+        .tools
+        .insert("inquiry_tool".to_string(), tool);
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("inquiry_tool", "confirm")
+            .max_response_bytes,
+        512,
+        "the per-question override must win over the global inquiry value"
+    );
+
+    // A question without its own ceiling still inherits the global inquiry
+    // value, not the parent assistant's.
+    assert_eq!(
+        backend
+            .config_for("inquiry_tool", "other")
+            .max_response_bytes,
+        4096,
+        "an unset per-question ceiling falls back to the global inquiry value"
+    );
 }
 
 /// Tool has one boolean question with `QuestionTarget::Assistant`.

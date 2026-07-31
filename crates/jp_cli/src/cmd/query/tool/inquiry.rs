@@ -145,6 +145,10 @@ pub struct InquiryConfig {
     pub model: ModelDetails,
     pub system_prompt: Option<String>,
     pub sections: Vec<SectionConfig>,
+
+    /// Output ceiling for the inquiry request, from
+    /// `assistant.request.max_response_bytes`.
+    pub max_response_bytes: u32,
 }
 
 /// Resolves inquiries by making structured output calls to an LLM provider.
@@ -188,7 +192,10 @@ impl LlmInquiryBackend {
     }
 
     /// Look up the effective config for this tool/question pair.
-    fn config_for(&self, tool_name: &str, question_id: &str) -> &InquiryConfig {
+    ///
+    /// Returns the per-question override when one exists, otherwise the default
+    /// built from the global inquiry config merged with the parent assistant.
+    pub(crate) fn config_for(&self, tool_name: &str, question_id: &str) -> &InquiryConfig {
         self.overrides
             .get(&(tool_name.to_owned(), question_id.to_owned()))
             .unwrap_or(&self.default_config)
@@ -282,7 +289,8 @@ impl InquiryBackend for LlmInquiryBackend {
             tool_choice: ToolChoice::None,
         };
 
-        let retry_config = RetryConfig::default();
+        let retry_config =
+            RetryConfig::default().with_max_response_bytes(config.max_response_bytes);
         let llm_events = tokio::select! {
             biased;
             () = cancellation_token.cancelled() => {

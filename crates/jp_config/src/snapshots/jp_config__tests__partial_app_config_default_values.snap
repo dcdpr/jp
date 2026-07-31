@@ -90,6 +90,9 @@ Ok(
                     stream_idle_timeout_secs: Some(
                         60,
                     ),
+                    max_response_bytes: Some(
+                        1048576,
+                    ),
                     cache: None,
                 },
             },
