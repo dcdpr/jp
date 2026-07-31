@@ -1558,57 +1558,42 @@ async fn await_mcp_servers_redraws_as_servers_finish() {
     );
 }
 
-/// A server name long enough to force truncation must not cost the elapsed-time
-/// suffix: the whole point of the line is the moving timer, so truncation has
-/// to fall on the server list, not the `Ns` tail.
-#[tokio::test(flavor = "multi_thread")]
-async fn await_mcp_servers_timer_suffix_survives_truncation() {
-    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
-    let printer = Arc::new(printer);
-
-    let long = "bookworm-with-a-very-long-descriptive-server-name";
-    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
-    let mut joins = tokio::task::JoinSet::new();
-    joins.spawn(async move {
-        release_rx.await.ok();
-        Ok(McpServerId::new(long))
-    });
-    let startup = StartupSet {
-        joins,
-        pending: vec![McpServerId::new(long)],
-    };
-
-    // A width far below the full line forces the status fragment to truncate.
-    let width = 30u16;
-    let wait = tokio::spawn(await_mcp_servers(
-        startup,
-        immediate_mcp_startup_config(),
-        printer.clone(),
-        true,
-        Some(width),
-    ));
-
-    // The suffix is only reachable if truncation spared it: under whole-line
-    // truncation the trailing ` 0.0s` is the first thing cut, so this wait
-    // would time out instead.
-    wait_for_frame(&err, "0.0s").await;
-    release_tx.send(()).expect("wait task is still running");
-    wait.await
-        .expect("task did not panic")
-        .expect("startup succeeds");
-    printer.flush();
-
-    let chrome = err.lock();
-    assert!(
-        chrome.contains('…'),
-        "the long server name must actually truncate.\nChrome:\n{chrome}"
+#[test]
+fn mcp_startup_line_renders_full_when_it_fits() {
+    assert_eq!(
+        mcp_startup_line(4.2, Some("MCP server bookworm"), Some(80)),
+        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
     );
-    // Every rendered frame (\r-separated) must fit the declared width once its
-    // control bytes are stripped, so the line never wraps past one row.
-    for frame in chrome.split('\r').filter(|f| !f.is_empty()) {
-        assert!(
-            display_width(frame) <= usize::from(width),
-            "frame exceeds width {width}: {frame:?}\nChrome:\n{chrome}"
-        );
-    }
+    // Unknown width leaves the line unbounded.
+    assert_eq!(
+        mcp_startup_line(4.2, Some("MCP server bookworm"), None),
+        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
+    );
+}
+
+// A long server list forced to truncate must keep the elapsed-time suffix: the
+// whole point of the line is the moving timer, so truncation has to fall on the
+// server list, not the `Ns` tail. Testing the pure formatter at a fixed `secs`
+// pins the invariant without depending on when the timer task first ticks.
+#[test]
+fn mcp_startup_line_truncation_preserves_timer_suffix() {
+    let long = "MCP server bookworm-with-a-very-long-descriptive-server-name";
+    let line = mcp_startup_line(12.3, Some(long), Some(30));
+
+    assert!(line.ends_with(" 12.3s"), "suffix must survive: {line:?}");
+    assert!(line.contains('…'), "server list must truncate: {line:?}");
+    // The visible text (control prefix stripped) must fit the declared width.
+    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
+    assert!(display_width(visible) <= 30, "must fit width: {line:?}");
+}
+
+// A terminal too narrow for even the prefix and suffix still keeps a moving
+// timer rather than a static stub.
+#[test]
+fn mcp_startup_line_ultra_narrow_keeps_bounded_timer() {
+    let line = mcp_startup_line(7.0, Some("MCP server bookworm"), Some(6));
+
+    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
+    assert!(display_width(visible) <= 6, "must fit width: {line:?}");
+    assert!(visible.contains("7.0s"), "timer must survive: {line:?}");
 }

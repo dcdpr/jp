@@ -1140,32 +1140,7 @@ async fn await_mcp_servers(
         config.show && is_tty,
         Duration::from_secs(config.delay_secs.into()),
         Duration::from_millis(config.interval_ms.into()),
-        move |secs, status| {
-            let status = status.unwrap_or("MCP servers");
-            let full = format!("⏱ Starting {status}… {secs:.1}s");
-            // Truncate only the server-list fragment, reserving the prefix and
-            // the elapsed-time suffix, so the timer keeps ticking even when a
-            // long list overflows. The `\r\x1b[K` control prefix stays outside
-            // the width budget.
-            let line = match width {
-                Some(w) if display_width(&full) > usize::from(w) => {
-                    let w = usize::from(w);
-                    let prefix = "⏱ Starting ";
-                    let suffix = format!(" {secs:.1}s");
-                    let reserved = display_width(prefix) + display_width(&suffix);
-                    if w <= reserved {
-                        // Too narrow even for the prefix and timer: keep the
-                        // bounded timer alone so elapsed time still moves.
-                        truncate_to_width(&format!("⏱ {secs:.1}s"), w)
-                    } else {
-                        let status = truncate_to_width(status, w - reserved);
-                        format!("{prefix}{status}{suffix}")
-                    }
-                }
-                _ => full,
-            };
-            format!("\r\x1b[K{line}")
-        },
+        move |secs, status| mcp_startup_line(secs, status, width),
     );
     if let Some(timer) = &timer {
         timer.set_status(mcp_startup_status(&startup.pending));
@@ -1192,6 +1167,36 @@ async fn await_mcp_servers(
     }
 
     result
+}
+
+/// Render the MCP startup timer line for `secs` elapsed and `status`, bounding
+/// the visible text to `width` columns when known.
+///
+/// Truncation falls on the server-list fragment only: the ` ⏱ Starting  `
+/// prefix and the `  {secs:.1}s ` timer suffix are always preserved, so the
+/// elapsed time keeps moving even when a long list overflows.
+/// A terminal too narrow for even the prefix and suffix falls back to a bounded
+/// `⏱ {secs:.1}s`.
+/// The leading `\r\x1b[K` control prefix stays outside the width budget.
+fn mcp_startup_line(secs: f64, status: Option<&str>, width: Option<u16>) -> String {
+    let status = status.unwrap_or("MCP servers");
+    let full = format!("⏱ Starting {status}… {secs:.1}s");
+    let line = match width {
+        Some(w) if display_width(&full) > usize::from(w) => {
+            let w = usize::from(w);
+            let prefix = "⏱ Starting ";
+            let suffix = format!(" {secs:.1}s");
+            let reserved = display_width(prefix) + display_width(&suffix);
+            if w <= reserved {
+                truncate_to_width(&format!("⏱ {secs:.1}s"), w)
+            } else {
+                let status = truncate_to_width(status, w - reserved);
+                format!("{prefix}{status}{suffix}")
+            }
+        }
+        _ => full,
+    };
+    format!("\r\x1b[K{line}")
 }
 
 /// Render the pending-server fragment for the MCP startup timer line.
