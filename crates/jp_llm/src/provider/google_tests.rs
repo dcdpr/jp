@@ -301,6 +301,34 @@ mod thought_signature_recovery {
         }
     }
 
+    fn function_call_part(name: &str, sig: &str) -> types::ContentPart {
+        types::ContentPart {
+            data: types::ContentData::FunctionCall(types::FunctionCall {
+                name: name.to_owned(),
+                id: None,
+                arguments: serde_json::Value::Null,
+            }),
+            thought: false,
+            thought_signature: Some(sig.to_owned()),
+            metadata: None,
+        }
+    }
+
+    fn function_response_part(name: &str) -> types::ContentPart {
+        types::ContentPart {
+            data: types::ContentData::FunctionResponse(types::FunctionResponse {
+                name: name.to_owned(),
+                id: None,
+                response: types::FunctionResponsePayload {
+                    content: serde_json::Value::String("ok".to_owned()),
+                },
+            }),
+            thought: false,
+            thought_signature: None,
+            metadata: None,
+        }
+    }
+
     fn content(role: types::Role, parts: Vec<types::ContentPart>) -> types::Content {
         types::Content {
             role: Some(role),
@@ -341,17 +369,20 @@ mod thought_signature_recovery {
         assert!(!is_corrupted_thought_signature(&err));
     }
 
+    /// Google validates thought signatures only within the current turn, so an
+    /// earlier turn's signature is never the one it rejected and stripping it
+    /// would leave the next request failing identically.
     #[test]
-    fn builds_patch_for_oldest_signature() {
+    fn builds_patch_for_signature_in_the_current_turn() {
         let req = request(vec![
             content(types::Role::User, vec![text_part("hello")]),
             content(types::Role::Model, vec![
-                thought_part("thinking 1", "sig_old"),
+                thought_part("thinking 1", "sig_previous_turn"),
                 text_part("response 1"),
             ]),
             content(types::Role::User, vec![text_part("follow up")]),
             content(types::Role::Model, vec![
-                thought_part("thinking 2", "sig_new"),
+                thought_part("thinking 2", "sig_current_turn"),
                 text_part("response 2"),
             ]),
         ]);
@@ -360,12 +391,61 @@ mod thought_signature_recovery {
         assert_eq!(patches.len(), 1);
         assert_eq!(patches[0].matcher, EventMatcher::MetadataValue {
             key: THOUGHT_SIGNATURE_KEY.to_owned(),
-            value: "sig_old".to_owned(),
+            value: "sig_current_turn".to_owned(),
         });
         assert_eq!(
             patches[0].action,
             PatchAction::RemoveMetadata(THOUGHT_SIGNATURE_KEY.to_owned())
         );
+    }
+
+    /// Nothing in the current turn can be stripped to fix the request, so the
+    /// error is reported rather than answered with a patch that cannot help.
+    #[test]
+    fn returns_none_when_only_earlier_turns_are_signed() {
+        let req = request(vec![
+            content(types::Role::User, vec![text_part("hello")]),
+            content(types::Role::Model, vec![thought_part(
+                "thinking",
+                "sig_previous_turn",
+            )]),
+            content(types::Role::User, vec![text_part("follow up")]),
+            content(types::Role::Model, vec![text_part("unsigned answer")]),
+        ]);
+
+        assert!(build_thought_signature_patch(&req).is_none());
+    }
+
+    /// A turn spans every step of a tool-use loop: the function responses
+    /// inside it are user messages, but they do not begin a new turn, so
+    /// signatures from earlier steps stay in scope.
+    #[test]
+    fn function_responses_do_not_start_a_new_turn() {
+        let req = request(vec![
+            content(types::Role::User, vec![text_part("first prompt")]),
+            content(types::Role::Model, vec![function_call_part(
+                "old_tool",
+                "sig_previous_turn",
+            )]),
+            content(types::Role::User, vec![function_response_part("old_tool")]),
+            content(types::Role::Model, vec![text_part("answer")]),
+            content(types::Role::User, vec![text_part("second prompt")]),
+            content(types::Role::Model, vec![function_call_part(
+                "step_one",
+                "sig_step_one",
+            )]),
+            content(types::Role::User, vec![function_response_part("step_one")]),
+            content(types::Role::Model, vec![function_call_part(
+                "step_two",
+                "sig_step_two",
+            )]),
+        ]);
+
+        let patches = build_thought_signature_patch(&req).unwrap();
+        assert_eq!(patches[0].matcher, EventMatcher::MetadataValue {
+            key: THOUGHT_SIGNATURE_KEY.to_owned(),
+            value: "sig_step_one".to_owned(),
+        });
     }
 
     #[test]
