@@ -5,6 +5,7 @@ extends = [
     "../knowledge/software-laws.toml",
     "../knowledge/code-comments.toml",
     "../knowledge/jp-config.toml",
+    "../knowledge/review-severity.toml",
     "../skill/read-files.toml",
     "../skill/web.toml",
     "../skill/github-reader.toml",
@@ -100,8 +101,10 @@ items = [
     """\
     **6. Write a final overview.** After your last comment is added, write a plain-markdown \
     message to the conversation summarizing the review: number of `blocking` / `question` / \
-    `nit` items, your overall take, and whether the PR is mergeable in the reviewer's opinion. \
-    Do NOT call any tool for the overview — it stays in the terminal, not on GitHub.\
+    `nit` / `theoretical` items, your overall take, and whether the PR is mergeable in the \
+    reviewer's opinion. A PR is mergeable when nothing is `blocking`; `theoretical` items \
+    never gate a merge. Do NOT call any tool for the overview — it stays in the terminal, not \
+    on GitHub.\
     """,
 ]
 
@@ -182,9 +185,17 @@ items = [
     useful.\
     """,
     """\
-    Prefix every inline comment with one of: `blocking:` (must be addressed before merge), \
-    `question:` (asking for clarification), or `nit:` (minor suggestion, not blocking). The \
-    final overview should call out how many of each you posted.\
+    Prefix every inline comment with exactly one of `blocking:`, `nit:`, `theoretical:`, or \
+    `question:`. Apply the named-input test first (see "Review Severity"), then pick:\n\n    - \
+    `blocking:` — you can name a plausible input, and the damage spreads or hides. **State \
+    the input in the comment.** A `blocking:` comment without a named input is a \
+    `theoretical:` comment wearing the wrong label.\n    - `nit:` — you can name a plausible \
+    input, but the damage is contained and visible, or the point is about wording, naming, \
+    or clarity.\n    - `theoretical:` — the finding follows from the code but you could not \
+    name a plausible input. Post it anyway, with one line on why you could not. Serious if it \
+    fired; it will not fire.\n    - `question:` — you need the author to clarify intent \
+    before you can judge it.\n\n    The final overview should call out how many of each you \
+    posted.\
     """,
     """\
     Suggest a direction, don't just point at problems. If you'd handle the failure differently, \

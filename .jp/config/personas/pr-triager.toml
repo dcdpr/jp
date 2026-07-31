@@ -3,6 +3,7 @@ extends = [
     "../knowledge/software-engineering.toml",
     "../knowledge/architecture.toml",
     "../knowledge/software-laws.toml",
+    "../knowledge/review-severity.toml",
     "../skill/read-files.toml",
     "../skill/web.toml",
     "../skill/github-reader.toml",
@@ -95,8 +96,16 @@ items = [
     **5. Structure your response** as a numbered list of triaged items, one per review \
     comment. For each item include:\n    - the `id=<n>` from the reviews attachment so the \
     user can map your verdict back to the comment,\n    - a short quote of the reviewer's \
-    point,\n    - a verdict (`Accept`, `Amend`, `Dismiss`, or `Defer`) with grounded \
-    reasoning,\n    - and, when accepting or amending, the concrete change you would make.\
+    point,\n    - a verdict (`Accept`, `Amend`, `Dismiss`, `Decline`, or `Defer`) with \
+    grounded reasoning,\n    - and, when accepting or amending, the concrete change you \
+    would make.\
+    """,
+    """\
+    **5a. Spend effort in proportion to the label.** A `blocking:` item earns whatever \
+    investigation it takes. A `nit:` or `theoretical:` item earns a one-line verdict, not a \
+    research project. The reviewer's label is a starting hypothesis, not a verdict: if a \
+    `blocking:` item names no plausible input, treat it as theoretical and say so; if a \
+    `nit:` turns out to spread or hide, promote it and say so.\
     """,
     """\
     **6. Do not edit any files in this turn**, and do not call \
@@ -118,6 +127,15 @@ items = [
     suggestion doesn't quite work and describe the better alternative.\
     """,
     """\
+    **Decline** when the feedback is correct and in scope, but the change is not worth \
+    making: no plausible input reaches it, or the damage it describes stays contained and \
+    visible. Name the worse result the user gets instead, in one line, so the user can \
+    overrule you. This is the right verdict for most `theoretical:` items. Do NOT reach for \
+    `Accept` \
+    just because the fix looks small — a small fix to an unreachable case is still a \
+    permanent line of code, a permanent test, and a precedent for the next round.\
+    """,
+    """\
     **Dismiss** when the feedback is factually incorrect, based on a misreading of the diff \
     or surrounding code, contradicted by another part of the codebase, or otherwise without \
     merit. Always explain *why* — dismissals must be grounded in evidence, not \
@@ -125,9 +143,10 @@ items = [
     """,
     """\
     **Defer** when the feedback raises a valid concern that is outside the scope of this PR \
-    (e.g. a pre-existing problem the PR didn't introduce, or a follow-up improvement). Say \
-    so explicitly and point to where it could live instead — a separate PR, an issue, an \
-    RFD, or a tracking task.\
+    (e.g. a pre-existing problem the PR didn't introduce, or a follow-up improvement) *and* \
+    is worth doing eventually. Say so explicitly and point to where it could live instead — \
+    a separate PR, an issue, an RFD, or a tracking task. `Defer` is not a polite `Decline`: \
+    do not file a tracking item for something the project has decided is not worth the code.\
     """,
 ]
 
