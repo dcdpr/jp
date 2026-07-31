@@ -29,7 +29,7 @@ use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
     Error as LlmError, Provider,
     error::StreamError,
-    event::{Event, EventPart, ToolCallPart},
+    event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
     query::ChatQuery,
@@ -48,7 +48,7 @@ use super::{
         LoopAction, StreamingInterruptResult, handle_llm_event, handle_streaming_interrupt,
         reply_edit_mode,
     },
-    stream::{StreamErrorOutcome, StreamRetryState, handle_stream_error},
+    stream::{StreamErrorOutcome, StreamRetryState, commit_partial_response, handle_stream_error},
     tool::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
         ToolRenderer, build_execution_plan,
@@ -502,11 +502,25 @@ pub(super) async fn run_turn_loop(
                                 }
                             };
 
-                            // Reset the retry counter on the first successful
+                            // Reset the retry counters on the first successful
                             // event in this cycle. This ensures that partially
                             // successful streams (rate-limited mid-response)
                             // don't permanently consume the retry budget.
-                            if !received_provider_event {
+                            //
+                            // Patches, keep-alives and rebuild requests are
+                            // excluded: a repair cycle consists only of those, so
+                            // counting them would clear the rebuild budget on
+                            // every rebuilt request and its cap could never be
+                            // reached. `reset` also drops the pending patch
+                            // record, which a rebuild request needs intact to be
+                            // authorized at all.
+                            let advances_cycle = !matches!(
+                                event,
+                                Event::Patch(_)
+                                    | Event::KeepAlive
+                                    | Event::Finished(FinishReason::Retry)
+                            );
+                            if !received_provider_event && advances_cycle {
                                 received_provider_event = true;
                                 stream_retry.clear_line(&printer);
                                 stream_retry.reset();
@@ -561,6 +575,7 @@ pub(super) async fn run_turn_loop(
                                 // Persist what was streamed and surface the dead
                                 // end, which the refusal describes.
                                 LoopAction::RebuildRefused(refusal) => {
+                                    commit_partial_response(&mut turn_coordinator, &conv, &printer);
                                     if let Err(err) = conv.flush() {
                                         warn!("Failed to persist before abort: {err}");
                                     }

@@ -95,9 +95,16 @@ pub struct StreamRetryState {
     /// Number of consecutive stream failures without a successful cycle.
     consecutive_failures: u32,
 
-    /// Whether the most recent provider patch set changed the conversation
-    /// stream in a way that makes a rebuild worth sending.
+    /// Whether any provider patch set in this cycle changed the conversation
+    /// stream.
     patch_changed_stream: bool,
+
+    /// Whether every provider patch set in this cycle strictly shrinks the
+    /// stream.
+    ///
+    /// Accumulated rather than replaced, so a later set that shrinks cannot
+    /// erase an earlier one that may not.
+    patch_sets_shrink: bool,
 
     /// Number of consecutive provider-requested rebuilds without a successful
     /// cycle.
@@ -120,6 +127,7 @@ impl StreamRetryState {
             config,
             consecutive_failures: 0,
             patch_changed_stream: false,
+            patch_sets_shrink: true,
             consecutive_rebuilds: 0,
             line_active: false,
             is_tty,
@@ -135,21 +143,25 @@ impl StreamRetryState {
     pub fn reset(&mut self) {
         self.consecutive_failures = 0;
         self.patch_changed_stream = false;
+        self.patch_sets_shrink = true;
         self.consecutive_rebuilds = 0;
     }
 
-    /// Record the outcome of a provider patch set.
+    /// Record the outcome of one provider patch set.
     ///
     /// `applied` is how many events it changed, and `shrinks` whether every
     /// action in the set strictly shrinks the stream (see
     /// [`PatchAction::shrinks_stream`]).
-    /// A rebuild is only worth sending when both hold: an unchanged stream
-    /// rebuilds to an identical request, and a set that can grow the stream
-    /// gives no guarantee the loop ends.
+    ///
+    /// Outcomes accumulate until a rebuild consumes them, because a provider
+    /// may send several patch sets before asking for the rebuild: the rebuilt
+    /// request differs if any set changed the stream, and the loop only
+    /// terminates if every set shrinks it.
     ///
     /// [`PatchAction::shrinks_stream`]: jp_llm::event::PatchAction::shrinks_stream
     pub fn record_patch(&mut self, applied: usize, shrinks: bool) {
-        self.patch_changed_stream = applied > 0 && shrinks;
+        self.patch_changed_stream |= applied > 0;
+        self.patch_sets_shrink &= shrinks;
     }
 
     /// Authorize a provider-requested rebuild, or explain why it is refused.
@@ -162,10 +174,13 @@ impl StreamRetryState {
     /// row is capped, which keeps a terminating-but-expensive repair from
     /// running up a bill.
     ///
-    /// Consumes the record of the preceding patch, so one patch cannot
-    /// authorize two rebuilds.
+    /// Consumes the accumulated patch record, so one patch cannot authorize two
+    /// rebuilds.
     pub fn authorize_rebuild(&mut self) -> Result<(), RebuildRefusal> {
-        if !mem::take(&mut self.patch_changed_stream) {
+        let changed = mem::take(&mut self.patch_changed_stream);
+        let shrinks = mem::replace(&mut self.patch_sets_shrink, true);
+
+        if !(changed && shrinks) {
             return Err(RebuildRefusal::NoProgress);
         }
 
@@ -240,6 +255,36 @@ impl StreamRetryState {
     }
 }
 
+/// Flush buffered output and commit any unflushed partial assistant content to
+/// the conversation stream.
+///
+/// Content sits in the coordinator's event builder until a flush or terminal
+/// event reaches it, so persisting the conversation alone would drop text the
+/// user already saw on screen.
+/// Call this before ending a turn on any path that bypasses the coordinator's
+/// own terminal handling.
+pub fn commit_partial_response(
+    turn_coordinator: &mut TurnCoordinator,
+    conv: &ConversationMut,
+    printer: &Arc<Printer>,
+) {
+    turn_coordinator.flush_renderer();
+    printer.flush_instant();
+
+    let partial = turn_coordinator.peek_partial_events();
+    if partial.is_empty() {
+        return;
+    }
+
+    conv.update_events(|stream| {
+        let mut turn = stream.current_turn_mut();
+        for response in partial {
+            turn = turn.add_chat_response(response);
+        }
+        turn.build().expect("Invalid ConversationStream state");
+    });
+}
+
 /// Outcome of [`handle_stream_error`].
 #[derive(Debug)]
 pub enum StreamErrorOutcome {
@@ -275,18 +320,7 @@ pub async fn handle_stream_error(
     // to the stream BEFORE deciding whether to retry or abort. Streamed text
     // the user already saw must never be dropped just because the error turned
     // out to be fatal.
-    turn_coordinator.flush_renderer();
-    printer.flush_instant();
-    let partial = turn_coordinator.peek_partial_events();
-    if !partial.is_empty() {
-        conv.update_events(|stream| {
-            let mut turn = stream.current_turn_mut();
-            for response in partial {
-                turn = turn.add_chat_response(response);
-            }
-            turn.build().expect("Invalid ConversationStream state");
-        });
-    }
+    commit_partial_response(turn_coordinator, conv, printer);
 
     if !retry_state.can_retry(&error) {
         // Clear the temp line before printing the final error so it doesn't

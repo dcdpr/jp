@@ -80,6 +80,50 @@ fn stale_signature_patch() -> Event {
     }])
 }
 
+/// A patch set targeting metadata no event carries, so applying it changes
+/// nothing.
+fn no_op_patch() -> Event {
+    Event::Patch(vec![EventPatch {
+        matcher: EventMatcher::MetadataValue {
+            key: "absent_key".into(),
+            value: "absent_value".into(),
+        },
+        action: PatchAction::RemoveMetadata("absent_key".into()),
+    }])
+}
+
+/// The event contract allows several patch sets before the rebuild request, so
+/// their outcomes accumulate: one set that changed the stream is enough to make
+/// the rebuilt request differ, whatever the sets around it did.
+#[test]
+fn a_later_no_op_patch_does_not_erase_an_earlier_effective_one() {
+    let mut turn_coordinator = make_turn_coordinator();
+    let mut stream = stream_with_patchable_event();
+    let mut retry_state = make_retry_state(2);
+
+    handle_llm_event(
+        stale_signature_patch(),
+        &mut turn_coordinator,
+        &mut stream,
+        &mut retry_state,
+    );
+    handle_llm_event(
+        no_op_patch(),
+        &mut turn_coordinator,
+        &mut stream,
+        &mut retry_state,
+    );
+
+    let (action, _) = handle_llm_event(
+        Event::Finished(FinishReason::Retry),
+        &mut turn_coordinator,
+        &mut stream,
+        &mut retry_state,
+    );
+
+    assert_matches!(action, LoopAction::Break);
+}
+
 /// A patch that changed the stream earns the rebuild that follows it: the
 /// request the provider gets next is genuinely different.
 #[test]
