@@ -12,6 +12,14 @@ vet_version          := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
 
+# Workspace crates that no `jp_*` crate depends on: standalone tooling binaries,
+# docs infrastructure, and command plugins. Skipping them drops their
+# dependencies from the build entirely, rather than merely skipping their tests.
+#
+# `grizzly` is deliberately absent: `jp_attachment_bear_note` depends on it, so
+# it is compiled either way.
+non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-path --exclude jp-serve-web --exclude json_edit --exclude tools"
+
 alias r := run
 alias i := install
 alias c := check
@@ -2082,9 +2090,13 @@ fmt-markdown-ci: _install-comfort _install_ci_matchers
     comfort --check --workspace --language markdown --format-markdown --reference-links --prune-reference-links
 
 # Test the code on CI.
+#
+# `SCOPE` selects the crates to test: `workspace` covers every member, `jp-only`
+# skips the crates listed in `non_jp_excludes`. An unrecognised scope tests the
+# full workspace.
 [group('ci')]
-test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
-    cargo nextest run --locked --lib --tests --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast
+test-ci SCOPE="workspace": (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
+    cargo nextest run --locked --lib --tests --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }}
 
 # Generate documentation on CI.
 [group('ci')]
