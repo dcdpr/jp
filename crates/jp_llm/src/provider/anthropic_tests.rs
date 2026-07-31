@@ -31,6 +31,36 @@ async fn test_redacted_thinking() -> Result {
     run_test(PROVIDER, function_name!(), requests).await
 }
 
+#[test]
+fn chaining_stops_when_the_budget_is_exhausted() {
+    let max_tokens = Event::Finished(FinishReason::MaxTokens);
+
+    assert!(
+        should_chain(&max_tokens, false, MAX_CHAIN_DEPTH),
+        "the initial request may use its continuation budget"
+    );
+    assert!(
+        should_chain(&max_tokens, false, 1),
+        "the final remaining continuation may be used"
+    );
+    assert!(
+        !should_chain(&max_tokens, false, 0),
+        "an exhausted budget must terminate the response"
+    );
+    assert!(
+        !should_chain(&max_tokens, true, MAX_CHAIN_DEPTH),
+        "tool calls cannot be continued without their results"
+    );
+    assert!(
+        !should_chain(
+            &Event::Finished(FinishReason::Completed),
+            false,
+            MAX_CHAIN_DEPTH,
+        ),
+        "a completed response must not be continued"
+    );
+}
+
 #[test(tokio::test)]
 async fn test_request_chaining() -> Result {
     let mut request = TestRequest::chat(PROVIDER)

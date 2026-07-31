@@ -8,8 +8,14 @@ use std::{
 
 use futures::{StreamExt as _, future, stream};
 
-use super::{with_idle_timeout, with_idle_timeout_at, with_tool_call_keepalive};
-use crate::{StreamError, StreamErrorKind, event::Event};
+use super::{
+    output_limit_bytes, with_idle_timeout, with_idle_timeout_at, with_output_limit,
+    with_tool_call_keepalive,
+};
+use crate::{
+    StreamError, StreamErrorKind,
+    event::{Event, FinishReason},
+};
 
 #[tokio::test(start_paused = true)]
 async fn idle_timeout_fires_when_wall_clock_exceeds_idle() {
@@ -52,6 +58,97 @@ async fn active_stream_passes_through_without_timeout() {
     assert!(wrapped.next().await.expect("first item").is_ok());
     assert!(wrapped.next().await.expect("second item").is_ok());
     assert!(wrapped.next().await.is_none(), "inner stream exhausted");
+}
+
+#[tokio::test]
+async fn output_limit_fires_once_the_ceiling_is_crossed() {
+    // Four 10-byte parts against a 25-byte ceiling. The third crosses it, so
+    // exactly three parts are forwarded before the guard errors: the crossing
+    // part is still delivered, because content already generated is never
+    // withheld. The fourth part is never polled.
+    let inner = stream::iter(vec![
+        Ok(Event::reasoning(0, "0123456789")),
+        Ok(Event::message(1, "0123456789")),
+        Ok(Event::structured(2, "0123456789")),
+        Ok(Event::tool_call_args(3, "0123456789")),
+    ])
+    .boxed();
+    let mut wrapped = with_output_limit(inner, 25);
+
+    for index in 0..3 {
+        assert!(
+            wrapped.next().await.expect("a forwarded part").is_ok(),
+            "part {index} is forwarded"
+        );
+    }
+
+    let err = wrapped
+        .next()
+        .await
+        .expect("an item before the stream ends")
+        .expect_err("an output limit error");
+    assert_eq!(err.kind, StreamErrorKind::OutputLimit);
+    assert!(
+        !err.is_retryable(),
+        "regenerating a runaway response must not be retried"
+    );
+
+    assert!(
+        wrapped.next().await.is_none(),
+        "stream ends after the output limit fires"
+    );
+}
+
+#[tokio::test]
+async fn output_under_the_ceiling_passes_through_untouched() {
+    let inner = stream::iter(vec![
+        Ok(Event::message(0, "0123456789")),
+        Ok(Event::flush(0)),
+        Ok(Event::Finished(FinishReason::Completed)),
+    ])
+    .boxed();
+    let mut wrapped = with_output_limit(inner, 25);
+
+    assert!(matches!(wrapped.next().await, Some(Ok(Event::Part { .. }))));
+    assert!(matches!(
+        wrapped.next().await,
+        Some(Ok(Event::Flush { .. }))
+    ));
+    assert!(matches!(
+        wrapped.next().await,
+        Some(Ok(Event::Finished(FinishReason::Completed)))
+    ));
+    assert!(wrapped.next().await.is_none(), "inner stream exhausted");
+}
+
+#[tokio::test]
+async fn non_content_events_do_not_count_toward_the_ceiling() {
+    // Flushes, keep-alives, and tool-call starts carry no generated content, so
+    // a stream of nothing but those must survive a 1-byte ceiling.
+    let inner = stream::iter(vec![
+        Ok(Event::flush(0)),
+        Ok(Event::KeepAlive),
+        Ok(Event::tool_call_start(1, "id", "name")),
+        Ok(Event::flush(1)),
+    ])
+    .boxed();
+
+    let items: Vec<_> = with_output_limit(inner, 1).collect().await;
+
+    assert_eq!(items.len(), 4, "no extra error item is appended");
+    assert!(items.iter().all(Result::is_ok), "got: {items:?}");
+}
+
+#[test]
+fn output_ceiling_of_zero_is_disabled() {
+    // `0` means "no ceiling" at the config layer. Both call sites route through
+    // this translation so they cannot drift on what `0` means.
+    assert!(output_limit_bytes(0).is_none(), "zero disables the ceiling");
+    assert_eq!(
+        output_limit_bytes(512),
+        Some(512),
+        "a non-zero ceiling is used as-is"
+    );
 }
 
 #[tokio::test(start_paused = true)]

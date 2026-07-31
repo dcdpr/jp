@@ -193,6 +193,49 @@ impl Provider for AlwaysPrematureProvider {
     }
 }
 
+/// A provider that streams content without end, counting calls so a test can
+/// assert the response was not re-requested.
+///
+/// After its parts the stream stays pending forever and it never sends a
+/// terminal `Finished`, so the output ceiling is the only thing that can end
+/// it.
+/// A test built on this fixture hangs if the ceiling never fires, rather than
+/// falling through to the retry path and passing for the wrong reason.
+#[derive(Debug, Default)]
+struct RunawayProvider {
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl Provider for RunawayProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: name.clone(),
+        }))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+
+        // 7 bytes, then 40 bytes per part.
+        let mut events = vec![Event::message(0, "runaway")];
+        events.extend(std::iter::repeat_with(|| Event::message(0, "0123456789".repeat(4))).take(9));
+
+        Ok(Box::pin(
+            stream::iter(events.into_iter().map(Ok)).chain(stream::pending()),
+        ))
+    }
+}
+
 /// A provider whose stream yields the given events and then stays pending
 /// forever, simulating an in-flight response that only an interrupt can stop.
 #[derive(Debug)]
@@ -689,6 +732,94 @@ async fn premature_stream_end_exhausts_retry_budget() {
         provider.calls.load(Ordering::SeqCst),
         3,
         "provider should be called once per attempt across the retry budget"
+    );
+}
+
+/// A response that runs past `assistant.request.max_response_bytes` ends the
+/// turn with an error, is not re-requested, and keeps the content streamed
+/// before the ceiling was reached.
+#[tokio::test]
+async fn output_ceiling_ends_turn_without_re_requesting() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 64;
+    // A retry budget is left in place so the call-count assertion below has
+    // something to catch: were the ceiling classified as retryable, the loop
+    // would re-request the response instead of ending the turn.
+    config.assistant.request.max_retries = 5;
+    config.assistant.request.base_backoff_ms = 0;
+    // The fixture never goes idle-silent before the ceiling fires, but an
+    // enabled idle timeout would give the loop a second way out; disable it so
+    // only the ceiling can end this turn.
+    config.assistant.request.stream_idle_timeout_secs = 0;
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    let provider = Arc::new(RunawayProvider::default());
+    let dyn_provider: Arc<dyn Provider> = provider.clone();
+    let model = dyn_provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let router = detached_router();
+
+    let result = timeout(
+        Duration::from_secs(5),
+        run_turn_loop(
+            dyn_provider,
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("hi"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        ),
+    )
+    .await
+    .expect("the output ceiling should end the turn, not hang it");
+
+    let Err(Error::Llm(jp_llm::Error::Stream(error))) = result else {
+        panic!("expected a stream error from the output ceiling, got: {result:?}");
+    };
+    assert_eq!(error.kind, jp_llm::StreamErrorKind::OutputLimit);
+
+    assert_eq!(
+        provider.calls.load(Ordering::SeqCst),
+        1,
+        "a response that breached the ceiling must not be re-requested"
+    );
+
+    // Option 1 of the ceiling design: the turn ends, but content the user
+    // already saw stays in the conversation.
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+    assert!(
+        content.contains("runaway"),
+        "content streamed before the ceiling must be persisted.\nFile contents:\n{content}"
     );
 }
 

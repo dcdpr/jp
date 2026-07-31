@@ -98,6 +98,76 @@ fn with_idle_timeout_at(
     .boxed()
 }
 
+/// Wrap an event stream so a runaway response fails instead of generating
+/// without bound.
+///
+/// Counts the bytes of generated content: assistant messages, reasoning,
+/// structured output, and tool-call arguments.
+/// Once the running total passes `max_bytes`, the returned stream yields a
+/// non-retryable [`StreamErrorKind::OutputLimit`] error and ends.
+/// The event that crosses the threshold is forwarded before the error, so
+/// content the provider has already generated is never withheld; the total may
+/// therefore overshoot `max_bytes` by up to the size of one event.
+///
+/// Non-content events (flushes, patches, keep-alives) do not count.
+///
+/// Apply this outside any provider-level continuation logic, so that a response
+/// the provider assembles from several chained requests counts as one response
+/// against the ceiling.
+///
+/// [`StreamErrorKind::OutputLimit`]: crate::StreamErrorKind::OutputLimit
+#[must_use]
+pub fn with_output_limit(stream: EventStream, max_bytes: u64) -> EventStream {
+    stream! {
+        let mut stream = stream;
+        let mut total: u64 = 0;
+        while let Some(item) = stream.next().await {
+            total = total.saturating_add(content_byte_size(&item));
+            yield item;
+
+            if total > max_bytes {
+                yield Err(StreamError::output_limit(format!(
+                    "response exceeded the {max_bytes} byte output limit after {total} bytes"
+                )));
+                break;
+            }
+        }
+    }
+    .boxed()
+}
+
+/// Translate a configured output ceiling into the argument for
+/// [`with_output_limit`], where `0` means the ceiling is disabled.
+///
+/// Returns `None` when no ceiling applies, in which case the caller leaves the
+/// stream unwrapped.
+#[must_use]
+pub fn output_limit_bytes(configured: u32) -> Option<u64> {
+    match configured {
+        0 => None,
+        bytes => Some(u64::from(bytes)),
+    }
+}
+
+/// Byte size of the generated content carried by a stream item.
+///
+/// Errors and non-content events count as zero.
+fn content_byte_size(item: &Result<Event, StreamError>) -> u64 {
+    let Ok(Event::Part { part, .. }) = item else {
+        return 0;
+    };
+
+    let size = match part {
+        EventPart::Message(text) | EventPart::Reasoning(text) | EventPart::Structured(text) => {
+            text.len()
+        }
+        EventPart::ToolCall(ToolCallPart::ArgumentChunk(json)) => json.len(),
+        EventPart::ToolCall(ToolCallPart::Start { .. }) => 0,
+    };
+
+    size as u64
+}
+
 /// Inject a synthetic [`Event::KeepAlive`] every `interval` while a tool call
 /// is mid-stream.
 ///

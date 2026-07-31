@@ -31,10 +31,11 @@ use jp_llm::{
     error::StreamError,
     event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
+    output_limit_bytes,
     provider::get_provider,
     query::ChatQuery,
     tool::{InvocationContext, ToolDefinition, executor::Executor},
-    with_idle_timeout,
+    with_idle_timeout, with_output_limit,
 };
 use jp_printer::{ErrChannel, Printer};
 use jp_workspace::{ConversationLock, ConversationMut};
@@ -206,6 +207,7 @@ pub(super) async fn run_turn_loop(
         0 => None,
         secs => Some(Duration::from_secs(u64::from(secs))),
     };
+    let output_limit = output_limit_bytes(cfg.assistant.request.max_response_bytes);
     let mut turn_coordinator = TurnCoordinator::new(
         printer.clone(),
         cfg.style.clone(),
@@ -340,6 +342,13 @@ pub(super) async fn run_turn_loop(
                 }
                 let raw_stream = match idle_timeout {
                     Some(idle) => with_idle_timeout(raw_stream, idle),
+                    None => raw_stream,
+                };
+                // Wrapped outside the provider stream, so a response the
+                // provider assembles from several chained requests counts as
+                // one response against the ceiling.
+                let raw_stream = match output_limit {
+                    Some(max) => with_output_limit(raw_stream, max),
                     None => raw_stream,
                 };
                 let llm_stream = StreamSource::Llm(

@@ -38,6 +38,7 @@ PartialAppConfig {
             base_backoff_ms: None,
             max_backoff_secs: None,
             stream_idle_timeout_secs: None,
+            max_response_bytes: None,
             cache: None,
         },
     },
