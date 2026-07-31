@@ -52,9 +52,13 @@ pub struct MarkdownConfig {
     /// Defaults to `40`.
     /// Set to `0` to leave columns as wide as their content.
     ///
-    /// Cells exceeding their column's width are wrapped over multiple lines.
+    /// Body cells exceeding their column's width are wrapped over multiple
+    /// lines.
     /// A line continuing the row above opens with `┆` instead of `|`, so a
     /// wrapped row reads as one row rather than several.
+    /// A header cell is cut short with `…` rather than wrapped, so the row of
+    /// dashes stays directly beneath the header and the table survives being
+    /// copied out of the terminal into a markdown document.
     /// A column can end up narrower than this: a table wider than the terminal
     /// has its widest columns narrowed until it fits, so the terminal does not
     /// break the rows apart.

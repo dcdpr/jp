@@ -22,6 +22,8 @@
 use std::{cmp::min, fmt::Write as _};
 
 use comrak::nodes::{NodeValue, TableAlignment};
+use unicode_segmentation::UnicodeSegmentation as _;
+use unicode_width::UnicodeWidthStr as _;
 
 use crate::{
     ansi::{self, AnsiState, RESET, Segment},
@@ -366,14 +368,61 @@ fn pad_cell(content: &str, target_width: usize, alignment: TableAlignment) -> St
     }
 }
 
+/// Append as many of `text`'s grapheme clusters to `out` as keep its visual
+/// width within `limit`, returning the text left over and the number of
+/// whole-buffer measurements taken.
+///
+/// An empty remainder means all of `text` fit.
+/// Clusters are appended whole: `❤` is one column on its own and two when a
+/// variation selector follows it, so stopping between the two would change
+/// which character the terminal draws.
+/// `out` is measured in full, so escapes it already holds cost nothing and
+/// visible content it already holds counts against `limit`.
+///
+/// The measurement count is returned so tests can pin it: measuring is the
+/// expensive step, and its count has to follow `limit` rather than the length
+/// of `text`.
+fn push_clusters_within<'a>(out: &mut String, text: &'a str, limit: usize) -> (&'a str, usize) {
+    // The running sum of cluster widths bounds the true width from above: the
+    // interactions that render a string narrower than its parts (ZWJ emoji,
+    // Arabic Lam-Alef, Tifinagh joiners) span cluster boundaries, while the ones
+    // that render it wider stay inside a single cluster and so are already
+    // counted by measuring the cluster whole. A buffer under the sum therefore
+    // fits for certain, at O(1) per cluster.
+    let mut sum = ansi::visual_width(out);
+    let mut measurements = 0;
+
+    for (offset, cluster) in text.grapheme_indices(true) {
+        sum += cluster.width();
+        out.push_str(cluster);
+
+        // Only once the sum passes the limit does the exact width decide, and
+        // that is the measurement worth counting.
+        if sum <= limit {
+            continue;
+        }
+
+        measurements += 1;
+        if ansi::visual_width(out) > limit {
+            out.truncate(out.len() - cluster.len());
+            return (&text[offset..], measurements);
+        }
+    }
+
+    ("", measurements)
+}
+
 /// Truncate a string (possibly containing ANSI escapes) to a maximum visual
 /// width, marking the cut with [`TRUNCATION_MARKER`].
 ///
 /// Content that already fits, and any content at all when `max_width` is `0`,
 /// is returned unchanged.
 /// The marker takes the last column, so `max_width` still bounds the result.
-/// ANSI state left open at the cut is closed, so styling does not leak into the
-/// rest of the line.
+/// The cut falls between grapheme clusters, so a retained character keeps the
+/// marks that modify it.
+/// SGR state left open at the cut is closed; escapes of any other kind are
+/// dropped rather than kept, since nothing here can close one whose terminator
+/// sits in the discarded suffix.
 fn truncate_to_visual_width(content: &str, max_width: usize) -> String {
     if max_width == 0 || ansi::visual_width(content) <= max_width {
         return content.to_string();
@@ -383,22 +432,24 @@ fn truncate_to_visual_width(content: &str, max_width: usize) -> String {
     let mut out = String::new();
     let mut state = AnsiState::default();
 
-    'segments: for segment in ansi::segments(content) {
+    for segment in ansi::segments(content) {
         let text = match segment {
+            // A non-SGR escape is dropped: the reset below closes SGR only, so
+            // keeping an OSC 8 opener whose terminator is about to be discarded
+            // would leave the rest of the output linked.
             Segment::Escape(escape) => {
-                state.update(escape);
-                out.push_str(escape);
+                if ansi::is_sgr(escape) {
+                    state.update(escape);
+                    out.push_str(escape);
+                }
                 continue;
             }
             Segment::Text(text) => text,
         };
 
-        for c in text.chars() {
-            out.push(c);
-            if ansi::visual_width(&out) > keep {
-                out.pop();
-                break 'segments;
-            }
+        let (rest, _) = push_clusters_within(&mut out, text, keep);
+        if !rest.is_empty() {
+            break;
         }
     }
 
@@ -556,8 +607,9 @@ fn finalize_line(lines: &mut Vec<String>, current: &mut String, state: &AnsiStat
 /// Hard-break a word that exceeds `max_width` across multiple lines, preserving
 /// ANSI escape state.
 ///
-/// Uses `visual_width` on the accumulated line to decide break points, so
-/// multi-codepoint emoji sequences are measured correctly.
+/// Breaks fall between grapheme clusters, so a cluster wider than the remaining
+/// room moves to the next line whole rather than leaving its combining marks
+/// behind.
 fn hard_break_into(
     lines: &mut Vec<String>,
     current: &mut String,
@@ -575,14 +627,29 @@ fn hard_break_into(
             Segment::Text(text) => text,
         };
 
-        for c in text.chars() {
-            current.push(c);
-            if ansi::visual_width(current) > max_width {
-                current.pop();
+        let mut rest = text;
+        loop {
+            let (remaining, _) = push_clusters_within(current, rest, max_width);
+            rest = remaining;
+            if rest.is_empty() {
+                break;
+            }
+
+            // Nothing to break when the line is still empty, which is the case
+            // for a cluster wider than the whole column.
+            if ansi::visual_width(current) > 0 {
                 finalize_line(lines, current, state);
                 *current = state.restore_sequence();
-                current.push(c);
             }
+
+            // The cluster that did not fit opens the fresh line whether or not
+            // it fits there either: one wider than the whole column can only be
+            // broken up by changing what it renders as.
+            let Some(cluster) = rest.graphemes(true).next() else {
+                break;
+            };
+            current.push_str(cluster);
+            rest = &rest[cluster.len()..];
         }
     }
 }

@@ -126,6 +126,55 @@ fn test_truncate_drops_the_space_before_the_marker() {
 }
 
 #[test]
+fn test_cluster_scan_measures_the_limit_not_the_input() {
+    // Measuring the whole buffer is the expensive step, so its count has to
+    // follow the limit rather than the size of the cell. The running sum of
+    // cluster widths bounds the width from above, so ASCII takes exactly one
+    // exact measurement: the one that confirms the overshoot.
+    let mut out = String::new();
+    let (_, short) = push_clusters_within(&mut out, &"x".repeat(500), 9);
+
+    out.clear();
+    let (_, long) = push_clusters_within(&mut out, &"x".repeat(100_000), 9);
+
+    assert_eq!(short, long, "measurement count grew with the input");
+    assert_eq!(long, 1, "{long} measurements for a 9-column limit");
+}
+
+#[test]
+fn test_truncate_drops_a_hyperlink_it_cannot_close() {
+    // OSC 8 is not an SGR sequence, so `RESET` cannot close it. Keeping the
+    // opener while its terminator falls in the dropped suffix would leave every
+    // following cell, and the rest of the output, linked.
+    let input = "\x1b]8;;url\x1b\\abcdef\x1b]8;;\x1b\\";
+    assert_eq!(truncate_to_visual_width(input, 4), "abc…");
+}
+
+#[test]
+fn test_truncate_keeps_grapheme_clusters_whole() {
+    // U+2764 is one column alone and two with the U+FE0F that follows it, so
+    // cutting between the two would render a different character than the input
+    // asked for. Written as escapes because the selector is invisible.
+    assert_eq!(truncate_to_visual_width("A\u{2764}\u{FE0F}x", 3), "A…");
+}
+
+#[test]
+fn test_hard_break_keeps_grapheme_clusters_whole() {
+    // The cluster does not fit the tail of the first line, so it moves whole to
+    // the second rather than leaving its selector orphaned.
+    let lines = wrap_to_visual_width("ab\u{2764}\u{FE0F}cd", 3);
+    assert_eq!(lines, vec!["ab", "\u{2764}\u{FE0F}c", "d"]);
+}
+
+#[test]
+fn test_hard_break_lets_an_oversized_cluster_overflow() {
+    // A cluster wider than the whole column cannot be split without changing
+    // what it renders as, so each one takes a line and overflows it.
+    let lines = wrap_to_visual_width("\u{2764}\u{FE0F}\u{2764}\u{FE0F}", 1);
+    assert_eq!(lines, vec!["\u{2764}\u{FE0F}", "\u{2764}\u{FE0F}"]);
+}
+
+#[test]
 fn test_truncate_closes_open_ansi_state() {
     // Bold opens before the cut, so it has to be closed or it bleeds into the
     // rest of the line.

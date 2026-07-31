@@ -227,6 +227,15 @@ fn consume_color<'a, I: Iterator<Item = &'a str>>(prefix: &str, tokens: &mut I) 
     }
 }
 
+/// Whether `esc` is an SGR sequence (`\x1b[…m`).
+///
+/// SGR is the only family [`AnsiState`] tracks, so this doubles as the test for
+/// whether an escape's effect can be closed with [`RESET`] or re-opened after a
+/// line break.
+pub fn is_sgr(esc: &str) -> bool {
+    esc.starts_with("\x1b[") && esc.ends_with('m')
+}
+
 /// A lexical segment of a string that may contain ANSI escape sequences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment<'a> {

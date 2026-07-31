@@ -17,7 +17,7 @@
 use std::fmt::{self, Write};
 
 use crate::{
-    ansi::{self, AnsiState, Segment},
+    ansi::{self, AnsiState, Segment, is_sgr},
     format::{self, BackgroundFill, DefaultBackground},
 };
 
@@ -243,11 +243,6 @@ pub fn shade(text: &str, background: &DefaultBackground) -> String {
         let _ = writer.finish();
     }
     buffer
-}
-
-/// Whether `esc` is an SGR sequence (`\x1b[…m`).
-fn is_sgr(esc: &str) -> bool {
-    esc.starts_with("\x1b[") && esc.ends_with('m')
 }
 
 /// Whether `esc` is a CSI erase-in-line (`\x1b[K`, `\x1b[2K`, …).
