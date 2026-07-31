@@ -283,6 +283,7 @@ impl ForcedToolFallback {
 /// If the API rejects a thinking block in the request, emits [`Event::Patch`]
 /// instructions to fix the conversation stream and finishes with
 /// [`FinishReason::Retry`] so the caller can rebuild and retry.
+#[expect(clippy::too_many_lines)]
 fn call(
     client: Client,
     request: types::CreateMessagesRequest,
