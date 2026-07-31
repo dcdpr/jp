@@ -2467,6 +2467,7 @@ dependencies = [
  "proptest",
  "syntect",
  "two-face",
+ "unicode-segmentation",
  "unicode-width",
 ]
 

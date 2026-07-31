@@ -3,7 +3,7 @@ use std::time::Duration;
 use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{
-    AppConfig,
+    AppConfig, PartialAppConfig,
     conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle},
     style::reasoning::{ReasoningDisplayConfig, TruncateChars},
 };
@@ -1443,6 +1443,99 @@ fn role_header_renders_assistant_label_with_model_suffix() {
     assert!(
         output.contains("── jp (anthropic/test) "),
         "assistant header should include model suffix, got: {output:?}"
+    );
+}
+
+/// A two-turn conversation whose model changed between the turns: turn 1 ran on
+/// `anthropic/test` (the conversation's base config), turn 2 on
+/// `openai/gpt-4o`.
+fn two_turns_with_model_switch() -> (Ctx, ConversationId, SharedBuffer, SharedBuffer, Runtime) {
+    let (ctx, id, out, err, rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("first"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::message("one"), ts(0, 0, 2)),
+    ]);
+
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.model.id = "openai/gpt-4o".into();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(h);
+    lock.as_mut().update_events(|e| {
+        e.add_config_delta(delta);
+        e.extend(vec![
+            ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+            ConversationEvent::new(ChatRequest::from("second"), ts(0, 1, 1)),
+            ConversationEvent::new(ChatResponse::message("two"), ts(0, 1, 2)),
+        ]);
+    });
+
+    (ctx, id, out, err, rt)
+}
+
+fn print_with_style(style: Option<PrintStyle>, id: ConversationId) -> Print {
+    Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style,
+        compacted: false,
+    }
+}
+
+#[test]
+fn assistant_header_names_the_model_each_turn_ran_on() {
+    let (mut ctx, id, out, _err, _rt) = two_turns_with_model_switch();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print_with_style(None, id).run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── jp (anthropic/test) ") && output.contains("── jp (openai/gpt-4o) "),
+        "each turn should name its own model, got: {output:?}"
+    );
+}
+
+/// A `--style` preset overrides presentation only.
+/// It must not swap the per-turn config out for the current workspace config,
+/// which would label every turn with the model configured right now.
+#[test]
+fn style_preset_keeps_the_per_turn_model_in_the_assistant_header() {
+    let (mut ctx, id, out, _err, _rt) = two_turns_with_model_switch();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print_with_style(Some(PrintStyle::Full), id)
+        .run(&mut ctx, &[h])
+        .unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── jp (anthropic/test) ") && output.contains("── jp (openai/gpt-4o) "),
+        "each turn should name its own model, got: {output:?}"
+    );
+}
+
+/// `--current-config` is the documented opt-out: it renders every turn with the
+/// workspace config, so both turns carry that model.
+#[test]
+fn current_config_labels_every_turn_with_the_workspace_model() {
+    let (mut ctx, id, out, _err, _rt) = two_turns_with_model_switch();
+
+    let mut print = print_with_style(None, id);
+    print.current_config = true;
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert_eq!(
+        output.matches("── jp (anthropic/test) ").count(),
+        2,
+        "both turns should use the workspace model, got: {output:?}"
     );
 }
 

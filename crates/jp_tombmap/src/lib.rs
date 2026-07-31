@@ -1,3 +1,11 @@
+//! A hash map that remembers what changed.
+//!
+//! [`TombMap`] wraps a [`HashMap`] and records which keys were removed (leaving
+//! a tombstone behind) and which were inserted or mutated.
+//! A persistence layer can use those two sets to write only the entries that
+//! changed and delete the ones that went away, instead of rewriting the whole
+//! map.
+
 use std::{
     borrow::Borrow,
     collections::{HashMap, HashSet, TryReserveError, hash_map},
@@ -12,6 +20,23 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use self::Entry::*;
 
+/// A [`HashMap`] that tracks removals and modifications.
+///
+/// Removing a key records a tombstone, so [`removed_keys`] still reports it
+/// afterwards.
+/// Inserting a key or handing out a mutable reference to its value marks the
+/// key as modified.
+/// The `_untracked` methods (such as [`remove_untracked`] and
+/// [`iter_mut_untracked`]) skip that bookkeeping.
+///
+/// Only the live entries are serialized.
+/// Deserializing therefore yields a map with no tombstones and nothing marked
+/// modified, so both sets describe the changes made since the map was last
+/// read.
+///
+/// [`iter_mut_untracked`]: TombMap::iter_mut_untracked
+/// [`remove_untracked`]: TombMap::remove_untracked
+/// [`removed_keys`]: TombMap::removed_keys
 pub struct TombMap<K, V, S = RandomState> {
     live: HashMap<K, V, S>,
     dead: HashSet<K>,

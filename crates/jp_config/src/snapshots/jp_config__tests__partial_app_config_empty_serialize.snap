@@ -132,6 +132,7 @@ PartialAppConfig {
         markdown: PartialMarkdownConfig {
             wrap_width: None,
             table_max_column_width: None,
+            table_continuation_edge: None,
             theme: None,
             hr_style: None,
         },
