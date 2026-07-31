@@ -102,7 +102,7 @@ fn with_idle_timeout_at(
 /// without bound.
 ///
 /// Counts the bytes of generated content: assistant messages, reasoning,
-/// structured output, and tool-call arguments.
+/// structured output, tool-call arguments, and the identity of each tool call.
 /// Once the running total passes `max_bytes`, the returned stream yields a
 /// non-retryable [`StreamErrorKind::OutputLimit`] error and ends.
 /// The event that crosses the threshold is forwarded before the error, so
@@ -111,9 +111,15 @@ fn with_idle_timeout_at(
 ///
 /// Non-content events (flushes, patches, keep-alives) do not count.
 ///
-/// Apply this outside any provider-level continuation logic, so that a response
-/// the provider assembles from several chained requests counts as one response
-/// against the ceiling.
+/// The count covers bytes delivered downstream, which is not the same as bytes
+/// the provider billed for.
+/// A provider that assembles a response from several requests may discard some
+/// of what it generated before yielding it here: Anthropic's continuation
+/// chaining drops the reasoning of each continuation and trims the overlap
+/// between links.
+/// Those bytes are paid for but never counted, so this ceiling bounds retained
+/// output rather than spend.
+/// The number of continuation requests is bounded separately by the provider.
 ///
 /// [`StreamErrorKind::OutputLimit`]: crate::StreamErrorKind::OutputLimit
 #[must_use]
@@ -151,6 +157,9 @@ pub fn output_limit_bytes(configured: u32) -> Option<u64> {
 
 /// Byte size of the generated content carried by a stream item.
 ///
+/// A tool call's `id` and `name` are generated response bytes too, so a stream
+/// of nothing but tool-call openings still advances the total.
+///
 /// Errors and non-content events count as zero.
 fn content_byte_size(item: &Result<Event, StreamError>) -> u64 {
     let Ok(Event::Part { part, .. }) = item else {
@@ -162,7 +171,7 @@ fn content_byte_size(item: &Result<Event, StreamError>) -> u64 {
             text.len()
         }
         EventPart::ToolCall(ToolCallPart::ArgumentChunk(json)) => json.len(),
-        EventPart::ToolCall(ToolCallPart::Start { .. }) => 0,
+        EventPart::ToolCall(ToolCallPart::Start { id, name }) => id.len() + name.len(),
     };
 
     size as u64

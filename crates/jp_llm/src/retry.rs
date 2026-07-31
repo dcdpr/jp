@@ -43,6 +43,21 @@ impl Default for RetryConfig {
     }
 }
 
+impl RetryConfig {
+    /// Apply the user's configured output ceiling, leaving the retry and
+    /// backoff settings at their defaults.
+    ///
+    /// The retry settings are deliberately not taken from the same config
+    /// block: they are tuned for a query the user is watching, and a collect
+    /// call that inherited a large `max_retries` would keep an unattended
+    /// request alive far longer than the caller expects.
+    #[must_use]
+    pub fn with_max_response_bytes(mut self, max_response_bytes: u32) -> Self {
+        self.max_response_bytes = max_response_bytes;
+        self
+    }
+}
+
 /// Execute `chat_completion_stream` with automatic retries on transient errors.
 ///
 /// Collects the full event stream into a `Vec<Event>`.

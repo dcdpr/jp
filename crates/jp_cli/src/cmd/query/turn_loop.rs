@@ -344,9 +344,10 @@ pub(super) async fn run_turn_loop(
                     Some(idle) => with_idle_timeout(raw_stream, idle),
                     None => raw_stream,
                 };
-                // Wrapped outside the provider stream, so a response the
-                // provider assembles from several chained requests counts as
-                // one response against the ceiling.
+                // Wrapped outside the provider stream, so the bytes of every
+                // chained continuation accumulate against a single ceiling
+                // rather than resetting per link. Bytes the provider discards
+                // while merging those links are billed but never seen here.
                 let raw_stream = match output_limit {
                     Some(max) => with_output_limit(raw_stream, max),
                     None => raw_stream,
@@ -929,6 +930,7 @@ async fn build_inquiry_backend(
             model: inquiry_model,
             system_prompt: default_system_prompt,
             sections: sections.clone(),
+            max_response_bytes: cfg.assistant.request.max_response_bytes,
         }
     } else {
         providers.insert(model.id.provider, Arc::clone(&provider));
@@ -938,6 +940,7 @@ async fn build_inquiry_backend(
             model: model.clone(),
             system_prompt: default_system_prompt,
             sections: sections.clone(),
+            max_response_bytes: cfg.assistant.request.max_response_bytes,
         }
     };
 
@@ -1032,6 +1035,7 @@ async fn build_inquiry_overrides(
                 model: inq_model,
                 system_prompt,
                 sections: default_config.sections.clone(),
+                max_response_bytes: default_config.max_response_bytes,
             });
         }
     }

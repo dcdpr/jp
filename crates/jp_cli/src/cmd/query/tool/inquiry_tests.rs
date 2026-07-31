@@ -39,6 +39,7 @@ fn test_inquiry_config(provider: MockProvider) -> InquiryConfig {
         model: test_model(),
         system_prompt: None,
         sections: vec![],
+        max_response_bytes: 1_048_576,
     }
 }
 
@@ -323,6 +324,7 @@ async fn llm_backend_uses_per_question_override() {
         model: test_model(),
         system_prompt: Some("Override prompt.".into()),
         sections: vec![],
+        max_response_bytes: 1_048_576,
     };
 
     let overrides = IndexMap::from([(("test_tool".into(), "confirm".into()), override_config)]);
@@ -557,6 +559,7 @@ async fn dedicated_model_backend_returns_answer() {
         }),
         system_prompt: Some("Answer concisely.".to_string()),
         sections: vec![],
+        max_response_bytes: 1_048_576,
     };
 
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);

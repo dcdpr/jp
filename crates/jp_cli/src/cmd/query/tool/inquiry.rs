@@ -145,6 +145,10 @@ pub struct InquiryConfig {
     pub model: ModelDetails,
     pub system_prompt: Option<String>,
     pub sections: Vec<SectionConfig>,
+
+    /// Output ceiling for the inquiry request, from
+    /// `assistant.request.max_response_bytes`.
+    pub max_response_bytes: u32,
 }
 
 /// Resolves inquiries by making structured output calls to an LLM provider.
@@ -282,7 +286,8 @@ impl InquiryBackend for LlmInquiryBackend {
             tool_choice: ToolChoice::None,
         };
 
-        let retry_config = RetryConfig::default();
+        let retry_config =
+            RetryConfig::default().with_max_response_bytes(config.max_response_bytes);
         let llm_events = tokio::select! {
             biased;
             () = cancellation_token.cancelled() => {

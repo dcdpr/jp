@@ -123,12 +123,12 @@ async fn output_under_the_ceiling_passes_through_untouched() {
 
 #[tokio::test]
 async fn non_content_events_do_not_count_toward_the_ceiling() {
-    // Flushes, keep-alives, and tool-call starts carry no generated content, so
-    // a stream of nothing but those must survive a 1-byte ceiling.
+    // Flushes, keep-alives, and patches carry no generated content, so a stream
+    // of nothing but those must survive a 1-byte ceiling.
     let inner = stream::iter(vec![
         Ok(Event::flush(0)),
         Ok(Event::KeepAlive),
-        Ok(Event::tool_call_start(1, "id", "name")),
+        Ok(Event::Patch(vec![])),
         Ok(Event::flush(1)),
     ])
     .boxed();
@@ -137,6 +137,42 @@ async fn non_content_events_do_not_count_toward_the_ceiling() {
 
     assert_eq!(items.len(), 4, "no extra error item is appended");
     assert!(items.iter().all(Result::is_ok), "got: {items:?}");
+}
+
+#[tokio::test]
+async fn repeated_tool_call_openings_reach_the_ceiling() {
+    // A tool call's `id` and `name` are generated response bytes. A model that
+    // emits nothing but empty tool calls must still hit the ceiling, rather
+    // than streaming forever at zero counted bytes.
+    let inner = stream::iter(
+        std::iter::repeat_with(|| Ok(Event::tool_call_start(0, "call_01", "some_tool")))
+            .take(20)
+            .collect::<Vec<_>>(),
+    )
+    .boxed();
+
+    // 16 bytes per opening (7 + 9) against a 40-byte ceiling: the third crosses
+    // it at 48 bytes.
+    let mut wrapped = with_output_limit(inner, 40);
+
+    for index in 0..3 {
+        assert!(
+            wrapped.next().await.expect("a forwarded part").is_ok(),
+            "tool call opening {index} is forwarded"
+        );
+    }
+
+    let err = wrapped
+        .next()
+        .await
+        .expect("an item before the stream ends")
+        .expect_err("an output limit error");
+    assert_eq!(err.kind, StreamErrorKind::OutputLimit);
+
+    assert!(
+        wrapped.next().await.is_none(),
+        "stream ends after the output limit fires"
+    );
 }
 
 #[test]

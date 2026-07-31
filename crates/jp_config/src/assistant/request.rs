@@ -86,10 +86,17 @@ pub struct RequestConfig {
     /// The default allows long responses assembled from several continuation
     /// requests while bounding the cost of a runaway response.
     ///
-    /// Content streamed before the ceiling is reached stays in the
-    /// conversation; only the turn ends, with an error.
+    /// During a query, content streamed before the ceiling is reached stays in
+    /// the conversation and only the turn ends, with an error.
+    /// Background requests that collect a whole response before using it (title
+    /// generation, summarization, tool inquiries) keep no partial result: they
+    /// fail outright.
+    ///
     /// The ceiling counts bytes rather than tokens because tokens cannot be
     /// counted locally; four bytes per token is a rough guide.
+    /// It counts the bytes JP receives, which can be fewer than the bytes
+    /// billed: a provider that assembles a response from several continuation
+    /// requests may discard some of what it generated before returning it.
     #[setting(default = 1_048_576)]
     pub max_response_bytes: u32,
 
