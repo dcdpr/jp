@@ -484,6 +484,10 @@ async fn build_compaction_for_range(
 ///
 /// Each rule produces one `Compaction` event.
 /// Runtime range overrides (`--from`/`--to`) apply to every rule.
+///
+/// Every range is resolved and every deterministic check runs before the first
+/// summarizer request, so a rule that turns out to be unsatisfiable cannot
+/// strand a paid request made for an earlier one.
 pub(crate) async fn build_compaction_events(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,
@@ -492,19 +496,45 @@ pub(crate) async fn build_compaction_events(
     to_override: Bound,
     printer: Option<&jp_printer::Printer>,
 ) -> crate::Result<Vec<Compaction>> {
-    // Two distinct baselines:
-    //
-    // - Range resolution uses the original `events` for every rule, so
-    //   `AfterLastCompaction` (`--from last-compaction` / `keep_first =
-    //   "last-compaction"`) resolves
-    //   against the compactions present at invocation start and applies
-    //   uniformly, rather than each rule starting after the previous rule's
-    //   freshly generated compaction.
-    // - `overlap` accumulates the compactions generated so far, so a later
-    //   summary rule's overlap extension sees earlier summaries in this same
-    //   invocation and can't be appended unextended.
+    let plan = plan_compactions(events, rules, &from_override, &to_override)?;
+
+    let mut compactions = Vec::with_capacity(plan.len());
+    for (rule, range) in plan {
+        compactions.push(build_compaction_for_range(events, cfg, rule, range, printer).await?);
+    }
+
+    Ok(compactions)
+}
+
+/// Resolve the range each rule would compact, in order, rejecting anything the
+/// build would reject.
+///
+/// Rules that select no turns are dropped rather than reported.
+///
+/// Two distinct baselines:
+///
+/// - Range resolution uses the original `events` for every rule, so
+///   `AfterLastCompaction` (`--from last-compaction` / `keep_first =
+///   "last-compaction"`) resolves against the compactions present at invocation
+///   start and applies uniformly, rather than each rule starting after the
+///   previous rule's freshly generated compaction.
+/// - `overlap` accumulates the compactions planned so far, so a later summary
+///   rule's overlap extension sees earlier summaries in this same invocation
+///   and can't be appended unextended.
+///
+/// # Errors
+///
+/// Returns the first unresolvable summary overlap, or the first blank verbatim
+/// summary.
+fn plan_compactions<'a>(
+    events: &ConversationStream,
+    rules: &'a [CompactionRuleConfig],
+    from_override: &Bound,
+    to_override: &Bound,
+) -> crate::Result<Vec<(&'a CompactionRuleConfig, CompactionRange)>> {
     let mut overlap = events.clone();
-    let mut compactions = Vec::new();
+    let mut plan = Vec::new();
+
     for rule in rules {
         let range = match resolve_rule_range(
             events,
@@ -517,12 +547,24 @@ pub(crate) async fn build_compaction_events(
             Ok(None) => continue,
             Err(conflict) => return Err(overlap_error(&conflict)),
         };
-        let compaction = build_compaction_for_range(events, cfg, rule, range, printer).await?;
-        overlap.add_compaction(compaction.clone());
-        compactions.push(compaction);
+
+        validate_summary_text(rule)?;
+
+        // Only the range and the provenance affect how a later rule resolves, so
+        // a placeholder stands in for the compaction this rule will produce.
+        if let Some(source) = rule_summary_source(rule) {
+            overlap.add_compaction(
+                Compaction::new(range.from_turn, range.to_turn).with_summary(SummaryPolicy {
+                    summary: String::new(),
+                    source,
+                }),
+            );
+        }
+
+        plan.push((rule, range));
     }
 
-    Ok(compactions)
+    Ok(plan)
 }
 
 /// Apply compaction events to the conversation stream.

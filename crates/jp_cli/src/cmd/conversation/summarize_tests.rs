@@ -217,6 +217,19 @@ fn completed_stream_without_text_is_unusable() {
 }
 
 #[test]
+fn completed_stream_with_only_whitespace_is_unusable() {
+    // A provider can complete with nothing but a newline. Storing that would
+    // replace the turns it stands for with a blank summary, in every future
+    // request, without telling anyone.
+    let events = stream_with_text(" \n", FinishReason::Completed);
+
+    assert_eq!(
+        summarize_events(events),
+        StreamOutcome::Unusable("the model returned an empty response".to_owned())
+    );
+}
+
+#[test]
 fn truncated_stream_is_unusable_even_though_it_produced_text() {
     // A max-tokens stream normally carries partial text. Returning it would
     // store a truncated summary over the range it replaces, dropping whatever
