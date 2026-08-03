@@ -125,6 +125,15 @@ jp conversation compact --reset
 | `--reset`          | `false`               | Remove all compaction events from the   |
 |                    |                       | stream.                                 |
 
+> [!TIP]
+> `--summarize` is now spelled `--summary`, and its value means something
+> different: `--summary` on its own generates a summary, while `--summary TEXT`
+> stores TEXT verbatim and calls no model.
+> Guidance for the summarizer moved to its own flag, `--summary-context TEXT`,
+> which modifies whichever rules are active rather than defining one.
+> In the DSL the policy is spelled `s` / `summary`, with `summarize` kept as an
+> alias.
+
 Range bounds accept several formats:
 
 | Value            | Example       | Meaning                              |
@@ -203,7 +212,7 @@ SPEC     = POLICIES [":" RANGE]
 POLICIES = POLICY ["+" POLICY]*
 POLICY   = "r" | "reasoning"
          | "t" | "tools"
-         | "s" | "summarize"
+         | "s" | "summary"       # "summarize" is accepted as an alias
 RANGE    = [BOUND] ".." [BOUND]    # explicit range (at least "..")
          | BOUND                    # single-bound shorthand
 BOUND    = INTEGER                 # >= 0: absolute turn index
