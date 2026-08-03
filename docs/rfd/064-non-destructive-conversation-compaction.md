@@ -110,29 +110,31 @@ jp conversation compact --reset
 
 **Flags:**
 
-| Flag               | Default               | Description                             |
-| ------------------ | --------------------- | --------------------------------------- |
-| `--keep-first <N>` | from config           | Preserve the first N turns.             |
-| `--keep-last <N>`  | from config           | Preserve the last N turns.              |
-| `--from <bound>`   | start of conversation | Start of the compacted range            |
-|                    |                       | (inclusive). Overrides `--keep-first`.  |
-| `--to <bound>`     | end of conversation   | End of the compacted range (inclusive). |
-|                    |                       | Overrides `--keep-last`.                |
-| `--reasoning`      | from config           | Strip reasoning (thinking) blocks.      |
-| `--tools`          | from config           | Strip tool call arguments/responses.    |
-| `--summarize`      | from config           | Generate an LLM summary for the range.  |
-| `--dry-run`        | `false`               | Preview effects without applying.       |
-| `--reset`          | `false`               | Remove all compaction events from the   |
-|                    |                       | stream.                                 |
+| Flag                | Default               | Description                             |
+| ------------------- | --------------------- | --------------------------------------- |
+| `--keep-first <N>`  | from config           | Preserve the first N turns.             |
+| `--keep-last <N>`   | from config           | Preserve the last N turns.              |
+| `--from <bound>`    | start of conversation | Start of the compacted range            |
+|                     |                       | (inclusive). Overrides `--keep-first`.  |
+| `--to <bound>`      | end of conversation   | End of the compacted range (inclusive). |
+|                     |                       | Overrides `--keep-last`.                |
+| `--reasoning`       | from config           | Strip reasoning (thinking) blocks.      |
+| `--tools`           | from config           | Strip tool call arguments/responses.    |
+| `--summary [TEXT]`  | from config           | Replace the range with a summary:       |
+|                     |                       | generated with no value, or TEXT        |
+|                     |                       | verbatim with one.                      |
+| `--summary-context` | none                  | Extra guidance for the summarizer.      |
+|                     |                       | Only affects rules that generate one.   |
+| `--dry-run`         | `false`               | Preview effects without applying.       |
+| `--reset`           | `false`               | Remove all compaction events from the   |
+|                     |                       | stream.                                 |
 
 > [!TIP]
-> `--summarize` is now spelled `--summary`, and its value means something
-> different: `--summary` on its own generates a summary, while `--summary TEXT`
-> stores TEXT verbatim and calls no model.
-> Guidance for the summarizer moved to its own flag, `--summary-context TEXT`,
-> which modifies whichever rules are active rather than defining one.
-> In the DSL the policy is spelled `s` / `summary`, with `summarize` kept as an
-> alias.
+> `--summary` was originally spelled `--summarize`, and its value meant
+> something different: it was passed to the summarizer as extra guidance rather
+> than used as the summary text.
+> A script still passing `--summarize TEXT` fails rather than silently storing
+> TEXT as the summary; that guidance now belongs to `--summary-context`.
 
 Range bounds accept several formats:
 

@@ -406,6 +406,28 @@ fn rule_summary_source(rule: &CompactionRuleConfig) -> Option<SummarySource> {
     })
 }
 
+/// Reject a verbatim summary whose text is blank.
+///
+/// The generated path refuses an empty model response rather than let it
+/// replace the turns it stands for; verbatim text is held to the same bar,
+/// whether it came from `--summary ""` or a blank `summary.text`.
+///
+/// Shared by the dry-run preview and the real build so a preview never promises
+/// a compaction the run would reject.
+fn validate_summary_text(rule: &CompactionRuleConfig) -> crate::Result<()> {
+    let Some(text) = rule.summary.as_ref().and_then(|s| s.text.as_deref()) else {
+        return Ok(());
+    };
+
+    if text.trim().is_empty() {
+        return Err(crate::error::Error::Compaction(
+            "the summary text is empty; drop the value to generate a summary instead".to_owned(),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Report an unresolvable summary overlap in the 1-based turn numbers the user
 /// typed.
 fn overlap_error(overlap: &SummaryOverlap) -> crate::error::Error {
@@ -430,6 +452,8 @@ async fn build_compaction_for_range(
     range: CompactionRange,
     printer: Option<&jp_printer::Printer>,
 ) -> crate::Result<Compaction> {
+    validate_summary_text(rule)?;
+
     let compaction = build_mechanical_compaction(range.from_turn, range.to_turn, rule);
 
     let Some(summary) = rule.summary.as_ref() else {
@@ -437,16 +461,6 @@ async fn build_compaction_for_range(
     };
 
     if let Some(text) = summary.text.as_deref() {
-        // The generated path rejects an empty response rather than let it
-        // replace the turns it stands for; verbatim text is held to the same
-        // bar, whether it came from `--summary ""` or a blank `summary.text`.
-        if text.trim().is_empty() {
-            return Err(crate::error::Error::Compaction(
-                "the summary text is empty; drop the value to generate a summary instead"
-                    .to_owned(),
-            ));
-        }
-
         return Ok(compaction.with_summary(SummaryPolicy::authored(text)));
     }
 
@@ -931,6 +945,12 @@ impl Compact {
                 Ok(None) => continue,
                 Err(conflict) => return Err(overlap_error(&conflict).into()),
             };
+
+            // Checked after the range resolves so a rule that selects no turns
+            // is skipped here exactly as it is in the real run, which never
+            // reaches `build_compaction_for_range` for it.
+            validate_summary_text(rule)?;
+
             let source = rule_summary_source(rule);
             let label = match source {
                 Some(source) => Some(summary_label(source).to_owned()),

@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use camino_tempfile::{Utf8TempDir, tempdir};
 use clap::Parser as _;
 use jp_config::{
     AppConfig, PartialAppConfig,
@@ -14,14 +15,17 @@ use jp_conversation::{
     ToolCallPolicy,
     event::{ToolCallRequest, ToolCallResponse},
 };
-use jp_printer::Printer;
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_workspace::Workspace;
 use serde_json::{Map, Value};
+use tokio::runtime::Runtime;
 
 use super::{
     Bound, Compact, IntoPartialAppConfig as _, TimelineSegment, build_compaction_events,
     existing_segments, resolve_reset_index, segments_for_compactions, timeline_lines,
 };
 use crate::cmd::{conversation_id::ConversationIds as _, target::ConversationTarget};
+use crate::{Globals, ctx::Ctx};
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
 fn parse_compact(args: &[&str]) -> Compact {
@@ -358,6 +362,85 @@ fn blank_verbatim_summary_is_rejected() {
     assert_eq!(
         error.to_string(),
         "Compaction error: the summary text is empty; drop the value to generate a summary instead"
+    );
+}
+
+/// A `Ctx` backed by an in-memory printer, for exercising the dry-run preview.
+///
+/// The tempdir and runtime are returned so they outlive the ctx: `Ctx::drop`
+/// persists, and needs both.
+fn preview_ctx() -> (Ctx, SharedBuffer, Utf8TempDir, Runtime) {
+    let tmp = tempdir().unwrap();
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let ctx = Ctx::new(
+        Workspace::new(tmp.path()),
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    (ctx, out, tmp, Runtime::new().unwrap())
+}
+
+#[test]
+fn preview_rejects_a_blank_verbatim_summary() {
+    // Regression: `--summary '' --dry-run` used to print a successful preview
+    // while the real run rejected the same rule, so the preview promised a
+    // compaction that could not be performed.
+    let (ctx, _out, _tmp, _rt) = preview_ctx();
+    let stream = stream_of(4);
+
+    let error = Compact::preview_compaction(
+        &ctx,
+        &stream,
+        &[summary_rule(Some("   "))],
+        &Bound::Default,
+        &Bound::Default,
+    )
+    .unwrap_err();
+
+    // `preview_compaction` yields the rendered command error, so this pins what
+    // the user actually reads.
+    assert_eq!(
+        error.to_string(),
+        "error 1: Compaction error (error:\"the summary text is empty; drop the value to generate \
+         a summary instead\")"
+    );
+}
+
+#[test]
+fn preview_refuses_an_overlap_the_real_run_would_refuse() {
+    // The preview shares `resolve_rule_range` with the real run, so the same
+    // widening over an existing summary is refused before anything is printed.
+    let (ctx, out, _tmp, _rt) = preview_ctx();
+    let mut stream = stream_of(6);
+    stream.add_compaction(Compaction::new(3, 5).with_summary(SummaryPolicy::generated("earlier")));
+
+    let mut rule = summary_rule(Some("hand-written"));
+    rule.keep_last = RuleBound::FromEnd(2);
+
+    let error =
+        Compact::preview_compaction(&ctx, &stream, &[rule], &Bound::Default, &Bound::Default)
+            .unwrap_err();
+
+    ctx.printer.flush();
+    // The full refusal as the user reads it: what went wrong, and the exact
+    // range that resolves it.
+    assert_eq!(
+        error.to_string(),
+        "error 1: Summary overlap (reason:\"A summary cannot be nested inside or split across \
+         another one, so your text for turns 1..4 would have to stand in for turns 1..6 as \
+         well.\", suggestion:\"Re-run with `--from 1 --to 6` to cover the whole range, or `jp \
+         conversation compact --reset` to drop the existing compactions first.\")"
+    );
+    assert_eq!(
+        out.lock().clone(),
+        "",
+        "a refused preview must print no timeline"
     );
 }
 
