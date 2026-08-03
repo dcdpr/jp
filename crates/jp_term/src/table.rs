@@ -9,7 +9,7 @@ pub enum DetailValue {
     /// A single value.
     Scalar(String),
 
-    /// A list of items: a bulleted multi-line cell in the pretty view, one row
+    /// A list of items: a numbered multi-line cell in the pretty view, one row
     /// per item in markdown, and a JSON array in the JSON views.
     List(Vec<DetailItem>),
 }
@@ -224,19 +224,23 @@ pub fn details(title: Option<&str>, rows: Vec<DetailRow>) -> String {
 
 /// Build a pretty (borderless table) row from a detail row.
 ///
-/// A list value renders with the label on its own line and the items bulleted
-/// beneath it (the leading newline pushes the items below the label, indented
-/// into the value column).
+/// A list value renders with the label on its own line and the items numbered
+/// from 1 beneath it (the leading newline pushes the items below the label,
+/// indented into the value column).
+/// The numbers are right-aligned so the item text stays in one column past the
+/// tenth item.
 fn detail_pretty_row(row: DetailRow) -> Row {
     let value = match row.value {
         DetailValue::Scalar(s) => s,
         DetailValue::List(items) => {
-            let bullets = items
+            let width = items.len().to_string().len();
+            let numbered = items
                 .into_iter()
-                .map(|item| format!("- {}", item.text))
+                .enumerate()
+                .map(|(index, item)| format!("{:>width$}. {}", index + 1, item.text))
                 .collect::<Vec<_>>()
                 .join("\n");
-            format!("\n{bullets}")
+            format!("\n{numbered}")
         }
     };
 

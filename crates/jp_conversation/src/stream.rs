@@ -423,6 +423,26 @@ impl ConversationStream {
         before - self.events.len()
     }
 
+    /// Remove a single compaction event, addressed by its 0-based position
+    /// among the compaction events in the stream.
+    ///
+    /// Returns the removed event, or `None` when the stream holds fewer
+    /// compaction events than that (in which case the stream is unchanged).
+    pub fn remove_compaction(&mut self, index: usize) -> Option<Compaction> {
+        let position = self
+            .events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| matches!(event, InternalEvent::Compaction(_)))
+            .map(|(position, _)| position)
+            .nth(index)?;
+
+        match self.events.remove(position) {
+            InternalEvent::Compaction(compaction) => Some(compaction),
+            _ => unreachable!("position points at a compaction event"),
+        }
+    }
+
     /// Returns an iterator over the [`Compaction`] events in the stream.
     pub fn compactions(&self) -> impl Iterator<Item = &Compaction> {
         self.events.iter().filter_map(|e| match e {
