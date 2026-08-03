@@ -318,9 +318,9 @@ fn blank_verbatim_summary_is_rejected() {
 
 /// A `Ctx` backed by an in-memory printer, for exercising the dry-run preview.
 ///
-/// The tempdir and runtime are returned so they outlive the ctx: `Ctx::drop`
-/// persists, and needs both.
-fn preview_ctx() -> (Ctx, SharedBuffer, Utf8TempDir, Runtime) {
+/// The tempdir is returned so it outlives the ctx, whose workspace points into
+/// it.
+fn preview_ctx() -> (Ctx, SharedBuffer, Utf8TempDir) {
     let tmp = tempdir().unwrap();
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
 
@@ -334,7 +334,7 @@ fn preview_ctx() -> (Ctx, SharedBuffer, Utf8TempDir, Runtime) {
         printer,
     );
 
-    (ctx, out, tmp, Runtime::new().unwrap())
+    (ctx, out, tmp)
 }
 
 #[test]
@@ -342,7 +342,7 @@ fn preview_rejects_a_blank_verbatim_summary() {
     // Regression: `--summary '' --dry-run` used to print a successful preview
     // while the real run rejected the same rule, so the preview promised a
     // compaction that could not be performed.
-    let (ctx, _out, _tmp, _rt) = preview_ctx();
+    let (ctx, _out, _tmp) = preview_ctx();
     let stream = stream_of(4);
 
     let error = Compact::preview_compaction(
@@ -367,7 +367,7 @@ fn preview_rejects_a_blank_verbatim_summary() {
 fn preview_refuses_an_overlap_the_real_run_would_refuse() {
     // The preview shares `resolve_rule_range` with the real run, so the same
     // widening over an existing summary is refused before anything is printed.
-    let (ctx, out, _tmp, _rt) = preview_ctx();
+    let (ctx, out, _tmp) = preview_ctx();
     let mut stream = stream_of(6);
     stream.add_compaction(Compaction::new(3, 5).with_summary(SummaryPolicy::generated("earlier")));
 
@@ -466,6 +466,52 @@ fn generated_summary_refuses_to_widen_over_verbatim_text() {
     };
     assert!(!authored, "the blocking text is the existing summary");
     assert_eq!((from, to, required_from, required_to), (1, 4, 1, 6));
+}
+
+#[test]
+fn a_later_overlap_is_refused_before_any_summarizer_request() {
+    // Regression: the first rule's summary used to be generated before the
+    // second rule's range was resolved, so an overlap in the second rule threw
+    // away a paid request nothing recorded.
+    //
+    // `AppConfig::new_test()` points the assistant at `anthropic/test`, so any
+    // summarizer call fails on provider lookup. Getting `SummaryOverlap` back is
+    // therefore proof that rule 1 never reached a provider.
+    let mut stream = stream_of(10);
+    stream.add_compaction(Compaction::new(6, 8).with_summary(SummaryPolicy::authored("mine")));
+
+    // Rule 1 generates a summary for turns 0..2, disjoint from the authored one.
+    let mut generated = summary_rule(None);
+    generated.keep_last = RuleBound::FromEnd(7);
+
+    // Rule 2 covers 4..7, so it has to grow over the authored summary.
+    let mut conflicting = summary_rule(None);
+    conflicting.keep_first = RuleBound::Absolute(5);
+    conflicting.keep_last = RuleBound::FromEnd(2);
+
+    let cfg = AppConfig::new_test();
+    let error = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &[generated, conflicting],
+            Bound::Default,
+            Bound::Default,
+            Some(&Printer::sink()),
+        ))
+        .unwrap_err();
+
+    let crate::error::Error::SummaryOverlap {
+        from,
+        to,
+        required_from,
+        required_to,
+        ..
+    } = error
+    else {
+        panic!("expected the overlap to be reported before summarizing, got: {error}");
+    };
+    assert_eq!((from, to, required_from, required_to), (5, 8, 5, 9));
 }
 
 #[test]
