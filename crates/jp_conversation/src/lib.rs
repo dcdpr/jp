@@ -37,8 +37,8 @@ pub mod stream;
 pub mod thread;
 
 pub use compaction::{
-    Compaction, CompactionRange, RangeBound, ReasoningPolicy, SummaryPolicy, ToolCallPolicy,
-    resolve_range,
+    Compaction, CompactionRange, RangeBound, ReasoningPolicy, SummaryOverlap, SummaryPolicy,
+    SummarySource, ToolCallPolicy, resolve_range,
 };
 pub use conversation::{Conversation, ConversationId};
 pub use error::Error;

@@ -22,6 +22,9 @@ In disagreements between code and docs, the code is authoritative.
     - [Attachment](#attachment)
     - [Background Task](#background-task)
     - [CommandConfig](#commandconfig)
+    - [Compacted View](#compacted-view)
+    - [Compaction](#compaction)
+    - [Compaction Rule](#compaction-rule)
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
     - [EditorBackend](#editorbackend)
@@ -34,6 +37,7 @@ In disagreements between code and docs, the code is authoritative.
     - [RFD](#rfd)
     - [Search Hit](#search-hit)
     - [Signal Router](#signal-router)
+    - [Summary](#summary)
     - [Thread](#thread)
     - [Tool Call](#tool-call)
     - [Turn](#turn)
@@ -80,6 +84,50 @@ attachment URL) share the same shape and parser.
 The policy around *when* JP is allowed to run a `CommandConfig` (prompt or not,
 confirm `shell = true` invocations) lives on each consumer, not on the shape
 itself.
+
+### Compacted View
+
+What the LLM actually receives for a conversation: the raw event stream with
+every [Compaction](#compaction) overlay applied.
+Produced by `ConversationStream::apply_projection` in `jp_conversation`, which
+also returns a `TurnOrigin` per resulting turn mapping it back to the raw turn
+number(s) it stands for.
+`jp conversation print --compacted` renders it.
+
+Turn numbering differs between the two: a [Summary](#summary) collapses its
+range into a single turn, so the compacted view can be shorter than the
+conversation it came from.
+
+**Not the same as** a [Workspace Projection](#workspace-projection).
+The word "projection" carries two unrelated meanings in the codebase: applying
+compaction overlays (`jp_conversation::stream::projection`) and writing a
+conversation into the workspace directory (`Projection` in `jp_storage`).
+
+### Compaction
+
+A non-destructive overlay that reduces what the provider sees for an inclusive
+range of turns.
+The original events are never removed: the overlay is appended to the
+conversation stream and applied when the [Compacted View](#compacted-view) is
+built.
+Implemented as `Compaction` in `jp_conversation::compaction`, carrying up to
+three independent policies over its range — a [Summary](#summary), a reasoning
+policy, and a tool-call policy.
+See [RFD-064].
+
+A Summary supersedes the other two for the turns it covers.
+
+### Compaction Rule
+
+The configuration that produces a [Compaction](#compaction): how many turns to
+preserve at each end, and which policies to apply to the rest.
+Implemented as `CompactionRuleConfig` in `jp_config::conversation::compaction`;
+each rule yields exactly one Compaction when applied.
+
+**Not the same as** a Compaction.
+A rule is durable configuration in relative terms ("keep the last turn"); a
+Compaction is the event it produced, pinned to absolute turn indices and stored
+in the conversation.
 
 ### Conversation
 
@@ -208,6 +256,23 @@ interrupt down the stack.
 The registered scopes are the streaming loop, the tool execution loop, and the
 turn-level handler covering gaps between turn phases.
 
+### Summary
+
+Text that stands in for a range of turns in the [Compacted
+View](#compacted-view): the turns it covers collapse into a single synthetic
+request/response pair carrying the text.
+Attached to a [Compaction](#compaction) as `SummaryPolicy` in
+`jp_conversation::compaction`, whose `SummarySource` records whether the text
+was *generated* (produced by a model reading the raw events in the range) or
+*authored* (supplied verbatim by the user).
+
+The distinction is operational: a generated summary can be re-derived for a
+wider range, an authored one cannot.
+
+**Not the same as** the mechanical compaction policies (reasoning stripping,
+tool-call stripping), which filter events within their range rather than
+replacing the range.
+
 ### Thread
 
 The decomposed, provider-facing projection of a Conversation: a rendered system
@@ -258,4 +323,5 @@ See [RFD-031].
 
 [RFD-001]: ../rfd/001-jp-rfd-process.md
 [RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
+[RFD-064]: ../rfd/064-non-destructive-conversation-compaction.md
 [`shlex::split`]: https://docs.rs/shlex
