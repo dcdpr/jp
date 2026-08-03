@@ -18,8 +18,9 @@ use serde_json::{Map, Value};
 
 use super::{
     Bound, Compact, IntoPartialAppConfig as _, TimelineSegment, build_compaction_events,
-    existing_segments, segments_for_compactions, timeline_lines,
+    existing_segments, resolve_reset_index, segments_for_compactions, timeline_lines,
 };
+use crate::cmd::{conversation_id::ConversationIds as _, target::ConversationTarget};
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
 fn parse_compact(args: &[&str]) -> Compact {
@@ -230,6 +231,54 @@ fn reset_conflicts_with_selection_flags() {
 
     // `--reset --dry-run` stays valid: it previews the removal.
     assert!(TestCli::try_parse_from(["compact", "--reset", "--dry-run"]).is_ok());
+}
+
+#[test]
+fn reset_takes_an_optional_compaction_index() {
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        compact: Compact,
+    }
+
+    assert_eq!(parse_compact(&["--reset"]).reset, Some(None));
+    assert_eq!(parse_compact(&["--reset=2"]).reset, Some(Some(2)));
+    assert_eq!(parse_compact(&[]).reset, None);
+
+    // The index requires `=`, so a bare `--reset` followed by a conversation
+    // target still targets the conversation instead of swallowing it as the
+    // index.
+    let compact = parse_compact(&["--reset", "latest"]);
+    assert_eq!(compact.reset, Some(None));
+    assert_eq!(compact.target.ids(), [ConversationTarget::Latest]);
+
+    // Indices are 1-based, so `0` names nothing.
+    assert!(TestCli::try_parse_from(["compact", "--reset=0"]).is_err());
+    assert!(TestCli::try_parse_from(["compact", "--reset=x"]).is_err());
+}
+
+#[test]
+fn reset_index_addresses_compactions_in_stream_order() {
+    let mut stream = ConversationStream::new_test();
+    for t in 0..6 {
+        stream.start_turn(format!("turn {t}"));
+    }
+    stream.add_compaction(Compaction::new(0, 1));
+    stream.add_compaction(Compaction::new(2, 4));
+
+    // The label carries 1-based turn numbers, matching `jp conversation show`.
+    assert_eq!(
+        resolve_reset_index(&stream, 1),
+        Ok((0, "turns 1..2".to_owned()))
+    );
+    assert_eq!(
+        resolve_reset_index(&stream, 2),
+        Ok((1, "turns 3..5".to_owned()))
+    );
+    assert_eq!(
+        resolve_reset_index(&stream, 3),
+        Err("compaction 3 out of range (conversation has 2 compaction event(s))".to_owned())
+    );
 }
 
 fn runtime() -> tokio::runtime::Runtime {
