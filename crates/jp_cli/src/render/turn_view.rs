@@ -248,6 +248,17 @@ impl TurnView {
         self.structured.flush();
     }
 
+    /// Flush pending output at a streaming-cycle boundary the same response
+    /// continues across.
+    ///
+    /// The chat renderer keeps its reasoning region open: the continuation's
+    /// output lands in the same region on screen, so a gap owed by reasoning
+    /// stays shaded rather than closing the region.
+    pub fn flush_for_continuation(&mut self) {
+        self.chat.flush_for_continuation();
+        self.structured.flush();
+    }
+
     /// Signal to the printer that the current streaming cycle has ended.
     ///
     /// Forwards to the chat renderer, which switches the printer's

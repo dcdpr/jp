@@ -263,12 +263,16 @@ impl StreamRetryState {
 /// user already saw on screen.
 /// Call this before ending a turn on any path that bypasses the coordinator's
 /// own terminal handling.
+///
+/// The renderer keeps its reasoning region open across the flush: a retry
+/// resends the request and its output continues the region on screen, and the
+/// retry notification is a transient line that leaves nothing behind.
 pub fn commit_partial_response(
     turn_coordinator: &mut TurnCoordinator,
     conv: &ConversationMut,
     printer: &Arc<Printer>,
 ) {
-    turn_coordinator.flush_renderer();
+    turn_coordinator.flush_renderer_for_continuation();
     printer.flush_instant();
 
     let partial = turn_coordinator.peek_partial_events();

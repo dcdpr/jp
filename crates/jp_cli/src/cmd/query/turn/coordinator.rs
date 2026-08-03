@@ -437,6 +437,19 @@ impl TurnCoordinator {
         self.view.flush();
     }
 
+    /// Flush the renderer at a streaming-cycle boundary the same response
+    /// continues across.
+    ///
+    /// Commits buffered content like [`flush_renderer`], but leaves the
+    /// reasoning region open: the continuation resends the request and its
+    /// output lands in the same region on screen, with no persistent content in
+    /// between.
+    ///
+    /// [`flush_renderer`]: Self::flush_renderer
+    pub fn flush_renderer_for_continuation(&mut self) {
+        self.view.flush_for_continuation();
+    }
+
     /// Resolve the live tool-call boundary, returning the background the tool's
     /// chrome should be filled with to keep a reasoning region continuous.
     ///

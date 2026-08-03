@@ -573,6 +573,37 @@ fn test_reasoning_block_gap_is_shaded() {
     );
 }
 
+/// A stream error mid-reasoning commits what was streamed and resets the
+/// renderer before the continuation request goes out.
+/// The reasoning region spans that boundary, so the gap the interrupted block
+/// owes stays inside the region and keeps its background.
+#[test]
+fn test_reasoning_gap_across_a_continuation_is_shaded() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First section.\n\n".into(),
+    });
+    renderer.flush_for_continuation();
+    renderer.reset();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Second section.\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output,
+        "\u{1b}[48;5;236mFirst \
+         section.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\u{1b}[48;5;236m\u{1b}[K\u{1b}[49m\n\u{1b}[48;\
+         5;236mSecond section.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\n"
+    );
+}
+
 #[test]
 fn test_message_buffer_flushed_on_explicit_flush() {
     let (mut renderer, out, _err) = create_renderer();

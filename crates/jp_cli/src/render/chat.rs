@@ -654,14 +654,32 @@ impl ChatRenderer {
     }
 
     pub fn flush(&mut self) {
-        // Leaving the region ends any ephemeral chrome: the timer line and the
-        // content about to be committed share the terminal row.
-        self.cancel_reasoning_timer();
-        self.drain_buffer();
         // A plain flush leaves the current content region (a content-kind
         // transition, a role header, or end of stream), so the deferred
         // separator is emitted unshaded.
-        self.emit_pending_separator(false);
+        self.flush_region(false);
+    }
+
+    /// Flush at a streaming-cycle boundary the same response continues across.
+    ///
+    /// A stream error commits what was streamed and resends the request; the
+    /// continuation's output lands in the same region on screen, with nothing
+    /// persistent rendered in between.
+    /// A separator owed by reasoning therefore stays inside the region and
+    /// keeps its background, instead of closing the region with an unshaded gap
+    /// the continuation then reopens.
+    pub fn flush_for_continuation(&mut self) {
+        self.flush_region(self.last_content_kind == Some(ContentKind::Reasoning));
+    }
+
+    /// Commit buffered content and resolve the deferred separator with the
+    /// given shading.
+    fn flush_region(&mut self, shaded: bool) {
+        // Committing persistent content ends any ephemeral chrome: the timer
+        // line and the content about to be written share the terminal row.
+        self.cancel_reasoning_timer();
+        self.drain_buffer();
+        self.emit_pending_separator(shaded);
     }
 
     /// Drain the buffer's end-of-region events to the printer, committing
