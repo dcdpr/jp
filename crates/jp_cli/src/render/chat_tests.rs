@@ -573,6 +573,67 @@ fn test_reasoning_block_gap_is_shaded() {
     );
 }
 
+/// A stream error mid-reasoning commits what was streamed and resets the
+/// renderer before the continuation request goes out.
+/// The reasoning region spans that boundary, so the gap the interrupted block
+/// owes stays inside the region and keeps its background.
+#[test]
+fn test_reasoning_gap_across_a_continuation_is_shaded() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First section.\n\n".into(),
+    });
+    renderer.flush_for_continuation();
+    renderer.reset_preserving_region();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Second section.\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output,
+        "\u{1b}[48;5;236mFirst \
+         section.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\u{1b}[48;5;236m\u{1b}[K\u{1b}[49m\n\u{1b}[48;\
+         5;236mSecond section.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\n"
+    );
+}
+
+/// The provider is free to resume an interrupted reasoning block with the
+/// answer instead of more reasoning.
+/// The gap then leaves the reasoning region, so it is unshaded — the same
+/// output the reasoning-to-answer transition produces without a retry in
+/// between.
+#[test]
+fn test_reasoning_gap_across_a_continuation_into_a_message_is_unshaded() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First section.\n\n".into(),
+    });
+    renderer.flush_for_continuation();
+    renderer.reset_preserving_region();
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer.\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output,
+        "\u{1b}[48;5;236mFirst section.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\nAnswer.\n\n"
+    );
+}
+
 #[test]
 fn test_message_buffer_flushed_on_explicit_flush() {
     let (mut renderer, out, _err) = create_renderer();

@@ -49,7 +49,10 @@ use super::{
         LoopAction, StreamingInterruptResult, handle_llm_event, handle_streaming_interrupt,
         reply_edit_mode,
     },
-    stream::{StreamErrorOutcome, StreamRetryState, commit_partial_response, handle_stream_error},
+    stream::{
+        ResponseBoundary, StreamErrorOutcome, StreamRetryState, commit_partial_response,
+        handle_stream_error,
+    },
     tool::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
         ToolRenderer, build_execution_plan,
@@ -595,7 +598,12 @@ pub(super) async fn run_turn_loop(
                                     // buffered output, which would otherwise land
                                     // after the parked cursor.
                                     stream_retry.clear_line(&printer);
-                                    commit_partial_response(&mut turn_coordinator, &conv, &printer);
+                                    commit_partial_response(
+                                        &mut turn_coordinator,
+                                        &conv,
+                                        &printer,
+                                        ResponseBoundary::Final,
+                                    );
                                     if let Err(err) = conv.flush() {
                                         warn!("Failed to persist before abort: {err}");
                                     }
