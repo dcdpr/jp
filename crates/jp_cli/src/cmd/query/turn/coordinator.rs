@@ -422,9 +422,27 @@ impl TurnCoordinator {
     /// The Provider decides whether the target model accepts native assistant
     /// prefill or needs another supported wire representation.
     pub fn prepare_continuation(&mut self) {
+        self.prepare_next_cycle();
+        self.view.reset_for_continuation();
+    }
+
+    /// Reset per-request state before resending a request a stream error cut
+    /// short.
+    ///
+    /// Like [`prepare_continuation`], but keeps the renderer's content region
+    /// open: a retry puts nothing persistent on the terminal, so the reasoning
+    /// region and the separator it owes span the boundary.
+    ///
+    /// [`prepare_continuation`]: Self::prepare_continuation
+    pub fn prepare_retry_continuation(&mut self) {
+        self.prepare_next_cycle();
+        self.view.reset_for_stream_retry();
+    }
+
+    /// Drop the per-request event buffer and re-enter the streaming phase.
+    fn prepare_next_cycle(&mut self) {
         // The committed partial response replaces these per-request buffers.
         self.event_builder = EventBuilder::new();
-        self.view.reset_for_continuation();
         self.state = TurnPhase::Streaming;
     }
 
@@ -440,10 +458,10 @@ impl TurnCoordinator {
     /// Flush the renderer at a streaming-cycle boundary the same response
     /// continues across.
     ///
-    /// Commits buffered content like [`flush_renderer`], but leaves the
-    /// reasoning region open: the continuation resends the request and its
-    /// output lands in the same region on screen, with no persistent content in
-    /// between.
+    /// Commits buffered content like [`flush_renderer`], but leaves a separator
+    /// owed by reasoning pending: the continuation resends the request with no
+    /// persistent content rendered in between, so its first content decides the
+    /// gap's shading.
     ///
     /// [`flush_renderer`]: Self::flush_renderer
     pub fn flush_renderer_for_continuation(&mut self) {

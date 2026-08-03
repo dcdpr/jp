@@ -251,9 +251,9 @@ impl TurnView {
     /// Flush pending output at a streaming-cycle boundary the same response
     /// continues across.
     ///
-    /// The chat renderer keeps its reasoning region open: the continuation's
-    /// output lands in the same region on screen, so a gap owed by reasoning
-    /// stays shaded rather than closing the region.
+    /// The chat renderer keeps its content region open, leaving a separator
+    /// owed by reasoning pending: nothing persistent renders between the two
+    /// cycles, so the continuation's first content decides the gap's shading.
     pub fn flush_for_continuation(&mut self) {
         self.chat.flush_for_continuation();
         self.structured.flush();
@@ -280,6 +280,17 @@ impl TurnView {
     /// flag stays `false` and the next assistant event will emit one.
     pub fn reset_for_continuation(&mut self) {
         self.chat.reset();
+        self.structured.reset();
+    }
+
+    /// Reset internal renderer state at a stream-retry boundary, keeping the
+    /// chat renderer's content region open.
+    ///
+    /// A retry resends the request without rendering anything persistent in
+    /// between, so the reasoning region and the separator it owes span the
+    /// boundary and the continuation's first content resolves the gap.
+    pub fn reset_for_stream_retry(&mut self) {
+        self.chat.reset_preserving_region();
         self.structured.reset();
     }
 

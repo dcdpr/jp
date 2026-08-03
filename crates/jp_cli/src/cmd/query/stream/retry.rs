@@ -255,6 +255,17 @@ impl StreamRetryState {
     }
 }
 
+/// Whether the assistant's response continues past a flush boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseBoundary {
+    /// The request is resent and the same response continues on screen, with
+    /// nothing persistent rendered in between.
+    Continuation,
+
+    /// The response ends here: nothing more of it will be rendered.
+    Final,
+}
+
 /// Flush buffered output and commit any unflushed partial assistant content to
 /// the conversation stream.
 ///
@@ -264,15 +275,21 @@ impl StreamRetryState {
 /// Call this before ending a turn on any path that bypasses the coordinator's
 /// own terminal handling.
 ///
-/// The renderer keeps its reasoning region open across the flush: a retry
-/// resends the request and its output continues the region on screen, and the
-/// retry notification is a transient line that leaves nothing behind.
+/// `boundary` decides how the renderer treats an open reasoning region.
+/// A continuation keeps the gap the region owes pending for the resent
+/// request's output to resolve (the retry notification is a transient line that
+/// leaves nothing behind); a final boundary closes the region with an unshaded
+/// gap.
 pub fn commit_partial_response(
     turn_coordinator: &mut TurnCoordinator,
     conv: &ConversationMut,
     printer: &Arc<Printer>,
+    boundary: ResponseBoundary,
 ) {
-    turn_coordinator.flush_renderer_for_continuation();
+    match boundary {
+        ResponseBoundary::Continuation => turn_coordinator.flush_renderer_for_continuation(),
+        ResponseBoundary::Final => turn_coordinator.flush_renderer(),
+    }
     printer.flush_instant();
 
     let partial = turn_coordinator.peek_partial_events();
@@ -324,9 +341,17 @@ pub async fn handle_stream_error(
     // to the stream BEFORE deciding whether to retry or abort. Streamed text
     // the user already saw must never be dropped just because the error turned
     // out to be fatal.
-    commit_partial_response(turn_coordinator, conv, printer);
+    // The retry decision does feed the flush: an aborted response ends its
+    // reasoning region here, while a retry hands the region to the resent
+    // request.
+    let boundary = if retry_state.can_retry(&error) {
+        ResponseBoundary::Continuation
+    } else {
+        ResponseBoundary::Final
+    };
+    commit_partial_response(turn_coordinator, conv, printer, boundary);
 
-    if !retry_state.can_retry(&error) {
+    if boundary == ResponseBoundary::Final {
         // Clear the temp line before printing the final error so it doesn't
         // linger on screen.
         retry_state.clear_line(printer);
@@ -341,7 +366,7 @@ pub async fn handle_stream_error(
     // Reset the coordinator for the next streaming cycle. The committed partial
     // response becomes continuation context in the rebuilt Thread; the Provider
     // decides how to encode it for the target model.
-    turn_coordinator.prepare_continuation();
+    turn_coordinator.prepare_retry_continuation();
 
     // Notify the user.
     let attempt = retry_state.consecutive_failures;

@@ -654,32 +654,31 @@ impl ChatRenderer {
     }
 
     pub fn flush(&mut self) {
+        // Leaving the region ends any ephemeral chrome: the timer line and the
+        // content about to be committed share the terminal row.
+        self.cancel_reasoning_timer();
+        self.drain_buffer();
         // A plain flush leaves the current content region (a content-kind
         // transition, a role header, or end of stream), so the deferred
         // separator is emitted unshaded.
-        self.flush_region(false);
+        self.emit_pending_separator(false);
     }
 
-    /// Flush at a streaming-cycle boundary the same response continues across.
+    /// Commit buffered content at a streaming-cycle boundary the same response
+    /// continues across, leaving the deferred separator unresolved.
     ///
-    /// A stream error commits what was streamed and resends the request; the
-    /// continuation's output lands in the same region on screen, with nothing
-    /// persistent rendered in between.
-    /// A separator owed by reasoning therefore stays inside the region and
-    /// keeps its background, instead of closing the region with an unshaded gap
-    /// the continuation then reopens.
+    /// A stream error commits what was streamed and resends the request, with
+    /// nothing persistent rendered in between.
+    /// A separator owed by reasoning therefore stays pending and the
+    /// continuation's first content decides its shading, exactly as the next
+    /// block would inside one streaming cycle.
+    /// Pair with [`reset_preserving_region`], which carries the pending
+    /// separator across the reset the continuation performs.
+    ///
+    /// [`reset_preserving_region`]: Self::reset_preserving_region
     pub fn flush_for_continuation(&mut self) {
-        self.flush_region(self.last_content_kind == Some(ContentKind::Reasoning));
-    }
-
-    /// Commit buffered content and resolve the deferred separator with the
-    /// given shading.
-    fn flush_region(&mut self, shaded: bool) {
-        // Committing persistent content ends any ephemeral chrome: the timer
-        // line and the content about to be written share the terminal row.
         self.cancel_reasoning_timer();
         self.drain_buffer();
-        self.emit_pending_separator(shaded);
     }
 
     /// Drain the buffer's end-of-region events to the printer, committing
@@ -850,6 +849,24 @@ impl ChatRenderer {
         // captured by the event builder, so it is safe to discard.
         self.para_source.clear();
         self.para_emitted = 0;
+    }
+
+    /// Reset the renderer state, keeping the content region open.
+    ///
+    /// Used at a streaming-cycle boundary the same response continues across:
+    /// the deferred separator survives, along with the content kinds that
+    /// decide its shading, so the continuation's first content resolves the gap
+    /// the interrupted block owed.
+    pub fn reset_preserving_region(&mut self) {
+        let last_content_kind = self.last_content_kind;
+        let last_response_kind = self.last_response_kind;
+        let pending_separator = self.pending_separator;
+
+        self.reset();
+
+        self.last_content_kind = last_content_kind;
+        self.last_response_kind = last_response_kind;
+        self.pending_separator = pending_separator;
     }
 }
 
