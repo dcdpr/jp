@@ -344,7 +344,7 @@
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
-    "hash": "63795fd09a15895ff477f2a6210cdda7698f6cb7421534934b244749bf74e828",
+    "hash": "33c87af5d75b59ef2f8ed995ede4f62bcac538e4c7139257676f174ae19c1bbf",
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
