@@ -2106,8 +2106,14 @@ fn apply_directive_to_tool(
 
 /// Apply the CLI tool use configuration to the partial configuration.
 ///
-/// NOTE: This has to run *after* `apply_enable_tools` because it will return an
-/// error if the tool of choice is not enabled.
+/// `-u NAME` implies `-t NAME`: forcing a specific tool also selects it, so a
+/// tool that is off by default never has to be named twice.
+/// A tool whose `allow_toggle` policy forbids a named enable is still refused,
+/// with the lock-aware message from [`apply_directive_to_tool`].
+///
+/// NOTE: This has to run *after* `apply_enable_tools`, so that `-u NAME` wins
+/// over a `-T` in the same invocation.
+/// The two are contradictory and the more specific intent takes precedence.
 fn apply_tool_use(
     partial: &mut PartialAppConfig,
     tool_choice: Option<Option<&str>>,
@@ -2118,34 +2124,38 @@ fn apply_tool_use(
         return Ok(());
     }
 
-    let Some(tool) = tool_choice else {
+    let Some(choice) = tool_choice else {
         return Ok(());
     };
 
-    partial.assistant.tool_choice = match tool {
-        None | Some("true") => Some(ToolChoice::Required),
-        Some(v) => {
-            let defaults = partial
-                .conversation
-                .tools
-                .defaults
-                .enable
-                .clone()
-                .unwrap_or_default();
-            if !partial
-                .conversation
-                .tools
-                .tools
-                .iter()
-                .filter(|(_, cfg)| effective_enable(cfg.enable.as_ref(), &defaults).state)
-                .any(|(name, _)| name == v)
-            {
-                return Err(format!("tool choice '{v}' does not match any enabled tools").into());
-            }
-
-            Some(ToolChoice::Function(v.to_owned()))
-        }
+    let Some(name) = choice else {
+        partial.assistant.tool_choice = Some(ToolChoice::Required);
+        return Ok(());
     };
+
+    if name == "true" {
+        partial.assistant.tool_choice = Some(ToolChoice::Required);
+        return Ok(());
+    }
+
+    let defaults = partial
+        .conversation
+        .tools
+        .defaults
+        .enable
+        .clone()
+        .unwrap_or_default();
+
+    let Some(tool) = partial.conversation.tools.tools.get_mut(name) else {
+        return Err(format!("tool choice '{name}' does not match any known tools").into());
+    };
+
+    // A tool already in the desired state is a no-op, so a locked-*on* tool
+    // (e.g. a builtin) stays selectable. A locked-off one is refused with the
+    // lock-aware message.
+    apply_directive_to_tool(name, tool, &defaults, ToggleScope::Named, true)?;
+
+    partial.assistant.tool_choice = Some(ToolChoice::Function(name.to_owned()));
 
     Ok(())
 }
