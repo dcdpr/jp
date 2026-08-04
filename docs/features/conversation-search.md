@@ -187,8 +187,9 @@ jp c grep --id +pinned 'error' # every pinned conversation
 ```
 
 `.` (long form `active`) is the session's active conversation — the one `jp
-query` would continue and `jp c print` would show. `+l` (long form `+live`) is
-every live conversation, which is what you get without `--id`.
+query` would continue and `jp c print` would show.
+`+l` (long form `+live`) is every live conversation, which is what you get
+without `--id`.
 
 Run `jp c grep --help` for the full target grammar.
 
