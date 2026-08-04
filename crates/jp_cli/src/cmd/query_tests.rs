@@ -1369,6 +1369,58 @@ fn resolve_config_keeps_a_cleared_conversation_field_across_invocations() {
     assert_eq!(lock.events().config_deltas().count(), 1);
 }
 
+/// A built-in registered as locked-on must survive config resolution as an
+/// enabled tool.
+/// Before RFD 081 the enable predicate matched only one variant, so this
+/// resolved to disabled and the tool was silently dropped.
+#[test]
+fn test_describe_tools_is_enabled_in_resolved_config() {
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query::default(),
+        None,
+        AppConfig::new_test().to_partial(),
+        None,
+    )
+    .unwrap();
+
+    let cfg = build(partial).unwrap();
+    let tool = cfg
+        .conversation
+        .tools
+        .get("describe_tools")
+        .expect("builtin is present in the resolved config");
+
+    assert!(tool.is_enabled(), "describe_tools must be enabled");
+    assert!(matches!(tool.source(), ToolSource::Builtin { .. }));
+}
+
+/// The other half of the same guard: `tool_definitions` is the filter that
+/// dropped the tool, so assert it survives all the way to the list handed to
+/// the provider.
+/// A registered executor is unreachable if the definition never ships.
+#[tokio::test]
+async fn test_describe_tools_reaches_the_llm_tool_list() {
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query::default(),
+        None,
+        AppConfig::new_test().to_partial(),
+        None,
+    )
+    .unwrap();
+
+    let cfg = build(partial).unwrap();
+    let client = jp_mcp::Client::new(IndexMap::new());
+    let defs = jp_llm::tool::tool_definitions(cfg.conversation.tools.iter(), &client, None)
+        .await
+        .unwrap();
+
+    assert!(
+        defs.iter().any(|d| d.name == "describe_tools"),
+        "describe_tools must be sent to the provider, got: {:?}",
+        defs.iter().map(|d| &d.name).collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn query_model_override_is_persisted_as_config_delta() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
