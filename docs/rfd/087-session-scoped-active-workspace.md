@@ -357,16 +357,17 @@ single-letter aliases for the concepts that carry over:
 
 > [!WARNING]
 > **`.` is already taken in `ConversationTarget`.** It is the short form of
-> `active`: the session's active conversation. Mapping it to `cwd` here gives
-> one character two meanings that are *opposite* on the session axis — the
-> conversation target is "whatever my session picked", while `cwd` explicitly
-> **clears** the session selection. A user who learns one grammar will predict
-> the wrong behavior in the other, which is the failure the shared grammar
-> exists to prevent.
+> `active`: the session's active conversation.
+> Mapping it to `cwd` here gives one character two meanings that are *opposite*
+> on the session axis — the conversation target is "whatever my session
+> picked", while `cwd` explicitly **clears** the session selection.
+> A user who learns one grammar will predict the wrong behavior in the other,
+> which is the failure the shared grammar exists to prevent.
 >
 > Suggested resolution: drop the `.` alias here and keep `cwd` as the only
-> spelling. `cwd` is already unambiguous on its own, whereas the conversation
-> grammar has no alternative short form available (`a` is `archived`).
+> spelling.
+> `cwd` is already unambiguous on its own, whereas the conversation grammar has
+> no alternative short form available (`a` is `archived`).
 
 Keywords with no workspace meaning are intentionally omitted: `newest` / `n`
 (workspaces have no creation timeline), the `pinned` / `p` family (workspaces
