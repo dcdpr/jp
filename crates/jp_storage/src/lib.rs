@@ -259,7 +259,7 @@ impl Storage {
     /// root that holds it.
     ///
     /// A projected conversation lives in both roots, so each copy is archived;
-    /// archiving only the first found would leave the other copy active.
+    /// archiving only the first found would leave the other copy live.
     /// Creates each archive directory if needed.
     pub fn archive_conversation(&self, id: &ConversationId) -> Result<()> {
         let mut archived = false;
@@ -295,7 +295,7 @@ impl Storage {
         }
     }
 
-    /// Move a conversation directory out of `.archive/` back to the active
+    /// Move a conversation directory out of `.archive/` back to the live
     /// conversations directory in every root that holds the archived copy.
     pub fn unarchive_conversation(&self, id: &ConversationId) -> Result<()> {
         let prefix = id.to_dirname(None);
@@ -727,18 +727,18 @@ fn merge_sibling_user_dirs(user_root: &Utf8Path, id: &str, target: &Utf8Path) ->
 }
 
 /// Adopt every conversation under `src_root` into `dst_root`, covering both the
-/// active and archive partitions.
+/// live and archive partitions.
 ///
 /// With `move_src` the source directories are renamed into place; otherwise
 /// they are copied so the originals survive (used when importing workspace
 /// conversations, whose workspace copy must remain).
 fn adopt_conversations(src_root: &Utf8Path, dst_root: &Utf8Path, move_src: bool) -> Result<()> {
-    let src_active = src_root.join(CONVERSATIONS_DIR);
-    let dst_active = dst_root.join(CONVERSATIONS_DIR);
-    adopt_partition(&src_active, &dst_active, move_src)?;
+    let src_live = src_root.join(CONVERSATIONS_DIR);
+    let dst_live = dst_root.join(CONVERSATIONS_DIR);
+    adopt_partition(&src_live, &dst_live, move_src)?;
     adopt_partition(
-        &src_active.join(ARCHIVE_DIR),
-        &dst_active.join(ARCHIVE_DIR),
+        &src_live.join(ARCHIVE_DIR),
+        &dst_live.join(ARCHIVE_DIR),
         move_src,
     )?;
     Ok(())
