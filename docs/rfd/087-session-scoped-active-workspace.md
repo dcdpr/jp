@@ -350,7 +350,7 @@ single-letter aliases for the concepts that carry over:
 | `?`              | pick from all known workspaces                                                                                      |
 | `?s`, `?session` | pick from this session's workspace history                                                                          |
 | `s`, `session`   | the session's previously active workspace (like `cd -`)                                                             |
-| `l`, `latest`    | the live root with the newest `last_used` across the roots registry (global recency, distinct from `s` / `session`) |
+| `r`, `recent`    | the live root with the newest `last_used` across the roots registry (global recency, distinct from `s` / `session`) |
 | `cwd`, `.`       | the cwd-derived workspace; as a `use` target, clears the session selection                                          |
 | `-`              | read a workspace ID from stdin (for `jp -w` in non-interactive use)                                                 |
 | `help`           | print keyword help and exit                                                                                         |
@@ -516,7 +516,7 @@ active = `history[0]`); session identity, the `getsid` / `Hwnd` / `Env` source
 split, and the stale-cleanup rules are the same machinery; `jp w use` / `ls` /
 `show` mirror `jp c use` / `ls` / `show`; and the targeting grammar reuses
 `ConversationTarget`'s keywords and single-letter aliases for the concepts that
-carry over (`?`, `?s`, `s` / `session`, `l` / `latest`, `-`, `help`).
+carry over (`?`, `?s`, `s` / `session`, `r` / `recent`, `-`, `help`).
 
 Two things genuinely diverge, by necessity:
 
