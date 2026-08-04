@@ -665,6 +665,99 @@ fn test_tool_use_accepts_locked_on_builtin() {
 }
 
 #[test]
+fn test_tool_use_enables_a_disabled_tool() {
+    // `-u NAME` implies `-t NAME`: naming a tool for forced use also selects
+    // it, so `jp q -u explicitly_disabled_tool` does not need a second flag.
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("explicitly_disabled_tool".into())),
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    )
+    .unwrap();
+
+    assert!(effective(&partial, "explicitly_disabled_tool").state);
+    assert_eq!(
+        partial.assistant.tool_choice,
+        Some(ToolChoice::Function("explicitly_disabled_tool".into()))
+    );
+}
+
+#[test]
+fn test_tool_use_enables_an_if_named_tool() {
+    // `explicit_tool` is off with `allow_toggle = if_named`. A named directive
+    // is exactly what its policy accepts, so `-u` reaches it.
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("explicit_tool".into())),
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    )
+    .unwrap();
+
+    let enable = effective(&partial, "explicit_tool");
+    assert!(enable.state);
+    assert_eq!(
+        enable.allow_toggle,
+        AllowToggle::IfNamed,
+        "the toggle policy survives a forced enable"
+    );
+}
+
+#[test]
+fn test_tool_use_of_locked_off_tool_errors() {
+    // A locked-off tool cannot be forced: the refusal names the lock rather
+    // than claiming the tool does not exist.
+    let mut partial = make_partial_with_tools();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("network".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig::LOCKED_OFF),
+            ..Default::default()
+        });
+
+    let err = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("network".into())),
+            ..Default::default()
+        },
+        None,
+        partial,
+        None,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("network"), "unexpected error: {err}");
+    assert!(err.contains("locked-off"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_tool_use_of_unknown_tool_errors() {
+    let err = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("no_such_tool".into())),
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("no_such_tool"), "unexpected error: {err}");
+}
+
+#[test]
 fn query_model_override_is_persisted_as_config_delta() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(1000);
