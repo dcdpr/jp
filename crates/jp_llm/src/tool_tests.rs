@@ -809,6 +809,69 @@ async fn test_execute_local_exposes_invocation_ids_in_context() {
     }
 }
 
+/// A built-in that reports it ran, so dispatch can be observed.
+struct ReachedBuiltin;
+
+#[async_trait::async_trait]
+impl builtin::BuiltinTool for ReachedBuiltin {
+    async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> jp_tool::Outcome {
+        "reached".into()
+    }
+}
+
+/// A built-in tool may be keyed differently from the implementation it names:
+/// `source = "builtin.describe_tools"` under a `docs` key.
+/// Dispatch keys on the source's tool name, matching how the local and MCP
+/// paths treat theirs.
+#[tokio::test]
+async fn test_execute_builtin_dispatches_on_source_name() {
+    use jp_config::{
+        AppConfig, Config,
+        conversation::tool::{PartialToolConfig, ToolConfig},
+    };
+
+    let partial: PartialToolConfig = serde_json::from_value(json!({
+        "source": "builtin.describe_tools",
+    }))
+    .expect("valid partial tool config");
+    let tool = ToolConfig::from_partial(partial, vec![]).expect("resolved tool config");
+
+    let mut cfg = AppConfig::new_test();
+    cfg.conversation.tools.insert("docs".to_owned(), tool);
+    let config = cfg.conversation.tools.get("docs").expect("tool present");
+
+    let definition = ToolDefinition {
+        name: "docs".to_owned(),
+        docs: ToolDocs::default(),
+        parameters: IndexMap::new(),
+    };
+    let mcp_client = jp_mcp::Client::new(IndexMap::new());
+    let builtins = builtin::BuiltinExecutors::new().register("describe_tools", ReachedBuiltin);
+
+    let outcome = definition
+        .execute(
+            "call-1".to_owned(),
+            json!({}),
+            &IndexMap::new(),
+            &config,
+            &mcp_client,
+            Utf8Path::new("/tmp"),
+            CancellationToken::new(),
+            &builtins,
+            None,
+            &InvocationContext::default(),
+        )
+        .await
+        .expect("execution succeeds");
+
+    match outcome {
+        ExecutionOutcome::Completed {
+            result: Ok(out), ..
+        } => assert_eq!(out, "reached"),
+        other => panic!("expected completed success, got: {other:?}"),
+    }
+}
+
 /// Regression for RFD 081: `tool_definitions` keeps a *forced* tool that is
 /// merely disabled (`OFF`), but always drops a locked-off tool (`state =
 /// false`, `allow_toggle = never`) even when it is forced.
