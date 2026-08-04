@@ -186,7 +186,7 @@ fn is_archived_returns_false_for_non_archived_targets() {
 #[test]
 fn archived_keyword_errors_when_no_archived_conversations() {
     let (ws, _) = workspace_with_conversation();
-    // Active conversations exist, but none are archived.
+    // Live conversations exist, but none are archived.
     let result = ConversationTarget::Archived.resolve(&ws, None);
     assert!(result.is_err());
 }

@@ -484,7 +484,7 @@ impl Workspace {
     ///
     /// Derived from the cross-root index load (and a conversation's creation
     /// intent).
-    /// Returns `None` for conversations not present in the active index.
+    /// Returns `None` for conversations not present in the live index.
     #[must_use]
     pub fn conversation_presence(&self, id: &ConversationId) -> Option<StoragePresence> {
         self.state.presence.get(id).copied()
@@ -592,7 +592,7 @@ impl Workspace {
         let id = conv.id();
 
         // Stamp archived_at and flush to disk before the rename.
-        // If the rename fails, the conversation stays active with a stale
+        // If the rename fails, the conversation stays live with a stale
         // archived_at — a cosmetic issue, not data loss. Directory location
         // is the source of truth for archived state.
         conv.update_metadata(|m| m.archived_at = Some(chrono::Utc::now()));
@@ -614,7 +614,7 @@ impl Workspace {
 
     /// Restore a conversation from the archive.
     ///
-    /// Moves the conversation back to the active partition and inserts it into
+    /// Moves the conversation back to the live partition and inserts it into
     /// the in-memory index.
     /// Returns a handle for the restored conversation.
     pub fn unarchive_conversation(&mut self, id: &ConversationId) -> Result<ConversationHandle> {
