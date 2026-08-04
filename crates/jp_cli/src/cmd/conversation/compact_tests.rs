@@ -24,8 +24,11 @@ use super::{
     Bound, Compact, IntoPartialAppConfig as _, TimelineSegment, build_compaction_events,
     existing_segments, resolve_reset_index, segments_for_compactions, timeline_lines,
 };
-use crate::cmd::{conversation_id::ConversationIds as _, target::ConversationTarget};
-use crate::{Globals, ctx::Ctx};
+use crate::{
+    Globals,
+    cmd::{conversation_id::ConversationIds as _, target::ConversationTarget},
+    ctx::Ctx,
+};
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
 fn parse_compact(args: &[&str]) -> Compact {
