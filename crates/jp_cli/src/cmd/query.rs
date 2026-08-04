@@ -1525,15 +1525,9 @@ impl IntoPartialAppConfig for Query {
 
         apply_model(&mut partial, model.as_deref(), merged_config);
 
-        // Inject builtin tool configs before tool-enable processing.
-        for (name, config) in tool::builtins::all() {
-            partial
-                .conversation
-                .tools
-                .tools
-                .entry(name)
-                .or_insert(config);
-        }
+        // Must run before tool-enable processing, which reads the injected
+        // `enable` blocks.
+        inject_builtin_tools(&mut partial)?;
 
         apply_enable_tools(&mut partial, tool_directives, merged_config)?;
         apply_tool_use(
@@ -1765,6 +1759,35 @@ fn apply_directive_to_tool(
             "locked-off"
         };
         return Err(format!("cannot {verb} `{name}`: this tool is configured as {lock}").into());
+    }
+
+    Ok(())
+}
+
+/// Merge the built-in tool configs into the partial configuration.
+///
+/// The built-in block is the *lower*-priority side of each merge: a user who
+/// sets one field (`conversation.tools.describe_tools.result = "ask"`) keeps
+/// the built-in's `source`, `enable`, `style`, and parameter schema, rather
+/// than replacing the whole block with a one-field partial.
+///
+/// Merging in place preserves each tool's position in the map, which is the
+/// order tools are presented to the provider.
+fn inject_builtin_tools(partial: &mut PartialAppConfig) -> BoxedResult<()> {
+    for (name, defaults) in tool::builtins::all() {
+        let tools = &mut partial.conversation.tools.tools;
+        match tools.get_mut(&name) {
+            Some(user) => {
+                let mut merged = defaults;
+                merged
+                    .merge(&(), std::mem::take(user))
+                    .map_err(|error| error.to_full_string())?;
+                *user = merged;
+            }
+            None => {
+                tools.insert(name, defaults);
+            }
+        }
     }
 
     Ok(())

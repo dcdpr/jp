@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
-    conversation::tool::{AllowToggle, Enable, PartialEnableConfig, PartialToolConfig},
+    conversation::tool::{AllowToggle, Enable, PartialEnableConfig, PartialToolConfig, ResultMode},
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
     util::build,
 };
@@ -755,6 +755,67 @@ fn test_tool_use_of_unknown_tool_errors() {
     .to_string();
 
     assert!(err.contains("no_such_tool"), "unexpected error: {err}");
+}
+
+#[test]
+fn test_builtin_config_merges_under_user_config() {
+    // A user overriding one field of a builtin keeps the rest of the builtin's
+    // block. Before the merge-under fix, the one-field partial replaced the
+    // whole entry and the tool lost its `source`, `enable`, and parameters.
+    let mut partial = make_partial_with_tools();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            result: Some(ResultMode::Ask),
+            ..Default::default()
+        });
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
+
+    let tool = &partial.conversation.tools.tools["describe_tools"];
+    assert_eq!(tool.result, Some(ResultMode::Ask), "user field wins");
+    assert_eq!(
+        tool.source,
+        Some(ToolSource::Builtin { tool: None }),
+        "builtin source survives a partial user override"
+    );
+    assert!(
+        effective(&partial, "describe_tools").is_locked(),
+        "builtin enable policy survives a partial user override"
+    );
+    assert!(
+        tool.parameters.contains_key("tools"),
+        "builtin parameter schema survives a partial user override"
+    );
+}
+
+#[test]
+fn test_builtin_config_preserves_tool_order() {
+    // Tool order is the order tools are presented to the provider, so merging
+    // a builtin block must not move an existing entry to the end.
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.tools.tools = IndexMap::from_iter([
+        ("describe_tools".into(), PartialToolConfig {
+            result: Some(ResultMode::Ask),
+            ..Default::default()
+        }),
+        ("zzz_last".into(), PartialToolConfig::default()),
+    ]);
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
+
+    let names: Vec<&str> = partial
+        .conversation
+        .tools
+        .tools
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(names, vec!["describe_tools", "zzz_last"]);
 }
 
 #[test]
