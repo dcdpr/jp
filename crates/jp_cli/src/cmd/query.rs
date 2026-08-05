@@ -113,6 +113,7 @@ use super::{
     attachment::load_conversation_attachments,
     conversation_id::{ConversationIds, FlagIds},
     lock::LockOutcome,
+    target::TargetGrammar,
 };
 use crate::{
     Ctx, PATH_STRING_PREFIX,
@@ -1092,7 +1093,10 @@ impl Query {
             return self.create_new_conversation(ctx);
         }
 
-        let handle = handle.ok_or(Error::NoConversationTarget)?;
+        // `--new` is only worth suggesting when it wouldn't conflict with a
+        // flag already given; the same predicate gates the picker's offer.
+        let grammar = TargetGrammar::from_args(&self.target, self.allows_new_from_picker());
+        let handle = handle.ok_or_else(|| Error::from(grammar))?;
 
         // Handle --fork: fork the conversation before locking.
         if let Some(fork_turns) = &self.fork {

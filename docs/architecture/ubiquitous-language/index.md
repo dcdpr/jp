@@ -55,7 +55,7 @@ In disagreements between code and this document, the code is authoritative.
 ## Clusters
 
 - [**Conversation**] — `Conversation`, `Turn`, `Event`, `Tool Call`, `Inquiry`,
-  `Thread`.
+  `Thread`, `Active Conversation`, `Live Conversation`, `Archived Conversation`.
   The user-facing notion of "talking to the assistant" and the event log that
   backs it.
 
@@ -67,8 +67,14 @@ Configuration*, *LLM*, *Attachments*, *Tools & Plugins*, *Process*.
 A quick lookup for any defined term.
 Each entry links to the cluster where it lives.
 
+- **Active Conversation** → [Conversation › Active Conversation]
+- **Archived Conversation** → [Conversation › Archived Conversation]
+- **Live Conversation** → [Conversation › Live Conversation]
 - **Turn** → [Conversation › Turn]
 
 [**Conversation**]: ./conversation.md
+[Conversation › Active Conversation]: ./conversation.md#active-conversation
+[Conversation › Archived Conversation]: ./conversation.md#archived-conversation
+[Conversation › Live Conversation]: ./conversation.md#live-conversation
 [Conversation › Turn]: ./conversation.md#turn
 [legacy single-page glossary]: ../ubiquitous-language.md

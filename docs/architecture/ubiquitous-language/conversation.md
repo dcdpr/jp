@@ -2,10 +2,13 @@
 
 The Conversation cluster covers JP's central abstraction: the persistent record
 of "talking to the assistant" and the event log that backs it.
-Six terms work together here — a **Conversation** is the stored entity, a
+Six terms describe its structure — a **Conversation** is the stored entity, a
 **Turn** is one slice of it, an **Event** is the atomic unit inside a Turn,
 **Tool Calls** and **Inquiries** are specific event kinds, and a **Thread** is
 the projection of a Conversation that gets sent to an LLM provider.
+
+Three more name a Conversation's *state*: **Live** and **Archived** are where it
+sits, and **Active** is the one a session is working on.
 
 These terms are tightly coupled — paraphrasing one usually breaks the model for
 another.
@@ -60,8 +63,8 @@ conversation in either location.
 current session is working on, which is one particular live conversation).
 
 **Avoid.** *Non-archived*, *unarchived*, *indexed*.
-The first two define the term by negation, which stops working as more
-locations appear; the third names a storage strategy rather than a state.
+The first two define the term by negation, which stops working as more locations
+appear; the third names a storage strategy rather than a state.
 
 ### Archived Conversation
 

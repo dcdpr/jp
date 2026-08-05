@@ -7,7 +7,10 @@ use crate::{
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::{ConversationIds as _, PositionalIds},
-        target::{ConversationTarget, PickerFilter, resolve_archived_picker, resolve_picker},
+        target::{
+            ConversationTarget, PickerFilter, TargetGrammar, resolve_archived_picker,
+            resolve_picker,
+        },
         time::CreationRange,
     },
     ctx::Ctx,
@@ -236,10 +239,11 @@ impl Use {
             let mut filter = sub_filter;
             filter.archived = archived_partition;
             filter.candidate_ids = Some(final_ids);
+            let grammar = TargetGrammar::from_args(&self.target, false);
             if archived_partition {
-                resolve_archived_picker(&ctx.workspace, &filter)?
+                resolve_archived_picker(&ctx.workspace, &filter, grammar)?
             } else {
-                resolve_picker(&ctx.workspace, session, &filter)?
+                resolve_picker(&ctx.workspace, session, &filter, grammar)?
             }
         };
 
