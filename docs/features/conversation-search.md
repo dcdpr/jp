@@ -262,9 +262,55 @@ A title hit reports `"turn": null`.
 | `--limit N`       | conversations shown, in sort order |
 | `--max-matches N` | matching lines per conversation    |
 
-Long lines are truncated to the output width: the terminal's when stdout is a
+Long lines are cut to the output width: the terminal's when stdout is a
 terminal, unlimited when piped.
 The global `--width` sets it explicitly.
+
+## Long lines
+
+A line wider than the output is shown through a window onto it, marked with `…`
+at each end the window cut.
+The window sits at the start of the line while the match fits there, and slides
+right when it doesn't, so a match far down a long line is always visible:
+
+```
+jp-c17834351370  Model Aliases with Parameters   1 match · 12 turns
+
+ 10:assistant:…wrapper, not of the merge system. The envelope conve…
+```
+
+The window keeps a few columns of what follows the match in view, opens between
+words rather than mid-word where a boundary is close enough, and shows the first
+match when a line has several.
+A match too wide for the window is shown from its start rather than its end.
+
+A trailing `…` is highlighted along with the match when the match itself runs
+past the window, and left plain when only the rest of the line does — so you
+can tell how much of the hit is off-screen.
+
+`--wrap` shows the whole line instead, broken across as many rows as it needs.
+Continuation rows leave the coordinate blank and line up under the text above
+them:
+
+```
+jp-c17834351370  Model Aliases with Parameters   1 match · 12 turns
+
+ 10:assistant:Nothing structural prevents it. The map-level
+             limitation is a property of the *existing*
+             `MergeableMap` wrapper, not of the merge system.
+```
+
+Wrapping happens at the output width, so pair it with `--width` to pick a
+column:
+
+```sh
+jp c grep --width=72 --wrap 'MergeableMap'
+```
+
+A pipe reports no width, so `--wrap` needs `--width` there or it does nothing.
+It is rejected alongside `--no-heading`: every line that mode emits is an
+`ID:TURN:SCOPE:KIND:TEXT` record, and a continuation row has no coordinate to
+carry.
 
 ## Scripting
 

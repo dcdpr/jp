@@ -648,11 +648,373 @@ fn a_terminal_fits_lines_to_its_width() {
     assert_eq!(display_width(&rendered[1]), 80);
 }
 
+// --- windowing --------------------------------------------------------------
+
+#[test]
+fn a_window_stays_at_the_start_of_the_line_while_the_match_fits_there() {
+    // Nothing to slide toward. This is the shape of every hit whose match sits
+    // near the start of a long line, so it has to stay a plain right-hand cut.
+    let text = format!("needle {}", "z".repeat(60));
+    let row = window_row(&text, std::slice::from_ref(&(0..6)), 20);
+
+    assert_eq!(row.text, "needle zzzzzzzzzzzz…");
+    assert_eq!(row.origin, 0);
+}
+
+#[test]
+fn a_window_slides_right_to_bring_a_far_match_into_view() {
+    // The match sits at column 61 with a 20-column budget, so a line cut at the
+    // right would show none of it. The window opens at the word boundary seven
+    // columns ahead of where the budget alone would have put it.
+    let text = format!("{} needle tail", "z".repeat(60));
+    let row = window_row(&text, std::slice::from_ref(&(61..67)), 20);
+
+    assert_eq!(row.text, "…needle tail");
+    assert_eq!(row.origin, 61);
+}
+
+#[test]
+fn a_slid_window_keeps_context_after_the_match() {
+    // A window ending at the match would leave it flush against the right
+    // margin with nothing after it to read.
+    let text = format!("{} needle {}", "z".repeat(60), "y".repeat(60));
+    let row = window_row(&text, std::slice::from_ref(&(61..67)), 20);
+
+    assert_eq!(row.text, "…needle yyyyyyyyyyy…");
+    assert_eq!(row.origin, 61);
+}
+
+#[test]
+fn trailing_context_never_pushes_the_match_out_of_the_window() {
+    // The whole point of sliding is to make the match visible, so the trailing
+    // context has to yield to it. A fixed trailing context wider than what the
+    // match leaves over would show only the match's last few characters.
+    let text = format!("{} needle {}", "z".repeat(60), "y".repeat(60));
+
+    for budget in 12..40 {
+        let row = window_row(&text, std::slice::from_ref(&(61..67)), budget);
+        let visible = &row.text[row.kept.clone()];
+        assert!(
+            visible.contains("needle"),
+            "budget {budget} hid the match: {:?}",
+            row.text
+        );
+    }
+}
+
+#[test]
+fn a_window_shows_the_head_of_a_match_wider_than_the_budget() {
+    // The match can't be contained, so the window is anchored to its start:
+    // reading a match from the beginning beats reading its tail.
+    let text = format!("{}{}", "z".repeat(60), "m".repeat(40));
+    let row = window_row(&text, std::slice::from_ref(&(60..100)), 20);
+
+    assert_eq!(row.text, "…mmmmmmmmmmmmmmmmmm…");
+    assert_eq!(row.origin, 60);
+}
+
+#[test]
+fn a_window_marks_only_the_ends_it_cut() {
+    // A match at the start of the line and wider than the budget leaves nothing
+    // to cut on the left, so no marker is owed there even though the match
+    // reaches past the window.
+    // Nineteen columns rather than the full twenty: the reserve is taken before
+    // the left edge is known, and a window that turns out to reach the start of
+    // the line has already paid for a marker it doesn't print.
+    let text = "m".repeat(100);
+    let row = window_row(&text, std::slice::from_ref(&(0..100)), 20);
+
+    assert_eq!(row.text, format!("{}…", "m".repeat(18)));
+    assert_eq!(row.origin, 0);
+}
+
+#[test]
+fn a_slid_window_opens_on_a_word_boundary() {
+    // A leading fragment of a word ("...tence") reads as noise. The window gives
+    // up those columns to open on the word after it.
+    let text = "alpha beta gamma delta epsilon zeta needle eta theta";
+    let row = window_row(text, std::slice::from_ref(&(36..42)), 24);
+
+    assert_eq!(row.text, "…zeta needle eta theta");
+    assert_eq!(&text[row.origin..], "zeta needle eta theta");
+}
+
+#[test]
+fn a_slid_window_keeps_a_ragged_edge_rather_than_crossing_a_long_token() {
+    // The nearest boundary is 53 columns away, so snapping would spend most of
+    // the window on the search. A fragment of a long token still tells the
+    // reader something, so the window keeps it.
+    let text = format!("{} needle tail", "z".repeat(60));
+    let row = window_row(&text, std::slice::from_ref(&(61..67)), 31);
+
+    assert_eq!(row.text, "…zzzzzzzzzzzzzzzzzz needle tail");
+    assert_eq!(row.origin, 42);
+}
+
+#[test]
+fn snapping_never_advances_past_the_start_of_the_match() {
+    // Snapping trades leading context for a clean edge, and the match is not
+    // leading context.
+    let text = "alpha beta gamma delta epsilon zeta needle eta theta";
+
+    for budget in 12..40 {
+        let row = window_row(text, std::slice::from_ref(&(36..42)), budget);
+        assert!(
+            row.origin <= 36,
+            "budget {budget} opened past the match at {}",
+            row.origin
+        );
+    }
+}
+
+#[test]
+fn a_context_line_is_cut_at_the_right() {
+    // No spans, so there is nothing to keep in view and no reason to drop the
+    // start of the line.
+    let text = "z".repeat(60);
+    let row = window_row(&text, &[], 20);
+
+    assert_eq!(row.text, format!("{}…", "z".repeat(19)));
+    assert_eq!(row.origin, 0);
+}
+
+#[test]
+fn a_window_leaves_a_line_that_fits_untouched() {
+    let row = window_row("short line", std::slice::from_ref(&(6..10)), 20);
+
+    assert_eq!(row.text, "short line");
+    assert_eq!(row.origin, 0);
+    assert_eq!(row.kept, 0..10);
+}
+
+#[test]
+fn a_slid_window_fits_the_budget() {
+    // Both markers are counted against the budget, and the reserve differs
+    // depending on whether the window reaches the end of the line.
+    let text = format!("{} needle {}", "z".repeat(60), "y".repeat(60));
+
+    for budget in 12..40 {
+        for span in [0..6, 61..67, 100..106] {
+            let row = window_row(&text, std::slice::from_ref(&span), budget);
+            assert!(
+                display_width(&row.text) <= budget,
+                "budget {budget} span {span:?}: {:?} is {} columns",
+                row.text,
+                display_width(&row.text)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_terminal_slides_the_window_to_the_match() {
+    // The end-to-end shape of the fix: a match past the right margin arrives
+    // visible and highlighted rather than cut away.
+    let id = make_id(3350);
+    let line = format!("{} needle tail", "z".repeat(60));
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from(line.as_str()),
+                ts(),
+            )]),
+        )],
+        40,
+    );
+
+    let rendered = run(grep("needle"), &mut ctx, &out);
+    assert_eq!(rendered, [
+        format!("{id}  (no title)   1 match · 1 turn"),
+        "  1:user:…zzzzzzzzzzzzzzzzzz needle tail".to_owned(),
+    ]);
+    assert_eq!(display_width(&rendered[1]), 40);
+}
+
+#[test]
+fn a_match_too_wide_for_the_window_is_shown_from_its_start_and_fully_styled() {
+    // Searching for a whole sentence: none of it fits, so the window opens where
+    // the sentence does and every column from there on is the match, trailing
+    // marker included. Only the leading marker is bare, and it has to be: the
+    // window opens exactly where the match does, so nothing was cut there.
+    let id = make_id(3355);
+    let line = "prefix text: the map-level limitation is a property of the existing wrapper";
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(ChatRequest::from(line), ts())]),
+        )],
+        40,
+    );
+
+    let grep = grep("the map-level limitation is a property of the existing wrapper");
+    run(grep, &mut ctx, &out);
+
+    let raw = out.lock().clone();
+    let rows: Vec<&str> = raw.trim_end().lines().collect();
+    assert_eq!(
+        rows[1],
+        format!(
+            "  {}:{}:…{}",
+            "1".green(),
+            "user".dim(),
+            "the map-level limitation is a…".red().bold()
+        )
+    );
+    assert_eq!(display_width(rows[1]), 40);
+}
+
+// --- wrapping ---------------------------------------------------------------
+
+#[test]
+fn wrap_continues_a_long_line_under_its_coordinate() {
+    // The coordinate marks the start of a hit, so a continuation row leaves it
+    // blank and lines up with the text above it.
+    let id = make_id(3360);
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from(
+                    "the needle is here and the rest of this line keeps going for a while yet",
+                ),
+                ts(),
+            )]),
+        )],
+        40,
+    );
+
+    let grep = Grep {
+        wrap: true,
+        ..grep("needle")
+    };
+    assert_eq!(run(grep, &mut ctx, &out), [
+        format!("{id}  (no title)   1 match · 1 turn"),
+        "  1:user:the needle is here and the rest".to_owned(),
+        "         of this line keeps going for a".to_owned(),
+        "         while yet".to_owned(),
+    ]);
+}
+
+#[test]
+fn wrap_highlights_a_match_on_a_continuation_row() {
+    // Spans index the whole line, so a match past the first row only lands in
+    // the right place once the row's origin is subtracted from it. Unshifted,
+    // the span points past the end of the row and is dropped unstyled.
+    let id = make_id(3370);
+    let line = "alpha beta gamma delta epsilon zeta needle eta";
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(ChatRequest::from(line), ts())]),
+        )],
+        40,
+    );
+
+    let grep = Grep {
+        wrap: true,
+        ..grep("needle")
+    };
+    run(grep, &mut ctx, &out);
+
+    // Row 0 is the heading and row 1 is the first row of the hit, which the
+    // match does not reach.
+    let raw = out.lock().clone();
+    let rows: Vec<&str> = raw.trim_end().lines().collect();
+
+    assert_eq!(
+        strip_str(rows[1]),
+        "  1:user:alpha beta gamma delta epsilon"
+    );
+    assert_eq!(
+        rows[2],
+        format!("         zeta {} eta", "needle".red().bold())
+    );
+}
+
+#[test]
+fn wrap_keeps_a_line_that_already_fits_on_one_row() {
+    let id = make_id(3380);
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from("a needle"),
+                ts(),
+            )]),
+        )],
+        40,
+    );
+
+    let grep = Grep {
+        wrap: true,
+        ..grep("needle")
+    };
+    assert_eq!(run(grep, &mut ctx, &out), [
+        format!("{id}  (no title)   1 match · 1 turn"),
+        "  1:user:a needle".to_owned(),
+    ]);
+}
+
+#[test]
+fn wrap_does_nothing_without_a_known_output_width() {
+    // Nothing to wrap at, and a pipe expects the text whole. `--heading` forces
+    // the grouped shape so that only the wrapping is under test.
+    let id = make_id(3390);
+    let text = format!("needle {}", "z".repeat(200));
+    let (mut ctx, out) = setup(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatRequest::from(text.as_str()),
+            ts(),
+        )]),
+    )]);
+
+    let grep = Grep {
+        wrap: true,
+        heading: true,
+        ..grep("needle")
+    };
+    assert_eq!(run(grep, &mut ctx, &out), [
+        format!("{id}  (no title)  1 match · 1 turn"),
+        format!("  1:user:{text}"),
+    ]);
+}
+
+#[test]
+fn wrap_rows_all_fit_the_available_columns() {
+    let id = make_id(3395);
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from(
+                    "the needle is here and the rest of this line keeps going for a while yet",
+                ),
+                ts(),
+            )]),
+        )],
+        40,
+    );
+
+    let grep = Grep {
+        wrap: true,
+        ..grep("needle")
+    };
+    for row in run(grep, &mut ctx, &out) {
+        assert!(
+            display_width(&row) <= 40,
+            "{row:?} is {} columns",
+            display_width(&row)
+        );
+    }
+}
+
 // --- match highlighting -----------------------------------------------------
 
 #[test]
 fn highlight_styles_only_the_matched_span() {
-    let styled = highlight("a needle here", std::slice::from_ref(&(2..8)), None);
+    let styled = highlight(&Row::whole("a needle here"), std::slice::from_ref(&(2..8)));
     assert_eq!(strip_str(&styled), "a needle here");
     assert!(
         styled.starts_with("a "),
@@ -669,44 +1031,78 @@ fn highlight_styles_only_the_matched_span() {
 fn highlight_drops_spans_past_a_truncated_line() {
     // Spans are found against the full line; after truncation the ones beyond
     // the cut have nothing to point at.
-    let styled = highlight("abc", &[0..1, 10..12], None);
+    let styled = highlight(&Row::whole("abc"), &[0..1, 10..12]);
     assert_eq!(styled, format!("{}bc", "a".red().bold()));
 }
 
 #[test]
 fn highlight_clips_a_span_straddling_the_end() {
-    let styled = highlight("abc", std::slice::from_ref(&(1..9)), None);
+    let styled = highlight(&Row::whole("abc"), std::slice::from_ref(&(1..9)));
     assert_eq!(strip_str(&styled), "abc");
 }
 
 #[test]
-fn highlight_never_styles_the_truncation_ellipsis() {
-    // `spans` index the original line, but the string handed to `highlight` is a
-    // prefix of it plus `…`. Clipping to the string's length would treat the
-    // ellipsis bytes as match text; `kept` bounds it to the surviving prefix.
-    //
-    // "abc…" is 3 + 3 bytes, so the ellipsis occupies 3..6 and `kept` is 3.
-    let ellipsis_start = 3;
+fn highlight_carries_a_cut_match_onto_the_trailing_marker() {
+    // A styled marker says "the match continues", a bare one says "the line
+    // continues". The reader can tell how much of the hit is off-screen.
+    let row = Row::windowed("abcdef", 0..3, false, true);
+    assert_eq!(row.text, "abc…");
 
-    // A match straddling the cut keeps the visible part styled and leaves the
-    // ellipsis bare.
-    let styled = highlight("abc…", std::slice::from_ref(&(0..5)), Some(ellipsis_start));
-    assert_eq!(styled, format!("{}…", "abc".red().bold()));
+    // A match running past the cut takes the marker into its styled run.
+    let styled = highlight(&row, std::slice::from_ref(&(0..5)));
+    assert_eq!(styled, "abc…".red().bold().to_string());
 
-    // A match whose clipped end would land *inside* the ellipsis keeps its
-    // highlight. Clipping to the string length put `end` at a non-boundary, so
-    // the span was skipped whole and a partly-visible match lost its styling.
-    let styled = highlight("abc…", std::slice::from_ref(&(2..4)), Some(ellipsis_start));
-    assert_eq!(styled, format!("ab{}…", "c".red().bold()));
+    // Partly visible, so only the visible part and the marker are styled.
+    let styled = highlight(&row, std::slice::from_ref(&(2..4)));
+    assert_eq!(styled, format!("ab{}", "c…".red().bold()));
 
-    // A match starting at the cut is entirely invisible, so nothing is styled.
-    let styled = highlight("abc…", std::slice::from_ref(&(3..6)), Some(ellipsis_start));
+    // A match starting at the cut is entirely invisible, so the marker stays
+    // bare: there is no visible match for it to continue.
+    let styled = highlight(&row, std::slice::from_ref(&(3..6)));
     assert_eq!(styled, "abc…");
 }
 
 #[test]
+fn highlight_leaves_the_marker_bare_when_the_match_ends_inside_the_window() {
+    // The marker means the *line* continues here, not the match, so styling it
+    // would overstate how much was cut.
+    let row = Row::windowed("abcdef", 0..3, false, true);
+
+    let styled = highlight(&row, std::slice::from_ref(&(0..2)));
+    assert_eq!(styled, format!("{}c…", "ab".red().bold()));
+
+    // A match ending exactly at the cut is fully shown, so the marker is still
+    // only about the line.
+    let styled = highlight(&row, std::slice::from_ref(&(0..3)));
+    assert_eq!(styled, format!("{}…", "abc".red().bold()));
+}
+
+#[test]
+fn highlight_shifts_spans_onto_a_slid_window() {
+    // The window starts part-way into the text, so a span has to be translated
+    // by the row's origin before it can be clipped. Without the shift the
+    // styling lands on whatever text happens to sit at that raw offset.
+    let row = Row::windowed("the needle is here", 4..18, true, false);
+    assert_eq!(row.text, "…needle is here");
+
+    let styled = highlight(&row, std::slice::from_ref(&(4..10)));
+    assert_eq!(styled, format!("…{} is here", "needle".red().bold()));
+}
+
+#[test]
+fn highlight_never_styles_a_leading_ellipsis() {
+    // A span reaching back past the window start is dropped rather than
+    // wrapping around onto the marker.
+    let row = Row::windowed("the needle is here", 11..18, true, false);
+    assert_eq!(row.text, "…is here");
+
+    let styled = highlight(&row, std::slice::from_ref(&(4..10)));
+    assert_eq!(styled, "…is here");
+}
+
+#[test]
 fn highlight_leaves_multibyte_text_intact() {
-    let styled = highlight("héllo wörld", std::slice::from_ref(&(0..6)), None);
+    let styled = highlight(&Row::whole("héllo wörld"), std::slice::from_ref(&(0..6)));
     assert_eq!(strip_str(&styled), "héllo wörld");
 }
 
@@ -1972,6 +2368,23 @@ fn output_is_a_single_choice_rather_than_competing_flags() {
         OutputKind::Text
     );
     assert!(parse(&["x", "--output", "bogus"]).is_err());
+}
+
+#[test]
+fn wrap_and_no_heading_are_mutually_exclusive() {
+    // Every line mode emits is an `ID:TURN:SCOPE:KIND:TEXT` record, and a
+    // continuation row has no coordinate to carry.
+    assert!(parse(&["x", "--wrap"]).is_ok());
+    assert!(parse(&["x", "--wrap", "--heading"]).is_ok());
+    assert!(parse(&["x", "--wrap", "--no-heading"]).is_err());
+}
+
+#[test]
+fn wrap_takes_no_value() {
+    // The pattern is positional, so a value-taking `--wrap` would swallow it.
+    assert!(parse(&["--wrap", "x"]).is_ok());
+    assert_eq!(parse(&["--wrap", "x"]).unwrap().pattern, ["x"]);
+    assert!(parse(&["x", "--wrap=60"]).is_err());
 }
 
 #[test]
