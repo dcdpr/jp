@@ -248,9 +248,9 @@ fn reset_takes_an_optional_compaction_index() {
     // The index requires `=`, so a bare `--reset` followed by a conversation
     // target still targets the conversation instead of swallowing it as the
     // index.
-    let compact = parse_compact(&["--reset", "latest"]);
+    let compact = parse_compact(&["--reset", "recent"]);
     assert_eq!(compact.reset, Some(None));
-    assert_eq!(compact.target.ids(), [ConversationTarget::Latest]);
+    assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
 
     // Indices are 1-based, so `0` names nothing.
     assert!(TestCli::try_parse_from(["compact", "--reset=0"]).is_err());
