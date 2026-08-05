@@ -178,7 +178,8 @@ jp c grep --scope user,assistant 'retry'
 Searching `title` alone never reads the event streams, so it stays fast across a
 large workspace.
 
-Every conversation in the workspace is searched unless `--id` narrows it:
+Every live conversation — everything outside the archive — is searched unless
+`--id` narrows it:
 
 ```sh
 jp c grep -i. 'error'          # the conversation you're in

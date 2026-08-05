@@ -10,6 +10,7 @@ use jp_workspace::{
 };
 
 use super::*;
+use crate::cmd::conversation_id::PositionalIds;
 
 fn workspace_with_conversation() -> (Workspace, ConversationId) {
     let mut ws = Workspace::in_memory(Utf8PathBuf::new());
@@ -316,6 +317,41 @@ fn all_live_resolves_to_every_live_conversation() {
 fn all_live_empty_workspace_errors() {
     let ws = Workspace::in_memory(Utf8PathBuf::new());
     assert!(ConversationTarget::AllLive.resolve(&ws, None).is_err());
+}
+
+/// The grammar comes off the argument type rather than being restated, so it
+/// can't drift from what the command actually accepts.
+#[test]
+fn grammar_is_read_from_the_target_argument() {
+    let multi_session = PositionalIds::<true, true>::from_targets(vec![]);
+    let grammar = TargetGrammar::from_args(&multi_session, false);
+    assert!(grammar.session);
+    assert!(grammar.multi);
+    assert!(!grammar.allow_new);
+
+    let single = PositionalIds::<false, false>::from_targets(vec![]);
+    let grammar = TargetGrammar::from_args(&single, true);
+    assert!(!grammar.session);
+    assert!(!grammar.multi);
+    assert!(grammar.allow_new);
+}
+
+#[test]
+fn grammar_converts_to_a_no_target_error() {
+    let grammar = TargetGrammar {
+        session: false,
+        multi: true,
+        allow_new: true,
+    };
+
+    assert!(matches!(
+        Error::from(grammar),
+        Error::NoConversationTarget {
+            session: false,
+            multi: true,
+            allow_new: true
+        }
+    ));
 }
 
 // --- Picker label formatting ------------------------------------------------

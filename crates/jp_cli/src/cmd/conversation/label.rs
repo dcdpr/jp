@@ -18,6 +18,7 @@ use crate::{
         conversation_id::FlagIds,
         label::{self, Change, LabelChange, LabelOperand, resolve::Resolver},
         lock::{LockOutcome, LockRequest, acquire_lock},
+        target::TargetGrammar,
     },
     ctx::Ctx,
     error::Error,
@@ -106,14 +107,16 @@ impl Label {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        let grammar = TargetGrammar::from_args(&self.target, false);
+
         // A bare `jp c label` lists, which is the only read-only verb and the
         // only one that accepts several conversations.
         let Some(command) = self.command else {
-            return list(ctx, &handles);
+            return list(ctx, &handles, grammar);
         };
 
         if let Commands::Ls = command {
-            return list(ctx, &handles);
+            return list(ctx, &handles, grammar);
         }
 
         // An alias names a rule to resolve into a value, so it makes sense
@@ -150,7 +153,7 @@ impl Label {
         }
 
         if handles.is_empty() {
-            return Err(Error::NoConversationTarget.into());
+            return Err(Error::from(grammar).into());
         }
 
         // Past a handful of targets, one line each is noise for a reader.
@@ -419,9 +422,9 @@ fn conversation_target(id: ConversationId, title: Option<&str>) -> String {
 ///
 /// The lines are the data, so they go to stdout with nothing around them: a
 /// reader needs no context from the lines before or after.
-fn list(ctx: &Ctx, handles: &[ConversationHandle]) -> Output {
+fn list(ctx: &Ctx, handles: &[ConversationHandle], grammar: TargetGrammar) -> Output {
     if handles.is_empty() {
-        return Err(Error::NoConversationTarget.into());
+        return Err(Error::from(grammar).into());
     }
 
     // Which conversation a label belongs to is only in question when several
