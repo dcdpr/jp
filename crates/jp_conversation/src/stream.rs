@@ -210,16 +210,29 @@ impl From<PartialAppConfig> for ConfigDelta {
     }
 }
 
+/// Extract the stored config subtree from a `config_delta` event.
+///
+/// Two on-disk shapes exist.
+/// Newer streams nest the config under a `delta` key; older ones carry the
+/// config fields as siblings of `type` and `timestamp`.
+fn config_delta_subtree(value: &Value) -> Value {
+    if let Some(delta) = value.get("delta") {
+        return delta.clone();
+    }
+
+    let mut obj = value.as_object().cloned().unwrap_or_default();
+    obj.remove("type");
+    obj.remove("timestamp");
+    Value::Object(obj)
+}
+
 /// Deserialize a [`ConfigDelta`] from a raw JSON value, tolerating schema
 /// changes.
 ///
-/// Delegates to [`deserialize_partial_config`] for the `delta` subtree and
+/// Delegates to [`deserialize_partial_config`] for the config subtree and
 /// extracts the timestamp separately.
 pub(crate) fn deserialize_config_delta(value: &Value) -> ConfigDelta {
-    let delta = value
-        .get("delta")
-        .cloned()
-        .map_or_else(PartialAppConfig::empty, deserialize_partial_config);
+    let delta = deserialize_partial_config(config_delta_subtree(value));
 
     let timestamp = value
         .get("timestamp")
@@ -1673,9 +1686,15 @@ impl ConversationStream {
     /// Used by the storage layer's backward-compatibility migration path.
     /// If the first element is not a `ConfigDelta`, returns `None`.
     ///
+    /// The returned stream has `created_at` set to [`Utc::now()`].
+    /// The caller should chain [`.with_created_at()`] to set the correct
+    /// creation time from the conversation ID.
+    ///
     /// # Errors
     ///
     /// Returns an error if event deserialization or config conversion fails.
+    ///
+    /// [`.with_created_at()`]: Self::with_created_at
     pub fn from_legacy_events(events: Vec<Value>) -> Result<Option<Self>, StreamError> {
         if events.is_empty() {
             return Ok(None);
@@ -1691,25 +1710,13 @@ impl ConversationStream {
             return Ok(None);
         }
 
-        // Extract timestamp from the first element.
-        let created_at = events[0]
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .and_then(|s| crate::parse_dt(s).ok())
-            .unwrap_or_else(Utc::now);
-
-        // Extract the delta subtree as the base config value.
-        let base_config = events[0]
-            .get("delta")
-            .cloned()
-            .unwrap_or(Value::Object(Map::default()));
+        // Extract the config subtree as the base config value.
+        let base_config = config_delta_subtree(&events[0]);
 
         // Remaining elements are events. from_parts handles compat stripping.
         let events = events.into_iter().skip(1).collect();
-        let mut stream = Self::from_parts(base_config, events)?;
-        stream.created_at = created_at;
 
-        Ok(Some(stream))
+        Ok(Some(Self::from_parts(base_config, events)?))
     }
 }
 

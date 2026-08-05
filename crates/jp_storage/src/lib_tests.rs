@@ -870,6 +870,50 @@ fn stream_loads_from_newer_root() {
     );
 }
 
+/// Write a legacy-format conversation stream: no `base_config.json`, with the
+/// base config packed inline into the first `events.json` element.
+///
+/// The oldest serializer emitted no `timestamp` on that element, so this omits
+/// it deliberately.
+fn write_legacy_stream_without_timestamp(conv_dir: &Utf8Path) {
+    let (base_config, events) = ConversationStream::new_test().to_parts().unwrap();
+
+    let mut first = base_config
+        .as_object()
+        .expect("base config serializes to an object")
+        .clone();
+    first.insert("type".to_owned(), serde_json::json!("config_delta"));
+
+    let mut legacy = vec![serde_json::Value::Object(first)];
+    legacy.extend(events);
+
+    fs::write(
+        conv_dir.join(EVENTS_FILE),
+        serde_json::to_string(&legacy).unwrap(),
+    )
+    .unwrap();
+}
+
+// A legacy stream carries no reliable creation time of its own, so the loader
+// derives it from the conversation ID. `openai.rs` builds `prompt_cache_key`
+// from this value, so a per-load timestamp would silently miss the prompt
+// cache on every request.
+#[test]
+fn legacy_stream_created_at_comes_from_conversation_id() {
+    let tmp = tempdir().unwrap();
+    let (storage, workspace, _user_dir) = dual_root_storage(tmp.path());
+
+    let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
+    let ws_conv = workspace.join(CONVERSATIONS_DIR).join(id.to_dirname(None));
+    fs::create_dir_all(&ws_conv).unwrap();
+
+    write_meta(&ws_conv, None, 1_000);
+    write_legacy_stream_without_timestamp(&ws_conv);
+
+    let stream = storage.load_conversation_stream(&id).unwrap();
+    assert_eq!(stream.created_at, id.timestamp());
+}
+
 #[test]
 fn projection_and_presence_map_to_each_other() {
     assert_eq!(

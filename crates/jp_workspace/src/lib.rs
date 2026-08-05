@@ -788,9 +788,12 @@ fn maybe_init_conversation(
         return;
     }
 
-    let Ok(meta) = loader.load_conversation_metadata(id) else {
-        warn!(%id, "Failed to load conversation metadata. Skipping.");
-        return;
+    let meta = match loader.load_conversation_metadata(id) {
+        Ok(meta) => meta,
+        Err(error) => {
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation metadata. Skipping.");
+            return;
+        }
     };
 
     if let Err(error) = cell.set(Arc::new(RwLock::new(meta))) {
@@ -806,9 +809,12 @@ fn maybe_init_events(
         return;
     }
 
-    let Ok(stream) = loader.load_conversation_stream(id) else {
-        warn!(%id, "Failed to load conversation events. Skipping.");
-        return;
+    let stream = match loader.load_conversation_stream(id) {
+        Ok(stream) => stream,
+        Err(error) => {
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation events. Skipping.");
+            return;
+        }
     };
 
     if let Err(error) = cell.set(Arc::new(RwLock::new(stream))) {
