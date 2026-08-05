@@ -1,26 +1,34 @@
 use std::time::Duration;
 
+use camino_tempfile::{Utf8TempDir, tempdir};
 use clap::Parser as _;
 use jp_config::{
     AppConfig, PartialAppConfig,
     conversation::compaction::{
         CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
-        ReasoningMode, RuleBound, ToolCallsMode,
+        ReasoningMode, RuleBound, SummaryConfig, ToolCallsMode,
     },
     model::{PartialModelConfig, id::PartialModelIdOrAliasConfig},
 };
 use jp_conversation::{
-    Compaction, ConversationStream, RangeBound, ReasoningPolicy, ToolCallPolicy,
+    Compaction, ConversationStream, RangeBound, ReasoningPolicy, SummaryPolicy, SummarySource,
+    ToolCallPolicy,
     event::{ToolCallRequest, ToolCallResponse},
 };
-use jp_printer::Printer;
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_workspace::Workspace;
 use serde_json::{Map, Value};
+use tokio::runtime::Runtime;
 
 use super::{
     Bound, Compact, IntoPartialAppConfig as _, TimelineSegment, build_compaction_events,
     existing_segments, resolve_reset_index, segments_for_compactions, timeline_lines,
 };
-use crate::cmd::{conversation_id::ConversationIds as _, target::ConversationTarget};
+use crate::{
+    Globals,
+    cmd::{conversation_id::ConversationIds as _, target::ConversationTarget},
+    ctx::Ctx,
+};
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
 fn parse_compact(args: &[&str]) -> Compact {
@@ -63,7 +71,7 @@ fn model_flag_targets_the_assistant_model() {
     // `--model` rides the same `assistant.model.id` path as `jp query --model`,
     // so the pipeline resolves the alias. The summarizer picks it up through its
     // fallback: an unset `summary.model` means "use the assistant model".
-    let compact = parse_compact(&["--summarize", "--model", "gpt"]);
+    let compact = parse_compact(&["--summary", "--model", "gpt"]);
     let mut partial = PartialAppConfig::new_test();
     partial = compact.apply_cli_config(None, partial, None).unwrap();
 
@@ -97,7 +105,7 @@ fn model_alias_reaches_a_configured_summary_model_through_the_pipeline() {
     }]
     .into();
 
-    // No `--summarize`: a policy flag would replace the configured rule with an
+    // No `--summary`: a policy flag would replace the configured rule with an
     // ad-hoc one, and the configured `summary.model` is what this exercises.
     let compact = parse_compact(&["--model", "gpt"]);
     let partial = compact.apply_cli_config(None, partial, None).unwrap();
@@ -283,6 +291,302 @@ fn reset_index_addresses_compactions_in_stream_order() {
 
 fn runtime() -> tokio::runtime::Runtime {
     tokio::runtime::Runtime::new().unwrap()
+}
+
+/// A rule that summarizes the whole conversation with `text`, if given.
+fn summary_rule(text: Option<&str>) -> CompactionRuleConfig {
+    CompactionRuleConfig {
+        keep_first: RuleBound::Turns(0),
+        keep_last: RuleBound::Turns(0),
+        reasoning: None,
+        tool_calls: None,
+        summary: Some(SummaryConfig {
+            text: text.map(ToOwned::to_owned),
+            model: None,
+            instructions: None,
+            context: None,
+        }),
+    }
+}
+
+fn stream_of(turns: usize) -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    for t in 0..turns {
+        stream.start_turn(format!("turn {t}"));
+    }
+    stream
+}
+
+#[test]
+fn verbatim_summary_is_stored_as_authored_text() {
+    let stream = stream_of(4);
+    let cfg = AppConfig::new_test();
+
+    let compactions = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &[summary_rule(Some("we settled on the layered loader"))],
+            Bound::Default,
+            Bound::Default,
+            Some(&Printer::sink()),
+        ))
+        .unwrap();
+
+    // `Authored` is reachable only through the branch that skips the
+    // summarizer, so this pins the no-model path rather than just the text.
+    assert_eq!(compactions.len(), 1);
+    assert_eq!(
+        compactions[0].summary,
+        Some(SummaryPolicy::authored("we settled on the layered loader"))
+    );
+    assert_eq!(
+        compactions[0].summary.as_ref().unwrap().source,
+        SummarySource::Authored
+    );
+}
+
+#[test]
+fn blank_verbatim_summary_is_rejected() {
+    let stream = stream_of(4);
+    let cfg = AppConfig::new_test();
+
+    let error = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &[summary_rule(Some("   "))],
+            Bound::Default,
+            Bound::Default,
+            Some(&Printer::sink()),
+        ))
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Compaction error: the summary text is empty; drop the value to generate a summary instead"
+    );
+}
+
+/// A `Ctx` backed by an in-memory printer, for exercising the dry-run preview.
+///
+/// The tempdir is returned so it outlives the ctx, whose workspace points into
+/// it.
+fn preview_ctx() -> (Ctx, SharedBuffer, Utf8TempDir) {
+    let tmp = tempdir().unwrap();
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let ctx = Ctx::new(
+        Workspace::new(tmp.path()),
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    (ctx, out, tmp)
+}
+
+#[test]
+fn preview_rejects_a_blank_verbatim_summary() {
+    // Regression: `--summary '' --dry-run` used to print a successful preview
+    // while the real run rejected the same rule, so the preview promised a
+    // compaction that could not be performed.
+    let (ctx, _out, _tmp) = preview_ctx();
+    let stream = stream_of(4);
+
+    let error = Compact::preview_compaction(
+        &ctx,
+        &stream,
+        &[summary_rule(Some("   "))],
+        &Bound::Default,
+        &Bound::Default,
+    )
+    .unwrap_err();
+
+    // `preview_compaction` yields the rendered command error, so this pins what
+    // the user actually reads.
+    assert_eq!(
+        error.to_string(),
+        "error 1: Compaction error (error:\"the summary text is empty; drop the value to generate \
+         a summary instead\")"
+    );
+}
+
+#[test]
+fn preview_refuses_an_overlap_the_real_run_would_refuse() {
+    // The preview shares `resolve_rule_range` with the real run, so the same
+    // widening over an existing summary is refused before anything is printed.
+    let (ctx, out, _tmp) = preview_ctx();
+    let mut stream = stream_of(6);
+    stream.add_compaction(Compaction::new(3, 5).with_summary(SummaryPolicy::generated("earlier")));
+
+    let mut rule = summary_rule(Some("hand-written"));
+    rule.keep_last = RuleBound::FromEnd(2);
+
+    let error =
+        Compact::preview_compaction(&ctx, &stream, &[rule], &Bound::Default, &Bound::Default)
+            .unwrap_err();
+
+    ctx.printer.flush();
+    // The full refusal as the user reads it: what went wrong, and the exact
+    // range that resolves it.
+    assert_eq!(
+        error.to_string(),
+        "error 1: Summary overlap (reason:\"A summary cannot be nested inside or split across \
+         another one, so your text for turns 1..4 would have to stand in for turns 1..6 as \
+         well.\", suggestion:\"Re-run with `--from 1 --to 6` to cover the whole range, or `jp \
+         conversation compact --reset` to drop the existing compactions first.\")"
+    );
+    assert_eq!(
+        out.lock().clone(),
+        "",
+        "a refused preview must print no timeline"
+    );
+}
+
+#[test]
+fn verbatim_summary_refuses_to_widen_over_an_existing_summary() {
+    let mut stream = stream_of(6);
+    // Raw turns 3..5 are already summarized, so a verbatim summary of 0..3
+    // would have to grow to 0..5 and stand in for turns it never described.
+    stream.add_compaction(Compaction::new(3, 5).with_summary(SummaryPolicy::generated("earlier")));
+
+    let mut rule = summary_rule(Some("hand-written"));
+    rule.keep_last = RuleBound::FromEnd(2);
+
+    let cfg = AppConfig::new_test();
+    let error = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &[rule],
+            Bound::Default,
+            Bound::Default,
+            Some(&Printer::sink()),
+        ))
+        .unwrap_err();
+
+    // Turn numbers are reported 1-based, matching `--from`/`--to`.
+    let crate::error::Error::SummaryOverlap {
+        authored,
+        from,
+        to,
+        required_from,
+        required_to,
+    } = error
+    else {
+        panic!("expected a summary overlap, got: {error}");
+    };
+    assert!(authored, "the new summary is the verbatim one");
+    assert_eq!((from, to, required_from, required_to), (1, 4, 1, 6));
+}
+
+#[test]
+fn generated_summary_refuses_to_widen_over_verbatim_text() {
+    let mut stream = stream_of(6);
+    stream.add_compaction(Compaction::new(3, 5).with_summary(SummaryPolicy::authored("mine")));
+
+    let mut rule = summary_rule(None);
+    rule.keep_last = RuleBound::FromEnd(2);
+
+    let cfg = AppConfig::new_test();
+    let error = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &[rule],
+            Bound::Default,
+            Bound::Default,
+            Some(&Printer::sink()),
+        ))
+        .unwrap_err();
+
+    // The refusal happens during range resolution, before any provider lookup,
+    // so the hand-written text survives.
+    let crate::error::Error::SummaryOverlap {
+        authored,
+        from,
+        to,
+        required_from,
+        required_to,
+    } = error
+    else {
+        panic!("expected a summary overlap, got: {error}");
+    };
+    assert!(!authored, "the blocking text is the existing summary");
+    assert_eq!((from, to, required_from, required_to), (1, 4, 1, 6));
+}
+
+#[test]
+fn a_later_overlap_is_refused_before_any_summarizer_request() {
+    // Regression: the first rule's summary used to be generated before the
+    // second rule's range was resolved, so an overlap in the second rule threw
+    // away a paid request nothing recorded.
+    //
+    // `AppConfig::new_test()` points the assistant at `anthropic/test`, so any
+    // summarizer call fails on provider lookup. Getting `SummaryOverlap` back is
+    // therefore proof that rule 1 never reached a provider.
+    let mut stream = stream_of(10);
+    stream.add_compaction(Compaction::new(6, 8).with_summary(SummaryPolicy::authored("mine")));
+
+    // Rule 1 generates a summary for turns 0..2, disjoint from the authored one.
+    let mut generated = summary_rule(None);
+    generated.keep_last = RuleBound::FromEnd(7);
+
+    // Rule 2 covers 4..7, so it has to grow over the authored summary.
+    let mut conflicting = summary_rule(None);
+    conflicting.keep_first = RuleBound::Absolute(5);
+    conflicting.keep_last = RuleBound::FromEnd(2);
+
+    let cfg = AppConfig::new_test();
+    let error = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &[generated, conflicting],
+            Bound::Default,
+            Bound::Default,
+            Some(&Printer::sink()),
+        ))
+        .unwrap_err();
+
+    let crate::error::Error::SummaryOverlap {
+        from,
+        to,
+        required_from,
+        required_to,
+        ..
+    } = error
+    else {
+        panic!("expected the overlap to be reported before summarizing, got: {error}");
+    };
+    assert_eq!((from, to, required_from, required_to), (5, 8, 5, 9));
+}
+
+#[test]
+fn verbatim_summary_covering_an_existing_summary_is_accepted() {
+    let mut stream = stream_of(6);
+    stream.add_compaction(Compaction::new(3, 5).with_summary(SummaryPolicy::generated("earlier")));
+
+    // The rule covers every turn, so nothing has to grow.
+    let cfg = AppConfig::new_test();
+    let compactions = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &[summary_rule(Some("covers everything"))],
+            Bound::Default,
+            Bound::Default,
+            Some(&Printer::sink()),
+        ))
+        .unwrap();
+
+    assert_eq!(compactions.len(), 1);
+    assert_eq!(compactions[0].from_turn, 0);
+    assert_eq!(compactions[0].to_turn, 5);
 }
 
 /// Each `ToolCallsMode` from the config maps to the right `ToolCallPolicy` on
@@ -608,15 +912,65 @@ fn keep_last_greater_than_last_is_rejected() {
 }
 
 #[test]
-fn summarize_flag_distinguishes_absent_bare_and_valued() {
-    // The three states the `Option<Option<String>>` encoding exists to separate.
-    assert_eq!(parse_compact(&[]).summarize, None);
-    assert_eq!(parse_compact(&["--summarize"]).summarize, Some(None));
-    assert_eq!(parse_compact(&["-s"]).summarize, Some(None));
+fn summary_flag_distinguishes_absent_bare_and_valued() {
+    // The three states the `Option<Option<String>>` encoding exists to separate:
+    // no summary, generate one, and use this exact text.
+    assert_eq!(parse_compact(&[]).summary, None);
+    assert_eq!(parse_compact(&["--summary"]).summary, Some(None));
+    assert_eq!(parse_compact(&["-s"]).summary, Some(None));
     assert_eq!(
-        parse_compact(&["-s", "focus on the architectural design"]).summarize,
-        Some(Some("focus on the architectural design".to_owned())),
+        parse_compact(&["-s", "we settled on the layered loader"]).summary,
+        Some(Some("we settled on the layered loader".to_owned())),
     );
+}
+
+#[test]
+fn valued_summary_flag_becomes_verbatim_text_not_summarizer_context() {
+    let compact = parse_compact(&["--summary", "the gist of it"]);
+    let cfg = AppConfig::new_test();
+
+    let rules = compact.effective_rules(&cfg).unwrap();
+    let summary = rules[0].summary.as_ref().expect("summary rule");
+
+    assert_eq!(summary.text.as_deref(), Some("the gist of it"));
+    assert_eq!(summary.context, None);
+}
+
+#[test]
+fn summary_context_flag_applies_to_configured_rules() {
+    // `--summary-context` modifies whichever rules are active, the same way
+    // `--model` does, instead of replacing them with an ad-hoc rule.
+    let mut cfg = AppConfig::new_test();
+    cfg.conversation.compaction.rules =
+        CompactionConfig::finalize_rules(vec![PartialCompactionRuleConfig {
+            summary: Some(PartialSummaryConfig {
+                context: Some("configured context".to_owned()),
+                ..PartialSummaryConfig::default()
+            }),
+            ..PartialCompactionRuleConfig::default()
+        }])
+        .unwrap();
+
+    let compact = parse_compact(&["--summary-context", "focus on the architecture"]);
+    let rules = compact.effective_rules(&cfg).unwrap();
+
+    assert_eq!(rules.len(), 1, "the configured rule must survive");
+    assert_eq!(
+        rules[0].summary.as_ref().unwrap().context.as_deref(),
+        Some("focus on the architecture")
+    );
+}
+
+#[test]
+fn summary_context_does_not_add_a_rule_of_its_own() {
+    // Without a summary rule to modify there is nothing to summarize, so the
+    // flag must not synthesize one.
+    let compact = parse_compact(&["--summary-context", "focus on the architecture"]);
+    let cfg = AppConfig::new_test();
+
+    let rules = compact.effective_rules(&cfg).unwrap();
+
+    assert_eq!(rules, cfg.conversation.compaction.rules);
 }
 
 #[test]
