@@ -2114,5 +2114,5 @@ fn lowercase_shorts_owned_by_globals_are_not_reclaimed() {
     // *both*, so the user can't tell which flag they invoked. `-i` belongs to
     // the conversation-target flag on every `jp c` subcommand.
     assert!(parse(&["x", "--ignore-case"]).is_ok());
-    assert!(!parse(&["x", "-i", "latest"]).unwrap().ignore_case);
+    assert!(!parse(&["x", "-i", "recent"]).unwrap().ignore_case);
 }

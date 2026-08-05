@@ -330,7 +330,7 @@ fn load_request_none_when_no_ids() {
 fn load_request_explicit_when_ids_present() {
     let set = Set {
         file_target: FileTarget::default(),
-        conversation: FlagIds::from_targets(vec![ConversationTarget::Latest]),
+        conversation: FlagIds::from_targets(vec![ConversationTarget::Recent]),
     };
     let req = set.conversation_load_request();
     assert!(req.targets.is_some());
