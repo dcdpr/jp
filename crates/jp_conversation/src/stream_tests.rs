@@ -1000,6 +1000,66 @@ fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
     assert_eq!(result.len(), 2); // TurnStart + ChatRequest
 }
 
+// --- from_legacy_events tests ---
+
+// Conversations written before the base config moved into `base_config.json`
+// keep it as the first `config_delta` element of `events.json`. Two inline
+// shapes exist: the config nested under a `delta` key, and the config fields
+// as siblings of `type`/`timestamp`.
+#[test]
+fn test_from_legacy_events_reads_base_config_nested_under_delta() {
+    let events = vec![
+        serde_json::json!({
+            "type": "config_delta",
+            "timestamp": "2025-12-04 09:28:23.202081",
+            "delta": {
+                "assistant": {"model": {"id": "anthropic/nested"}},
+                "conversation": {"tools": {"*": {"run": "ask"}}},
+                "style": {"code": {"color": false}}
+            }
+        }),
+        serde_json::json!({
+            "type": "chat_request",
+            "timestamp": "2025-12-04 09:28:24.0",
+            "content": "hello"
+        }),
+    ];
+
+    let stream = ConversationStream::from_legacy_events(events)
+        .expect("legacy stream loads")
+        .expect("first event is a config delta");
+
+    let config = stream.config().expect("config resolves");
+    assert_eq!(config.assistant.model.id.to_string(), "anthropic/nested");
+    assert!(!config.style.code.color);
+}
+
+#[test]
+fn test_from_legacy_events_reads_base_config_inline_alongside_type() {
+    let events = vec![
+        serde_json::json!({
+            "type": "config_delta",
+            "timestamp": "2025-12-04 09:28:23.202081",
+            "assistant": {"model": {"id": "anthropic/inline"}},
+            "conversation": {"tools": {"*": {"run": "ask"}}},
+            "style": {"code": {"color": false}}
+        }),
+        serde_json::json!({
+            "type": "chat_request",
+            "timestamp": "2025-12-04 09:28:24.0",
+            "content": "hello"
+        }),
+    ];
+
+    let stream = ConversationStream::from_legacy_events(events)
+        .expect("legacy stream loads")
+        .expect("first event is a config delta");
+
+    let config = stream.config().expect("config resolves");
+    assert_eq!(config.assistant.model.id.to_string(), "anthropic/inline");
+    assert!(!config.style.code.color);
+}
+
 // --- Compaction event invariant tests ---
 
 fn make_compaction(from: usize, to: usize) -> Compaction {

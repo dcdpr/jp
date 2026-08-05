@@ -210,16 +210,29 @@ impl From<PartialAppConfig> for ConfigDelta {
     }
 }
 
+/// Extract the stored config subtree from a `config_delta` event.
+///
+/// Two on-disk shapes exist.
+/// Newer streams nest the config under a `delta` key; older ones carry the
+/// config fields as siblings of `type` and `timestamp`.
+fn config_delta_subtree(value: &Value) -> Value {
+    if let Some(delta) = value.get("delta") {
+        return delta.clone();
+    }
+
+    let mut obj = value.as_object().cloned().unwrap_or_default();
+    obj.remove("type");
+    obj.remove("timestamp");
+    Value::Object(obj)
+}
+
 /// Deserialize a [`ConfigDelta`] from a raw JSON value, tolerating schema
 /// changes.
 ///
-/// Delegates to [`deserialize_partial_config`] for the `delta` subtree and
+/// Delegates to [`deserialize_partial_config`] for the config subtree and
 /// extracts the timestamp separately.
 pub(crate) fn deserialize_config_delta(value: &Value) -> ConfigDelta {
-    let delta = value
-        .get("delta")
-        .cloned()
-        .map_or_else(PartialAppConfig::empty, deserialize_partial_config);
+    let delta = deserialize_partial_config(config_delta_subtree(value));
 
     let timestamp = value
         .get("timestamp")
@@ -1698,11 +1711,8 @@ impl ConversationStream {
             .and_then(|s| crate::parse_dt(s).ok())
             .unwrap_or_else(Utc::now);
 
-        // Extract the delta subtree as the base config value.
-        let base_config = events[0]
-            .get("delta")
-            .cloned()
-            .unwrap_or(Value::Object(Map::default()));
+        // Extract the config subtree as the base config value.
+        let base_config = config_delta_subtree(&events[0]);
 
         // Remaining elements are events. from_parts handles compat stripping.
         let events = events.into_iter().skip(1).collect();
