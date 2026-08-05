@@ -1,3 +1,5 @@
+set fallback
+
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.23.0"
 binstall_version     := "1.20.0"
