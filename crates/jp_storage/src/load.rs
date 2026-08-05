@@ -114,11 +114,11 @@ impl Storage {
         filter: ConversationFilter,
     ) -> Vec<ConversationIndexEntry> {
         let partition = |root: &Utf8Path| -> Utf8PathBuf {
-            let active = root.join(CONVERSATIONS_DIR);
+            let live = root.join(CONVERSATIONS_DIR);
             if filter.archived {
-                active.join(ARCHIVE_DIR)
+                live.join(ARCHIVE_DIR)
             } else {
-                active
+                live
             }
         };
 
