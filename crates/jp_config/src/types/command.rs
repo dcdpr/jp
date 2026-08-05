@@ -40,7 +40,11 @@ pub enum CommandConfigOrString {
     String(String),
 
     /// A complete command configuration.
-    #[setting(nested)]
+    ///
+    /// Marked as the expanded form: the string above is a shorthand for this
+    /// table, so `cmd.program` and `cmd.args` address a command however it was
+    /// written.
+    #[setting(nested, expanded)]
     Config(CommandConfig),
 }
 
@@ -57,13 +61,39 @@ impl AssignKeyValue for PartialCommandConfigOrString {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => *self = kv.try_object_or_from_str()?,
+
+            // A key addressing the table's fields expands the shorthand first,
+            // rather than discarding the program it named. `editor.cmd = "code
+            // --wait"` followed by `editor.cmd.args = ["--foo"]` keeps `code`.
             _ => match self {
-                Self::String(_) => return missing_key(&kv),
+                Self::String(shorthand) => {
+                    let mut config = expand_shorthand(shorthand);
+                    config.assign(kv)?;
+                    *self = Self::Config(config);
+                }
                 Self::Config(config) => config.assign(kv)?,
             },
         }
 
         Ok(())
+    }
+}
+
+/// Expand the string shorthand into the table form it abbreviates.
+///
+/// Splits exactly as [`CommandConfigOrString::command`] does, so expanding
+/// before assigning a field cannot change which command ends up running.
+/// `shell` and any empty part are left unset so their defaults still apply, and
+/// so a later layer can still fill them.
+fn expand_shorthand(shorthand: &str) -> PartialCommandConfig {
+    let mut tokens = shlex::split(shorthand).unwrap_or_default().into_iter();
+    let program = tokens.next();
+    let args: Vec<_> = tokens.collect();
+
+    PartialCommandConfig {
+        program,
+        args: (!args.is_empty()).then_some(args),
+        shell: None,
     }
 }
 

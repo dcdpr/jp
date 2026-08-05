@@ -147,8 +147,9 @@ pub struct InquiryConfig {
     pub sections: Vec<SectionConfig>,
 
     /// Output ceiling for the inquiry request, from
-    /// `assistant.request.max_response_bytes`.
-    pub max_response_bytes: u32,
+    /// `conversation.inquiry.assistant.request.max_response_bytes`.
+    /// `None` leaves the response unbounded.
+    pub max_response_bytes: Option<u64>,
 }
 
 /// Resolves inquiries by making structured output calls to an LLM provider.

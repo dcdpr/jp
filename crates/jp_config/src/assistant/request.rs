@@ -2,7 +2,7 @@
 
 use std::{fmt, time::Duration};
 
-use schematic::{Config, ConfigError, HandlerError};
+use schematic::{Config, ConfigError, HandlerError, TransformResult};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -78,7 +78,10 @@ pub struct RequestConfig {
     /// Abort a response after it generates more than this many bytes.
     ///
     /// Defaults to `1048576` (1 MiB, roughly 260,000 tokens).
-    /// Set to `0` to disable the ceiling.
+    /// Accepted values:
+    ///
+    /// - a byte count such as `4096`
+    /// - `0`, `"disabled"`, `"off"`, or `false`: no ceiling
     ///
     /// This is a runaway guard rather than a length preference.
     /// It exists so a model that gets stuck generating without end cannot run
@@ -95,16 +98,14 @@ pub struct RequestConfig {
     /// Inquiry requests can be held to their own ceiling via
     /// `conversation.inquiry.assistant.request.max_response_bytes`, or per
     /// question via a question's assistant target.
-    /// In the `conversation.inquiry` block, `0` means "inherit this ceiling"
-    /// rather than "disable it"; disable it per question instead.
     ///
     /// The ceiling counts bytes rather than tokens because tokens cannot be
     /// counted locally; four bytes per token is a rough guide.
     /// It counts the bytes JP receives, which can be fewer than the bytes
     /// billed: a provider that assembles a response from several continuation
     /// requests may discard some of what it generated before returning it.
-    #[setting(default = 1_048_576)]
-    pub max_response_bytes: u32,
+    #[setting(default = default_max_response_bytes)]
+    pub max_response_bytes: MaxResponseBytes,
 
     /// Prompt caching policy.
     ///
@@ -153,7 +154,9 @@ impl AssignKeyValue for PartialRequestConfig {
             "stream_idle_timeout_secs" => {
                 self.stream_idle_timeout_secs = kv.try_some_u32()?;
             }
-            "max_response_bytes" => self.max_response_bytes = kv.try_some_u32()?,
+            "max_response_bytes" => {
+                self.max_response_bytes = kv.try_some_number_or_from_str()?;
+            }
             "cache" => self.cache = kv.try_some_bool_or_from_str()?,
             _ => return missing_key(&kv),
         }
@@ -211,6 +214,174 @@ impl ToPartial for RequestConfig {
             max_response_bytes: partial_opt(&self.max_response_bytes, defaults.max_response_bytes),
             cache: partial_opt(&self.cache, defaults.cache),
         }
+    }
+}
+
+/// A ceiling on the bytes of generated content a single response may produce.
+///
+/// The ceiling is a runaway guard: it bounds what a model that never stops
+/// generating can cost.
+/// `Disabled` removes the bound entirely.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaxResponseBytes {
+    /// No ceiling.
+    /// A response may generate without bound.
+    Disabled,
+
+    /// Abort the response once it generates more than this many bytes.
+    Bytes(u32),
+}
+
+/// 1 MiB, roughly 260,000 tokens.
+const DEFAULT_MAX_RESPONSE_BYTES: u32 = 1_048_576;
+
+/// The default output ceiling.
+#[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
+const fn default_max_response_bytes(_: &()) -> TransformResult<Option<MaxResponseBytes>> {
+    Ok(Some(MaxResponseBytes::Bytes(DEFAULT_MAX_RESPONSE_BYTES)))
+}
+
+impl Default for MaxResponseBytes {
+    fn default() -> Self {
+        Self::Bytes(DEFAULT_MAX_RESPONSE_BYTES)
+    }
+}
+
+impl MaxResponseBytes {
+    /// Build a ceiling from a byte count, where `0` disables it.
+    ///
+    /// A zero-byte ceiling would abort every response before its first event,
+    /// so `0` reads as [`Self::Disabled`] instead, matching the sibling
+    /// settings that spell "off" the same way.
+    #[must_use]
+    pub const fn from_bytes(bytes: u32) -> Self {
+        match bytes {
+            0 => Self::Disabled,
+            bytes => Self::Bytes(bytes),
+        }
+    }
+
+    /// The ceiling in bytes, or `None` when no ceiling applies.
+    #[must_use]
+    pub const fn bytes(self) -> Option<u64> {
+        match self {
+            Self::Disabled => None,
+            Self::Bytes(bytes) => Some(bytes as u64),
+        }
+    }
+
+    /// Returns `true` if no ceiling applies.
+    #[must_use]
+    pub const fn is_disabled(self) -> bool {
+        matches!(self, Self::Disabled)
+    }
+}
+
+impl From<bool> for MaxResponseBytes {
+    /// `false` disables the ceiling; `true` selects the default ceiling.
+    fn from(v: bool) -> Self {
+        if v { Self::default() } else { Self::Disabled }
+    }
+}
+
+impl std::str::FromStr for MaxResponseBytes {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "disabled" | "off" | "false" => Ok(Self::Disabled),
+            "true" => Ok(Self::default()),
+            _ => s.parse::<u32>().map(Self::from_bytes).map_err(|_| {
+                format!(
+                    "invalid max response bytes: '{s}', expected a byte count or one of: \
+                     disabled, off, false"
+                )
+            }),
+        }
+    }
+}
+
+impl fmt::Display for MaxResponseBytes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Disabled => write!(f, "disabled"),
+            Self::Bytes(bytes) => write!(f, "{bytes}"),
+        }
+    }
+}
+
+impl Serialize for MaxResponseBytes {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Disabled => serializer.serialize_str("disabled"),
+            Self::Bytes(bytes) => serializer.serialize_u32(*bytes),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for MaxResponseBytes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct MaxResponseBytesVisitor;
+
+        impl serde::de::Visitor<'_> for MaxResponseBytesVisitor {
+            type Value = MaxResponseBytes;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a byte count, \"disabled\", or a boolean")
+            }
+
+            fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<MaxResponseBytes, E> {
+                Ok(MaxResponseBytes::from(v))
+            }
+
+            fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<MaxResponseBytes, E> {
+                let bytes = u32::try_from(v).map_err(|_| {
+                    serde::de::Error::custom(format!("max response bytes '{v}' exceeds u32"))
+                })?;
+
+                Ok(MaxResponseBytes::from_bytes(bytes))
+            }
+
+            fn visit_i64<E: serde::de::Error>(self, v: i64) -> Result<MaxResponseBytes, E> {
+                let unsigned = u64::try_from(v).map_err(|_| {
+                    serde::de::Error::custom(format!("max response bytes '{v}' is negative"))
+                })?;
+                self.visit_u64(unsigned)
+            }
+
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<MaxResponseBytes, E> {
+                v.parse().map_err(serde::de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_any(MaxResponseBytesVisitor)
+    }
+}
+
+impl schematic::Schematic for MaxResponseBytes {
+    fn schema_name() -> Option<String> {
+        Some("MaxResponseBytes".to_owned())
+    }
+
+    fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
+        use schematic::schema::{BooleanType, EnumType, IntegerType, LiteralValue, UnionType};
+
+        schema.union(UnionType::new_any([
+            schema
+                .nest()
+                .integer(IntegerType::new_kind(schematic::schema::IntegerKind::U32)),
+            schema.nest().enumerable(EnumType::new([
+                LiteralValue::String("disabled".into()),
+                LiteralValue::String("off".into()),
+            ])),
+            schema.nest().boolean(BooleanType::default()),
+        ]))
     }
 }
 

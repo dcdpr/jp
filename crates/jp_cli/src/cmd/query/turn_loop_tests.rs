@@ -19,7 +19,7 @@ use jp_config::{
     AppConfig, PartialAppConfig,
     assistant::{
         PartialAssistantConfig,
-        request::{CachePolicy, PartialRequestConfig, RequestConfig},
+        request::{CachePolicy, MaxResponseBytes, PartialRequestConfig},
     },
     conversation::tool::{
         CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
@@ -749,7 +749,7 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
     let storage = root.join(".jp");
 
     let mut config = AppConfig::new_test();
-    config.assistant.request.max_response_bytes = 64;
+    config.assistant.request.max_response_bytes = MaxResponseBytes::Bytes(64);
     // A retry budget is left in place so the call-count assertion below has
     // something to catch: were the ceiling classified as retryable, the loop
     // would re-request the response instead of ending the turn.
@@ -4528,19 +4528,20 @@ fn inquiry_mock_model() -> ModelDetails {
     })
 }
 
-/// The global inquiry override for the output ceiling wins over the parent
-/// assistant's value.
+/// The global inquiry ceiling wins over the top-level assistant's value.
 ///
 /// `conversation.inquiry.assistant.request.max_response_bytes` is a public key,
-/// so reading the parent value here would silently ignore it.
+/// so reading the assistant value here would silently ignore it.
 #[tokio::test]
 async fn inquiry_ceiling_honors_the_global_inquiry_override() {
     let mut config = AppConfig::new_test();
-    config.assistant.request.max_response_bytes = 999_999;
-    config.conversation.inquiry.assistant.request = Some(RequestConfig {
-        max_response_bytes: 4096,
-        ..config.assistant.request
-    });
+    config.assistant.request.max_response_bytes = MaxResponseBytes::Bytes(999_999);
+    config
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = MaxResponseBytes::Bytes(4096);
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
@@ -4553,42 +4554,27 @@ async fn inquiry_ceiling_honors_the_global_inquiry_override() {
         backend
             .config_for("any_tool", "any_question")
             .max_response_bytes,
-        4096,
+        Some(4096),
         "the global inquiry override must win over the parent assistant"
     );
 }
 
-/// A partially-set inquiry request block must not disable the ceiling.
+/// Setting one field in the inquiry request block leaves the ceiling inheriting
+/// from the assistant rather than resolving to the disable sentinel.
 ///
-/// Built through the real loading path rather than by hand: because
-/// `AssistantOverrideConfig::request` is a resolved struct, setting only a
-/// sibling field leaves `max_response_bytes` at `0`, which is the ceiling's
-/// disable sentinel.
-/// Reading it verbatim would silently drop the runaway guard for every inquiry.
+/// Built through the real loading path, since the failure this guards against
+/// only appears in the partial-to-resolved conversion.
 #[tokio::test]
 async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
     let mut partial = PartialAppConfig::new_test();
-    partial.assistant.request.max_response_bytes = Some(500_000);
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(500_000));
 
-    partial.conversation.inquiry.assistant.request = Some(PartialRequestConfig {
+    partial.conversation.inquiry.assistant.request = PartialRequestConfig {
         cache: Some(CachePolicy::Off),
         ..PartialRequestConfig::default()
-    });
+    };
 
     let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
-
-    // The resolution the guard has to cope with: the block is present, and its
-    // ceiling field is a zero the user never asked for.
-    assert_eq!(
-        config
-            .conversation
-            .inquiry
-            .assistant
-            .request
-            .expect("the block is set")
-            .max_response_bytes,
-        0
-    );
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
@@ -4601,24 +4587,57 @@ async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
         backend
             .config_for("any_tool", "any_question")
             .max_response_bytes,
-        500_000,
-        "an unset inquiry ceiling must inherit the parent, not disable the guard"
+        Some(500_000),
+        "an unset inquiry ceiling must inherit the assistant, not disable the guard"
     );
 }
 
-/// A per-question ceiling wins over the global inquiry override, which in turn
-/// wins over the parent assistant (RFD 034's resolution order).
+/// An explicit `0` at the inquiry layer disables the ceiling for inquiries,
+/// even when the assistant sets one.
+#[tokio::test]
+async fn inquiry_ceiling_can_be_disabled_independently() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(500_000));
+    partial
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = Some(MaxResponseBytes::Disabled);
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        None,
+        "an explicit disable removes the ceiling for inquiries"
+    );
+}
+
+/// A per-question ceiling wins over the global inquiry value, which in turn
+/// wins over the top-level assistant (RFD 034's resolution order).
 #[tokio::test]
 async fn inquiry_ceiling_honors_the_per_question_override() {
     let mut config = AppConfig::new_test();
-    config.assistant.request.max_response_bytes = 999_999;
-    config.conversation.inquiry.assistant.request = Some(RequestConfig {
-        max_response_bytes: 4096,
-        ..config.assistant.request
-    });
+    config.assistant.request.max_response_bytes = MaxResponseBytes::Bytes(999_999);
+    config
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = MaxResponseBytes::Bytes(4096);
 
     let mut per_question = PartialAssistantConfig::default();
-    per_question.request.max_response_bytes = Some(512);
+    per_question.request.max_response_bytes = Some(MaxResponseBytes::Bytes(512));
 
     let mut tool = inquiry_tool_config(&["confirm"]);
     tool.questions
@@ -4642,7 +4661,7 @@ async fn inquiry_ceiling_honors_the_per_question_override() {
         backend
             .config_for("inquiry_tool", "confirm")
             .max_response_bytes,
-        512,
+        Some(512),
         "the per-question override must win over the global inquiry value"
     );
 
@@ -4652,7 +4671,7 @@ async fn inquiry_ceiling_honors_the_per_question_override() {
         backend
             .config_for("inquiry_tool", "other")
             .max_response_bytes,
-        4096,
+        Some(4096),
         "an unset per-question ceiling falls back to the global inquiry value"
     );
 }
