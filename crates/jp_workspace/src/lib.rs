@@ -791,7 +791,7 @@ fn maybe_init_conversation(
     let meta = match loader.load_conversation_metadata(id) {
         Ok(meta) => meta,
         Err(error) => {
-            warn!(%id, %error, "Failed to load conversation metadata. Skipping.");
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation metadata. Skipping.");
             return;
         }
     };
@@ -812,7 +812,7 @@ fn maybe_init_events(
     let stream = match loader.load_conversation_stream(id) {
         Ok(stream) => stream,
         Err(error) => {
-            warn!(%id, %error, "Failed to load conversation events. Skipping.");
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation events. Skipping.");
             return;
         }
     };
