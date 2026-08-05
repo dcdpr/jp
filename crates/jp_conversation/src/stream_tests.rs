@@ -1003,9 +1003,13 @@ fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
 // --- from_legacy_events tests ---
 
 // Conversations written before the base config moved into `base_config.json`
-// keep it as the first `config_delta` element of `events.json`. Two inline
-// shapes exist: the config nested under a `delta` key, and the config fields
-// as siblings of `type`/`timestamp`.
+// keep it as the first `config_delta` element of `events.json`. Three shapes
+// exist across versions: the config nested under a `delta` key, the config
+// fields as siblings of `type`/`timestamp`, and the same siblings with no
+// `timestamp` at all (the oldest serializer had no timestamp field).
+//
+// `created_at` is the caller's responsibility, so none of these assert it;
+// the storage layer derives it from the conversation ID.
 #[test]
 fn test_from_legacy_events_reads_base_config_nested_under_delta() {
     let events = vec![
@@ -1057,6 +1061,37 @@ fn test_from_legacy_events_reads_base_config_inline_alongside_type() {
 
     let config = stream.config().expect("config resolves");
     assert_eq!(config.assistant.model.id.to_string(), "anthropic/inline");
+    assert!(!config.style.code.color);
+}
+
+#[test]
+fn test_from_legacy_events_reads_base_config_inline_without_timestamp() {
+    let events = vec![
+        serde_json::json!({
+            "type": "config_delta",
+            "inherit": true,
+            "config_load_paths": [],
+            "extends": [],
+            "assistant": {"model": {"id": "anthropic/no-timestamp"}},
+            "conversation": {"tools": {"*": {"run": "ask"}}},
+            "style": {"code": {"color": false}}
+        }),
+        serde_json::json!({
+            "type": "chat_request",
+            "timestamp": "2025-12-04 09:28:24.0",
+            "content": "hello"
+        }),
+    ];
+
+    let stream = ConversationStream::from_legacy_events(events)
+        .expect("legacy stream loads")
+        .expect("first event is a config delta");
+
+    let config = stream.config().expect("config resolves");
+    assert_eq!(
+        config.assistant.model.id.to_string(),
+        "anthropic/no-timestamp"
+    );
     assert!(!config.style.code.color);
 }
 

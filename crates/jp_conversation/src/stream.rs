@@ -1686,9 +1686,15 @@ impl ConversationStream {
     /// Used by the storage layer's backward-compatibility migration path.
     /// If the first element is not a `ConfigDelta`, returns `None`.
     ///
+    /// The returned stream has `created_at` set to [`Utc::now()`].
+    /// The caller should chain [`.with_created_at()`] to set the correct
+    /// creation time from the conversation ID.
+    ///
     /// # Errors
     ///
     /// Returns an error if event deserialization or config conversion fails.
+    ///
+    /// [`.with_created_at()`]: Self::with_created_at
     pub fn from_legacy_events(events: Vec<Value>) -> Result<Option<Self>, StreamError> {
         if events.is_empty() {
             return Ok(None);
@@ -1704,22 +1710,13 @@ impl ConversationStream {
             return Ok(None);
         }
 
-        // Extract timestamp from the first element.
-        let created_at = events[0]
-            .get("timestamp")
-            .and_then(Value::as_str)
-            .and_then(|s| crate::parse_dt(s).ok())
-            .unwrap_or_else(Utc::now);
-
         // Extract the config subtree as the base config value.
         let base_config = config_delta_subtree(&events[0]);
 
         // Remaining elements are events. from_parts handles compat stripping.
         let events = events.into_iter().skip(1).collect();
-        let mut stream = Self::from_parts(base_config, events)?;
-        stream.created_at = created_at;
 
-        Ok(Some(stream))
+        Ok(Some(Self::from_parts(base_config, events)?))
     }
 }
 
