@@ -87,7 +87,7 @@ Setting neither yields the empty value.
 - `turn`: re-resolve at the start of every turn.
 - `manual`: never apply automatically. The declaration becomes an alias for `--label`.
 
-Label keys cannot contain `=` or `,`, which the CLI uses as separators, and cannot begin with `:`, which marks an alias reference.
+Label keys cannot contain `=`, which the CLI uses as a separator, and cannot begin with `:`, which marks an alias reference.
 Any other Unicode is accepted.
 Values are unconstrained.
 
@@ -96,14 +96,14 @@ Values are unconstrained.
 Resolution lives in `jp_workspace`, beside conversation creation.
 The data type stays in `jp_conversation`, which performs no I/O.
 
-At creation, the workspace resolves every label whose `apply_on` is `new` or `turn`:
+At creation, the workspace resolves every label whose `apply_on` is `new`:
 
 1. Static declarations yield their value directly.
 2. Command declarations run in parallel from the workspace root; trimmed stdout becomes the value.
 3. `--label` flags apply last and overwrite config-resolved values.
 
 A command that fails or writes nothing produces a warning and no label; creation continues.
-A command declaring `shell = true` is rejected at config load, because label commands run without a confirmation prompt.
+A command declaring `shell = true` is rejected at config load as a footgun guard, not a trust boundary; `program = "sh"` reaches the same place.
 
 Labels with `apply_on = "turn"` re-resolve at the start of each turn, before the request reaches the provider.
 Only the current value is stored; no history is kept.
@@ -119,7 +119,7 @@ jp conversation ls --label=branch=main --label=team
 jp conversation grep --label=team=ops "retry policy"
 ```
 
-`--label` is repeatable and accepts comma-separated values, so `--label=a,b=c` sets two labels.
+`--label` is repeatable.
 Three forms are accepted: `foo` sets the empty value, `foo=bar` sets a value, and `:name` resolves a declaration from `conversation.labels`.
 A `manual` declaration carrying `cmd` runs that command when the flag resolves.
 
@@ -192,7 +192,7 @@ A conversation-scoped delta that drops the declaration makes the alias fail with
 **Phase 1.**
 Add the `labels` field to `Conversation`.
 Add `conversation.labels` accepting static declarations only.
-Add `--label` and `--no-label` to `query` and `edit`, and `--label` filtering to `ls`.
+Add `--label` to `query` and `edit`, and `--no-label` to `edit`, and `--label` filtering to `ls`.
 Render labels in `conversation show`.
 Relocate `CommandConfigOrString` and `ToolCommandConfig` to `jp_config::types::command`, dropping the `Tool` prefix; no configuration changes.
 
