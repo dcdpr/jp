@@ -388,15 +388,12 @@ fn legacy_rule_bounds_survive_compat_deserialization() {
         "an unrelated setting must survive a stale compaction bound"
     );
 
+    // `last` is renamed in place; the `@5` rule goes entirely, because running
+    // it with a substituted bound would compact a range it never named.
     let rules = &config.conversation.compaction.rules;
-    assert_eq!(rules.len(), 2);
+    assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].keep_first, Some(RuleBound::AfterLastCompaction));
     assert_eq!(rules[0].keep_last, Some(RuleBound::Turns(3)));
-    assert_eq!(
-        rules[1].keep_first, None,
-        "`@5` has no config spelling, so the bound is dropped and defaulted"
-    );
-    assert_eq!(rules[1].keep_last, Some(RuleBound::FromEnd(3)));
 }
 
 #[test]
@@ -409,7 +406,10 @@ fn legacy_rule_bounds_migrate_in_bare_array_form() {
     let value = json!({
         "conversation": {
             "compaction": {
-                "rules": [{ "keep_first": "LAST", "keep_last": "@9" }]
+                "rules": [
+                    { "keep_first": "LAST", "keep_last": 2 },
+                    { "keep_first": "@9" }
+                ]
             }
         }
     });
@@ -420,5 +420,27 @@ fn legacy_rule_bounds_migrate_in_bare_array_form() {
         .rules;
     assert_eq!(rules.len(), 1);
     assert_eq!(rules[0].keep_first, Some(RuleBound::AfterLastCompaction));
-    assert_eq!(rules[0].keep_last, None);
+    assert_eq!(rules[0].keep_last, Some(RuleBound::Turns(2)));
+}
+
+#[test]
+fn dropping_the_only_rule_leaves_an_explicit_empty_rule_set() {
+    // An empty bare array reads as "unset" to
+    // `PartialCompactionConfig::fill_from`, which answers with the built-in
+    // strip-everything rule — a wider range than the rule just dropped. The
+    // `Merged` form with a strategy reads as "no rules" instead.
+    let mut value = json!({
+        "conversation": {
+            "compaction": {
+                "rules": [{ "keep_first": "@9", "reasoning": "strip" }]
+            }
+        }
+    });
+
+    migrate_legacy_rule_bounds(&mut value);
+
+    assert_eq!(
+        value["conversation"]["compaction"]["rules"],
+        json!({ "value": [], "strategy": "replace" })
+    );
 }

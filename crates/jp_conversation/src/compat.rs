@@ -12,7 +12,7 @@
 //! changed), we fall back to an empty config.
 
 use jp_config::{AppConfig, PartialAppConfig, Schema, SchemaType};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tracing::warn;
 
 /// Deserialize a [`PartialAppConfig`] from a raw JSON value, tolerating schema
@@ -61,10 +61,12 @@ pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
 ///
 /// - `"last"` becomes `"last-compaction"`, the same bound under its current
 ///   name.
-/// - `"@N"` is removed, leaving the rule to fall back to its default bound.
+/// - A rule carrying an `"@N"` bound is dropped whole.
 ///   An absolute turn describes one conversation, so a config rule has no way
-///   to express it; dropping the one field costs far less than dropping the
-///   config around it.
+///   to express it, and removing just the bound would leave the rule running
+///   over the default range instead — compacting turns the rule never named.
+///   Dropping the rule compacts less than intended rather than more, and the
+///   config around it still survives.
 fn migrate_legacy_rule_bounds(value: &mut Value) {
     let Some(rules) = value.pointer_mut("/conversation/compaction/rules") else {
         return;
@@ -72,6 +74,7 @@ fn migrate_legacy_rule_bounds(value: &mut Value) {
 
     // `rules` is a `MergeableVec`: a bare array, or an object whose `value` key
     // holds one (the shape `ConversationStream::to_parts` writes).
+    let bare_array = matches!(rules, Value::Array(_));
     let items = match rules {
         Value::Array(items) => items,
         Value::Object(obj) => match obj.get_mut("value") {
@@ -81,11 +84,14 @@ fn migrate_legacy_rule_bounds(value: &mut Value) {
         _ => return,
     };
 
-    for rule in items {
+    let before = items.len();
+
+    items.retain_mut(|rule| {
         let Some(rule) = rule.as_object_mut() else {
-            continue;
+            return true;
         };
 
+        let mut keep = true;
         for key in ["keep_first", "keep_last"] {
             let Some(bound) = rule.get(key).and_then(Value::as_str).map(str::to_owned) else {
                 continue;
@@ -101,12 +107,23 @@ fn migrate_legacy_rule_bounds(value: &mut Value) {
                 warn!(
                     field = key,
                     bound = bound,
-                    "Dropping absolute turn bound from stored compaction rule; config rules \
-                     cannot name a turn. The rule falls back to its default bound.",
+                    "Dropping stored compaction rule: config rules cannot name an absolute turn, \
+                     and running the rule with a substituted bound would compact a range it never \
+                     named.",
                 );
-                rule.remove(key);
+                keep = false;
             }
         }
+
+        keep
+    });
+
+    // An empty bare array reads as "unset" to
+    // `PartialCompactionConfig::fill_from`, which then reinstates the built-in
+    // default rule — compacting more than the rule just dropped. The `Merged`
+    // form with an explicit strategy reads as "no rules".
+    if bare_array && before > 0 && items.is_empty() {
+        *rules = json!({ "value": [], "strategy": "replace" });
     }
 }
 

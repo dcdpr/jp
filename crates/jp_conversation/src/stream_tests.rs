@@ -984,8 +984,6 @@ fn test_from_parts_tolerates_unknown_fields_in_config_deltas() {
 
 #[test]
 fn test_from_parts_tolerates_legacy_compaction_bounds_in_base_config() {
-    use jp_config::conversation::compaction::RuleBound;
-
     // A conversation written before `last` was renamed and before `@N` stopped
     // being a config spelling. Both land in `base_config.json`, which is
     // rewritten on every save, so a hard failure here would discard the stored
@@ -999,6 +997,9 @@ fn test_from_parts_tolerates_legacy_compaction_bounds_in_base_config() {
     let (mut base_config, events) = stream.to_parts().unwrap();
 
     base_config["style"]["code"]["color"] = serde_json::json!(false);
+    // `@7` ended compaction at turn 7. Substituting the default `keep_last`
+    // would end it at the second-to-last turn instead, compacting every turn
+    // in between.
     base_config["conversation"]["compaction"]["rules"] = serde_json::json!({
         "value": [{ "keep_first": "last", "keep_last": "@7" }],
         "strategy": "replace"
@@ -1012,13 +1013,9 @@ fn test_from_parts_tolerates_legacy_compaction_bounds_in_base_config() {
         "settings beside the stale bound must survive the load"
     );
 
-    let rules = &config.conversation.compaction.rules;
-    assert_eq!(rules.len(), 1);
-    assert_eq!(rules[0].keep_first, RuleBound::AfterLastCompaction);
-    assert_eq!(
-        rules[0].keep_last,
-        RuleBound::Turns(1),
-        "`@7` is dropped, so the rule takes the default end bound"
+    assert!(
+        config.conversation.compaction.rules.is_empty(),
+        "the `@7` rule is dropped whole rather than run over a substituted range"
     );
 }
 
