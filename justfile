@@ -322,6 +322,77 @@ pr-triage NNN *ARGS: _install-jp _install-tools
             $args
     fi
 
+# Archive `pr-review:NNN` / `pr-triage:NNN` conversations whose pull request is
+# no longer open.
+#
+# Fetches dcdpr/jp's open PRs once, then archives every conversation whose title
+# names a PR outside that set (merged, closed, or never existed). Set
+# `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to avoid GitHub's 60-requests-per-hour
+# anonymous rate limit. Archiving is reversible with `jp c unarchive`.
+[group('jp')]
+pr-gc: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    api="https://api.github.com/repos/dcdpr/jp/pulls?state=open&per_page=100"
+    token="${JP_GITHUB_TOKEN:-${GITHUB_TOKEN:-}}"
+    if [ -n "$token" ]; then
+        body=$(curl -fsSL -H "Authorization: Bearer $token" "$api" || true)
+    else
+        body=$(curl -fsSL "$api" || true)
+    fi
+
+    # A failed request must not read as "no PRs are open", which would archive
+    # every conversation. Insist on a JSON array before going further.
+    if ! printf '%s' "$body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "Could not list open pull requests for dcdpr/jp." >&2
+        echo "Check your network, or set JP_GITHUB_TOKEN / GITHUB_TOKEN if you're rate-limited." >&2
+        exit 1
+    fi
+    open=$(printf '%s' "$body" | jq -r '[.[].number | tostring] | join(" ")')
+
+    # `<id>:pr-<kind>:<number>` per line. Conversation ids carry no colon, so
+    # the id is everything before the first one and the PR number everything
+    # after the last.
+    convs=$(jp -F json conversation ls 2>/dev/null \
+        | jq -r '.[] | select((.Title // "") | test("^pr-(review|triage):[0-9]+$")) | "\(.ID):\(.Title)"' \
+        2>/dev/null || true)
+
+    if [ -z "$convs" ]; then
+        echo "No pr-review or pr-triage conversations found."
+        exit 0
+    fi
+
+    stale=""
+    for entry in $convs; do
+        case " $open " in
+            *" ${entry##*:} "*) continue ;;
+        esac
+        stale="${stale} ${entry}"
+    done
+
+    if [ -z "$stale" ]; then
+        echo "Nothing to archive: every conversation tracks an open pull request."
+        exit 0
+    fi
+
+    ids=""
+    echo "These conversations track pull requests that are no longer open:"
+    for entry in $stale; do
+        printf "  %s (%s)\n" "${entry#*:}" "${entry%%:*}"
+        ids="${ids} ${entry%%:*}"
+    done
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "Archive them? [Y/n] " > /dev/tty
+        IFS= read -r ans < /dev/tty
+        case "$ans" in
+            n|N|no|No|NO) echo "Nothing archived."; exit 0 ;;
+        esac
+    fi
+
+    jp conversation archive --yes $ids
+
 # Review the current diff with revdiff and send the annotations to jp for
 # triage. The assistant (personas/review-triager: dev/architect knowledge,
 # no edit tools) grounds each note against the code and responds note by
@@ -1391,6 +1462,19 @@ rfd-promote NNN: _install-jp _install-comfort
                 fi
                 echo "  backfilled ${inverse}: RFD ${num} into ${dep_file}"
             done
+        done
+
+        # The review and triage conversations are titled after the draft id,
+        # which no longer names anything. Archive them; a later cycle starts
+        # fresh under the permanent number.
+        for kind in review triage; do
+            conv_title="rfd-${kind}:${old_draft_id}"
+            conv_id=$(jp -F json conversation ls 2>/dev/null \
+                | jq -r --arg t "$conv_title" 'first(.[] | select(.Title == $t) | .ID) // empty' \
+                2>/dev/null || true)
+            [ -n "$conv_id" ] || continue
+            echo "  archiving conversation ${conv_title} (${conv_id})"
+            jp conversation archive "$conv_id" || true
         done
 
         echo "${new_file}: Draft -> Discussion (assigned ${num})"
