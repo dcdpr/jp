@@ -122,6 +122,86 @@ stage-and-commit: _install-jp
     out=$(just stage -c style.reasoning.display=hidden)
     just commit "$out - now write me a commit message"
 
+# Merge REF into the current branch and hand any conflicts to jp.
+#
+# A clean merge just reports and exits. When the merge stops on conflicts,
+# prompts where to resolve them (a [p]icked conversation, a [n]ew one, or
+# [q]uit) and sends the merge output plus `git status -sb` as the query. The
+# conflicted files stay in the working tree; jp edits them in place, and does
+# not commit or abort the merge.
+#
+# Re-running while a merge is already in progress skips the merge itself and
+# hands the outstanding conflicts over again, so a resolution that went
+# sideways can be retried in another conversation.
+#
+# A picked conversation keeps its own config; it usually already holds the
+# branch's context. A new one gets `personas/dev`, since the workspace default
+# has no file-editing tools.
+#
+# ARGS are forwarded to `jp query` as flags:
+#
+#   just git-merge main
+#   just git-merge origin/main --edit
+[group('jp')]
+[positional-arguments]
+git-merge REF="main" *ARGS: _install-jp _install-tools
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove REF from positional params
+
+    if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        merge_out="A merge is already in progress; 'git merge {{REF}}' was not re-run."
+        merge_exit=0
+        printf '%s\n' "$merge_out" >&2
+    else
+        set +e
+        merge_out=$(git merge "{{REF}}" 2>&1)
+        merge_exit=$?
+        set -e
+        printf '%s\n' "$merge_out"
+    fi
+
+    # Unmerged paths, not the exit status, decide whether there's work for jp:
+    # a merge can also fail for reasons it can't help with (dirty tree, unknown
+    # ref), and an in-progress merge may already be fully resolved.
+    conflicts=$(git diff --name-only --diff-filter=U)
+    if [ -z "$conflicts" ]; then
+        exit "$merge_exit"
+    fi
+
+    count=$(printf '%s\n' "$conflicts" | wc -l | tr -d ' ')
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "\n%s file(s) left conflicted.\n" "$count" > /dev/tty
+        printf "  Resolve in a [p]icked conversation / [n]ew conversation / [q]uit: " > /dev/tty
+        IFS= read -r ans < /dev/tty
+    else
+        ans=n
+    fi
+
+    target=""
+    persona=""
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    case "$ans" in
+        ""|p|P) jp conversation use '?' ;;
+        n|N)    target="--new --title merge:{{REF}}-into-${branch}"
+                persona="--cfg=personas/dev" ;;
+        q|Q)    exit 0 ;;
+        *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
+    esac
+
+    preamble="Please resolve the merge conflicts with {{REF}}. Read each conflicted file, \
+    work out what both sides were after, and write the resolution that keeps both intents. \
+    Where the two sides genuinely disagree, stop and tell me instead of picking one. Leave \
+    the merge uncommitted and do not run 'git merge --abort'."
+
+    printf '%s\n\n```sh\n$ git merge %s\n%s\n\n$ git status -sb\n%s\n```\n' \
+        "$preamble" "{{REF}}" "$merge_out" "$(git status -sb)" \
+        | jp query $target $persona "$@"
+
+    printf "\nReview the resolution, then 'git commit' to conclude the merge.\n" >&2
+
 # Generate changelog for the project.
 [group('build')]
 build-changelog: (_install "jilu@" + jilu_version)
