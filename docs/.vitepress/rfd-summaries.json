@@ -1,6 +1,6 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "45bbfb5aa52f98002b13208b1098392958d1a7c05f3cc8191fd93b1945fab6fa",
+    "hash": "bc7ca9d435b63751ad554e04bf6d468a2ffab7508ef47049c3e51c12c4751dc6",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
@@ -156,7 +156,7 @@
     "summary": "Hide conversations from default listings and expose conversation_id to tools for sub-agent workflows."
   },
   "041-rfd-lifecycle-enhancements.md": {
-    "hash": "c640083e40b592c53f088a16eda1a5b30dd4c20e27433cc61c48f0f06c10cf0c",
+    "hash": "00756b6d2a512e34cad82ad7d51c036f6543b06510d24e5275fa4714f6fdccba",
     "summary": "Defer RFD numbering to Discussion, auto-create tracking issues, add Extends/Extended by metadata."
   },
   "042-tool-options.md": {
@@ -390,5 +390,9 @@
   "098-request-response-event-linking.md": {
     "hash": "9e4099d9ae5835c978c66ac78fde41f8ce24313d59f33abde3e555fd3651f236",
     "summary": "Request-response linking via persistent event IDs detects answer scope under structural edits."
+  },
+  "100-in-repo-ticket-tracking.md": {
+    "hash": "18891a17a345f2857482614e2a3c5c694dddc1b6a8e3fc36a0f34accd6bc9af7",
+    "summary": "Lightweight markdown-based work items tracked in-repo, displacing GitHub issues from assistant context with kanban board and RFD promotion mechanics."
   }
 }

@@ -790,23 +790,14 @@ rfd-draft CATEGORY +TITLE:
         design)   template="design"  ;;
         decision) template="decision" ;;
         guide)    template="guide"   ;;
-        process)  template="guide"   ;;
+        process)  template="process" ;;
         *) echo "Unknown category '$category'. Use 'design', 'decision', 'guide', or 'process'." >&2; exit 1 ;;
     esac
 
     # Find the first available draft number (D01–D99).
     draft_id=$(just _rfd-next-draft-slot) || exit 1
 
-    # Resolve the author from git config, falling back to $USER.
-    git_name=$(git config user.name 2>/dev/null || true)
-    git_email=$(git config user.email 2>/dev/null || true)
-    if [ -n "$git_name" ] && [ -n "$git_email" ]; then
-        author="${git_name} <${git_email}>"
-    elif [ -n "$git_name" ]; then
-        author="$git_name"
-    else
-        author="${USER:-unknown}"
-    fi
+    author=$(just _git-author)
 
     # Capitalize the category for the metadata header.
     cap_category=$(echo "$category" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
@@ -1137,13 +1128,13 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
 # Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
 #
 # For drafts (DNN-prefixed files), assigns the next available permanent number
-# and renames the file. When promoting to Accepted, offers to create a GitHub
-# tracking issue via `jp` (prompting on TTY, defaulting to yes in
-# non-interactive runs) and injects the link into the metadata.
+# and renames the file. When promoting to Accepted, offers to turn each phase of
+# the Implementation Plan into a ticket carrying `Implements: NNN` (prompting on
+# TTY, defaulting to yes in non-interactive runs).
 #
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
-rfd-promote NNN: _install-jp _install-comfort
+rfd-promote NNN: _install-jp _install-comfort _install-ticket
     #!/usr/bin/env sh
     set -eu
 
@@ -1396,61 +1387,59 @@ rfd-promote NNN: _install-jp _install-comfort
             echo "Updated ${updated} cross-reference(s) in RFD files."
         fi
 
-    # --- Discussion -> Accepted: create tracking issue via jp ---
+    # --- Discussion -> Accepted: offer to seed phase tickets ---
     elif [ "$current" = "Discussion" ]; then
         sed "s/^- \*\*Status\*\*: Discussion/- **Status**: Accepted/" "$file" > "${file}.tmp"
         mv "${file}.tmp" "$file"
+        echo "${file}: Discussion -> Accepted"
 
-        # Decide whether to create a tracking issue. When a TTY is
-        # attached, ask the caller so they can skip issue creation. In
-        # non-interactive runs (e.g. CI), default to creating one to
-        # preserve prior behaviour.
-        create_issue=true
+        # Acceptance records an agreed direction, not a commitment to start
+        # building, so the tickets are offered rather than created. Whoever
+        # accepts reviews them before they land. Non-interactive runs default to
+        # creating them.
+        create_tickets=true
         if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-            printf "Create GitHub tracking issue for %s? [Y/n] " "$(basename "$file")" > /dev/tty
+            printf "Create phase tickets for %s? [Y/n] " "$(basename "$file")" > /dev/tty
             if IFS= read -r answer < /dev/tty; then
                 case "$answer" in
-                    n|N|no|No|NO) create_issue=false ;;
+                    n|N|no|No|NO) create_tickets=false ;;
                 esac
             fi
         fi
 
-        if [ "$create_issue" = true ]; then
-            # Create tracking issue using jp + structured output.
-            SCHEMA='{"type":"object","properties":{"number":{"type":"integer","description":"GitHub issue number"},"url":{"type":"string","description":"GitHub issue URL"}},"required":["number","url"]}'
-            PROMPT="Read the attached RFD. Create a tracking issue for it by calling the github_create_issue_rfd_tracking tool. Return the issue number and url."
-            TOOL_CFG='conversation.tools.github_create_issue_rfd_tracking:={"enable":true,"run":"unattended"}'
+        if [ "$create_tickets" = true ]; then
+            # The phases differ per RFD, so they're read out of the document
+            # rather than templated. Structured output keeps the result parseable.
+            SCHEMA='{"type":"object","properties":{"phases":{"type":"array","description":"One entry per phase of the Implementation Plan, in order","items":{"type":"object","properties":{"title":{"type":"string","description":"Imperative title, at most 60 characters"},"summary":{"type":"string","description":"What the phase delivers, one to three sentences of markdown"}},"required":["title","summary"]}}},"required":["phases"]}'
+            PROMPT="Read the attached RFD and list the phases of its Implementation Plan, in order. Give each a short imperative title and a summary of what it delivers. Return an empty array if the RFD has no Implementation Plan."
 
             result=$(
-                jp query --new --local --tmp=5m --format=json --no-reasoning \
-                    -c "$TOOL_CFG" \
+                jp query --new --local --tmp=5m --format=json --no-reasoning --no-tools \
                     --schema "$SCHEMA" \
                     --attachment "$file" \
                     "$PROMPT" \
                 | jq -s '.[-1]' 2>/dev/null
             ) || true
 
-            issue_num=$(echo "$result" | jq -r '.number // empty' 2>/dev/null || true)
-            issue_url=$(echo "$result" | jq -r '.url // empty' 2>/dev/null || true)
+            count=$(echo "$result" | jq '.phases | length' 2>/dev/null || echo 0)
+            count=${count:-0}
 
-            if [ -n "$issue_num" ] && [ -n "$issue_url" ]; then
-                first_heading=$(grep -n '^## ' "$file" | head -1 | cut -d: -f1)
-                last_meta=$(head -n "${first_heading:-9999}" "$file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
-                awk -v ln="$last_meta" -v ti="- **Tracking Issue**: [#${issue_num}](${issue_url})" '
-                    NR == ln { print; print ti; next }
-                    { print }
-                ' "$file" > "${file}.tmp"
-                mv "${file}.tmp" "$file"
-                echo "${file}: Discussion -> Accepted"
-                echo "Tracking issue: #${issue_num} (${issue_url})"
+            if [ "$count" -eq 0 ]; then
+                echo "No implementation phases found; no tickets created." >&2
             else
-                echo "${file}: Discussion -> Accepted"
-                echo "Warning: tracking issue creation failed or was skipped." >&2
-                echo "Create one manually and add '- **Tracking Issue**: #NNN' to the metadata." >&2
+                i=0
+                while [ "$i" -lt "$count" ]; do
+                    title=$(echo "$result" | jq -r ".phases[$i].title")
+                    summary=$(echo "$result" | jq -r ".phases[$i].summary")
+                    jp ticket add feature "$title" \
+                        --implements "$rfd_id" \
+                        --body "$summary"
+                    i=$((i + 1))
+                done
+                echo "Review the tickets before committing them; 'just ticket-list' shows the board."
             fi
         else
-            echo "${file}: Discussion -> Accepted"
-            echo "Skipped tracking issue creation. Add one manually if needed." >&2
+            echo "Skipped phase tickets. File them later with 'just ticket-add'." >&2
         fi
 
     # --- Accepted -> Implemented ---
@@ -1690,6 +1679,26 @@ rfd-renumber NNN MMM="":
         echo "Run \`just rfd-summaries\` to refresh the summary cache." >&2
     fi
 
+# Internal: print the commit author as `Name <email>`.
+#
+# Falls back to the bare name, then to $USER, so a checkout without git identity
+# still produces something to attribute a document to.
+[private]
+_git-author:
+    #!/usr/bin/env sh
+    set -eu
+
+    name=$(git config user.name 2>/dev/null || true)
+    email=$(git config user.email 2>/dev/null || true)
+
+    if [ -n "$name" ] && [ -n "$email" ]; then
+        echo "${name} <${email}>"
+    elif [ -n "$name" ]; then
+        echo "$name"
+    else
+        echo "${USER:-unknown}"
+    fi
+
 # Internal: print the first available draft slot id (D01–D99).
 #
 # Exits 1 when all 99 slots are in use. Callers should propagate the exit
@@ -1739,8 +1748,8 @@ _rfd-next-number:
 # Internal: rewrite an RFD id in the priority board.
 #
 # `priority.json` stores RFD ids; substitute OLD for NEW wherever the id
-# appears (the `planned` milestone groups, `backlog`, `in_development`, and
-# the legacy flat `order`). A missing board file is a no-op.
+# appears (the `planned` milestone groups, `backlog`, and the legacy flat
+# `order`). A missing board file is a no-op.
 [private]
 _rfd-priority-rewrite OLD NEW:
     #!/usr/bin/env sh
@@ -1753,7 +1762,6 @@ _rfd-priority-rewrite OLD NEW:
         (if .planned then .planned |= map(.ids |= sub_id) else . end)
         | (if .order then .order |= sub_id else . end)
         | .backlog = ((.backlog // []) | sub_id)
-        | .in_development = ((.in_development // []) | sub_id)
     ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
 
 # Mark an RFD as abandoned with the given reason.
@@ -1917,6 +1925,194 @@ rfd-grep +ARGS:
 [group('rfd')]
 rfd-list *ARGS:
     node docs/.vitepress/rfd-list.mjs {{ARGS}}
+
+# File a ticket. KIND is 'bug', 'feature', or 'chore'.
+#
+# Tickets are markdown files under `docs/ticket/`, numbered from a counter that
+# never reuses an id. Write a ticket when the work is clear enough to start, and
+# an RFD when it needs a design first.
+#
+# The author comes from your JP or git identity. Omit the title to compose the
+# ticket inline — first line the title, blank line, then the description, with
+# `Ctrl+X` to escape into your editor. Piped text seeds the buffer:
+#
+#   just ticket-add bug "Tool call header misaligned"
+#   just ticket-add bug
+#   pbpaste | just ticket-add chore "Bump the deny list"
+[group('ticket')]
+ticket-add KIND *TITLE: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    # The plugin's stdin carries the host protocol, so a piped description is
+    # read here and handed over as an argument.
+    body=""
+    if [ ! -t 0 ]; then
+        body=$(cat)
+    fi
+
+    set -- add {{quote(KIND)}}
+    if [ -n "{{TITLE}}" ]; then
+        set -- "$@" {{quote(TITLE)}}
+    fi
+    if [ -n "$body" ]; then
+        set -- "$@" --body "$body"
+    fi
+
+    jp ticket "$@"
+
+# Append a comment to a ticket.
+#
+# NNN is 42, 042, or T0042; append `#N` to reply to the Nth comment. The body
+# comes from the arguments, from stdin when piped, or from the inline composer
+# when neither is given.
+#
+#   just ticket-comment 42 "Reproduced at 72 columns."
+#   just ticket-comment 42#1 "The wrap calculation is off."
+#   git log -1 | just ticket-comment 42
+#   just ticket-comment 42
+#
+# The author comes from your JP or git identity.
+[group('ticket')]
+[positional-arguments]
+ticket-comment NNN *BODY: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+
+    # `T0042#1` addresses a comment; split the reply target off the id.
+    id="{{NNN}}"
+    re=""
+    case "$id" in
+        *'#'*) re="${id##*#}"; id="${id%%#*}" ;;
+    esac
+
+    # The plugin's stdin carries the host protocol, so a piped body is read
+    # here and handed over as an argument. With neither, the plugin asks the
+    # host to open the inline composer.
+    body=""
+    if [ "$#" -gt 0 ]; then
+        body="$*"
+    elif [ ! -t 0 ]; then
+        body=$(cat)
+    fi
+
+    set -- comment "$id"
+    if [ -n "$re" ]; then
+        set -- "$@" --re "$re"
+    fi
+    if [ -n "$body" ]; then
+        set -- "$@" --body "$body"
+    fi
+
+    jp ticket "$@"
+
+# Mark a ticket as Done. NNN is 42, 042, or T0042.
+[group('ticket')]
+ticket-close NNN: _install-ticket
+    @jp ticket close {{quote(NNN)}}
+
+# List tickets, ordered by id.
+#
+#   just ticket-list                        # every ticket
+#   just ticket-list --status "In Progress" # one column of the board
+#   just ticket-list --kind bug
+#   just ticket-list --json                 # for `jq`
+[group('ticket')]
+[positional-arguments]
+ticket-list *ARGS: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    jp ticket list "$@"
+
+# Read one ticket, with its comments numbered for replies.
+#
+# Pass `--json` for the machine-readable form.
+[group('ticket')]
+[positional-arguments]
+ticket-show NNN *ARGS: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    jp ticket show {{quote(NNN)}} "$@"
+
+# Import a GitHub issue as a ticket, or refresh one already imported.
+#
+# One way only: the title, description, and comments come from GitHub, and the
+# metadata block stays local, so triage survives the next import. Replies belong
+# on GitHub and arrive when you import again.
+#
+#   just ticket-import 123
+#   just ticket-import 123 --kind feature
+[group('ticket')]
+[positional-arguments]
+ticket-import NNN *ARGS: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    jp ticket import {{quote(NNN)}} "$@"
+
+# Promote a ticket to an RFD draft. CATEGORY is 'design' (default), 'decision',
+# 'guide', or 'process'.
+#
+# A ticket whose discussion turned into a design question becomes an RFD: the
+# draft is seeded from the ticket's title and description, and the ticket closes
+# as Done with `Promoted to` naming the draft. The work item is finished; the
+# work moved.
+#
+# Idempotent: a ticket that already names an existing draft reports it and stops,
+# so a run that failed partway can simply be repeated.
+[group('ticket')]
+ticket-promote NNN CATEGORY="design": _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    detail=$(jp ticket show {{quote(NNN)}} --json)
+    id=$(echo "$detail" | jq -r '.id')
+    title=$(echo "$detail" | jq -r '.title')
+    description=$(echo "$detail" | jq -r '.description')
+    promoted=$(echo "$detail" | jq -r '.metadata.promoted_to // empty')
+
+    if [ -n "$promoted" ]; then
+        existing=$(ls docs/rfd/drafts/${promoted}-*.md docs/rfd/${promoted}-*.md 2>/dev/null | head -1)
+        if [ -n "$existing" ]; then
+            echo "${id} is already promoted to ${promoted} (${existing})." >&2
+            exit 0
+        fi
+        echo "${id} names ${promoted}, but no such RFD exists; seeding a new draft." >&2
+    fi
+
+    out=$(just rfd-draft {{quote(CATEGORY)}} "$title")
+    echo "$out"
+    file=${out#Created }
+    draft=$(basename "$file" | sed 's/^\(D[0-9]*\)-.*/\1/')
+
+    # Seed the Summary with the ticket's description, replacing the template's
+    # placeholder prose. The remaining sections are left for the author.
+    awk -v desc="$description" -v id="$id" '
+        /^## Summary$/ {
+            print; print ""
+            if (desc != "") { print desc; print "" }
+            print "Promoted from ticket " id "."
+            print ""
+            skip = 1
+            next
+        }
+        skip && /^## / { skip = 0 }
+        skip { next }
+        { print }
+    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+
+    jp ticket promote "$id" --to "$draft"
+
+# Search across all tickets.
+[group('ticket')]
+ticket-grep +ARGS:
+    @rg {{ARGS}} docs/ticket/
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
@@ -2173,6 +2369,19 @@ _install-tools *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path .config/jp/tools --debug {{args}}
+
+# Build and install the `jp-ticket` command plugin that backs `jp ticket`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.ticket.run` in `.jp/config.toml` approves it).
+_install-ticket *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -n "${JP_NO_INSTALL:-}" ]; then
+        echo "Skipping jp-ticket rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
 
 @_install-comfort *args:
     cargo install {{quiet_flag}} --locked --path crates/contrib/comfort {{args}}

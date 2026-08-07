@@ -237,7 +237,9 @@ fn reader_loop(reader: impl BufRead, inner: &Inner, shutdown_tx: &watch::Sender<
                 let _ = shutdown_tx.send(true);
             }
 
-            HostToPlugin::Init(_) | HostToPlugin::Describe => {
+            // `Composed` answers a `Compose` request, which this plugin never
+            // sends: it serves HTTP and has no prompts to raise.
+            HostToPlugin::Init(_) | HostToPlugin::Describe | HostToPlugin::Composed(_) => {
                 warn!("Unexpected message after startup");
             }
 
