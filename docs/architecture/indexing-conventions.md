@@ -24,9 +24,18 @@ consistent and happens in exactly one place per boundary.
   rendered.
   Nothing in between carries an ambiguous "is this 0- or 1-based?" value.
 
-The boundary is the `jp_cli` resolution layer.
-`jp_config` carries user values (1-based), `jp_conversation` carries core values
-(0-based), and `jp_cli` translates between them.
+`jp_conversation` carries core values (0-based) and never sees a user value.
+Everything above it translates at the point where it parses or renders user
+input, and each such point is listed under "Where the translation lives":
+`jp_cli`'s flag parsers for `--turn`/`--from`/`--to`, and `RuleBound`'s
+`FromStr`/`Display` for config values and the inline DSL.
+
+One consequence worth knowing before touching `RuleBound`: because it normalizes
+at parse time, its `FromEnd` payload is already a 0-based offset (`FromEnd(0)`
+is the last turn, written `-1`), matching `jp_conversation::RangeBound::FromEnd`
+so the two never need a shift between them.
+`RuleBound::Absolute` is the exception — it holds the 1-based number as written
+and is shifted in `keep_first_to_bound` / `keep_last_to_bound`.
 
 ## Positions vs. counts
 

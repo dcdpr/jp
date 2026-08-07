@@ -107,8 +107,10 @@ impl clap::Args for CompactFlag {
                      LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips \
                      both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, \
                      `strip-responses`/`sres`, `omit`/`o`\n\nRange: FROM..TO (1-based, inclusive \
-                     on both ends, so 1..5 is turns 1-5), single number, or .. for \
-                     all\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20",
+                     on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA \
+                     negative bound counts from the end, where -1 is the last turn: ..-3 compacts \
+                     through the third turn from the end, leaving the final two \
+                     alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)

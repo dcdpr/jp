@@ -172,17 +172,18 @@ impl CompactionConfig {
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct CompactionRuleConfig {
-    /// Number of turns to preserve at the start of the conversation.
+    /// Start bound for compaction: where the compacted range begins.
     ///
-    /// Defaults to 1 (preserve the initial request).
+    /// Defaults to `1`, preserving the initial request.
     ///
     /// Accepts:
     ///
-    /// - a turn count (`1`),
+    /// - a turn count (`1` — preserve the first turn),
     /// - a duration (`"5h"` — preserve turns from the first 5 hours),
-    /// - a turn counted from the end (`"-5"` — start compacting at the fifth
-    ///   turn from the last),
-    /// - `"last-compaction"` — start after the most recent compaction.
+    /// - a turn position counted from the end (`"-5"` — begin at the fifth
+    ///   turn from the last, so how many turns are preserved depends on the
+    ///   length of the conversation),
+    /// - `"last-compaction"` — begin after the most recent compaction.
     ///
     /// Absolute turn numbers are not accepted: a rule is written once and
     /// applied to every conversation, so its bounds have to mean the same thing
@@ -190,16 +191,16 @@ pub struct CompactionRuleConfig {
     #[setting(default = default_keep_first)]
     pub keep_first: RuleBound,
 
-    /// Number of turns to preserve at the end of the conversation.
+    /// End bound for compaction: where the compacted range ends.
     ///
-    /// Defaults to 1 (keep the final turn).
+    /// Defaults to `1`, keeping the final turn.
     ///
     /// Accepts:
     ///
-    /// - a turn count (`3`),
+    /// - a turn count (`3` — preserve the last three turns),
     /// - a duration (`"3h"` — preserve turns from the last 3 hours),
-    /// - a turn counted from the end (`"-4"` — compact through the fourth turn
-    ///   from the last, keeping the final three).
+    /// - a turn position counted from the end (`"-4"` — end at the fourth turn
+    ///   from the last, preserving the final three).
     ///
     /// Absolute turn numbers are not accepted: a rule is written once and
     /// applied to every conversation, so its bounds have to mean the same thing

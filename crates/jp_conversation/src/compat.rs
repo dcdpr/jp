@@ -19,8 +19,9 @@ use tracing::warn;
 /// changes.
 ///
 /// 1. Strips unknown fields using the current [`AppConfig`] schema.
-/// 2. Attempts typed deserialization.
-/// 3. If that fails (e.g. a field's type changed), falls back to
+/// 2. Repairs field values whose accepted spelling has changed.
+/// 3. Attempts typed deserialization.
+/// 4. If that fails (e.g. a field's type changed), falls back to
 ///    [`PartialAppConfig::empty()`].
 ///
 /// Used for both the base config snapshot (`base_config.json`) and config delta
@@ -36,6 +37,8 @@ pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
         );
     }
 
+    migrate_legacy_rule_bounds(&mut value);
+
     match serde_json::from_value::<PartialAppConfig>(value) {
         Ok(config) => config,
         Err(err) => {
@@ -44,6 +47,65 @@ pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
                 "Stored config incompatible with current schema, replacing with empty config.",
             );
             PartialAppConfig::empty()
+        }
+    }
+}
+
+/// Repair compaction rule bounds written in a spelling the current parser no
+/// longer accepts.
+///
+/// `keep_first`/`keep_last` once accepted `"last"` for the last-compaction
+/// marker and `"@N"` for an absolute turn, and both forms reached disk.
+/// Left as-is they fail typed deserialization, which discards the entire stored
+/// config — model, tools, style and all — so they are rewritten here:
+///
+/// - `"last"` becomes `"last-compaction"`, the same bound under its current
+///   name.
+/// - `"@N"` is removed, leaving the rule to fall back to its default bound.
+///   An absolute turn describes one conversation, so a config rule has no way
+///   to express it; dropping the one field costs far less than dropping the
+///   config around it.
+fn migrate_legacy_rule_bounds(value: &mut Value) {
+    let Some(rules) = value.pointer_mut("/conversation/compaction/rules") else {
+        return;
+    };
+
+    // `rules` is a `MergeableVec`: a bare array, or an object whose `value` key
+    // holds one (the shape `ConversationStream::to_parts` writes).
+    let items = match rules {
+        Value::Array(items) => items,
+        Value::Object(obj) => match obj.get_mut("value") {
+            Some(Value::Array(items)) => items,
+            _ => return,
+        },
+        _ => return,
+    };
+
+    for rule in items {
+        let Some(rule) = rule.as_object_mut() else {
+            continue;
+        };
+
+        for key in ["keep_first", "keep_last"] {
+            let Some(bound) = rule.get(key).and_then(Value::as_str).map(str::to_owned) else {
+                continue;
+            };
+
+            if bound.eq_ignore_ascii_case("last") {
+                warn!(
+                    field = key,
+                    "Renaming stored `last` bound to `last-compaction`."
+                );
+                rule.insert(key.to_owned(), Value::String("last-compaction".to_owned()));
+            } else if bound.starts_with('@') {
+                warn!(
+                    field = key,
+                    bound = bound,
+                    "Dropping absolute turn bound from stored compaction rule; config rules \
+                     cannot name a turn. The rule falls back to its default bound.",
+                );
+                rule.remove(key);
+            }
         }
     }
 }

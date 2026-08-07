@@ -357,3 +357,68 @@ fn legacy_enable_strings_survive_compat_deserialization() {
     );
     assert_eq!(tools["off_tool"].enable, Some(PartialEnableConfig::OFF));
 }
+
+#[test]
+fn legacy_rule_bounds_survive_compat_deserialization() {
+    use jp_config::conversation::compaction::RuleBound;
+
+    // A conversation stored before `last` was renamed to `last-compaction`, and
+    // before `@N` stopped being a config spelling, must still load. The
+    // settings around the stale bound are what a hard failure would cost.
+    let value = json!({
+        "style": { "code": { "color": false } },
+        "conversation": {
+            "compaction": {
+                "rules": {
+                    "value": [
+                        { "keep_first": "last", "keep_last": 3 },
+                        { "keep_first": "@5", "keep_last": "-4" }
+                    ],
+                    "strategy": "replace"
+                }
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+
+    assert_eq!(
+        config.style.code.color,
+        Some(false),
+        "an unrelated setting must survive a stale compaction bound"
+    );
+
+    let rules = &config.conversation.compaction.rules;
+    assert_eq!(rules.len(), 2);
+    assert_eq!(rules[0].keep_first, Some(RuleBound::AfterLastCompaction));
+    assert_eq!(rules[0].keep_last, Some(RuleBound::Turns(3)));
+    assert_eq!(
+        rules[1].keep_first, None,
+        "`@5` has no config spelling, so the bound is dropped and defaulted"
+    );
+    assert_eq!(rules[1].keep_last, Some(RuleBound::FromEnd(3)));
+}
+
+#[test]
+fn legacy_rule_bounds_migrate_in_bare_array_form() {
+    use jp_config::conversation::compaction::RuleBound;
+
+    // `rules` is a `MergeableVec`, so a hand-written config or `--cfg` delta
+    // can store the bare-array form instead of the `{ value: [...] }` shape
+    // `to_parts` writes.
+    let value = json!({
+        "conversation": {
+            "compaction": {
+                "rules": [{ "keep_first": "LAST", "keep_last": "@9" }]
+            }
+        }
+    });
+
+    let rules = deserialize_partial_config(value)
+        .conversation
+        .compaction
+        .rules;
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].keep_first, Some(RuleBound::AfterLastCompaction));
+    assert_eq!(rules[0].keep_last, None);
+}
