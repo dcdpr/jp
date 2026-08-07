@@ -1327,6 +1327,68 @@ fn quote_rejects_an_attached_non_boolean_value() {
     assert!(parse_query(["jp", "q", "--quote=foo"]).is_err());
 }
 
+/// A stream whose last assistant message is a two-line reply.
+fn stream_with_assistant_reply() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("line one\nline two"))
+        .build()
+        .unwrap();
+    stream
+}
+
+#[test]
+fn quote_false_seeds_the_message_verbatim() {
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        false
+    ));
+
+    // The trailing blank line separates the seed from the reply the user is
+    // about to type below it.
+    assert_eq!(request.content, "line one\nline two\n\n");
+}
+
+#[test]
+fn quote_true_seeds_the_message_as_a_blockquote() {
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        true
+    ));
+
+    assert_eq!(request.content, "> line one\n> line two\n\n");
+}
+
+#[test]
+fn quote_seeds_above_an_already_composed_request() {
+    let mut request = ChatRequest::from("and what about X?");
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        false
+    ));
+
+    assert_eq!(request.content, "line one\nline two\n\nand what about X?");
+}
+
+#[test]
+fn quote_leaves_the_request_untouched_without_an_assistant_message() {
+    let mut request = ChatRequest::from("only my words");
+    assert!(!seed_quoted_reply(
+        &mut request,
+        &ConversationStream::new_test(),
+        true
+    ));
+
+    assert_eq!(request.content, "only my words");
+}
+
 #[test]
 fn blockquote_prefixes_each_line() {
     assert_eq!(blockquote("hello"), "> hello");

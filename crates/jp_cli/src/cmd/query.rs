@@ -716,17 +716,10 @@ impl Query {
         // between the quoted lines (mutt-style inline reply). Missing message
         // (e.g. brand new conversation) degrades to a warning and the editor
         // opens with whatever else was seeded.
-        if let Some(prefixed) = self.input.quote {
-            if let Some(message) = last_assistant_message(view) {
-                let quoted = if prefixed {
-                    blockquote(message)
-                } else {
-                    message.to_owned()
-                };
-                *chat_request = format!("{quoted}\n\n{chat_request}");
-            } else {
-                warn!("--quote: no prior assistant message in this conversation");
-            }
+        if let Some(prefixed) = self.input.quote
+            && !seed_quoted_reply(&mut chat_request, view, prefixed)
+        {
+            warn!("--quote: no prior assistant message in this conversation");
         }
 
         let (query_source, editor_provided_config) = self.edit_message(
@@ -1227,6 +1220,32 @@ fn blockquote(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Prepend the stream's last assistant message to `request` as a quoted reply
+/// seed.
+///
+/// With `prefixed` the message is marked up as a markdown blockquote, otherwise
+/// it is inserted verbatim.
+/// Returns `false` when the stream holds no assistant message, leaving
+/// `request` untouched.
+fn seed_quoted_reply(
+    request: &mut ChatRequest,
+    stream: &ConversationStream,
+    prefixed: bool,
+) -> bool {
+    let Some(message) = last_assistant_message(stream) else {
+        return false;
+    };
+
+    let quoted = if prefixed {
+        blockquote(message)
+    } else {
+        message.to_owned()
+    };
+    request.content = format!("{quoted}\n\n{request}");
+
+    true
 }
 
 /// The query text and the `--quote` seed.
