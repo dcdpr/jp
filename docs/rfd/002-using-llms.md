@@ -117,33 +117,43 @@ rewrite it for you.
 
 ### LLMs as Writers
 
-While LLMs are adept at reading and can be terrific editors, their writing is
-more mixed.
-At best, writing from LLMs is hackneyed and cliché-ridden; at worst, it brims
-with tells that reveal the prose was automatically generated.
+An LLM can write project documents, including RFDs, when the contributor
+supplies the decisions and understands them.
+JP's own RFD workflow works this way.
+Contributor and assistant discuss the problem, the contributor settles the
+scope, and the assistant then writes the document from that discussion.
 
-LLM-generated writing undermines the authenticity of not just one's prose but of
-the thinking behind it.
-If the prose is automatically generated, might the ideas be too?
-The reader can't be sure — and increasingly, the hallmarks of LLM generation
-cause readers to disengage.
+The line is between delegating the typing and delegating the thinking.
+The first is fine.
+The second is the failure this section exists to prevent.
 
-LLM-generated prose also undermines a social contract: absent LLMs, it is
-presumed that of the reader and writer, the writer has undertaken the greater
-intellectual exertion.
-If prose is LLM-generated, a reader cannot assume the writer understands their
-own ideas — they might not have read the output they tasked the LLM to produce.
+Generated prose fails in specific ways, and each has a countermeasure:
 
-The guideline is to generally not use LLMs to write prose that others will read
-as your own thinking — RFDs, design documents, substantive PR descriptions,
-important issue writeups.
-This is not an absolute.
-An LLM can be part of the writing process.
-Just consider your responsibility to yourself, to your own ideas, and to the
-reader.
+- **It hides an unsettled decision.** Fluent prose about an open question reads
+  like a resolved one.
+  Settle the scope in conversation before asking for a draft.
+- **It manufactures agreement.** A model will write "we chose X because Y" for
+  an X nobody chose.
+  Read the result against what was actually discussed.
+- **It grows.** Every review round invites another caveat, and a long document
+  is not evidence that anyone resolved the design.
+  The prose budgets and the bounded review cycle in [RFD 001] exist for this.
+- **It carries tells.** Machine-generated prose is cliché-ridden by default, and
+  readers disengage once they notice.
+  The countermeasure is the project's voice rules applied to generated text, not
+  abstention.
 
-For mechanical prose — commit messages, changelog entries, boilerplate
-documentation — LLM generation is fine, provided you review the output.
+The contributor owns the problem, the decisions, and the final approval.
+The assistant writes and revises the prose.
+Before approving, the contributor reads the result and confirms it says what was
+agreed.
+
+**Automated review does not substitute for that approval.** Two models clearing
+a document tells you they agree, which is not the same as the document being
+right.
+
+For mechanical prose, such as commit messages, changelog entries, and
+boilerplate documentation, LLM generation is fine when you check the output.
 
 ### LLMs as Code Reviewers
 
@@ -273,6 +283,7 @@ The quality and correctness of the result is your responsibility.
 - [RFD 001: The JP RFD Process] — how we write and manage RFDs.
 
 [RFD 001: The JP RFD Process]: 001-jp-rfd-process.md
+[RFD 001]: 001-jp-rfd-process.md
 [oxide-rfd-576]: https://rfd.shared.oxide.computer/rfd/0576
 [rfc-3]: https://datatracker.ietf.org/doc/html/rfc3
 [rubber-duck]: https://en.wikipedia.org/wiki/Rubber_duck_debugging

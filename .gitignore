@@ -2,6 +2,10 @@
 /.jp/conversations/.trash
 /.jp/mcp/state/
 
+# Carry-over ledgers written by `just rfd-cycle`. Scaffolding for the review
+# handoff, with the same lifetime as the cycle's commits.
+/.jp/rfd-cycle/
+
 # Rust specific
 **/target
 /.cargo/config.toml

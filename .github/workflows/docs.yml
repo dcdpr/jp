@@ -52,6 +52,7 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       - uses: actions/configure-pages@d5606572c479bee637007364c6b4800ac4fc8573 # v5
       - run: corepack enable
+      - run: just rfd-lint-ci
       - run: just build-changelog > change-log.md
       # Fetch the plugin registry before the build so VitePress copies it from
       # the public directory into the deployed site (served at /plugins.json).

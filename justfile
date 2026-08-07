@@ -96,10 +96,10 @@ commit *ARGS: _install-jp
 
     msg="Give me a commit message"
 
-    args=$(just _shape-args "$msg" "$@")
+    args=$(just _shape-args personas/committer "$msg" "$@")
     branch=$(git rev-parse --abbrev-ref HEAD)
 
-    jp query --new --local --tmp=1h --title="just commit ($branch)" --cfg=personas/committer $args || exit 1
+    jp query --new --local --tmp=1h --title="just commit ($branch)" $args || exit 1
     git commit --amend
 
 [group('jp')]
@@ -111,15 +111,18 @@ stage *ARGS: _install-jp
     msg="Find related changes in the git diff and stage ONE set of changes in preparation for a \
     commit using the 'git_stage_patch' tool. Follow your prompt instructions carefully."
 
-    args=$(just _shape-args "$msg" "$@")
+    args=$(just _shape-args personas/stager "$msg" "$@")
 
-    jp query --new --local --tmp=1h --cfg=personas/stager $args
+    jp query --new --local --tmp=1h $args
 
 stage-and-commit: _install-jp
     #!/usr/bin/env sh
     set -eu
 
-    out=$(just stage -c style.reasoning.display=hidden)
+    # `--hide-reasoning` rather than `-c style.reasoning.display=hidden`:
+    # command flags are applied after the config pipeline, so they beat the
+    # persona. A `-c` no longer does.
+    out=$(just stage --hide-reasoning)
     just commit "$out - now write me a commit message"
 
 # Generate changelog for the project.
@@ -135,18 +138,73 @@ profile-heap *ARGS:
 
     cargo run --profile profiling --features dhat -- "$@"
 
-# Ask JP to create a new RFD based on the current conversation context.
-[group('jp')]
+# Outline an RFD from the current conversation. Stage 1 of two.
+#
+# Writes no file. The author reads the discussion you just had, decides
+# whether it warrants an RFD at all, picks a category, and emits an outline
+# with a per-section word budget plus a list of what it is dropping from the
+# discussion.
+#
+# This is the scope gate. Cutting a section costs one line here and an
+# argument after review has attached findings to it. Approve or redirect the
+# outline, then run `just rfd-write`.
+[group('rfd')]
 [positional-arguments]
 rfd-this *ARGS: _install-jp
     #!/usr/bin/env sh
     set -eu
 
-    msg="I gave you the RFD skill, use it to codify all that we just discussed and concluded in a feature request RFD."
+    msg="Stage 1: outline. Codify what we just discussed and concluded into an \
+    RFD outline. First decide whether this warrants an RFD at all rather than \
+    a ticket, using the expensive-to-reverse-contract test. Then pick the \
+    category and justify it, and emit the outline in the required shape with \
+    a per-section word budget that sums to at or under the target. List what \
+    you are dropping from the discussion. Write no file."
 
-    args=$(just _shape-args "$msg" "$@")
+    args=$(just _shape-args personas/rfd-author "$msg" "$@")
 
-    jp query --cfg=skill/rfd $args
+    jp query $args
+
+# Write the RFD draft from the approved outline. Stage 2 of two.
+#
+# Runs in the same conversation as `just rfd-this`, so the author still holds
+# the outline you approved. Creates the file and writes it to the outline's
+# section budgets.
+#
+# The draft ID isn't known until the author picks a slot, so it is read back
+# out of the conversation afterwards to make the follow-up commands
+# copy-pasteable.
+[group('rfd')]
+[positional-arguments]
+rfd-write *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    msg="Stage 2: draft. Write the RFD from the outline I approved. Create the \
+    file with rfd_draft, then fill it in section by section, respecting each \
+    section's word budget. Follow the outline: do not add sections I did not \
+    approve. Run your cut pass before reporting done, and report the final \
+    prose word count against the target."
+
+    args=$(just _shape-args personas/rfd-author "$msg" "$@")
+
+    jp query $args
+
+    # `rfd_draft` echoes `Created docs/rfd/drafts/DNN-slug.md`, so the id is in
+    # the conversation even though the recipe never saw it. Tool results are
+    # chrome, which `jp` writes to stderr, hence `2>&1`. `tail -1` picks the
+    # most recent, which matters when the same conversation drafted more than
+    # once.
+    rfd_id=$(NO_COLOR=1 jp conversation print -s full 2>&1 \
+        | rg -o 'Created docs/rfd/drafts/(D[0-9]{2})' -r '$1' \
+        | tail -1 || true)
+
+    if [ -n "$rfd_id" ]; then
+        printf "\nRun 'just rfd-lint %s' to check it, then 'just rfd-cycle %s' to review.\n" \
+            "$rfd_id" "$rfd_id" >&2
+    else
+        printf "\nNo draft was created. Run 'just rfd-lint <id>' and 'just rfd-cycle <id>' once one exists.\n" >&2
+    fi
 
 # Review a GitHub pull request, queueing inline comments to a draft review.
 #
@@ -175,7 +233,7 @@ pr-review NNN *ARGS: _install-jp _install-tools
     overall take, mergeability). Do NOT submit the review yourself — leave \
     it as a draft."
 
-    args=$(just _shape-args "$msg" "$@")
+    args=$(just _shape-args personas/pr-reviewer "$msg" "$@")
 
     # Tell the reviewer whether the working tree holds this PR's code, so it
     # prefers the local fs_*/git_* tools over the slower github_* ones.
@@ -205,13 +263,13 @@ pr-review NNN *ARGS: _install-jp _install-tools
 
     if [ -n "$existing" ]; then
         printf "Resuming review on PR #{{NNN}} (%s)\n\n" "$existing" >&2
-        jp query --id "$existing" --cfg=personas/pr-reviewer \
+        jp query --id "$existing" \
             --attach "gh:pull/{{NNN}}/diff" \
             --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
     else
         printf "Reviewing PR #{{NNN}}\n\n" >&2
-        jp query --new --title "$title" --cfg=personas/pr-reviewer \
+        jp query --new --title "$title" \
             --attach "gh:pull/{{NNN}}/diff" \
             --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
@@ -253,7 +311,7 @@ pr-triage NNN *ARGS: _install-jp _install-tools
     edit any files and do NOT post replies yet — output the triage as \
     plain markdown only."
 
-    args=$(just _shape-args "$msg" "$@")
+    args=$(just _shape-args personas/pr-triager "$msg" "$@")
 
     # Tell the triager whether the working tree holds this PR's code, so it
     # prefers the local fs_*/git_* tools over the slower github_* ones.
@@ -285,7 +343,7 @@ pr-triage NNN *ARGS: _install-jp _install-tools
             case "$ans" in
                 p|P|"")
                     jp conversation use '?session'
-                    jp query --cfg=personas/pr-triager \
+                    jp query \
                         --attach "gh:pull/{{NNN}}/diff" \
                         --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
                         $args
@@ -310,13 +368,13 @@ pr-triage NNN *ARGS: _install-jp _install-tools
 
     if [ -n "$existing" ]; then
         printf "Resuming triage on PR #{{NNN}} (%s)\n\n" "$existing" >&2
-        jp query --id "$existing" --cfg=personas/pr-triager \
+        jp query --id "$existing" \
             --attach "gh:pull/{{NNN}}/diff" \
             --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
     else
         printf "Triaging PR #{{NNN}}\n\n" >&2
-        jp query --new --title "$title" --cfg=personas/pr-triager \
+        jp query --new --title "$title" \
             --attach "gh:pull/{{NNN}}/diff" \
             --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
@@ -517,11 +575,12 @@ rfd-review NNN *ARGS: _install-jp
     set -eu
 
     shift # remove NNN from positional params
-    msg="Please review the attached RFD. Review the RFD in isolation, \
-    including its explicit dependencies, or any implicit dependencies, but \
-    keep in mind that Draft RFDs are still in the design phase, and Discussion \
-    RFDs are aspirational, but not necessarily final, so any inconsistencies \
-    against those should be noted, but not blockers."
+    msg="Review the attached RFD. Review it in isolation, including its \
+    explicit and implicit dependencies, but keep in mind that Draft RFDs are \
+    still in the design phase and Discussion RFDs are aspirational, so \
+    inconsistencies against those belong under Noted, not in a finding. \
+    Respect the Non-Goals section as the binding scope contract. End with \
+    the verdict line."
 
     out=$(just _rfd-resolve "{{NNN}}") || exit 1
     rfd_id="${out%% *}"
@@ -566,11 +625,11 @@ rfd-review NNN *ARGS: _install-jp
         *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
     esac
 
-    args=$(just _shape-args "$msg" "$@")
+    args=$(just _shape-args personas/rfd-reviewer "$msg" "$@")
 
     if [ -n "$existing" ]; then
         printf "Resuming review on $file (%s)\n\n" "$existing" >&2
-        jp query --id "$existing" --cfg=personas/rfd-reviewer \
+        jp query --id "$existing" \
             --attach "$file" \
             $triage_attach \
             $note_attach \
@@ -578,7 +637,7 @@ rfd-review NNN *ARGS: _install-jp
             $args
     else
         printf "Reviewing $file\n\n" >&2
-        jp query --new --title "$title" --cfg=personas/rfd-reviewer \
+        jp query --new --title "$title" \
             --attach "$file" \
             $note_attach \
             $extra_edit \
@@ -610,11 +669,12 @@ rfd-triage NNN *ARGS: _install-jp
 
     shift # remove NNN from positional params
     msg="I received feedback on the RFD. Read the attached reviewer response \
-    carefully, then triage it item by item. Ground each point against the code \
-    and related RFDs. Do not assume the feedback is correct. For each item \
-    give a verdict (accept / amend / dismiss / defer) with reasoning, and for \
-    accepted or amended items describe the concrete change you would make to \
-    the RFD. Do NOT edit the RFD yet; give your opinion first."
+    carefully, then triage its findings item by item. Ignore everything under \
+    the reviewer's Noted heading. Ground each point against the code and \
+    related RFDs; do not assume the feedback is correct. Give each item a \
+    verdict with reasoning, describe the concrete change for accepted and \
+    amended items, and report the word delta per item and in total. Do NOT \
+    edit the RFD; give your opinion first."
 
     out=$(just _rfd-resolve "{{NNN}}") || exit 1
     rfd_id="${out%% *}"
@@ -679,15 +739,518 @@ rfd-triage NNN *ARGS: _install-jp
         *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
     esac
 
-    args=$(just _shape-args "$msg" "$@")
+    args=$(just _shape-args personas/rfd-triager "$msg" "$@")
 
     printf "Triaging feedback on $file\n\n" >&2
-    jp query $target --cfg=personas/rfd-triager \
+    jp query $target \
         --attach "file://$file" \
         --attach "jp://${review_id}?select=u,a:-1" \
         $note_attach \
         $extra_edit \
         $args
+
+# Lint RFDs: prose budget, sentence length, hedging, banned vocabulary, link
+# hygiene, metadata, leftover template text.
+#
+# With no arguments, lints every RFD and draft. Severity depends on lifecycle:
+# Draft and Discussion documents are held to the style rules as errors,
+# Accepted and later get warnings, because RFD 001 says not to churn the
+# permanent record.
+#
+#   just rfd-lint                  # everything
+#   just rfd-lint 070 D33          # named ids
+#   just rfd-lint --summary        # word-count table, no findings
+#   just rfd-lint 070 --since HEAD~1   # with prose word delta
+#   just rfd-lint --errors-only
+#   just rfd-lint --json
+[group('rfd')]
+rfd-lint *ARGS:
+    @node docs/.vitepress/rfd-lint.mjs {{ARGS}}
+
+# Fail on RFD lint errors for the RFDs this branch touches.
+#
+# Scoped to changed files on purpose. The published corpus predates these
+# rules and lighting it all up red on every build would train everyone to
+# ignore the check.
+[group('ci')]
+rfd-lint-ci:
+    #!/usr/bin/env sh
+    set -eu
+
+    base="${GITHUB_BASE_REF:-main}"
+    changed=$(git diff --name-only "origin/${base}...HEAD" -- \
+        'docs/rfd/*.md' 'docs/rfd/drafts/*.md' 2>/dev/null || true)
+
+    ids=""
+    for f in $changed; do
+        [ -f "$f" ] || continue
+        id=$(basename "$f" | sed 's/^\(D\{0,1\}[0-9]*\)-.*/\1/')
+        case "$id" in 000|'') continue ;; esac
+        ids="$ids $id"
+    done
+
+    if [ -z "$ids" ]; then
+        echo "No RFDs changed on this branch; nothing to lint." >&2
+        exit 0
+    fi
+
+    node docs/.vitepress/rfd-lint.mjs $ids --errors-only
+
+# Cut an RFD down without changing what it says.
+#
+# A single-purpose pass: same technical content, fewer words. Deliberately
+# separate from review, because "is the design right" and "is the prose tight"
+# are different questions and they fight when asked in the same conversation.
+#
+# Run it once when the design has converged, not every round.
+[group('rfd')]
+[positional-arguments]
+rfd-prose NNN *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
+
+    msg="Cut this RFD down. The technical content is fixed: every claim, \
+    decision, constraint, trade-off and Non-Goal survives unchanged. What does \
+    not survive is the words spent saying them. Apply the cuts, then report \
+    the before and after word counts."
+
+    args=$(just _shape-args personas/rfd-prose "$msg" "$@")
+
+    printf "Cutting %s\n\n" "$file" >&2
+    jp query --new --title "rfd-prose:${rfd_id}" \
+        --attach "file://$file" \
+        $args
+
+    printf "\n" >&2
+    node docs/.vitepress/rfd-lint.mjs "$rfd_id" || true
+
+# Run the review cycle unattended until the reviewer clears the RFD.
+#
+# Each round is review -> triage -> apply -> lint, committed as one commit, so
+# you read the cycle as a diff instead of as a conversation. The loop stops on
+# the first of: the reviewer returning `VERDICT: CLEAR`, an `ESCALATE:` from
+# either side, or the round budget running out.
+#
+# Repeat disagreement is the one thing that genuinely needs a human, so it is
+# the only thing that interrupts the cycle.
+#
+# Requires a clean working tree for the RFD file. Start at 2 rounds until you
+# trust the digests; `git reset` to a round boundary if one goes bad.
+#
+#   just rfd-cycle D33
+#   just rfd-cycle 070 4
+[group('rfd')]
+rfd-cycle NNN ROUNDS="3": _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
+    rounds="{{ROUNDS}}"
+
+    case "$rounds" in
+        ''|*[!0-9]*|0) echo "ROUNDS must be a positive integer." >&2; exit 1 ;;
+    esac
+
+    if [ -n "$(git status --porcelain -- "$file")" ]; then
+        echo "Refusing to cycle: $file has uncommitted changes." >&2
+        echo "Each round is committed on its own so the cycle reads as a diff." >&2
+        exit 1
+    fi
+
+    base=$(git rev-parse HEAD)
+    short=$(git rev-parse --short HEAD)
+
+    # Scope containment. The applier runs unattended with write access, and it
+    # is *told* to touch only the RFD. Telling is not enforcing: an applier
+    # that edits a source file leaves it dirty, uncommitted, and invisible,
+    # because the per-round commit is path-scoped. Snapshot everything else in
+    # the tree and abort the moment it moves.
+    #
+    # Snapshotting rather than refusing also means the cycle tolerates a dirty
+    # worktree: unrelated work in progress is the baseline, not a blocker.
+    tree_snapshot() {
+        git status --porcelain | grep -v "[[:space:]]${file}$" || true
+    }
+    tree_before=$(tree_snapshot)
+
+    check_scope() {
+        now=$(tree_snapshot)
+        if [ "$now" != "$tree_before" ]; then
+            printf "\nAborting: something outside %s changed during this cycle.\n" \
+                "$file" >&2
+            printf "The applier may only edit the RFD.\n\nbefore:\n%s\n\nnow:\n%s\n" \
+                "$tree_before" "$now" >&2
+            exit 1
+        fi
+    }
+
+    # Start each cycle from fresh conversations. The reviewer needs memory
+    # across rounds within a cycle (that is what the no-new-findings rule
+    # rests on) and no memory of the last one.
+    for kind in review triage apply; do
+        old=$(just _rfd-conversation-id "rfd-${kind}:${rfd_id}")
+        if [ -n "$old" ]; then
+            jp conversation archive "$old" </dev/null >/dev/null 2>&1 || true
+        fi
+    done
+
+    printf "cycling %s, up to %s round(s), from %s\n" "$file" "$rounds" "$short" >&2
+
+    round=1
+    ran=0
+    verdict=""
+    escalated=""
+    rv_id=""
+    tg_id=""
+    tallies=""
+
+    while [ "$round" -le "$rounds" ]; do
+        ran=$round
+
+        # --- review
+        printf "\n===== round %s/%s: review =====\n\n" "$round" "$rounds" >&2
+        if [ "$round" -eq 1 ]; then
+            rv_target="--new --title rfd-review:${rfd_id}"
+            rv_extra=""
+        else
+            rv_target="--id $(just _rfd-conversation-id "rfd-review:${rfd_id}")"
+            rv_extra="--attach jp://$(just _rfd-conversation-id "rfd-triage:${rfd_id}")?select=u,a:-1"
+        fi
+
+        rmsg="Round ${round} of ${rounds} in this review cycle. Apply your \
+        round-${round} finding budget. Respect the Non-Goals section as the \
+        binding scope contract. Post only findings where a named input \
+        produces damage that spreads or hides; everything else goes under \
+        Noted. End with the verdict line and nothing after it."
+
+        # Let the query stream straight to the terminal: colour, live output,
+        # no pipe. The verdict is read back out of the conversation instead of
+        # scraped from a captured stream, so nothing here has to understand
+        # ANSI. `tail -1` takes the newest verdict, since earlier rounds of
+        # this cycle are in the same conversation.
+        jp query $rv_target --cfg=personas/rfd-reviewer \
+            --attach "file://$file" \
+            $rv_extra \
+            -- "$rmsg"
+
+        rv_id=$(just _rfd-conversation-id "rfd-review:${rfd_id}")
+        rv_log=$(jp conversation print "$rv_id" -s full 2>&1 || true)
+
+        verdict=$(printf '%s\n' "$rv_log" \
+            | rg -o 'VERDICT: *(CLEAR|BLOCK)' -r '$1' | tail -1 || true)
+        if printf '%s\n' "$rv_log" | rg -q 'ESCALATE:'; then
+            escalated="reviewer, round ${round}"
+        fi
+
+        case "$verdict" in
+            CLEAR)
+                printf "\nreviewer cleared the RFD at round %s\n" "$round" >&2
+                break ;;
+            BLOCK) ;;
+            *)
+                printf "\nno verdict line in round %s; stopping the cycle\n" "$round" >&2
+                break ;;
+        esac
+
+        # --- triage
+        printf "\n===== round %s/%s: triage =====\n\n" "$round" "$rounds" >&2
+        if [ "$round" -eq 1 ]; then
+            tg_target="--new --title rfd-triage:${rfd_id}"
+        else
+            tg_target="--id $(just _rfd-conversation-id "rfd-triage:${rfd_id}")"
+        fi
+
+        tmsg="Triage round ${round}. Read the attached reviewer findings and \
+        rule on each one. Ignore everything under the reviewer's Noted \
+        heading. Ground every verdict against the code. Decline is the default \
+        for anything without a named input, and a Decline produces no edit to \
+        the RFD. Report the word delta per item and in total."
+
+        # The triager has no command tool, so it cannot run the linter itself.
+        # Left to hand-count it will be wrong by a hundred words or more, and
+        # it rations its edits against that number. Give it the real one.
+        tmsg=$(printf '%s\n\nCurrent state per `just rfd-lint %s`, do not re-derive it by hand:\n\n%s' \
+            "$tmsg" "$rfd_id" \
+            "$(node docs/.vitepress/rfd-lint.mjs "$rfd_id" 2>&1 || true)")
+
+        # The triager edits in confirmation mode when driven by hand. In an
+        # unattended cycle a confirmation prompt would hang on a pipe, and
+        # the applier owns the edits anyway.
+        jp query $tg_target --cfg=personas/rfd-triager \
+            --cfg conversation.tools.fs_modify_file.enable=false \
+            --cfg conversation.tools.fs_create_file.enable=false \
+            --attach "file://$file" \
+            --attach "jp://${rv_id}?select=u,a:-1" \
+            -- "$tmsg"
+
+        tg_id=$(just _rfd-conversation-id "rfd-triage:${rfd_id}")
+        tg_log=$(jp conversation print "$tg_id" -s full 2>&1 || true)
+
+        if printf '%s\n' "$tg_log" | rg -q '\bESCALATE\b'; then
+            escalated="${escalated:+${escalated}; }triager, round ${round}"
+        fi
+
+        # The triager closes with a `TRIAGE: accepted=.. declined=..` footer.
+        # A one-line footer rather than a schema, because constraining the
+        # triage to JSON would flatten the prose the carry-over ledger is
+        # built from, and these counts are a calibration signal, not a gate.
+        tally=$(printf '%s\n' "$tg_log" | rg -o '^TRIAGE: .*' | tail -1 || true)
+        if [ -n "$tally" ]; then
+            tallies=$(printf '%s\n  round %s: %s' \
+                "$tallies" "$round" "${tally#TRIAGE: }")
+        fi
+
+        # --- apply
+        printf "\n===== round %s/%s: apply =====\n\n" "$round" "$rounds" >&2
+        if [ "$round" -eq 1 ]; then
+            ap_target="--new --title rfd-apply:${rfd_id}"
+        else
+            ap_target="--id $(just _rfd-conversation-id "rfd-apply:${rfd_id}")"
+        fi
+
+        amsg="Apply the accepted and amended items from the attached triage to \
+        ${file}. Every other verdict produces no edit. Do not reconsider a \
+        verdict and do not improve on a described edit."
+
+        jp query $ap_target --cfg=personas/rfd-applier \
+            --attach "file://$file" \
+            --attach "jp://${tg_id}?select=u,a:-1" \
+            -- "$amsg"
+
+        ap_id=$(just _rfd-conversation-id "rfd-apply:${rfd_id}")
+
+        # --- lint, fed straight back to the applier
+        printf "\n===== round %s/%s: lint =====\n\n" "$round" "$rounds" >&2
+        # A non-zero exit means errors, not warnings. The applier gets the
+        # whole report either way, so it cleans the style findings while it
+        # is in there.
+        if ! lint_out=$(node docs/.vitepress/rfd-lint.mjs "$rfd_id" 2>&1); then
+            printf '%s\n\nasking the applier to fix these\n\n' "$lint_out" >&2
+            fixmsg=$(printf '%s reports the following on %s. Clear every error, and fix the warnings that fall in text you touched. A budget failure is fixed by cutting, never by adding an Over budget field.\n\n%s' \
+                'just rfd-lint' "$file" "$lint_out")
+            jp query --id "$ap_id" --cfg=personas/rfd-applier \
+                --attach "file://$file" \
+                -- "$fixmsg"
+            node docs/.vitepress/rfd-lint.mjs "$rfd_id" >&2 || true
+        else
+            printf '%s\n' "$lint_out" >&2
+        fi
+
+        check_scope
+
+        # --- commit the round
+        #
+        # `--only "$file"` rather than `git add` plus a bare commit: a bare
+        # commit takes whatever else is staged, and these are throwaway
+        # checkpoints, not history. Nothing outside the RFD file can end up in
+        # them, and `git reset --soft` at the end collapses the lot.
+        if [ -n "$(git status --porcelain -- "$file")" ]; then
+            git commit -q --only "$file" \
+                -m "rfd(${rfd_id}): review cycle round ${round}"
+            printf "\ncommitted round %s\n" "$round" >&2
+        else
+            printf "\nround %s produced no edits\n" "$round" >&2
+        fi
+
+        if [ -n "$escalated" ]; then
+            printf "\nescalation raised (%s); stopping the cycle\n" "$escalated" >&2
+            break
+        fi
+
+        round=$((round + 1))
+    done
+
+    # --- digest
+    #
+    # Readiness is a checklist, not a single verdict. Two models agreeing is
+    # not a completion criterion: they can agree on a bad document, or keep
+    # disagreeing forever. What ends the cycle is the reviewer clearing it AND
+    # the deterministic checks passing.
+    lint_json=$(node docs/.vitepress/rfd-lint.mjs "$rfd_id" --json 2>/dev/null || true)
+    lint_errors=$(printf '%s' "$lint_json" | jq -r '.errors // "?"' 2>/dev/null || echo '?')
+    lint_warnings=$(printf '%s' "$lint_json" | jq -r '.warnings // "?"' 2>/dev/null || echo '?')
+    words=$(printf '%s' "$lint_json" | jq -r '.files[0].words // "?"' 2>/dev/null || echo '?')
+    target=$(printf '%s' "$lint_json" | jq -r '.files[0].target // "?"' 2>/dev/null || echo '?')
+
+    ready=yes
+    [ "$verdict" = "CLEAR" ] || ready=no
+    [ "$lint_errors" = "0" ] || ready=no
+    [ -z "$escalated" ] || ready=no
+
+    printf "\n\n===== cycle digest: RFD %s =====\n\n" "$rfd_id" >&2
+    printf "ready:            %s\n" "$ready" >&2
+    printf "  verdict         %s\n" "${verdict:-none returned}" >&2
+    printf "  lint errors     %s\n" "$lint_errors" >&2
+    printf "  lint warnings   %s\n" "$lint_warnings" >&2
+    printf "  words           %s of %s target\n" "$words" "$target" >&2
+    printf "  rounds run      %s of %s\n" "$ran" "$rounds" >&2
+    if [ -n "$tallies" ]; then
+        printf "\ntriage tallies:%s\n" "$tallies" >&2
+    fi
+    if [ -n "$escalated" ]; then
+        printf "  escalated       %s\n" "$escalated" >&2
+        printf "                  a human settles these; the cycle stopped rather than argue.\n" >&2
+    fi
+
+    printf "\ncommits this cycle:\n" >&2
+    git --no-pager log --oneline "${base}..HEAD" -- "$file" >&2 || true
+
+    # --- carry-over ledger
+    #
+    # Everything the cycle raised and dropped lives in two conversations that
+    # nobody will scroll back through. Extract it into a file so it can sit
+    # beside the RFD in `just rfd-signoff`, where each line is annotatable.
+    if [ -n "$rv_id" ]; then
+        mkdir -p .jp/rfd-cycle
+        carryover=".jp/rfd-cycle/${rfd_id}-carryover.md"
+
+        printf "\nwriting the carry-over ledger\n\n" >&2
+        co_attach="--attach jp://${rv_id}"
+        if [ -n "$tg_id" ]; then
+            co_attach="$co_attach --attach jp://${tg_id}"
+        fi
+
+        jp query --new --local --tmp=24h --title "rfd-carryover:${rfd_id}" \
+            $co_attach \
+            --cfg=personas/rfd-carryover \
+            -- "Write the carry-over ledger for RFD ${rfd_id} to ${carryover}. \
+            The attached conversations are this cycle's review and triage."
+    fi
+
+    printf "\nlint and word delta:\n" >&2
+    node docs/.vitepress/rfd-lint.mjs "$rfd_id" --since "$base" >&2 || true
+
+    printf "\nread the whole cycle as one diff:\n  git diff %s..HEAD -- %s\n" "$short" "$file" >&2
+    printf "back out the last round:\n  git reset --hard HEAD~1\n" >&2
+    printf "collapse every round into staged changes, ready for your own commit:\n  git reset --soft %s\n" "$short" >&2
+    printf "\nyour turn:\n  just rfd-signoff %s\n" "$rfd_id" >&2
+
+    # Exit codes, so the cycle composes into a script:
+    #   0  ready: reviewer cleared it and the checks pass
+    #   1  needs a human: escalation, or no verdict came back
+    #   2  blockers remain after the round limit, or checks still fail
+    if [ -n "$escalated" ] || [ -z "$verdict" ]; then
+        exit 1
+    fi
+    if [ "$ready" = "no" ]; then
+        exit 2
+    fi
+
+# Your review of an RFD, and the decision that ends the pipeline.
+#
+# Opens the RFD in `revdiff` alongside the carry-over ledger the last cycle
+# wrote, so the findings that were raised and dropped sit next to the document
+# instead of hundreds of lines up a conversation. Annotate either file.
+#
+# A note on a carry-over line means "pick this back up". A note on the RFD is a
+# direct instruction. Both go to the applier, which makes the edits, and which
+# reports back anything needing a design change rather than guessing at one.
+#
+# Leaving no notes is the verdict: the RFD is done, and the recipe prints the
+# promote command. Nothing is promoted automatically, because that is a one-way
+# door.
+#
+# ARGS are forwarded to the `jp query` that receives the notes.
+#
+#   just rfd-signoff D52
+#   just rfd-signoff 070 --edit
+[group('rfd')]
+rfd-signoff NNN *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! command -v revdiff >/dev/null 2>&1; then
+        echo "revdiff not found on PATH." >&2
+        echo "Install via 'brew install umputun/apps/revdiff' or see" >&2
+        echo "https://github.com/umputun/revdiff/releases for binaries." >&2
+        exit 1
+    fi
+
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
+
+    # `--only` is revdiff's context-only mode: a file with no VCS changes is
+    # read from disk and shown in full, still annotatable. A file that does
+    # have uncommitted changes shows its diff, which is also what you want
+    # when you are re-reading after an applier run.
+    rev_args="--only=$file"
+
+    carryover=".jp/rfd-cycle/${rfd_id}-carryover.md"
+    if [ -f "$carryover" ]; then
+        rev_args="$rev_args --only=$carryover"
+        printf "Carry-over from the last cycle: %s\n" "$carryover" >&2
+    else
+        printf "No carry-over ledger yet; run 'just rfd-cycle %s' to produce one.\n" \
+            "$rfd_id" >&2
+    fi
+
+    annotations=$(mktemp)
+    set +e
+    revdiff --output="$annotations" --vim-motion --word-diff --cross-file-hunks $rev_args
+    rev_exit=$?
+    notes=$(cat "$annotations")
+    rm -f "$annotations"
+    set -e
+    if [ "$rev_exit" -ne 0 ]; then
+        exit "$rev_exit"
+    fi
+
+    if [ -z "$notes" ]; then
+        printf "\nNo notes. %s is signed off.\n\n" "$rfd_id" >&2
+        printf "  just rfd-promote %s\n" "$rfd_id" >&2
+        exit 0
+    fi
+
+    preamble="Below are my review notes on ${file}, taken in revdiff, in the \
+    fenced block. Each record header is \`## path:line[-line] (+|-| )\` anchored \
+    to a position in the reviewed file, or \`## path (file-level)\` for a note \
+    about a file as a whole.
+
+    These are the author's decisions, not a reviewer's findings. Do not triage \
+    them, do not rule on them, apply them.
+
+    A note anchored to ${carryover} means: pick that item back up. The item is \
+    something an earlier review round raised and the triage dropped. Act on it \
+    in the RFD; never edit the ledger.
+
+    If a note needs a design change you cannot make mechanically, do not guess. \
+    Leave that part of the document alone and list it at the end under 'needs \
+    the author'."
+
+    printf '%s\n\n```markdown\n%s\n```\n' "$preamble" "$notes" \
+        | jp query --new --title "rfd-signoff:${rfd_id}" {{ARGS}} \
+            --cfg=personas/rfd-applier \
+            --attach "file://$file"
+
+    printf "\n" >&2
+    node docs/.vitepress/rfd-lint.mjs "$rfd_id" >&2 || true
+
+    if [ -n "$(git status --porcelain -- "$file")" ]; then
+        git commit -q --only "$file" -m "rfd(${rfd_id}): author signoff notes"
+        printf "\ncommitted your notes\n" >&2
+    else
+        printf "\nno edits were made\n" >&2
+    fi
+
+    printf "\nre-read it:            just rfd-signoff %s\n" "$rfd_id" >&2
+    printf "confirming agent round: just rfd-cycle %s 1\n" "$rfd_id" >&2
+
+# Internal: print the conversation ID for a title, or nothing.
+[no-exit-message]
+[private]
+_rfd-conversation-id TITLE:
+    @jp -F json conversation ls 2>/dev/null \
+        | jq -r --arg t "{{TITLE}}" 'first(.[] | select(.Title == $t) | .ID) // empty' \
+        2>/dev/null || true
 
 # Implement an Accepted RFD. Accepts a permanent number (41, 041).
 #
@@ -759,18 +1322,18 @@ rfd-implement NNN *ARGS: _install-jp
         *)         echo "Unexpected from _bear-note: $note_out" >&2; exit 1 ;;
     esac
 
-    args=$(just _shape-args "$msg" "$@")
+    args=$(just _shape-args personas/rfd-implementor "$msg" "$@")
 
     if [ -n "$existing" ]; then
         printf "Resuming implementation of $file (%s)\n\n" "$existing" >&2
-        jp query --id "$existing" --cfg=personas/rfd-implementor \
+        jp query --id "$existing" \
             --attach "$file" \
             $note_attach \
             $extra_edit \
             $args
     else
         printf "Implementing $file\n\n" >&2
-        jp query --new --title "$title" --cfg=personas/rfd-implementor \
+        jp query --new --title "$title" \
             --attach "$file" \
             $note_attach \
             $extra_edit \
@@ -1134,9 +1697,19 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
 # the Implementation Plan into a ticket carrying `Implements: NNN` (prompting on
 # TTY, defaulting to yes in non-interactive runs).
 #
+# Promotion is gated on `just rfd-lint`: an RFD with lint errors does not
+# advance. The prose budget is one of those errors. When an RFD genuinely
+# needs the words, pass a reason as the second argument; it is recorded as
+# `- **Over budget**: <reason>` in the metadata header, where every reader
+# sees it, and the budget check stands down.
+#
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
+#
+#   just rfd-promote D33
+#   just rfd-promote 070 "three config layers, each needing its own worked example"
 [group('rfd')]
-rfd-promote NNN: _install-jp _install-comfort _install-ticket
+rfd-promote NNN OVER_BUDGET="": _install-jp _install-comfort _install-ticket
+>>>>>>> aa2daf7f (checkpoint)
     #!/usr/bin/env sh
     set -eu
 
@@ -1154,6 +1727,31 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
             echo "Promotable statuses: Draft, Discussion, Accepted." >&2
             exit 1 ;;
     esac
+
+    # --- Record an over-budget exemption, if one was given. Written before
+    # the lint gate so the reason takes effect on this run.
+    reason="{{OVER_BUDGET}}"
+    if [ -n "$reason" ]; then
+        awk -v reason="$reason" '
+            /^- \*\*Over budget\*\*:/ { next }
+            { print }
+            /^- \*\*Date\*\*: / { print "- **Over budget**: " reason }
+        ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+        echo "Recorded over-budget reason in $(basename "$file")." >&2
+    fi
+
+    # --- Lint gate. Style rules are errors while an RFD is in flight (Draft,
+    # Discussion) and warnings once it is Accepted, so this tightens exactly
+    # where the document is still cheap to change.
+    if ! lint_out=$(node docs/.vitepress/rfd-lint.mjs "$rfd_id" --errors-only 2>&1); then
+        echo "Cannot promote to ${next}: 'just rfd-lint ${rfd_id}' reports errors." >&2
+        printf '%s\n' "$lint_out" >&2
+        echo "" >&2
+        echo "Fix them, or run 'just rfd-prose ${rfd_id}' to cut the document down." >&2
+        echo "If the length is genuinely warranted:" >&2
+        echo "  just rfd-promote ${rfd_id} \"why this RFD needs the words\"" >&2
+        exit 1
+    fi
 
     # --- Pre-flight (Draft -> Discussion): refuse if Requires or Extends
     # contain draft references. The promoted RFD becomes a published file;
@@ -2564,8 +3162,24 @@ _rfd-resolve NNN:
 
     echo "${rfd_id} ${file}"
 
-# Internal: shape a recipe's `*ARGS` and a default prompt MSG into a single
-# `args` string that the recipe forwards to `jp query`.
+# Internal: shape a recipe's own CFG flags, the user's `*ARGS`, and a default
+# prompt MSG into a single `args` string that the recipe forwards to
+# `jp query`.
+#
+# CFG names the config the recipe owns, e.g. `personas/rfd-author`. It is
+# turned into a `--cfg=` flag here and emitted *after* the user's arguments,
+# because `--cfg` layers compose in declaration order and the last one wins.
+# The persona is the recipe's identity, not a default: `just rfd-this` without
+# the author persona is not `rfd-this`. Ordering it last means a stray
+# `-c <file>` on the command line cannot silently dismantle it.
+#
+# It is passed bare rather than as `--cfg=...` so that no leading `--` reaches
+# `just`'s own argument parser.
+#
+# The cost is real and worth knowing: a `-c KEY=VALUE` no longer overrides a
+# key the persona sets. Use the command-level flags for that (`-m`,
+# `--hide-reasoning`, `--edit`), which are applied after the whole config
+# pipeline and always win.
 #
 # Resolves four shapes (in this order):
 #
@@ -2580,31 +3194,33 @@ _rfd-resolve NNN:
 # In every shape the free-text message is placed after a `--` so `jp query`
 # treats it as the positional query, never as flags. Without this guard, a
 # preceding option (e.g. `--edit`) word-split next to the message would swallow
-# its first token as the option's value.
+# its first token as the option's value. CFG always lands before that `--`.
 #
 # Prints the resulting `args` string to stdout with no trailing newline.
-# Callers use it as: `args=$(just _shape-args "$msg" "$@")`.
+# Callers use it as: `args=$(just _shape-args personas/x "$msg" "$@")`.
+# Pass an empty CFG when the recipe owns no config.
 [no-exit-message]
 [private]
 [positional-arguments]
-_shape-args MSG *ARGS:
+_shape-args CFG MSG *ARGS:
     #!/usr/bin/env sh
     set -eu
 
+    cfg="${1:+--cfg=$1}"; shift
     msg="$1"; shift
 
     starts_with() { case ${2-} in "$1"*) true;; *) false;; esac; }
     contains()    { case ${2-} in *"$1"*) true;; *) false;; esac; }
 
-    args="$*"
+    rest="$*"
     if starts_with "-- " "$@"; then
-        :
+        args="$cfg $rest"
     elif starts_with "-" "$@" && ! contains "-- " "$@"; then
-        args="$* -- $msg"
-    elif [ -n "$args" ]; then
-        args="-- $msg\n\n Here is additional context: $args"
+        args="$rest $cfg -- $msg"
+    elif [ -n "$rest" ]; then
+        args="$cfg -- $msg\n\n Here is additional context: $rest"
     else
-        args="-- $msg"
+        args="$cfg -- $msg"
     fi
 
     printf '%s' "$args"

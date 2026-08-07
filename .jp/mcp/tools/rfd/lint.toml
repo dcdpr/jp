@@ -1,0 +1,42 @@
+[conversation.tools.rfd_lint]
+enable = false
+run = "unattended"
+result = "unattended"
+source = "local"
+command = "just rfd-lint {{tool.arguments.nnn | default('')}} {{tool.arguments.flag | default('')}}"
+description = """Check RFDs deterministically: prose budget against the category \
+target and hard limit, sentence length, hedging, banned vocabulary, filler, \
+link hygiene, metadata, filename/heading agreement, duplicated sentences, and \
+leftover template text.
+
+Errors gate `rfd_promote` and CI: broken metadata, dead or undefined links, \
+leftover template text, a missing Non-Goals section on a Design RFD, and the \
+prose budget. The budget and Non-Goals gates apply only while an RFD is in \
+Draft or Discussion. Everything line-level is a warning and never gates.
+
+Use it to measure your own work rather than counting words by hand. A hand \
+count is wrong by a hundred words or more on a document of any size, and the \
+budget decisions that follow from it are wrong with it."""
+
+[conversation.tools.rfd_lint.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.rfd_lint.parameters.nnn]
+description = """One or more RFD ids, space separated: permanent numbers (95, \
+095) or draft IDs (D24). Omit to check every RFD and draft."""
+required = false
+type = "string"
+
+[conversation.tools.rfd_lint.parameters.flag]
+description = """Optional output mode. `--summary` prints a word-count table \
+with no findings, worst first. `--errors-only` drops the warnings. `--json` \
+emits the full report as JSON."""
+required = false
+type = "string"
+enum = [
+    "--summary",
+    "--errors-only",
+    "--json",
+]

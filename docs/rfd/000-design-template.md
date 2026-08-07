@@ -3,9 +3,16 @@
   don't apply, add sections that do, or restructure entirely. The only
   requirement is the metadata header (Status, Authors, Date).
 
+  Budget: 1200 prose words, 2000 hard. Write to the target; the gap is for
+  what review turns up. Run `just rfd-lint DNN` to check. A Design RFD that
+  can't make its case in 1200 words is usually two RFDs.
+
+  Non-Goals is not optional here. It is the binding scope contract: a
+  reviewer may not raise a finding inside a stated Non-Goal.
+
   Use HTML comments like this one for draft-time notes and review markers.
-  They do not appear in the rendered output and can be removed when the RFD
-  advances to Discussion status.
+  They do not appear in the rendered output and must be removed before the
+  RFD advances to Discussion status.
 -->
 
 # RFD NNN: TITLE
@@ -61,7 +68,14 @@ explored and gives future readers context for the decision.
 
 What this RFD explicitly does not aim to achieve, even though a reader might
 expect it to.
-This keeps the discussion focused and signals awareness of the broader picture.
+
+This section binds the review: a reviewer cannot raise a finding that falls
+inside a stated Non-Goal, and gets one chance to challenge a Non-Goal itself.
+Name each item in the project's vocabulary, and say whether it is deferred
+(someone does it later) or rejected (nobody should).
+
+Do not use this section to dodge a question the design has to answer.
+A Non-Goal that hides a hole in the design is worse than the hole.
 
 ## Risks and Open Questions
 

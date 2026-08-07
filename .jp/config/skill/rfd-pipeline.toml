@@ -1,0 +1,32 @@
+# The shared substrate for every persona in the RFD authoring and review
+# pipeline: author, reviewer, triager, applier, prose cutter.
+#
+# Deliberately NOT `skill/rfd.toml`. That skill is for interactive work on an
+# RFD alongside a contributor, and it says so in its system prompt ("your role
+# is collaborator, not author") — which contradicts the author persona. It also
+# grants the lifecycle-mutation tools (`rfd_promote`, `rfd_supersede`,
+# `rfd_abandon`, `rfd_renumber`), and no pipeline persona should be able to
+# advance or retire an RFD. Promotion is the contributor's decision.
+#
+# What belongs here: anything every pipeline persona needs. What does not:
+# write access, research skills, model choice, and the role itself. Those vary
+# per persona and stay with the persona.
+
+extends = [
+    "../knowledge/rfd-writing.toml",
+    "read-files.toml",
+]
+
+[style]
+reasoning.display = "timer"
+
+# Every pipeline persona reads RFD 001 as the authority on the process,
+# templates, lifecycle, and conventions.
+[[conversation.attachments]]
+type = "file"
+path = "docs/rfd/001-jp-rfd-process.md"
+
+# Deterministic checks, available to everything that writes or judges prose.
+# The reviewer turns this off; see the comment there.
+[conversation.tools]
+rfd_lint = { enable = true, run = "unattended" }

@@ -96,28 +96,54 @@ understand why things are the way they are.
 
 ## When to Write an RFD
 
-Write an RFD when:
+The test is one question:
 
-- Adding a new feature that affects the architecture or public interface
-- Making a significant change to the data model or event system
-- Introducing a new dependency, protocol, or integration pattern
-- Changing the build, release, or contribution process
-- Removing a feature or deprecating an interface
-- Proposing a large refactoring effort
-- Any change where you want structured feedback before investing in code
+> Does this change create a contract that is expensive to reverse?
+
+A contract is anything that other code, other tools, or other people depend on
+once it ships: an on-disk format, a CLI surface, a config key, an event shape, a
+serialized structure, a cross-crate boundary, a protocol.
+Expensive to reverse means changing it later costs a migration, a deprecation,
+or a broken user script.
+
+If the answer is yes, write an RFD.
+If the answer is no, open a ticket.
+
+Wanting structured feedback is not a reason to write an RFD.
+That is a reason to have a conversation.
+A conversation costs an hour.
+An RFD costs a review cycle, a permanent number, and a document the project
+maintains forever.
+
+Write an RFD when the change includes one of these:
+
+- a new public interface, protocol, persisted format, or config contract
+- a change to data ownership or a crate boundary
+- a process or policy decision that is hard to reverse
+
+Keep it as a ticket when:
+
+- the implementation follows an established pattern
+- the decision is local and reversible
+- it is a bug, a small feature, or a contained refactor
+- the design questions can be settled during code review
 
 Do NOT write an RFD for:
 
 - Bug fixes
 - Performance improvements with no architectural change
 - Code reorganization that doesn't change behavior
-- Small feature additions that fit within established patterns
 - Documentation updates
 
-When in doubt, start writing.
-If it turns out to be unnecessary, you'll know quickly.
-The cost of an unnecessary RFD is low; the cost of a misaligned implementation
-is high.
+When you are unsure, open the ticket.
+A ticket that turns out to need an RFD is cheap to promote, and the ticket's
+problem statement carries straight into it.
+An RFD that turns out to have been a ticket has already cost the review cycle.
+
+**Only a human escalates a ticket to an RFD.** An assistant can recommend it and
+record which of the criteria above it thinks applies, but reaching for an RFD is
+not how an assistant resolves its own uncertainty.
+The answer to "I am not sure how big this is" is a ticket.
 
 ## RFD Lifecycle
 
@@ -335,6 +361,7 @@ All categories use the same metadata:
 - **Required by**: RFD NNN (if another RFD depends on this one)
 - **Supersedes**: RFD NNN (if applicable)
 - **Superseded by**: RFD NNN (if applicable)
+- **Over budget**: reason (if the RFD exceeds its prose budget)
 ```
 
 Implementation progress is tracked in [tickets], not in the metadata header.
@@ -409,30 +436,209 @@ filled in automatically by `rfd-promote`.
 
 - **Use present tense.** "This RFD describes..." not "This RFD was created to
   describe..."
-- **Be direct.** Avoid hedging language like "it seems" or "probably" or "it
-  might be worth considering."
-  State what you propose and why.
+- **Be direct.** State what you propose and why, without hedging.
 - **Use concrete examples.** A code snippet or data flow diagram is worth a
   paragraph of abstract description.
 - **Define terms.** If you introduce a concept, define it where it first
   appears.
-- **Keep it short.** If an RFD exceeds 5-6 pages (roughly 2000 words), consider
-  whether it can be split into smaller proposals.
+- **Keep sentences under 25 words.** Over 30 is a lint error.
+  A long sentence is usually two sentences and a comma splice.
+- **One word, one meaning, across the document.** If the code calls it a `Turn`,
+  it is a Turn every time.
+  Rotating through synonyms to avoid repetition costs the reader.
+- **No `should`, `would`, `may`, `might`, `probably`, `it seems`.** These hide
+  whether something is a requirement.
+  `can`, `will`, and `must` say what you meant.
+- **Prefer deletion.** Clarify existing prose before adding a caveat.
+  An RFD does not need to record every reachable edge case or implementation
+  choice.
+- **Reference-style links only.** `[RFD 001]` in the body, the target defined at
+  the bottom.
+
+These rules are adapted from ASD-STE100, the controlled English used for
+aircraft maintenance manuals.
+The full standard is not adopted: it bans the argumentative prose that
+Motivation and Alternatives sections are made of.
+
+### Prose Budgets
+
+Every RFD has a prose budget in words, counted with fenced code blocks and the
+metadata header excluded.
+
+| Category | Target | Hard limit |
+| -------- | ------ | ---------- |
+| Design   | 1200   | 2000       |
+| Decision | 500    | 800        |
+| Guide    | 2000   | 3500       |
+| Process  | 2000   | 3500       |
+
+Write to the target, not the limit.
+The gap between them is reserved for the review cycle, which will surface things
+that genuinely need saying.
+An RFD that opens at the hard limit has nowhere to put them.
+
+The hard limit is a promotion gate.
+`just rfd-promote NNN` refuses to advance an over-budget document unless the
+author supplies a reason, which is recorded as `- **Over budget**: <reason>` in
+the metadata header.
+That exception is meant to be rare and visible.
+
+An RFD that cannot make its case within its target is usually two RFDs.
+
+`just rfd-lint` is authoritative for all of the above.
+It also checks link hygiene, metadata, heading depth, and leftover template
+text.
+
+It reports two severities, and the split is deliberate.
+
+**Errors gate promotion and CI**: broken metadata, dead or undefined links,
+leftover template text, a missing Non-Goals section, and the prose budget.
+The budget and Non-Goals gates only bite while a document is in Draft or
+Discussion, when it is still cheap to change.
+
+**Warnings never gate**: sentence length, hedging, banned vocabulary, filler, em
+dashes, paragraph length, heading depth.
+A 31-word sentence written last March must not block an RFD from being accepted
+today.
+Warnings are feedback for the author and for the review cycle, which fixes them
+as it goes.
+
+## Review Protocol
+
+Review has a terminal state, and reaching it is the job.
+A review that produces findings forever is a failed review, not a thorough one.
+
+### The finding bar
+
+A finding exists when a plausible input produces damage that spreads or hides.
+Damage spreads when it escapes the operation under review.
+Damage hides when the user cannot tell it happened.
+
+Anything contained and visible is an observation, not a finding.
+Observations go under a `Noted` heading in the review, and the triager does not
+act on them.
+They are on the record, which was the point.
+
+### Non-Goals are binding
+
+The Non-Goals section is the scope contract between author and reviewer.
+A reviewer must not raise a finding that falls inside a stated Non-Goal.
+A reviewer can challenge a Non-Goal itself exactly once, in round 1.
+After that, scope is settled.
+
+That makes the section carry real weight, so write it precisely: name what is
+out of scope, and say whether it is deferred or rejected.
+
+### Rounds
+
+One round is review, then triage, then apply, then lint.
+The reviewer's finding budget shrinks each round: 7, then 4, then 2, then none.
+
+After round 1, a new finding must have been introduced by an edit made since.
+A concern present in round 1 that went unraised is settled by omission.
+
+Every review ends with `VERDICT: CLEAR` or `VERDICT: BLOCK` on its own final
+line.
+`CLEAR` ends the cycle.
+
+### Verdicts, and what they cost the document
+
+The triager rules on each finding: `Accept`, `Amend`, `Decline`, `Dismiss`,
+`Defer`, or `Escalate`.
+
+**A `Decline` produces no edit to the RFD.** Not a sentence in Risks, not a
+parenthetical, not a Non-Goal bullet.
+The triage conversation is the record, and it is durable and searchable.
+Storing rejected edge cases in the document is what turns a 1200-word RFD into a
+5000-word one, one reasonable-looking sentence at a time.
+
+The triager reports the net word delta of its proposed edits, per item and in
+total, before anything is applied.
+A round proposing more than +100 words needs a sentence justifying it.
+
+### Escalation
+
+When reviewer and triager disagree twice on the same item, it is marked
+`ESCALATE:` and leaves the cycle.
+Repeated disagreement is the signal that human judgment is required, and it is
+the only thing that interrupts an unattended cycle.
 
 ## Process
 
 ### Creating an RFD
 
+Authoring happens in two stages, with the scope decision in between.
+
 1. Create a branch for your work.
-2. Run `just rfd-draft CATEGORY Your Title` to generate the file from the
-   appropriate template.
-   Category is one of: `design`, `decision`, `guide`, `process`.
-   The file is created under `docs/rfd/drafts/` with a `DNN` prefix (e.g.
-   `docs/rfd/drafts/D01-your-title.md`).
-3. Fill in the sections.
-   Write your proposal.
-4. Push your branch.
-   Iterate until you're ready for feedback.
+2. Talk the problem through with `jp` until you have a conclusion.
+   This is where the design happens.
+3. Run `just rfd-this` to get an outline: category, summary, the one problem,
+   the proposed shape, alternatives, Non-Goals, and a per-section word budget.
+   No file is written.
+4. Approve, cut, or redirect the outline.
+   This is the scope gate.
+   Removing a section here costs one line; removing it after review has attached
+   findings to it costs an argument.
+5. Run `just rfd-write` to produce the draft under `docs/rfd/drafts/`.
+6. Run `just rfd-lint DNN` and fix what it reports.
+7. Push your branch.
+
+To start from a blank template instead of a conversation, run `just rfd-draft
+CATEGORY Your Title`.
+Category is one of: `design`, `decision`, `guide`, `process`.
+
+### Reviewing an RFD
+
+Run `just rfd-cycle NNN` to review, triage, apply, and lint unattended until the
+reviewer returns `CLEAR`.
+Each round is one commit, so the cycle reads as a diff rather than as a
+conversation.
+The cycle stops early on an escalation.
+
+Start at two rounds until you trust the digests:
+
+```sh
+just rfd-cycle D33 2
+git diff HEAD~2..HEAD -- docs/rfd/drafts/D33-conversation-store-and-bare-forking.md
+```
+
+To drive the steps by hand instead, `just rfd-review NNN` and `just rfd-triage
+NNN` run the same personas interactively, with Bear-note attachment and
+conversation prompts.
+
+When the design has converged, run `just rfd-prose NNN` once.
+It cuts words without changing content.
+It is deliberately separate from review, because "is the design right" and "is
+the prose tight" are different questions that fight when asked in the same
+conversation.
+
+### Signing off
+
+The cycle decides whether the RFD is *correct*.
+You decide whether it is *done*.
+Run `just rfd-signoff NNN` when the cycle clears.
+
+It opens the RFD in `revdiff` next to the cycle's carry-over ledger, so every
+finding that was raised and dropped sits beside the document rather than
+hundreds of lines up a conversation.
+The ledger holds declined findings, the reviewer's `Noted` observations, and the
+places the triager kept the design but rejected the reviewer's proposed fix.
+
+Annotate either file.
+A note on the RFD is an instruction.
+A note on a ledger line means "pick this back up".
+Both go to the applier, which makes the edits and reports back anything needing
+a design change instead of guessing at one.
+
+**Leaving no notes is the verdict.** The RFD is done, and the recipe prints the
+promote command.
+Nothing promotes automatically; that is a one-way door.
+
+Signoff does not start another cycle.
+If you want a confirming agent round after your notes land, `just rfd-cycle NNN
+1` is one command.
+Keeping the two separate is what stops "the author had comments" from meaning
+"run more agent rounds".
 
 ### Opening for Discussion
 
@@ -480,10 +686,26 @@ Run `just --list --group rfd` to see them.
 
 | Command                         | Description                              |
 | ------------------------------- | ---------------------------------------- |
-| `just rfd-draft CATEGORY TITLE` | Create a new draft under `drafts/`.      |
-| `just rfd-promote NNN`          | Advance status. Draft → Discussion       |
-|                                 | assigns number; Discussion → Accepted    |
-|                                 | offers phase tickets.                    |
+| `just rfd-this`                 | Outline an RFD from the current          |
+|                                 | conversation. Writes no file.            |
+| `just rfd-write`                | Write the draft from the approved        |
+|                                 | outline.                                 |
+| `just rfd-draft CATEGORY TITLE` | Create a blank draft under `drafts/`.    |
+| `just rfd-lint [NNN...]`        | Budget, sentence length, hedging, links, |
+|                                 | metadata. `--summary` for a word table.  |
+| `just rfd-cycle NNN [ROUNDS]`   | Unattended review/triage/apply/lint      |
+|                                 | loop, one commit per round.              |
+| `just rfd-review NNN`           | One interactive review round.            |
+| `just rfd-triage NNN`           | Triage the last review round.            |
+| `just rfd-prose NNN`            | Cut words without changing content.      |
+| `just rfd-signoff NNN`          | Your review in `revdiff`, beside the     |
+|                                 | cycle's carry-over ledger. No notes      |
+|                                 | means done.                              |
+| `just rfd-promote NNN [REASON]` | Advance status. Gated on `rfd-lint`.     |
+|                                 | Draft → Discussion assigns a number;     |
+|                                 | Discussion → Accepted creates the        |
+|                                 | tracking issue. REASON records an        |
+|                                 | over-budget exemption.                   |
 | `just rfd-extend NNN MMM`       | Record that RFD MMM extends RFD NNN,     |
 |                                 | updating both. Accepts draft IDs (DNN)   |
 |                                 | on either side.                          |

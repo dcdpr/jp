@@ -3,9 +3,12 @@
   don't apply, add sections that do, or restructure entirely. The only
   requirement is the metadata header (Status, Authors, Date).
 
+  Budget: 500 prose words, 800 hard. A decision record is short by design:
+  the forces, the call, and what follows from it. Run `just rfd-lint DNN`.
+
   Use HTML comments like this one for draft-time notes and review markers.
-  They do not appear in the rendered output and can be removed when the RFD
-  advances to Discussion status.
+  They do not appear in the rendered output and must be removed before the
+  RFD advances to Discussion status.
 -->
 
 # RFD NNN: TITLE

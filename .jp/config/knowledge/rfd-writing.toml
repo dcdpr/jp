@@ -1,0 +1,153 @@
+# Writing rules for RFD documents. Loaded by every persona that puts words
+# into an RFD: the author, the triager, the applier, the prose cutter.
+#
+# The numeric budgets here are mirrored in `docs/.vitepress/rfd-lint.mjs`,
+# which is authoritative. When they disagree, the linter wins.
+
+[[assistant.system_prompt_sections]]
+tag = "RFD Writing: Budgets"
+content = """\
+Every RFD has a prose budget, in words, counted with fenced code blocks and \
+the metadata header excluded. `just rfd-lint NNN` reports the count.
+
+| Category | Target | Hard limit |
+| -------- | ------ | ---------- |
+| Design   | 1200   | 2000       |
+| Decision | 500    | 800        |
+| Guide    | 2000   | 3500       |
+| Process  | 2000   | 3500       |
+
+Write to the **target**, not the hard limit. The gap between the two is \
+reserved for the review cycle: a reviewer will surface things that genuinely \
+need saying, and an RFD that opens at the hard limit has nowhere to put them.
+
+The hard limit is a promotion gate. `just rfd-promote NNN` refuses to advance \
+an over-budget RFD. The author can override it with `just rfd-promote NNN \
+"reason"`, which records `- **Over budget**: reason` in the metadata header \
+where every reader sees it. Treat that as a rare, deliberate act, not a \
+release valve, and never reach for it on the author's behalf.
+
+`just rfd-prose NNN` is the other way out: a single pass that removes words \
+without changing content.
+
+An RFD that cannot make its case in its target is usually two RFDs. Split it.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "RFD Writing: The Conversation Is Input, Not Content"
+content = """\
+An RFD written from a design discussion carries the **conclusion**, not the \
+route to it. Most of a good discussion is the route: options raised and \
+dropped, wrong turns, clarifications, the thing that seemed right for ten \
+minutes. None of that belongs in the document.
+
+- An option you considered and rejected is one line in Alternatives, with the \
+  reason it lost. Not a paragraph, and not a narration of when it was raised.
+- A misunderstanding that got cleared up leaves no trace. The corrected \
+  understanding is simply what the RFD states.
+- A constraint discovered mid-discussion is stated as a constraint. The \
+  discovery is not part of the design.
+
+If you rebuilt this RFD from scratch knowing only the final conclusion, it \
+should read roughly as it does. Anything that only makes sense as a record of \
+how the discussion unfolded is cut.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "RFD Writing: Sentences"
+content = """\
+Four rules adapted from ASD-STE100, the controlled English aerospace uses for \
+maintenance manuals. They transfer to RFDs because both are read by someone \
+who has to act on them.
+
+- **One sentence, 25 words at most.** Over 30 is a lint error. A long sentence \
+  is almost always two sentences and a comma splice.
+- **One word, one meaning, across the whole document.** If the code calls it a \
+  `Turn`, it is a Turn every time. Do not rotate through "message", "round", \
+  "exchange" to avoid repetition; that is a readability cost dressed as style.
+- **No `should`, `would`, `may`, `might`, `probably`, `it seems`, `arguably`.** \
+  These are lint errors. `can`, `will`, and `must` survive, and they are what \
+  you meant.
+- **Active voice, simple tenses.** "The loader reads the file", not "the file \
+  is read by the loader" or "the file will have been read".
+
+Full STE is not adopted. It bans the argumentative prose an RFD's Motivation \
+and Alternatives sections are made of. These four rules are the part that \
+carries over.
+"""
+
+[[assistant.instructions]]
+title = "RFD Writing: Cut Before You Add"
+description = """\
+Completeness checklists produce long documents; a model asked "does it have X?" \
+nine times will supply nine sections. Ask the inverse questions with the same \
+seriousness.\
+"""
+items = [
+    """\
+    **Which sentences can go without the reader losing the proposal?** Delete \
+    them. A sentence that only restates the one before it is the most common \
+    kind.\
+    """,
+    """\
+    **Which section exists only because the template has it?** Delete it. RFD \
+    001 says the templates are starting points, not constraints. An empty \
+    Drawbacks section is worse than no Drawbacks section, because it claims \
+    the question was considered.\
+    """,
+    """\
+    **Which paragraph restates something already said?** Summary, Motivation, \
+    and Design overlap by default. Say each thing once, in the section where \
+    a reader will look for it.\
+    """,
+    """\
+    **Which part of this is the discussion path rather than the conclusion?** \
+    Cut it. See "The Conversation Is Input, Not Content".\
+    """,
+    """\
+    **Which code sketch is longer than the point it makes?** A type signature \
+    beats a full impl. A five-line struct beats a fifty-line module. Sketches \
+    are illustrative, never contractual.\
+    """,
+    """\
+    **Which qualifier is doing no work?** "significantly", "quite", "fairly", \
+    "very", "somewhat", "essentially", "actually", "simply", "just", "really". \
+    Delete on sight; the sentence gets stronger.\
+    """,
+]
+
+[[assistant.system_prompt_sections]]
+tag = "RFD Writing: Non-Goals Are Binding"
+content = """\
+The Non-Goals section is not a courtesy note. It is the scope contract between \
+the author and the reviewer, and the review protocol treats it as binding: a \
+reviewer may not raise a finding that lives inside a stated Non-Goal, and gets \
+exactly one chance to challenge the Non-Goal itself.
+
+That makes Non-Goals load-bearing. Write them precisely:
+
+- Name the thing that is out of scope, in the same vocabulary the rest of the \
+  RFD uses.
+- Say whether it is deferred (someone will do it later) or rejected (nobody \
+  should).
+- Do not use Non-Goals to dodge a question the design actually has to answer. \
+  A Non-Goal that hides a hole in the design is worse than the hole.
+
+An RFD in the Design category without a Non-Goals section is a lint error.
+"""
+
+[[assistant.system_prompt_sections]]
+tag = "RFD Writing: Mechanics"
+content = """\
+- **Reference-style links only.** Write `[RFD 001]` in the body and define \
+  `[RFD 001]: 001-jp-rfd-process.md` at the bottom. Inline `[text](target)` \
+  links to other RFDs are a lint error.
+- **One sentence per line.** The repository uses semantic linefeeds; `comfort` \
+  reflows to them and the linter counts on them.
+- **Headings stop at `###`.** An `####` means the document has become a \
+  specification. Flatten it or split the RFD.
+- **No leftover template prose, `TODO`, or HTML comments** once the RFD leaves \
+  Draft. All three are lint errors at Discussion and beyond.
+- **Present tense, no history.** "This RFD describes", not "was created to \
+  describe". The document says what the system is, not what changed.
+"""

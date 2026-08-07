@@ -1,4 +1,5 @@
 extends = [
+    "../knowledge/rfd-writing.toml",
     "../skill/read-files.toml",
     "../skill/project-discourse.toml",
 ]
@@ -10,6 +11,7 @@ attachments = [
 
 [conversation.tools]
 rfd_draft = { enable = true, run = "unattended" }
+rfd_lint = { enable = true, run = "unattended" }
 rfd_promote = { enable = true, run = "unattended" }
 rfd_renumber = { enable = true, run = "unattended" }
 rfd_supersede = { enable = true, run = "unattended" }
@@ -53,9 +55,15 @@ documentation website. Published RFDs must not link to drafts. Permanent \
 numbers are assigned when `rfd_promote` advances a draft to Discussion \
 status, which also moves the file up to `docs/rfd/`.
 
+`rfd_lint` runs the deterministic checks: prose budget against the category \
+target and hard limit, sentence length, hedging, banned vocabulary, link \
+hygiene, metadata, filename/heading agreement, and duplicated sentences. Its \
+errors gate `rfd_promote`. Call it instead of estimating a word count.
+
 `rfd_promote` handles deferred numbering: for DNN-prefixed drafts, it \
 assigns the next available permanent number and renames the file. When \
-promoting to Accepted, it creates a GitHub tracking issue.
+promoting to Accepted, it creates a GitHub tracking issue. It refuses to \
+advance an RFD that `rfd_lint` reports errors on.
 
 `rfd_renumber` moves an RFD (draft or published) to a new id and rewrites its \
 file name, heading, cross-references, and priority-board entry. The target id \
@@ -122,33 +130,48 @@ asked to confirm each modification before it is applied.\
 tag = "rfd_skill"
 title = "RFD Quality Checks"
 content = """\
-When reviewing an RFD draft, evaluate against these questions:
+When reviewing an RFD draft, ask both directions. Presence questions alone \
+produce long documents, because a draft measured against nine "does it have \
+X?" checks will grow nine sections.
+
+Is anything missing?
 
 - Does the Summary convey the proposal in 1-3 sentences?
 - Does the Motivation explain why, not just what?
 - Does the Design start with user-facing behavior before internals?
-- Are Alternatives actually explored, or just listed?
-- Are Non-Goals explicitly stated where readers might have wrong expectations?
-- Are Risks honest about what could go wrong?
+- Are Alternatives explored with reasons, or just listed?
+- Do the Non-Goals name every scope decision the author made? They are the \
+binding scope contract for review.
+- Are Risks honest about what can go wrong?
 - Is the Implementation Plan broken into mergeable phases?
-- Does the RFD solve exactly one problem/feature, or should it be split up?
-- Are there no dead links?
-- Are all links using the reference style (e.g. `[RFD 001]`) with the link defined at the bottom \
-of the document?\
+
+Is anything removable?
+
+- Which sentences can go without the reader losing the proposal?
+- Which section exists only because the template has it?
+- Which paragraph restates something already said?
+- Which code sketch is longer than the point it makes?
+- Is the document inside its category's prose budget? Call `rfd_lint`.
+
+And once, for the whole document: does it solve exactly one problem, or is it \
+two RFDs?\
 """
 
 [[assistant.system_prompt_sections]]
 tag = "rfd_skill"
 title = "RFD Writing Style"
 content = """\
-- Use present tense: "This RFD describes..." not "This RFD was created \
-to describe..."
-- Be direct. No hedging: "it seems", "probably", "it might be worth \
-considering."
-- Keep it short. Only write words that carry their own weight, more \
-non-relevant words can hide the significance of relevant words.
-- Use concrete examples. A code snippet or data flow diagram is worth a \
-paragraph of abstraction.\
+The rules live in "RFD Writing: Sentences", "RFD Writing: Budgets", and "RFD \
+Writing: Cut Before You Add". Two that carry most of the weight:
+
+- Present tense, active voice: "This RFD describes", not "was created to \
+describe".
+- A concrete example beats a paragraph of abstraction. A type signature beats \
+a full implementation.
+
+The `rfd_lint` tool checks the mechanical half of this and is authoritative. \
+Call it rather than guessing; a hand-counted word total is wrong by enough to \
+matter.\
 """
 
 [[assistant.system_prompt_sections]]

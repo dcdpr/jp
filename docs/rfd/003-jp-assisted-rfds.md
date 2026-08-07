@@ -25,12 +25,17 @@ A dedicated skill configuration can combine them into a single workflow: load
 the process guidelines, give the LLM read access to the codebase, and provide
 system prompt guidance on how to be a useful RFD collaborator.
 
-The goal is not to have JP write the RFD for you.
-[RFD 002][] is clear on this point: prose that represents your thinking should
-be written in your own words, and you own what you ship.
-The goal is to have JP help you write a better RFD — by pointing out gaps in
-your reasoning, suggesting structure, finding relevant code to reference, and
-drafting sections you can then rewrite in your voice.
+The contributor owns the problem, the decisions, and the final approval.
+The assistant can write and revise the prose.
+[RFD 002][] draws the line: generated text must codify a decision the
+contributor has settled and understands, not manufacture one.
+
+This skill serves the interactive half of that arrangement.
+It makes JP a useful collaborator on a document you are working through:
+pointing out gaps in reasoning, suggesting structure, finding relevant code, and
+drafting sections on request.
+The sole-authoring path, where JP writes a whole draft from an agreed design and
+a bounded cycle refines it, is described in [RFD 001][].
 
 ## Design
 
@@ -55,9 +60,9 @@ The skill consists of four parts:
    attachment, giving the LLM direct access to the project's RFD conventions,
    templates, and writing style guidelines.
 
-2. **System prompt sections** — focused prompt sections that establish the
-   LLM's role as an RFD collaborator (not author), describe the collaboration
-   workflow, and set quality checks and writing style reminders.
+2. **System prompt sections** — focused prompt sections that assign decision
+   ownership to the contributor, describe the collaboration workflow, and set
+   quality checks and writing style reminders.
 
 3. **Read-only tools** — file reading, listing, and searching tools run in
    unattended mode, so the LLM can explore the codebase and existing
@@ -127,9 +132,9 @@ The skill adds four `system_prompt_sections`, all tagged `rfd_skill`:
 
 | Section                        | Purpose                                  |
 | ------------------------------ | ---------------------------------------- |
-| **Skill: RFD Writing**         | Establishes the collaborator-not-author  |
-|                                | role. Lists what the LLM should and      |
-|                                | should not do.                           |
+| **Skill: RFD Writing**         | Assigns decision ownership to the        |
+|                                | contributor. Lists what the LLM should   |
+|                                | and should not do.                       |
 | **RFD Collaboration Workflow** | Six-step workflow: understand intent,    |
 |                                | research context, suggest structure,     |
 |                                | review drafts, draft on request, apply   |
@@ -189,22 +194,20 @@ The user reviews the diff and confirms or rejects it.
 
 ### Relationship to RFD 002
 
-[RFD 002][] establishes that LLM-generated prose that represents your thinking
-should generally be written in your own words.
-This skill is designed to work within that guideline:
+[RFD 002][] assigns responsibility for a generated document to the contributor
+who approves it.
+This skill works within that:
 
-- The system prompt explicitly frames JP as a **collaborator, not author**.
-  It assists with structure, research, and review — it does not produce the
-  finished document.
-- When JP drafts text on request, the expectation is that the contributor
-  rewrites it.
-  The draft is a starting point, not a submission.
-- The quality check sections focus on asking questions ("Does the Motivation
-  explain why?") rather than generating answers.
+- The contributor settles the scope and the design before asking for prose.
+- The assistant drafts and revises from those decisions.
+- The quality check sections ask in both directions, what is missing and what is
+  removable, so a draft measured against them does not simply grow.
+- The contributor reads the result and confirms it says what was agreed.
 
-This matches the "LLMs as editors" and "LLMs as researchers" patterns from RFD
-002, which are encouraged.
-It deliberately avoids the "LLMs as writers" pattern for substantive prose.
+The skill leans on the "LLMs as editors" and "LLMs as researchers" patterns from
+RFD 002.
+It also uses "LLMs as writers", under the condition that pattern sets: the
+contributor supplies the decisions and approves the result.
 
 ## Alternatives
 
@@ -260,8 +263,9 @@ insufficient.
   conflict with each other or with the active persona.
   This is true today but could become an issue if tool configurations diverge.
 - **Should RFD 002 also be attached?** It contains relevant guidance on LLM use.
-  Omitted for now to reduce token cost — the system prompt captures the key
-  principle (collaborator, not author).
+  Omitted for now to reduce token cost: the system prompt carries the
+  responsibility rule, and the contributor is the final approval gate either
+  way.
   Can be added later if needed.
 
 ## Implementation Plan
