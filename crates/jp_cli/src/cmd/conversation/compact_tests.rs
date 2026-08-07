@@ -20,7 +20,9 @@ use super::{
     Bound, Compact, IntoPartialAppConfig as _, TimelineSegment, build_compaction_events,
     existing_segments, resolve_reset_index, segments_for_compactions, timeline_lines,
 };
-use crate::cmd::{conversation_id::ConversationIds as _, target::ConversationTarget};
+use crate::cmd::{
+    conversation_id::ConversationIds as _, target::ConversationTarget, turn_range::TurnPos,
+};
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
 fn parse_compact(args: &[&str]) -> Compact {
@@ -33,6 +35,21 @@ fn parse_compact(args: &[&str]) -> Compact {
     let mut argv = vec!["compact"];
     argv.extend_from_slice(args);
     TestCli::try_parse_from(argv).unwrap().compact
+}
+
+/// Like [`parse_compact`], but returns the clap error message on failure.
+fn try_parse_compact(args: &[&str]) -> Result<Compact, String> {
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        compact: Compact,
+    }
+
+    let mut argv = vec!["compact"];
+    argv.extend_from_slice(args);
+    TestCli::try_parse_from(argv)
+        .map(|cli| cli.compact)
+        .map_err(|e| e.to_string())
 }
 
 #[test]
@@ -568,6 +585,91 @@ fn keep_last_composes_with_last() {
 }
 
 #[test]
+fn from_end_bounds_agree_across_flags_and_dsl() {
+    // `-3` is the third turn from the end wherever it is written. Over 10 turns
+    // that is index 7, so every spelling compacts through index 7 inclusive and
+    // leaves the final two alone.
+    //
+    // The start differs by design: `--to`/`--keep-last` leave `keep_first` to
+    // the config default (1, preserving the genesis turn), while the DSL's
+    // explicit open start (`..-3`) asks for the whole front of the
+    // conversation.
+    //
+    // `--keep-last 2` is the count that names the same range: preserving two
+    // trailing turns stops one turn earlier than the position `-3` suggests to
+    // a reader who expects the numbers to match.
+    let mut stream = ConversationStream::new_test();
+    for t in 0..10 {
+        stream.start_turn(format!("turn {t}"));
+    }
+
+    let cfg = AppConfig::new_test();
+    for (args, expected) in [
+        (vec!["--to=-3", "-r"], (1, 7)),
+        (vec!["-k", "r:..-3"], (0, 7)),
+        // The count that preserves the same two trailing turns.
+        (vec!["--keep-last", "2", "-r"], (1, 7)),
+    ] {
+        let compact = parse_compact(&args);
+        let rules = compact.effective_rules(&cfg).unwrap();
+        let from = compact.resolve_from(&stream);
+        let to = compact.resolve_to(&stream);
+
+        let compactions = runtime()
+            .block_on(build_compaction_events(
+                &stream,
+                &cfg,
+                &rules,
+                from,
+                to,
+                Some(&Printer::sink()),
+            ))
+            .unwrap();
+
+        assert_eq!(compactions.len(), 1, "{args:?}");
+        assert_eq!(
+            (compactions[0].from_turn, compactions[0].to_turn),
+            expected,
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn keep_flags_reject_turn_positions() {
+    // `--keep-first`/`--keep-last` ask how many turns to preserve. A value that
+    // names a turn belongs on `--from`/`--to`, so it is refused here rather
+    // than silently meaning something one turn away from what it looks like.
+    for (arg, value) in [
+        ("--keep-last=-3", "-3"),
+        ("--keep-first=-3", "-3"),
+        ("--keep-first=last-compaction", "last-compaction"),
+    ] {
+        let Err(err) = try_parse_compact(&[arg, "-r"]) else {
+            panic!("{arg} should be rejected");
+        };
+        assert!(
+            err.contains(&format!(
+                "`{value}` names a turn, not an amount to preserve; use `--from`/`--to` for turn \
+                 positions, or pass a count (e.g. `3`) or a duration (e.g. `2h`) here"
+            )),
+            "{arg}: {err}"
+        );
+    }
+
+    // `@N` has no spelling at all any more, so it fails in the bound parser
+    // before the keep-flag check sees it.
+    let Err(err) = try_parse_compact(&["--keep-first=@3", "-r"]) else {
+        panic!("`@3` should be rejected");
+    };
+    assert!(err.contains("invalid range bound `@3`"), "{err}");
+
+    // Counts and durations are what these flags are for.
+    assert!(try_parse_compact(&["--keep-last", "3", "-r"]).is_ok());
+    assert!(try_parse_compact(&["--keep-first", "2h", "-r"]).is_ok());
+}
+
+#[test]
 fn keep_first_greater_than_first_is_rejected() {
     // A preserved prefix larger than the selection is nonsensical and must be
     // an error rather than a silent no-op.
@@ -626,13 +728,13 @@ fn turn_out_of_range_is_rejected() {
     // range. With 5 turns, both forms flag turn 100; an in-range turn does not.
     assert_eq!(
         parse_compact(&["--turn", "100"]).range.turn_out_of_range(5),
-        Some(100)
+        Some(TurnPos::Absolute(100))
     );
     assert_eq!(
         parse_compact(&["--turn", "..100"])
             .range
             .turn_out_of_range(5),
-        Some(100)
+        Some(TurnPos::Absolute(100))
     );
     assert_eq!(
         parse_compact(&["--turn", "3"]).range.turn_out_of_range(5),

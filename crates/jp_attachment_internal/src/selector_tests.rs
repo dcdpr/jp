@@ -29,9 +29,20 @@ fn selector_star_is_all_content() {
 
 #[test]
 fn selector_parses_negative_shorthand() {
+    // `-3` names the third turn from the end, not the last three turns.
     let sel: Selector = "a:-3".parse().unwrap();
     assert_eq!(sel.range.start, Some(-3));
+    assert_eq!(sel.range.end, Some(-3));
+    assert_eq!(sel.range.resolve(10), Some((7, 8)));
+}
+
+#[test]
+fn selector_parses_open_ended_negative_range() {
+    // The last three turns need the explicit open range.
+    let sel: Selector = "a:-3..".parse().unwrap();
+    assert_eq!(sel.range.start, Some(-3));
     assert_eq!(sel.range.end, None);
+    assert_eq!(sel.range.resolve(10), Some((7, 10)));
 }
 
 #[test]
@@ -53,8 +64,7 @@ fn selector_bare_negative_index_is_range_only() {
     // `-1` (no colon) means "default content, last turn" — same as `a:-1`.
     let sel: Selector = "-1".parse().unwrap();
     assert_eq!(sel.content, Content::assistant_only());
-    assert_eq!(sel.range.start, Some(-1));
-    assert_eq!(sel.range.end, None);
+    assert_eq!(sel.range, Range::last());
 }
 
 #[test]
@@ -85,8 +95,7 @@ fn selector_colon_prefix_uses_default_content() {
     // `:-1` is the long-form equivalent of `-1`.
     let sel: Selector = ":-1".parse().unwrap();
     assert_eq!(sel.content, Content::assistant_only());
-    assert_eq!(sel.range.start, Some(-1));
-    assert_eq!(sel.range.end, None);
+    assert_eq!(sel.range, Range::last());
 }
 
 #[test]
@@ -158,7 +167,9 @@ fn selector_roundtrip() {
     // Parsing a Selector's own Display form must yield an equal Selector.
     // We don't assert byte-for-byte equality with the input because the
     // Display form is canonical (e.g. content flags are ordered a,u,r,t).
-    let cases = ["a:-1", "u,a:-1", "*:..", "a:2..4", "a:3..", "a:..5"];
+    let cases = [
+        "a:-1", "u,a:-1", "*:..", "a:2..4", "a:3..", "a:..5", "a:-3..", "a:2..-1",
+    ];
     for input in cases {
         let sel: Selector = input.parse().unwrap();
         let round: Selector = sel.to_string().parse().unwrap();

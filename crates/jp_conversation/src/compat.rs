@@ -12,15 +12,16 @@
 //! changed), we fall back to an empty config.
 
 use jp_config::{AppConfig, PartialAppConfig, Schema, SchemaType};
-use serde_json::Value;
+use serde_json::{Value, json};
 use tracing::warn;
 
 /// Deserialize a [`PartialAppConfig`] from a raw JSON value, tolerating schema
 /// changes.
 ///
 /// 1. Strips unknown fields using the current [`AppConfig`] schema.
-/// 2. Attempts typed deserialization.
-/// 3. If that fails (e.g. a field's type changed), falls back to
+/// 2. Repairs field values whose accepted spelling has changed.
+/// 3. Attempts typed deserialization.
+/// 4. If that fails (e.g. a field's type changed), falls back to
 ///    [`PartialAppConfig::empty()`].
 ///
 /// Used for both the base config snapshot (`base_config.json`) and config delta
@@ -36,6 +37,8 @@ pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
         );
     }
 
+    migrate_legacy_rule_bounds(&mut value);
+
     match serde_json::from_value::<PartialAppConfig>(value) {
         Ok(config) => config,
         Err(err) => {
@@ -45,6 +48,82 @@ pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
             );
             PartialAppConfig::empty()
         }
+    }
+}
+
+/// Repair compaction rule bounds written in a spelling the current parser no
+/// longer accepts.
+///
+/// `keep_first`/`keep_last` once accepted `"last"` for the last-compaction
+/// marker and `"@N"` for an absolute turn, and both forms reached disk.
+/// Left as-is they fail typed deserialization, which discards the entire stored
+/// config — model, tools, style and all — so they are rewritten here:
+///
+/// - `"last"` becomes `"last-compaction"`, the same bound under its current
+///   name.
+/// - A rule carrying an `"@N"` bound is dropped whole.
+///   An absolute turn describes one conversation, so a config rule has no way
+///   to express it, and removing just the bound would leave the rule running
+///   over the default range instead — compacting turns the rule never named.
+///   Dropping the rule compacts less than intended rather than more, and the
+///   config around it still survives.
+fn migrate_legacy_rule_bounds(value: &mut Value) {
+    let Some(rules) = value.pointer_mut("/conversation/compaction/rules") else {
+        return;
+    };
+
+    // `rules` is a `MergeableVec`: a bare array, or an object whose `value` key
+    // holds one (the shape `ConversationStream::to_parts` writes).
+    let bare_array = matches!(rules, Value::Array(_));
+    let items = match rules {
+        Value::Array(items) => items,
+        Value::Object(obj) => match obj.get_mut("value") {
+            Some(Value::Array(items)) => items,
+            _ => return,
+        },
+        _ => return,
+    };
+
+    let before = items.len();
+
+    items.retain_mut(|rule| {
+        let Some(rule) = rule.as_object_mut() else {
+            return true;
+        };
+
+        let mut keep = true;
+        for key in ["keep_first", "keep_last"] {
+            let Some(bound) = rule.get(key).and_then(Value::as_str).map(str::to_owned) else {
+                continue;
+            };
+
+            if bound.eq_ignore_ascii_case("last") {
+                warn!(
+                    field = key,
+                    "Renaming stored `last` bound to `last-compaction`."
+                );
+                rule.insert(key.to_owned(), Value::String("last-compaction".to_owned()));
+            } else if bound.starts_with('@') {
+                warn!(
+                    field = key,
+                    bound = bound,
+                    "Dropping stored compaction rule: config rules cannot name an absolute turn, \
+                     and running the rule with a substituted bound would compact a range it never \
+                     named.",
+                );
+                keep = false;
+            }
+        }
+
+        keep
+    });
+
+    // An empty bare array reads as "unset" to
+    // `PartialCompactionConfig::fill_from`, which then reinstates the built-in
+    // default rule — compacting more than the rule just dropped. The `Merged`
+    // form with an explicit strategy reads as "no rules".
+    if bare_array && before > 0 && items.is_empty() {
+        *rules = json!({ "value": [], "strategy": "replace" });
     }
 }
 
