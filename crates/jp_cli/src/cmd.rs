@@ -395,6 +395,12 @@ impl From<crate::error::Error> for Error {
                 ("id", id),
             ]
             .into(),
+            ArgFile { path, source } => [
+                ("message", "Cannot read argument file".into()),
+                ("path", path),
+                ("error", source.to_string()),
+            ]
+            .into(),
             Attachment(error) => [
                 ("message", "Attachment error".into()),
                 ("error", error.clone()),
