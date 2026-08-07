@@ -627,8 +627,13 @@ if (flags.has('--summary')) {
     process.exit(0)
 }
 
+// A clean file still prints its word count when it was asked for by id: the
+// count is the reason to run this on a single RFD. Whole-corpus runs stay
+// quiet about clean documents, or the report is 150 lines of nothing.
+const explicit = ids.length > 0
+
 for (const r of shown) {
-    if (r.findings.length === 0 && r.delta === undefined) continue
+    if (r.findings.length === 0 && r.delta === undefined && !explicit) continue
     const head = r.delta === undefined || r.delta === null
         ? `${r.file}  (${r.words} words, target ${r.budget.target})`
         : `${r.file}  (${r.words} words, target ${r.budget.target}, ` +

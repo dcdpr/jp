@@ -1,9 +1,8 @@
 [conversation.tools.rfd_lint]
 enable = false
 run = "unattended"
-result = "unattended"
 source = "local"
-command = "just rfd-lint {{tool.arguments.nnn | default('')}} {{tool.arguments.flag | default('')}}"
+command = "just rfd-lint {{tool.arguments.nnn}} {{tool.arguments.flag | default('')}}"
 description = """Check RFDs deterministically: prose budget against the category \
 target and hard limit, sentence length, hedging, banned vocabulary, filler, \
 link hygiene, metadata, filename/heading agreement, duplicated sentences, and \
@@ -25,18 +24,17 @@ parameters = "function_call"
 
 [conversation.tools.rfd_lint.parameters.nnn]
 description = """One or more RFD ids, space separated: permanent numbers (95, \
-095) or draft IDs (D24). Omit to check every RFD and draft."""
-required = false
+095) or draft IDs (D24)."""
+required = true
 type = "string"
 
+# Documented in the description rather than constrained with `enum`. An
+# optional parameter carrying an `enum` fails to render through
+# `default('')`; `renumber.toml` proves the plain-string form works.
 [conversation.tools.rfd_lint.parameters.flag]
-description = """Optional output mode. `--summary` prints a word-count table \
-with no findings, worst first. `--errors-only` drops the warnings. `--json` \
-emits the full report as JSON."""
+description = """Optional output mode, one of `--summary`, `--errors-only`, or \
+`--json`. `--summary` prints a word-count table with no findings, worst first. \
+`--errors-only` drops the warnings. `--json` emits the full report as \
+structured data. Omit it for the normal report."""
 required = false
 type = "string"
-enum = [
-    "--summary",
-    "--errors-only",
-    "--json",
-]
