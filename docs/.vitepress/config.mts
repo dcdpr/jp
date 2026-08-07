@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, posix, resolve } from 'node:path'
 
 import { defineConfig } from 'vitepress'
@@ -83,7 +83,7 @@ const rfdPriorityWriter = {
                 try {
                     res.end(readFileSync(file))
                 } catch {
-                    res.end('{"planned":[],"backlog":[],"in_development":[]}')
+                    res.end('{"planned":[],"backlog":[]}')
                 }
                 return
             }
@@ -125,11 +125,10 @@ const rfdPriorityWriter = {
                 if (
                     !Array.isArray(parsed.planned) ||
                     !parsed.planned.every(isGroup) ||
-                    !isStrArray(parsed.backlog) ||
-                    !isStrArray(parsed.in_development)
+                    !isStrArray(parsed.backlog)
                 ) {
                     res.statusCode = 400
-                    res.end('expected { planned: [{ milestone, ids }], backlog, in_development }')
+                    res.end('expected { planned: [{ milestone, ids }], backlog }')
                     return
                 }
 
@@ -139,10 +138,144 @@ const rfdPriorityWriter = {
                         ids: g.ids,
                     })),
                     backlog: parsed.backlog,
-                    in_development: parsed.in_development,
                 }
                 try {
                     writeFileSync(file, JSON.stringify(out, null, 2) + '\n')
+                } catch (err) {
+                    res.statusCode = 500
+                    res.end(String(err))
+                    return
+                }
+
+                res.statusCode = 200
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ ok: true }))
+            })
+        })
+    },
+}
+
+// Dev-only read/write endpoint for the ticket board (`/ticket/board`).
+//
+// Two pieces of state, kept apart (see RFD 100): the order within a column
+// lives in `docs/ticket/board.json`, and a ticket's status lives in the ticket
+// file. Dragging a card between columns therefore rewrites one `Status` line;
+// dragging within a column touches only the board file.
+const ticketBoardWriter = {
+    name: 'ticket-board-writer',
+    configureServer(server) {
+        const dir = resolve(server.config.root, 'ticket')
+        const boardFile = resolve(dir, 'board.json')
+        const COLUMNS = [
+            { key: 'todo', status: 'Todo' },
+            { key: 'in_progress', status: 'In Progress' },
+            { key: 'done', status: 'Done' },
+        ]
+
+        // Every ticket on disk, by id, with the bits the board needs.
+        const readTickets = () => {
+            const tickets = new Map()
+            for (const name of readdirSync(dir)) {
+                if (!/^\d{4}-.+\.md$/.test(name)) continue
+                const file = resolve(dir, name)
+                const content = readFileSync(file, 'utf-8')
+                const field = (key) =>
+                    content.match(new RegExp(`^- \\*\\*${key}\\*\\*:\\s*(.+)`, 'm'))?.[1]?.trim()
+                        ?? null
+                const id = `T${name.slice(0, 4)}`
+                tickets.set(id, {
+                    id,
+                    file,
+                    title: content.match(/^# T\d+:\s*(.+)/m)?.[1]?.trim() ?? name,
+                    status: field('Status'),
+                    kind: field('Kind'),
+                    blockedBy: field('Blocked by'),
+                    implements: field('Implements'),
+                    path: `/ticket/${name.replace(/\.md$/, '')}`,
+                })
+            }
+            return tickets
+        }
+
+        const readOrder = () => {
+            try {
+                return JSON.parse(readFileSync(boardFile, 'utf-8'))
+            } catch {
+                return {}
+            }
+        }
+
+        server.middlewares.use('/__ticket-board', (req, res, next) => {
+            if (req.method === 'GET') {
+                const tickets = readTickets()
+                const order = readOrder()
+                const columns = COLUMNS.map(column => {
+                    const rank = new Map((order[column.key] ?? []).map((id, i) => [id, i]))
+                    const rows = [...tickets.values()]
+                        .filter(t => t.status === column.status)
+                        .sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity)
+                            || a.id.localeCompare(b.id))
+                    return { ...column, total: rows.length, tickets: rows }
+                })
+
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ columns }))
+                return
+            }
+
+            if (req.method !== 'POST') return next()
+
+            let body = ''
+            let tooBig = false
+            req.on('data', (chunk) => {
+                body += chunk
+                if (body.length > 256 * 1024) {
+                    tooBig = true
+                    req.destroy()
+                }
+            })
+            req.on('end', () => {
+                if (tooBig) {
+                    res.statusCode = 413
+                    res.end('payload too large')
+                    return
+                }
+
+                let parsed
+                try {
+                    parsed = JSON.parse(body)
+                } catch {
+                    res.statusCode = 400
+                    res.end('invalid JSON')
+                    return
+                }
+
+                const isStrArray = (v) =>
+                    Array.isArray(v) && v.every((x) => typeof x === 'string')
+                if (!COLUMNS.every(column => isStrArray(parsed[column.key]))) {
+                    res.statusCode = 400
+                    res.end('expected { todo, in_progress, done } arrays of ticket ids')
+                    return
+                }
+
+                try {
+                    const tickets = readTickets()
+                    const order = {}
+                    for (const column of COLUMNS) {
+                        order[column.key] = parsed[column.key]
+                        for (const id of parsed[column.key]) {
+                            const ticket = tickets.get(id)
+                            if (!ticket || ticket.status === column.status) continue
+                            // The status line is the ticket's own; the first
+                            // match is the header, ahead of any quoted example.
+                            const content = readFileSync(ticket.file, 'utf-8')
+                            writeFileSync(ticket.file, content.replace(
+                                /^- \*\*Status\*\*:.*$/m,
+                                `- **Status**: ${column.status}`,
+                            ))
+                        }
+                    }
+                    writeFileSync(boardFile, JSON.stringify(order, null, 2) + '\n')
                 } catch (err) {
                     res.statusCode = 500
                     res.end(String(err))
@@ -203,6 +336,15 @@ export default defineConfig({
             })
         },
     },
+    // RFDs and tickets aren't in the sidebar, so VitePress's prev/next links
+    // would point at whatever page happens to sit next to them in the config.
+    // They're indexed documents, not a reading order.
+    transformPageData(pageData) {
+        if (/^(rfd|ticket)\//.test(pageData.relativePath)) {
+            pageData.frontmatter.prev ??= false
+            pageData.frontmatter.next ??= false
+        }
+    },
     async buildEnd(siteConfig) {
         // Copy raw .md source files into the output directory so every page
         // is also reachable at its .md URL (e.g. /getting-started.md).
@@ -224,15 +366,21 @@ export default defineConfig({
         }
     },
     vite: {
-        plugins: [serveMarkdownAsUtf8, rfdPriorityWriter],
+        plugins: [serveMarkdownAsUtf8, rfdPriorityWriter, ticketBoardWriter],
         // The priority board persists itself by writing `rfd/priority.json` via
         // the dev middleware above. It isn't part of the module graph, so it
         // must not trigger a dev-server reload — the board owns its in-memory
         // state and a manual refresh re-reads the file.
         server: {
             watch: {
-                ignored: ['**/rfd/priority.json'],
+                ignored: ['**/rfd/priority.json', '**/ticket/board.json'],
             },
+        },
+        // Both boards import SortableJS on demand, which Vite would otherwise
+        // discover mid-session and answer with a full page reload. Pre-bundling
+        // it means the first visit to a board is just a board.
+        optimizeDeps: {
+            include: ['sortablejs'],
         },
     },
     lang: 'en-US',
@@ -255,6 +403,7 @@ export default defineConfig({
             { text: 'Installation', link: '/installation' },
             { text: 'Change Log', link: '/change-log' },
             { text: 'RFDs', link: '/rfd/' },
+            { text: 'Tickets', link: '/ticket/' },
         ],
 
         sidebar: [

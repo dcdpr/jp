@@ -2,6 +2,9 @@
 import { ref, computed, watch, onMounted } from 'vue'
 import { inBrowser } from 'vitepress'
 
+// One index for every kind of document the site lists. RFDs and tickets differ
+// in what their id column is called and what they filter by; everything else —
+// the toolbar, the URL sync, the sortable table, the badges — is shared.
 const props = defineProps({
     entries: { type: Array, required: true },
     // The status column and the `status:` search filter only make sense when
@@ -10,6 +13,18 @@ const props = defineProps({
     // Prefix for the persisted toolbar state, so two indexes on the same site
     // don't share filter/search/summary toggles.
     storageKey: { type: String, default: 'rfd' },
+    // Heading of the id column, and the entry field holding that id.
+    idLabel: { type: String, default: 'RFD' },
+    idField: { type: String, default: 'num' },
+    // The toolbar's filter buttons, and the entry field they match against.
+    // `all` is prepended.
+    filters: { type: Array, default: () => ['design', 'decision', 'guide', 'process'] },
+    filterField: { type: String, default: 'category' },
+    // Whether entries carry a one-line summary worth toggling.
+    showSummary: { type: Boolean, default: true },
+    // Tickets list their author; RFDs don't, since theirs is nearly always the
+    // same person.
+    showAuthors: { type: Boolean, default: false },
 })
 
 function stored(key, fallback) {
@@ -26,12 +41,12 @@ function fromUrl(name) {
 }
 
 // Default to descending by id so the newest RFDs sit at the top.
-const sortKey = ref('num')
+const sortKey = ref(props.idField)
 const sortAsc = ref(false)
-const categories = ['all', 'design', 'decision', 'guide', 'process']
+const categories = computed(() => ['all', ...props.filters])
 
 const urlFilter = fromUrl('filter')
-const filter = ref(categories.includes(urlFilter) ? urlFilter : stored(k('filter'), 'all'))
+const filter = ref(categories.value.includes(urlFilter) ? urlFilter : stored(k('filter'), 'all'))
 const search = ref(fromUrl('search') ?? stored(k('search'), ''))
 const showSummaries = ref(stored(k('summaries'), 'true') === 'true')
 
@@ -61,13 +76,25 @@ const showCategory = computed(() => filter.value === 'all')
 
 const columns = computed(() => {
     const cols = [
-        { key: 'num', label: 'RFD' },
+        { key: props.idField, label: props.idLabel },
         { key: 'title', label: 'Title' },
     ]
-    if (showCategory.value) cols.push({ key: 'category', label: 'Category' })
+    if (showCategory.value) {
+        cols.push({ key: props.filterField, label: capitalize(props.filterField) })
+    }
+    if (props.showAuthors) cols.push({ key: 'authors', label: 'Authors' })
     if (props.showStatus) cols.push({ key: 'status', label: 'Status' })
     return cols
 })
+
+function capitalize(value) {
+    return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+// `In Progress` and the like need a class-safe form.
+function statusClass(status) {
+    return `doc-badge--${(status ?? 'unknown').toLowerCase().replace(/\s+/g, '-')}`
+}
 
 function toggleSort(key) {
     if (sortKey.value === key) {
@@ -103,7 +130,7 @@ function toggleStatusFilter(status) {
 const filtered = computed(() => {
     let rows = filter.value === 'all'
         ? [...props.entries]
-        : props.entries.filter(r => r.category?.toLowerCase() === filter.value)
+        : props.entries.filter(r => r[props.filterField]?.toLowerCase() === filter.value)
 
     const { statusFilter, textQuery } = parsedSearch.value
 
@@ -113,7 +140,7 @@ const filtered = computed(() => {
 
     if (textQuery) {
         rows = rows.filter(r =>
-            [r.num, r.title, r.category, r.status, r.summary]
+            [r[props.idField], r.title, r[props.filterField], r.status, r.summary]
                 .some(v => v?.toLowerCase().includes(textQuery))
         )
     }
@@ -131,79 +158,83 @@ const filtered = computed(() => {
 </script>
 
 <template>
-<div class="rfd-toolbar">
-    <div class="rfd-filters">
+<div class="doc-toolbar">
+    <div class="doc-filters">
         <button
             v-for="cat in categories"
             :key="cat"
-            :class="['rfd-filter', { active: filter === cat }]"
+            :class="['doc-filter', { active: filter === cat }]"
             @click="filter = cat"
         >{{ cat }}</button>
     </div>
-    <div class="rfd-search-wrap">
+    <div class="doc-search-wrap">
         <input
             v-model="search"
-            class="rfd-search"
+            class="doc-search"
             type="text"
-            :placeholder="showStatus ? 'Filter… e.g. status:draft' : 'Filter…'"
+            :placeholder="showStatus ? 'Filter… e.g. status:' + (filters[0] ?? '') : 'Filter…'"
         />
-        <button v-if="search" class="rfd-search-clear" @click="search = ''" title="Clear">&times;</button>
+        <button v-if="search" class="doc-search-clear" @click="search = ''" title="Clear">&times;</button>
     </div>
     <button
-        :class="['rfd-toggle', { active: showSummaries }]"
+        v-if="showSummary"
+        :class="['doc-toggle', { active: showSummaries }]"
         :title="showSummaries ? 'Hide summaries' : 'Show summaries'"
         @click="showSummaries = !showSummaries"
     >{{ showSummaries ? '⊟' : '⊞' }}</button>
 </div>
 
-<table class="rfd-table">
+<table class="doc-table">
 <colgroup>
     <col style="width: 4rem">
     <col>
-    <col v-if="showCategory" class="rfd-col-category" style="width: 7rem">
+    <col v-if="showCategory" class="doc-col-category" style="width: 7rem">
+    <col v-if="showAuthors" class="doc-col-category" style="width: 10rem">
     <col v-if="showStatus" style="width: 8rem">
 </colgroup>
 <thead><tr>
-    <th v-for="col in columns" :key="col.key" :class="['rfd-sortable', 'rfd-col-' + col.key]" @click="toggleSort(col.key)">
-        {{ col.label }} <span class="rfd-sort-arrow">{{ sortKey === col.key ? (sortAsc ? '▲' : '▼') : '' }}</span>
+    <th v-for="col in columns" :key="col.key" :class="['doc-sortable', 'doc-col-' + col.key]" @click="toggleSort(col.key)">
+        {{ col.label }} <span class="doc-sort-arrow">{{ sortKey === col.key ? (sortAsc ? '▲' : '▼') : '' }}</span>
     </th>
 </tr></thead>
 <tbody>
-<tr v-for="rfd in filtered" :key="rfd.slug">
-    <td>{{ rfd.num }}</td>
+<tr v-for="entry in filtered" :key="entry.slug">
+    <td>{{ entry[idField] }}</td>
     <td>
-        <a :href="rfd.path">{{ rfd.title }}</a>
-        <div v-if="showSummaries && rfd.summary" class="rfd-summary">{{ rfd.summary }}</div>
+        <a :href="entry.path">{{ entry.title }}</a>
+        <span v-if="entry.blockedBy" class="doc-badge doc-badge--blocked">blocked by {{ entry.blockedBy }}</span>
+        <div v-if="showSummaries && entry.summary" class="doc-summary">{{ entry.summary }}</div>
     </td>
-    <td v-if="showCategory" class="rfd-col-category">{{ rfd.category }}</td>
+    <td v-if="showCategory" class="doc-col-category">{{ entry[filterField] }}</td>
+    <td v-if="showAuthors" class="doc-col-category">{{ (entry.authors ?? '').replace(/\s*<[^>]*>/, '') }}</td>
     <td v-if="showStatus"><span
-        :class="['rfd-badge', 'rfd-badge--' + (rfd.status?.toLowerCase() ?? 'unknown'), { 'rfd-badge--active': parsedSearch.statusFilter === rfd.status?.toLowerCase() }]"
-        @click="toggleStatusFilter(rfd.status)"
-    >{{ rfd.status }}</span></td>
+        :class="['doc-badge', statusClass(entry.status), { 'doc-badge--active': parsedSearch.statusFilter === entry.status?.toLowerCase() }]"
+        @click="toggleStatusFilter(entry.status)"
+    >{{ entry.status }}</span></td>
 </tr>
 </tbody>
 </table>
 </template>
 
 <style>
-.rfd-toolbar {
+.doc-toolbar {
     display: flex;
     align-items: center;
     gap: 0.5rem;
     margin-top: 2rem;
 }
-.rfd-toolbar .rfd-toggle {
+.doc-toolbar .doc-toggle {
     margin-left: auto;
 }
-.rfd-filters {
+.doc-filters {
     display: flex;
     gap: 0.5rem;
 }
-.rfd-search-wrap {
+.doc-search-wrap {
     position: relative;
     width: 14rem;
 }
-.rfd-search {
+.doc-search {
     padding: 0.3rem 1.75rem 0.3rem 0.75rem;
     border: 1px solid var(--vp-c-divider);
     border-radius: 4px;
@@ -214,13 +245,13 @@ const filtered = computed(() => {
     width: 100%;
     box-sizing: border-box;
 }
-.rfd-search::placeholder {
+.doc-search::placeholder {
     color: var(--vp-c-text-3);
 }
-.rfd-search:focus {
+.doc-search:focus {
     border-color: var(--vp-c-brand-1);
 }
-.rfd-search-clear {
+.doc-search-clear {
     position: absolute;
     right: 0.35rem;
     top: 50%;
@@ -239,11 +270,11 @@ const filtered = computed(() => {
     justify-content: center;
     padding: 0;
 }
-.rfd-search-clear:hover {
+.doc-search-clear:hover {
     background: var(--vp-c-text-3);
     color: var(--vp-c-bg);
 }
-.rfd-filter {
+.doc-filter {
     padding: 0.25rem 0.75rem;
     border: 1px solid var(--vp-c-divider);
     border-radius: 4px;
@@ -253,7 +284,7 @@ const filtered = computed(() => {
     font-size: 0.9rem;
     text-transform: capitalize;
 }
-.rfd-toggle {
+.doc-toggle {
     padding: 0;
     border: none;
     background: transparent;
@@ -262,81 +293,81 @@ const filtered = computed(() => {
     font-size: 1.1rem;
     line-height: 1;
 }
-.rfd-filter:hover {
+.doc-filter:hover {
     border-color: var(--vp-c-brand-1);
     color: var(--vp-c-text-1);
 }
-.rfd-filter.active {
+.doc-filter.active {
     border-color: var(--vp-c-brand-1);
     background: var(--vp-c-brand-1);
     color: var(--vp-c-white);
 }
-.rfd-sortable {
+.doc-sortable {
     cursor: pointer;
     user-select: none;
     white-space: nowrap;
 }
-.rfd-sortable:hover {
+.doc-sortable:hover {
     color: var(--vp-c-brand-1);
 }
-.rfd-sort-arrow {
+.doc-sort-arrow {
     font-size: 0.7em;
     margin-left: 0.2em;
 }
-.rfd-table {
+.doc-table {
     margin-top: 0.5em !important;
     table-layout: fixed !important;
     width: 100% !important;
     max-width: 100% !important;
     display: table !important;
 }
-.rfd-summary {
+.doc-summary {
     font-size: 0.8rem;
     color: var(--vp-c-text-2);
     line-height: 1.4;
     margin-top: 0.15rem;
 }
-.rfd-table .rfd-badge {
+.doc-table .doc-badge {
     cursor: pointer;
     transition: opacity 0.15s, box-shadow 0.15s;
 }
-.rfd-table .rfd-badge:hover {
+.doc-table .doc-badge:hover {
     opacity: 0.8;
 }
-.rfd-badge--active {
+.doc-badge--active {
     box-shadow: 0 0 0 2px var(--vp-c-brand-1);
 }
 @media (max-width: 767px) {
-    .rfd-table {
+    .doc-table {
         table-layout: auto !important;
     }
 }
 @media (max-width: 639px) {
-    .rfd-toolbar {
+    .doc-toolbar {
         flex-wrap: wrap;
     }
-    .rfd-filters {
+    .doc-filters {
         width: 100%;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
     }
-    .rfd-filter {
+    .doc-filter {
         font-size: 0.8rem;
         padding: 0.2rem 0.5rem;
         white-space: nowrap;
     }
-    .rfd-search-wrap {
+    .doc-search-wrap {
         flex: 1;
         min-width: 0;
         width: auto;
     }
-    .rfd-search {
+    .doc-search {
         font-size: 1rem;
     }
-    .rfd-col-category {
+    .doc-col-category {
         display: none;
     }
-    .rfd-badge {
+    .doc-badge {
         font-size: 0.75rem;
         padding: 0.1rem 0.4rem;
     }

@@ -328,20 +328,31 @@ All categories use the same metadata:
 - **Category**: Design | Decision | Guide | Process
 - **Authors**: Name <email> (or GitHub handle)
 - **Date**: YYYY-MM-DD
-- **Tracking Issue**: #NNN (added automatically at Accepted)
 - **Extends**: RFD NNN (if this RFD builds on another)
-- **Extended by**: RFD NNN (if another RFD builds on this one)
+- **Extended by**: RFD NNN (if another RFD builds on this one), [RFD 100](100-in-repo-ticket-tracking.md)
 - **Requires**: RFD NNN (if this RFD depends on another)
 - **Required by**: RFD NNN (if another RFD depends on this one)
 - **Supersedes**: RFD NNN (if applicable)
 - **Superseded by**: RFD NNN (if applicable)
 ```
 
-The `Tracking Issue` field is added automatically by `just rfd-promote` when
-advancing from Discussion to Accepted.
-It links to a GitHub issue that tracks implementation progress.
-The issue is created by `jp` using the `github_create_issue_rfd_tracking` tool,
-which reads the RFD and generates a task list from the Implementation Plan.
+Implementation progress is tracked in [tickets], not in the metadata header.
+When `just rfd-promote` advances an RFD from Discussion to Accepted, it offers to
+turn each phase of the Implementation Plan into a ticket carrying `Implements:
+NNN`.
+The phases are read out of the document by `jp`, so the tickets match the plan
+rather than a fixed template, and whoever accepts the prompt reviews them before
+they land.
+
+Accepting an RFD records an agreed direction, not a commitment to start
+building, which is why the tickets are offered rather than created.
+Decline the prompt and file them later with `just ticket-create` when the work
+actually starts.
+
+A handful of older RFDs still carry a `Tracking Issue` field pointing at a GitHub
+issue.
+The field is retired: nothing writes it, and the lifecycle recipes only read it
+to remind you to close the issue when such an RFD is superseded or abandoned.
 
 The `Extends` and `Extended by` fields capture design-lineage relationships:
 "this RFD builds on that one's design."
@@ -438,8 +449,9 @@ filled in automatically by `rfd-promote`.
    The promotion is gated on the RFD's `Requires` *and* `Extends` fields: every
    entry in either field must be at status `Accepted`, `Implemented`, or
    `Superseded`.
-2. Merge the pull request.
-3. Create implementation issues or tasks as needed.
+2. Accept the prompt to file a ticket per implementation phase, or decline it and
+   file them when the work starts.
+3. Merge the pull request.
 
 ### After Acceptance
 
@@ -470,7 +482,7 @@ Run `just --list --group rfd` to see them.
 | `just rfd-draft CATEGORY TITLE` | Create a new draft under `drafts/`.      |
 | `just rfd-promote NNN`          | Advance status. Draft → Discussion       |
 |                                 | assigns number; Discussion → Accepted    |
-|                                 | creates tracking issue.                  |
+|                                 | offers phase tickets.                    |
 | `just rfd-extend NNN MMM`       | Record that RFD MMM extends RFD NNN,     |
 |                                 | updating both. Accepts draft IDs (DNN)   |
 |                                 | on either side.                          |
@@ -590,6 +602,7 @@ The steps are:
 
 [RFC 3]: https://datatracker.ietf.org/doc/html/rfc3
 [RFD 002]: 002-using-llms.md
+[tickets]: 100-in-repo-ticket-tracking.md
 [`000-decision-template.md`]: 000-decision-template.md
 [`000-design-template.md`]: 000-design-template.md
 [`000-guide-template.md`]: 000-guide-template.md

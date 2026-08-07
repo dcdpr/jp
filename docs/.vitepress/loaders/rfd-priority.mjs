@@ -12,11 +12,15 @@
 //   guaranteed.
 // - `order`: the flattened planned ids, for rank arithmetic (the cutoff sits
 //   at `order.length`).
-// - `backlog` / `inDevelopment`: string id arrays.
+// - `backlog`: string id array.
 //
 // The legacy shape — a flat `order` array instead of `planned` — is accepted
 // as a single unassigned group. Missing or malformed fields degrade to empty,
 // matching "a missing file is an empty board".
+//
+// There is no in-development field: "someone is writing code for this" is a
+// property of a work item, not of a design document, and is derived from ticket
+// state instead (see RFD 100).
 export function normalizePriority(raw) {
     const ids = v => (Array.isArray(v) ? v.map(String) : [])
 
@@ -37,7 +41,6 @@ export function normalizePriority(raw) {
         planned,
         order: planned.flatMap(g => g.ids),
         backlog: ids(raw?.backlog),
-        inDevelopment: ids(raw?.in_development),
     }
 }
 
