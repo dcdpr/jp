@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use assert_matches::assert_matches;
 use chrono::{DateTime, Utc};
+use clap::Parser as _;
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
@@ -1596,4 +1598,184 @@ fn mcp_startup_line_ultra_narrow_keeps_bounded_timer() {
     let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
     assert!(display_width(visible) <= 6, "must fit width: {line:?}");
     assert!(visible.contains("7.0s"), "timer must survive: {line:?}");
+}
+
+#[test]
+fn arg_file_path_recognizes_sigil() {
+    assert_eq!(arg_file_path("@notes.md"), Some("notes.md"));
+    assert_eq!(arg_file_path("@~/notes.md"), Some("~/notes.md"));
+    assert_eq!(arg_file_path("notes.md"), None);
+    assert_eq!(arg_file_path(""), None);
+}
+
+// A bare `@` is ordinary prose, not a reference to the empty path. Reading it
+// as a path is what made `jp q ... drop the @ entirely ...` fail.
+#[test]
+fn arg_file_path_ignores_bare_sigil() {
+    assert_eq!(arg_file_path("@"), None);
+    assert_eq!(arg_file_path("@ "), None);
+    assert_eq!(arg_file_path("@\t"), None);
+}
+
+#[test]
+fn query_file_path_only_for_single_value_query() {
+    let one = ["@notes.md".to_owned()];
+    assert_eq!(query_file_path(&one), Some("notes.md"));
+
+    let trailing = ["hello".to_owned(), "@notes.md".to_owned()];
+    assert_eq!(query_file_path(&trailing), None);
+
+    let leading = ["@notes.md".to_owned(), "extra".to_owned()];
+    assert_eq!(query_file_path(&leading), None);
+
+    let plain = ["hello".to_owned()];
+    assert_eq!(query_file_path(&plain), None);
+
+    assert_eq!(query_file_path(&[]), None);
+}
+
+#[test]
+fn read_arg_file_returns_file_contents() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Notes\n\nbody\n").unwrap();
+
+    assert_eq!(read_arg_file(path.as_str()).unwrap(), "# Notes\n\nbody\n");
+}
+
+/// Host for [`Query`]'s arguments, so tests can drive the real clap parser
+/// rather than constructing a [`Query`] the CLI could never produce.
+#[derive(clap::Parser)]
+struct QueryArgs {
+    #[command(flatten)]
+    query: Query,
+}
+
+/// Parse `jp query <args>`, always with `--no-edit` so no editor opens.
+fn parse_query(args: &[&str]) -> std::result::Result<Query, clap::Error> {
+    let argv = ["query", "--no-edit"]
+        .into_iter()
+        .chain(args.iter().copied());
+
+    QueryArgs::try_parse_from(argv).map(|parsed| parsed.query)
+}
+
+/// Build the request for `args`, with no piped stdin and an empty stream.
+fn built_request(args: &[&str]) -> String {
+    parse_query(args)
+        .unwrap()
+        .build_conversation(
+            "",
+            &ConversationStream::new_test(),
+            &AppConfig::new_test(),
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap()
+        .chat_request
+        .expect("non-empty request")
+        .content
+}
+
+#[test]
+fn build_conversation_reads_single_at_path_query() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Notes\n\nbody\n").unwrap();
+
+    assert_eq!(
+        built_request(&[format!("@{path}").as_str()]),
+        "# Notes\n\nbody\n"
+    );
+}
+
+// A bare `@` is the whole query: there is no path after the sigil, so it is
+// text. Reading it as the empty path is what aborted the query.
+#[test]
+fn build_conversation_keeps_lone_bare_sigil() {
+    assert_eq!(built_request(&["@"]), "@");
+}
+
+// The reported failure: a bare `@` mid-sentence was read as the empty path and
+// aborted the query before it was ever sent.
+#[test]
+fn build_conversation_keeps_bare_sigil_in_prose() {
+    assert_eq!(
+        built_request(&["we", "should", "drop", "the", "@", "entirely"]),
+        "we should drop the @ entirely"
+    );
+}
+
+// An `@path` that names a real file is still ordinary text when it is one word
+// of a longer query: only a single-value query reads from disk.
+#[test]
+fn build_conversation_keeps_at_path_word_in_multi_word_query() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "file contents").unwrap();
+
+    assert_eq!(
+        built_request(&["see", format!("@{path}").as_str()]),
+        format!("see @{path}")
+    );
+    // Leading position too: it is the value count that decides, not where the
+    // sigil sits.
+    assert_eq!(
+        built_request(&[format!("@{path}").as_str(), "is", "stale"]),
+        format!("@{path} is stale")
+    );
+}
+
+#[test]
+fn build_conversation_prepends_query_to_piped_stdin() {
+    let built = parse_query(&["look", "at", "this"])
+        .unwrap()
+        .build_conversation(
+            "piped payload",
+            &ConversationStream::new_test(),
+            &AppConfig::new_test(),
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap();
+
+    assert_eq!(
+        built.chat_request.unwrap().content,
+        "look at this\n\npiped payload"
+    );
+}
+
+#[test]
+fn build_conversation_missing_at_path_query_errors() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.md");
+    let query = parse_query(&[&format!("@{path}")]).unwrap();
+
+    let result = query.build_conversation(
+        "",
+        &ConversationStream::new_test(),
+        &AppConfig::new_test(),
+        Utf8Path::new("/tmp"),
+    );
+
+    let Err(error) = result else {
+        panic!("a query naming a missing file must fail, not be sent verbatim");
+    };
+    assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());
+}
+
+#[test]
+fn read_arg_file_error_names_the_path() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.md");
+
+    let error = read_arg_file(path.as_str()).unwrap_err();
+
+    assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());
+    // The OS-supplied cause differs per platform, so pin the part we own: the
+    // path is in the message clap renders, which is what "IO error" dropped.
+    assert!(
+        error
+            .to_string()
+            .starts_with(&format!("cannot read '{path}': ")),
+        "unexpected message: {error}"
+    );
 }

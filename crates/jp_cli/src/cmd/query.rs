@@ -143,7 +143,8 @@ pub(crate) struct Query {
     /// The query to send.
     /// If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit
     /// the query in an editor.
-    #[arg(value_parser = string_or_path)]
+    ///
+    /// A query consisting of a single `@path` value is read from that file.
     query: Option<Vec<String>>,
 
     /// Use the query string as a Jinja2 template.
@@ -428,6 +429,8 @@ impl Query {
             |fs| fs.build_conversation_dir(&cid, conv_title.as_deref(), true),
         );
 
+        let piped = read_piped_stdin()?;
+
         // Build the request read-only: replay resolution, quote seeding, and
         // the editor session all operate on (a view of) the stream without
         // mutating it. The destructive replay trim is described by
@@ -438,7 +441,9 @@ impl Query {
             mut editor_provided_config,
             pending_trim,
             chat_request,
-        } = lock.with_events(|stream| self.build_conversation(stream, &cfg, &conversation_path))?;
+        } = lock.with_events(|stream| {
+            self.build_conversation(&piped, stream, &cfg, &conversation_path)
+        })?;
 
         let Some(mut chat_request) = chat_request else {
             // Empty query, early exit. Nothing was mutated and nothing is
@@ -677,6 +682,7 @@ impl Query {
     /// [`TurnCoordinator::start_turn`]: turn::TurnCoordinator::start_turn
     fn build_conversation(
         &self,
+        piped: &str,
         stream: &ConversationStream,
         config: &AppConfig,
         conversation_root: &Utf8Path,
@@ -703,25 +709,7 @@ impl Query {
         };
         let view = view.as_ref();
 
-        // If stdin contains data, we prepend it to the chat request.
-        let stdin = io::stdin();
-        let piped = if stdin.is_terminal() {
-            String::new()
-        } else {
-            // Read the payload verbatim: interior newlines (fenced code
-            // blocks, paragraph breaks, ...) are part of the message. Only
-            // the final line terminator is dropped; the composition below
-            // adds its own separators.
-            let mut piped = io::read_to_string(stdin.lock())?;
-            if piped.ends_with('\n') {
-                piped.pop();
-                if piped.ends_with('\r') {
-                    piped.pop();
-                }
-            }
-            piped
-        };
-
+        // If stdin contained data, we prepend it to the chat request.
         if !piped.is_empty() {
             let sep = if chat_request.is_empty() { "" } else { "\n\n" };
             *chat_request = format!("{piped}{sep}{chat_request}");
@@ -730,8 +718,11 @@ impl Query {
         // If a query is provided, prepend it to the chat request. This is only
         // relevant for replays, otherwise the chat request is still empty, so
         // we replace it with the provided query.
-        if let Some(text) = &self.query {
-            let text = text.join(" ");
+        if let Some(values) = &self.query {
+            let text = match query_file_path(values) {
+                Some(path) => read_arg_file(path)?,
+                None => values.join(" "),
+            };
             let sep = if chat_request.is_empty() { "" } else { "\n\n" };
             *chat_request = format!("{text}{sep}{chat_request}");
         }
@@ -2272,15 +2263,68 @@ fn parse_fork_turns(s: &str) -> std::result::Result<Option<usize>, String> {
         .map_err(|_| format!("expected a positive integer, got '{s}'"))
 }
 
-fn string_or_path(s: &str) -> Result<String> {
-    if let Some(s) = s
-        .strip_prefix(PATH_STRING_PREFIX)
-        .and_then(|s| expand_tilde(s, env::var("HOME").ok()))
-    {
-        return fs::read_to_string(s).map_err(Into::into);
+/// Read the piped stdin payload, or the empty string when stdin is a terminal.
+///
+/// The payload is taken verbatim: interior newlines (fenced code blocks,
+/// paragraph breaks, ...) are part of the message.
+/// Only the final line terminator is dropped, so request composition can add
+/// its own separators.
+fn read_piped_stdin() -> Result<String> {
+    let stdin = io::stdin();
+    if stdin.is_terminal() {
+        return Ok(String::new());
     }
 
-    Ok(s.to_owned())
+    let mut piped = io::read_to_string(stdin.lock())?;
+    if piped.ends_with('\n') {
+        piped.pop();
+        if piped.ends_with('\r') {
+            piped.pop();
+        }
+    }
+
+    Ok(piped)
+}
+
+/// Resolve an argument value that may use the `@path` form.
+///
+/// A value starting with `@` is replaced by the contents of the file it names.
+/// Any other value is returned as-is.
+fn string_or_path(s: &str) -> Result<String> {
+    match arg_file_path(s) {
+        Some(path) => read_arg_file(path),
+        None => Ok(s.to_owned()),
+    }
+}
+
+/// Path an argument value refers to, if it uses the `@path` form.
+///
+/// Returns `None` for a value without the sigil, and for a bare `@` whose
+/// remainder is empty or only whitespace — that is ordinary text, not a path.
+fn arg_file_path(s: &str) -> Option<&str> {
+    s.strip_prefix(PATH_STRING_PREFIX)
+        .filter(|path| !path.trim().is_empty())
+}
+
+/// Path a positional query refers to, if it uses the `@path` form.
+///
+/// Only a query consisting of exactly one value participates, so an `@` word
+/// inside a multi-word query stays ordinary text.
+fn query_file_path(values: &[String]) -> Option<&str> {
+    match values {
+        [value] => arg_file_path(value),
+        _ => None,
+    }
+}
+
+/// Read the file an `@path` argument names, expanding a leading `~` to `$HOME`.
+fn read_arg_file(path: &str) -> Result<String> {
+    let path = expand_tilde(path, env::var("HOME").ok()).unwrap_or_else(|| Utf8PathBuf::from(path));
+
+    fs::read_to_string(&path).map_err(|source| Error::ArgFile {
+        path: path.into_string(),
+        source,
+    })
 }
 
 #[cfg(test)]
