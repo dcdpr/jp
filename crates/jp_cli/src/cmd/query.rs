@@ -140,12 +140,6 @@ type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + 
 
 #[derive(Debug, Default, clap::Args)]
 pub(crate) struct Query {
-    /// The query to send.
-    /// If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit
-    /// the query in an editor.
-    #[arg(value_parser = string_or_path)]
-    query: Option<Vec<String>>,
-
     /// Use the query string as a Jinja2 template.
     ///
     /// You can provide values for template variables using the
@@ -232,27 +226,8 @@ pub(crate) struct Query {
     #[arg(short = 'E', long = "no-edit", conflicts_with = "edit")]
     no_edit: bool,
 
-    /// Pre-fill the editor with the last assistant message quoted as a markdown
-    /// blockquote (each line prefixed with ` >  `).
-    ///
-    /// Useful for inline replies: open `$EDITOR` with the assistant's last
-    /// response pre-quoted, then intersperse your replies between the quoted
-    /// lines (mutt/email style).
-    /// The complete buffer — quotes plus your replies — becomes your next
-    /// message.
-    ///
-    /// Forces the editor open by default; respects `--no-edit` / `--edit=false`
-    /// if explicitly suppressed, in which case the quoted text is sent as-is
-    /// and echoed to the terminal before the turn runs.
-    /// Composes with `--replay`: the quote is taken from the stream *after* the
-    /// replayed turn has been trimmed, i.e. the assistant message preceding the
-    /// turn being replayed.
-    ///
-    /// If no prior assistant message exists in this conversation, a warning is
-    /// emitted and the editor opens with whatever other content was seeded
-    /// (query, stdin, or empty).
-    #[arg(long = "quote")]
-    quote: bool,
+    #[command(flatten)]
+    input: QueryInput,
 
     /// The model to use.
     #[arg(short = 'm', long = "model")]
@@ -730,20 +705,24 @@ impl Query {
         // If a query is provided, prepend it to the chat request. This is only
         // relevant for replays, otherwise the chat request is still empty, so
         // we replace it with the provided query.
-        if let Some(text) = &self.query {
+        if let Some(text) = &self.input.query {
             let text = text.join(" ");
             let sep = if chat_request.is_empty() { "" } else { "\n\n" };
             *chat_request = format!("{text}{sep}{chat_request}");
         }
 
-        // If --quote is set, prepend the last assistant message as a markdown
-        // blockquote so it sits at the top of the editor buffer. The user can
-        // then intersperse replies between the quoted lines (mutt-style inline
-        // reply). Missing message (e.g. brand new conversation) degrades to a
-        // warning and the editor opens with whatever else was seeded.
-        if self.quote {
+        // If --quote is set, prepend the last assistant message so it sits at
+        // the top of the editor buffer. The user can then intersperse replies
+        // between the quoted lines (mutt-style inline reply). Missing message
+        // (e.g. brand new conversation) degrades to a warning and the editor
+        // opens with whatever else was seeded.
+        if let Some(prefixed) = self.input.quote {
             if let Some(message) = last_assistant_message(view) {
-                let quoted = blockquote(message);
+                let quoted = if prefixed {
+                    blockquote(message)
+                } else {
+                    message.to_owned()
+                };
                 *chat_request = format!("{quoted}\n\n{chat_request}");
             } else {
                 warn!("--quote: no prior assistant message in this conversation");
@@ -870,7 +849,7 @@ impl Query {
         // `--quote` that text was assembled from the quoted assistant message
         // rather than typed by the user, so it is synthesized too (and
         // therefore echoed); anything else was typed or piped inline.
-        let source = if self.quote {
+        let source = if self.input.quote.is_some() {
             QuerySource::Synthesized
         } else {
             QuerySource::Inline
@@ -879,7 +858,9 @@ impl Query {
         // If a query is provided, and editing is not explicitly requested, or
         // in addition to the query, stdin contains data, or editing was
         // explicitly suppressed with `--no-edit`, we omit opening the editor.
-        if (self.query.as_ref().is_some_and(|v| !v.is_empty()) || !piped || self.force_no_edit())
+        if (self.input.query.as_ref().is_some_and(|v| !v.is_empty())
+            || !piped
+            || self.force_no_edit())
             && !self.force_edit()
             && !request.is_empty()
         {
@@ -1002,7 +983,7 @@ impl Query {
     /// In either case the editor should be opened, regardless of whether a
     /// query is provided as an argument.
     fn force_edit(&self) -> bool {
-        !self.force_no_edit() && (self.edit || self.quote)
+        !self.force_no_edit() && (self.edit || self.input.quote.is_some())
     }
 
     #[must_use]
@@ -1246,6 +1227,191 @@ fn blockquote(text: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// The query text and the `--quote` seed.
+///
+/// The two are parsed together because `--quote` accepts its value either
+/// attached (`--quote=false`) or as the word right after the flag (`--quote
+/// false`), and in the second form that word arrives as query text.
+#[derive(Debug, Default)]
+pub(crate) struct QueryInput {
+    /// The query words, in the order they were given.
+    query: Option<Vec<String>>,
+
+    /// `Some(true)` prefixes the quoted message with ` >  `, `Some(false)`
+    /// seeds it verbatim, `None` means `--quote` was not given.
+    quote: Option<bool>,
+}
+
+impl QueryInput {
+    /// Split the parsed arguments into the query and the quote seed.
+    fn resolve(args: QueryInputArgs, matches: &clap::ArgMatches) -> Self {
+        let QueryInputArgs {
+            mut query,
+            escaped_query,
+            quote,
+        } = args;
+
+        let quote = match quote {
+            None => None,
+            Some(QuoteArg::Attached(prefixed)) => Some(prefixed),
+            // A bare `--quote` reads its value from the next word when that
+            // word is exactly `true` or `false`. Anything else there is query
+            // text, and the flag falls back to its default.
+            Some(QuoteArg::Bare) => Some(take_quote_value(&mut query, matches).unwrap_or(true)),
+        };
+
+        // The two halves are one query. They stay apart until here so that
+        // `--quote` above only ever sees the unescaped words, and stay in this
+        // order because `--` always comes last.
+        if let Some(escaped) = escaped_query {
+            query.get_or_insert_default().extend(escaped);
+        }
+
+        Self { query, quote }
+    }
+}
+
+/// Take the `true` / `false` word sitting directly after `--quote` out of the
+/// query and return its value.
+///
+/// Returns `None` — leaving the query untouched — when the flag is followed
+/// by anything else.
+/// Words given after `--` are never candidates: they land in a separate
+/// argument that this never reads.
+fn take_quote_value(query: &mut Option<Vec<String>>, matches: &clap::ArgMatches) -> Option<bool> {
+    // clap counts a flag and its value as two separate indices, so the word
+    // directly after `--quote` sits one past the index of the flag's own
+    // (defaulted) value.
+    let after_quote = matches.index_of("quote")? + 1;
+    let position = matches
+        .indices_of("query")?
+        .position(|index| index == after_quote)?;
+
+    // Test the raw word rather than the parsed one: a `@path` query argument
+    // is read from disk by the value parser, and the file's contents must not
+    // decide the flag.
+    let value = matches
+        .get_raw("query")?
+        .nth(position)?
+        .to_str()?
+        .parse::<bool>()
+        .ok()?;
+
+    let words = query.as_mut()?;
+    words.remove(position);
+    if words.is_empty() {
+        *query = None;
+    }
+
+    Some(value)
+}
+
+/// Argument declarations for [`QueryInput`].
+///
+/// [`QueryInput`] borrows these declarations and resolves the parsed values
+/// itself; it is never constructed as a command's own arguments.
+#[derive(Debug, clap::Args)]
+struct QueryInputArgs {
+    /// The query to send.
+    /// If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit
+    /// the query in an editor.
+    #[arg(value_parser = string_or_path)]
+    query: Option<Vec<String>>,
+
+    /// Query words given after `--`.
+    ///
+    /// clap only fills this argument through the `--` separator, which makes it
+    /// the record of which words were escaped.
+    /// They are appended to `query` once `--quote` has been resolved, so `--`
+    /// shields a `true` / `false` word from being read as the flag's value.
+    #[arg(last = true, hide = true, value_parser = string_or_path)]
+    escaped_query: Option<Vec<String>>,
+
+    /// Pre-fill the editor with the last assistant message quoted as a markdown
+    /// blockquote (each line prefixed with ` >  `).
+    ///
+    /// Useful for inline replies: open `$EDITOR` with the assistant's last
+    /// response pre-quoted, then intersperse your replies between the quoted
+    /// lines (mutt/email style).
+    /// The complete buffer — quotes plus your replies — becomes your next
+    /// message.
+    ///
+    /// `--quote=false` seeds the message verbatim, without the ` >  ` prefixes.
+    /// `--quote=true` is the same as a bare `--quote`.
+    /// Both values also work unattached (`--quote false`); any other word after
+    /// `--quote` stays part of the query, so `jp q --quote what now?` still
+    /// asks "what now?".
+    /// To ask a question that *is* `true` or `false`, put it after `--`.
+    ///
+    /// Forces the editor open by default; respects `--no-edit` / `--edit=false`
+    /// if explicitly suppressed, in which case the quoted text is sent as-is
+    /// and echoed to the terminal before the turn runs.
+    /// Composes with `--replay`: the quote is taken from the stream *after* the
+    /// replayed turn has been trimmed, i.e. the assistant message preceding the
+    /// turn being replayed.
+    ///
+    /// If no prior assistant message exists in this conversation, a warning is
+    /// emitted and the editor opens with whatever other content was seeded
+    /// (query, stdin, or empty).
+    #[arg(
+        long = "quote",
+        value_name = "BOOL",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "",
+        value_parser = parse_quote_arg,
+    )]
+    quote: Option<QuoteArg>,
+}
+
+/// The `--quote` value as it was written on the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuoteArg {
+    /// `--quote` with nothing attached.
+    Bare,
+
+    /// `--quote=true` or `--quote=false`.
+    Attached(bool),
+}
+
+/// Parse the `--quote` value.
+///
+/// The empty string is what a bare `--quote` yields, since `require_equals`
+/// keeps it from swallowing the next word and the flag falls back to its
+/// `default_missing_value`.
+fn parse_quote_arg(s: &str) -> std::result::Result<QuoteArg, String> {
+    match s {
+        "" => Ok(QuoteArg::Bare),
+        "true" => Ok(QuoteArg::Attached(true)),
+        "false" => Ok(QuoteArg::Attached(false)),
+        _ => Err("expected `true` or `false`".to_owned()),
+    }
+}
+
+impl clap::Args for QueryInput {
+    fn augment_args(cmd: clap::Command) -> clap::Command {
+        QueryInputArgs::augment_args(cmd)
+    }
+
+    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
+        QueryInputArgs::augment_args_for_update(cmd)
+    }
+}
+
+impl clap::FromArgMatches for QueryInput {
+    fn from_arg_matches(matches: &clap::ArgMatches) -> std::result::Result<Self, clap::Error> {
+        QueryInputArgs::from_arg_matches(matches).map(|args| Self::resolve(args, matches))
+    }
+
+    fn update_from_arg_matches(
+        &mut self,
+        matches: &clap::ArgMatches,
+    ) -> std::result::Result<(), clap::Error> {
+        *self = Self::from_arg_matches(matches)?;
+        Ok(())
+    }
 }
 
 /// A single tool selection directive from the CLI.
@@ -1504,10 +1670,9 @@ impl IntoPartialAppConfig for Query {
             attachments,
             edit: _,
             no_edit: _,
-            quote: _,
+            input: _,
             tool_use,
             no_tool_use,
-            query: _,
             parameters,
             hide_reasoning,
             hide_tool_calls,

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use clap::Parser as _;
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
@@ -27,7 +28,10 @@ use serde_json::Value;
 use super::*;
 use crate::{
     KeyValueOrPath,
-    cmd::target::{ConversationTarget, PickerFilter},
+    cmd::{
+        Commands,
+        target::{ConversationTarget, PickerFilter},
+    },
     config_pipeline::ConfigPipeline,
     signals::testing::detached_router,
 };
@@ -73,6 +77,14 @@ fn effective(partial: &PartialAppConfig, name: &str) -> Enable {
         .clone()
         .unwrap_or_default()
         .effective(&defaults)
+}
+
+/// Query input carrying `text` as the inline query, with `--quote` unset.
+fn inline_query(text: &str) -> QueryInput {
+    QueryInput {
+        query: Some(vec![text.to_owned()]),
+        ..Default::default()
+    }
 }
 
 /// Helper to build directives from a list.
@@ -809,7 +821,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
 
     let query1 = Query {
         new_conversation: true,
-        query: Some(vec!["is this thing on?".to_owned()]),
+        input: inline_query("is this thing on?"),
         ..Default::default()
     };
     let cfg1 = build_query_config(
@@ -840,7 +852,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     let handle2 = workspace.acquire_conversation(&conversation_id).unwrap();
     let query2 = Query {
         model: Some("gpt".to_owned()),
-        query: Some(vec!["are you there?".to_owned()]),
+        input: inline_query("are you there?"),
         ..Default::default()
     };
     let cfg2 = build_query_config(&workspace, base.clone(), &[], &query2, Some(&handle2));
@@ -856,7 +868,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
 
     let handle3 = workspace.acquire_conversation(&conversation_id).unwrap();
     let query3 = Query {
-        query: Some(vec!["plain query".to_owned()]),
+        input: inline_query("plain query"),
         ..Default::default()
     };
     let cfg3 = build_query_config(&workspace, base, &[], &query3, Some(&handle3));
@@ -1099,7 +1111,10 @@ fn edit_message_quote_without_editor_is_synthesized() {
     // inline.
     let config = AppConfig::new_test();
     let query = Query {
-        quote: true,
+        input: QueryInput {
+            quote: Some(true),
+            ..Default::default()
+        },
         no_edit: true,
         ..Default::default()
     };
@@ -1189,6 +1204,127 @@ fn picker_new_item_gated_by_bare_id_flag() {
         ..Default::default()
     };
     assert!(!bare_id.allows_new_from_picker());
+}
+
+/// Parse a full `jp` command line and return the `query` subcommand's args.
+fn parse_query<'a>(
+    argv: impl IntoIterator<Item = &'a str>,
+) -> std::result::Result<Query, clap::Error> {
+    match crate::Cli::try_parse_from(argv)?.command {
+        Commands::Query(query) => Ok(query),
+        other => panic!("expected the query subcommand, got {other:?}"),
+    }
+}
+
+/// The query words a parse produced, for comparison against a static slice.
+fn query_words(query: &Query) -> &[String] {
+    query.input.query.as_deref().unwrap_or_default()
+}
+
+#[test]
+fn bare_quote_uses_the_blockquote_prefix() {
+    let query = parse_query(["jp", "q", "--quote"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_true_is_the_same_as_a_bare_quote() {
+    let query = parse_query(["jp", "q", "--quote=true"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_false_still_quotes_but_drops_the_prefix() {
+    let query = parse_query(["jp", "q", "--quote=false"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_is_absent_when_not_given() {
+    let query = parse_query(["jp", "q"]).unwrap();
+    assert_eq!(query.input.quote, None);
+}
+
+#[test]
+fn quote_takes_an_unattached_bool() {
+    let query = parse_query(["jp", "q", "--quote", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert!(query_words(&query).is_empty());
+
+    let query = parse_query(["jp", "q", "--quote", "true"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_takes_an_unattached_bool_ahead_of_the_query() {
+    let query = parse_query(["jp", "q", "--quote", "false", "and", "now?"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query_words(&query), ["and".to_owned(), "now?".to_owned()]);
+}
+
+#[test]
+fn quote_does_not_swallow_a_following_flag() {
+    let query = parse_query(["jp", "q", "--quote", "--model", "foo"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.model.as_deref(), Some("foo"));
+}
+
+#[test]
+fn quote_does_not_swallow_the_positional_query() {
+    let query = parse_query(["jp", "q", "--quote", "what about X?"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["what about X?".to_owned()]);
+}
+
+#[test]
+fn quote_only_takes_the_word_directly_after_it() {
+    // `false` is the query here: it sits before the flag, so it was never
+    // offered as the flag's value.
+    let query = parse_query(["jp", "q", "false", "--quote"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+
+    // Same when another flag sits between the two.
+    let query = parse_query(["jp", "q", "--quote", "--model", "foo", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+}
+
+#[test]
+fn a_double_dash_shields_a_bool_from_quote() {
+    let query = parse_query(["jp", "q", "--quote", "--", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+}
+
+#[test]
+fn words_before_and_after_a_double_dash_form_one_query() {
+    let query = parse_query(["jp", "q", "why", "--", "--model", "foo"]).unwrap();
+    assert_eq!(query.input.quote, None);
+    assert_eq!(query_words(&query), [
+        "why".to_owned(),
+        "--model".to_owned(),
+        "foo".to_owned()
+    ]);
+}
+
+#[test]
+fn quote_with_an_attached_value_leaves_a_following_bool_in_the_query() {
+    // `--quote=false` has its value already, so the `true` after it is query
+    // text. Without the attached/bare distinction both forms would look
+    // identical here, since clap records the same index for either.
+    let query = parse_query(["jp", "q", "--quote=false", "true"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query_words(&query), ["true".to_owned()]);
+}
+
+#[test]
+fn quote_rejects_an_attached_non_boolean_value() {
+    assert!(parse_query(["jp", "q", "--quote=foo"]).is_err());
 }
 
 #[test]
