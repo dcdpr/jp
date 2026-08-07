@@ -1,6 +1,38 @@
+use clap::Parser as _;
 use jp_conversation::RangeBound;
 
 use super::*;
+
+/// Parse a `TurnRange` from CLI arguments.
+fn parse_range(args: &[&str]) -> TurnRange {
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        range: TurnRange,
+    }
+
+    let mut argv = vec!["test"];
+    argv.extend_from_slice(args);
+    TestCli::try_parse_from(argv).unwrap().range
+}
+
+#[test]
+fn from_end_values_parse_as_values_not_flags() {
+    // A leading `-` must not be mistaken for the start of another flag, whether
+    // or not the value is attached with `=`.
+    let expected = Some(TurnSpec::Single(TurnPos::FromEnd(2)));
+    assert_eq!(parse_range(&["--turn=-2"]).turn, expected);
+    assert_eq!(parse_range(&["--turn", "-2"]).turn, expected);
+
+    assert!(matches!(
+        parse_range(&["--from", "-2"]).from,
+        Some(CliRangeBound::Resolved(RangeBound::FromEnd(1)))
+    ));
+    assert!(matches!(
+        parse_range(&["--to", "-1"]).to,
+        Some(CliRangeBound::Resolved(RangeBound::FromEnd(0)))
+    ));
+}
 
 #[test]
 fn parse_bound_absolute_is_one_based() {
@@ -36,25 +68,20 @@ fn parse_bound_rejects_zero() {
 }
 
 #[test]
-fn parse_bound_accepts_last_compaction_and_alias() {
-    // `last-compaction` is canonical; `last` is a deprecated alias.
-    for s in ["last-compaction", "last"] {
-        assert!(
-            matches!(
-                parse_bound(s).unwrap(),
-                CliRangeBound::Resolved(RangeBound::AfterLastCompaction)
-            ),
-            "`{s}` should parse as the last-compaction marker"
-        );
-    }
+fn parse_bound_accepts_last_compaction() {
+    assert!(matches!(
+        parse_bound("last-compaction").unwrap(),
+        CliRangeBound::Resolved(RangeBound::AfterLastCompaction)
+    ));
+
+    // `last` alone names nothing; it parses as a (failing) duration.
+    assert!(parse_bound("last").is_err());
 }
 
 #[test]
 fn parse_to_bound_rejects_last_compaction_but_accepts_indices() {
-    // The most-recent-compaction marker is start-only, so `--to` rejects it
-    // (canonical name and alias).
+    // The most-recent-compaction marker is start-only, so `--to` rejects it.
     assert!(parse_to_bound("last-compaction").is_err());
-    assert!(parse_to_bound("last").is_err());
     assert!(parse_to_bound("3").is_ok());
     assert!(parse_to_bound("-1").is_ok());
 }
@@ -103,25 +130,25 @@ fn first_zero_is_an_empty_selection() {
 
 #[test]
 fn parse_turn_single_and_range() {
-    assert!(matches!(parse_turn("3").unwrap(), TurnSpec::Single(3)));
-    assert!(matches!(
+    assert_eq!(
+        parse_turn("3").unwrap(),
+        TurnSpec::Single(TurnPos::Absolute(3))
+    );
+    assert_eq!(
         parse_turn("1..5").unwrap(),
-        TurnSpec::Range(Some(1), Some(5))
-    ));
+        TurnSpec::Range(Some(TurnPos::Absolute(1)), Some(TurnPos::Absolute(5)))
+    );
 
     // Open-ended ranges.
-    assert!(matches!(
+    assert_eq!(
         parse_turn("10..").unwrap(),
-        TurnSpec::Range(Some(10), None)
-    ));
-    assert!(matches!(
+        TurnSpec::Range(Some(TurnPos::Absolute(10)), None)
+    );
+    assert_eq!(
         parse_turn("..10").unwrap(),
-        TurnSpec::Range(None, Some(10))
-    ));
-    assert!(matches!(
-        parse_turn("..").unwrap(),
-        TurnSpec::Range(None, None)
-    ));
+        TurnSpec::Range(None, Some(TurnPos::Absolute(10)))
+    );
+    assert_eq!(parse_turn("..").unwrap(), TurnSpec::Range(None, None));
 
     // 1-based: `0` is rejected wherever a number appears.
     assert!(parse_turn("0").is_err());
@@ -136,7 +163,7 @@ fn parse_turn_single_and_range() {
 fn turn_open_ended_ranges_set_both_bounds() {
     // `--turn 10..` is turn 10 through the last turn.
     let onward = TurnRange {
-        turn: Some(TurnSpec::Range(Some(10), None)),
+        turn: Some(TurnSpec::Range(Some(TurnPos::Absolute(10)), None)),
         ..Default::default()
     };
     assert!(matches!(
@@ -164,9 +191,120 @@ fn turn_open_ended_ranges_set_both_bounds() {
 }
 
 #[test]
-fn parse_one_based_rejects_zero() {
-    assert_eq!(parse_one_based("1").unwrap(), 1);
-    assert_eq!(parse_one_based("7").unwrap(), 7);
-    assert!(parse_one_based("0").is_err());
-    assert!(parse_one_based("x").is_err());
+fn parse_turn_pos_is_one_based_on_both_sides() {
+    assert_eq!(parse_turn_pos("1").unwrap(), TurnPos::Absolute(1));
+    assert_eq!(parse_turn_pos("7").unwrap(), TurnPos::Absolute(7));
+    assert_eq!(parse_turn_pos("-1").unwrap(), TurnPos::FromEnd(1));
+    assert_eq!(parse_turn_pos("-7").unwrap(), TurnPos::FromEnd(7));
+    assert!(parse_turn_pos("0").is_err());
+    assert!(parse_turn_pos("-0").is_err());
+    assert!(parse_turn_pos("x").is_err());
+    assert!(parse_turn_pos("-x").is_err());
+}
+
+#[test]
+fn parse_turn_accepts_from_end_positions() {
+    // `-1` is the last turn, matching `--from -1` / `--to -1`.
+    assert_eq!(
+        parse_turn("-1").unwrap(),
+        TurnSpec::Single(TurnPos::FromEnd(1))
+    );
+    assert_eq!(
+        parse_turn("-2").unwrap(),
+        TurnSpec::Single(TurnPos::FromEnd(2))
+    );
+
+    // Both ends may count from the end, and the two conventions can be mixed.
+    assert_eq!(
+        parse_turn("-3..-2").unwrap(),
+        TurnSpec::Range(Some(TurnPos::FromEnd(3)), Some(TurnPos::FromEnd(2)))
+    );
+    assert_eq!(
+        parse_turn("-3..").unwrap(),
+        TurnSpec::Range(Some(TurnPos::FromEnd(3)), None)
+    );
+    assert_eq!(
+        parse_turn("..-2").unwrap(),
+        TurnSpec::Range(None, Some(TurnPos::FromEnd(2)))
+    );
+    assert_eq!(
+        parse_turn("2..-1").unwrap(),
+        TurnSpec::Range(Some(TurnPos::Absolute(2)), Some(TurnPos::FromEnd(1)))
+    );
+}
+
+#[test]
+fn turn_from_end_selects_a_single_turn() {
+    // `--turn -1` is the last turn on both ends.
+    let last = TurnRange {
+        turn: Some(TurnSpec::Single(TurnPos::FromEnd(1))),
+        ..Default::default()
+    };
+    assert!(matches!(
+        last.cli_from_bound(),
+        Some(CliRangeBound::Resolved(RangeBound::FromEnd(0)))
+    ));
+    assert!(matches!(
+        last.cli_to_bound(),
+        Some(CliRangeBound::Resolved(RangeBound::FromEnd(0)))
+    ));
+
+    // `--turn -2` is the second-to-last turn, and nothing else.
+    let second_to_last = TurnRange {
+        turn: Some(TurnSpec::Single(TurnPos::FromEnd(2))),
+        ..Default::default()
+    };
+    assert!(matches!(
+        second_to_last.cli_from_bound(),
+        Some(CliRangeBound::Resolved(RangeBound::FromEnd(1)))
+    ));
+    assert!(matches!(
+        second_to_last.cli_to_bound(),
+        Some(CliRangeBound::Resolved(RangeBound::FromEnd(1)))
+    ));
+}
+
+#[test]
+fn turn_from_end_range_is_inclusive() {
+    // `--turn -3..-2` is the two turns before the last, excluding it.
+    let range = TurnRange {
+        turn: Some(TurnSpec::Range(
+            Some(TurnPos::FromEnd(3)),
+            Some(TurnPos::FromEnd(2)),
+        )),
+        ..Default::default()
+    };
+    assert!(matches!(
+        range.cli_from_bound(),
+        Some(CliRangeBound::Resolved(RangeBound::FromEnd(2)))
+    ));
+    assert!(matches!(
+        range.cli_to_bound(),
+        Some(CliRangeBound::Resolved(RangeBound::FromEnd(1)))
+    ));
+}
+
+#[test]
+fn turn_out_of_range_covers_from_end_positions() {
+    // A 5-turn conversation: `-5` is the first turn, `-6` is before it.
+    let oob = |s: &str| {
+        TurnRange {
+            turn: Some(parse_turn(s).unwrap()),
+            ..Default::default()
+        }
+        .turn_out_of_range(5)
+    };
+
+    assert_eq!(oob("-6"), Some(TurnPos::FromEnd(6)));
+    assert_eq!(oob("-5"), None);
+    assert_eq!(oob("-1"), None);
+    assert_eq!(oob("-8..-2"), Some(TurnPos::FromEnd(8)));
+    assert_eq!(oob("-3..-2"), None);
+}
+
+#[test]
+fn turn_pos_displays_as_written() {
+    // The out-of-range error quotes the position the user typed.
+    assert_eq!(TurnPos::Absolute(4).to_string(), "4");
+    assert_eq!(TurnPos::FromEnd(4).to_string(), "-4");
 }

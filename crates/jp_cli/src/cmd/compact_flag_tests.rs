@@ -51,7 +51,7 @@ fn parse_tool_mode_with_range() {
         summarize: false,
         range: Some(DslRange {
             from: None,
-            to: Some(RuleBound::FromEnd(3)),
+            to: Some(RuleBound::FromEnd(2)),
         }),
     });
 }
@@ -64,7 +64,7 @@ fn parse_with_range() {
         summarize: true,
         range: Some(DslRange {
             from: None,
-            to: Some(RuleBound::FromEnd(3)),
+            to: Some(RuleBound::FromEnd(2)),
         }),
     });
     assert_eq!(
@@ -75,7 +75,7 @@ fn parse_with_range() {
             summarize: false,
             range: Some(DslRange {
                 from: Some(RuleBound::Absolute(5)),
-                to: Some(RuleBound::FromEnd(3)),
+                to: Some(RuleBound::FromEnd(2)),
             }),
         }
     );
@@ -116,28 +116,37 @@ fn parse_absolute_range() {
             to: Some(RuleBound::Absolute(10)),
         })
     );
+    // Negative bounds are positions counted from the last turn (`-1`).
     assert_eq!(
         "s:-10..-3".parse::<CompactSpec>().unwrap().range,
         Some(DslRange {
-            from: Some(RuleBound::FromEnd(10)),
-            to: Some(RuleBound::FromEnd(3)),
+            from: Some(RuleBound::FromEnd(9)),
+            to: Some(RuleBound::FromEnd(2)),
+        })
+    );
+    assert_eq!(
+        "s:..-1".parse::<CompactSpec>().unwrap().range,
+        Some(DslRange {
+            from: None,
+            to: Some(RuleBound::FromEnd(0)),
         })
     );
 }
 
 #[test]
 fn parse_single_number_shorthand() {
-    // Negative shorthand `-3` = `..-3` (keep last 3).
+    // Negative shorthand `-3` = `..-3` (compact through the third turn from the
+    // end, keeping the final two).
     assert_eq!("s:-3".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: false,
         tools: None,
         summarize: true,
         range: Some(DslRange {
             from: None,
-            to: Some(RuleBound::FromEnd(3)),
+            to: Some(RuleBound::FromEnd(2)),
         }),
     });
-    // Positive shorthand `5` = `5..` (keep first 5).
+    // Positive shorthand `5` = `5..` (compact from turn 5 on).
     assert_eq!("r:5".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: true,
         tools: None,
@@ -156,9 +165,11 @@ fn parse_errors() {
     assert!("s:abc".parse::<CompactSpec>().is_err());
     // Non-numeric bound
     assert!("s:5..x".parse::<CompactSpec>().is_err());
-    // Absolute bounds are 1-based; `0` is invalid.
+    // Bounds are 1-based on both ends; `0` and `-0` are invalid.
     assert!("s:0..".parse::<CompactSpec>().is_err());
     assert!("s:0..5".parse::<CompactSpec>().is_err());
+    assert!("s:-0".parse::<CompactSpec>().is_err());
+    assert!("s:..-0".parse::<CompactSpec>().is_err());
     // Unknown tool mode
     assert!("t=nope".parse::<CompactSpec>().is_err());
     // Boolean policies reject values
@@ -173,10 +184,10 @@ fn to_partial_rule_with_range() {
     assert_eq!(rule.reasoning, Some(ReasoningMode::Strip));
     assert_eq!(rule.tool_calls, Some(ToolCallsMode::Strip));
     assert!(rule.summary.is_none());
-    // Open start maps to keep-first 0 (compact from the first turn); `-3` keeps
-    // the last 3.
+    // Open start maps to keep-first 0 (compact from the first turn); `-3` stops
+    // at the third turn from the end.
     assert_eq!(rule.keep_first, Some(RuleBound::Turns(0)));
-    assert_eq!(rule.keep_last, Some(RuleBound::FromEnd(3)));
+    assert_eq!(rule.keep_last, Some(RuleBound::FromEnd(2)));
 }
 
 #[test]

@@ -147,8 +147,8 @@ as integers.
 > The two `5`/`-3` examples above describe the original 0-based behavior; see
 > [Indexing and Counting Conventions] for the current rule.
 >
-> The `last` keyword is now spelled `last-compaction` (with `last` kept as a
-> deprecated alias) and is accepted only for `--from`.
+> The `last` keyword is now spelled `last-compaction` and is accepted only for
+> `--from`.
 
 `--reset` removes all `InternalEvent::Compaction` variants from the stream,
 restoring the raw event history.

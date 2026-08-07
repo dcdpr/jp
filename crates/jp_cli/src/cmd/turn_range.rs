@@ -7,9 +7,10 @@
 //!
 //! Turn positions are 1-based on the CLI and 0-based in the stream; the
 //! translation happens here.
+//! A position may also count from the end, where `-1` is the last turn.
 //! See `docs/architecture/indexing-conventions.md`.
 
-use std::{str::FromStr as _, time::Duration};
+use std::{fmt, str::FromStr as _, time::Duration};
 
 use chrono::{DateTime, Utc};
 use jp_conversation::{ConversationStream, RangeBound};
@@ -24,17 +25,15 @@ pub(crate) enum CliRangeBound {
 }
 
 /// Whether `s` is the most-recent-compaction marker.
-///
-/// `last-compaction` is canonical; `last` is accepted as a deprecated alias.
 fn is_last_compaction(s: &str) -> bool {
-    s.eq_ignore_ascii_case("last-compaction") || s.eq_ignore_ascii_case("last")
+    s.eq_ignore_ascii_case("last-compaction")
 }
 
 /// Parse a `--from`/`--to` bound.
 ///
 /// Accepts a 1-based turn index, `-N` (offset from the end, `-1` is the last
 /// turn), a duration (`5h`), or `last-compaction` (after the most recent
-/// compaction; `last` is accepted as a deprecated alias).
+/// compaction).
 pub(crate) fn parse_bound(s: &str) -> Result<CliRangeBound, String> {
     if is_last_compaction(s) {
         return Ok(CliRangeBound::Resolved(RangeBound::AfterLastCompaction));
@@ -77,26 +76,72 @@ fn parse_to_bound(s: &str) -> Result<CliRangeBound, String> {
     parse_bound(s)
 }
 
-/// Parse a 1-based turn number for `--turn`, rejecting `0`.
-fn parse_one_based(s: &str) -> Result<usize, String> {
+/// One endpoint of a `--turn` value: a turn counted from the start of the
+/// conversation, or from its end.
+///
+/// Both flavours are 1-based, and each holds the number as the user wrote it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TurnPos {
+    /// A turn counted from the start; `1` is the first turn.
+    Absolute(usize),
+    /// A turn counted from the end; `1` (written `-1`) is the last turn.
+    FromEnd(usize),
+}
+
+impl TurnPos {
+    /// The 0-based bound this position resolves to in the stream.
+    fn to_range_bound(self) -> RangeBound {
+        match self {
+            Self::Absolute(n) => RangeBound::Absolute(n.saturating_sub(1)),
+            Self::FromEnd(n) => RangeBound::FromEnd(n.saturating_sub(1)),
+        }
+    }
+
+    /// Whether this position names a turn a conversation of `count` turns does
+    /// not have.
+    fn out_of_range(self, count: usize) -> bool {
+        let (Self::Absolute(n) | Self::FromEnd(n)) = self;
+        n == 0 || n > count
+    }
+}
+
+impl fmt::Display for TurnPos {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Absolute(n) => write!(f, "{n}"),
+            Self::FromEnd(n) => write!(f, "-{n}"),
+        }
+    }
+}
+
+/// Parse one `--turn` endpoint: `N` counting from the first turn, or `-N`
+/// counting from the last.
+fn parse_turn_pos(s: &str) -> Result<TurnPos, String> {
+    if let Some(rest) = s.strip_prefix('-') {
+        return match rest.parse::<usize>() {
+            Ok(0) => Err("from-end offsets are 1-based; use `-1` for the last turn".to_owned()),
+            Ok(n) => Ok(TurnPos::FromEnd(n)),
+            Err(_) => Err(format!("invalid turn number `{s}`")),
+        };
+    }
     match s.parse::<usize>() {
         Ok(0) => Err("turn numbers are 1-based; `0` is not a valid turn".to_owned()),
-        Ok(n) => Ok(n),
+        Ok(n) => Ok(TurnPos::Absolute(n)),
         Err(_) => Err(format!("invalid turn number `{s}`")),
     }
 }
 
-/// A `--turn` value: a single 1-based turn, or an inclusive 1-based range.
+/// A `--turn` value: a single turn, or an inclusive range.
 ///
 /// Either end of a range may be open: `10..` is turn 10 through the end, `..10`
 /// is the first 10 turns, and `..` is the whole conversation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TurnSpec {
     /// A single turn.
-    Single(usize),
+    Single(TurnPos),
     /// An inclusive range `from..to`.
     /// `None` on either side is open (the start or end of the conversation).
-    Range(Option<usize>, Option<usize>),
+    Range(Option<TurnPos>, Option<TurnPos>),
 }
 
 /// Parse a `--turn` value: `N` (a single turn) or a range `A..B`.
@@ -104,21 +149,23 @@ pub(crate) enum TurnSpec {
 /// The separator is `..` and both ends are inclusive, matching the compaction
 /// DSL (`1..5` is turns 1 through 5).
 /// Either end may be omitted: `10..`, `..10`, or `..` (all turns).
+/// Either end may also count from the end of the conversation: `-1` is the last
+/// turn, so `-3..-2` is the two turns before it.
 fn parse_turn(s: &str) -> Result<TurnSpec, String> {
     if let Some((a, b)) = s.split_once("..") {
         let from = if a.is_empty() {
             None
         } else {
-            Some(parse_one_based(a)?)
+            Some(parse_turn_pos(a)?)
         };
         let to = if b.is_empty() {
             None
         } else {
-            Some(parse_one_based(b)?)
+            Some(parse_turn_pos(b)?)
         };
         return Ok(TurnSpec::Range(from, to));
     }
-    Ok(TurnSpec::Single(parse_one_based(s)?))
+    Ok(TurnSpec::Single(parse_turn_pos(s)?))
 }
 
 /// The resolution of one range bound (`from` or `to`) against a stream.
@@ -190,21 +237,23 @@ pub(crate) struct TurnRange {
     #[arg(long, num_args = 0..=1, default_missing_value = "1", conflicts_with_all = ["first", "turn", "from", "to"])]
     last: Option<usize>,
 
-    /// Select turns by number (1-based): a single turn (`3`), an inclusive
-    /// range (`1..5`), or an open range like `10..` (turn 10 onward), `..10`
-    /// (the first 10), or `..` (all).
-    /// Stable across new turns.
-    #[arg(long, value_parser = parse_turn, conflicts_with_all = ["first", "last", "from", "to"])]
+    /// Select turns by number: a single turn (`3`), an inclusive range
+    /// (`1..5`), or an open range like `10..` (turn 10 onward), `..10` (the
+    /// first 10), or `..` (all).
+    /// Numbers are 1-based and stable across new turns; `-N` instead counts
+    /// from the end, so `-1` is the last turn and `-3..-2` the two turns before
+    /// it.
+    #[arg(long, value_parser = parse_turn, allow_hyphen_values = true, conflicts_with_all = ["first", "last", "from", "to"])]
     turn: Option<TurnSpec>,
 
     /// Start of the range: a 1-based turn index, `-N` from the end, a duration
     /// (e.g. `5h`), or `last-compaction` (after the most recent compaction).
-    #[arg(long, value_parser = parse_bound)]
+    #[arg(long, value_parser = parse_bound, allow_hyphen_values = true)]
     from: Option<CliRangeBound>,
 
     /// End of the range: a 1-based turn index, `-N` from the end, or a duration
     /// (e.g. `2h`).
-    #[arg(long, value_parser = parse_to_bound)]
+    #[arg(long, value_parser = parse_to_bound, allow_hyphen_values = true)]
     to: Option<CliRangeBound>,
 }
 
@@ -215,7 +264,7 @@ impl TurnRange {
         Self {
             first: None,
             last,
-            turn: turn.map(TurnSpec::Single),
+            turn: turn.map(|n| TurnSpec::Single(TurnPos::Absolute(n))),
             from: None,
             to: None,
         }
@@ -231,17 +280,18 @@ impl TurnRange {
         self.last
     }
 
-    /// The first `--turn` endpoint outside `1..=count`, if any.
+    /// The first `--turn` endpoint the conversation does not have, if any.
     ///
-    /// `--turn` names specific turns, so an endpoint past the conversation is
-    /// an error rather than a clamped selection (unlike `--first`/`--last`).
-    pub(crate) fn turn_out_of_range(&self, count: usize) -> Option<usize> {
-        let oob = |n: usize| n == 0 || n > count;
+    /// `--turn` names specific turns, so an endpoint outside the conversation
+    /// is an error rather than a clamped selection (unlike `--first`/`--last`).
+    pub(crate) fn turn_out_of_range(&self, count: usize) -> Option<TurnPos> {
         let ends = match self.turn.as_ref()? {
-            TurnSpec::Single(n) => [Some(*n), None],
+            TurnSpec::Single(pos) => [Some(*pos), None],
             TurnSpec::Range(a, b) => [*a, *b],
         };
-        ends.into_iter().flatten().find(|&n| oob(n))
+        ends.into_iter()
+            .flatten()
+            .find(|pos| pos.out_of_range(count))
     }
 
     /// Whether the selector explicitly names an empty range (`--last 0` or
@@ -257,9 +307,9 @@ impl TurnRange {
     fn cli_from_bound(&self) -> Option<CliRangeBound> {
         if let Some(spec) = &self.turn {
             let bound = match spec {
-                TurnSpec::Single(n) => RangeBound::Absolute(n.saturating_sub(1)),
+                TurnSpec::Single(pos) => pos.to_range_bound(),
                 // Open start (`--turn ..B`) begins at the first turn.
-                TurnSpec::Range(Some(a), _) => RangeBound::Absolute(a.saturating_sub(1)),
+                TurnSpec::Range(Some(a), _) => a.to_range_bound(),
                 TurnSpec::Range(None, _) => RangeBound::Absolute(0),
             };
             return Some(CliRangeBound::Resolved(bound));
@@ -283,9 +333,9 @@ impl TurnRange {
     fn cli_to_bound(&self) -> Option<CliRangeBound> {
         if let Some(spec) = &self.turn {
             let bound = match spec {
-                TurnSpec::Single(n) => RangeBound::Absolute(n.saturating_sub(1)),
+                TurnSpec::Single(pos) => pos.to_range_bound(),
                 // Open end (`--turn A..`) runs through the last turn.
-                TurnSpec::Range(_, Some(b)) => RangeBound::Absolute(b.saturating_sub(1)),
+                TurnSpec::Range(_, Some(b)) => b.to_range_bound(),
                 TurnSpec::Range(_, None) => RangeBound::FromEnd(0),
             };
             return Some(CliRangeBound::Resolved(bound));
