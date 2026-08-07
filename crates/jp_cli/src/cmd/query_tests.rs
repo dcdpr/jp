@@ -22,13 +22,17 @@ use jp_llm::{
 };
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_term::width::display_width;
-use jp_workspace::{ConversationHandle, Workspace};
+use jp_workspace::{
+    ConversationHandle, Workspace,
+    session::{Session, SessionId, SessionSource},
+};
 use relative_path::RelativePathBuf;
 use serde_json::Value;
+use tokio::runtime::Runtime;
 
 use super::*;
 use crate::{
-    KeyValueOrPath,
+    Globals, KeyValueOrPath,
     cmd::target::{ConversationTarget, PickerFilter},
     config_pipeline::ConfigPipeline,
     signals::testing::detached_router,
@@ -1661,11 +1665,16 @@ fn parse_query(args: &[&str]) -> std::result::Result<Query, clap::Error> {
 }
 
 /// Build the request for `args`, with no piped stdin and an empty stream.
+///
+/// Runs the same two steps `run` does: resolve the query, then compose it.
 fn built_request(args: &[&str]) -> String {
-    parse_query(args)
-        .unwrap()
+    let query = parse_query(args).unwrap();
+    let resolved = query.resolve_query().unwrap();
+
+    query
         .build_conversation(
             "",
+            resolved.as_deref(),
             &ConversationStream::new_test(),
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
@@ -1731,6 +1740,7 @@ fn build_conversation_prepends_query_to_piped_stdin() {
         .unwrap()
         .build_conversation(
             "piped payload",
+            Some("look at this"),
             &ConversationStream::new_test(),
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
@@ -1743,20 +1753,60 @@ fn build_conversation_prepends_query_to_piped_stdin() {
     );
 }
 
+// A query naming an unreadable file must fail before any conversation or
+// session state is touched. The read used to happen after the conversation was
+// created and recorded as the session's active one, so a typo'd path left an
+// empty conversation behind that the next query silently targeted.
 #[test]
-fn build_conversation_missing_at_path_query_errors() {
+fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.md");
+
+    let session = Session {
+        id: SessionId::new("jp-cli-query-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut ctx = Ctx::new(
+        Workspace::new("/tmp/jp-cli-query-test"),
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        Some(session.clone()),
+        printer,
+    );
+
+    let query = parse_query(&["--new", &format!("@{missing}")]).unwrap();
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, None, false));
+
+    let Err(error) = result else {
+        panic!("a query naming a missing file must fail");
+    };
+    // Pin that it failed on the unreadable path, not on something the test
+    // environment happens to be missing further down `run`.
+    assert_eq!(
+        error
+            .metadata
+            .iter()
+            .find(|(key, _)| key == "path")
+            .map(|(_, value)| value),
+        Some(&Value::from(missing.as_str())),
+    );
+
+    assert_eq!(ctx.workspace.conversations().count(), 0);
+    assert_eq!(ctx.workspace.session_active_conversation(&session), None);
+}
+
+#[test]
+fn resolve_query_missing_at_path_errors() {
     let dir = camino_tempfile::tempdir().unwrap();
     let path = dir.path().join("missing.md");
     let query = parse_query(&[&format!("@{path}")]).unwrap();
 
-    let result = query.build_conversation(
-        "",
-        &ConversationStream::new_test(),
-        &AppConfig::new_test(),
-        Utf8Path::new("/tmp"),
-    );
-
-    let Err(error) = result else {
+    let Err(error) = query.resolve_query() else {
         panic!("a query naming a missing file must fail, not be sent verbatim");
     };
     assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());

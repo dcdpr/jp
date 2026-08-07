@@ -360,6 +360,11 @@ impl Query {
         let now = ctx.now();
         let cfg = ctx.config();
 
+        // Resolve the query before any conversation or session state is
+        // touched: an unreadable `@path` must not leave a conversation created
+        // and recorded as the session's active one.
+        let query = self.resolve_query()?;
+
         // Resolve the target conversation and acquire an exclusive lock.
         //
         // Paths:
@@ -442,7 +447,7 @@ impl Query {
             pending_trim,
             chat_request,
         } = lock.with_events(|stream| {
-            self.build_conversation(&piped, stream, &cfg, &conversation_path)
+            self.build_conversation(&piped, query.as_deref(), stream, &cfg, &conversation_path)
         })?;
 
         let Some(mut chat_request) = chat_request else {
@@ -662,6 +667,30 @@ impl Query {
         turn_result
     }
 
+    /// Resolve the positional query into the text to send.
+    ///
+    /// A query of exactly one `@path` value is read from that file; any other
+    /// query is its values joined with spaces, leaving an `@` word inside a
+    /// multi-word query as ordinary text.
+    /// Returns `None` when no query was given, which leaves the request to be
+    /// composed from piped stdin, a replayed request, or the editor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ArgFile`] if the named file cannot be read.
+    fn resolve_query(&self) -> Result<Option<String>> {
+        let Some(values) = &self.query else {
+            return Ok(None);
+        };
+
+        let text = match query_file_path(values) {
+            Some(path) => read_arg_file(path)?,
+            None => values.join(" "),
+        };
+
+        Ok(Some(text))
+    }
+
     /// Declare what conversations this command needs.
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
         if self.is_new() {
@@ -683,6 +712,7 @@ impl Query {
     fn build_conversation(
         &self,
         piped: &str,
+        query: Option<&str>,
         stream: &ConversationStream,
         config: &AppConfig,
         conversation_root: &Utf8Path,
@@ -718,11 +748,7 @@ impl Query {
         // If a query is provided, prepend it to the chat request. This is only
         // relevant for replays, otherwise the chat request is still empty, so
         // we replace it with the provided query.
-        if let Some(values) = &self.query {
-            let text = match query_file_path(values) {
-                Some(path) => read_arg_file(path)?,
-                None => values.join(" "),
-            };
+        if let Some(text) = query {
             let sep = if chat_request.is_empty() { "" } else { "\n\n" };
             *chat_request = format!("{text}{sep}{chat_request}");
         }
