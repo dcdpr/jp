@@ -17,33 +17,20 @@ and the mechanical policies.
 
 ## Motivation
 
-[RFD 064] generates a compaction summary in one non-interactive model call and
-applies it immediately.
-The user sees the result only after it has been stored.
+[RFD 064] generates a compaction summary in one non-interactive model
+call and applies it immediately.  But:
 
-[RFD 064] names the consequence in its own Drawbacks section: `--dry-run`
-cannot preview a summary, because generating one costs tokens and a second run
-produces different text.
-So the user has two choices, neither good.
-Apply the compaction blind and inspect it afterwards, or skip summarization and
-lose its benefit.
+  - some conversation compactions are intricate and need review; and
 
-The failure is not rare.
-A summary that drops the current task state, or that covers a range ending in
-the middle of an unfinished topic, misleads the model worse than the long
-conversation it replaced.
-`compact --reset` removes every compaction event, not just the bad one, so
-undoing a bad summary also discards each earlier compaction, and the tokens are
-already spent either way.
+  - conversations that can't fit in context cannot be compacted except
+    by operating over subranges, which means summarizing from prior
+    compactions, and that needs higher-level tooling to do well.
 
-Range selection has the same problem and no tooling at all.
-`--keep-last 3` is a guess about where the live work starts.
-The user cannot tell whether turn 18 opened a new topic without rereading the
-conversation, and the model that just had that conversation can answer the
-question immediately.
+Interactive review of compaction summaries in a flexible conversation
+model allows both subagent use in compaction as well as human review.
 
-Doing nothing leaves summarization as a one-shot bet on an expensive,
-non-deterministic operation.
+Doing nothing leaves summarization as a one-shot bet that cannot
+operate over long converations.
 
 ## Design
 
@@ -65,19 +52,28 @@ jp conversation compact --continue
 jp conversation compact --abort
 ```
 
+The shape follows `git rebase`: start, then discuss, then `--continue` or
+`--abort`.
+
 **Step 1** forks the source conversation into a **compaction conversation**,
 makes it active, runs the existing summarizer once so the review opens on a real
 draft rather than a blank page, records that draft as the opening proposal, and
 prints how to proceed.
-The range flags of `compact` (`--keep-first`, `--keep-last`, `--from`, `--to`)
-seed the opening draft's range; without them, the configured rules decide, as
-for a non-interactive compact.
+The opening proposal is always a summary proposal.
+Its range comes from the range flags of `compact` (`--keep-first`,
+`--keep-last`, `--from`, `--to`) when given; otherwise from the first
+configured rule with a `summary` section; otherwise from the built-in default
+range.
+`--reasoning`, `--tools`, `--dry-run`, and `--reset` conflict with
+`--interactive`; the policies stay negotiable inside the review.
 Starting a second review for a source that already has one open is refused (see
 [One review per source](#one-review-per-source)).
 
 The fork copies the whole source conversation, including the most recent turns.
 The range is under negotiation, so the model has to see the turns that a range
 change would move across.
+Whether the source's earlier compactions come along depends on size (see
+[Raw events and prior compactions](#raw-events-and-prior-compactions)).
 
 **Step 2** is ordinary chat.
 No new interaction mode, no prompt surface, no long-lived process.
@@ -113,6 +109,8 @@ Step 1 sets the new conversation up for its one job:
   The markers are ordinary event content, so the model sees them in its context
   and the user sees them in `jp conversation print`.
   Both sides read the same numbers instead of counting messages.
+  Marker numbers are 1-based, like every user-facing turn position
+  ([Indexing and Counting Conventions]).
   Turns added during the review carry no markers; they are not part of the
   negotiation.
 
@@ -135,10 +133,11 @@ Step 1 sets the new conversation up for its one job:
   [Configuration](#configuration)).
 
 - **Source ID.**
-  The compaction conversation stores the source conversation's ID in its
-  metadata.
-  The field survives archiving, so an archived review still names what it
-  reviewed.
+  The compaction conversation records the source conversation's ID in a new
+  field on the conversation record — a sibling of `pinned_at` and
+  `archived_at`, not event metadata.
+  Its presence is what marks a conversation as a compaction conversation, and
+  it survives archiving, so an archived review still names what it reviewed.
 
 ### One review per source
 
@@ -156,6 +155,37 @@ finalized second would append a second compaction on top of the first, with
 There is no use case for that.
 Archived reviews never block: both endings archive, so a finished review clears
 the way, and a forgotten one is exactly what the error reminds the user about.
+Unarchiving an old review reopens it: new reviews and compaction of the source
+are blocked again, and `--continue` offers its stale proposal.
+Re-validation and the confirmation prompt make that safe, if rarely useful.
+
+### Compaction of the source is blocked
+
+An open review freezes the source's compaction state, the way git blocks
+conflicting operations mid-rebase.
+While a not-yet-archived compaction conversation names the source, JP refuses
+every operation that appends or removes `Compaction` events on the source's
+stream: `jp conversation compact` in all forms, including `--reset`, and
+`jp query --compact` targeting the source.
+
+```
+error: a compaction review of this conversation is open: 01xyz
+finish it first: `jp conversation use 01xyz`, then discuss, `--continue`, or `--abort`
+```
+
+Without the block, a `--reset` mid-review changes what the copied compaction
+events in the fork mean, and a new summary compaction triggers [RFD 064]'s
+overlap auto-extension at apply time, silently widening the range the review
+negotiated.
+
+The block is scoped to compaction writes.
+`--dry-run` stays available; it writes nothing.
+Ordinary chat in the source stays available; the proposal's absolute range
+already tolerates growth (see
+[Range bounds are absolute](#range-bounds-are-absolute)).
+`jp conversation fork --compact` stays available; it compacts the fork's copy
+and leaves the source's stream untouched.
+The check is the same open-review scan `--interactive` performs.
 
 ### What is negotiated
 
@@ -174,6 +204,12 @@ Its fields are those [RFD 064] already defines.
 Turn numbers refer to the **source** conversation, read from the turn markers.
 The compaction conversation is scratch space, not the subject.
 
+The fields follow [RFD 064]'s precedence: when `summary` is set, `reasoning`
+and `tool_calls` are ignored.
+Validation flags a proposal that sets `summary` alongside either, so the model
+drops the dead fields rather than letting the user negotiate policies that
+change nothing.
+
 ### Recording a proposal
 
 The model records a proposal by calling a built-in tool.
@@ -186,6 +222,14 @@ Built-in means implemented inside JP rather than as an external program.
 The tool is disabled by default; the configuration entry written at fork time
 enables it inside compaction conversations, and nowhere else.
 Outside a review, the model never sees it.
+
+`from_turn` and `to_turn` are 1-based source turn positions — the numbers the
+model reads from the turn markers.
+The model never sees a 0-based index: markers, tool arguments, validation
+errors, and the rendered proposal all speak 1-based.
+JP translates to the 0-based `Compaction` fields only when `--continue` builds
+the event, at the same boundary where CLI range flags are translated
+([Indexing and Counting Conventions]).
 
 Each call is one proposal.
 Calls accumulate as ordinary tool-call events in the compaction conversation, so
@@ -204,12 +248,22 @@ Three properties follow from using a tool call rather than message text:
 JP validates every call as it is made, against the source conversation as it
 stands: the range falls within the source's turns, `from_turn` does not exceed
 `to_turn`, and the policy values parse.
+Validation also applies [RFD 064]'s summary-overlap rule at once: a summary
+range that partially overlaps an existing summary compaction is grown to
+subsume it, and the grown range is the proposal's range from that moment on.
+The tool result, the confirmation prompt, and the stored event all carry the
+same numbers; nothing widens at apply time.
 An invalid call returns an error as the tool result ("the conversation has 20
 turns, `to_turn` was 25"), which the model reads and corrects in the same
 exchange, while the user watches.
 A valid call returns the proposal rendered for display, so the user and the
 model see the same confirmed reading of what was just agreed.
 A call made in a conversation that records no source is an error.
+
+Validation reads the source without taking its lock.
+A snapshot suffices: an open review admits no compaction writes, new turns
+only widen the valid range, and `--continue` re-validates under the source's
+lock before applying.
 
 `--continue` fails with a clear error when the compaction conversation contains
 no `propose_compaction` call, and re-validates the call it finds before
@@ -254,7 +308,7 @@ looked at.
 ### Applying and aborting
 
 `--continue` resolves the source from the active compaction conversation's
-metadata, so the user passes no IDs.
+source field, so the user passes no IDs.
 It reads the compaction conversation and writes to the source, so it locks
 both.
 
@@ -279,34 +333,52 @@ The standard `--confirm` / `--no-confirm` / `--yes` flags apply.
 It writes nothing to the source and archives rather than deletes, so an
 accidental abort loses nothing that matters.
 
+Deleting or archiving the source while a review is open is not blocked.
+`--abort` always works; it touches only the compaction conversation.
+`--continue` against an archived source applies normally.
+`--continue` against a deleted source fails: the source conversation no longer
+exists, and the error says to close the review with `--abort`.
+
 Nothing is written to the source conversation until a confirmed `--continue`.
 Abandoning a review costs the compaction conversation and the tokens spent in
 it, and leaves the source conversation untouched.
 
+`--continue` is idempotent.
+Apply comes before archive, so a failure between the two leaves the compaction
+applied and the review still open.
+A rerun detects that state — the source's most recent `Compaction` equals the
+proposal, and an open review means nothing else can have written it (see
+[Compaction of the source is blocked](#compaction-of-the-source-is-blocked))
+— and skips the prompt and the apply, finishing only the archive and the
+switch back.
+
 ### Raw events and prior compactions
 
-[RFD 064] states that no code path feeds a projected view to a summarizer.
-The summarizer invoked at step 1 reads raw events, as it does today.
-The compaction conversation copies raw events, so this holds without new
-machinery.
+Raw events are preferred, and size decides.
+At fork time, JP estimates whether the source's raw events fit the review
+model's context window.
+When they fit, the fork drops the copied compaction events: the review model
+sees every original turn, and earlier summaries play no part in the review.
+When they do not fit, the fork keeps them: the review model sees earlier turns
+as their stored summaries, and a summary negotiated over such turns is built
+from those summaries, because the original messages cannot be loaded.
 
-The copy includes any compaction events the source already carries, and they
-keep working in the fork: the review model sees the same reduced view of
-earlier turns that the working model sees.
-The limitation follows, and is accepted: turns hidden under an earlier summary
-cannot be re-litigated in a review, because the review model sees only the
-summary.
-Dropping the copied compaction events would lift that, but a source that was
-compacted because it outgrew the context window would produce a fork that does
-not fit in it.
-A first review of a conversation has no prior compactions and no limitation.
+The step 1 summarizer follows the same rule: it reads the raw events of its
+range when they fit the summary model's window, and the projected view when
+they do not.
+A source with no prior compactions has nothing to drop or keep; both readings
+are the same.
 
 ### Configuration
 
 ```toml
-[conversation.compaction.review]
-model = "anthropic/claude-sonnet-4-5"  # defaults to assistant.model
+# Defaults to assistant.model.
+[conversation.compaction.review.model]
+id = "anthropic/claude-sonnet-4-5"
 ```
+
+`model` is a table mirroring `assistant.model`, the shape the rules' `summary.model`
+already uses.
 
 Review is a multi-turn discussion with tool calls.
 The cheap one-shot model a rule may name under `summary.model` is a poor fit, so
@@ -432,11 +504,16 @@ does not need it.
 
 ### Phase 1: The proposal tool
 
-Add `propose_compaction` as a built-in tool, disabled by default.
+Add the source field on the conversation record, and `propose_compaction` as a
+built-in tool, disabled by default.
 Its arguments mirror the `Compaction` fields [RFD 064] defines.
 Every call is validated against the source conversation named by the
-conversation's metadata: range within bounds, `from_turn` at most `to_turn`,
-policy values recognized.
+conversation's source field: range within bounds, `from_turn` at most `to_turn`,
+policy values recognized, and the summary-overlap growth applied at once, so
+the recorded range is final.
+Arguments are 1-based positions, validated as such; the translation to the
+stored 0-based indices happens when `--continue` builds the `Compaction`
+(Phase 3), not in the tool.
 The tool result carries the validation error or the proposal rendered for
 display; a conversation that names no source is itself a validation error.
 
@@ -448,12 +525,21 @@ Mergeable independently.
 Add the flag to `jp conversation compact`.
 Refuse when an open review already names the source.
 Fork the source conversation, inserting a turn marker at the start of each
-copied turn and recording the source ID in the new conversation's metadata.
+copied turn and recording the source ID in the field added in Phase 1.
+Drop the copied compaction events when the source's raw events fit the review
+model's context window; keep them when they do not, and feed the step 1
+summarizer the projected view in that case.
+Reject `--reasoning`, `--tools`, `--dry-run`, and `--reset` alongside
+`--interactive`.
 Write the fork-time configuration entry: inherited tools off,
 `propose_compaction` on, review instructions, review model.
-Run the existing summarizer once, seeded by the range flags when given, write
-its draft as the opening proposal, activate the compaction conversation, and
-print instructions.
+Run the existing summarizer once, its range from the flags when given,
+otherwise the first configured rule with a `summary` section, otherwise the
+built-in default; write its draft as the opening proposal, activate the
+compaction conversation, and print instructions.
+Block compaction writes to the source while the review is open: non-interactive
+`jp conversation compact` (including `--reset`) and `jp query --compact` refuse
+when an open review names the conversation, reusing the open-review scan.
 
 Depends on Phase 1.
 
@@ -463,7 +549,7 @@ Add both flags.
 Neither accepts a conversation ID or range flags; both require the active
 conversation to be a compaction conversation.
 `--continue` resolves the source conversation from the active compaction
-conversation's metadata, locks both, reads the most recent `propose_compaction`
+conversation's source field, locks both, reads the most recent `propose_compaction`
 call, re-validates it, prints it, and asks for confirmation (the shared
 `--confirm` / `--no-confirm` / `--yes` flags apply).
 On yes it builds and appends the `Compaction`, archives the compaction
@@ -473,6 +559,11 @@ without touching the source's event stream, and without prompting.
 
 Archiving is the last step of `--continue`: a failure to archive must not leave
 the compaction unapplied.
+A rerun after such a failure finds the proposal already applied as the source's
+most recent `Compaction`, skips the confirmation and the apply, and completes
+the archive and reactivation.
+A deleted source makes `--continue` fail with a pointer to `--abort`; an
+archived source is applied to normally.
 
 Depends on Phase 2.
 
@@ -490,5 +581,6 @@ Mergeable separately from Phase 3.
 - [RFD 064], Non-Destructive Conversation Compaction
 - [RFD 071], Conversation Archiving
 
+[Indexing and Counting Conventions]: ../../architecture/indexing-conventions.md
 [RFD 064]: ../064-non-destructive-conversation-compaction.md
 [RFD 071]: ../071-conversation-archiving.md
