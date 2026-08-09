@@ -290,81 +290,12 @@ fn handle_command(init: &InitMessage, stdout: &mut impl Write) -> Result<(), Str
     }
 }
 
-/// How composed text divides into a title and a body.
-#[derive(Debug, PartialEq, Eq)]
-enum Composition {
-    /// Nothing to file.
-    Empty,
-    /// One line: a title on its own.
-    Title(String),
-    /// A title, a blank line, and the rest.
-    TitleAndBody { title: String, body: String },
-    /// Prose that runs from the first line into the second, so all of it is
-    /// body and the title has to be asked for separately.
-    Body(String),
-}
-
-impl Composition {
-    /// Read composed text the way a commit message reads: subject, blank line,
-    /// then the rest.
-    ///
-    /// Text that runs straight on from the first line has no subject, so it is
-    /// all body.
-    /// Trailing blank lines never change the reading.
-    fn read(text: &str) -> Self {
-        let text = text.trim_end();
-        let mut lines = text.lines();
-
-        let Some(first) = lines.next().map(str::trim).filter(|line| !line.is_empty()) else {
-            return Self::Empty;
-        };
-
-        match lines.next() {
-            None => Self::Title(first.to_owned()),
-            Some(second) if !second.trim().is_empty() => Self::Body(text.to_owned()),
-            Some(_) => {
-                let body = lines.collect::<Vec<_>>().join("\n").trim().to_owned();
-                if body.is_empty() {
-                    Self::Title(first.to_owned())
-                } else {
-                    Self::TitleAndBody {
-                        title: first.to_owned(),
-                        body,
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Title used when the composed text is all body and the user names nothing.
-const UNTITLED: &str = "untitled";
-
 /// Take a value the composer fills in interactively, or explain its absence.
 ///
 /// Reached only when there was no terminal to ask on, since every one of these
 /// is prompted for otherwise.
 fn required<T>(value: Option<T>, what: &str) -> Result<T, String> {
     value.ok_or_else(|| format!("No {what} given, and no terminal to ask for one."))
-}
-
-/// Read a repository's open issues.
-async fn fetch_open(owner: &str, repo: &str) -> Result<Vec<Issue>, String> {
-    let mut builder = jp_github::Octocrab::builder();
-    if let Some(token) = token() {
-        builder = builder.personal_token(token);
-    }
-    let client = builder
-        .build()
-        .map_err(|error| format!("failed to create the GitHub client: {error}"))?;
-
-    client
-        .issues(owner, repo)
-        .list()
-        .per_page(PER_PAGE)
-        .send()
-        .await
-        .map_err(|error| format!("failed to list issues in {owner}/{repo}: {error}"))
 }
 
 /// Read `jp ticket 42` as `jp ticket show 42`.
