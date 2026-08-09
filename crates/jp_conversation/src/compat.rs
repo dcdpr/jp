@@ -72,9 +72,19 @@ fn migrate_legacy_rule_bounds(value: &mut Value) {
         return;
     };
 
+    // Mirrors `MergeableVec::is_empty`, which is what decides whether an
+    // item-less list reads as "unset" further down.
+    let has_active_metadata = match &*rules {
+        Value::Object(obj) => {
+            obj.get("strategy").is_some_and(|v| !v.is_null())
+                || obj.get("dedup").is_some_and(|v| !v.is_null())
+                || obj.get("discard_when_merged") == Some(&Value::Bool(true))
+        }
+        _ => false,
+    };
+
     // `rules` is a `MergeableVec`: a bare array, or an object whose `value` key
     // holds one (the shape `ConversationStream::to_parts` writes).
-    let bare_array = matches!(rules, Value::Array(_));
     let items = match rules {
         Value::Array(items) => items,
         Value::Object(obj) => match obj.get_mut("value") {
@@ -118,11 +128,15 @@ fn migrate_legacy_rule_bounds(value: &mut Value) {
         keep
     });
 
-    // An empty bare array reads as "unset" to
+    // A list with no items and no merge metadata reads as "unset" to
     // `PartialCompactionConfig::fill_from`, which then reinstates the built-in
-    // default rule — compacting more than the rule just dropped. The `Merged`
-    // form with an explicit strategy reads as "no rules".
-    if bare_array && before > 0 && items.is_empty() {
+    // default rule — compacting more than the rule just dropped. An explicit
+    // strategy makes it read as "no rules" instead.
+    //
+    // A list that already carries metadata keeps it: its strategy decides how
+    // the now-empty list merges, and forcing `replace` here would wipe rules
+    // set by a lower layer.
+    if before > 0 && items.is_empty() && !has_active_metadata {
         *rules = json!({ "value": [], "strategy": "replace" });
     }
 }

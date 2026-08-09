@@ -444,3 +444,47 @@ fn dropping_the_only_rule_leaves_an_explicit_empty_rule_set() {
         json!({ "value": [], "strategy": "replace" })
     );
 }
+
+#[test]
+fn dropping_the_only_rule_in_a_metadata_free_wrapper_leaves_a_strategy() {
+    // The object wrapper without a strategy is as "unset" as a bare array
+    // once its last rule goes: `MergeableVec::is_empty` looks at the metadata,
+    // not at which of the two shapes was written.
+    let mut value = json!({
+        "conversation": {
+            "compaction": {
+                "rules": { "value": [{ "keep_first": "@9" }] }
+            }
+        }
+    });
+
+    migrate_legacy_rule_bounds(&mut value);
+
+    assert_eq!(
+        value["conversation"]["compaction"]["rules"],
+        json!({ "value": [], "strategy": "replace" })
+    );
+}
+
+#[test]
+fn emptying_a_rule_set_keeps_the_strategy_it_already_had() {
+    // An emptied `append` list is a no-op against lower layers. Forcing
+    // `replace` here would turn it into one that wipes their rules.
+    let mut value = json!({
+        "conversation": {
+            "compaction": {
+                "rules": {
+                    "value": [{ "keep_first": "@9" }],
+                    "strategy": "append"
+                }
+            }
+        }
+    });
+
+    migrate_legacy_rule_bounds(&mut value);
+
+    assert_eq!(
+        value["conversation"]["compaction"]["rules"],
+        json!({ "value": [], "strategy": "append" })
+    );
+}
