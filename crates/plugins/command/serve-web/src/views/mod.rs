@@ -3,4 +3,3 @@
 pub(crate) mod detail;
 pub(crate) mod layout;
 pub(crate) mod list;
-pub(crate) mod new;
