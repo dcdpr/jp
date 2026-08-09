@@ -2,7 +2,7 @@
 name = "jp-serve-web"
 
 authors.workspace = true
-description = "Web UI for browsing JP conversations and continuing them."
+description = "Read-only web UI for browsing JP conversations."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
@@ -15,12 +15,10 @@ version.workspace = true
 [dependencies]
 jp_plugin = { workspace = true }
 
-axum = { workspace = true, features = ["form", "http1", "json", "query", "tokio"] }
+axum = { workspace = true, features = ["http1", "tokio"] }
 chrono = { workspace = true }
 comrak = { workspace = true }
-form_urlencoded = { workspace = true }
 maud = { workspace = true, features = ["axum"] }
-serde = { workspace = true, features = ["derive", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 sha2 = { workspace = true }
 tokio = { workspace = true }
@@ -37,7 +35,7 @@ workspace = true
 [package.metadata.jp-registry]
 id = "serve-web"
 command = ["serve", "web"]
-description = "Web UI for browsing conversations and continuing them"
+description = "Read-only web UI for browsing conversations"
 official = true
 requires = ["serve"]
 repository = "https://github.com/dcdpr/jp"

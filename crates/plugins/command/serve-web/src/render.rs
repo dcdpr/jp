@@ -31,33 +31,6 @@ pub(crate) enum RenderedEvent {
     },
 }
 
-/// Whether the conversation is waiting on the assistant.
-///
-/// True when the last thing in the transcript is the user's message, or a tool
-/// call with no result yet.
-/// Read from the transcript rather than from any bookkeeping, so it holds for a
-/// turn started from another process, and survives this server restarting
-/// mid-turn.
-///
-/// A turn that was interrupted and never resumed looks the same as one still
-/// running.
-/// Both are "the assistant owes you a reply", which is what the page reports,
-/// so the conflation is honest rather than merely convenient.
-pub(crate) fn awaiting_response(events: &[RenderedEvent]) -> bool {
-    events
-        .iter()
-        .rev()
-        .find(|event| !matches!(event, RenderedEvent::TurnSeparator))
-        .is_some_and(|event| match event {
-            RenderedEvent::UserMessage { .. } => true,
-            RenderedEvent::ToolCall { result, .. } => result.is_none(),
-            RenderedEvent::AssistantMessage { .. }
-            | RenderedEvent::Reasoning { .. }
-            | RenderedEvent::Structured { .. }
-            | RenderedEvent::TurnSeparator => false,
-        })
-}
-
 /// Which kind of text a [`PendingText`] region holds.
 #[derive(Clone, Copy, PartialEq)]
 enum TextKind {
