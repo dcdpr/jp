@@ -13,11 +13,6 @@ use jp_plugin::message::{
     DescribeResponse, ExitMessage, HostToPlugin, InitMessage, PluginToHost, PrintMessage,
 };
 
-/// The protocol version this plugin needs from the host.
-///
-/// It only reads paths out of `init`, so anything that can spawn it will do.
-const REQUIRED_PROTOCOL: u32 = 1;
-
 const HELP_TEXT: &str = "\
 Print JP directory paths.
 
@@ -65,10 +60,7 @@ fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
     match first_msg {
         HostToPlugin::Describe => send_describe(&mut stdout),
         HostToPlugin::Init(init) => {
-            match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
-                Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
-                Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
-            }
+            send(&mut stdout, &PluginToHost::Ready)?;
             handle_command(&init, &mut stdout)
         }
         other => Err(format!("expected init or describe, got: {other:?}")),
