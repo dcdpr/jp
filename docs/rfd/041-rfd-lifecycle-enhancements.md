@@ -4,7 +4,7 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-09
-- **Extended by**: [RFD 100](100-in-repo-ticket-tracking.md)
+- **Extended by**: [RFD 100]
 
 ## Summary
 
@@ -79,15 +79,15 @@ relationships to be resolved before both RFDs reach Discussion.
 > Implementation work is tracked in tickets: `rfd-promote` offers to turn each
 > phase of the Implementation Plan into a ticket carrying `Implements: NNN`, and
 > one ticket serves as both the tracking item and the prioritised work item.
-> No GitHub tracking issue is created, and the `Tracking Issue` metadata field is
-> retired.
+> No GitHub tracking issue is created, and the `Tracking Issue` metadata field
+> is retired.
 >
 > The original text below is preserved for historical context.
 > Note that it describes issue creation at Discussion; as implemented, it
 > happened at Accepted.
 
-When `just rfd-promote` advances an RFD to Accepted, a GitHub tracking issue
-is created automatically alongside the status change.
+When `just rfd-promote` advances an RFD to Accepted, a GitHub tracking issue is
+created automatically alongside the status change.
 
 The issue:
 

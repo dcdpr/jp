@@ -4,7 +4,7 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
-- **Extended by**: [RFD 100](100-in-repo-ticket-tracking.md)
+- **Extended by**: [RFD 100][tickets]
 
 ## Summary
 
@@ -338,9 +338,9 @@ All categories use the same metadata:
 ```
 
 Implementation progress is tracked in [tickets], not in the metadata header.
-When `just rfd-promote` advances an RFD from Discussion to Accepted, it offers to
-turn each phase of the Implementation Plan into a ticket carrying `Implements:
-NNN`.
+When `just rfd-promote` advances an RFD from Discussion to Accepted, it offers
+to turn each phase of the Implementation Plan into a ticket carrying
+`Implements: NNN`.
 The phases are read out of the document by `jp`, so the tickets match the plan
 rather than a fixed template, and whoever accepts the prompt reviews them before
 they land.
@@ -350,8 +350,8 @@ building, which is why the tickets are offered rather than created.
 Decline the prompt and file them later with `just ticket-create` when the work
 actually starts.
 
-A handful of older RFDs still carry a `Tracking Issue` field pointing at a GitHub
-issue.
+A handful of older RFDs still carry a `Tracking Issue` field pointing at a
+GitHub issue.
 The field is retired: nothing writes it, and the lifecycle recipes only read it
 to remind you to close the issue when such an RFD is superseded or abandoned.
 
@@ -450,8 +450,8 @@ filled in automatically by `rfd-promote`.
    The promotion is gated on the RFD's `Requires` *and* `Extends` fields: every
    entry in either field must be at status `Accepted`, `Implemented`, or
    `Superseded`.
-2. Accept the prompt to file a ticket per implementation phase, or decline it and
-   file them when the work starts.
+2. Accept the prompt to file a ticket per implementation phase, or decline it
+   and file them when the work starts.
 3. Merge the pull request.
 
 ### After Acceptance
@@ -603,8 +603,8 @@ The steps are:
 
 [RFC 3]: https://datatracker.ietf.org/doc/html/rfc3
 [RFD 002]: 002-using-llms.md
-[tickets]: 100-in-repo-ticket-tracking.md
 [`000-decision-template.md`]: 000-decision-template.md
 [`000-design-template.md`]: 000-design-template.md
 [`000-guide-template.md`]: 000-guide-template.md
 [`000-process-template.md`]: 000-process-template.md
+[tickets]: 100-in-repo-ticket-tracking.md

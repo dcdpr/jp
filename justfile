@@ -1316,10 +1316,12 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
         # promoted file. These are bookkeeping artefacts of the bidirectional
         # draft-draft policy; the file is now published and cannot carry
         # draft back-links.
+        promoted_head=$(grep -n '^## ' "$new_file" | head -1 | cut -d: -f1)
+        promoted_head="${promoted_head:-9999}"
         for field in "Required by" "Extended by"; do
-            awk -v field="$field" '
+            awk -v field="$field" -v header_end="$promoted_head" '
                 BEGIN { search = "^- \\*\\*" field "\\*\\*: " }
-                $0 ~ search {
+                NR <= header_end && $0 ~ search {
                     sub(search, "", $0)
                     n = split($0, entries, /, /)
                     new = ""
@@ -1355,7 +1357,17 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
                 fi
                 [ -z "$dep_file" ] && continue
 
-                existing=$(sed -n "s/^- \\*\\*${inverse}\\*\\*: //p" "$dep_file" | head -1)
+                # Scoped to the metadata header, like `add_link` in `_rfd-link`.
+                # RFDs that document these fields carry metadata-shaped examples
+                # in fenced blocks — 001 and 041 both do, and they are the most
+                # likely extension targets. Reading unscoped finds the example and
+                # concludes a header line exists; writing unscoped appends to the
+                # example instead of the header.
+                dep_head=$(grep -n '^## ' "$dep_file" | head -1 | cut -d: -f1)
+                dep_head="${dep_head:-9999}"
+
+                existing=$(head -n "$dep_head" "$dep_file" \
+                    | sed -n "s/^- \\*\\*${inverse}\\*\\*: //p" | head -1)
                 if echo "$existing" | grep -qE "RFD ${num}([^0-9]|\$)"; then
                     continue
                 fi
@@ -1369,11 +1381,11 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
                 link="[RFD ${num}](${rel})"
 
                 if [ -n "$existing" ]; then
-                    sed "s|^- \\*\\*${inverse}\\*\\*: .*|&, ${link}|" "$dep_file" > "${dep_file}.tmp"
+                    sed "1,${dep_head}s|^- \\*\\*${inverse}\\*\\*: .*|&, ${link}|" \
+                        "$dep_file" > "${dep_file}.tmp"
                     mv "${dep_file}.tmp" "$dep_file"
                 else
-                    first_heading=$(grep -n '^## ' "$dep_file" | head -1 | cut -d: -f1)
-                    last_meta=$(head -n "${first_heading:-9999}" "$dep_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
+                    last_meta=$(head -n "$dep_head" "$dep_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
                     awk -v ln="$last_meta" -v entry="- **${inverse}**: ${link}" '
                         NR == ln { print; print entry; next }
                         { print }
@@ -1757,7 +1769,7 @@ _rfd-priority-rewrite OLD NEW:
     #!/usr/bin/env sh
     set -eu
 
-    priority_file="docs/rfd/priority.json"
+    priority_file="docs/rfd/.priority.json"
     [ -f "$priority_file" ] || exit 0
     jq --arg old "{{OLD}}" --arg new "{{NEW}}" '
         def sub_id: map(if . == $old then $new else . end);
@@ -2118,18 +2130,18 @@ ticket-grep +ARGS:
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
-develop-docs *FLAGS="--open": rfd-summaries
+develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries
     just _docs "dev" {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
 #
 # Starts the docs dev server and opens the board at `/rfd/priority`. Dragging
-# rows and toggling "in development" writes `docs/rfd/priority.json`; commit that
+# rows and toggling "in development" writes `docs/rfd/.priority.json`; commit that
 # file to publish the new order. The board is read-only in the production build
 # — the write endpoint only exists on the dev server.
 [group('rfd')]
 rfd-manage: rfd-summaries
-    just _docs "dev" "--open" "/rfd/priority"
+    just _docs "dev" "--host" "--allowedHosts" "--open" "/rfd/priority"
 
 # Build the statically built documentation.
 [group('docs')]
@@ -2345,7 +2357,7 @@ vet-ci: (_install "cargo-vet@" + vet_version)
     echo "::add-matcher::.github/matchers.json"
 
 [working-directory: 'docs']
-@_docs CMD="dev" *FLAGS: _docs-install
+@_docs CMD="dev --host --allowedHosts" *FLAGS: _docs-install
     yarn vitepress {{CMD}} {{FLAGS}}
 
 @_install +CRATES: _install-binstall
