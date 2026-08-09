@@ -16,7 +16,11 @@ fn run_command(dir: &Utf8TempDir, command: Command) -> Result<Output, String> {
     execute(
         dir.path(),
         command,
-        &serde_json::json!({ "user": { "name": "tester" } }),
+        &serde_json::json!({
+          "user": {
+            "name": "tester"
+          }
+        }),
     )
 }
 
@@ -47,7 +51,11 @@ fn init_at(version: u32, root: &Utf8Path, args: &[&str]) -> HostToPlugin {
             id: "test".to_owned(),
         },
         paths: jp_plugin::message::PathsInfo::default(),
-        config: serde_json::json!({ "user": { "name": "tester" } }),
+        config: serde_json::json!({
+          "user": {
+            "name": "tester"
+          }
+        }),
         options: serde_json::Map::new(),
         args: args.iter().map(|arg| (*arg).to_owned()).collect(),
         log_level: 0,
@@ -148,7 +156,11 @@ fn subcommands_are_not_mistaken_for_ids() {
 
 #[test]
 fn the_author_falls_back_through_jp_then_git_then_the_environment() {
-    let jp = serde_json::json!({ "user": { "name": "Jean Mertz" } });
+    let jp = serde_json::json!({
+      "user": {
+        "name": "Jean Mertz"
+      }
+    });
 
     assert_eq!(
         resolve_author(Some("  Someone Else  ".to_owned()), &jp),
@@ -161,41 +173,14 @@ fn the_author_falls_back_through_jp_then_git_then_the_environment() {
 
     // An empty or absent `user.name` falls through to git or `$USER`, both of
     // which exist in any environment this runs in.
-    let blank = serde_json::json!({ "user": { "name": "   " } });
+    let blank = serde_json::json!({
+      "user": {
+        "name": "   "
+      }
+    });
     assert!(resolve_author(None, &blank).is_ok());
     assert!(resolve_author(None, &serde_json::Value::Null).is_ok());
     assert!(resolve_author(Some(String::new()), &jp).is_ok());
-}
-
-#[test]
-fn composed_text_splits_into_a_title_and_a_body() {
-    // A single line, however many blank lines follow it, is a title alone.
-    assert_eq!(
-        Composition::read("Tool call header misaligned"),
-        Composition::Title("Tool call header misaligned".to_owned())
-    );
-    assert_eq!(
-        Composition::read("Tool call header misaligned\n\n\n"),
-        Composition::Title("Tool call header misaligned".to_owned())
-    );
-
-    // Subject, blank line, body.
-    assert_eq!(
-        Composition::read("Header misaligned\n\nIt wraps one column early.\n"),
-        Composition::TitleAndBody {
-            title: "Header misaligned".to_owned(),
-            body: "It wraps one column early.".to_owned(),
-        }
-    );
-
-    // Prose running straight on from the first line has no subject.
-    assert_eq!(
-        Composition::read("The header wraps one column\nearly, below 80 columns."),
-        Composition::Body("The header wraps one column\nearly, below 80 columns.".to_owned())
-    );
-
-    assert_eq!(Composition::read(""), Composition::Empty);
-    assert_eq!(Composition::read("  \n\n"), Composition::Empty);
 }
 
 #[test]
@@ -347,7 +332,7 @@ fn a_run_reports_ready_then_output_then_exit() {
 
     match messages.as_slice() {
         [
-            PluginToHost::Ready(_),
+            PluginToHost::Ready,
             PluginToHost::Print(print),
             PluginToHost::Exit(exit),
         ] => {
@@ -365,36 +350,13 @@ fn a_run_reports_ready_then_output_then_exit() {
     );
 }
 
-/// A plugin newer than its host can't ask for anything interactive, so it says
-/// so and stops — without claiming ready — rather than hanging on a reply the
-/// host can't produce.
-#[test]
-fn an_older_host_is_refused_up_front() {
-    let dir = Utf8TempDir::new().unwrap();
-    let messages = exchange(&init_at(REQUIRED_PROTOCOL - 1, dir.path(), &["list"]));
-
-    match messages.as_slice() {
-        [PluginToHost::Exit(exit)] => {
-            assert_eq!(exit.code, 1);
-            assert!(
-                exit.reason
-                    .as_ref()
-                    .is_some_and(|reason| reason.contains("needs `jp` protocol 2")),
-                "{:?}",
-                exit.reason
-            );
-        }
-        other => panic!("unexpected exchange: {other:?}"),
-    }
-}
-
 #[test]
 fn a_bad_argument_exits_non_zero_with_a_reason() {
     let dir = Utf8TempDir::new().unwrap();
     let messages = exchange(&init(dir.path(), &["close", "not-an-id"]));
 
     match messages.as_slice() {
-        [PluginToHost::Ready(_), PluginToHost::Exit(exit)] => {
+        [PluginToHost::Ready, PluginToHost::Exit(exit)] => {
             assert_eq!(exit.code, 1);
             assert!(
                 exit.reason
