@@ -57,16 +57,7 @@ fn message_loop_ready_then_exit() {
     // construct a minimal in-memory workspace.
     let ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
 
-    // No terminal in a test, so a compose request would be declined rather
-    // than prompting; this exchange never asks for one.
-    let printer = jp_printer::Printer::sink();
-    let composer = Composer {
-        printer: &printer,
-        editor: None,
-        is_tty: false,
-    };
-
-    message_loop(reader, &sink, &ws, &config, &shutdown_sent, &composer).unwrap();
+    message_loop(reader, &sink, &ws, &config, &shutdown_sent).unwrap();
 }
 
 #[test]
