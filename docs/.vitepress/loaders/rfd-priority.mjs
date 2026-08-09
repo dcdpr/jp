@@ -1,5 +1,5 @@
 // Pure parsing and validation for the priority board file
-// (`docs/rfd/priority.json`). No Node imports: the Node-side loaders
+// (`docs/rfd/.priority.json`). No Node imports: the Node-side loaders
 // (`rfd-shared.mjs`) and the browser-side board (`RfdBoard.vue`) both consume
 // this module, so it must run in either environment.
 
@@ -59,7 +59,7 @@ export function checkMilestones(planned) {
         const names = [...dups].sort().join(', ')
         return `Duplicate milestone names in priority board: ${names}.\n\n` +
             `Milestone markers are keyed by name; rename or merge the ` +
-            `duplicates in \`docs/rfd/priority.json\`.`
+            `duplicates in \`docs/rfd/.priority.json\`.`
     }
 
     const nullIndex = planned.findIndex(g => g.milestone === null)
@@ -67,7 +67,7 @@ export function checkMilestones(planned) {
         return `Misplaced unassigned group in priority board.\n\n` +
             `The \`"milestone": null\` group holds planned-but-unassigned ` +
             `RFDs and must be the last \`planned\` group in ` +
-            `\`docs/rfd/priority.json\`.`
+            `\`docs/rfd/.priority.json\`.`
     }
 
     return null

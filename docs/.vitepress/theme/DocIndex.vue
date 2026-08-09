@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, useSlots } from 'vue'
 import { inBrowser } from 'vitepress'
 
 // One index for every kind of document the site lists. RFDs and tickets differ
@@ -26,6 +26,12 @@ const props = defineProps({
     // same person.
     showAuthors: { type: Boolean, default: false },
 })
+
+// A filled `actions` slot adds a trailing column, one cell per row, receiving
+// that row's entry. Nothing here knows what the buttons do — the ticket index
+// puts edit and delete there, the RFD index leaves it empty and gets no column.
+const slots = useSlots()
+const hasActions = computed(() => Boolean(slots.actions))
 
 function stored(key, fallback) {
     try { return sessionStorage.getItem(key) ?? fallback } catch { return fallback }
@@ -74,15 +80,25 @@ onMounted(syncUrl)
 
 const showCategory = computed(() => filter.value === 'all')
 
+// `optional` columns are the ones a narrow screen drops. Header cells and body
+// cells both take the class from here, so the two can't disagree about which
+// columns exist — keying the CSS off the field name meant `kind` never matched
+// the rule written for `category`.
 const columns = computed(() => {
     const cols = [
         { key: props.idField, label: props.idLabel },
         { key: 'title', label: 'Title' },
     ]
     if (showCategory.value) {
-        cols.push({ key: props.filterField, label: capitalize(props.filterField) })
+        cols.push({
+            key: props.filterField,
+            label: capitalize(props.filterField),
+            optional: true,
+        })
     }
-    if (props.showAuthors) cols.push({ key: 'authors', label: 'Authors' })
+    if (props.showAuthors) {
+        cols.push({ key: 'authors', label: 'Authors', optional: true })
+    }
     if (props.showStatus) cols.push({ key: 'status', label: 'Status' })
     return cols
 })
@@ -188,14 +204,16 @@ const filtered = computed(() => {
 <colgroup>
     <col style="width: 4rem">
     <col>
-    <col v-if="showCategory" class="doc-col-category" style="width: 7rem">
-    <col v-if="showAuthors" class="doc-col-category" style="width: 10rem">
+    <col v-if="showCategory" class="doc-col-optional" style="width: 7rem">
+    <col v-if="showAuthors" class="doc-col-optional" style="width: 10rem">
     <col v-if="showStatus" style="width: 8rem">
+    <col v-if="hasActions" style="width: 5.5rem">
 </colgroup>
 <thead><tr>
-    <th v-for="col in columns" :key="col.key" :class="['doc-sortable', 'doc-col-' + col.key]" @click="toggleSort(col.key)">
+    <th v-for="col in columns" :key="col.key" :class="['doc-sortable', 'doc-col-' + col.key, { 'doc-col-optional': col.optional }]" @click="toggleSort(col.key)">
         {{ col.label }} <span class="doc-sort-arrow">{{ sortKey === col.key ? (sortAsc ? '▲' : '▼') : '' }}</span>
     </th>
+    <th v-if="hasActions" class="doc-col-actions"></th>
 </tr></thead>
 <tbody>
 <tr v-for="entry in filtered" :key="entry.slug">
@@ -205,12 +223,15 @@ const filtered = computed(() => {
         <span v-if="entry.blockedBy" class="doc-badge doc-badge--blocked">blocked by {{ entry.blockedBy }}</span>
         <div v-if="showSummaries && entry.summary" class="doc-summary">{{ entry.summary }}</div>
     </td>
-    <td v-if="showCategory" class="doc-col-category">{{ entry[filterField] }}</td>
-    <td v-if="showAuthors" class="doc-col-category">{{ (entry.authors ?? '').replace(/\s*<[^>]*>/, '') }}</td>
+    <td v-if="showCategory" class="doc-col-optional">{{ entry[filterField] }}</td>
+    <td v-if="showAuthors" class="doc-col-optional">{{ (entry.authors ?? '').replace(/\s*<[^>]*>/, '') }}</td>
     <td v-if="showStatus"><span
         :class="['doc-badge', statusClass(entry.status), { 'doc-badge--active': parsedSearch.statusFilter === entry.status?.toLowerCase() }]"
         @click="toggleStatusFilter(entry.status)"
     >{{ entry.status }}</span></td>
+    <td v-if="hasActions" class="doc-col-actions">
+        <slot name="actions" :entry="entry" />
+    </td>
 </tr>
 </tbody>
 </table>
@@ -364,8 +385,11 @@ const filtered = computed(() => {
     .doc-search {
         font-size: 1rem;
     }
-    .doc-col-category {
+    .doc-col-optional {
         display: none;
+    }
+    .doc-col-actions {
+        white-space: nowrap;
     }
     .doc-badge {
         font-size: 0.75rem;

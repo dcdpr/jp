@@ -62,7 +62,7 @@ async function onDrop() {
 onMounted(async () => {
     if (!isDev) return
 
-    // The board file only carries order; statuses live in the ticket files. A
+    // The board file carries order only; statuses live in the ticket files. A
     // fresh read picks up both, since the loader's cache is per server run.
     const fresh = await loadBoard(ENDPOINT)
     if (fresh?.columns) {

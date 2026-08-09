@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, posix, resolve } from 'node:path'
 
@@ -68,13 +69,17 @@ const serveMarkdownAsUtf8 = {
 //
 // The board page is read-only in the production build. On the dev server it
 // POSTs the reordered list here, and this middleware persists it to
-// `docs/rfd/priority.json` in the working tree. The endpoint exists only on the
+// `docs/rfd/.priority.json` in the working tree. The endpoint exists only on the
 // dev server, so the static build never carries a write path.
 const rfdPriorityWriter = {
     name: 'rfd-priority-writer',
     configureServer(server) {
         server.middlewares.use('/__rfd-priority', (req, res, next) => {
-            const file = resolve(server.config.root, 'rfd/priority.json')
+            // Dotted, and deliberately not `priority.json`: a page lives at
+            // `/rfd/priority`, and Vite's module resolver would answer a cold
+            // document request for it with the JSON transformed into an ES
+            // module.
+            const file = resolve(server.config.root, 'rfd/.priority.json')
 
             // The board fetches this on mount to bypass the data loader's
             // dev-lifetime cache, so a refresh reflects the saved file.
@@ -158,14 +163,17 @@ const rfdPriorityWriter = {
 // Dev-only read/write endpoint for the ticket board (`/ticket/board`).
 //
 // Two pieces of state, kept apart (see RFD 100): the order within a column
-// lives in `docs/ticket/board.json`, and a ticket's status lives in the ticket
+// lives in `docs/ticket/.board.json`, and a ticket's status lives in the ticket
 // file. Dragging a card between columns therefore rewrites one `Status` line;
 // dragging within a column touches only the board file.
 const ticketBoardWriter = {
     name: 'ticket-board-writer',
     configureServer(server) {
         const dir = resolve(server.config.root, 'ticket')
-        const boardFile = resolve(dir, 'board.json')
+        // Dotted, and deliberately not `board.json`: a page lives at
+        // `/ticket/board`, and Vite's module resolver would answer a cold
+        // document request for it with the JSON transformed into an ES module.
+        const boardFile = resolve(dir, '.board.json')
         const COLUMNS = [
             { key: 'todo', status: 'Todo' },
             { key: 'in_progress', status: 'In Progress' },
@@ -290,6 +298,114 @@ const ticketBoardWriter = {
     },
 }
 
+// Dev-only ticket management: add, edit, delete.
+//
+// Every write shells out to `jp ticket`, which is the one implementation of the
+// ticket format. Reimplementing id allocation, slugs, and the file template here
+// would be a second writer to keep in step, and they would drift.
+const ticketWriter = {
+    name: 'ticket-writer',
+    configureServer(server) {
+        const run = (args) =>
+            new Promise((done) => {
+                execFile('jp', ['ticket', ...args], {
+                    cwd: resolve(server.config.root, '..'),
+                }, (error, stdout, stderr) => {
+                    done({
+                        ok: !error,
+                        output: (stdout || stderr || String(error ?? '')).trim(),
+                    })
+                })
+            })
+
+        const json = (res, code, payload) => {
+            res.statusCode = code
+            res.setHeader('Content-Type', 'application/json')
+            res.end(JSON.stringify(payload))
+        }
+
+        server.middlewares.use('/__ticket', async (req, res, next) => {
+            // A GET reads one ticket back, which is how the edit form gets the
+            // current description: the index loader doesn't carry it.
+            if (req.method === 'GET') {
+                const id = new URL(req.url, 'http://localhost').searchParams.get('id')
+                if (!id) return json(res, 400, { ok: false, output: 'missing id' })
+
+                const { ok, output } = await run(['show', id, '--json'])
+                if (!ok) return json(res, 500, { ok, output })
+
+                try {
+                    return json(res, 200, { ok: true, ...JSON.parse(output) })
+                } catch {
+                    return json(res, 500, { ok: false, output: 'unreadable ticket JSON' })
+                }
+            }
+
+            if (req.method !== 'POST') return next()
+
+            let body = ''
+            let tooBig = false
+            req.on('data', (chunk) => {
+                body += chunk
+                if (body.length > 256 * 1024) {
+                    tooBig = true
+                    req.destroy()
+                }
+            })
+            req.on('end', async () => {
+                if (tooBig) {
+                    res.statusCode = 413
+                    res.end('payload too large')
+                    return
+                }
+
+                let parsed
+                try {
+                    parsed = JSON.parse(body)
+                } catch {
+                    res.statusCode = 400
+                    res.end('invalid JSON')
+                    return
+                }
+
+                // Flags are built here rather than taken from the client, so a
+                // request can only ask for what the CLI already offers.
+                const text = (value) => (typeof value === 'string' ? value : '')
+                const flag = (name, value) => (text(value) ? [name, text(value)] : [])
+                let args
+                switch (parsed.action) {
+                    case 'add':
+                        if (!text(parsed.kind) || !text(parsed.title)) {
+                            res.statusCode = 400
+                            res.end('add needs a kind and a title')
+                            return
+                        }
+                        args = ['add', text(parsed.kind), text(parsed.title),
+                            ...flag('--body', parsed.body)]
+                        break
+                    case 'edit':
+                        args = ['edit', text(parsed.id),
+                            ...flag('--title', parsed.title),
+                            ...flag('--body', parsed.body),
+                            ...flag('--kind', parsed.kind),
+                            ...flag('--status', parsed.status)]
+                        break
+                    case 'delete':
+                        args = ['delete', text(parsed.id)]
+                        break
+                    default:
+                        res.statusCode = 400
+                        res.end('expected action: add, edit, or delete')
+                        return
+                }
+
+                const { ok, output } = await run(args)
+                json(res, ok ? 200 : 500, { ok, output })
+            })
+        })
+    },
+}
+
 // https://vitepress.dev/reference/site-config
 
 export default defineConfig({
@@ -366,14 +482,14 @@ export default defineConfig({
         }
     },
     vite: {
-        plugins: [serveMarkdownAsUtf8, rfdPriorityWriter, ticketBoardWriter],
-        // The priority board persists itself by writing `rfd/priority.json` via
+        plugins: [serveMarkdownAsUtf8, rfdPriorityWriter, ticketBoardWriter, ticketWriter],
+        // The priority board persists itself by writing `rfd/.priority.json` via
         // the dev middleware above. It isn't part of the module graph, so it
         // must not trigger a dev-server reload — the board owns its in-memory
         // state and a manual refresh re-reads the file.
         server: {
             watch: {
-                ignored: ['**/rfd/priority.json', '**/ticket/board.json'],
+                ignored: ['**/rfd/.priority.json', '**/ticket/.board.json'],
             },
         },
         // Both boards import SortableJS on demand, which Vite would otherwise

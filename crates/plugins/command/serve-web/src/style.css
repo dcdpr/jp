@@ -40,8 +40,17 @@
 
 html {
     -webkit-text-size-adjust: 100%;
+    height: 100%;
+    /* Nothing outside the transcript may scroll or bounce, including the rubber
+       band that would otherwise chain up from an inner scroller. */
+    overscroll-behavior: none;
 }
 
+/* A column that fits the visible area exactly, with one scrolling row inside it.
+
+   `--app-height` is set by the page from the visual viewport, which is the only
+   thing that knows how much room an on-screen keyboard has taken. `100dvh` is the
+   fallback for a page without script, and for desktop where the two agree. */
 body {
     margin: 0;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -49,6 +58,45 @@ body {
     line-height: 1.6;
     color: var(--fg);
     background: var(--bg);
+
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+
+    /* Deliberately *not* `position: fixed`.
+
+       A fixed element attaches to the fixed viewport, which on iOS is the ICB and
+       is not resized by the on-screen keyboard. Safari scrolls the page to reveal
+       a focused field and only repositions fixed elements once that scroll
+       settles, so a fixed header visibly leaves the screen and snaps back. No
+       amount of compensation fixes that: it cannot be painted until the scroll
+       ends.
+
+       In normal flow there is nothing anchored to a viewport that moves, so the
+       column simply fills the layout viewport and stays that size. The keyboard is
+       accounted for by moving the composer, not by resizing this. */
+    height: 100%;
+    overscroll-behavior: none;
+}
+
+/* Set by the page when iOS reports the keyboard's destination in one jump rather
+   than reporting each step of the slide, so there is nothing to follow and the
+   movement has to be invented.
+
+   The curve is the one the React Native community settled on for animating in sync
+   with the iOS keyboard; Apple publishes neither it nor the duration, which is
+   given only to native code. Both are therefore approximations, which is why the
+   page follows the real height wherever iOS gives it one. */
+html.eased .composer-dock {
+    transition: transform 250ms cubic-bezier(0.17, 0.59, 0.4, 0.77);
+}
+
+/* The same easing on the space the transcript reserves, so the conversation rises
+   with the composer rather than snapping to its final position while the composer
+   is still moving. The page holds the scroll against the bottom for the duration,
+   which turns this growing padding into a smooth scroll. */
+html.eased .stage {
+    transition: margin-bottom 250ms cubic-bezier(0.17, 0.59, 0.4, 0.77);
 }
 
 a {
@@ -60,32 +108,155 @@ a:hover {
     text-decoration: underline;
 }
 
-/* Page header */
+/* Page header
+
+   One row rather than two: a back link and a title don't need the height, and on
+   a phone every pixel here is transcript the reader doesn't see.
+
+   A flex row of the body rather than `sticky`, since the body doesn't scroll.
+
+   `touch-action: none` because iOS makes the document scrollable while the
+   keyboard is open: without it, dragging a finger across the header pans the
+   whole page. Taps are unaffected. */
 .page-header {
-    position: sticky;
-    top: 0;
-    z-index: 10;
+    flex: none;
+    touch-action: none;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
     background: var(--bg);
     border-bottom: 1px solid var(--border);
-    padding: 12px 16px;
+    /* The top inset keeps the title clear of the status bar when this runs
+       installed to a home screen, where there is no browser chrome above it.
+
+       The bar spans the window, but its contents line up with the conversation
+       below it — on a wide screen a back link pinned to the far left has nothing
+       to do with the column it belongs to. The horizontal padding grows to
+       whatever centres a `--max-width` column, and falls back to the plain inset
+       once the window is narrower than that. */
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: 8px;
+    padding-left: max(16px, env(safe-area-inset-left), calc((100% - var(--max-width)) / 2));
+    padding-right: max(16px, env(safe-area-inset-right), calc((100% - var(--max-width)) / 2));
 }
 
 .page-header h1 {
     margin: 0;
-    font-size: 1.25rem;
+    font-size: 1rem;
     font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .page-header .back {
-    display: inline-block;
-    margin-bottom: 4px;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
+    flex-shrink: 0;
+}
+
+/* The `New` action sits opposite the title, which is otherwise alone on the row. */
+.page-header .new-conversation-link {
+    margin-left: auto;
+    flex-shrink: 0;
+    font-size: 0.8125rem;
+}
+
+/* New conversation form */
+.new-conversation {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.new-conversation .field-label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+}
+
+.new-conversation input[type="text"],
+.new-conversation textarea {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 10px 12px;
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+/* One block per load-path directory: the directory is the namespace, and its
+   files are the choices within it. */
+.new-conversation fieldset {
+    margin: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.new-conversation legend {
+    padding: 0 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+}
+
+.new-conversation .config-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.new-conversation button {
+    padding: 10px 20px;
+    font: inherit;
+    font-weight: 600;
+    color: var(--bg);
+    background: var(--fg);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+/* Filter field above the conversation list. Shares the list's width and side
+   padding so the field lines up with the entries under it. */
+.list-search {
+    flex: none;
+    padding: 8px 16px;
+    max-width: var(--max-width);
+    width: 100%;
+    box-sizing: border-box;
+    margin: 0 auto;
+}
+
+.list-search input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 12px;
+    /* Inherits the body's 16px, which is also the size below which iOS zooms
+       the page on focus. */
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg-alt);
+    border: 1px solid var(--border);
+    border-radius: 8px;
 }
 
 /* Conversation list */
 .conversation-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+
     padding: 0 16px 16px;
     max-width: var(--max-width);
+    width: 100%;
+    box-sizing: border-box;
     margin: 0 auto;
 }
 
@@ -133,11 +304,390 @@ a:hover {
     color: var(--fg-muted);
 }
 
-/* Conversation detail */
+/* Conversation detail
+
+   The page's only scroller. `min-height: 0` is what lets a flex child actually
+   shrink and scroll rather than growing the column past the viewport.
+
+   `--kb-settled` is the keyboard height, but only once it has stopped moving: the
+   raised composer overlaps the bottom of this box, and the padding gives the last
+   message room to scroll clear of it. Deliberately not `--kb`, which changes every
+   frame — padding is a layout property, and paying for a relayout per frame is
+   exactly what the transform above avoids. */
 .conversation-detail {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+
     padding: 16px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
+    /* No bottom padding: the composer below carries its own top margin, padding
+       and rule, which is already the separation. Adding to it here reads as the
+       conversation stopping short. */
+    padding-bottom: 0;
     max-width: var(--max-width);
+    width: 100%;
+    box-sizing: border-box;
     margin: 0 auto;
+}
+
+/* Covers the conversation until it has been scrolled to the end.
+
+   A long transcript paints from the top over a second or more, so without this the
+   reader watches it stream past and then jump. Removed by the page adding `ready`
+   to the root, which it does after applying the scroll — or after a timeout, so a
+   page that never finishes loading is still usable. */
+.loading-veil {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    background: var(--bg);
+    transition: opacity 150ms ease-out;
+}
+
+html.ready .loading-veil {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Jumps within the conversation, floating over its bottom-right corner.
+
+   Inside the stage rather than the transcript, so it stays put while the
+   conversation scrolls under it. */
+.nav {
+    position: absolute;
+    bottom: 16px;
+    z-index: 15;
+
+    /* Wholly inside the column, against its right edge.
+
+       Measured from the column rather than the window: `16px` from the window is
+       only inside the column while the two share an edge, and once a gutter opens
+       up it puts the button astride that edge instead — which is the one placement
+       that looks broken from either side.
+
+       `max(0px, ...)` covers a window narrower than the column, where there is no
+       gutter to account for.
+
+       The media query further down moves it out into the gutter once there is
+       enough of one to hold it. Snapped rather than interpolated, so no window
+       width lands on the edge. */
+    right: calc(max(0px, (100% - var(--max-width)) / 2) + 16px);
+}
+
+.nav summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    color: var(--fg-muted);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    cursor: pointer;
+    /* The disclosure triangle is replaced by the icon inside. */
+    list-style: none;
+}
+
+.nav summary::-webkit-details-marker {
+    display: none;
+}
+
+.nav summary:hover,
+.nav[open] summary {
+    color: var(--fg);
+    border-color: var(--fg-muted);
+}
+
+/* Opens upward: the toggle sits at the bottom of the view, so there is only room
+   above it. */
+.nav-menu {
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+}
+
+.nav-menu button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: var(--fg-muted);
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+.nav-menu button:hover {
+    color: var(--fg);
+    background: var(--bg-alt);
+}
+
+/* Holds the transcript and whatever floats over it.
+
+   Ends above the composer rather than behind it. The composer is out of flow, so
+   without this the transcript's box runs to the bottom of the window and the
+   composer sits on top of it — hiding the last lines of the conversation and the
+   bottom of its own scrollbar.
+
+   Reserved here rather than as padding on the transcript: padding moves the
+   content but not the box, which leaves the scrollbar running on underneath. */
+.stage {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    margin-bottom: calc(var(--dock, 0px) + var(--kb, 0px));
+}
+
+/* Raised when the page outlives the server it loaded from.
+
+   Floats over the top of the transcript rather than taking a row of its own: it
+   is transient, and reflowing the whole conversation to announce it would be a
+   worse interruption than the thing it announces. Pinned under the header, which
+   is what carries the status-bar inset. */
+.reload-banner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  text-align: center;
+  color: var(--fg);
+  background: var(--user-bg);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.15);
+}
+
+.reload-banner a {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+/* Composer
+
+   Field and send button on one row, so an idle composer costs the conversation a
+   single line. The draft warning spans both columns beneath them, and is hidden
+   unless there is something to say. */
+.composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.composer #draft-note {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.composer-dock {
+  /* Fixed, so it is out of flow: moving or growing it cannot lay out the
+     transcript, because the transcript no longer has it as a sibling taking
+     space. The transcript reserves room for it with padding instead, from the
+     `--dock` height the page measures. */
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
+
+  /* Raised clear of the keyboard by `--kb`, the height it covers, which the page
+     measures from the visual viewport.
+
+     A transform rather than `bottom`: transforms are composited, so this moves on
+     the GPU without laying anything out. Animating an inset property instead costs
+     a relayout per frame, which is what made this stutter. */
+  transform: translateY(calc(-1 * var(--kb, 0px)));
+
+  /* As on the header: block dragging the page by its chrome. The textarea below
+     opts back in, so it can still scroll once it has grown. */
+  touch-action: none;
+
+  /* Also transform-only, so the field growing on focus is composited too. */
+  will-change: transform;
+  width: 100%;
+  max-width: var(--max-width);
+  box-sizing: border-box;
+  margin: 0 auto;
+  /* The full bottom inset is sized to keep controls clear of the home indicator,
+     which is more room than a composer needs — the indicator overlaps the gap
+     below the field, not the field itself. Most of it is given back. */
+  padding: 0 max(16px, env(safe-area-inset-left))
+           max(6px, calc(env(safe-area-inset-bottom) - 22px))
+           max(16px, env(safe-area-inset-right));
+  background: var(--bg);
+}
+
+.composer {
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.composer textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  /* Height is managed by the page, which grows it with the content. */
+  resize: none;
+  overflow-y: auto;
+  /* Overrides the dock's `none` so the field scrolls at its maximum height. */
+  touch-action: pan-y;
+}
+
+.composer button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  /* Square, so an icon sits centred rather than in a slab sized for a word. */
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  /* The accent rather than a straight inversion of the foreground: inverted, it
+     is a white slab in dark mode, which pulls the eye away from the conversation
+     it sits under. */
+  color: #ffffff;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.composer button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Sealed while a message is on its way to the transcript. The text is still in
+   there and still recoverable if the turn is refused, so it is dimmed rather than
+   emptied. */
+.composer textarea:read-only {
+  opacity: 0.6;
+}
+
+/* The last thing in the conversation while a reply is coming.
+
+   In the transcript rather than docked to the composer, because it stands in for
+   the block being written: it belongs where that block will appear, and it scrolls
+   with the conversation like everything else. */
+.composer-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.composer-status:empty {
+  display: none;
+}
+
+/* A bare icon beside the dots: the indicator says a reply is coming, and this is
+   the way to say stop. Sized to the dots rather than to a text button, so the pair
+   reads as one thing. */
+.composer-stop button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  color: var(--fg-muted);
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.composer-stop button:hover {
+  color: var(--fg);
+  background: var(--bg-alt);
+}
+
+/* Three bouncing dots, the chat-app convention for "a reply is coming".
+   Keeps a long turn looking alive between event batches, which arrive one per
+   streaming cycle and can be a minute apart. */
+.composer-working {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--assistant-bg);
+}
+
+.composer-working i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  animation: composer-bounce 1.3s ease-in-out infinite;
+}
+
+.composer-working i:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.composer-working i:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+@keyframes composer-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+/* Still visible, just not moving. */
+@media (prefers-reduced-motion: reduce) {
+  .composer-working i {
+    animation: none;
+    opacity: 0.7;
+  }
+}
+
+.composer-hint,
+.composer-error {
+  font-size: 0.8rem;
+  color: var(--fg-muted);
+  margin: 0;
+}
+
+.composer-error {
+  padding: 8px 12px;
+  color: var(--fg);
+  background: var(--user-bg);
+  border-left: 3px solid currentcolor;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
 }
 
 /* Turn separator */
@@ -169,6 +719,12 @@ a:hover {
 
 .message.assistant {
     background: var(--assistant-bg);
+}
+
+/* Submitted, not yet in the transcript. Dimmed so it reads as provisional
+   rather than as something the conversation already records. */
+.message.pending {
+    opacity: 0.6;
 }
 
 .message .content {
@@ -297,17 +853,40 @@ th {
 
 /* Responsive: wider viewports */
 @media (min-width: 768px) {
+    /* Vertical only: the horizontal padding is what centres the header's contents
+       over the column below, and a flat value here would pin them to the window
+       edges on exactly the screens where that looks worst. */
     .page-header {
+        padding-top: max(16px, env(safe-area-inset-top));
+        padding-bottom: 16px;
+    }
+
+    .conversation-list {
         padding: 16px 24px;
     }
 
-    .conversation-list,
     .conversation-detail {
         padding: 16px 24px;
+        padding-bottom: 0;
+    }
+
+    .composer-dock {
+        padding: 0 24px 12px;
     }
 
     .page-header h1 {
-        font-size: 1.5rem;
+        font-size: 1.125rem;
+    }
+}
+
+/* Wide enough for the navigation button to clear the conversation column.
+
+   `--max-width` plus a gutter big enough for a 36px button and its margins on
+   both sides. Below this it stays inside the column, where it overlaps a little
+   text but is at least beside the thing it navigates. */
+@media (min-width: 920px) {
+    .nav {
+        right: calc((100% - var(--max-width)) / 2 - 44px);
     }
 }
 

@@ -22,7 +22,7 @@ import TicketBoard from '../.vitepress/theme/TicketBoard.vue'
 <TicketBoard :columns="data.columns" />
 
 Status lives in the ticket file; the order within a column lives in
-`docs/ticket/board.json`.
+`docs/ticket/.board.json`.
 A ticket the board file doesn't mention sits at the bottom of its column, so a
 newly filed ticket joins Todo below whatever has already been prioritised.
 
