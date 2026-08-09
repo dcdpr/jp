@@ -56,9 +56,6 @@ pub enum HostToPlugin {
     /// Response to `read_config`.
     Config(ConfigResponse),
 
-    /// Response to `compose`.
-    Composed(ComposeResponse),
-
     /// An error response to any plugin request.
     Error(ErrorResponse),
 
@@ -88,9 +85,6 @@ pub enum PluginToHost {
 
     /// Request the resolved config (or a subtree).
     ReadConfig(ReadConfigRequest),
-
-    /// Ask the host to collect text from the user.
-    Compose(ComposeRequest),
 
     /// Print user-facing output through JP's printer.
     Print(PrintMessage),
@@ -262,96 +256,6 @@ pub struct ReadConfigRequest {
     /// Optional dot-separated path to narrow the config response.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub path: Option<String>,
-}
-
-/// Ask the host to collect text from the user.
-///
-/// Composition happens on the host rather than in the plugin because the host
-/// owns both ends of it: a plugin's stdin carries this protocol, so it has no
-/// terminal to read keys from, and only the host knows which editor the
-/// `Ctrl+X` escape should open.
-///
-/// The host answers with [`HostToPlugin::Composed`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ComposeRequest {
-    /// Optional request correlation ID.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-
-    /// Rendered before the input, naming what is being asked for.
-    pub message: String,
-
-    /// What kind of input to collect.
-    pub mode: ComposeMode,
-
-    /// Help text rendered alongside the prompt.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub help: Option<String>,
-}
-
-/// What a [`ComposeRequest`] asks for.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum ComposeMode {
-    /// A single line, pre-filled with `default`.
-    Line {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        default: Option<String>,
-    },
-
-    /// A multi-line buffer seeded with `initial_text`, offering the `Ctrl+X`
-    /// escape to the user's configured editor.
-    Buffer {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        initial_text: Option<String>,
-    },
-
-    /// One of a fixed set of choices.
-    ///
-    /// The response carries the chosen option's `value`, not its label.
-    Select {
-        options: Vec<ComposeOption>,
-
-        /// The `value` to start the selection on.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        default: Option<String>,
-    },
-
-    /// Any number of a fixed set of choices.
-    ///
-    /// The response carries the chosen `value`s in [`ComposeResponse::values`].
-    MultiSelect { options: Vec<ComposeOption> },
-}
-
-/// One choice in a [`ComposeMode::Select`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ComposeOption {
-    /// What the plugin gets back when this is chosen.
-    pub value: String,
-
-    /// What the user reads.
-    pub label: String,
-}
-
-/// Response to `compose`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ComposeResponse {
-    /// Optional request correlation ID.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
-
-    /// What the user wrote, or the single value they chose.
-    ///
-    /// `None` when they cancelled, when there was no terminal to ask on, or
-    /// when the request was a multi-select.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub text: Option<String>,
-
-    /// The values chosen from a [`ComposeMode::MultiSelect`].
-    ///
-    /// Empty for every other mode, and for a cancelled or unanswerable one.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub values: Vec<String>,
 }
 
 /// Print user-facing output through JP's printer.
