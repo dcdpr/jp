@@ -4,6 +4,7 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-09
+- **Extended by**: [RFD 100](100-in-repo-ticket-tracking.md)
 
 ## Summary
 
@@ -131,7 +132,7 @@ between RFDs:
 
 ```markdown
 - **Extends**: RFD 028
-- **Extended by**: RFD 034, RFD 037, [RFD 100](100-in-repo-ticket-tracking.md)
+- **Extended by**: RFD 034, RFD 037
 ```
 
 `Extends` is written in the newer RFD.

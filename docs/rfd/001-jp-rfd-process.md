@@ -4,6 +4,7 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
+- **Extended by**: [RFD 100](100-in-repo-ticket-tracking.md)
 
 ## Summary
 
@@ -329,7 +330,7 @@ All categories use the same metadata:
 - **Authors**: Name <email> (or GitHub handle)
 - **Date**: YYYY-MM-DD
 - **Extends**: RFD NNN (if this RFD builds on another)
-- **Extended by**: RFD NNN (if another RFD builds on this one), [RFD 100](100-in-repo-ticket-tracking.md)
+- **Extended by**: RFD NNN (if another RFD builds on this one)
 - **Requires**: RFD NNN (if this RFD depends on another)
 - **Required by**: RFD NNN (if another RFD depends on this one)
 - **Supersedes**: RFD NNN (if applicable)

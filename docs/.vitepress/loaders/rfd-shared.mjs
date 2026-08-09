@@ -189,7 +189,7 @@ export function checkPriority(entries, priority) {
 
     const ids = [...new Set(unknown)].sort().join(', ')
     return `Unknown RFD ids in priority board: ${ids}.\n\n` +
-        `\`docs/rfd/priority.json\` references RFDs that don't exist. Fix the ` +
+        `\`docs/rfd/.priority.json\` references RFDs that don't exist. Fix the ` +
         `ids or remove them (the board UI rewrites this file on save).`
 }
 
@@ -497,7 +497,7 @@ export function assembleBoard() {
     const rfdDir = resolve(import.meta.dirname, '../../rfd')
     const draftsDir = resolve(import.meta.dirname, '../../rfd/drafts')
     const cachePath = resolve(import.meta.dirname, '../rfd-summaries.json')
-    const priorityPath = resolve(import.meta.dirname, '../../rfd/priority.json')
+    const priorityPath = resolve(import.meta.dirname, '../../rfd/.priority.json')
 
     const publishedFiles = readdirSync(rfdDir)
         .filter(f => /^\d{3}-.+\.md$/.test(f) && !f.startsWith('000-'))

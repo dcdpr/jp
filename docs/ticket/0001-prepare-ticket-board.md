@@ -1,6 +1,6 @@
 # T0001: prepare ticket board
 
-- **Status**: Todo
+- **Status**: In Progress
 - **Kind**: Chore
 - **Authors**: Jean Mertz
 - **Date**: 2026-08-06

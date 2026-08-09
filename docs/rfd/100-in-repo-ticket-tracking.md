@@ -1,6 +1,6 @@
 # RFD 100: In-Repo Ticket Tracking
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-05

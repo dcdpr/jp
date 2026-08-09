@@ -1,9 +1,11 @@
-//! `jp-serve-web`: read-only web UI plugin for JP.
+//! `jp-serve-web`: web UI plugin for JP.
 //!
 //! Communicates with the `jp` host over the JSON-lines plugin protocol
-//! (stdin/stdout) and serves a read-only conversation browser over HTTP.
+//! (stdin/stdout) and serves a conversation browser over HTTP.
+//! Turns composed in the browser are delegated to the host, which owns the
+//! agent loop.
 //!
-//! See: `docs/rfd/D17-command-plugin-system.md`
+//! See: `docs/rfd/072-command-plugin-system.md`
 
 mod client;
 mod log_layer;
@@ -26,23 +28,30 @@ use crate::{
     log_layer::{ProtocolLogHandle, ProtocolLogLayer},
 };
 
-const HELP_TEXT: &str = "\
-Start the read-only web interface for browsing JP conversations.
+/// The protocol version this plugin needs from the host.
+///
+/// The composer posts turns with `query` (3), stops them with `interrupt` (4),
+/// and syncs what is being typed through the draft messages (5).
+const REQUIRED_PROTOCOL: u32 = 5;
 
-Usage: jp serve web [OPTIONS]
+const HELP_TEXT: &str = "\
+Start the web interface for browsing JP conversations and continuing them.
+
+Usage: jp serve-web [OPTIONS]
 
 Options:
   --bind <ADDR>    Address to bind to [default: 127.0.0.1]
   --port <PORT>    Port to listen on [default: 3000]
 
 Configuration (in .jp/config.toml):
-  [plugins.command.serve.options]
+  [plugins.command.serve-web.options]
   bind = \"127.0.0.1\"
   port = 8080
 
 The server has no authentication and exposes every conversation in the
-workspace. Binding to a non-loopback address (e.g. 0.0.0.0) makes all of them
-reachable from the network.";
+workspace, and anyone who reaches it can start a turn, which spends tokens and
+runs whatever tools the conversation allows. Binding to a non-loopback address
+(e.g. 0.0.0.0) hands that to the network.";
 
 fn main() {
     let log_handle = init_tracing();
@@ -55,7 +64,7 @@ fn main() {
         drop(writeln!(err));
         drop(writeln!(
             err,
-            "Note: this binary is a JP plugin. Run it via `jp serve web`."
+            "Note: this binary is a JP plugin. Run it via `jp serve-web`."
         ));
         std::process::exit(0);
     }
@@ -136,12 +145,16 @@ fn run_server(
     if !is_loopback {
         warn!(
             %socket_addr,
-            "Binding to a non-loopback address exposes all conversations without authentication"
+            "Binding to a non-loopback address exposes all conversations, and lets anyone who \
+             reaches it start a turn, without authentication"
         );
     }
 
     // Send early protocol messages before sharing stdout.
-    send(&mut stdout, &PluginToHost::Ready)?;
+    match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
+        Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
+        Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
+    }
     send(
         &mut stdout,
         &PluginToHost::Print(PrintMessage {
@@ -159,7 +172,8 @@ fn run_server(
             &mut stdout,
             &PluginToHost::Print(PrintMessage {
                 text: "Warning: bound to a non-loopback address; every conversation in this \
-                       workspace is reachable over the network without authentication.\n"
+                       workspace is readable over the network without authentication, and anyone \
+                       who reaches it can start a turn.\n"
                     .into(),
                 channel: "content".into(),
                 format: "plain".into(),
@@ -216,7 +230,7 @@ fn send_describe(stdout: &mut impl Write) -> Result<(), String> {
         &PluginToHost::Describe(DescribeResponse {
             name: "serve-web".to_owned(),
             version: env!("CARGO_PKG_VERSION").to_owned(),
-            description: "Read-only web UI for browsing conversations".to_owned(),
+            description: "Web UI for browsing conversations and continuing them".to_owned(),
             command: vec!["serve".to_owned(), "web".to_owned()],
             author: Some("Jean Mertz <git@jeanmertz.com>".to_owned()),
             help: Some(HELP_TEXT.to_owned()),

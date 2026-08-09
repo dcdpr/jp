@@ -1,7 +1,9 @@
 {
   "todo": [
+    "T0002"
+  ],
+  "in_progress": [
     "T0001"
   ],
-  "in_progress": [],
   "done": []
 }

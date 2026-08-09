@@ -89,6 +89,40 @@ enum Command {
         id: Option<TicketId>,
     },
 
+    /// Rewrite a ticket's title, description, kind, or status.
+    ///
+    /// Metadata and comments the flags don't name are left alone.
+    Edit {
+        /// Ticket id: `42`, `042`, or `T0042`.
+        /// Omit it to choose.
+        id: Option<TicketId>,
+
+        /// New one-line summary.
+        #[arg(long)]
+        title: Option<String>,
+
+        /// New description, replacing the old one.
+        #[arg(long)]
+        body: Option<String>,
+
+        /// New kind: `bug`, `feature`, or `chore`.
+        #[arg(long)]
+        kind: Option<Kind>,
+
+        /// New status: `todo`, `in progress`, or `done`.
+        #[arg(long)]
+        status: Option<Status>,
+    },
+
+    /// Delete a ticket outright.
+    ///
+    /// Its number stays retired: the counter never goes backwards.
+    Delete {
+        /// Ticket id: `42`, `042`, or `T0042`.
+        /// Omit it to choose.
+        id: Option<TicketId>,
+    },
+
     /// Read one ticket, with its comments numbered for replies.
     Show {
         /// Ticket id: `42`, `042`, or `T0042`.
@@ -209,12 +243,23 @@ fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
     match read_message(&mut stdin)? {
         HostToPlugin::Describe => send_describe(&mut stdout),
         HostToPlugin::Init(init) => {
-            send(&mut stdout, &PluginToHost::Ready)?;
+            match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
+                Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
+                Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
+            }
             handle_command(&init, &mut stdin, &mut stdout)
         }
         other => Err(format!("expected init or describe, got: {other:?}")),
     }
 }
+
+/// The protocol version this plugin needs from the host.
+///
+/// Composition (`compose` / `composed`) arrived in 2.
+/// Running against an older `jp` means every interactive path sends a message
+/// the host can't read, so the handshake refuses it up front rather than
+/// discovering it mid-prompt.
+const REQUIRED_PROTOCOL: u32 = 2;
 
 fn handle_command(
     init: &InitMessage,
@@ -325,41 +370,25 @@ fn compose_missing(
 ) -> Result<Command, String> {
     match command {
         Command::Add {
-            kind: None,
+            kind,
             title,
             author,
             body,
             implements,
-        } => {
-            let kind = Some(pick_kind(stdin, stdout)?);
-
-            // Round-trip: the title may still be missing, which the arm below
-            // handles.
-            compose_missing(
-                dir,
-                Command::Add {
-                    kind,
-                    title,
-                    author,
-                    body,
-                    implements,
-                },
-                stdin,
-                stdout,
-            )
-        }
-
-        Command::Add {
-            kind,
-            title: None,
-            author,
-            body,
-            implements,
-        } => {
-            let (title, body) = compose_ticket(kind, body, stdin, stdout)?;
+        } if kind.is_none() || title.is_none() => {
+            // Kind first: it frames what you're about to write. The title is
+            // read out of the composed text, or asked for last.
+            let kind = match kind {
+                Some(kind) => kind,
+                None => pick_kind(stdin, stdout)?,
+            };
+            let (title, body) = match title {
+                Some(title) => (title, body),
+                None => compose_ticket(Some(kind), body, stdin, stdout)?,
+            };
 
             Ok(Command::Add {
-                kind,
+                kind: Some(kind),
                 title: Some(title),
                 author,
                 body,
@@ -414,6 +443,24 @@ fn compose_missing(
         Command::Show { id: None, json } => Ok(Command::Show {
             id: Some(pick_ticket(dir, stdin, stdout, "Show", false)?),
             json,
+        }),
+
+        Command::Edit {
+            id: None,
+            title,
+            body,
+            kind,
+            status,
+        } => Ok(Command::Edit {
+            id: Some(pick_ticket(dir, stdin, stdout, "Edit", false)?),
+            title,
+            body,
+            kind,
+            status,
+        }),
+
+        Command::Delete { id: None } => Ok(Command::Delete {
+            id: Some(pick_ticket(dir, stdin, stdout, "Delete", false)?),
         }),
 
         Command::Promote { id: None, to } => Ok(Command::Promote {
@@ -616,6 +663,7 @@ fn compose_many(
         }
         HostToPlugin::Composed(response) => Ok(response.values),
         HostToPlugin::Error(error) => Err(error.message),
+        HostToPlugin::Shutdown => Err("Interrupted.".to_owned()),
         other => Err(format!("expected a composed response, got: {other:?}")),
     }
 }
@@ -652,6 +700,7 @@ fn compose(
             .text
             .ok_or_else(|| "Nothing composed; run it again with the text as arguments.".to_owned()),
         HostToPlugin::Error(error) => Err(error.message),
+        HostToPlugin::Shutdown => Err("Interrupted.".to_owned()),
         other => Err(format!("expected a composed response, got: {other:?}")),
     }
 }
@@ -808,6 +857,28 @@ fn execute(dir: &Utf8Path, command: Command, config: &Value) -> Result<Output, S
 
         Command::Show { id, json } => show(dir, required(id, "ticket id")?, json),
 
+        Command::Edit {
+            id,
+            title,
+            body,
+            kind,
+            status,
+        } => edit(
+            dir,
+            required(id, "ticket id")?,
+            title.as_deref(),
+            body.as_deref(),
+            kind,
+            status,
+        ),
+
+        Command::Delete { id } => {
+            let id = required(id, "ticket id")?;
+            let path = store::delete(dir, id).map_err(|error| error.to_string())?;
+
+            Ok(format!("Deleted {path}\n").into())
+        }
+
         Command::Promote { id, to } => {
             let id = required(id, "ticket id")?;
             let path = store::promote(dir, id, &to).map_err(|error| error.to_string())?;
@@ -940,6 +1011,33 @@ fn token() -> Option<String> {
     let non_empty = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
 
     non_empty("JP_GITHUB_TOKEN").or_else(|| non_empty("GITHUB_TOKEN"))
+}
+
+/// Apply an edit, touching only the parts the caller named.
+fn edit(
+    dir: &Utf8Path,
+    id: TicketId,
+    title: Option<&str>,
+    body: Option<&str>,
+    kind: Option<Kind>,
+    status: Option<Status>,
+) -> Result<Output, String> {
+    let failed = |error: store::Error| error.to_string();
+
+    let mut path = if title.is_some() || body.is_some() {
+        store::edit(dir, id, title, body).map_err(failed)?
+    } else {
+        store::locate_ticket(dir, id).map_err(failed)?
+    };
+
+    if let Some(kind) = kind {
+        path = store::set_field(dir, id, "Kind", &kind.to_string()).map_err(failed)?;
+    }
+    if let Some(status) = status {
+        path = store::set_field(dir, id, "Status", &status.to_string()).map_err(failed)?;
+    }
+
+    Ok(format!("Edited {path}\n").into())
 }
 
 /// Read one ticket, as markdown or as JSON for scripting.
@@ -1089,9 +1187,17 @@ fn send_exit(stdout: &mut impl Write, code: u8, reason: Option<&str>) -> Result<
 
 fn read_message(stdin: &mut impl BufRead) -> Result<HostToPlugin, String> {
     let mut line = String::new();
-    stdin
+    let read = stdin
         .read_line(&mut line)
         .map_err(|error| format!("failed to read from host: {error}"))?;
+
+    // EOF: the host closed the pipe without answering, which is what an older
+    // `jp` does when it gives up on a message it couldn't read.
+    if read == 0 {
+        return Err(
+            "The host stopped responding. Are `jp` and `jp-ticket` the same build?".to_owned(),
+        );
+    }
 
     serde_json::from_str(line.trim()).map_err(|error| format!("invalid host message: {error}"))
 }

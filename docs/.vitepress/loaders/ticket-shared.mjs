@@ -13,7 +13,7 @@ import { referencedLabels } from './rfd-shared.mjs'
 // the markdown file itself, so comment bodies never come through here.
 
 // The board's three columns, in flow order. `key` is the field in
-// `docs/ticket/board.json`; `status` is what the ticket file carries.
+// `docs/ticket/.board.json`; `status` is what the ticket file carries.
 export const COLUMNS = [
     { key: 'todo', status: 'Todo' },
     { key: 'in_progress', status: 'In Progress' },
@@ -171,7 +171,7 @@ export function loadTickets() {
 // view can point at the index for the rest.
 export function assembleBoard() {
     const tickets = loadTickets()
-    const order = loadBoard(resolve(import.meta.dirname, '../../ticket/board.json'))
+    const order = loadBoard(resolve(import.meta.dirname, '../../ticket/.board.json'))
 
     const columns = COLUMNS.map(column => {
         const rows = orderColumn(tickets, column, order[column.key])
