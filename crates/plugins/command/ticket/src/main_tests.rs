@@ -158,29 +158,41 @@ fn subcommands_are_not_mistaken_for_ids() {
 fn the_author_falls_back_through_jp_then_git_then_the_environment() {
     let jp = serde_json::json!({
       "user": {
-        "name": "Jean Mertz"
+        "name": "John Doe"
       }
     });
 
+    // An explicit author wins outright and never reaches git, so this is the
+    // one case with a fully fixed answer.
     assert_eq!(
         resolve_author(Some("  Someone Else  ".to_owned()), &jp),
         Ok("Someone Else".to_owned())
     );
-    // The configured name picks up git's email, so a ticket's author line reads
-    // like an RFD's. The email itself depends on the machine.
-    let resolved = resolve_author(None, &jp).unwrap();
-    assert!(resolved.starts_with("Jean Mertz"), "{resolved}");
 
-    // An empty or absent `user.name` falls through to git or `$USER`, both of
-    // which exist in any environment this runs in.
-    let blank = serde_json::json!({
-      "user": {
-        "name": "   "
-      }
-    });
-    assert!(resolve_author(None, &blank).is_ok());
-    assert!(resolve_author(None, &serde_json::Value::Null).is_ok());
-    assert!(resolve_author(Some(String::new()), &jp).is_ok());
+    // A blank `--author` is no answer at all, so the configured name applies
+    // just as it would with no flag at all.
+    assert_eq!(
+        resolve_author(Some("   ".to_owned()), &jp),
+        resolve_author(None, &jp)
+    );
+
+    // The configured name picks up git's email, so a ticket's author line reads
+    // like an RFD's. The address is whatever the machine has configured and may
+    // be missing entirely, so only the shape is pinned: the name, and nothing
+    // after it but a bracketed address.
+    let resolved = resolve_author(None, &jp).unwrap();
+    assert!(
+        resolved == "John Doe" || (resolved.starts_with("John Doe <") && resolved.ends_with('>')),
+        "{resolved}"
+    );
+
+    // The git and OS-username fallbacks are deliberately not exercised. Whether
+    // they yield a name or an error is a property of the machine, not of this
+    // function: CI has neither a git identity nor a username in the
+    // environment, and a developer's machine has both. Asserting `is_ok()` here
+    // passes for whichever branch happens to fire, which is how this test came
+    // to fail on Windows. Covering them means having `resolve_author` take
+    // those two values as arguments instead of reading them itself.
 }
 
 #[test]
@@ -228,7 +240,7 @@ fn commands_run_against_the_resolved_directory() {
     let created = run_command(&dir, Command::Add {
         kind: Some(Kind::Bug),
         title: Some("Tool call header misaligned".to_owned()),
-        author: Some("Jean Mertz".to_owned()),
+        author: Some("John Doe".to_owned()),
         body: Some("The header renders one column left of the body.".to_owned()),
         implements: None,
     })
@@ -238,12 +250,12 @@ fn commands_run_against_the_resolved_directory() {
 
     let commented = run_command(&dir, Command::Comment {
         id: Some(TicketId::new(1)),
-        author: Some("jean".to_owned()),
+        author: Some("john".to_owned()),
         re: None,
         body: Some("Reproduced at 72 columns.".to_owned()),
     })
     .unwrap();
-    assert_eq!(commented.text, "Added T0001#1 by jean\n");
+    assert_eq!(commented.text, "Added T0001#1 by john\n");
 
     let listed = run_command(&dir, Command::List {
         status: None,
@@ -378,7 +390,7 @@ fn unreadable_tickets_are_warned_about_separately() {
     run_command(&dir, Command::Add {
         kind: Some(Kind::Chore),
         title: Some("Readable".to_owned()),
-        author: Some("jean".to_owned()),
+        author: Some("john".to_owned()),
         body: None,
         implements: None,
     })

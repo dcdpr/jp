@@ -10,7 +10,7 @@ fn new_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
         dir.path(),
         Kind::Bug,
         title,
-        "jean",
+        "john",
         DATE,
         None,
         "Description.",
@@ -27,7 +27,7 @@ fn create_writes_a_numbered_file() {
         dir.path(),
         Kind::Bug,
         "Tool call header misaligned",
-        "Jean Mertz",
+        "John Doe",
         DATE,
         None,
         "The header renders one column left of the body.",
@@ -86,7 +86,7 @@ fn comments_append_and_number_from_one() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Tool call header misaligned");
 
-    let first = append_comment(dir.path(), id, "jean", STAMP, None, "Reproduced at 72.").unwrap();
+    let first = append_comment(dir.path(), id, "john", STAMP, None, "Reproduced at 72.").unwrap();
     let second = append_comment(dir.path(), id, "jp", STAMP, Some(1), "The wrap is off.").unwrap();
 
     assert_eq!(first, 1);
@@ -95,7 +95,7 @@ fn comments_append_and_number_from_one() {
     let path = locate(dir.path(), id).unwrap();
     let ticket = parse::document(&fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(ticket.comments.len(), 2);
-    assert_eq!(ticket.comments[0].from, "jean");
+    assert_eq!(ticket.comments[0].from, "john");
     assert_eq!(ticket.comments[1].re.as_deref(), Some("T0001#1"));
 }
 
@@ -272,7 +272,7 @@ fn imported_content_is_escaped_on_the_way_in() {
 fn editing_keeps_metadata_and_comments() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Original title");
-    append_comment(dir.path(), id, "jean", STAMP, None, "Still relevant.").unwrap();
+    append_comment(dir.path(), id, "john", STAMP, None, "Still relevant.").unwrap();
     set_field(dir.path(), id, "Status", "In Progress").unwrap();
 
     let path = edit(dir.path(), id, Some("Revised title"), Some("Revised body.")).unwrap();

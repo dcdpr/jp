@@ -18,7 +18,7 @@ fn renders_a_new_ticket() {
         TicketId::new(42),
         "Tool call header misaligned",
         Kind::Bug,
-        "Jean Mertz",
+        "John Doe",
         "2026-08-05",
         None,
         "The header renders one column left of the body.",
@@ -29,7 +29,7 @@ fn renders_a_new_ticket() {
 
             - **Status**: Todo
             - **Kind**: Bug
-            - **Authors**: Jean Mertz
+            - **Authors**: John Doe
             - **Date**: 2026-08-05
 
             The header renders one column left of the body.
@@ -42,7 +42,7 @@ fn renders_a_new_ticket_without_a_description() {
         TicketId::new(1),
         "Bump the deny list",
         Kind::Chore,
-        "jean",
+        "john",
         "2026-08-05",
         None,
         "   ",
@@ -53,7 +53,7 @@ fn renders_a_new_ticket_without_a_description() {
 
             - **Status**: Todo
             - **Kind**: Chore
-            - **Authors**: jean
+            - **Authors**: john
             - **Date**: 2026-08-05
         "});
 }
@@ -64,7 +64,7 @@ fn first_comment_opens_the_comments_section() {
         TicketId::new(42),
         "Tool call header misaligned",
         Kind::Bug,
-        "Jean Mertz",
+        "John Doe",
         "2026-08-05",
         None,
         "The header renders one column left of the body.",
@@ -72,7 +72,7 @@ fn first_comment_opens_the_comments_section() {
 
     let out = append_comment(
         &document,
-        &comment("jean", "Reproduced at 72 columns.", None),
+        &comment("john", "Reproduced at 72 columns.", None),
     );
 
     assert_eq!(out, indoc! {"
@@ -80,7 +80,7 @@ fn first_comment_opens_the_comments_section() {
 
             - **Status**: Todo
             - **Kind**: Bug
-            - **Authors**: Jean Mertz
+            - **Authors**: John Doe
             - **Date**: 2026-08-05
 
             The header renders one column left of the body.
@@ -89,7 +89,7 @@ fn first_comment_opens_the_comments_section() {
 
             -----
 
-            - **From**: jean
+            - **From**: john
             - **Date**: 2026-08-05T14:03:11Z
 
             Reproduced at 72 columns.
@@ -104,12 +104,12 @@ fn later_comments_are_a_pure_append() {
             TicketId::new(42),
             "Tool call header misaligned",
             Kind::Bug,
-            "Jean Mertz",
+            "John Doe",
             "2026-08-05",
             None,
             "Description.",
         ),
-        &comment("jean", "Reproduced at 72 columns.", None),
+        &comment("john", "Reproduced at 72 columns.", None),
     );
 
     let out = append_comment(
@@ -138,12 +138,12 @@ fn appended_comments_parse_back() {
                 TicketId::new(7),
                 "Round trip",
                 Kind::Feature,
-                "jean",
+                "john",
                 "2026-08-05",
                 None,
                 "Description.",
             ),
-            &comment("jean", "First.", None),
+            &comment("john", "First.", None),
         ),
         &comment("jp", "Second.", Some("T0007#1")),
     );
@@ -164,7 +164,7 @@ fn replaces_a_metadata_field() {
 
         - **Status**: Todo
         - **Kind**: Bug
-        - **Authors**: Jean Mertz
+        - **Authors**: John Doe
         - **Date**: 2026-08-05
 
         Description.
@@ -185,7 +185,7 @@ fn only_the_header_block_is_rewritten() {
 
         - **Status**: Todo
         - **Kind**: Bug
-        - **Authors**: jean
+        - **Authors**: john
         - **Date**: 2026-08-05
 
         ## Comments
@@ -215,7 +215,7 @@ fn adds_a_field_the_ticket_lacks() {
 
         - **Status**: Todo
         - **Kind**: Bug
-        - **Authors**: jean
+        - **Authors**: john
         - **Date**: 2026-08-05
 
         Description.
@@ -228,7 +228,7 @@ fn adds_a_field_the_ticket_lacks() {
 
             - **Status**: Todo
             - **Kind**: Bug
-            - **Authors**: jean
+            - **Authors**: john
             - **Date**: 2026-08-05
             - **GitHub**: #123
 

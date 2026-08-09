@@ -8,7 +8,7 @@
 //!
 //! - **Status**: Todo
 //! - **Kind**: Bug
-//! - **Authors**: Jean Mertz
+//! - **Authors**: John Doe
 //! - **Date**: 2026-08-05
 //!
 //! The header renders one column left of the body below 80 columns.
@@ -17,7 +17,7 @@
 //!
 //! -----
 //!
-//! - **From**: jean
+//! - **From**: john
 //! - **Date**: 2026-08-05T14:03:11Z
 //!
 //! Reproduced at 72 columns. Not at 80.
@@ -190,7 +190,7 @@ pub struct Metadata {
 
 /// One comment on a ticket.
 ///
-/// `from` is a short handle (`jean`, `jp`); imported GitHub comments use
+/// `from` is a short handle (`john`, `jp`); imported GitHub comments use
 /// `gh:username`.
 /// `re` holds a reference to the comment being replied to, in `T0042#1` form,
 /// where the number is the 1-based position of that comment in the file.

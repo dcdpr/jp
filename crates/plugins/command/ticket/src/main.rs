@@ -316,7 +316,7 @@ fn with_show_alias(args: &[String]) -> Vec<String> {
 /// Decide who to attribute a write to.
 ///
 /// `--author` wins; otherwise JP's own `user.name`, then git's identity, then
-/// `$USER`.
+/// the OS username (`$USER`, or `%USERNAME%` on Windows).
 /// Erroring beats guessing: a ticket signed by the wrong person is worse than
 /// one that refuses to be written.
 fn resolve_author(explicit: Option<String>, config: &Value) -> Result<String, String> {
@@ -340,7 +340,7 @@ fn resolve_author(explicit: Option<String>, config: &Value) -> Result<String, St
         return Ok(with_email(name));
     }
 
-    if let Ok(user) = std::env::var("USER")
+    if let Ok(user) = std::env::var("USER").or_else(|_| std::env::var("USERNAME"))
         && !user.trim().is_empty()
     {
         return Ok(with_email(user.trim().to_owned()));
@@ -354,7 +354,7 @@ fn resolve_author(explicit: Option<String>, config: &Value) -> Result<String, St
 }
 
 /// Append git's email to a bare name, so a ticket's author line reads like an
-/// RFD's: `Jean Mertz <git@jeanmertz.com>`.
+/// RFD's: `John Doe <git@johndoe.com>`.
 fn with_email(name: String) -> String {
     if name.contains('<') {
         return name;
