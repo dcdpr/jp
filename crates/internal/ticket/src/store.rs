@@ -122,6 +122,57 @@ pub fn promote(dir: &Utf8Path, id: TicketId, rfd: &str) -> Result<Utf8PathBuf> {
     Ok(path)
 }
 
+/// Rewrite a ticket's title and description, keeping its metadata and comments.
+///
+/// `None` leaves that part as it was.
+pub fn edit(
+    dir: &Utf8Path,
+    id: TicketId,
+    title: Option<&str>,
+    description: Option<&str>,
+) -> Result<Utf8PathBuf> {
+    let path = locate(dir, id)?;
+    let source = fs::read_to_string(&path)?;
+    let ticket = parse::document(&source)?;
+
+    let updated = render::replace_content(
+        &source,
+        id,
+        title.unwrap_or(&ticket.title),
+        description.unwrap_or(&ticket.description),
+        &ticket.comments,
+    )
+    .ok_or(ParseError::MissingMetadata)?;
+    fs::write(&path, updated)?;
+
+    Ok(path)
+}
+
+/// Set one metadata field on a ticket.
+///
+/// The field is created if the ticket doesn't carry it yet.
+pub fn set_field(dir: &Utf8Path, id: TicketId, key: &str, value: &str) -> Result<Utf8PathBuf> {
+    let path = locate(dir, id)?;
+    let source = fs::read_to_string(&path)?;
+
+    let updated = render::set_metadata(&source, key, value).ok_or(ParseError::MissingMetadata)?;
+    fs::write(&path, updated)?;
+
+    Ok(path)
+}
+
+/// Delete a ticket, returning the path that held it.
+///
+/// Unlike an RFD, a ticket can go: one carrying false claims or imported spam
+/// is removed outright so nothing reads it as true.
+/// Its number is not reused — the counter never goes backwards.
+pub fn delete(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
+    let path = locate(dir, id)?;
+    fs::remove_file(&path)?;
+
+    Ok(path)
+}
+
 /// Append a comment to a ticket, returning its 1-based position.
 ///
 /// `re` is the position of the comment being replied to.
@@ -250,6 +301,11 @@ pub fn list(dir: &Utf8Path) -> Result<Vec<Entry>> {
             })
         })
         .collect()
+}
+
+/// Resolve a ticket id to its file.
+pub fn locate_ticket(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
+    locate(dir, id)
 }
 
 /// Resolve a ticket id to its file.

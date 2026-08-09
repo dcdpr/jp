@@ -267,6 +267,53 @@ fn imported_content_is_escaped_on_the_way_in() {
     assert!(!source.contains("{{"), "{source}");
 }
 
+/// An edit rewrites the content and leaves everything else standing.
+#[test]
+fn editing_keeps_metadata_and_comments() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Original title");
+    append_comment(dir.path(), id, "jean", STAMP, None, "Still relevant.").unwrap();
+    set_field(dir.path(), id, "Status", "In Progress").unwrap();
+
+    let path = edit(dir.path(), id, Some("Revised title"), Some("Revised body.")).unwrap();
+
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.title, "Revised title");
+    assert_eq!(ticket.description, "Revised body.");
+    assert_eq!(ticket.metadata.status, Status::InProgress);
+    assert_eq!(ticket.comments.len(), 1);
+    assert_eq!(ticket.comments[0].body, "Still relevant.");
+}
+
+#[test]
+fn editing_one_part_leaves_the_other() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Original title");
+
+    let path = edit(dir.path(), id, Some("Revised title"), None).unwrap();
+
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.title, "Revised title");
+    assert_eq!(ticket.description, "Description.");
+}
+
+/// A deleted ticket's number stays retired: the counter never goes backwards.
+#[test]
+fn deleting_removes_the_file_and_keeps_the_number_retired() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Mistaken");
+
+    let path = delete(dir.path(), id).unwrap();
+
+    assert!(!path.exists());
+    assert!(list(dir.path()).unwrap().is_empty());
+    assert_eq!(new_ticket(&dir, "Next").number(), 2);
+    assert_eq!(
+        delete(dir.path(), id).unwrap_err().to_string(),
+        "No ticket T0001."
+    );
+}
+
 #[test]
 fn slugs_are_lowercase_and_hyphenated() {
     assert_eq!(
