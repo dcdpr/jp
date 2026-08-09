@@ -983,6 +983,43 @@ fn test_from_parts_tolerates_unknown_fields_in_config_deltas() {
 }
 
 #[test]
+fn test_from_parts_tolerates_legacy_compaction_bounds_in_base_config() {
+    // A conversation written before `last` was renamed and before `@N` stopped
+    // being a config spelling. Both land in `base_config.json`, which is
+    // rewritten on every save, so a hard failure here would discard the stored
+    // config and then persist the loss.
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.style.code.color = Some(false);
+
+    let mut stream = ConversationStream::new_test().with_config_delta(partial);
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let (mut base_config, events) = stream.to_parts().unwrap();
+
+    base_config["style"]["code"]["color"] = serde_json::json!(false);
+    // `@7` ended compaction at turn 7. Substituting the default `keep_last`
+    // would end it at the second-to-last turn instead, compacting every turn
+    // in between.
+    base_config["conversation"]["compaction"]["rules"] = serde_json::json!({
+        "value": [{ "keep_first": "last", "keep_last": "@7" }],
+        "strategy": "replace"
+    });
+
+    let result = ConversationStream::from_parts(base_config, events).unwrap();
+
+    let config = result.config().unwrap();
+    assert!(
+        !config.style.code.color,
+        "settings beside the stale bound must survive the load"
+    );
+
+    assert!(
+        config.conversation.compaction.rules.is_empty(),
+        "the `@7` rule is dropped whole rather than run over a substituted range"
+    );
+}
+
+#[test]
 fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("hello"));

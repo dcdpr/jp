@@ -36,19 +36,21 @@ pub(crate) struct Compact {
     /// Preserve the first N turns (or turns within a duration).
     ///
     /// Accepts a turn count (e.g. `2`) or a duration (e.g. `5h`).
+    /// Use `--from` to start the range at a turn position instead.
     /// Composes with `--first M`: the pair compacts the first M turns minus the
     /// preserved prefix, e.g. `--keep-first 1 --first 16` compacts turns 2
     /// through 16.
-    #[arg(long, conflicts_with_all = ["from", "last", "turn"])]
+    #[arg(long, value_parser = parse_keep_bound, conflicts_with_all = ["from", "last", "turn"])]
     keep_first: Option<RuleBound>,
 
     /// Preserve the last N turns (or turns within a duration).
     ///
     /// Accepts a turn count (e.g. `3`) or a duration (e.g. `2h`).
+    /// Use `--to` to end the range at a turn position instead.
     /// Composes with `--last M`: the pair compacts the last M turns minus the
     /// preserved suffix, e.g. `--keep-last 2 --last 16` compacts the 14 turns
     /// before the final 2.
-    #[arg(long, conflicts_with_all = ["to", "first", "turn"])]
+    #[arg(long, value_parser = parse_keep_bound, conflicts_with_all = ["to", "first", "turn"])]
     keep_last: Option<RuleBound>,
 
     /// Which turns to compact.
@@ -270,6 +272,22 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
         "expected one of: strip (s), strip-requests (sreq), strip-responses (sres), omit (o)"
             .to_string()
     })
+}
+
+/// Parse a `--keep-first`/`--keep-last` value: a turn count or a duration.
+///
+/// These flags answer "how many turns to preserve", so a value naming a turn is
+/// rejected — `--from`/`--to` bound the range by position, and each is
+/// mutually exclusive with the keep flag on its side.
+fn parse_keep_bound(s: &str) -> Result<RuleBound, String> {
+    let bound: RuleBound = s.parse().map_err(|e| format!("{e}"))?;
+    match bound {
+        RuleBound::Turns(_) | RuleBound::Duration(_) => Ok(bound),
+        other => Err(format!(
+            "`{other}` names a turn, not an amount to preserve; use `--from`/`--to` for turn \
+             positions, or pass a count (e.g. `3`) or a duration (e.g. `2h`) here"
+        )),
+    }
 }
 
 /// Parse the `--reset=INDEX` value: a 1-based position among the conversation's
