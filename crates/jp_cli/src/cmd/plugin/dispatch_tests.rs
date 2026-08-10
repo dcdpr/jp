@@ -21,8 +21,24 @@ fn wire_id(id: ConversationId) -> String {
 /// The temp dir comes back so the caller keeps it alive; dropping it takes the
 /// storage with it.
 fn workspace_with_conversation() -> (Workspace, ConversationId, Utf8TempDir) {
+    let (ws, id, _fs, tmp) = workspace_with_drafts();
+    (ws, id, tmp)
+}
+
+/// The same, with user-local storage configured so drafts have somewhere to go.
+fn workspace_with_drafts() -> (
+    Workspace,
+    ConversationId,
+    Arc<FsStorageBackend>,
+    Utf8TempDir,
+) {
     let tmp = tempdir().unwrap();
-    let fs = Arc::new(FsStorageBackend::new(&tmp.path().join(".jp")).unwrap());
+    let fs = Arc::new(
+        FsStorageBackend::new(&tmp.path().join(".jp"))
+            .unwrap()
+            .with_user_storage(&tmp.path().join("user"), None, "test-workspace")
+            .unwrap(),
+    );
 
     let id = ConversationId::try_from(
         chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
@@ -30,10 +46,143 @@ fn workspace_with_conversation() -> (Workspace, ConversationId, Utf8TempDir) {
     .unwrap();
     fs.write_test_conversation(&id, &Conversation::default());
 
-    let mut workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
+    let mut workspace = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     workspace.load_conversation_index();
 
-    (workspace, id, tmp)
+    (workspace, id, fs, tmp)
+}
+
+/// Unwrap a draft response, or say what came back instead.
+fn draft(response: HostToPlugin) -> jp_plugin::message::DraftResponse {
+    match response {
+        HostToPlugin::Draft(draft) => draft,
+        other => panic!("expected a draft response, got {other:?}"),
+    }
+}
+
+/// A conversation with no draft reads back empty rather than as an error: most
+/// conversations never have one.
+#[test]
+fn an_absent_draft_reads_as_empty() {
+    let (ws, id, fs, _tmp) = workspace_with_drafts();
+
+    let read = draft(handle_read_draft(Some(&fs), &ws, &wire_id(id), None));
+
+    assert_eq!(read.content, "");
+    assert_eq!(read.revision, None);
+    assert!(!read.conflict);
+}
+
+#[test]
+fn a_written_draft_reads_back_with_its_revision() {
+    let (ws, id, fs, _tmp) = workspace_with_drafts();
+
+    let written = draft(handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
+        id: Some("w1".to_owned()),
+        conversation: wire_id(id),
+        content: "half a thought".to_owned(),
+        revision: None,
+    }));
+
+    assert_eq!(written.id.as_deref(), Some("w1"));
+    assert_eq!(written.content, "half a thought");
+    assert!(!written.conflict);
+
+    let read = draft(handle_read_draft(Some(&fs), &ws, &wire_id(id), None));
+
+    assert_eq!(read.content, "half a thought");
+    assert_eq!(
+        read.revision, written.revision,
+        "the revision a write reports is the one a read gives back"
+    );
+}
+
+/// The whole point of the revision: a write based on a version that has since
+/// moved on is refused, and the caller is handed what it had not seen.
+#[test]
+fn a_write_against_a_stale_revision_is_refused() {
+    let (ws, id, fs, _tmp) = workspace_with_drafts();
+
+    let first = draft(handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
+        id: None,
+        conversation: wire_id(id),
+        content: "what the other writer typed".to_owned(),
+        revision: None,
+    }));
+
+    // A second writer that started from no draft at all, and so never saw the
+    // first write.
+    let refused = draft(handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
+        id: Some("w2".to_owned()),
+        conversation: wire_id(id),
+        content: "what I typed".to_owned(),
+        revision: None,
+    }));
+
+    assert!(refused.conflict);
+    assert_eq!(refused.id.as_deref(), Some("w2"));
+    assert_eq!(
+        refused.content, "what the other writer typed",
+        "the refusal carries the text on disk, not the text submitted"
+    );
+    assert_eq!(refused.revision, first.revision);
+
+    // And nothing was overwritten.
+    let read = draft(handle_read_draft(Some(&fs), &ws, &wire_id(id), None));
+    assert_eq!(read.content, "what the other writer typed");
+}
+
+/// An empty write removes the draft rather than leaving a blank file, which the
+/// CLI would otherwise seed an editor from and treat as a recovery copy.
+#[test]
+fn an_empty_write_removes_the_draft() {
+    let (ws, id, fs, _tmp) = workspace_with_drafts();
+
+    let written = draft(handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
+        id: None,
+        conversation: wire_id(id),
+        content: "to be discarded".to_owned(),
+        revision: None,
+    }));
+
+    let cleared = draft(handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
+        id: None,
+        conversation: wire_id(id),
+        content: String::new(),
+        revision: written.revision,
+    }));
+
+    assert_eq!(cleared.content, "");
+    assert_eq!(cleared.revision, None);
+    assert!(!cleared.conflict);
+
+    let path = draft_path(Some(&fs), &ws, &id, false);
+    assert!(
+        path.is_none_or(|path| !path.exists()),
+        "the draft file is gone, not blank"
+    );
+}
+
+/// Without user-local storage there is nowhere a draft may live, and saying so
+/// beats writing it into the workspace where a teammate would see it.
+#[test]
+fn writing_a_draft_without_user_local_storage_fails() {
+    let (ws, id, _tmp) = workspace_with_conversation();
+
+    let response = handle_write_draft(None, &ws, WriteDraftRequest {
+        id: Some("w3".to_owned()),
+        conversation: wire_id(id),
+        content: "nowhere to go".to_owned(),
+        revision: None,
+    });
+
+    match response {
+        HostToPlugin::Error(error) => {
+            assert_eq!(error.request.as_deref(), Some("write_draft"));
+            assert!(error.message.contains("user-local storage"), "{error:?}");
+        }
+        other => panic!("expected an error, got {other:?}"),
+    }
 }
 
 #[test]
@@ -222,6 +371,7 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
             &mut ws,
             &config,
             None,
+            None,
         )
         .unwrap(),
         Flow::Continue
@@ -236,6 +386,7 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
             &mut sink,
             &mut ws,
             &config,
+            None,
             None,
         )
         .unwrap(),
@@ -258,6 +409,7 @@ fn a_failing_exit_carries_its_code_and_reason() {
         &mut sink,
         &mut ws,
         &json!({}),
+        None,
         None,
     )
     .expect_err("a non-zero exit is an error");
@@ -388,6 +540,7 @@ fn message_loop_ready_then_exit() {
         &shutdown_sent,
         &composer,
         None,
+        None,
     )
     .unwrap();
 }
@@ -429,6 +582,7 @@ fn message_loop_refuses_a_plugin_needing_a_newer_protocol() {
         &config,
         &shutdown_sent,
         &composer,
+        None,
         None,
     )
     .expect_err("a plugin needing a newer protocol must be refused");
