@@ -11,6 +11,14 @@ fn bare_workspace() -> Workspace {
     Workspace::new("/tmp/jp-test-plugin")
 }
 
+/// A router with no signal source, for requests that never reach one.
+///
+/// Must be called inside a tokio runtime, which is why the tests using it are
+/// `#[tokio::test]` despite `handle_request` being synchronous.
+fn router() -> SignalRouter {
+    crate::signals::testing::detached_router()
+}
+
 /// How a conversation is spelled on the wire, matching `list_conversations`.
 fn wire_id(id: ConversationId) -> String {
     id.to_string()
@@ -298,8 +306,8 @@ fn a_conversation_is_named_the_way_jp_prints_it() {
     assert_eq!(summary.id, "jp-c17000000000");
 }
 
-#[test]
-fn a_ready_carries_on_and_a_clean_exit_stops() {
+#[tokio::test]
+async fn a_ready_carries_on_and_a_clean_exit_stops() {
     let mut ws = bare_workspace();
     let config = json!({});
     let mut sink: Vec<u8> = Vec::new();
@@ -313,6 +321,7 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
             None,
             None,
             &AppConfig::new_test(),
+            &router(),
         )
         .unwrap(),
         Flow::Continue
@@ -330,6 +339,7 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
             None,
             None,
             &AppConfig::new_test(),
+            &router(),
         )
         .unwrap(),
         Flow::Stop
@@ -338,8 +348,8 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
 
 /// A non-zero exit is the plugin's failure, so it surfaces as one rather than
 /// ending the run quietly.
-#[test]
-fn a_failing_exit_carries_its_code_and_reason() {
+#[tokio::test]
+async fn a_failing_exit_carries_its_code_and_reason() {
     let mut ws = bare_workspace();
     let mut sink: Vec<u8> = Vec::new();
 
@@ -354,6 +364,7 @@ fn a_failing_exit_carries_its_code_and_reason() {
         None,
         None,
         &AppConfig::new_test(),
+        &router(),
     )
     .expect_err("a non-zero exit is an error");
 
@@ -470,8 +481,8 @@ fn a_lone_error_is_reported_as_itself() {
 
 /// A plugin needing a newer protocol than this host is refused on its `ready`,
 /// before it can send anything the host would fail to parse.
-#[test]
-fn a_plugin_needing_a_newer_protocol_is_refused() {
+#[tokio::test]
+async fn a_plugin_needing_a_newer_protocol_is_refused() {
     let mut ws = bare_workspace();
     let mut sink: Vec<u8> = Vec::new();
 
@@ -485,6 +496,7 @@ fn a_plugin_needing_a_newer_protocol_is_refused() {
         None,
         None,
         &AppConfig::new_test(),
+        &router(),
     )
     .expect_err("a plugin needing a newer protocol must be refused");
 

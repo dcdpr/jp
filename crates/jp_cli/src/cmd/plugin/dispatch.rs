@@ -55,6 +55,7 @@ use crate::{
     cmd::query::{PendingStreamTrim, TurnInputs},
     config_pipeline::build_partial_over,
     editor::report_editor_failure,
+    signals::SignalRouter,
 };
 
 /// Runs the prompts a plugin asks for.
@@ -502,6 +503,7 @@ async fn message_loop(
                 let config = ctx.config();
                 let fs_backend = ctx.fs_backend.clone();
                 let session = ctx.session.clone();
+                let signals = ctx.signals.clone();
                 let mut writer = stdin.lock().expect("stdin lock poisoned");
 
                 if handle_request(
@@ -512,6 +514,7 @@ async fn message_loop(
                     session.as_ref(),
                     fs_backend.as_deref(),
                     &config,
+                    &signals,
                 )? == Flow::Stop
                 {
                     return Ok(());
@@ -885,6 +888,7 @@ fn handle_request(
     session: Option<&Session>,
     fs_backend: Option<&FsStorageBackend>,
     config: &AppConfig,
+    signals: &SignalRouter,
 ) -> Result<Flow, cmd::Error> {
     match msg {
         PluginToHost::Ready(ready) => {
@@ -934,6 +938,26 @@ fn handle_request(
         PluginToHost::WriteDraft(req) => {
             let response = handle_write_draft(fs_backend, workspace, req);
             write_message(writer, &response)?;
+        }
+
+        PluginToHost::Interrupt(req) => {
+            // Aimed at the named conversation, not at whatever is topmost.
+            //
+            // Several turns can be running at once, and the request already said
+            // which one it means. Falling back to the untargeted path would stop
+            // an arbitrary other turn, which is worse than stopping nothing.
+            //
+            // Nothing to answer: what the interrupt did lands in the
+            // conversation, and the turn's own outcome is still the reply to its
+            // `query`.
+            let reached = parse_conversation_id(&req.conversation)
+                .is_ok_and(|id| signals.interrupt_scope(id));
+
+            debug!(
+                conversation = %req.conversation,
+                reached,
+                "Interrupting on a plugin's behalf."
+            );
         }
 
         PluginToHost::ListConfigs(req) => {

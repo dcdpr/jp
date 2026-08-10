@@ -202,7 +202,13 @@ pub(super) async fn run_turn_loop(
     // thread building, response processing) and receives interrupts the inner
     // streaming/tool handlers decline. Its notifications are consumed at the
     // top of each phase-loop iteration; the guard drops when the turn ends.
-    let (_turn_interrupt_guard, mut turn_interrupt_rx) = signals.push_handler();
+    //
+    // Registered under the conversation, so an interrupt that names one reaches
+    // that turn rather than whichever happens to be topmost. Several turns can be
+    // in flight at once when something other than a terminal is driving them, and
+    // a Ctrl-C's "whatever is in front of me" is the wrong guess for a request
+    // that already said which.
+    let (_turn_interrupt_guard, mut turn_interrupt_rx) = signals.push_handler_for(lock.id());
 
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request, is_tty);

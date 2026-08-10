@@ -34,6 +34,7 @@ use std::{
 };
 
 use futures::{Stream, StreamExt as _};
+use jp_conversation::ConversationId;
 use tokio::{
     runtime::{Handle, Runtime},
     sync::mpsc::{self, error::TrySendError},
@@ -176,7 +177,25 @@ impl SignalRouter {
     /// receiver fires.
     #[must_use]
     pub fn push_handler(&self) -> (InterruptGuard, mpsc::Receiver<()>) {
-        self.inner.push_handler()
+        self.inner.push_handler(None)
+    }
+
+    /// Register an interrupt handler scope that can also be interrupted by
+    /// name.
+    ///
+    /// Behaves as [`push_handler`] for a Ctrl-C, which still goes to whichever
+    /// handler is topmost.
+    /// The scope only matters to [`interrupt_scope`], for interrupts that
+    /// arrive from somewhere with no notion of "topmost".
+    ///
+    /// [`interrupt_scope`]: Self::interrupt_scope
+    /// [`push_handler`]: Self::push_handler
+    #[must_use]
+    pub fn push_handler_for(
+        &self,
+        conversation: ConversationId,
+    ) -> (InterruptGuard, mpsc::Receiver<()>) {
+        self.inner.push_handler(Some(conversation))
     }
 
     /// Called by a handler's event loop when it declines to handle the current
@@ -186,6 +205,24 @@ impl SignalRouter {
     /// graceful shutdown when no other handler exists.
     pub fn decline(&self) {
         self.inner.notify_next_or_shutdown();
+    }
+
+    /// Interrupt one named scope, leaving every other handler alone.
+    ///
+    /// For interrupts that arrive with a target rather than from a keyboard.
+    /// A Ctrl-C means "whatever I am looking at", and the topmost handler is
+    /// the right guess; a request naming a conversation means that
+    /// conversation, and with several turns running the topmost handler is very
+    /// likely the wrong one.
+    ///
+    /// Deliberately outside the escalation ladder: a repeat is a repeat of the
+    /// same targeted request, not a signal to give up on the process.
+    ///
+    /// Returns whether a handler was found.
+    /// `false` means nothing is registered for that scope, so there was nothing
+    /// to interrupt.
+    pub fn interrupt_scope(&self, conversation: ConversationId) -> bool {
+        self.inner.notify_scope(conversation)
     }
 }
 
@@ -208,6 +245,21 @@ struct HandlerId(u64);
 /// A handler scope on the router's stack.
 struct RegisteredHandler {
     id: HandlerId,
+
+    /// The conversation this handler is a scope for, when something other than
+    /// a keypress might want to interrupt it specifically.
+    ///
+    /// A Ctrl-C is aimed at whatever the user is looking at, which is the
+    /// topmost handler, so the terminal path ignores this.
+    /// An interrupt arriving over a protocol names its target instead: several
+    /// turns can be running at once, and stopping the wrong one is worse than
+    /// stopping nothing.
+    ///
+    /// The id itself, not a rendering of it.
+    /// An id has more than one spelling, and comparing one spelling to another
+    /// matches nothing while looking exactly like a stop button that does not
+    /// work.
+    scope: Option<ConversationId>,
 
     /// Notifies the handler's event loop that SIGINT arrived.
     /// The event loop runs the interrupt logic; the router never does.
@@ -351,13 +403,20 @@ impl RouterInner {
 
     /// Register a handler scope: push a fresh notification channel onto the
     /// stack and return the deregistration guard plus the receiver.
-    fn push_handler(self: &Arc<Self>) -> (InterruptGuard, mpsc::Receiver<()>) {
+    fn push_handler(
+        self: &Arc<Self>,
+        scope: Option<ConversationId>,
+    ) -> (InterruptGuard, mpsc::Receiver<()>) {
         let (notify_tx, notify_rx) = mpsc::channel(1);
         let id = HandlerId(self.next_handler_id.fetch_add(1, Ordering::Relaxed));
         self.stack
             .lock()
             .expect("handler stack lock poisoned")
-            .push(RegisteredHandler { id, notify_tx });
+            .push(RegisteredHandler {
+                id,
+                scope,
+                notify_tx,
+            });
 
         (
             InterruptGuard {
@@ -366,6 +425,31 @@ impl RouterInner {
             },
             notify_rx,
         )
+    }
+
+    /// Notify the handler registered for `scope`, if one still is.
+    ///
+    /// Searched from the top down, so the innermost handler for a conversation
+    /// is the one reached, matching how a Ctrl-C finds the innermost handler
+    /// overall.
+    ///
+    /// Returns whether anything was notified.
+    /// `false` means the scope has no handler, usually because its work already
+    /// finished, and is not an error: there was nothing left to interrupt.
+    fn notify_scope(&self, scope: ConversationId) -> bool {
+        let tx = self
+            .stack
+            .lock()
+            .expect("handler stack lock poisoned")
+            .iter()
+            .rev()
+            .find(|handler| handler.scope == Some(scope))
+            .map(|handler| handler.notify_tx.clone());
+
+        match tx {
+            Some(tx) => tx.try_send(()).is_ok(),
+            None => false,
+        }
     }
 
     /// Remove a handler by id.

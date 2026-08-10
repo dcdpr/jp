@@ -6,7 +6,84 @@ use super::*;
 
 /// Push a handler scope onto the router state.
 fn push_handler(inner: &Arc<RouterInner>) -> (InterruptGuard, mpsc::Receiver<()>) {
-    inner.push_handler()
+    inner.push_handler(None)
+}
+
+/// A fixed conversation id, distinct per `secs`.
+fn conversation(secs: u64) -> ConversationId {
+    ConversationId::try_from(
+        chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + Duration::from_secs(secs),
+    )
+    .unwrap()
+}
+
+/// A targeted interrupt reaches the named scope and nothing else.
+///
+/// The failure this guards against is stopping the wrong turn: with several
+/// running, the topmost handler is very likely not the one that was asked for.
+#[test]
+fn a_scoped_interrupt_notifies_only_its_own_scope() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let wanted = conversation(1_700_000_000);
+    let other = conversation(1_700_000_001);
+
+    let (_guard_wanted, mut rx_wanted) = inner.push_handler(Some(wanted));
+    // Pushed after, so it is topmost and would be the one a Ctrl-C reached.
+    let (_guard_other, mut rx_other) = inner.push_handler(Some(other));
+    let (_guard_plain, mut rx_plain) = push_handler(&inner);
+
+    assert!(inner.notify_scope(wanted));
+
+    assert_eq!(rx_wanted.try_recv(), Ok(()));
+    assert_eq!(rx_other.try_recv(), Err(TryRecvError::Empty));
+    assert_eq!(rx_plain.try_recv(), Err(TryRecvError::Empty));
+}
+
+/// A scope with no handler is not an error: its work already finished, so there
+/// was nothing left to interrupt.
+#[test]
+fn interrupting_an_unknown_scope_reports_that_nothing_was_reached() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let (_guard, mut rx) = push_handler(&inner);
+
+    assert!(!inner.notify_scope(conversation(1_700_000_000)));
+
+    assert_eq!(
+        rx.try_recv(),
+        Err(TryRecvError::Empty),
+        "an unscoped handler is not a fallback target"
+    );
+}
+
+/// A dropped guard takes its scope with it, so a later interrupt finds nothing
+/// rather than a stale channel.
+#[test]
+fn a_finished_scope_is_no_longer_reachable() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+
+    let (guard, _rx) = inner.push_handler(Some(id));
+    assert!(inner.notify_scope(id));
+
+    drop(guard);
+    assert!(!inner.notify_scope(id));
+}
+
+/// A Ctrl-C still goes to whichever handler is topmost, scoped or not.
+///
+/// The scope is extra information for targeted interrupts, not a change to how
+/// the keyboard path chooses.
+#[test]
+fn a_scope_does_not_change_where_a_keypress_lands() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+
+    let (_guard_bottom, mut rx_bottom) = inner.push_handler(Some(conversation(1_700_000_000)));
+    let (_guard_top, mut rx_top) = inner.push_handler(Some(conversation(1_700_000_001)));
+
+    assert_eq!(inner.route_interrupt(Instant::now()), Routed::Handler);
+
+    assert_eq!(rx_top.try_recv(), Ok(()));
+    assert_eq!(rx_bottom.try_recv(), Err(TryRecvError::Empty));
 }
 
 #[test]
