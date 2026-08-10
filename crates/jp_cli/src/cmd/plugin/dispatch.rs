@@ -906,11 +906,13 @@ fn handle_request(
         }
 
         PluginToHost::ListConversations(req) => {
+            refresh_conversations(workspace);
             let response = handle_list_conversations(workspace, req.id);
             write_message(writer, &response)?;
         }
 
         PluginToHost::ReadEvents(req) => {
+            refresh_conversations(workspace);
             let response = handle_read_events(workspace, &req.conversation, req.id);
             write_message(writer, &response)?;
         }
@@ -1305,6 +1307,26 @@ fn handle_list_configs(
         .collect();
 
     HostToPlugin::Configs(ConfigsResponse { id: req_id, data })
+}
+
+/// Re-read the conversation index, dropping what this process has cached.
+///
+/// A plugin host is long-lived and does not own the store: a `jp query` in
+/// another terminal, or another plugin, appends events to a conversation whose
+/// metadata and stream this process loaded once and would otherwise keep
+/// serving forever.
+/// Re-reading the index clears both caches, so the read that follows comes from
+/// disk, and conversations created or deleted since startup appear and
+/// disappear.
+///
+/// The scan is a directory listing per storage root; metadata and streams stay
+/// lazy, so only what the request actually reads is loaded again.
+///
+/// Deliberately not a sanitize pass: that repairs a store on startup and can
+/// move broken conversations aside, which is not a thing a page view should do.
+fn refresh_conversations(workspace: &mut Workspace) {
+    trace!("Re-reading the conversation index for a plugin request.");
+    workspace.load_conversation_index();
 }
 
 fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> HostToPlugin {

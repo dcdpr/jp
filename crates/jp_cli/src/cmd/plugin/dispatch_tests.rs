@@ -279,6 +279,56 @@ fn an_unknown_conversation_fails_against_its_request() {
     }
 }
 
+/// A long-running host sees what another process wrote after it started.
+///
+/// The host loads the index once at startup.
+/// Without re-reading it, a plugin asking for the conversation list is served
+/// that snapshot for the life of the process, so a conversation started in a
+/// terminal never appears.
+#[tokio::test]
+async fn a_conversation_written_after_startup_is_listed() {
+    let (mut ws, first, fs, tmp) = workspace_with_drafts();
+    let mut sink: Vec<u8> = Vec::new();
+
+    // The host's view, taken at startup.
+    ws.load_conversation_index();
+    assert_eq!(ws.conversations().count(), 1);
+
+    // Another process writes a second conversation. Same store, its own handle,
+    // which is what a `jp query` in a terminal amounts to.
+    let second = ConversationId::try_from(
+        chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_001),
+    )
+    .unwrap();
+    fs.write_test_conversation(&second, &Conversation::default());
+
+    let response = handle_request(
+        PluginToHost::ListConversations(jp_plugin::message::OptionalId { id: None }),
+        &mut sink,
+        &mut ws,
+        &json!({}),
+        None,
+        None,
+        &AppConfig::new_test(),
+        &router(),
+    )
+    .unwrap();
+    assert_eq!(response, Flow::Continue);
+
+    let listed: Vec<String> = ws.conversations().map(|(id, _)| id.to_string()).collect();
+
+    assert!(
+        listed.contains(&second.to_string()),
+        "a conversation written after startup must be listed: {listed:?}"
+    );
+    assert!(
+        listed.contains(&first.to_string()),
+        "and the one from startup is still there: {listed:?}"
+    );
+
+    drop(tmp);
+}
+
 /// The canonical spelling is what JP prints, and bare deciseconds still resolve
 /// because that is what the wire carried before.
 #[test]
