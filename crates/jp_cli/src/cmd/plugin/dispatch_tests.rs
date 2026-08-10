@@ -1,4 +1,7 @@
+use camino_tempfile::{Utf8TempDir, tempdir};
+use jp_conversation::{Conversation, ConversationId};
 use jp_plugin::message::{ExitMessage, ReadyMessage};
+use jp_storage::backend::FsStorageBackend;
 use serde_json::json;
 
 use super::*;
@@ -8,9 +11,120 @@ fn bare_workspace() -> Workspace {
     Workspace::new("/tmp/jp-test-plugin")
 }
 
+/// How a conversation is spelled on the wire, matching `list_conversations`.
+fn wire_id(id: ConversationId) -> String {
+    id.as_deciseconds().to_string()
+}
+
+/// A workspace holding one conversation already on disk.
+///
+/// The temp dir comes back so the caller keeps it alive; dropping it takes the
+/// storage with it.
+fn workspace_with_conversation() -> (Workspace, ConversationId, Utf8TempDir) {
+    let tmp = tempdir().unwrap();
+    let fs = Arc::new(FsStorageBackend::new(&tmp.path().join(".jp")).unwrap());
+
+    let id = ConversationId::try_from(
+        chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
+    )
+    .unwrap();
+    fs.write_test_conversation(&id, &Conversation::default());
+
+    let mut workspace = Workspace::new(tmp.path()).with_backend(fs);
+    workspace.load_conversation_index();
+
+    (workspace, id, tmp)
+}
+
+#[test]
+fn set_title_names_a_conversation() {
+    let (ws, id, _tmp) = workspace_with_conversation();
+
+    let response = handle_set_title(&ws, None, SetTitleRequest {
+        id: Some("r1".to_owned()),
+        conversation: wire_id(id),
+        title: Some("  Tool call header misaligns  ".to_owned()),
+    });
+
+    assert_eq!(
+        response,
+        HostToPlugin::Done(DoneResponse {
+            id: Some("r1".to_owned())
+        })
+    );
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    assert_eq!(
+        ws.metadata(&handle).unwrap().title.as_deref(),
+        Some("Tool call header misaligns"),
+        "the title is stored trimmed"
+    );
+}
+
+/// A blank title clears the name rather than storing an empty one, which leaves
+/// the conversation eligible for a generated title again.
+#[test]
+fn a_blank_set_title_clears_the_name() {
+    let (ws, id, _tmp) = workspace_with_conversation();
+
+    handle_set_title(&ws, None, SetTitleRequest {
+        id: None,
+        conversation: wire_id(id),
+        title: Some("Named".to_owned()),
+    });
+
+    handle_set_title(&ws, None, SetTitleRequest {
+        id: None,
+        conversation: wire_id(id),
+        title: Some("   ".to_owned()),
+    });
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    assert_eq!(ws.metadata(&handle).unwrap().title, None);
+}
+
+#[test]
+fn archiving_takes_a_conversation_out_of_the_index() {
+    let (mut ws, id, _tmp) = workspace_with_conversation();
+
+    let response = handle_archive(&mut ws, None, &wire_id(id), Some("r2".to_owned()));
+
+    assert_eq!(
+        response,
+        HostToPlugin::Done(DoneResponse {
+            id: Some("r2".to_owned())
+        })
+    );
+    assert!(
+        ws.acquire_conversation(&id).is_err(),
+        "an archived conversation is no longer in the index"
+    );
+}
+
+/// A failure names the request it belongs to, so a plugin with several in
+/// flight can tell which one it answers.
+#[test]
+fn an_unknown_conversation_fails_against_its_request() {
+    let mut ws = bare_workspace();
+
+    let response = handle_archive(&mut ws, None, "not-an-id", Some("r3".to_owned()));
+
+    match response {
+        HostToPlugin::Error(error) => {
+            assert_eq!(error.id.as_deref(), Some("r3"));
+            assert_eq!(error.request.as_deref(), Some("archive_conversation"));
+            assert!(
+                error.message.contains("invalid conversation ID"),
+                "{error:?}"
+            );
+        }
+        other => panic!("expected an error, got {other:?}"),
+    }
+}
+
 #[test]
 fn a_ready_carries_on_and_a_clean_exit_stops() {
-    let ws = bare_workspace();
+    let mut ws = bare_workspace();
     let config = json!({});
     let mut sink: Vec<u8> = Vec::new();
 
@@ -18,8 +132,9 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
         handle_request(
             PluginToHost::Ready(ReadyMessage { protocol: 1 }),
             &mut sink,
-            &ws,
+            &mut ws,
             &config,
+            None,
         )
         .unwrap(),
         Flow::Continue
@@ -32,8 +147,9 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
                 reason: None,
             }),
             &mut sink,
-            &ws,
+            &mut ws,
             &config,
+            None,
         )
         .unwrap(),
         Flow::Stop
@@ -44,7 +160,7 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
 /// ending the run quietly.
 #[test]
 fn a_failing_exit_carries_its_code_and_reason() {
-    let ws = bare_workspace();
+    let mut ws = bare_workspace();
     let mut sink: Vec<u8> = Vec::new();
 
     let error = handle_request(
@@ -53,8 +169,9 @@ fn a_failing_exit_carries_its_code_and_reason() {
             reason: Some("no such ticket".to_owned()),
         }),
         &mut sink,
-        &ws,
+        &mut ws,
         &json!({}),
+        None,
     )
     .expect_err("a non-zero exit is an error");
 
@@ -114,7 +231,7 @@ fn message_loop_ready_then_exit() {
     // We can't easily construct a Workspace for a unit test without a temp dir,
     // but this test only exercises ready + exit (no workspace queries). We
     // construct a minimal in-memory workspace.
-    let ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
+    let mut ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
 
     // No terminal in a test, so a compose request would be declined rather
     // than prompting; this exchange never asks for one.
@@ -125,7 +242,16 @@ fn message_loop_ready_then_exit() {
         is_tty: false,
     };
 
-    message_loop(reader, &sink, &ws, &config, &shutdown_sent, &composer).unwrap();
+    message_loop(
+        reader,
+        &sink,
+        &mut ws,
+        &config,
+        &shutdown_sent,
+        &composer,
+        None,
+    )
+    .unwrap();
 }
 
 /// A plugin needing a newer protocol than this host is refused on its `ready`.
@@ -146,7 +272,7 @@ fn message_loop_refuses_a_plugin_needing_a_newer_protocol() {
     let sink: Mutex<Vec<u8>> = Mutex::new(Vec::new());
     let config = json!({});
     let shutdown_sent = AtomicBool::new(false);
-    let ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
+    let mut ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
 
     let printer = jp_printer::Printer::sink();
     let composer = Composer {
@@ -155,8 +281,16 @@ fn message_loop_refuses_a_plugin_needing_a_newer_protocol() {
         is_tty: false,
     };
 
-    let error = message_loop(reader, &sink, &ws, &config, &shutdown_sent, &composer)
-        .expect_err("a plugin needing a newer protocol must be refused");
+    let error = message_loop(
+        reader,
+        &sink,
+        &mut ws,
+        &config,
+        &shutdown_sent,
+        &composer,
+        None,
+    )
+    .expect_err("a plugin needing a newer protocol must be refused");
 
     assert!(
         error.to_string().contains("Reinstall the two together"),

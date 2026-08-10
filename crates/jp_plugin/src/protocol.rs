@@ -7,11 +7,12 @@ use crate::message::{ExitMessage, ReadyMessage};
 /// Bumped whenever the host gains a message or a message variant a plugin might
 /// send.
 ///
-/// | Version | Adds                                          |
-/// | ------- | --------------------------------------------- |
-/// | 1       | The initial protocol.                         |
-/// | 2       | `compose` / `composed`, for host-run prompts. |
-pub const PROTOCOL_VERSION: u32 = 2;
+/// | Version | Adds                                                          |
+/// | ------- | ------------------------------------------------------------- |
+/// | 1       | The initial protocol.                                         |
+/// | 2       | `compose` / `composed`, for host-run prompts.                 |
+/// | 3       | `archive_conversation` and `set_title`, answered with `done`. |
+pub const PROTOCOL_VERSION: u32 = 3;
 
 /// Answer a host's `init`, refusing it when it is too old to serve this plugin.
 ///

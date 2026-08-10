@@ -15,12 +15,9 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use jp_config::{
-    AppConfig,
-    plugins::{
-        PluginsConfig,
-        command::{CommandPluginConfig, RunPolicy},
-    },
+use jp_config::plugins::{
+    PluginsConfig,
+    command::{CommandPluginConfig, RunPolicy},
 };
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{InlineOption, InlineReply, InlineSelect, ReplyOutcome};
@@ -28,18 +25,18 @@ use jp_plugin::{
     PROTOCOL_VERSION,
     message::{
         ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigResponse,
-        ConversationSummary, ConversationsResponse, DescribeResponse, ErrorResponse,
+        ConversationSummary, ConversationsResponse, DescribeResponse, DoneResponse, ErrorResponse,
         EventsResponse, HostToPlugin, InitMessage, LogMessage, PathsInfo, PluginToHost,
-        WorkspaceInfo,
+        SetTitleRequest, WorkspaceInfo,
     },
 };
 use jp_printer::Printer;
-use jp_workspace::Workspace;
+use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use serde_json::Value;
 use tracing::{debug, error, trace, warn};
 
 use super::registry;
-use crate::{Ctx, cmd, editor::report_editor_failure, signals::SignalRouter};
+use crate::{Ctx, cmd, editor::report_editor_failure};
 
 /// Runs the prompts a plugin asks for.
 ///
@@ -192,14 +189,22 @@ pub(crate) fn run_plugin(
     name: &str,
     binary: &Utf8Path,
     args: &[String],
-    workspace: &Workspace,
-    storage_path: Option<&Utf8Path>,
-    user_storage_path: Option<&Utf8Path>,
-    config: &Arc<AppConfig>,
-    signals: &SignalRouter,
-    log_level: u8,
-    composer: &Composer<'_>,
+    ctx: &mut Ctx,
 ) -> Result<(), cmd::Error> {
+    let config = ctx.config();
+    let log_level = ctx.term.args.verbose;
+
+    // Owned before the workspace is borrowed mutably: both read through `&self`,
+    // so they would otherwise hold a borrow of all of `ctx`.
+    let storage_path = ctx.storage_path().map(ToOwned::to_owned);
+    let user_storage_path = ctx.user_storage_path().map(ToOwned::to_owned);
+
+    let composer = Composer {
+        printer: &ctx.printer,
+        editor: crate::editor::build_editor_backend(&config.editor),
+        is_tty: ctx.term.is_tty,
+    };
+
     let config_json = serde_json::to_value(config.as_ref().to_partial())
         .map_err(|e| cmd::Error::from(format!("failed to serialize config: {e}")))?;
 
@@ -217,11 +222,11 @@ pub(crate) fn run_plugin(
     let init = HostToPlugin::Init(InitMessage {
         version: PROTOCOL_VERSION,
         workspace: WorkspaceInfo {
-            root: workspace.root().to_owned(),
-            storage: storage_path.to_owned(),
-            id: workspace.id().to_string(),
+            root: ctx.workspace.root().to_owned(),
+            storage: storage_path.clone(),
+            id: ctx.workspace.id().to_string(),
         },
-        paths: well_known_paths(user_storage_path),
+        paths: well_known_paths(user_storage_path.as_deref()),
         config: config_json.clone(),
         options,
         args: args.to_vec(),
@@ -241,8 +246,8 @@ pub(crate) fn run_plugin(
     //
     // The guard drops when this function returns; the thread then sees the
     // notification channel close and exits.
-    let (_interrupt_guard, mut interrupt_rx) = signals.push_handler();
-    let shutdown_token = signals.shutdown_token();
+    let (_interrupt_guard, mut interrupt_rx) = ctx.signals.push_handler();
+    let shutdown_token = ctx.signals.shutdown_token();
     let shutdown_sent = Arc::new(AtomicBool::new(false));
     let shutdown_writer = stdin.clone();
     let shutdown_flag = shutdown_sent.clone();
@@ -275,10 +280,11 @@ pub(crate) fn run_plugin(
     let result = message_loop(
         reader,
         &stdin,
-        workspace,
+        &mut ctx.workspace,
         &config_json,
         &shutdown_sent,
-        composer,
+        &composer,
+        ctx.session.as_ref(),
     );
 
     // Always clean up, even on error.
@@ -395,10 +401,11 @@ fn well_known_paths(user_storage_path: Option<&Utf8Path>) -> PathsInfo {
 fn message_loop(
     reader: BufReader<impl std::io::Read>,
     stdin: &Mutex<impl Write>,
-    workspace: &Workspace,
+    workspace: &mut Workspace,
     config_json: &Value,
     shutdown_sent: &AtomicBool,
     composer: &Composer<'_>,
+    session: Option<&Session>,
 ) -> Result<(), cmd::Error> {
     for line in reader.lines() {
         let line =
@@ -430,7 +437,7 @@ fn message_loop(
 
         let mut writer = stdin.lock().expect("stdin lock poisoned");
 
-        if handle_request(msg, &mut *writer, workspace, config_json)? == Flow::Stop {
+        if handle_request(msg, &mut *writer, workspace, config_json, session)? == Flow::Stop {
             return Ok(());
         }
     }
@@ -463,8 +470,9 @@ enum Flow {
 fn handle_request(
     msg: PluginToHost,
     writer: &mut impl Write,
-    workspace: &Workspace,
+    workspace: &mut Workspace,
     config_json: &Value,
+    session: Option<&Session>,
 ) -> Result<Flow, cmd::Error> {
     match msg {
         PluginToHost::Ready(ready) => {
@@ -493,6 +501,16 @@ fn handle_request(
 
         PluginToHost::ReadConfig(req) => {
             let response = handle_read_config(config_json, req.path, req.id);
+            write_message(writer, &response)?;
+        }
+
+        PluginToHost::ArchiveConversation(req) => {
+            let response = handle_archive(workspace, session, &req.conversation, req.id);
+            write_message(writer, &response)?;
+        }
+
+        PluginToHost::SetTitle(req) => {
+            let response = handle_set_title(workspace, session, req);
             write_message(writer, &response)?;
         }
 
@@ -529,6 +547,83 @@ fn handle_request(
     }
 
     Ok(Flow::Continue)
+}
+
+/// An error against a request that only reports whether it worked.
+fn action_failed(id: Option<String>, request: &str, message: String) -> HostToPlugin {
+    HostToPlugin::Error(ErrorResponse {
+        id,
+        request: Some(request.to_owned()),
+        message,
+    })
+}
+
+/// Take the lock a mutation needs, or say why it could not be had.
+fn lock_for_action(
+    workspace: &Workspace,
+    session: Option<&Session>,
+    conversation: &str,
+) -> Result<ConversationLock, String> {
+    let id = jp_conversation::ConversationId::try_from_deciseconds_str(conversation)
+        .map_err(|error| format!("invalid conversation ID: {error}"))?;
+
+    let handle = workspace
+        .acquire_conversation(&id)
+        .map_err(|error| format!("conversation {conversation}: {error}"))?;
+
+    match workspace.lock_conversation(handle, session) {
+        Ok(LockResult::Acquired(lock)) => Ok(lock),
+        Ok(LockResult::AlreadyLocked(_)) => {
+            Err("another process is working on this conversation".to_owned())
+        }
+        Err(error) => Err(format!("failed to lock the conversation: {error}")),
+    }
+}
+
+/// Move a conversation to the archive.
+///
+/// Held under a lock like any other mutation: archiving moves the conversation
+/// on disk, and doing that under a running turn would pull the files out from
+/// beneath it.
+fn handle_archive(
+    workspace: &mut Workspace,
+    session: Option<&Session>,
+    conversation: &str,
+    req_id: Option<String>,
+) -> HostToPlugin {
+    let lock = match lock_for_action(workspace, session, conversation) {
+        Ok(lock) => lock,
+        Err(message) => return action_failed(req_id, "archive_conversation", message),
+    };
+
+    workspace.archive_conversation(lock.into_mut());
+
+    HostToPlugin::Done(DoneResponse { id: req_id })
+}
+
+/// Rename a conversation.
+///
+/// An empty title clears it, which leaves the conversation eligible for a
+/// generated one again rather than naming it the empty string.
+fn handle_set_title(
+    workspace: &Workspace,
+    session: Option<&Session>,
+    req: SetTitleRequest,
+) -> HostToPlugin {
+    let lock = match lock_for_action(workspace, session, &req.conversation) {
+        Ok(lock) => lock,
+        Err(message) => return action_failed(req.id, "set_title", message),
+    };
+
+    let title = req
+        .title
+        .map(|title| title.trim().to_owned())
+        .filter(|title| !title.is_empty());
+
+    lock.as_mut().update_metadata(|meta| meta.title = title);
+
+    // Written out when the lock drops, at the end of this function.
+    HostToPlugin::Done(DoneResponse { id: req.id })
 }
 
 fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> HostToPlugin {
@@ -1119,7 +1214,7 @@ fn unknown_subcommand_error(name: &str) -> cmd::Error {
 ///
 /// Resolves the plugin binary, then runs the protocol loop.
 /// Called from `Commands::run()` after the normal startup flow.
-pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
+pub(crate) async fn run_external(args: &[String], ctx: &mut Ctx) -> cmd::Output {
     let (subcommand, plugin_args) = args
         .split_first()
         .ok_or("no subcommand provided for plugin dispatch")?;
@@ -1150,24 +1245,7 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
 
     debug!(%binary, subcommand, "Dispatching to plugin.");
 
-    let composer = Composer {
-        printer: &ctx.printer,
-        editor: crate::editor::build_editor_backend(&config.editor),
-        is_tty: ctx.term.is_tty,
-    };
-
-    run_plugin(
-        subcommand,
-        &binary,
-        plugin_args,
-        &ctx.workspace,
-        ctx.storage_path(),
-        ctx.user_storage_path(),
-        &config,
-        &ctx.signals,
-        ctx.term.args.verbose,
-        &composer,
-    )?;
+    run_plugin(subcommand, &binary, plugin_args, ctx)?;
     Ok(())
 }
 
