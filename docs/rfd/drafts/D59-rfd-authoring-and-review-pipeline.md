@@ -198,8 +198,8 @@ the only thing that interrupts an unattended run.
 - **Filing a deferred finding automatically during a cycle.** Rejected.
   A ticket is a committed file, and the per-round commit is scoped to the RFD,
   so one filed mid-cycle sits uncommitted across every round after it.
-  Deferrals reach the carry-over ledger, and signoff files them where the
-  author sees the diff.
+  Deferrals reach the carry-over ledger, and signoff files them where the author
+  sees the diff.
 - **Automatic promotion after a clean signoff.** Rejected.
   Promotion is a one-way door and stays a deliberate act.
 - **The RFD lifecycle.** Rejected.
