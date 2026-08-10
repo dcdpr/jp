@@ -703,9 +703,9 @@ Run `just --list --group rfd` to see them.
 |                                 | means done.                              |
 | `just rfd-promote NNN [REASON]` | Advance status. Gated on `rfd-lint`.     |
 |                                 | Draft → Discussion assigns a number;     |
-|                                 | Discussion → Accepted creates the        |
-|                                 | tracking issue. REASON records an        |
-|                                 | over-budget exemption.                   |
+|                                 | Discussion → Accepted offers phase       |
+|                                 | tickets. REASON records an over-budget   |
+|                                 | exemption.                               |
 | `just rfd-extend NNN MMM`       | Record that RFD MMM extends RFD NNN,     |
 |                                 | updating both. Accepts draft IDs (DNN)   |
 |                                 | on either side.                          |

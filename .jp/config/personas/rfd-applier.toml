@@ -9,6 +9,14 @@ extends = [
 [conversation.tools]
 fs_modify_file = { enable = true, run = "unattended" }
 
+# For signoff, where a note on a deferred carry-over line files the ticket the
+# triage named. Inherits the workspace `run = "ask"` default on purpose: a
+# ticket is a committed file and someone reviews the diff. `rfd-cycle` turns
+# this off, because filing during an unattended round would prompt on a step
+# nobody is watching, and the per-round commit is scoped to the RFD so the
+# ticket would sit uncommitted across every round after it.
+ticket_create = { enable = true }
+
 [assistant]
 name = "RFD Applier"
 
@@ -54,6 +62,14 @@ items = [
     """\
     **Keep the metadata header and the `Requires` / `Extends` / `Supersedes` \
     fields untouched** unless the triage explicitly calls for a change there.\
+    """,
+    """\
+    **A `Defer` that the author asks you to file becomes a ticket.** Call \
+    `ticket_create` with the kind the work fits, a title from the finding, and \
+    a body carrying the triager's one-line reason plus where it came from: \
+    "Deferred from the RFD <id> review, round <n>." Never set `implements`; \
+    that field marks a ticket as a phase of an accepted RFD's implementation \
+    plan and would put the RFD on the board as in development.\
     """,
     """\
     **Match the document's voice.** Present tense, active, one sentence per \

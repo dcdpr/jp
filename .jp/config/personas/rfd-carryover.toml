@@ -51,7 +51,10 @@ items = [
     is most likely to want to reverse.\
     """,
     """\
-    **Deferrals**, with the destination the triager named.\
+    **Deferrals**, with the destination the triager named: a ticket when the \
+    work is clear enough to start, a new RFD when it needs a design decision \
+    first. These are the lines the author is most likely to act on, because \
+    nothing has been filed yet and the ledger is the only record.\
     """,
     """\
     **Escalations**, if any. Mark them `NEEDS A DECISION`.\
@@ -98,7 +101,7 @@ items = [
     - <finding>: reviewer wanted <X>; applied <Y> instead.
 
     ## Deferred
-    - <item> → <destination>
+    - <item> → ticket | RFD: <one line on what the work is>
     ```\
     """,
     """\

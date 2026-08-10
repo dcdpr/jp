@@ -4,7 +4,7 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-07
-- **Extends**: [RFD 001](../001-jp-rfd-process.md)
+- **Extends**: [RFD 001]
 
 ## Summary
 
@@ -22,34 +22,33 @@ document rather than a better one.
 
 Three mechanisms cause this, and they compound.
 
-**The reviewer has no terminal state.**
-Nothing defines "done", so a reviewer pointed at a document that changed since
-the last round always finds something.
+**The reviewer has no terminal state.** Nothing defines "done", so a reviewer
+pointed at a document that changed since the last round always finds something.
 The contributor becomes the stopping condition.
 
 **The severity framework classifies findings, then discards the
-classification.**
-It defines a gating finding as one where a plausible input produces damage that
-spreads or hides.
+classification.** It defines a gating finding as one where a plausible input
+produces damage that spreads or hides.
 It names the contained-and-visible case as where review threads go to die.
 It then instructs the reviewer to post everything anyway.
 
-**Every finding resolves by adding text.**
-A triager that declines a finding still writes a sentence acknowledging it, so
-the document only grows.
+**Every finding resolves by adding text.** A triager that declines a finding
+still writes a sentence acknowledging it, so the document only grows.
 RFD 070 reached 11,671 words against a 2,000-word guideline.
 
 ## The Pipeline
 
 Five stages, each with one owner.
+Each stage gets only the write access it needs: the outline stage gets none, and
+the applier writes only the RFD.
 
 ### Outline
 
 The contributor discusses the problem until the design is settled, then runs
 `just rfd-this`.
 The author reads that discussion and emits an outline: category, summary, the
-one problem, the proposed shape, alternatives, Non-Goals, and a per-section
-word budget.
+one problem, the proposed shape, alternatives, Non-Goals, and a per-section word
+budget.
 No file is written.
 
 The contributor approves, cuts, or redirects.
@@ -81,9 +80,11 @@ The cycle snapshots every file except the RFD and stops if any of them changes.
 
 ### Signoff
 
-`just rfd-signoff NNN` opens the RFD in `revdiff` beside a ledger of everything
-the cycle raised and dropped.
+`just rfd-signoff NNN` opens the RFD in `revdiff` beside a ledger of what the
+cycle raised and dropped.
 Notes on either file go to the applier.
+A note on a deferred ledger line files the ticket the triage named, so the item
+leaves the cycle without entering the document.
 Leaving no notes is the verdict.
 
 ### Promote
@@ -104,8 +105,8 @@ header excluded.
 | Process  | 2000   | 3500       |
 
 Write to the target.
-The gap to the hard limit belongs to the review cycle, which will surface
-things that genuinely need saying.
+The gap to the hard limit belongs to the review cycle, which will surface things
+that genuinely need saying.
 An RFD that opens at the hard limit has nowhere to put them.
 
 The hard limit gates promotion.
@@ -127,8 +128,8 @@ It bans the argumentative prose that Motivation and Alternatives are made of.
 It also checks link hygiene, metadata, filename and heading agreement, and
 duplicated sentences.
 Errors gate promotion and CI.
-Line-level findings are warnings and never gate, because a long sentence
-written months ago must not block acceptance today.
+Line-level findings are warnings and never gate, because a long sentence written
+months ago must not block acceptance today.
 
 ## Review Protocol
 
@@ -194,9 +195,11 @@ the only thing that interrupts an unattended run.
 - **Model-based checks in CI.** Rejected.
   A nondeterministic check is a review even when it emits lint-shaped
   diagnostics, and calling it a lint hides the distinction.
-- **The ticket system.** Deferred.
-  [RFD 001] sends work that fails the contract test to a ticket; building that
-  system is separate work.
+- **Filing a deferred finding automatically during a cycle.** Rejected.
+  A ticket is a committed file, and the per-round commit is scoped to the RFD,
+  so one filed mid-cycle sits uncommitted across every round after it.
+  Deferrals reach the carry-over ledger, and signoff files them where the
+  author sees the diff.
 - **Automatic promotion after a clean signoff.** Rejected.
   Promotion is a one-way door and stays a deliberate act.
 - **The RFD lifecycle.** Rejected.
@@ -204,29 +207,28 @@ the only thing that interrupts an unattended run.
 
 ## Alternatives
 
-**Cap the existing interactive loop at N rounds.**
-This caps the symptom.
+**Cap the existing interactive loop at N rounds.** This caps the symptom.
 A reviewer with no definition of done spends every one of the N rounds finding
 something.
 
-**Merge triage and editing into one model turn.**
-Fewer round trips, at the cost of the separation that stops a declined finding
-from becoming a hedging sentence.
+**Merge triage and editing into one model turn.** Fewer round trips, at the cost
+of the separation that stops a declined finding from becoming a hedging
+sentence.
 The extra model call buys that guarantee.
 
-**Constrain every model turn with a JSON schema.**
-Machine-readable verdicts replace a regex on one token.
-The cost is the prose that the carry-over ledger and the signoff stage are
-built from.
+**Constrain every model turn with a JSON schema.** Machine-readable verdicts
+replace a regex on one token.
+The cost is the prose that the carry-over ledger and the signoff stage are built
+from.
 
-**Adopt ASD-STE100 in full.**
-It bans the modal and hypothetical constructions that design rationale needs.
+**Adopt ASD-STE100 in full.** It bans the modal and hypothetical constructions
+that design rationale needs.
 Four of its rules transfer; the rest would make Motivation and Alternatives
 worse.
 
-**Put the contributor's review before the cycle.**
-This reintroduces the per-round human involvement the pipeline removes, and the
-outline gate already settles scope before prose exists.
+**Put the contributor's review before the cycle.** This reintroduces the
+per-round human involvement the pipeline removes, and the outline gate already
+settles scope before prose exists.
 
 ## Implementation Plan
 

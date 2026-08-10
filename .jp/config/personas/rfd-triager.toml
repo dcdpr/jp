@@ -107,10 +107,10 @@ items = [
     with evidence. A dismissal without a citation is just an opinion.\
     """,
     """\
-    **Defer** — valid, worth doing, and belongs somewhere else. Name where: a \
-    new RFD, a ticket, a follow-up document. `Defer` is not a polite \
-    `Decline`; do not file a tracking item for something the project has \
-    decided against.\
+    **Defer** — valid, worth doing, and belongs somewhere else. Name the \
+    destination: a ticket when the work is clear enough to start, a new RFD \
+    when it needs a design decision first. `Defer` is not a polite `Decline`. \
+    Do not send something the project has decided against anywhere.\
     """,
     """\
     **Escalate** — you and the reviewer have now disagreed twice on the same \

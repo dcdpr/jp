@@ -176,7 +176,7 @@ rfd-this *ARGS: _install-jp
 # copy-pasteable.
 [group('rfd')]
 [positional-arguments]
-rfd-write *ARGS: _install-jp
+rfd-write *ARGS: _install-jp _install-comfort
     #!/usr/bin/env sh
     set -eu
 
@@ -200,6 +200,8 @@ rfd-write *ARGS: _install-jp
         | tail -1 || true)
 
     if [ -n "$rfd_id" ]; then
+        out=$(just _rfd-resolve "$rfd_id") || exit 1
+        just _rfd-fmt "${out#* }"
         printf "\nRun 'just rfd-lint %s' to check it, then 'just rfd-cycle %s' to review.\n" \
             "$rfd_id" "$rfd_id" >&2
     else
@@ -805,7 +807,7 @@ rfd-lint-ci:
 # Run it once when the design has converged, not every round.
 [group('rfd')]
 [positional-arguments]
-rfd-prose NNN *ARGS: _install-jp
+rfd-prose NNN *ARGS: _install-jp _install-comfort
     #!/usr/bin/env sh
     set -eu
 
@@ -827,6 +829,8 @@ rfd-prose NNN *ARGS: _install-jp
         --attach "file://$file" \
         $args
 
+    just _rfd-fmt "$file"
+
     printf "\n" >&2
     node docs/.vitepress/rfd-lint.mjs "$rfd_id" || true
 
@@ -846,7 +850,7 @@ rfd-prose NNN *ARGS: _install-jp
 #   just rfd-cycle D33
 #   just rfd-cycle 070 4
 [group('rfd')]
-rfd-cycle NNN ROUNDS="3": _install-jp
+rfd-cycle NNN ROUNDS="3": _install-jp _install-comfort
     #!/usr/bin/env sh
     set -eu
 
@@ -1020,12 +1024,22 @@ rfd-cycle NNN ROUNDS="3": _install-jp
         ${file}. Every other verdict produces no edit. Do not reconsider a \
         verdict and do not improve on a described edit."
 
+        # `ticket_create` is off for the whole cycle: it prompts, nobody is
+        # watching, and the per-round commit is scoped to the RFD so a filed
+        # ticket would sit uncommitted across every round after it. Deferred
+        # items reach the ledger, and `rfd-signoff` files them.
         jp query $ap_target --cfg=personas/rfd-applier \
+            --cfg conversation.tools.ticket_create.enable=false \
             --attach "file://$file" \
             --attach "jp://${tg_id}?select=u,a:-1" \
             -- "$amsg"
 
         ap_id=$(just _rfd-conversation-id "rfd-apply:${rfd_id}")
+
+        # Reflow before linting: `comfort` moves line numbers, and the lint
+        # findings the applier gets handed have to point at the file as it
+        # will be committed.
+        just _rfd-fmt "$file"
 
         # --- lint, fed straight back to the applier
         printf "\n===== round %s/%s: lint =====\n\n" "$round" "$rounds" >&2
@@ -1037,8 +1051,10 @@ rfd-cycle NNN ROUNDS="3": _install-jp
             fixmsg=$(printf '%s reports the following on %s. Clear every error, and fix the warnings that fall in text you touched. A budget failure is fixed by cutting, never by adding an Over budget field.\n\n%s' \
                 'just rfd-lint' "$file" "$lint_out")
             jp query --id "$ap_id" --cfg=personas/rfd-applier \
+                --cfg conversation.tools.ticket_create.enable=false \
                 --attach "file://$file" \
                 -- "$fixmsg"
+            just _rfd-fmt "$file"
             node docs/.vitepress/rfd-lint.mjs "$rfd_id" >&2 || true
         else
             printf '%s\n' "$lint_out" >&2
@@ -1163,7 +1179,7 @@ rfd-cycle NNN ROUNDS="3": _install-jp
 #   just rfd-signoff D52
 #   just rfd-signoff 070 --edit
 [group('rfd')]
-rfd-signoff NNN *ARGS: _install-jp
+rfd-signoff NNN *ARGS: _install-jp _install-comfort
     #!/usr/bin/env sh
     set -eu
 
@@ -1222,6 +1238,10 @@ rfd-signoff NNN *ARGS: _install-jp
     something an earlier review round raised and the triage dropped. Act on it \
     in the RFD; never edit the ledger.
 
+    A note on a deferred ledger line asking for a ticket means file one with \
+    \`ticket_create\`, carrying the triager's reason and where it came from. \
+    That item stays out of the RFD.
+
     If a note needs a design change you cannot make mechanically, do not guess. \
     Leave that part of the document alone and list it at the end under 'needs \
     the author'."
@@ -1230,6 +1250,10 @@ rfd-signoff NNN *ARGS: _install-jp
         | jp query --new --title "rfd-signoff:${rfd_id}" {{ARGS}} \
             --cfg=personas/rfd-applier \
             --attach "file://$file"
+
+    # After the applier, never before: the revdiff annotations above are
+    # anchored to line numbers in the file you just read.
+    just _rfd-fmt "$file"
 
     printf "\n" >&2
     node docs/.vitepress/rfd-lint.mjs "$rfd_id" >&2 || true
@@ -1241,8 +1265,28 @@ rfd-signoff NNN *ARGS: _install-jp
         printf "\nno edits were made\n" >&2
     fi
 
+    if [ -n "$(git status --porcelain -- docs/ticket/ 2>/dev/null)" ]; then
+        printf "\ntickets were filed and are uncommitted; review and commit them:\n" >&2
+        git status --porcelain -- docs/ticket/ >&2
+    fi
+
     printf "\nre-read it:            just rfd-signoff %s\n" "$rfd_id" >&2
     printf "confirming agent round: just rfd-cycle %s 1\n" "$rfd_id" >&2
+
+# Internal: reflow an RFD to the repository's markdown conventions.
+#
+# Same flags as `fmt-markdown-ci`, so what lands here is what CI accepts.
+# Called after every agent write and *before* the lint, because `comfort`
+# moves line numbers and the linter reports them. In `rfd-signoff` it runs
+# after the applier rather than before, so the line-anchored `revdiff`
+# annotations still resolve against the file the author reviewed.
+#
+# Assumes the calling recipe depends on `_install-comfort`; the cycle calls
+# this several times per run and the install check is not free.
+[no-exit-message]
+[private]
+_rfd-fmt FILE:
+    @comfort --language markdown --format-markdown --reference-links "{{FILE}}"
 
 # Internal: print the conversation ID for a title, or nothing.
 [no-exit-message]
@@ -1709,7 +1753,6 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
 #   just rfd-promote 070 "three config layers, each needing its own worked example"
 [group('rfd')]
 rfd-promote NNN OVER_BUDGET="": _install-jp _install-comfort _install-ticket
->>>>>>> aa2daf7f (checkpoint)
     #!/usr/bin/env sh
     set -eu
 
