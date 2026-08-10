@@ -155,6 +155,62 @@ pub fn find_file_in_load_path(
     None
 }
 
+/// List every segment [`find_file_in_load_path`] can resolve within a load
+/// path.
+///
+/// The inverse of that lookup: instead of asking where one name lives, this
+/// walks the load path and reports every configuration file as the segment that
+/// selects it, the path relative to `load_path` without its extension.
+/// Directories are part of that segment, so `<load_path>/skill/rfd.toml` is
+/// reported as `skill/rfd`, and passing that back to `--cfg` finds the same
+/// file.
+///
+/// Segments are sorted, and a load path that does not exist yields nothing
+/// rather than an error: an absent directory is a load path with nothing in it.
+pub fn list_configs_in_load_path(load_path: &dyn AsRef<Path>) -> Vec<String> {
+    let root = load_path.as_ref();
+    let mut segments = Vec::new();
+
+    collect_config_segments(root, root, &mut segments);
+    segments.sort();
+    segments.dedup();
+    segments
+}
+
+/// Recurse `dir`, pushing each configuration file's segment relative to `root`.
+fn collect_config_segments(root: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        if path.is_dir() {
+            collect_config_segments(root, &path, out);
+            continue;
+        }
+
+        let is_config = path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|ext| VALID_CONFIG_FILE_EXTS.contains(&ext));
+
+        if !is_config {
+            continue;
+        }
+
+        // A name that does not survive the round trip through UTF-8 could not
+        // have been typed as a `--cfg` argument either, so dropping it loses
+        // nothing selectable.
+        if let Ok(relative) = path.strip_prefix(root)
+            && let Some(segment) = relative.with_extension("").to_str()
+        {
+            out.push(segment.replace('\\', "/"));
+        }
+    }
+}
+
 /// Load a partial configuration from a file at `path`, if it exists.
 ///
 /// This loads either the file directly, or tries to load a file with the same

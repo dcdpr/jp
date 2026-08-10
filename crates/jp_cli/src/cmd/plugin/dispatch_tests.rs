@@ -312,6 +312,7 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
             &config,
             None,
             None,
+            &AppConfig::new_test(),
         )
         .unwrap(),
         Flow::Continue
@@ -328,6 +329,7 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
             &config,
             None,
             None,
+            &AppConfig::new_test(),
         )
         .unwrap(),
         Flow::Stop
@@ -351,6 +353,7 @@ fn a_failing_exit_carries_its_code_and_reason() {
         &json!({}),
         None,
         None,
+        &AppConfig::new_test(),
     )
     .expect_err("a non-zero exit is an error");
 
@@ -430,6 +433,7 @@ fn message_loop_ready_then_exit() {
         &composer,
         None,
         None,
+        &AppConfig::new_test(),
     )
     .unwrap();
 }
@@ -470,6 +474,7 @@ fn message_loop_refuses_a_plugin_needing_a_newer_protocol() {
         &composer,
         None,
         None,
+        &AppConfig::new_test(),
     )
     .expect_err("a plugin needing a newer protocol must be refused");
 
