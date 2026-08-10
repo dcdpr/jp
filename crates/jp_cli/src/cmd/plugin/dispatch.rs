@@ -6,7 +6,7 @@
 use std::{
     collections::HashSet,
     io::{BufRead, BufReader, Write},
-    process::{Command, Stdio},
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -228,46 +228,12 @@ pub(crate) fn run_plugin(
         log_level,
     });
 
-    debug!(%binary, "Spawning plugin.");
-
-    let mut cmd = Command::new(binary);
-    cmd.stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    // Prevent the child from receiving SIGINT/SIGTERM directly. The host
-    // sends `Shutdown` over the protocol instead, giving the plugin a
-    // chance to exit gracefully.
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt as _;
-        cmd.process_group(0);
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| cmd::Error::from(format!("failed to spawn plugin: {e}")))?;
-
-    let child_stdin = child.stdin.take().expect("stdin piped");
-    let stdout = child.stdout.take().expect("stdout piped");
-    let stderr = child.stderr.take().expect("stderr piped");
-
-    // Wrap stdin so the shutdown thread can write to it too.
-    let stdin = Arc::new(Mutex::new(child_stdin));
-
-    // Forward stderr to tracing in a background thread.
-    let stderr_handle = thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => trace!(target: "plugin::stderr", "{}", line),
-                Err(e) => {
-                    warn!("Error reading plugin stderr: {e}");
-                    break;
-                }
-            }
-        }
-    });
+    let PluginProcess {
+        mut child,
+        stdin,
+        stdout,
+        stderr_handle,
+    } = spawn_plugin(binary)?;
 
     // Shutdown thread: sends `Shutdown` directly to the plugin's stdin when
     // an interrupt or a graceful shutdown request arrives. If the plugin
@@ -294,22 +260,7 @@ pub(crate) fn run_plugin(
             return;
         }
 
-        // Send Shutdown over the protocol.
-        if let Ok(mut writer) = shutdown_writer.lock() {
-            drop(write_message(&mut *writer, &HostToPlugin::Shutdown));
-        }
-        shutdown_flag.store(true, Ordering::Release);
-
-        // Grace period: wait in short intervals so we don't block cleanup
-        // if the plugin exits promptly.
-        for _ in 0..50 {
-            thread::sleep(std::time::Duration::from_millis(100));
-            if !is_process_alive(child_id) {
-                return;
-            }
-        }
-
-        kill_child(child_id);
+        stop_plugin(&shutdown_writer, &shutdown_flag, child_id);
     });
 
     // Send init.
@@ -336,6 +287,96 @@ pub(crate) fn run_plugin(
     drop(shutdown_handle);
 
     result
+}
+
+/// How long a plugin gets to exit on its own after being told to stop.
+const SHUTDOWN_GRACE_MS: u64 = 5_000;
+
+/// A spawned plugin process and its wired-up pipes.
+struct PluginProcess {
+    child: Child,
+
+    /// Shared, because the shutdown thread writes to it as well as the message
+    /// loop.
+    stdin: Arc<Mutex<ChildStdin>>,
+    stdout: ChildStdout,
+
+    /// Joins when the plugin's stderr closes.
+    stderr_handle: thread::JoinHandle<()>,
+}
+
+/// Spawn the plugin, wiring its three pipes.
+///
+/// Its stderr is forwarded to tracing from a thread, so a plugin that logs
+/// heavily cannot fill the pipe and block on a write nobody is draining.
+fn spawn_plugin(binary: &Utf8Path) -> Result<PluginProcess, cmd::Error> {
+    debug!(%binary, "Spawning plugin.");
+
+    let mut cmd = Command::new(binary);
+    cmd.stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    // Prevent the child from receiving SIGINT/SIGTERM directly. The host
+    // sends `Shutdown` over the protocol instead, giving the plugin a
+    // chance to exit gracefully.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        cmd.process_group(0);
+    }
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| cmd::Error::from(format!("failed to spawn plugin: {e}")))?;
+
+    let child_stdin = child.stdin.take().expect("stdin piped");
+    let stdout = child.stdout.take().expect("stdout piped");
+    let stderr = child.stderr.take().expect("stderr piped");
+
+    let stderr_handle = thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => trace!(target: "plugin::stderr", "{}", line),
+                Err(e) => {
+                    warn!("Error reading plugin stderr: {e}");
+                    break;
+                }
+            }
+        }
+    });
+
+    Ok(PluginProcess {
+        child,
+        stdin: Arc::new(Mutex::new(child_stdin)),
+        stdout,
+        stderr_handle,
+    })
+}
+
+/// Ask the plugin to stop, and kill it if it will not.
+///
+/// `shutdown_sent` is raised once the request is out, so a stdout that closes
+/// without an `exit` is read as the plugin obeying rather than as a crash.
+/// It is raised after the write for that reason: before it, a closed stdout
+/// still means something went wrong.
+fn stop_plugin(stdin: &Mutex<impl Write>, shutdown_sent: &AtomicBool, child_id: u32) {
+    if let Ok(mut writer) = stdin.lock() {
+        drop(write_message(&mut *writer, &HostToPlugin::Shutdown));
+    }
+    shutdown_sent.store(true, Ordering::Release);
+
+    // Polled in short intervals so a prompt exit doesn't hold up cleanup.
+    let interval = std::time::Duration::from_millis(100);
+    for _ in 0..(SHUTDOWN_GRACE_MS / 100) {
+        thread::sleep(interval);
+        if !is_process_alive(child_id) {
+            return;
+        }
+    }
+
+    kill_child(child_id);
 }
 
 /// The JP directories a plugin is told about, so it needs no platform logic of
@@ -389,66 +430,8 @@ fn message_loop(
 
         let mut writer = stdin.lock().expect("stdin lock poisoned");
 
-        match msg {
-            PluginToHost::Ready(ready) => {
-                // The plugin states what it needs, so a mismatch is caught here
-                // rather than several messages later, when the host hits
-                // something it cannot parse and the plugin blocks on the reply.
-                if ready.protocol > PROTOCOL_VERSION {
-                    return Err(cmd::Error::from(format!(
-                        "this plugin needs protocol {}, and this `jp` speaks {PROTOCOL_VERSION}. \
-                         Reinstall the two together.",
-                        ready.protocol,
-                    )));
-                }
-                debug!(protocol = ready.protocol, "Plugin signaled ready.");
-            }
-
-            PluginToHost::ListConversations(req) => {
-                let response = handle_list_conversations(workspace, req.id);
-                write_message(&mut *writer, &response)?;
-            }
-
-            PluginToHost::ReadEvents(req) => {
-                let response = handle_read_events(workspace, &req.conversation, req.id);
-                write_message(&mut *writer, &response)?;
-            }
-
-            PluginToHost::ReadConfig(req) => {
-                let response = handle_read_config(config_json, req.path, req.id);
-                write_message(&mut *writer, &response)?;
-            }
-
-            PluginToHost::Print(print) => {
-                // In Phase 1, write to stdout directly. Full printer
-                // integration comes later when we thread through &Printer.
-                let stdout = std::io::stdout();
-                let mut handle = stdout.lock();
-                drop(handle.write_all(print.text.as_bytes()));
-                drop(handle.flush());
-            }
-
-            PluginToHost::Log(log) => {
-                emit_log(&log);
-            }
-
-            PluginToHost::Describe(_) => {
-                debug!("Ignoring describe in message loop.");
-            }
-
-            // Handled above, before the lock this arm holds.
-            PluginToHost::Compose(_) => unreachable!("compose is answered before the lock"),
-
-            PluginToHost::Exit(exit) => {
-                debug!(code = exit.code, "Plugin exited.");
-                if exit.code == 0 {
-                    return Ok(());
-                }
-                return match exit.reason {
-                    Some(reason) => Err(cmd::Error::from((exit.code, reason))),
-                    None => Err(cmd::Error::from(exit.code)),
-                };
-            }
+        if handle_request(msg, &mut *writer, workspace, config_json)? == Flow::Stop {
+            return Ok(());
         }
     }
 
@@ -464,6 +447,88 @@ fn message_loop(
         1u8,
         "plugin exited unexpectedly without sending exit message",
     )))
+}
+
+/// Whether the message loop carries on after a request.
+#[derive(Debug, PartialEq)]
+enum Flow {
+    Continue,
+    Stop,
+}
+
+/// Answer one request from the plugin.
+///
+/// Runs with the writer lock held, so everything here has to be quick: anything
+/// that blocks on the user is answered by the caller, before the lock is taken.
+fn handle_request(
+    msg: PluginToHost,
+    writer: &mut impl Write,
+    workspace: &Workspace,
+    config_json: &Value,
+) -> Result<Flow, cmd::Error> {
+    match msg {
+        PluginToHost::Ready(ready) => {
+            // The plugin states what it needs, so a mismatch is caught here
+            // rather than several messages later, when the host hits something it
+            // cannot parse and the plugin blocks on the reply.
+            if ready.protocol > PROTOCOL_VERSION {
+                return Err(cmd::Error::from(format!(
+                    "this plugin needs protocol {}, and this `jp` speaks {PROTOCOL_VERSION}. \
+                     Reinstall the two together.",
+                    ready.protocol,
+                )));
+            }
+            debug!(protocol = ready.protocol, "Plugin signaled ready.");
+        }
+
+        PluginToHost::ListConversations(req) => {
+            let response = handle_list_conversations(workspace, req.id);
+            write_message(writer, &response)?;
+        }
+
+        PluginToHost::ReadEvents(req) => {
+            let response = handle_read_events(workspace, &req.conversation, req.id);
+            write_message(writer, &response)?;
+        }
+
+        PluginToHost::ReadConfig(req) => {
+            let response = handle_read_config(config_json, req.path, req.id);
+            write_message(writer, &response)?;
+        }
+
+        PluginToHost::Print(print) => {
+            // In Phase 1, write to stdout directly. Full printer
+            // integration comes later when we thread through &Printer.
+            let stdout = std::io::stdout();
+            let mut handle = stdout.lock();
+            drop(handle.write_all(print.text.as_bytes()));
+            drop(handle.flush());
+        }
+
+        PluginToHost::Log(log) => {
+            emit_log(&log);
+        }
+
+        PluginToHost::Describe(_) => {
+            debug!("Ignoring describe in message loop.");
+        }
+
+        // Answered before the lock this runs under is taken.
+        PluginToHost::Compose(_) => unreachable!("compose is answered before the lock"),
+
+        PluginToHost::Exit(exit) => {
+            debug!(code = exit.code, "Plugin exited.");
+            if exit.code != 0 {
+                return match exit.reason {
+                    Some(reason) => Err(cmd::Error::from((exit.code, reason))),
+                    None => Err(cmd::Error::from(exit.code)),
+                };
+            }
+            return Ok(Flow::Stop);
+        }
+    }
+
+    Ok(Flow::Continue)
 }
 
 fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> HostToPlugin {
