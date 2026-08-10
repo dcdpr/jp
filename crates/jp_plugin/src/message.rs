@@ -77,8 +77,8 @@ pub enum HostToPlugin {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum PluginToHost {
-    /// Acknowledge successful initialization.
-    Ready,
+    /// Acknowledge successful initialization, and state what the plugin needs.
+    Ready(ReadyMessage),
 
     /// Request a list of conversations.
     ListConversations(OptionalId),
@@ -232,6 +232,26 @@ pub struct ErrorResponse {
 }
 
 // --- Plugin-to-Host messages ---
+
+/// The plugin's answer to `init`.
+///
+/// Carrying the required protocol version here rather than leaving each plugin
+/// to check for itself means the host can refuse a plugin it is too old to
+/// serve, and a plugin cannot forget to ask: the field has no Rust default, so
+/// it has to be named at every construction site.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReadyMessage {
+    /// The lowest protocol version this plugin can work with.
+    ///
+    /// Defaults to 1 on the wire, so a plugin built before this field existed
+    /// still parses, and is taken at its word.
+    #[serde(default = "legacy_protocol")]
+    pub protocol: u32,
+}
+
+const fn legacy_protocol() -> u32 {
+    1
+}
 
 /// A message with only an optional correlation ID.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
