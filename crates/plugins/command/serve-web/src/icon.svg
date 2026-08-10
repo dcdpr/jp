@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 180" width="180" height="180">
+  <rect width="180" height="180" rx="40" fill="#1a1a1a"/>
+  <text
+    x="90"
+    y="92"
+    fill="#f5f5f5"
+    font-family="ui-monospace, SFMono-Regular, Menlo, monospace"
+    font-size="84"
+    font-weight="600"
+    text-anchor="middle"
+    dominant-baseline="central"
+  >jp</text>
+</svg>

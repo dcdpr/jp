@@ -1,6 +1,6 @@
 use std::{cell::RefCell, env, io::Cursor};
 
-use jp_plugin::message::{PathsInfo, ReadyMessage, WorkspaceInfo};
+use jp_plugin::message::{OutputFormat, PathsInfo, ReadyMessage, WorkspaceInfo};
 use pretty_assertions::assert_eq;
 
 use super::*;
@@ -48,6 +48,7 @@ fn init_message(root: &str, args: &[&str]) -> String {
         options: serde_json::Map::new(),
         args: args.iter().map(|a| (*a).to_owned()).collect(),
         log_level: 0,
+        output_format: OutputFormat::default(),
     };
 
     format!(

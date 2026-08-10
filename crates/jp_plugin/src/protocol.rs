@@ -16,7 +16,8 @@ use crate::message::{ExitMessage, ReadyMessage};
 /// | 5       | `list_configs`, naming the configurations a query can select.   |
 /// | 6       | `query`, with `created` and `query_complete` in reply.          |
 /// | 7       | `interrupt`, for stopping a turn the host is running.           |
-pub const PROTOCOL_VERSION: u32 = 7;
+/// | 8       | `lock` on `events`, saying whether a turn is running.           |
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Answer a host's `init`, refusing it when it is too old to serve this plugin.
 ///
