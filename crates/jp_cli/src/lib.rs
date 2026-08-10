@@ -829,7 +829,7 @@ pub(crate) fn resolve_config(
 /// No `--cfg` args or per-conversation config.
 ///
 /// See: <https://jp.computer/configuration>
-fn load_base_partial(fs: Option<&FsStorageBackend>) -> Result<PartialAppConfig> {
+pub(crate) fn load_base_partial(fs: Option<&FsStorageBackend>) -> Result<PartialAppConfig> {
     let partials = load_partial_configs_from_files(fs, absolute_utf8(".").ok())?;
     let partial = load_partials_with_inheritance(partials)?;
 

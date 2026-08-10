@@ -238,6 +238,26 @@ pub(crate) fn build_partial_from_cfg_args(
     apply_cfg_args(PartialAppConfig::empty(), &resolved)
 }
 
+/// Layer raw `--cfg` arguments over a partial, keeping what the base already
+/// says.
+///
+/// The same resolution [`build_partial_from_cfg_args`] does, applied onto
+/// `base` rather than onto nothing.
+/// That distinction is the whole difference between "what did these arguments
+/// ask for" and "what does this configuration look like once they are applied".
+///
+/// Unlike that function, no arguments is not an error: layering nothing over a
+/// configuration leaves the configuration.
+pub(crate) fn build_partial_over(
+    base: PartialAppConfig,
+    args: &[KeyValueOrPath],
+    workspace: Option<&Workspace>,
+    fs: Option<&FsStorageBackend>,
+) -> Result<PartialAppConfig> {
+    let resolved = resolve_cfg_args(args, &base, workspace, fs)?;
+    apply_cfg_args(base, &resolved)
+}
+
 #[cfg(test)]
 #[path = "config_pipeline_tests.rs"]
 mod tests;

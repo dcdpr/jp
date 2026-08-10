@@ -246,7 +246,9 @@ fn reader_loop(reader: impl BufRead, inner: &Inner, shutdown_tx: &watch::Sender<
             HostToPlugin::Composed(_)
             | HostToPlugin::Done(_)
             | HostToPlugin::Draft(_)
-            | HostToPlugin::Configs(_) => {
+            | HostToPlugin::Configs(_)
+            | HostToPlugin::QueryComplete(_)
+            | HostToPlugin::Created(_) => {
                 warn!(?msg, "Received a response to a request we never sent");
             }
 

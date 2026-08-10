@@ -14,7 +14,8 @@ use crate::message::{ExitMessage, ReadyMessage};
 /// | 3       | `archive_conversation` and `set_title`, answered with `done`.   |
 /// | 4       | `read_draft` / `write_draft`, for a conversation's query draft. |
 /// | 5       | `list_configs`, naming the configurations a query can select.   |
-pub const PROTOCOL_VERSION: u32 = 5;
+/// | 6       | `query`, with `created` and `query_complete` in reply.          |
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Answer a host's `init`, refusing it when it is too old to serve this plugin.
 ///

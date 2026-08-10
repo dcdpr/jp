@@ -13,29 +13,31 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    thread,
+    thread::{self, JoinHandle},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
 use jp_config::{
     AppConfig,
     fs::user_global_config_dir,
+    interrupt::{StreamingInterruptAction, ToolInterruptAction},
     plugins::{
         PluginsConfig,
         command::{CommandPluginConfig, RunPolicy},
     },
     util::list_configs_in_load_path,
 };
-use jp_conversation::ConversationId;
+use jp_conversation::{ConversationId, ConversationStream, event::ChatRequest};
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{InlineOption, InlineReply, InlineSelect, ReplyOutcome};
 use jp_plugin::{
     PROTOCOL_VERSION,
     message::{
         ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigEntry, ConfigResponse,
-        ConfigsResponse, ConversationSummary, ConversationsResponse, DescribeResponse,
-        DoneResponse, DraftResponse, ErrorResponse, EventsResponse, HostToPlugin, InitMessage,
-        LogMessage, PathsInfo, PluginToHost, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
+        ConfigsResponse, ConversationSummary, ConversationsResponse, CreatedResponse,
+        DescribeResponse, DoneResponse, DraftResponse, ErrorResponse, EventsResponse, HostToPlugin,
+        InitMessage, LogMessage, PathsInfo, PluginToHost, QueryCompleteResponse, QueryRequest,
+        SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
     },
 };
 use jp_printer::Printer;
@@ -44,23 +46,32 @@ use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use relative_path::RelativePath;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
-use tracing::{debug, error, trace, warn};
+use tokio::sync::mpsc;
+use tracing::{debug, error, info, trace, warn};
 
 use super::registry;
-use crate::{Ctx, cmd, editor::report_editor_failure};
+use crate::{
+    Ctx, KeyValueOrPath, cmd,
+    cmd::query::{PendingStreamTrim, TurnInputs},
+    config_pipeline::build_partial_over,
+    editor::report_editor_failure,
+};
 
 /// Runs the prompts a plugin asks for.
 ///
 /// Composition lives on this side of the protocol because the host owns both
 /// ends of it: the plugin's stdin carries the protocol, so it has no terminal
 /// to read keys from, and only the host knows which editor `Ctrl+X` opens.
-pub(crate) struct Composer<'a> {
-    printer: &'a Printer,
+///
+/// Holds a handle on the printer rather than a borrow, so the message loop it
+/// belongs to can take the context mutably.
+pub(crate) struct Composer {
+    printer: Arc<Printer>,
     editor: Option<Arc<dyn EditorBackend>>,
     is_tty: bool,
 }
 
-impl Composer<'_> {
+impl Composer {
     /// Collect what the request asks for, or nothing if the user declines.
     fn compose(&self, request: &ComposeRequest) -> ComposeResponse {
         let mut response = ComposeResponse {
@@ -177,7 +188,7 @@ impl Composer<'_> {
                         Ok((EditOutcome::Saved, edited)) => buffer = edited,
                         Ok((EditOutcome::Cancelled, _)) => {}
                         Err(error) => report_editor_failure(
-                            self.printer,
+                            &self.printer,
                             &error,
                             "Continuing with the inline editor.",
                         ),
@@ -196,7 +207,7 @@ impl Composer<'_> {
 ///
 /// `binary` is the path to the plugin executable.
 /// `args` are the remaining CLI arguments to forward.
-pub(crate) fn run_plugin(
+pub(crate) async fn run_plugin(
     name: &str,
     binary: &Utf8Path,
     args: &[String],
@@ -209,10 +220,9 @@ pub(crate) fn run_plugin(
     // so they would otherwise hold a borrow of all of `ctx`.
     let storage_path = ctx.storage_path().map(ToOwned::to_owned);
     let user_storage_path = ctx.user_storage_path().map(ToOwned::to_owned);
-    let fs_backend = ctx.fs_backend.clone();
 
     let composer = Composer {
-        printer: &ctx.printer,
+        printer: ctx.printer.clone(),
         editor: crate::editor::build_editor_backend(&config.editor),
         is_tty: ctx.term.is_tty,
     };
@@ -287,23 +297,24 @@ pub(crate) fn run_plugin(
             .map_err(|e| cmd::Error::from(format!("failed to send init: {e}")))?;
     }
 
-    // Read messages from plugin.
-    let reader = BufReader::new(stdout);
+    // Read on a thread of its own, so a turn awaiting the provider cannot stop
+    // the host from noticing what the plugin says next.
+    let (mut requests, reader_thread) = spawn_reader(stdout);
+
     let result = message_loop(
-        reader,
+        &mut requests,
         &stdin,
-        &mut ctx.workspace,
+        ctx,
         &config_json,
         &shutdown_sent,
         &composer,
-        ctx.session.as_ref(),
-        fs_backend.as_deref(),
-        &config,
-    );
+    )
+    .await;
 
     // Always clean up, even on error.
     drop(child.wait());
     drop(stderr_handle.join());
+    drop(reader_thread);
     drop(shutdown_handle);
 
     result
@@ -411,22 +422,52 @@ fn well_known_paths(user_storage_path: Option<&Utf8Path>) -> PathsInfo {
     }
 }
 
+/// Read plugin messages on a dedicated thread, forwarding each line.
+///
+/// The channel closes when the plugin's stdout does, which ends the message
+/// loop.
+/// A full channel blocks the reader rather than dropping messages: the plugin
+/// is waiting on replies to most of what it sends, so losing one would hang it.
+fn spawn_reader(
+    stdout: impl std::io::Read + Send + 'static,
+) -> (mpsc::Receiver<String>, JoinHandle<()>) {
+    let (tx, rx) = mpsc::channel(64);
+
+    let handle = thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    if tx.blocking_send(line).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    warn!(%error, "Error reading from plugin.");
+                    break;
+                }
+            }
+        }
+    });
+
+    (rx, handle)
+}
+
 /// The main message loop: reads plugin requests and sends responses.
-fn message_loop(
-    reader: BufReader<impl std::io::Read>,
-    stdin: &Mutex<impl Write>,
-    workspace: &mut Workspace,
+///
+/// Async because a `query` runs a turn, which takes as long as the assistant
+/// needs.
+/// The turn goes to a task of its own, and this keeps answering reads while it
+/// runs.
+async fn message_loop(
+    requests: &mut mpsc::Receiver<String>,
+    stdin: &Arc<Mutex<ChildStdin>>,
+    ctx: &mut Ctx,
     config_json: &Value,
     shutdown_sent: &AtomicBool,
-    composer: &Composer<'_>,
-    session: Option<&Session>,
-    fs_backend: Option<&FsStorageBackend>,
-    config: &AppConfig,
+    composer: &Composer,
 ) -> Result<(), cmd::Error> {
-    for line in reader.lines() {
-        let line =
-            line.map_err(|e| cmd::Error::from(format!("failed to read from plugin: {e}")))?;
-
+    while let Some(line) = requests.recv().await {
         if line.trim().is_empty() {
             continue;
         }
@@ -436,34 +477,46 @@ fn message_loop(
 
         trace!(?msg, "Received plugin message.");
 
-        // Composing blocks on the user, so it runs before the lock is taken:
-        // the shutdown thread needs that same lock to deliver `Shutdown` if the
-        // user interrupts mid-prompt.
-        let msg = match msg {
+        // Both of these block for as long as a person or a provider takes, so
+        // they run before the lock is taken: the shutdown thread needs that same
+        // lock to deliver `Shutdown` if the user interrupts partway.
+        match msg {
             PluginToHost::Compose(request) => {
                 let response = composer.compose(&request);
                 let mut writer = stdin.lock().expect("stdin lock poisoned");
                 write_message(&mut *writer, &HostToPlugin::Composed(response)).map_err(|e| {
                     cmd::Error::from(format!("failed to answer a compose request: {e}"))
                 })?;
-                continue;
             }
-            other => other,
-        };
 
-        let mut writer = stdin.lock().expect("stdin lock poisoned");
+            PluginToHost::Query(request) => {
+                // `None` means the turn is running and will answer for itself.
+                if let Some(response) = run_query(ctx, request, stdin).await {
+                    let mut writer = stdin.lock().expect("stdin lock poisoned");
+                    write_message(&mut *writer, &response)
+                        .map_err(|e| cmd::Error::from(format!("failed to answer a query: {e}")))?;
+                }
+            }
 
-        if handle_request(
-            msg,
-            &mut *writer,
-            workspace,
-            config_json,
-            session,
-            fs_backend,
-            config,
-        )? == Flow::Stop
-        {
-            return Ok(());
+            msg => {
+                let config = ctx.config();
+                let fs_backend = ctx.fs_backend.clone();
+                let session = ctx.session.clone();
+                let mut writer = stdin.lock().expect("stdin lock poisoned");
+
+                if handle_request(
+                    msg,
+                    &mut *writer,
+                    &mut ctx.workspace,
+                    config_json,
+                    session.as_ref(),
+                    fs_backend.as_deref(),
+                    &config,
+                )? == Flow::Stop
+                {
+                    return Ok(());
+                }
+            }
         }
     }
 
@@ -479,6 +532,338 @@ fn message_loop(
         1u8,
         "plugin exited unexpectedly without sending exit message",
     )))
+}
+
+/// Run a turn on the plugin's behalf.
+///
+/// The turn is the same one `jp query` runs: it locks the conversation, calls
+/// the provider, executes tools, and persists the events.
+///
+/// `None` means the turn is under way and will send its own reply, correlated
+/// by the request's id.
+/// Anything returned is a failure that happened before the turn started.
+async fn run_query(
+    ctx: &mut Ctx,
+    request: QueryRequest,
+    stdin: &Arc<Mutex<ChildStdin>>,
+) -> Option<HostToPlugin> {
+    let reply_id = request.id.clone();
+    let failed = |message: String| Some(query_error(reply_id.clone(), message));
+
+    if request.content.trim().is_empty() {
+        return failed("query content is empty".to_owned());
+    }
+
+    let new = request.new;
+    let lock = match lock_for_query(ctx, &request) {
+        Ok(lock) => lock,
+        Err(error) => return failed(error),
+    };
+
+    // The turn runs under the conversation's own config, not the host's.
+    //
+    // A host resolved its config once at startup with no conversation in view, so
+    // its persona, skills and enabled tools are whatever the bare workspace has.
+    // The conversation carries all of that in its stored deltas, and running a
+    // turn under anything else silently answers with the wrong model and no
+    // tools.
+    let config = match conversation_config(ctx, &lock, &request.cfg) {
+        Ok(mut config) => {
+            // A delegated turn has no terminal, so nothing can answer a prompt.
+            //
+            // An interrupt runs the same escalation as Ctrl-C, and the default
+            // streaming action is to show the interrupt menu. With no keyboard
+            // attached that menu blocks on a read nobody can satisfy: the turn
+            // keeps the conversation locked, the next request is refused as
+            // already-locked, and the host's terminal sits at a prompt meant for
+            // someone who is elsewhere.
+            //
+            // Stopping is the only interpretation available here, so it is the
+            // configured one. The reply and abort variants need a person.
+            config.interrupt.streaming.action = StreamingInterruptAction::Stop;
+            config.interrupt.tool_call.action = ToolInterruptAction::Stop;
+            Arc::new(config)
+        }
+        Err(error) => return failed(error),
+    };
+
+    debug!(
+        conversation = %lock.id(),
+        model = %config.assistant.model.id.resolved(),
+        "Running a delegated query.",
+    );
+
+    // Swapped around collecting only, because that is the part that reads the
+    // context. The turn itself carries the config it was given.
+    let host_config = ctx.swap_config(Arc::clone(&config));
+    let prepared = prepare_turn(ctx, config, &lock, request.content).await;
+    ctx.swap_config(host_config);
+
+    let (inputs, stream) = match prepared {
+        Ok(prepared) => prepared,
+        Err(error) => return failed(error.to_string()),
+    };
+
+    // Read from the lock, not the request: a new conversation was named by the
+    // host, and the plugin has no other way to learn its id.
+    let conversation = lock.id().to_string();
+
+    // Answered before the turn, because a caller that only needs somewhere to
+    // send the user cannot wait minutes to find out where that is.
+    if new {
+        let mut writer = stdin.lock().expect("stdin lock poisoned");
+        drop(write_message(
+            &mut *writer,
+            &HostToPlugin::Created(CreatedResponse {
+                id: reply_id.clone(),
+                conversation: conversation.clone(),
+            }),
+        ));
+    }
+
+    // Hand the turn to its own task. It owns everything it needs and the lock owns
+    // itself, so nothing here is borrowed for the minutes a turn can take, which
+    // is what keeps the message loop answering reads while it runs.
+    let stdin = Arc::clone(stdin);
+
+    tokio::spawn(async move {
+        let outcome = inputs.run(&lock, stream).await;
+
+        // Reported through tracing rather than to the terminal. These are facts
+        // about the host, not content: the turn's output belongs to the
+        // conversation, which is where whoever asked for it is reading.
+        let reply = match outcome {
+            Ok(()) => {
+                info!(%conversation, "A delegated turn finished.");
+                HostToPlugin::QueryComplete(QueryCompleteResponse {
+                    id: reply_id,
+                    conversation,
+                })
+            }
+            Err(error) => {
+                // The full chain, not the outermost label: `cmd::Error` renders as
+                // "LLM error" and everything that matters hangs off its sources.
+                let detail = error_chain(&error);
+                warn!(%conversation, %detail, "A delegated turn failed.");
+                query_error(reply_id, detail)
+            }
+        };
+
+        let mut writer = stdin.lock().expect("stdin lock poisoned");
+        drop(write_message(&mut *writer, &reply));
+    });
+
+    None
+}
+
+/// Take exclusive hold of the conversation a query names, creating it if asked.
+///
+/// The lock comes before anything else a turn needs: it is the turn's proof of
+/// exclusive access, and it owns what it needs, which is what lets the turn run
+/// away from the message loop.
+fn lock_for_query(ctx: &mut Ctx, request: &QueryRequest) -> Result<ConversationLock, String> {
+    if request.new {
+        // Resolved before the conversation exists, so a name that does not resolve
+        // leaves nothing behind to clean up.
+        let config = new_conversation_config(ctx, &request.cfg)?;
+
+        let conversation = jp_conversation::Conversation {
+            title: request.title.clone().filter(|t| !t.trim().is_empty()),
+            ..jp_conversation::Conversation::default()
+        };
+
+        return ctx
+            .workspace
+            .create_and_lock_conversation(conversation, config, ctx.session.as_ref())
+            .map_err(|error| format!("failed to create the conversation: {error}"));
+    }
+
+    let id = parse_conversation_id(&request.conversation)?;
+
+    let handle = ctx
+        .workspace
+        .acquire_conversation(&id)
+        .map_err(|error| format!("conversation {}: {error}", request.conversation))?;
+
+    match ctx
+        .workspace
+        .lock_conversation(handle, ctx.session.as_ref())
+    {
+        Ok(LockResult::Acquired(lock)) => Ok(lock),
+        Ok(LockResult::AlreadyLocked(_)) => {
+            Err("another process is working on this conversation".to_owned())
+        }
+        Err(error) => Err(format!("failed to lock the conversation: {error}")),
+    }
+}
+
+/// The configuration an existing conversation's next turn runs under.
+///
+/// The conversation's own configuration with any named `cfg` layered over it.
+/// With nothing named, this is what the stream already resolves to.
+///
+/// The base layer is the one frozen when the conversation was created, so edits
+/// to config files since then are not picked up.
+/// Layering stored deltas over freshly read files needs the config pipeline,
+/// which belongs with the caller that owns startup.
+fn conversation_config(
+    ctx: &Ctx,
+    lock: &ConversationLock,
+    cfg: &[String],
+) -> Result<AppConfig, String> {
+    let stored = lock
+        .events()
+        .config()
+        .map_err(|error| format!("the conversation's config is invalid: {error}"))?;
+
+    if cfg.is_empty() {
+        return Ok(stored);
+    }
+
+    let args = cfg
+        .iter()
+        .map(|arg| arg.parse::<KeyValueOrPath>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("invalid configuration argument: {error}"))?;
+
+    let partial = build_partial_over(
+        stored.to_partial(),
+        &args,
+        Some(&ctx.workspace),
+        ctx.fs_backend.as_deref(),
+    )
+    .map_err(|error| error.to_string())?;
+
+    jp_config::util::build(partial)
+        .map_err(|error| format!("the resolved configuration is invalid: {error}"))
+}
+
+/// The configuration a conversation created by a query starts from.
+///
+/// The files layer, every config file and its `extends` chain plus the
+/// environment, read fresh, with the named configurations on top.
+/// A host that stays up for hours should start a conversation from the
+/// configuration as it is now, not as it was when the process booted.
+fn new_conversation_config(ctx: &Ctx, cfg: &[String]) -> Result<Arc<AppConfig>, String> {
+    let base = crate::load_base_partial(ctx.fs_backend.as_deref())
+        .map_err(|error| format!("failed to read the workspace configuration: {error}"))?;
+
+    let args = cfg
+        .iter()
+        .map(|arg| arg.parse::<KeyValueOrPath>())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| format!("invalid configuration argument: {error}"))?;
+
+    let partial = build_partial_over(base, &args, Some(&ctx.workspace), ctx.fs_backend.as_deref())
+        .map_err(|error| error.to_string())?;
+
+    jp_config::util::build(partial)
+        .map(Arc::new)
+        .map_err(|error| format!("the resolved configuration is invalid: {error}"))
+}
+
+/// Collect what the turn needs, which is the only part that needs the context.
+///
+/// Fast on purpose: the message loop is blocked for exactly this long, and
+/// every other request waits on it.
+/// Starting the MCP servers is a spawn, not a wait; the waiting happens inside
+/// [`TurnInputs::run`], on the turn's own task.
+async fn prepare_turn(
+    ctx: &mut Ctx,
+    config: Arc<AppConfig>,
+    lock: &ConversationLock,
+    content: String,
+) -> Result<(TurnInputs, ConversationStream), cmd::Error> {
+    let mcp_servers = ctx.configure_active_mcp_servers().await?;
+
+    let chat_request = ChatRequest {
+        content,
+        author: config.user.name.clone(),
+        ..ChatRequest::default()
+    };
+
+    // The message has moved from draft to request, so the draft is done. Clearing
+    // it here rather than from the caller gives it one owner: a client that
+    // cleared its own draft would be racing its debounced save, and losing.
+    if let Some(path) = draft_path(ctx.fs_backend.as_deref(), &ctx.workspace, &lock.id(), false)
+        && path.exists()
+        && let Err(error) = fs::remove_file(&path)
+    {
+        warn!(%error, "Failed to clear the query draft.");
+    }
+
+    // Sending a message counts as using the conversation.
+    //
+    // Only on this path. At a terminal, activating a conversation is a deliberate
+    // act with its own command, and inferring it from a message would overwrite
+    // what the user said. A caller reaching in over the protocol has no such act
+    // to offer, so the last message is the best evidence of when the conversation
+    // was last used, which is what orders the list.
+    lock.as_mut()
+        .update_metadata(|meta| meta.last_activated_at = chrono::Utc::now());
+
+    // Recorded before the turn, so the conversation carries the change that
+    // produced it rather than a turn whose configuration came from nowhere.
+    match crate::cmd::query::get_config_delta_from_cli(&config, lock) {
+        Ok(Some(delta)) => {
+            lock.as_mut()
+                .update_events(|events| events.add_config_delta(delta));
+        }
+        Ok(None) => {}
+        Err(error) => return Err(cmd::Error::from(error.to_string())),
+    }
+
+    let stream = lock.events().clone();
+
+    let inputs = TurnInputs::collect(
+        ctx,
+        config,
+        lock,
+        chat_request,
+        PendingStreamTrim::default(),
+        mcp_servers,
+        // A sink, because this turn has no reader at this terminal. Nobody typed
+        // it here: it was asked for from somewhere else, and its output belongs to
+        // the conversation, which is where whoever asked is reading. Rendering it
+        // here would also braid two concurrent turns into one stream with no way
+        // to tell them apart.
+        Arc::new(Printer::sink()),
+    )
+    .await?;
+
+    Ok((inputs, stream))
+}
+
+/// Flatten an error and its sources into one line.
+///
+/// JP's error types label a category and carry the cause underneath, so the
+/// outermost message alone says "LLM error" where the source says what actually
+/// went wrong.
+/// A reader across a protocol has no way to ask for the rest, so send all of
+/// it.
+fn error_chain(error: &dyn std::error::Error) -> String {
+    let mut out = error.to_string();
+    let mut source = error.source();
+
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        // Wrappers often restate their source; saying it twice helps nobody.
+        if !out.contains(&text) {
+            let _ = write!(out, ": {text}");
+        }
+        source = cause.source();
+    }
+
+    out
+}
+
+/// An error response to a `query` request.
+fn query_error(id: Option<String>, message: String) -> HostToPlugin {
+    HostToPlugin::Error(ErrorResponse {
+        id,
+        request: Some("query".to_owned()),
+        message,
+    })
 }
 
 /// Whether the message loop carries on after a request.
@@ -573,8 +958,10 @@ fn handle_request(
             debug!("Ignoring describe in message loop.");
         }
 
-        // Answered before the lock this runs under is taken.
-        PluginToHost::Compose(_) => unreachable!("compose is answered before the lock"),
+        // Answered by the caller, before the lock this runs under is taken.
+        PluginToHost::Compose(_) | PluginToHost::Query(_) => {
+            unreachable!("answered before the lock")
+        }
 
         PluginToHost::Exit(exit) => {
             debug!(code = exit.code, "Plugin exited.");
@@ -1515,7 +1902,7 @@ pub(crate) async fn run_external(args: &[String], ctx: &mut Ctx) -> cmd::Output 
 
     debug!(%binary, subcommand, "Dispatching to plugin.");
 
-    run_plugin(subcommand, &binary, plugin_args, ctx)?;
+    run_plugin(subcommand, &binary, plugin_args, ctx).await?;
     Ok(())
 }
 

@@ -162,6 +162,23 @@ impl Ctx {
         self.config.clone()
     }
 
+    /// Install a resolved config for one scoped run, returning the previous
+    /// one.
+    ///
+    /// A `jp` invocation resolves config once and treats it as fixed, which is
+    /// why there is otherwise no way to change it here.
+    /// A long-running host is the exception: it serves many conversations from
+    /// one process, and a turn has to run under the config of the conversation
+    /// it belongs to, its persona, its enabled tools, its model.
+    /// Swap before the turn and swap back after.
+    ///
+    /// Takes an already-resolved [`AppConfig`], so this stays a substitution
+    /// rather than a mutation: assembling a config is still the partial API's
+    /// job.
+    pub(crate) fn swap_config(&mut self, config: Arc<AppConfig>) -> Arc<AppConfig> {
+        std::mem::replace(&mut self.config, config)
+    }
+
     /// Get a runtime handle.
     pub(crate) fn handle(&self) -> &Handle {
         self.runtime.handle()
