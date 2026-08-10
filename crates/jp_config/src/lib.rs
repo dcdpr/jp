@@ -315,7 +315,9 @@ impl AppConfig {
     ///
     /// Returns an error if `default_values` fails, if the partial is missing
     /// required fields, or if the resolved configuration fails validation.
-    pub fn from_partial_with_defaults(partial: PartialAppConfig) -> Result<Self, ConfigError> {
+    pub(crate) fn from_partial_with_defaults(
+        partial: PartialAppConfig,
+    ) -> Result<Self, ConfigError> {
         let partial = match PartialAppConfig::default_values(&())? {
             Some(defaults) => partial.fill_from(defaults),
             None => partial,
