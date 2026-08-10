@@ -987,7 +987,7 @@ fn a_run_reports_ready_then_output_then_exit() {
 
     match messages.as_slice() {
         [
-            PluginToHost::Ready,
+            PluginToHost::Ready(_),
             PluginToHost::Print(print),
             PluginToHost::Exit(exit),
         ] => {
@@ -1015,13 +1015,36 @@ fn a_run_reports_ready_then_output_then_exit() {
     }
 }
 
+/// A plugin newer than its host cannot ask for anything interactive, so it says
+/// so and stops, without claiming ready, rather than hanging on a reply the
+/// host cannot produce.
+#[test]
+fn an_older_host_is_refused_up_front() {
+    let dir = Utf8TempDir::new().unwrap();
+    let messages = exchange(&init_at(REQUIRED_PROTOCOL - 1, dir.path(), &["list"]));
+
+    match messages.as_slice() {
+        [PluginToHost::Exit(exit)] => {
+            assert_eq!(exit.code, 1);
+            assert!(
+                exit.reason
+                    .as_ref()
+                    .is_some_and(|reason| reason.contains("needs `jp` protocol 2")),
+                "{:?}",
+                exit.reason
+            );
+        }
+        other => panic!("unexpected exchange: {other:?}"),
+    }
+}
+
 #[test]
 fn a_bad_argument_exits_non_zero_with_a_reason() {
     let dir = Utf8TempDir::new().unwrap();
     let messages = exchange(&init(dir.path(), &["close", "not-an-id"]));
 
     match messages.as_slice() {
-        [PluginToHost::Ready, PluginToHost::Exit(exit)] => {
+        [PluginToHost::Ready(_), PluginToHost::Exit(exit)] => {
             assert_eq!(exit.code, 1);
             assert!(
                 exit.reason

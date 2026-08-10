@@ -456,8 +456,18 @@ fn message_loop(
         let mut writer = stdin.lock().expect("stdin lock poisoned");
 
         match msg {
-            PluginToHost::Ready => {
-                debug!("Plugin signaled ready.");
+            PluginToHost::Ready(ready) => {
+                // The plugin states what it needs, so a mismatch is caught here
+                // rather than several messages later, when the host hits
+                // something it cannot parse and the plugin blocks on the reply.
+                if ready.protocol > PROTOCOL_VERSION {
+                    return Err(cmd::Error::from(format!(
+                        "this plugin needs protocol {}, and this `jp` speaks {PROTOCOL_VERSION}. \
+                         Reinstall the two together.",
+                        ready.protocol,
+                    )));
+                }
+                debug!(protocol = ready.protocol, "Plugin signaled ready.");
             }
 
             PluginToHost::ListConversations(req) => {

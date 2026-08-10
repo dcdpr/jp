@@ -72,6 +72,42 @@ fn message_loop_ready_then_exit() {
     message_loop(reader, &sink, &ws, &config, &shutdown_sent, &composer).unwrap();
 }
 
+/// A plugin needing a newer protocol than this host is refused on its `ready`.
+///
+/// The `exit 0` behind it would end the loop successfully, so an `Err` here can
+/// only come from the version check.
+#[test]
+fn message_loop_refuses_a_plugin_needing_a_newer_protocol() {
+    use std::io::{BufReader, Cursor};
+
+    let plugin_output = [
+        &format!(r#"{{"type":"ready","protocol":{}}}"#, PROTOCOL_VERSION + 1),
+        r#"{"type":"exit","code":0}"#,
+    ]
+    .join("\n");
+
+    let reader = BufReader::new(Cursor::new(plugin_output));
+    let sink: Mutex<Vec<u8>> = Mutex::new(Vec::new());
+    let config = json!({});
+    let shutdown_sent = AtomicBool::new(false);
+    let ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
+
+    let printer = jp_printer::Printer::sink();
+    let composer = Composer {
+        printer: &printer,
+        editor: None,
+        is_tty: false,
+    };
+
+    let error = message_loop(reader, &sink, &ws, &config, &shutdown_sent, &composer)
+        .expect_err("a plugin needing a newer protocol must be refused");
+
+    assert!(
+        error.to_string().contains("Reinstall the two together"),
+        "{error}"
+    );
+}
+
 #[test]
 fn find_plugin_binary_nonexistent() {
     let result = find_plugin_binary(&["__jp_test_nonexistent_plugin_42__"]);
