@@ -13,7 +13,7 @@ fn bare_workspace() -> Workspace {
 
 /// How a conversation is spelled on the wire, matching `list_conversations`.
 fn wire_id(id: ConversationId) -> String {
-    id.as_deciseconds().to_string()
+    id.to_string()
 }
 
 /// A workspace holding one conversation already on disk.
@@ -180,6 +180,33 @@ fn an_unknown_conversation_fails_against_its_request() {
         }
         other => panic!("expected an error, got {other:?}"),
     }
+}
+
+/// The canonical spelling is what JP prints, and bare deciseconds still resolve
+/// because that is what the wire carried before.
+#[test]
+fn a_conversation_is_named_the_way_jp_prints_it() {
+    let (ws, id, _tmp) = workspace_with_conversation();
+
+    assert_eq!(
+        wire_id(id),
+        "jp-c17000000000",
+        "a plugin is handed the spelling a user can paste back into `jp`"
+    );
+
+    assert_eq!(parse_conversation_id("jp-c17000000000").unwrap(), id);
+    assert_eq!(parse_conversation_id("17000000000").unwrap(), id);
+    assert!(parse_conversation_id("not-an-id").is_err());
+
+    // Asserted exactly, not round-tripped: both spellings parse, so a
+    // round-trip would pass whichever one the host emitted.
+    let HostToPlugin::Conversations(listed) = handle_list_conversations(&ws, None) else {
+        panic!("expected a conversations response");
+    };
+    let [summary] = listed.data.as_slice() else {
+        panic!("expected exactly one conversation");
+    };
+    assert_eq!(summary.id, "jp-c17000000000");
 }
 
 #[test]
