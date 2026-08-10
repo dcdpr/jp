@@ -85,6 +85,108 @@ fn workspace_drains_a_persist_failure_left_by_a_dropped_lock() {
     );
 }
 
+/// An index reload keeps a conversation that has not been written yet.
+///
+/// A scan reports what a store holds, so a conversation created in memory is
+/// absent from it, indistinguishable from the scan alone from one another
+/// process has deleted.
+/// Rebuilding the index from the scan alone therefore forgets conversations
+/// moments after creating them: a long-running host reloads the index on every
+/// request, and a conversation created to serve one request is gone by the
+/// next.
+#[test]
+fn an_index_reload_keeps_an_unwritten_conversation() {
+    let dir = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&dir.path().join("workspace")).unwrap();
+    let mut ws = workspace_with_fs(dir.path(), &fs);
+
+    let id = ws.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+
+    assert!(
+        ws.conversation_presence(&id)
+            .is_some_and(|p| !p.is_durable()),
+        "a conversation is unwritten until something flushes it"
+    );
+
+    ws.load_conversation_index();
+
+    assert!(
+        ws.acquire_conversation(&id).is_ok(),
+        "an unwritten conversation survives the reload that cannot see it"
+    );
+    assert!(
+        ws.conversation_presence(&id)
+            .is_some_and(|p| !p.is_durable()),
+        "and is still unwritten, having still not been written"
+    );
+}
+
+/// An index reload forgets a conversation the store no longer holds.
+///
+/// The counterpart to the case above, and the reason the distinction has to be
+/// recorded rather than inferred: both are absent from the scan, and only one
+/// should be kept.
+#[test]
+fn an_index_reload_forgets_a_durable_conversation_that_is_gone() {
+    let dir = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&dir.path().join("workspace")).unwrap();
+    let mut ws = workspace_with_fs(dir.path(), &fs);
+
+    let id = ws.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+
+    // Stand in for "was written, then removed from under us": the presence says
+    // durable, and the store has never heard of it.
+    ws.state.presence.insert(id, StoragePresence::Projected);
+
+    ws.load_conversation_index();
+
+    assert!(
+        ws.acquire_conversation(&id).is_err(),
+        "a conversation the store does not hold is dropped from the index"
+    );
+}
+
+/// A long-running reader has to see what other processes write.
+///
+/// A plugin host outlives the `jp` runs happening around it, so re-reading the
+/// index must drop the cached index and streams rather than keep serving the
+/// snapshot taken at startup.
+#[test]
+fn reloading_the_index_picks_up_another_process_writes() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage_path = root.join("storage");
+    let config = Arc::new(AppConfig::new_test());
+
+    let first = ConversationId::try_from(datetime!(2024-03-15 12:00:00 Z)).unwrap();
+    let second = ConversationId::try_from(datetime!(2024-03-15 13:00:00 Z)).unwrap();
+
+    let write = |id: ConversationId| {
+        let mut ws = workspace_with_fs(&root, &FsStorageBackend::new(&storage_path).unwrap());
+        ws.load_conversation_index();
+        ws.create_conversation_with_id(id, Conversation::default(), config.clone());
+        let handle = ws.acquire_conversation(&id).unwrap();
+        let mut conv = ws.test_lock(handle).into_mut();
+        conv.update_metadata(|_| {});
+        conv.flush().unwrap();
+    };
+
+    write(first);
+
+    // The reader loads the index once, as a plugin host does at startup.
+    let mut reader = workspace_with_fs(&root, &FsStorageBackend::new(&storage_path).unwrap());
+    reader.load_conversation_index();
+    assert_eq!(reader.conversations().count(), 1);
+
+    write(second);
+
+    // Still one: the reader is serving the snapshot it took at startup.
+    assert_eq!(reader.conversations().count(), 1);
+
+    reader.load_conversation_index();
+    assert_eq!(reader.conversations().count(), 2);
+}
+
 #[test]
 fn conversation_presence_reflects_creation_intent() {
     let mut ws = Workspace::in_memory("root");
@@ -102,15 +204,28 @@ fn conversation_presence_reflects_creation_intent() {
         Projection::LocalOnly,
     );
 
+    // Unwritten until something flushes it, carrying the intent it was created
+    // with, which is what a lock later derives its write projection from.
     assert_eq!(
         ws.conversation_presence(&projected),
-        Some(StoragePresence::Projected),
-        "a non-local conversation is projected"
+        Some(StoragePresence::Unwritten(Projection::Projected)),
+        "a non-local conversation is unwritten, and projected when it is written"
     );
     assert_eq!(
         ws.conversation_presence(&local),
-        Some(StoragePresence::UserLocalOnly),
-        "a --local conversation is user-local only"
+        Some(StoragePresence::Unwritten(Projection::LocalOnly)),
+        "a --local conversation is unwritten, and user-local when it is written"
+    );
+
+    // The intent survives the indirection: this is what actually decides where a
+    // write lands, and it is unchanged by the conversation not being on disk yet.
+    assert_eq!(
+        ws.conversation_presence(&projected).map(Projection::from),
+        Some(Projection::Projected)
+    );
+    assert_eq!(
+        ws.conversation_presence(&local).map(Projection::from),
+        Some(Projection::LocalOnly)
     );
     assert_eq!(
         ws.conversation_presence(&unknown),
