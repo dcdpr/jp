@@ -1,6 +1,6 @@
 use camino_tempfile::Utf8TempDir;
 use clap::CommandFactory;
-use jp_plugin::message::WorkspaceInfo;
+use jp_plugin::message::{OutputFormat, WorkspaceInfo};
 
 use super::*;
 
@@ -59,6 +59,7 @@ fn init_at(version: u32, root: &Utf8Path, args: &[&str]) -> HostToPlugin {
         options: serde_json::Map::new(),
         args: args.iter().map(|arg| (*arg).to_owned()).collect(),
         log_level: 0,
+        output_format: OutputFormat::default(),
     })
 }
 

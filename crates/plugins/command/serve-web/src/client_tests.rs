@@ -43,6 +43,99 @@ fn feed_after_register(client: &PluginClient, tx: std::sync::mpsc::Sender<u8>, l
     });
 }
 
+/// Two replies to one request reach two waiters, in the order they registered.
+///
+/// Starting a conversation is answered twice: once with the id as soon as it
+/// exists, and again when its first turn ends.
+/// The second reply is what clears the turn from the busy map, so a dispatcher
+/// that served only the first would leave the conversation marked running for
+/// the life of the process.
+#[tokio::test]
+async fn two_replies_to_one_request_reach_both_waiters() {
+    let (client, _tx) = channel_client();
+
+    let first = client.register("7");
+    let second = client.register("7");
+
+    dispatch(
+        &client.inner.pending,
+        Some("7"),
+        HostToPlugin::Created(CreatedResponse {
+            id: Some("7".to_owned()),
+            conversation: "jp-c1".to_owned(),
+        }),
+    );
+    dispatch(
+        &client.inner.pending,
+        Some("7"),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: Some("7".to_owned()),
+            conversation: "jp-c1".to_owned(),
+        }),
+    );
+
+    assert!(
+        matches!(first.await, Ok(HostToPlugin::Created(_))),
+        "the first waiter gets the first reply"
+    );
+    assert!(
+        matches!(second.await, Ok(HostToPlugin::QueryComplete(_))),
+        "the second waiter gets the second, rather than the first being served twice or the \
+         second being dropped"
+    );
+
+    assert!(
+        client.inner.pending.lock().unwrap().is_empty(),
+        "the request is forgotten once its last waiter is served"
+    );
+}
+
+/// One waiter still behaves as it always did.
+///
+/// The queue is only there for requests answered more than once; every other
+/// request registers one waiter and must be cleaned up by the reply that serves
+/// it, not left behind for a second that never comes.
+#[tokio::test]
+async fn a_single_reply_still_clears_its_request() {
+    let (client, _tx) = channel_client();
+
+    let only = client.register("3");
+
+    dispatch(
+        &client.inner.pending,
+        Some("3"),
+        HostToPlugin::QueryComplete(QueryCompleteResponse {
+            id: Some("3".to_owned()),
+            conversation: "jp-c1".to_owned(),
+        }),
+    );
+
+    assert!(matches!(only.await, Ok(HostToPlugin::QueryComplete(_))));
+    assert!(
+        client.inner.pending.lock().unwrap().is_empty(),
+        "a request with one waiter is forgotten when that waiter is served"
+    );
+}
+
+/// Abandoning a request drops every waiter it registered.
+///
+/// The error paths in `start_conversation` register two and may bail after the
+/// first; leaving the second behind would keep a sender alive for a reply that
+/// is never coming.
+#[tokio::test]
+async fn forgetting_a_request_drops_all_of_its_waiters() {
+    let (client, _tx) = channel_client();
+
+    let first = client.register("9");
+    let second = client.register("9");
+
+    client.forget("9");
+
+    assert!(client.inner.pending.lock().unwrap().is_empty());
+    assert!(first.await.is_err(), "a dropped sender closes its channel");
+    assert!(second.await.is_err());
+}
+
 #[tokio::test]
 async fn list_conversations_roundtrip() {
     let response = HostToPlugin::Conversations(ConversationsResponse {
@@ -67,6 +160,8 @@ async fn list_conversations_roundtrip() {
 #[tokio::test]
 async fn read_events_roundtrip() {
     let response = HostToPlugin::Events(EventsResponse {
+        lock: jp_plugin::message::LockState::Free,
+        title: None,
         id: Some("1".to_owned()),
         conversation: "456".to_owned(),
         data: vec![json!({"type": "turn_start", "timestamp": "2025-01-01T00:00:00Z"})],

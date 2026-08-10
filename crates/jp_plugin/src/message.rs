@@ -189,6 +189,90 @@ impl PluginToHost {
 
 // --- Host-to-Plugin messages ---
 
+/// How the host renders what it prints.
+///
+/// A plugin reads this to decide the shape of its own output, so `jp --format
+/// json` reaches a plugin's listings the way it reaches the host's own commands
+/// and a caller does not have to learn a separate flag per plugin.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputFormat {
+    /// Plain text, with no ANSI colors and no unicode decoration.
+    #[default]
+    Text,
+
+    /// Text with ANSI colors and unicode decoration.
+    TextPretty,
+
+    /// Compact JSON, one line per print.
+    Json,
+
+    /// Indented JSON.
+    JsonPretty,
+}
+
+impl OutputFormat {
+    /// Whether output should be machine-readable.
+    #[must_use]
+    pub const fn is_json(self) -> bool {
+        matches!(self, Self::Json | Self::JsonPretty)
+    }
+
+    /// Whether JSON output should be indented.
+    #[must_use]
+    pub const fn is_json_pretty(self) -> bool {
+        matches!(self, Self::JsonPretty)
+    }
+
+    /// Whether text output can carry ANSI colors and unicode decoration.
+    #[must_use]
+    pub const fn is_pretty(self) -> bool {
+        matches!(self, Self::TextPretty)
+    }
+}
+
+/// Who holds a conversation.
+///
+/// A conversation is locked for the length of a turn, so this says whether one
+/// is running, and whether it is the reader's to interrupt.
+/// A turn in another process can be waited for but not signalled from here.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum LockState {
+    /// Nobody.
+    /// No turn is running.
+    #[default]
+    Free,
+
+    /// A turn in another process.
+    Elsewhere,
+
+    /// A turn in the host answering this request.
+    Here,
+}
+
+impl LockState {
+    /// Whether no turn is running.
+    ///
+    /// Takes a reference because `skip_serializing_if` calls it with one.
+    #[must_use]
+    pub const fn is_free(&self) -> bool {
+        matches!(self, Self::Free)
+    }
+
+    /// Whether a turn is running, wherever it is.
+    #[must_use]
+    pub const fn is_held(&self) -> bool {
+        !self.is_free()
+    }
+
+    /// Whether the running turn can be interrupted through this connection.
+    #[must_use]
+    pub const fn is_here(&self) -> bool {
+        matches!(self, Self::Here)
+    }
+}
+
 /// The `init` message sent to the plugin on startup.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InitMessage {
@@ -227,6 +311,18 @@ pub struct InitMessage {
     /// that stderr output matches the host's `-v` flags.
     #[serde(default)]
     pub log_level: u8,
+
+    /// The shape the host's own output takes, resolved from `--format`.
+    ///
+    /// A plugin that prints listings or records should match it, so one flag
+    /// governs the whole invocation.
+    ///
+    /// Reads as [`OutputFormat::Text`] when the host is old enough not to send
+    /// it, which is the shape plugins printed before they could ask.
+    /// That fallback is why this needs no protocol version of its own: there is
+    /// nothing a plugin has to refuse to run without.
+    #[serde(default)]
+    pub output_format: OutputFormat,
 }
 
 /// Workspace metadata included in the `init` message.
@@ -278,6 +374,21 @@ pub struct EventsResponse {
 
     /// The conversation ID.
     pub conversation: String,
+
+    /// Who holds this conversation, if anyone.
+    ///
+    /// Read from the conversation lock, which is the only authoritative answer:
+    /// a transcript ending in a request looks identical whether a turn is
+    /// running, was interrupted, or failed outright.
+    #[serde(default, skip_serializing_if = "LockState::is_free")]
+    pub lock: LockState,
+
+    /// The conversation's title, if it has one.
+    ///
+    /// Saves a plugin from asking for the whole conversation list to label one
+    /// conversation, which reads every conversation's metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 
     /// Serialized conversation events.
     pub data: Vec<Value>,
