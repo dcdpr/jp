@@ -399,79 +399,89 @@ fn handle_read_config_invalid_path() {
     assert!(matches!(resp, HostToPlugin::Error(_)));
 }
 
-#[test]
-fn message_loop_ready_then_exit() {
-    use std::io::{BufReader, Cursor};
-
-    let plugin_output = [r#"{"type":"ready"}"#, r#"{"type":"exit","code":0}"#].join("\n");
-
-    let reader = BufReader::new(Cursor::new(plugin_output));
-    let sink: Mutex<Vec<u8>> = Mutex::new(Vec::new());
-    let config = json!({});
-    let shutdown_sent = AtomicBool::new(false);
-
-    // We can't easily construct a Workspace for a unit test without a temp dir,
-    // but this test only exercises ready + exit (no workspace queries). We
-    // construct a minimal in-memory workspace.
-    let mut ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
-
-    // No terminal in a test, so a compose request would be declined rather
-    // than prompting; this exchange never asks for one.
-    let printer = jp_printer::Printer::sink();
-    let composer = Composer {
-        printer: &printer,
-        editor: None,
-        is_tty: false,
-    };
-
-    message_loop(
-        reader,
-        &sink,
-        &mut ws,
-        &config,
-        &shutdown_sent,
-        &composer,
-        None,
-        None,
-        &AppConfig::new_test(),
-    )
-    .unwrap();
+/// An error whose `Display` says one thing and whose source says another.
+#[derive(Debug)]
+struct Layered {
+    message: &'static str,
+    source: Option<Box<Layered>>,
 }
 
-/// A plugin needing a newer protocol than this host is refused on its `ready`.
-///
-/// The `exit 0` behind it would end the loop successfully, so an `Err` here can
-/// only come from the version check.
+impl std::fmt::Display for Layered {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message)
+    }
+}
+
+impl std::error::Error for Layered {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn std::error::Error + 'static))
+    }
+}
+
+fn layered(message: &'static str, source: Option<Layered>) -> Layered {
+    Layered {
+        message,
+        source: source.map(Box::new),
+    }
+}
+
+/// The outermost message is a category, so sending it alone tells the reader
+/// nothing.
+/// A plugin cannot ask for the sources, so they are flattened in.
 #[test]
-fn message_loop_refuses_a_plugin_needing_a_newer_protocol() {
-    use std::io::{BufReader, Cursor};
+fn an_error_is_reported_with_its_causes() {
+    let error = layered(
+        "LLM error",
+        Some(layered(
+            "request failed",
+            Some(layered(
+                "prompt is too long: 1000327 tokens > 1000000 maximum",
+                None,
+            )),
+        )),
+    );
 
-    let plugin_output = [
-        &format!(r#"{{"type":"ready","protocol":{}}}"#, PROTOCOL_VERSION + 1),
-        r#"{"type":"exit","code":0}"#,
-    ]
-    .join("\n");
+    assert_eq!(
+        error_chain(&error),
+        "LLM error: request failed: prompt is too long: 1000327 tokens > 1000000 maximum"
+    );
+}
 
-    let reader = BufReader::new(Cursor::new(plugin_output));
-    let sink: Mutex<Vec<u8>> = Mutex::new(Vec::new());
-    let config = json!({});
-    let shutdown_sent = AtomicBool::new(false);
-    let mut ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
+/// A wrapper that already quotes its source should not say it twice.
+#[test]
+fn a_restated_cause_is_not_repeated() {
+    let error = layered(
+        "config error: no such model `haiku`",
+        Some(layered("no such model `haiku`", None)),
+    );
 
-    let printer = jp_printer::Printer::sink();
-    let composer = Composer {
-        printer: &printer,
-        editor: None,
-        is_tty: false,
-    };
+    assert_eq!(error_chain(&error), "config error: no such model `haiku`");
+}
 
-    let error = message_loop(
-        reader,
-        &sink,
+#[test]
+fn a_lone_error_is_reported_as_itself() {
+    assert_eq!(
+        error_chain(&layered("nothing underneath", None)),
+        "nothing underneath"
+    );
+}
+
+/// A plugin needing a newer protocol than this host is refused on its `ready`,
+/// before it can send anything the host would fail to parse.
+#[test]
+fn a_plugin_needing_a_newer_protocol_is_refused() {
+    let mut ws = bare_workspace();
+    let mut sink: Vec<u8> = Vec::new();
+
+    let error = handle_request(
+        PluginToHost::Ready(ReadyMessage {
+            protocol: PROTOCOL_VERSION + 1,
+        }),
+        &mut sink,
         &mut ws,
-        &config,
-        &shutdown_sent,
-        &composer,
+        &json!({}),
         None,
         None,
         &AppConfig::new_test(),

@@ -33,7 +33,10 @@ use super::Event;
 /// or pass them unchanged.
 /// Fixups may hold state across events (e.g. remembering properties of the
 /// previous block).
-pub trait EventFixup {
+/// Implementors must be `Send`: a renderer built from these travels to
+/// whichever task or thread is running a turn, and a turn does not always run
+/// on the one that started it.
+pub trait EventFixup: Send {
     /// Process a single event.
     /// Returns `None` to suppress the event, or `Some(event)` (possibly
     /// modified) to pass it through.

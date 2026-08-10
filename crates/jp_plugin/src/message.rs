@@ -72,6 +72,20 @@ pub enum HostToPlugin {
     /// Response to `list_configs`.
     Configs(ConfigsResponse),
 
+    /// A delegated turn finished.
+    QueryComplete(QueryCompleteResponse),
+
+    /// A conversation asked for by `query` with `new` exists.
+    ///
+    /// Sent as soon as it has been created and locked, before its first turn
+    /// runs.
+    /// A caller that only needs somewhere to send the user cannot wait for the
+    /// turn: it can take minutes, and the conversation is usable immediately.
+    ///
+    /// The first of two replies to such a request; `query_complete` follows
+    /// when the turn ends.
+    Created(CreatedResponse),
+
     /// An error response to any plugin request.
     Error(ErrorResponse),
 
@@ -120,6 +134,9 @@ pub enum PluginToHost {
     /// List the configurations a query can name.
     ListConfigs(OptionalId),
 
+    /// Ask the host to run a turn on a conversation.
+    Query(QueryRequest),
+
     /// Print user-facing output through JP's printer.
     Print(PrintMessage),
 
@@ -131,6 +148,37 @@ pub enum PluginToHost {
 
     /// Signal that the plugin is done.
     Exit(ExitMessage),
+}
+
+impl PluginToHost {
+    /// The correlation ID this message carries, if any.
+    ///
+    /// `None` covers two cases that need no distinguishing here: a request that
+    /// omitted its optional id, and a message that is not a request at all.
+    /// Neither has an answer to correlate.
+    ///
+    /// Exists so a host can answer a request it could not otherwise inspect,
+    /// notably when handling it failed and the failure has to be reported
+    /// against the right request rather than sent into the void for the plugin
+    /// to time out on.
+    #[must_use]
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Self::ListConversations(m) | Self::ListConfigs(m) => m.id.as_deref(),
+            Self::ReadEvents(m) => m.id.as_deref(),
+            Self::ReadConfig(m) => m.id.as_deref(),
+            Self::Compose(m) => m.id.as_deref(),
+            Self::Query(m) => m.id.as_deref(),
+            Self::ArchiveConversation(m) | Self::ReadDraft(m) => m.id.as_deref(),
+            Self::SetTitle(m) => m.id.as_deref(),
+            Self::WriteDraft(m) => m.id.as_deref(),
+
+            // Not requests: nothing is waiting on an answer to any of these.
+            Self::Ready(_) | Self::Print(_) | Self::Log(_) | Self::Describe(_) | Self::Exit(_) => {
+                None
+            }
+        }
+    }
 }
 
 // --- Host-to-Plugin messages ---
@@ -302,6 +350,86 @@ pub struct WriteDraftRequest {
     /// A mismatch against what is on disk is refused rather than overwritten.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
+}
+
+/// Ask the host to run a turn on a conversation.
+///
+/// The host owns the agent loop: it locks the conversation, appends the
+/// request, calls the provider, runs whatever tools the assistant asks for, and
+/// persists the result.
+/// A plugin doing this itself would need the user's credentials, the tool
+/// registry, and the MCP servers, and would end up a second implementation of
+/// the turn loop.
+///
+/// The host answers with [`HostToPlugin::QueryComplete`] once the turn has
+/// finished, or [`HostToPlugin::Error`] if it could not be started.
+/// A turn runs for as long as the assistant needs, so a plugin awaiting the
+/// reply should allow minutes, not seconds.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QueryRequest {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation to add the turn to.
+    ///
+    /// Ignored when `new` is set, which makes the host create one.
+    #[serde(default)]
+    pub conversation: String,
+
+    /// What the user said.
+    pub content: String,
+
+    /// Start a new conversation rather than adding to an existing one.
+    ///
+    /// The host replies twice: [`HostToPlugin::Created`] as soon as the
+    /// conversation exists, carrying the id it assigned, then
+    /// [`HostToPlugin::QueryComplete`] when the turn ends.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub new: bool,
+
+    /// A title for a conversation created by this request.
+    ///
+    /// Left unset, a new conversation is untitled until the title generator
+    /// names it from the first turn.
+    /// Ignored without `new`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+
+    /// Configurations to layer over what this turn would otherwise run under,
+    /// as `--cfg` takes them.
+    ///
+    /// Not scoped to the turn.
+    /// The host records the difference as a config event, so the choice holds
+    /// for the turns after it and the stream carries the reason, which is what
+    /// `jp q --cfg` does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cfg: Vec<String>,
+}
+
+/// Response to `query`, sent once the turn has finished.
+///
+/// Carries no transcript: the events are persisted, and the plugin reads them
+/// back with [`PluginToHost::ReadEvents`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QueryCompleteResponse {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation the turn ran on.
+    pub conversation: String,
+}
+
+/// The conversation a `query` with `new` created.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CreatedResponse {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The id the host assigned, which the caller has no other way to learn.
+    pub conversation: String,
 }
 
 /// One configuration a query can name.
