@@ -14,6 +14,7 @@ pub(crate) mod session_mapping;
 mod state;
 
 use std::{
+    collections::HashMap,
     env,
     sync::{Arc, OnceLock},
 };
@@ -197,20 +198,55 @@ impl Workspace {
 
         debug!(count = entries.len(), "Loaded conversation index.");
 
-        let conversations = entries
+        // Conversations created here and not yet written, carried across the
+        // reload.
+        //
+        // A scan reports what a store holds, so an unwritten conversation is
+        // absent from it, the same way a deleted one is. Replacing the index with
+        // the scan alone therefore forgets conversations that were only just
+        // created, which is how one could be started and then immediately not
+        // found.
+        //
+        // Keeping them is safe because the distinction is decidable: the presence
+        // recorded at creation says which of the two an absent conversation is,
+        // and a scan that *does* find one is proof it has since been written.
+        let unwritten: Vec<ConversationId> = self
+            .state
+            .presence
+            .iter()
+            .filter(|(_, presence)| !presence.is_durable())
+            .map(|(id, _)| *id)
+            .filter(|id| !entries.iter().any(|entry| entry.id == *id))
+            .collect();
+
+        let mut conversations: HashMap<_, _> = entries
             .iter()
             .map(|entry| (entry.id, OnceLock::new()))
             .collect();
 
-        let events = entries
+        let mut events: HashMap<_, _> = entries
             .iter()
             .map(|entry| (entry.id, OnceLock::new()))
             .collect();
 
-        let presence = entries
+        let mut presence: HashMap<_, _> = entries
             .iter()
             .map(|entry| (entry.id, entry.presence))
             .collect();
+
+        // Moved rather than re-inserted: the loaded metadata and events are the
+        // only copy, and re-scanning cannot produce them.
+        for id in unwritten {
+            if let Some(entry) = self.state.conversations.remove(&id) {
+                conversations.insert(id, entry);
+            }
+            if let Some(entry) = self.state.events.remove(&id) {
+                events.insert(id, entry);
+            }
+            if let Some(entry) = self.state.presence.remove(&id) {
+                presence.insert(id, entry);
+            }
+        }
 
         self.state = State {
             conversations,
@@ -345,9 +381,12 @@ impl Workspace {
                 ConversationStream::new(config).with_created_at(id.timestamp()),
             )));
 
+        // `Unwritten`, not the projection's durable equivalent: nothing has been
+        // written yet, and an index reload has to be able to tell this apart from a
+        // conversation another process has deleted.
         self.state
             .presence
-            .insert(id, StoragePresence::from(projection));
+            .insert(id, StoragePresence::Unwritten(projection));
 
         id
     }

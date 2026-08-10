@@ -29,6 +29,9 @@ impl From<StoragePresence> for Projection {
             // A workspace-only (external) conversation is projected on its
             // first write, which also creates the durable user-local copy.
             StoragePresence::Projected | StoragePresence::WorkspaceOnly => Self::Projected,
+            // Nothing on disk to infer from, so the intent it was created with is
+            // the only answer, which is why it carries one.
+            StoragePresence::Unwritten(projection) => projection,
         }
     }
 }
@@ -39,6 +42,17 @@ impl From<Projection> for StoragePresence {
             Projection::LocalOnly => Self::UserLocalOnly,
             Projection::Projected => Self::Projected,
         }
+    }
+}
+
+impl StoragePresence {
+    /// Whether a store holds this conversation.
+    ///
+    /// False only for a conversation that exists in memory and has never been
+    /// written, which is the one case an index scan cannot see.
+    #[must_use]
+    pub fn is_durable(self) -> bool {
+        !matches!(self, Self::Unwritten(_))
     }
 }
 
