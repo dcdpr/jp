@@ -196,6 +196,37 @@ fn the_author_falls_back_through_jp_then_git_then_the_environment() {
 }
 
 #[test]
+fn composed_text_splits_into_a_title_and_a_body() {
+    // A single line, however many blank lines follow it, is a title alone.
+    assert_eq!(
+        Composition::read("Tool call header misaligned"),
+        Composition::Title("Tool call header misaligned".to_owned())
+    );
+    assert_eq!(
+        Composition::read("Tool call header misaligned\n\n\n"),
+        Composition::Title("Tool call header misaligned".to_owned())
+    );
+
+    // Subject, blank line, body.
+    assert_eq!(
+        Composition::read("Header misaligned\n\nIt wraps one column early.\n"),
+        Composition::TitleAndBody {
+            title: "Header misaligned".to_owned(),
+            body: "It wraps one column early.".to_owned(),
+        }
+    );
+
+    // Prose running straight on from the first line has no subject.
+    assert_eq!(
+        Composition::read("The header wraps one column\nearly, below 80 columns."),
+        Composition::Body("The header wraps one column\nearly, below 80 columns.".to_owned())
+    );
+
+    assert_eq!(Composition::read(""), Composition::Empty);
+    assert_eq!(Composition::read("  \n\n"), Composition::Empty);
+}
+
+#[test]
 fn list_filters_are_optional() {
     let args = parse(&["list", "--status", "In Progress"]).unwrap();
 
