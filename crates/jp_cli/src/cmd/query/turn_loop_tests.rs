@@ -4575,7 +4575,7 @@ async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
         ..PartialRequestConfig::default()
     });
 
-    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    let config = jp_config::util::build(partial).expect("valid config");
 
     // The resolution the guard has to cope with: the block is present, and its
     // ceiling field is a zero the user never asked for.

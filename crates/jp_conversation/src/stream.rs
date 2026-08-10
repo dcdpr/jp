@@ -339,7 +339,11 @@ impl ConversationStream {
             partial.merge(&(), delta.into())?;
         }
 
-        AppConfig::from_partial_with_defaults(partial).map_err(Into::into)
+        // `build`, not the bare conversion: a delta can introduce a model alias
+        // that the base config never had, and reading an unresolved alias panics.
+        // `build` is also what orders instructions and prompt sections, which the
+        // rest of the system assumes has happened.
+        jp_config::util::build(partial).map_err(Into::into)
     }
 
     /// Removes all events from the end of the stream, until a [`ChatRequest`]
@@ -1565,8 +1569,7 @@ impl FromIterator<ConversationEventWithConfig> for Result<ConversationStream, St
             return Err(StreamError::FromEmptyIterator);
         };
 
-        let mut stream =
-            ConversationStream::new(AppConfig::from_partial_with_defaults(config)?.into());
+        let mut stream = ConversationStream::new(jp_config::util::build(config)?.into());
         stream.push(first_event);
         stream.extend(events);
 
@@ -1639,7 +1642,7 @@ impl ConversationStream {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
-            base_config: AppConfig::from_partial_with_defaults(base_config)?.into(),
+            base_config: jp_config::util::build(base_config)?.into(),
             events,
             created_at: Utc::now(),
         })
@@ -1725,6 +1728,16 @@ pub enum StreamError {
     /// An error occurred for the stream [`AppConfig`].
     #[error(transparent)]
     Config(#[from] jp_config::ConfigError),
+
+    /// Building the stream's [`AppConfig`] failed.
+    ///
+    /// Distinct from [`Config`]: that is a partial that would not convert, this
+    /// is everything else assembling a usable configuration involves, a model
+    /// alias that resolves to nothing being the most common.
+    ///
+    /// [`Config`]: Self::Config
+    #[error(transparent)]
+    BuildConfig(#[from] jp_config::Error),
 
     /// A JSON serialization or deserialization error.
     #[error(transparent)]

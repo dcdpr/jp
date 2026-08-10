@@ -2,6 +2,7 @@ use chrono::TimeZone as _;
 use jp_config::{
     PartialConfig as _,
     conversation::tool::{PartialToolConfig, RunMode},
+    model::id::{ModelIdConfig, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
 };
 use serde_json::{Map, Value};
 
@@ -179,6 +180,33 @@ fn trim_chat_request_preserves_trailing_compaction() {
         stream.compactions().count(),
         1,
         "compaction overlay must survive trim_chat_request"
+    );
+}
+
+#[test]
+fn a_delta_may_introduce_a_model_alias_the_base_config_never_had() {
+    // Deltas are merged into a partial, so an alias arriving in one has nothing
+    // resolving it unless the stream builds the config properly. An unresolved
+    // alias then panics on the first `resolved()` read, far from here.
+    let mut partial = PartialAppConfig::empty();
+    partial.providers.llm.aliases.insert(
+        "fast".to_owned(),
+        PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+            provider: Some(ProviderId::Anthropic),
+            name: "claude-haiku-4-5".parse().ok(),
+        }),
+    );
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Alias("fast".to_owned());
+
+    let mut stream = ConversationStream::new_test();
+    stream.add_config_delta(partial);
+
+    assert_eq!(
+        stream.config().unwrap().assistant.model.id.resolved(),
+        &ModelIdConfig {
+            provider: ProviderId::Anthropic,
+            name: "claude-haiku-4-5".parse().unwrap(),
+        }
     );
 }
 
