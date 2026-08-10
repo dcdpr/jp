@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, posix, resolve } from 'node:path'
 
 import { defineConfig } from 'vitepress'
 import abnfGrammar from './grammars/abnf.tmLanguage.json'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
+import { COLUMNS, loadBoard, loadTickets, orderColumn } from './loaders/ticket-shared.mjs'
 
 // Rewrite relative links that climb above the docs root to absolute GitHub
 // URLs. The repo tree is the parent of the docs root, so any link resolving
@@ -174,56 +175,29 @@ const ticketBoardWriter = {
         // `/ticket/board`, and Vite's module resolver would answer a cold
         // document request for it with the JSON transformed into an ES module.
         const boardFile = resolve(dir, '.board.json')
-        const COLUMNS = [
-            { key: 'todo', status: 'Todo' },
-            { key: 'in_progress', status: 'In Progress' },
-            { key: 'done', status: 'Done' },
-        ]
-
-        // Every ticket on disk, by id, with the bits the board needs.
-        const readTickets = () => {
-            const tickets = new Map()
-            for (const name of readdirSync(dir)) {
-                if (!/^\d{4}-.+\.md$/.test(name)) continue
-                const file = resolve(dir, name)
-                const content = readFileSync(file, 'utf-8')
-                const field = (key) =>
-                    content.match(new RegExp(`^- \\*\\*${key}\\*\\*:\\s*(.+)`, 'm'))?.[1]?.trim()
-                        ?? null
-                const id = `T${name.slice(0, 4)}`
-                tickets.set(id, {
-                    id,
-                    file,
-                    title: content.match(/^# T\d+:\s*(.+)/m)?.[1]?.trim() ?? name,
-                    status: field('Status'),
-                    kind: field('Kind'),
-                    blockedBy: field('Blocked by'),
-                    implements: field('Implements'),
-                    path: `/ticket/${name.replace(/\.md$/, '')}`,
-                })
-            }
-            return tickets
-        }
-
-        const readOrder = () => {
-            try {
-                return JSON.parse(readFileSync(boardFile, 'utf-8'))
-            } catch {
-                return {}
-            }
-        }
+        // Read through the site's own loader rather than a second parser. The
+        // two had already drifted: this endpoint ordered an unranked Done column
+        // oldest first, where the published board orders it newest first. `file`
+        // is the one field the loader doesn't carry, for the status rewrite
+        // below.
+        const readTickets = () => new Map(loadTickets(dir).map(
+            ticket => [ticket.id, { ...ticket, file: resolve(dir, `${ticket.slug}.md`) }]))
 
         server.middlewares.use('/__ticket-board', (req, res, next) => {
             if (req.method === 'GET') {
-                const tickets = readTickets()
-                const order = readOrder()
+                const tickets = [...readTickets().values()]
+                const order = loadBoard(boardFile)
+                // Done is uncapped here, unlike the published board: this is
+                // where a card gets dragged back out of Done, and the cap would
+                // hide the older ones.
                 const columns = COLUMNS.map(column => {
-                    const rank = new Map((order[column.key] ?? []).map((id, i) => [id, i]))
-                    const rows = [...tickets.values()]
-                        .filter(t => t.status === column.status)
-                        .sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity)
-                            || a.id.localeCompare(b.id))
-                    return { ...column, total: rows.length, tickets: rows }
+                    const rows = orderColumn(tickets, column, order[column.key])
+                    return {
+                        key: column.key,
+                        status: column.status,
+                        total: rows.length,
+                        tickets: rows,
+                    }
                 })
 
                 res.setHeader('Content-Type', 'application/json')
@@ -386,7 +360,10 @@ const ticketWriter = {
                     case 'edit':
                         args = ['edit', text(parsed.id),
                             ...flag('--title', parsed.title),
-                            ...flag('--body', parsed.body),
+                            // An empty body clears the description; `flag` would
+                            // read it as an absent field, and the old text would
+                            // survive the save.
+                            ...(typeof parsed.body === 'string' ? ['--body', parsed.body] : []),
                             ...flag('--kind', parsed.kind),
                             ...flag('--status', parsed.status)]
                         break

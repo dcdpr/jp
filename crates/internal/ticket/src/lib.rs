@@ -174,8 +174,11 @@ impl FromStr for Kind {
 
 /// A ticket's metadata block.
 ///
-/// The repository owns every field here: a GitHub import replaces the title,
+/// The repository owns every field here: an import writes the title,
 /// description, and comments, and leaves this block alone.
+///
+/// `github` and `source` carry the link back to the item a ticket was imported
+/// from; see [`import::Source`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Metadata {
     pub status: Status,
@@ -186,6 +189,7 @@ pub struct Metadata {
     pub implements: Option<String>,
     pub promoted_to: Option<String>,
     pub github: Option<String>,
+    pub source: Option<String>,
 }
 
 /// One comment on a ticket.

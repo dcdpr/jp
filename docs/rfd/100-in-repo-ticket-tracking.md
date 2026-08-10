@@ -123,6 +123,20 @@ parses with a three-line regex and renders as visible content.
 | `Implements`  | no       | The RFD this ticket implements |
 | `Promoted to` | no       | The RFD this ticket became     |
 | `GitHub`      | no       | `#123`, set by import          |
+| `Source`      | no       | `scheme:id`, set by import     |
+
+`GitHub` and `Source` are import links: each carries the value that identifies
+the ticket's origin, so a second import of the same item finds the ticket it
+already wrote rather than filing another one.
+A ticket carries at most one of them.
+
+`Source` is free-form provenance, for anywhere that isn't GitHub.
+The scheme names the place and the id identifies the item there; the repository
+never interprets either, so whatever wrote the ticket is the only thing that has
+to recognise its own scheme.
+A marker is the one piece of imported text written without escaping, since it
+has to match byte for byte on the way back out, so ids are restricted to
+single-line text and refused rather than mangled when they aren't.
 
 There is no close date.
 The `ticket_*` tooling reads it from git history, so the file never carries a
@@ -255,6 +269,24 @@ written back.
 Imported text is untrusted input.
 The site compiles markdown as Vue, so imported bodies are escaped before they
 reach the working tree and are rendered as data, never as page source.
+
+## Other Sources
+
+A thought caught in a note-taking app is a thought that does not reach the
+board, and everyone's capture habit is their own.
+Rather than name those places, `jp ticket add --source scheme:id` records where
+a ticket came from and refuses to file the same item twice, which is enough for
+someone to write the sweep they want outside the repository.
+
+Ownership moves, which is the difference from GitHub.
+An item is captured once and the ticket is where the work happens from then on,
+so a second add naming the same source leaves the ticket alone: the write-up
+done here is never overwritten from a scratch pad.
+
+That also makes the repository the cursor.
+A sweep reads the sources already on the board to know what it has seen, so it
+keeps no state of its own and stays correct across a machine it has not run on
+in a week.
 
 ## Alternatives
 

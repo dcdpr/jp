@@ -16,14 +16,19 @@ use std::io::{self, BufRead, BufReader, IsTerminal as _, Write};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
-use jp_github::models::issues::{Comment as IssueComment, Issue};
 use jp_plugin::message::{
     ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
     InitMessage, LogMessage, PluginToHost, PrintMessage,
 };
 use serde::Serialize;
 use serde_json::Value;
-use ticket::{Comment, Kind, Metadata, Status, Ticket, TicketId, import::Import, store};
+use ticket::{
+    Kind, Metadata, Status, Ticket, TicketId,
+    import::{Import, Source},
+    store::{self, Existing, Outcome},
+};
+
+mod github;
 
 #[derive(Debug, Parser)]
 #[command(name = "jp ticket", about = "Track work items as markdown files.")]
@@ -60,6 +65,15 @@ enum Command {
         /// The RFD this work implements, e.g. `045`.
         #[arg(long)]
         implements: Option<String>,
+
+        /// Where the ticket came from, as `scheme:id`.
+        ///
+        /// Recorded in the `Source` metadata field, which makes the write
+        /// idempotent: a second add naming the same source finds the ticket it
+        /// already wrote and leaves it alone.
+        /// The text is treated as untrusted and escaped on the way in.
+        #[arg(long)]
+        source: Option<String>,
     },
 
     /// Append a comment to a ticket.
@@ -375,6 +389,7 @@ fn compose_missing(
             author,
             body,
             implements,
+            source,
         } if kind.is_none() || title.is_none() => {
             // Kind first: it frames what you're about to write. The title is
             // read out of the composed text, or asked for last.
@@ -393,6 +408,7 @@ fn compose_missing(
                 author,
                 body,
                 implements,
+                source,
             })
         }
 
@@ -489,15 +505,7 @@ fn pick_issues(
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
 ) -> Result<Vec<u64>, String> {
-    let (owner, name) = repo
-        .split_once('/')
-        .ok_or_else(|| format!("`{repo}` is not an `owner/name` pair."))?;
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("failed to start the async runtime: {error}"))?;
-    let issues = runtime.block_on(fetch_open(owner, name))?;
+    let issues = github::open_issues(repo)?;
 
     let options: Vec<ComposeOption> = issues
         .iter()
@@ -668,25 +676,6 @@ fn compose_many(
     }
 }
 
-/// Read a repository's open issues.
-async fn fetch_open(owner: &str, repo: &str) -> Result<Vec<Issue>, String> {
-    let mut builder = jp_github::Octocrab::builder();
-    if let Some(token) = token() {
-        builder = builder.personal_token(token);
-    }
-    let client = builder
-        .build()
-        .map_err(|error| format!("failed to create the GitHub client: {error}"))?;
-
-    client
-        .issues(owner, repo)
-        .list()
-        .per_page(PER_PAGE)
-        .send()
-        .await
-        .map_err(|error| format!("failed to list issues in {owner}/{repo}: {error}"))
-}
-
 /// Ask the host to collect text, and wait for it.
 fn compose(
     stdin: &mut impl BufRead,
@@ -804,25 +793,16 @@ fn execute(dir: &Utf8Path, command: Command, config: &Value) -> Result<Output, S
             author,
             body,
             implements,
-        } => {
-            let kind = required(kind, "kind")?;
-            let title = required(title, "title")?;
-            let author = resolve_author(author, config)?;
-            let date = Local::now().format("%Y-%m-%d").to_string();
-            let description = body.unwrap_or_default();
-            let (id, path) = store::create(
-                dir,
-                kind,
-                &title,
-                &author,
-                &date,
-                implements.as_deref(),
-                &description,
-            )
-            .map_err(|error| error.to_string())?;
-
-            Ok(format!("Created {path} ({id})\n").into())
-        }
+            source,
+        } => add(
+            dir,
+            required(kind, "kind")?,
+            &required(title, "title")?,
+            &resolve_author(author, config)?,
+            body.as_deref().unwrap_or_default(),
+            implements.as_deref(),
+            source.as_deref(),
+        ),
 
         Command::Comment {
             id,
@@ -890,127 +870,88 @@ fn execute(dir: &Utf8Path, command: Command, config: &Value) -> Result<Output, S
             numbers,
             repo,
             kind,
-        } => {
-            if numbers.is_empty() {
-                return Err("No issue numbers given, and no terminal to ask for one.".to_owned());
-            }
-
-            let mut output = Output::default();
-            for number in numbers {
-                output
-                    .text
-                    .push_str(&import(dir, number, &repo, kind)?.text);
-            }
-
-            Ok(output)
-        }
+        } => import_issues(dir, &numbers, &repo, kind),
 
         Command::List { status, kind, json } => list(dir, status, kind, json),
     }
 }
 
-/// Fetch a GitHub issue and write it into a ticket.
+/// File a ticket, recording where it came from when the caller named a source.
 ///
-/// One way only: replies belong on GitHub and arrive on the next import, so
-/// nothing is ever written back.
-fn import(dir: &Utf8Path, number: u64, repo: &str, kind: Kind) -> Result<Output, String> {
-    let (owner, name) = repo
-        .split_once('/')
-        .ok_or_else(|| format!("`{repo}` is not an `owner/name` pair."))?;
+/// A sourced add goes through the import path: the text came from outside the
+/// repository, so it is escaped, and the write is idempotent, so a sweep can
+/// run as often as it likes without filing anything twice.
+fn add(
+    dir: &Utf8Path,
+    kind: Kind,
+    title: &str,
+    author: &str,
+    body: &str,
+    implements: Option<&str>,
+    source: Option<&str>,
+) -> Result<Output, String> {
+    let date = today();
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| format!("failed to start the async runtime: {error}"))?;
-    let (issue, comments) = runtime.block_on(fetch(owner, name, number))?;
+    let Some(source) = source else {
+        let (id, path) = store::create(dir, kind, title, author, &date, implements, body)
+            .map_err(|error| error.to_string())?;
 
-    if issue.pull_request.is_some() {
-        return Err(format!("{repo}#{number} is a pull request, not an issue."));
-    }
-
-    let comments: Vec<Comment> = comments
-        .into_iter()
-        .map(|comment| Comment {
-            from: format!("gh:{}", comment.user.login),
-            date: comment
-                .created_at
-                .to_rfc3339_opts(SecondsFormat::Secs, true),
-            re: None,
-            body: comment.body.unwrap_or_default(),
-        })
-        .collect();
-
-    let count = comments.len();
-    let imported = store::import(dir, &Import {
-        number,
-        title: &issue.title,
-        description: issue.body.as_deref().unwrap_or_default(),
-        comments,
-        kind,
-        authors: &format!("gh:{}", issue.user.login),
-        date: &issue.created_at.format("%Y-%m-%d").to_string(),
-    })
-    .map_err(|error| error.to_string())?;
-
-    let verb = if imported.created {
-        "Imported"
-    } else {
-        "Refreshed"
+        return Ok(format!("Created {path} ({id})\n").into());
     };
 
-    Ok(format!(
-        "{verb} {} from {repo}#{number} at {} ({count} comments)\n",
-        imported.id, imported.path
+    let source = Source::external(source).map_err(|error| error.to_string())?;
+    let marker = source.marker();
+    let imported = store::import(
+        dir,
+        &Import {
+            source,
+            title,
+            description: body,
+            comments: vec![],
+            kind,
+            authors: author,
+            date: &date,
+        },
+        Existing::Skip,
     )
+    .map_err(|error| error.to_string())?;
+
+    Ok(match imported.outcome {
+        Outcome::Created => format!(
+            "Created {} ({}) from {marker}\n",
+            imported.path, imported.id
+        ),
+        Outcome::Refreshed | Outcome::Skipped => {
+            format!("{marker} is already {}\n", imported.id)
+        }
+    }
     .into())
 }
 
-/// Comments per request; the GitHub maximum, so long threads take few round
-/// trips.
-const PER_PAGE: u8 = 100;
-
-/// Read an issue and every page of its comments.
-async fn fetch(owner: &str, repo: &str, number: u64) -> Result<(Issue, Vec<IssueComment>), String> {
-    // Anonymous requests work against public repositories, at a much lower rate
-    // limit; a token raises it and reaches private ones.
-    let mut builder = jp_github::Octocrab::builder();
-    if let Some(token) = token() {
-        builder = builder.personal_token(token);
-    }
-    let client = builder
-        .build()
-        .map_err(|error| format!("failed to create the GitHub client: {error}"))?;
-
-    let issues = client.issues(owner, repo);
-    let issue = issues
-        .get(number)
-        .await
-        .map_err(|error| format!("failed to read {owner}/{repo}#{number}: {error}"))?;
-
-    let mut comments = vec![];
-    for page in 1.. {
-        let batch = issues
-            .list_comments(number)
-            .page(page)
-            .per_page(PER_PAGE)
-            .send()
-            .await
-            .map_err(|error| format!("failed to read comments on #{number}: {error}"))?;
-
-        let short = batch.len() < usize::from(PER_PAGE);
-        comments.extend(batch);
-        if short {
-            break;
-        }
+/// Import each named issue in turn.
+fn import_issues(
+    dir: &Utf8Path,
+    numbers: &[u64],
+    repo: &str,
+    kind: Kind,
+) -> Result<Output, String> {
+    if numbers.is_empty() {
+        return Err("No issue numbers given, and no terminal to ask for one.".to_owned());
     }
 
-    Ok((issue, comments))
+    let mut output = Output::default();
+    for &number in numbers {
+        output
+            .text
+            .push_str(&github::import(dir, number, repo, kind)?.text);
+    }
+
+    Ok(output)
 }
 
-fn token() -> Option<String> {
-    let non_empty = |name: &str| std::env::var(name).ok().filter(|value| !value.is_empty());
-
-    non_empty("JP_GITHUB_TOKEN").or_else(|| non_empty("GITHUB_TOKEN"))
+/// Today, as a ticket's `Date` field spells it.
+fn today() -> String {
+    Local::now().format("%Y-%m-%d").to_string()
 }
 
 /// Apply an edit, touching only the parts the caller named.
@@ -1073,8 +1014,13 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
         out.push_str(&format!("\n{}\n", ticket.description));
     }
     for (index, comment) in ticket.comments.iter().enumerate() {
+        let re = comment
+            .re
+            .as_deref()
+            .map_or_else(String::new, |re| format!(", replying to {re}"));
+
         out.push_str(&format!(
-            "\n## {}#{} \u{2014} {} at {}\n\n{}\n",
+            "\n## {}#{} \u{2014} {} at {}{re}\n\n{}\n",
             ticket.id,
             index + 1,
             comment.from,

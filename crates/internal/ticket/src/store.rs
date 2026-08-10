@@ -32,6 +32,16 @@ pub enum Error {
     NoSuchTicket(TicketId),
     /// A reply named a comment position the ticket doesn't have.
     NoSuchComment { id: TicketId, position: usize },
+    /// Two files claim the same id.
+    ///
+    /// A merge produces this without conflicting: the slugs differ, so the
+    /// filenames don't collide, and both branches raised the counter to the
+    /// same number.
+    DuplicateId {
+        id: TicketId,
+        first: Utf8PathBuf,
+        second: Utf8PathBuf,
+    },
     /// A ticket file that isn't a well-formed ticket.
     Parse(ParseError),
     /// The filesystem said no.
@@ -45,6 +55,11 @@ impl fmt::Display for Error {
             Self::NoSuchComment { id, position } => {
                 write!(f, "{id} has no comment #{position} to reply to.")
             }
+            Self::DuplicateId { id, first, second } => write!(
+                f,
+                "{id} is claimed by two files: {first} and {second}. Rename one to a free id and \
+                 raise the count in `{COUNTER}`."
+            ),
             Self::Parse(error) => error.fmt(f),
             Self::Io(error) => error.fmt(f),
         }
@@ -207,35 +222,76 @@ pub fn append_comment(
     Ok(count + 1)
 }
 
+/// What an import does with a ticket it has imported before.
+///
+/// Choose by who owns the content afterwards.
+/// A tracker that stays the place discussion happens keeps ownership, so its
+/// tickets are refreshed; a note captured once and then triaged here hands
+/// ownership over, so its ticket is left alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Existing {
+    /// Replace the title, description, and comments from upstream.
+    Refresh,
+
+    /// Leave the ticket as it is.
+    Skip,
+}
+
+/// What an import did to one ticket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Outcome {
+    /// The ticket was filed and filled from upstream.
+    Created,
+
+    /// The ticket was already there, and its content was replaced.
+    Refreshed,
+
+    /// The ticket was already there and was left as it was.
+    Skipped,
+}
+
 /// What an import did.
 pub struct Imported {
     pub id: TicketId,
     pub path: Utf8PathBuf,
-    /// Whether the ticket was created rather than refreshed.
-    pub created: bool,
+    pub outcome: Outcome,
+    /// Comments written from upstream; zero for a ticket that was skipped.
     pub comments: usize,
 }
 
-/// Replace a ticket's content from an upstream issue, creating it if this is
-/// the first import.
+/// Write a ticket from an upstream item, creating it if this is the first
+/// import.
 ///
-/// The ticket is found by its `GitHub` field, so the local id and the upstream
-/// number stay independent.
-/// Re-importing is safe and idempotent: the metadata block survives, so triage
-/// done here is never undone from there.
-pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
-    let marker = upstream.marker();
+/// The ticket is found by the metadata field its [`Source`] names, so the local
+/// id and the upstream identifier stay independent.
+/// Importing again is safe: the metadata block survives either way, so triage
+/// done here is never undone from there, and `existing` decides whether the
+/// content is replaced.
+///
+/// [`Source`]: crate::import::Source
+pub fn import(dir: &Utf8Path, upstream: &Import<'_>, existing: Existing) -> Result<Imported> {
+    let source = &upstream.source;
     let (title, description, comments) = escaped(upstream);
 
-    let existing = list(dir)?.into_iter().find(|entry| {
+    let found = list(dir)?.into_iter().find(|entry| {
         entry
             .ticket
             .as_ref()
-            .is_ok_and(|ticket| ticket.metadata.github.as_deref() == Some(marker.as_str()))
+            .is_ok_and(|t| source.links(&t.metadata))
     });
 
-    let (id, path, created) = if let Some(entry) = existing {
-        (entry.ticket.map_err(Error::Parse)?.id, entry.path, false)
+    let (id, path, outcome) = if let Some(Entry { path, ticket }) = found {
+        let id = ticket.map_err(Error::Parse)?.id;
+        if existing == Existing::Skip {
+            return Ok(Imported {
+                id,
+                path,
+                outcome: Outcome::Skipped,
+                comments: 0,
+            });
+        }
+
+        (id, path, Outcome::Refreshed)
     } else {
         let (id, path) = create(
             dir,
@@ -249,23 +305,23 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
 
         // Record the link before writing content, so a failure halfway leaves a
         // ticket the next import will find rather than duplicate.
-        let source = fs::read_to_string(&path)?;
-        let linked =
-            render::set_metadata(&source, "GitHub", &marker).ok_or(ParseError::MissingMetadata)?;
+        let document = fs::read_to_string(&path)?;
+        let linked = render::set_metadata(&document, source.field(), &source.marker())
+            .ok_or(ParseError::MissingMetadata)?;
         fs::write(&path, linked)?;
 
-        (id, path, true)
+        (id, path, Outcome::Created)
     };
 
-    let source = fs::read_to_string(&path)?;
-    let updated = render::replace_content(&source, id, &title, &description, &comments)
+    let document = fs::read_to_string(&path)?;
+    let updated = render::replace_content(&document, id, &title, &description, &comments)
         .ok_or(ParseError::MissingMetadata)?;
     fs::write(&path, updated)?;
 
     Ok(Imported {
         id,
         path,
-        created,
+        outcome,
         comments: comments.len(),
     })
 }
@@ -345,6 +401,17 @@ fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
         files.push((id, path));
     }
     files.sort_unstable();
+
+    // Ambiguity here is worse than a hard stop: `locate` would pick whichever
+    // path sorts first, so `close 2` would report success while mutating a
+    // ticket the caller never named.
+    if let Some(pair) = files.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+        return Err(Error::DuplicateId {
+            id: pair[0].0,
+            first: pair[0].1.clone(),
+            second: pair[1].1.clone(),
+        });
+    }
 
     Ok(files)
 }

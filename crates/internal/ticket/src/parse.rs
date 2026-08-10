@@ -216,6 +216,7 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
     let mut implements = None;
     let mut promoted_to = None;
     let mut github = None;
+    let mut source = None;
 
     for (key, value) in pairs {
         match key.to_ascii_lowercase().as_str() {
@@ -227,6 +228,7 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
             "implements" => implements = Some(value.to_owned()),
             "promoted to" => promoted_to = Some(value.to_owned()),
             "github" => github = Some(value.to_owned()),
+            "source" => source = Some(value.to_owned()),
             _ => {}
         }
     }
@@ -240,6 +242,7 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
         implements,
         promoted_to,
         github,
+        source,
     })
 }
 

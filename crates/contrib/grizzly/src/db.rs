@@ -158,12 +158,14 @@ pub(crate) mod tests {
                 ZENCRYPTED INTEGER DEFAULT 0
             );
 
+            -- Creation dates are seconds from the Core Data epoch (2001-01-01),
+            -- one day apart, so date filtering has something to divide.
             INSERT INTO ZSFNOTE
                 (Z_PK, ZUNIQUEIDENTIFIER, ZTITLE, ZTEXT, ZMODIFICATIONDATE, ZCREATIONDATE, ZTRASHED, ZARCHIVED)
             VALUES
                 (1, 'note-1', 'Getting Things Done', 'A productivity method by David Allen.' || char(10) || 'It focuses on capturing tasks.', 0, 0, 0, 0),
-                (2, 'note-2', 'Pomodoro Technique', 'Work in 25-minute intervals.' || char(10) || 'Take short breaks between pomodoros.', 0, 0, 0, 0),
-                (3, 'note-3', 'Shopping List', 'Eggs' || char(10) || 'Milk' || char(10) || 'Bread', 0, 0, 0, 0),
+                (2, 'note-2', 'Pomodoro Technique', 'Work in 25-minute intervals.' || char(10) || 'Take short breaks between pomodoros.', 0, 86400, 0, 0),
+                (3, 'note-3', 'Shopping List', 'Eggs' || char(10) || 'Milk' || char(10) || 'Bread', 0, 172800, 0, 0),
                 (4, 'note-4', 'Trashed Note', 'This is trashed', 0, 0, 1, 0),
                 (5, 'note-5', 'Archived Note', 'archivedterm appears here' || char(10) || 'and archivedterm again', 0, 0, 0, 1);
 

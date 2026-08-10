@@ -2098,6 +2098,17 @@ ticket-promote NNN CATEGORY="design": _install-ticket
         echo "${id} names ${promoted}, but no such RFD exists; seeding a new draft." >&2
     fi
 
+    # A run interrupted between the draft and the `promote` below leaves the
+    # ticket unmarked, so a retry would seed a second draft. The seeded Summary
+    # names the ticket, which is the marker to find it by.
+    seeded=$(grep -rl "^Promoted from ticket ${id}\.$" docs/rfd --include='*.md' 2>/dev/null | head -1 || true)
+    if [ -n "$seeded" ]; then
+        draft=$(basename "$seeded" | sed 's/^\([D0-9][0-9]*\)-.*/\1/')
+        echo "${id} already seeded ${seeded}; linking it." >&2
+        jp ticket promote "$id" --to "$draft"
+        exit 0
+    fi
+
     out=$(just rfd-draft {{quote(CATEGORY)}} "$title")
     echo "$out"
     file=${out#Created }
@@ -2128,7 +2139,7 @@ ticket-grep +ARGS:
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries
+develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries _install-ticket
     just _docs "dev" {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.

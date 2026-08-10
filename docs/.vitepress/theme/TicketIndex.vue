@@ -58,7 +58,10 @@ async function openEdit(ticket) {
         const res = await fetch(`${ENDPOINT}?id=${encodeURIComponent(ticket.id)}`)
         const detail = await res.json()
         if (detail?.ok && form.value?.id === ticket.id) {
-            form.value.body = detail.ticket?.description ?? ''
+            // `show` flattens the ticket in JSON and the endpoint spreads it, so
+            // the description is top-level. Reading it a level down yields
+            // undefined, and a save then overwrites text never shown.
+            form.value.body = detail.description ?? ''
         } else if (!detail?.ok) {
             notice.value = detail?.output ?? 'could not read the ticket'
         }

@@ -71,12 +71,179 @@ fn add_takes_a_kind_and_a_title_and_defaults_the_author() {
             author,
             body,
             implements,
+            source,
         } => {
             assert_eq!(kind, Some(Kind::Bug));
             assert_eq!(title.as_deref(), Some("Tool call header misaligned"));
             assert_eq!(author, None);
             assert_eq!(body, None);
             assert_eq!(implements, None);
+            assert_eq!(source, None);
+        }
+        other => panic!("expected add, got {other:?}"),
+    }
+}
+
+/// The whole point of `--source` is that a sweep can run on a timer: the second
+/// add finds the ticket the first one wrote and writes nothing.
+#[test]
+fn adding_the_same_source_twice_files_one_ticket() {
+    let dir = Utf8TempDir::new().unwrap();
+    let add = || {
+        run_command(&dir, Command::Add {
+            kind: Some(Kind::Feature),
+            title: Some("Auto import notes".to_owned()),
+            author: Some("jean".to_owned()),
+            body: Some("Caught on a phone.".to_owned()),
+            implements: None,
+            source: Some("bear:E340A2C4-8671-4233-860B-6AEFF7CB00D8".to_owned()),
+        })
+        .unwrap()
+    };
+
+    let first = add();
+    let second = add();
+
+    assert_eq!(
+        first.text,
+        format!(
+            "Created {}/0001-auto-import-notes.md (T0001) from \
+             bear:E340A2C4-8671-4233-860B-6AEFF7CB00D8\n",
+            dir.path()
+        )
+    );
+    assert_eq!(
+        second.text,
+        "bear:E340A2C4-8671-4233-860B-6AEFF7CB00D8 is already T0001\n"
+    );
+
+    let entries = store::list(dir.path()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(
+        entries[0]
+            .ticket
+            .as_ref()
+            .unwrap()
+            .metadata
+            .source
+            .as_deref(),
+        Some("bear:E340A2C4-8671-4233-860B-6AEFF7CB00D8")
+    );
+}
+
+/// A ticket the sweep filed is written up here afterwards, and the next sweep
+/// must not undo that.
+#[test]
+fn a_sourced_ticket_survives_being_rewritten() {
+    let dir = Utf8TempDir::new().unwrap();
+    let add = |title: &str, body: &str| {
+        run_command(&dir, Command::Add {
+            kind: Some(Kind::Feature),
+            title: Some(title.to_owned()),
+            author: Some("jean".to_owned()),
+            body: Some(body.to_owned()),
+            implements: None,
+            source: Some("bear:note-1".to_owned()),
+        })
+        .unwrap()
+    };
+
+    add("rough note", "half a thought");
+    run_command(&dir, Command::Edit {
+        id: Some(TicketId::new(1)),
+        title: Some("Sharpened title".to_owned()),
+        body: Some("Written up properly.".to_owned()),
+        kind: None,
+        status: Some(Status::InProgress),
+    })
+    .unwrap();
+
+    add("rough note", "half a thought, edited in the note");
+
+    let entries = store::list(dir.path()).unwrap();
+    let ticket = entries[0].ticket.as_ref().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(ticket.title, "Sharpened title");
+    assert_eq!(ticket.description, "Written up properly.");
+    assert_eq!(ticket.metadata.status, Status::InProgress);
+}
+
+/// Sourced text comes from outside the repository, so it is escaped before it
+/// reaches a file the site compiles as Vue.
+#[test]
+fn sourced_content_is_escaped_but_hand_written_content_is_not() {
+    let dir = Utf8TempDir::new().unwrap();
+    let add = |source: Option<&str>| {
+        run_command(&dir, Command::Add {
+            kind: Some(Kind::Chore),
+            title: Some("Title".to_owned()),
+            author: Some("jean".to_owned()),
+            body: Some("Uses {{ interpolation }} and <div>tags</div>.".to_owned()),
+            implements: None,
+            source: source.map(ToOwned::to_owned),
+        })
+        .unwrap()
+    };
+
+    add(Some("bear:note-1"));
+    add(None);
+
+    let entries = store::list(dir.path()).unwrap();
+    assert_eq!(
+        entries[0].ticket.as_ref().unwrap().description,
+        "Uses &#123;&#123; interpolation &#125;&#125; and &lt;div>tags&lt;/div>."
+    );
+    assert_eq!(
+        entries[1].ticket.as_ref().unwrap().description,
+        "Uses {{ interpolation }} and <div>tags</div>."
+    );
+}
+
+#[test]
+fn a_malformed_source_is_refused_before_anything_is_written() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = run_command(&dir, Command::Add {
+        kind: Some(Kind::Chore),
+        title: Some("Title".to_owned()),
+        author: Some("jean".to_owned()),
+        body: None,
+        implements: None,
+        source: Some("nocolon".to_owned()),
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "`nocolon` is not a `scheme:id` pair naming where it came from."
+    );
+    assert!(store::list(dir.path()).unwrap().is_empty());
+}
+
+/// A sweep passes the title after `--` so a note titled "- fix the thing" isn't
+/// read as a flag.
+#[test]
+fn add_takes_a_title_after_a_double_dash() {
+    let args = parse(&[
+        "add",
+        "bug",
+        "--source",
+        "bear:note-1",
+        "--",
+        "-fix the thing",
+    ])
+    .unwrap();
+
+    match args.command {
+        Command::Add {
+            kind,
+            title,
+            source,
+            ..
+        } => {
+            assert_eq!(kind, Some(Kind::Bug));
+            assert_eq!(title.as_deref(), Some("-fix the thing"));
+            assert_eq!(source.as_deref(), Some("bear:note-1"));
         }
         other => panic!("expected add, got {other:?}"),
     }
@@ -246,6 +413,7 @@ fn commands_run_against_the_resolved_directory() {
         author: Some("Jean Mertz".to_owned()),
         body: Some("The header renders one column left of the body.".to_owned()),
         implements: None,
+        source: None,
     })
     .unwrap();
     assert!(created.text.contains("(T0001)"), "{}", created.text);
@@ -315,6 +483,93 @@ fn a_missing_ticket_is_an_error() {
     .unwrap_err();
 
     assert_eq!(error, "No ticket T0009.");
+}
+
+/// A reply names what it answers, as the MCP renderer does.
+/// Without it the human output flattens a thread into a flat list.
+#[test]
+fn show_names_the_comment_a_reply_answers() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_command(&dir, Command::Add {
+        kind: Some(Kind::Bug),
+        title: Some("Tool call header misaligned".to_owned()),
+        author: Some("john".to_owned()),
+        body: None,
+        implements: None,
+        source: None,
+    })
+    .unwrap();
+    run_command(&dir, Command::Comment {
+        id: Some(TicketId::new(1)),
+        author: Some("john".to_owned()),
+        re: None,
+        body: Some("Reproduced at 72 columns.".to_owned()),
+    })
+    .unwrap();
+    run_command(&dir, Command::Comment {
+        id: Some(TicketId::new(1)),
+        author: Some("jp".to_owned()),
+        re: Some(1),
+        body: Some("The wrap calculation is off.".to_owned()),
+    })
+    .unwrap();
+
+    let shown = run_command(&dir, Command::Show {
+        id: Some(TicketId::new(1)),
+        json: false,
+    })
+    .unwrap();
+
+    assert!(
+        shown.text.contains("## T0001#1 \u{2014} john at "),
+        "{}",
+        shown.text
+    );
+    assert!(
+        shown.text.contains("## T0001#2 \u{2014} jp at ")
+            && shown.text.contains(", replying to T0001#1\n"),
+        "{}",
+        shown.text
+    );
+}
+
+/// `show --json` flattens the ticket, so its fields sit at the top level.
+///
+/// Two consumers depend on that shape: the docs dev server spreads this object
+/// into its response and the edit form reads `description` from there, and
+/// `just ticket-promote` reads `.description` and `.metadata.promoted_to` with
+/// `jq`.
+/// Nesting the ticket would break both silently.
+#[test]
+fn show_json_keeps_the_ticket_fields_at_the_top_level() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_command(&dir, Command::Add {
+        kind: Some(Kind::Bug),
+        title: Some("Tool call header misaligned".to_owned()),
+        author: Some("john".to_owned()),
+        body: Some("The header renders one column left of the body.".to_owned()),
+        implements: None,
+        source: None,
+    })
+    .unwrap();
+
+    let shown = run_command(&dir, Command::Show {
+        id: Some(TicketId::new(1)),
+        json: true,
+    })
+    .unwrap();
+    let value: Value = serde_json::from_str(&shown.text).unwrap();
+
+    assert_eq!(value["id"], "T0001");
+    assert_eq!(
+        value["description"],
+        "The header renders one column left of the body."
+    );
+    assert_eq!(value["metadata"]["status"], "Todo");
+    assert!(
+        value.get("ticket").is_none(),
+        "the ticket is flattened, not nested: {value}"
+    );
 }
 
 #[test]
@@ -419,6 +674,7 @@ fn unreadable_tickets_are_warned_about_separately() {
         author: Some("jean".to_owned()),
         body: None,
         implements: None,
+        source: None,
     })
     .unwrap();
     std::fs::write(dir.path().join("0009-mangled.md"), "no heading here\n").unwrap();

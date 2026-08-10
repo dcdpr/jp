@@ -41,6 +41,7 @@ export function parseTicket(content, filename) {
         implements: field(content, 'Implements'),
         promotedTo: field(content, 'Promoted to'),
         github: field(content, 'GitHub'),
+        source: field(content, 'Source'),
         comments: countComments(content),
         // Cross-kind links, resolved in the browser against both sets.
         links: referencedLabels(content).filter(label => label !== `T${id}`),
@@ -147,11 +148,11 @@ export function inDevelopmentRfds(tickets) {
 
 // Read every ticket, ordered by id.
 //
-// Paths resolve from this file's location, so the result doesn't depend on the
-// caller's working directory. A missing directory holds no tickets.
-export function loadTickets() {
-    const dir = resolve(import.meta.dirname, '../../ticket')
-
+// `dir` defaults to this file's sibling ticket directory, so the result doesn't
+// depend on the caller's working directory. The dev server passes its own, to
+// keep the directory it reads and the one it writes back to the same. A missing
+// directory holds no tickets.
+export function loadTickets(dir = resolve(import.meta.dirname, '../../ticket')) {
     let files
     try {
         files = readdirSync(dir).filter(f => /^\d{4}-.+\.md$/.test(f)).sort()

@@ -1,6 +1,7 @@
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
+use crate::import::Source;
 
 const DATE: &str = "2026-08-05";
 const STAMP: &str = "2026-08-05T14:03:11Z";
@@ -79,6 +80,33 @@ fn a_stale_counter_does_not_collide() {
     fs::write(dir.path().join(COUNTER), "1\n").unwrap();
 
     assert_eq!(new_ticket(&dir, "Third").number(), 3);
+}
+
+/// A merge can land two files claiming one id: the slugs differ, so git sees no
+/// conflict, and both branches wrote the same counter.
+/// Addressing that id has to fail rather than pick one.
+#[test]
+fn two_files_claiming_one_id_is_an_error() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Mine");
+    fs::write(
+        dir.path().join("0001-theirs.md"),
+        render::ticket(id, "Theirs", Kind::Bug, "jean", DATE, None, "Description."),
+    )
+    .unwrap();
+
+    let message = close(dir.path(), id).unwrap_err().to_string();
+
+    assert!(
+        message.starts_with("T0001 is claimed by two files:"),
+        "{message}"
+    );
+    assert!(message.contains("0001-mine.md"), "{message}");
+    assert!(message.contains("0001-theirs.md"), "{message}");
+
+    // Listing and allocation read the same floor, so neither hides it either.
+    assert!(list(dir.path()).is_err());
+    assert!(create(dir.path(), Kind::Bug, "Next", "jean", DATE, None, "").is_err());
 }
 
 #[test]
@@ -184,23 +212,27 @@ fn list_of_a_missing_directory_is_empty() {
 fn an_import_creates_a_ticket_linked_to_its_issue() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let imported = import(dir.path(), &Import {
-        number: 123,
-        title: "Crash on empty input",
-        description: "Running `jp q` with no argument panics.",
-        comments: vec![Comment {
-            from: "gh:someone".to_owned(),
-            date: "2026-08-05T00:00:00Z".to_owned(),
-            re: None,
-            body: "Still happens on main.".to_owned(),
-        }],
-        kind: Kind::Bug,
-        authors: "gh:someone",
-        date: "2026-08-05",
-    })
+    let imported = import(
+        dir.path(),
+        &Import {
+            source: Source::GitHub { number: 123 },
+            title: "Crash on empty input",
+            description: "Running `jp q` with no argument panics.",
+            comments: vec![Comment {
+                from: "gh:someone".to_owned(),
+                date: "2026-08-05T00:00:00Z".to_owned(),
+                re: None,
+                body: "Still happens on main.".to_owned(),
+            }],
+            kind: Kind::Bug,
+            authors: "gh:someone",
+            date: "2026-08-05",
+        },
+        Existing::Refresh,
+    )
     .unwrap();
 
-    assert!(imported.created);
+    assert_eq!(imported.outcome, Outcome::Created);
     assert_eq!(imported.comments, 1);
 
     let ticket = parse::document(&fs::read_to_string(&imported.path).unwrap()).unwrap();
@@ -217,7 +249,7 @@ fn an_import_creates_a_ticket_linked_to_its_issue() {
 fn re_importing_replaces_content_and_keeps_triage() {
     let dir = Utf8TempDir::new().unwrap();
     let upstream = |title: &'static str, body: &'static str| Import {
-        number: 123,
+        source: Source::GitHub { number: 123 },
         title,
         description: body,
         comments: vec![],
@@ -226,7 +258,12 @@ fn re_importing_replaces_content_and_keeps_triage() {
         date: "2026-08-05",
     };
 
-    let first = import(dir.path(), &upstream("Crash", "First telling.")).unwrap();
+    let first = import(
+        dir.path(),
+        &upstream("Crash", "First telling."),
+        Existing::Refresh,
+    )
+    .unwrap();
 
     // Local triage between imports.
     let source = fs::read_to_string(&first.path).unwrap();
@@ -234,9 +271,14 @@ fn re_importing_replaces_content_and_keeps_triage() {
     let triaged = render::set_metadata(&triaged, "Implements", "095").unwrap();
     fs::write(&first.path, triaged).unwrap();
 
-    let second = import(dir.path(), &upstream("Crash, revised", "Second telling.")).unwrap();
+    let second = import(
+        dir.path(),
+        &upstream("Crash, revised", "Second telling."),
+        Existing::Refresh,
+    )
+    .unwrap();
 
-    assert!(!second.created);
+    assert_eq!(second.outcome, Outcome::Refreshed);
     assert_eq!(second.id, first.id);
 
     let ticket = parse::document(&fs::read_to_string(&second.path).unwrap()).unwrap();
@@ -251,20 +293,94 @@ fn re_importing_replaces_content_and_keeps_triage() {
 fn imported_content_is_escaped_on_the_way_in() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let imported = import(dir.path(), &Import {
-        number: 7,
-        title: "<script>x</script>",
-        description: "Uses {{ interpolation }}.",
-        comments: vec![],
-        kind: Kind::Bug,
-        authors: "gh:someone",
-        date: "2026-08-05",
-    })
+    let imported = import(
+        dir.path(),
+        &Import {
+            source: Source::GitHub { number: 7 },
+            title: "<script>x</script>",
+            description: "Uses {{ interpolation }}.",
+            comments: vec![],
+            kind: Kind::Bug,
+            authors: "gh:someone",
+            date: "2026-08-05",
+        },
+        Existing::Refresh,
+    )
     .unwrap();
 
     let source = fs::read_to_string(&imported.path).unwrap();
     assert!(!source.contains("<script"), "{source}");
     assert!(!source.contains("{{"), "{source}");
+}
+
+#[test]
+fn an_external_import_links_the_ticket_under_the_source_field() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let imported = import(
+        dir.path(),
+        &Import {
+            source: Source::external("bear:E340A2C4-8671-4233-860B-6AEFF7CB00D8").unwrap(),
+            title: "Auto import notes",
+            description: "I type quick notes elsewhere.",
+            comments: vec![],
+            kind: Kind::Feature,
+            authors: "jean",
+            date: "2026-08-09",
+        },
+        Existing::Skip,
+    )
+    .unwrap();
+
+    assert_eq!(imported.outcome, Outcome::Created);
+
+    let ticket = parse::document(&fs::read_to_string(&imported.path).unwrap()).unwrap();
+    assert_eq!(ticket.title, "Auto import notes");
+    assert_eq!(ticket.metadata.kind, Kind::Feature);
+    assert_eq!(
+        ticket.metadata.source.as_deref(),
+        Some("bear:E340A2C4-8671-4233-860B-6AEFF7CB00D8")
+    );
+    assert_eq!(ticket.metadata.github, None);
+}
+
+/// An item captured once hands ownership to the ticket, so importing it again
+/// finds the ticket and writes nothing — the edits made here survive.
+#[test]
+fn skipping_leaves_an_already_imported_ticket_untouched() {
+    let dir = Utf8TempDir::new().unwrap();
+    let upstream = |title: &'static str, body: &'static str| Import {
+        source: Source::external("bear:note-1").unwrap(),
+        title,
+        description: body,
+        comments: vec![],
+        kind: Kind::Feature,
+        authors: "jean",
+        date: "2026-08-09",
+    };
+
+    let first = import(
+        dir.path(),
+        &upstream("Rough title", "Rough body."),
+        Existing::Skip,
+    )
+    .unwrap();
+    edit(dir.path(), first.id, Some("Sharpened"), Some("Written up.")).unwrap();
+
+    let second = import(
+        dir.path(),
+        &upstream("Rough title", "Rough body, revised."),
+        Existing::Skip,
+    )
+    .unwrap();
+
+    assert_eq!(second.outcome, Outcome::Skipped);
+    assert_eq!(second.id, first.id);
+    assert_eq!(list(dir.path()).unwrap().len(), 1);
+
+    let ticket = parse::document(&fs::read_to_string(&second.path).unwrap()).unwrap();
+    assert_eq!(ticket.title, "Sharpened");
+    assert_eq!(ticket.description, "Written up.");
 }
 
 /// An edit rewrites the content and leaves everything else standing.

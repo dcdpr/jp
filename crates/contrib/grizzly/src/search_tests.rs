@@ -94,6 +94,7 @@ fn archived_xml_marks_archived_and_omits_content() {
         title: "Archived".into(),
         tags: vec![],
         updated_at: None,
+        created_at: None,
         line_hits: vec![],
         total_hits: 3,
         snippet: None,
@@ -158,6 +159,7 @@ fn title_in_xml_output() {
         title: "My Note".into(),
         tags: vec!["work".into()],
         updated_at: Some("2024-01-01 00:00:00".into()),
+        created_at: Some("2024-01-01 00:00:00".into()),
         line_hits: vec![1],
         total_hits: 1,
         snippet: Some(Snippet {
@@ -184,6 +186,7 @@ fn title_xml_escaping() {
         title: r#"Notes & "Quotes" <stuff>"#.into(),
         tags: vec![],
         updated_at: None,
+        created_at: None,
         line_hits: vec![],
         total_hits: 0,
         snippet: None,
@@ -201,6 +204,7 @@ fn xml_lists_all_line_hits() {
         title: "Test".into(),
         tags: vec![],
         updated_at: None,
+        created_at: None,
         line_hits: vec![10, 11, 50],
         total_hits: 3,
         snippet: Some(Snippet {
@@ -343,7 +347,7 @@ fn nested_tag_filter_excludes_untagged() {
 }
 
 #[test]
-fn result_carries_tags_and_updated_at() {
+fn result_carries_tags_and_timestamps() {
     let db = BearDb::in_memory().unwrap();
     let results = search(&db, vec!["productivity"]);
 
@@ -351,6 +355,69 @@ fn result_carries_tags_and_updated_at() {
     assert_eq!(results[0].note_id, "note-1");
     assert_eq!(results[0].tags, vec!["productivity", "projects/jp"]);
     assert!(results[0].updated_at.is_some());
+    assert_eq!(
+        results[0].created_at.as_deref(),
+        Some("2001-01-01 00:00:00")
+    );
+}
+
+/// note-1 and note-2 both carry `productivity`, a day apart.
+#[test]
+fn created_after_drops_notes_older_than_the_cutoff() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        tags: vec!["productivity".into()],
+        created_after: Some("2001-01-02".into()),
+        ..Default::default()
+    });
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].note_id, "note-2");
+}
+
+/// A cutoff at midnight on the day a note was created keeps that note.
+#[test]
+fn created_after_is_inclusive_of_the_cutoff_day() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        tags: vec!["productivity".into()],
+        created_after: Some("2001-01-01".into()),
+        ..Default::default()
+    });
+
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn created_after_beyond_every_note_matches_nothing() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        created_after: Some("2026-01-01".into()),
+        ..Default::default()
+    });
+
+    assert!(results.is_empty());
+}
+
+/// Tag-only queries all score the same, so the date decides the order and a
+/// limit takes the newest rather than an arbitrary row.
+///
+/// The cutoff keeps only the two notes with distinct creation dates, so the
+/// expected order is fully determined.
+#[test]
+fn results_of_equal_score_come_back_newest_first() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        created_after: Some("2001-01-02".into()),
+        ..Default::default()
+    });
+
+    let ids: Vec<&str> = results.iter().map(|r| r.note_id.as_str()).collect();
+    assert_eq!(ids, vec!["note-3", "note-2"]);
 }
 
 #[test]
