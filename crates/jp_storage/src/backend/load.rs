@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use chrono::{DateTime, Utc};
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 
+use super::Projection;
 use crate::{LoadError, validate::ValidationError};
 
 /// Controls which storage partition to scan.
@@ -29,6 +30,21 @@ pub enum StoragePresence {
     Projected,
     /// Present only in the workspace, not yet imported into user-local.
     WorkspaceOnly,
+    /// Created in memory and not yet written anywhere.
+    ///
+    /// Never produced by a scan: a store cannot report something it does not
+    /// hold.
+    /// It is recorded when a conversation is created and replaced the first
+    /// time a scan finds it, which is also the first moment it is known to be
+    /// durable.
+    ///
+    /// It carries the projection it was created with, so the write intent
+    /// survives until there is a stored presence to derive one from.
+    ///
+    /// Distinguishing this from a durable presence is what lets an index reload
+    /// tell "created here, not saved yet" apart from "deleted by someone else":
+    /// both are absent from the scan, and only one should be forgotten.
+    Unwritten(Projection),
 }
 
 /// A conversation ID paired with where its data lives.
