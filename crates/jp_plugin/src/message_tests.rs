@@ -62,12 +62,21 @@ fn paths_info_omits_none_fields() {
 
 #[test]
 fn plugin_ready_roundtrip() {
-    let msg = PluginToHost::Ready;
+    let msg = PluginToHost::Ready(ReadyMessage { protocol: 2 });
     let json = serde_json::to_string(&msg).unwrap();
-    assert_eq!(json, r#"{"type":"ready"}"#);
+    assert_eq!(json, r#"{"type":"ready","protocol":2}"#);
 
     let parsed: PluginToHost = from_str(&json).unwrap();
     assert_eq!(msg, parsed);
+}
+
+/// A plugin built before the field existed sends a bare `ready`, and is taken
+/// at its word: it can only have been written against protocol 1.
+#[test]
+fn plugin_ready_without_a_protocol_reads_as_the_first_version() {
+    let parsed: PluginToHost = from_str(r#"{"type":"ready"}"#).unwrap();
+
+    assert_eq!(parsed, PluginToHost::Ready(ReadyMessage { protocol: 1 }));
 }
 
 #[test]
