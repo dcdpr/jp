@@ -219,6 +219,37 @@ fn escalation_counter_bumps_and_resets() {
     assert_eq!(state.bump(now + Duration::from_secs(10)), 1);
 }
 
+/// A clone is a second handle onto one router, not a second router.
+///
+/// Work running away from the thread that started it holds a clone, and a
+/// handler it registers has to be one the signal task reaches.
+/// Were the state duplicated instead of shared, the press would find an empty
+/// stack and fall through to requesting shutdown, which is what this pins.
+#[tokio::test]
+async fn a_cloned_router_shares_the_handler_stack() {
+    let (router, signals) = super::testing::test_router();
+    let clone = router.clone();
+
+    // Registered through the clone, delivered through the original's source.
+    let (_guard, mut interrupt_rx) = clone.push_handler();
+
+    signals.interrupt().await;
+
+    // Bounded, because the failure this guards against is a notification that
+    // never arrives: the guard keeps the sender alive, so an unshared stack would
+    // leave `recv` blocked rather than closed, and the test would hang instead of
+    // failing.
+    tokio::time::timeout(Duration::from_secs(5), interrupt_rx.recv())
+        .await
+        .expect("a handler pushed on a clone is reached by the signal task")
+        .expect("the notification channel stayed open");
+
+    // The press stopped at the handler, so neither of these ran.
+    assert!(!router.shutdown_token().is_cancelled());
+    assert!(!clone.shutdown_token().is_cancelled());
+    assert!(signals.exit_codes().is_empty());
+}
+
 /// Drives the full Ctrl-C escalation ladder through the real signal task —
 /// handler notification, shutdown, process exit — without ending the test
 /// process: the injected exit action records the code instead of exiting.

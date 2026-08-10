@@ -1065,17 +1065,18 @@ impl Query {
     }
 }
 
-/// Everything a turn needs, gathered in one place.
+/// Everything a turn needs, owned.
 ///
-/// Collecting reads the context; running no longer touches it.
-/// That split is what lets the slow half of a turn be driven by a caller that
-/// is not the `query` command, without handing it the whole CLI context.
-pub(crate) struct TurnInputs<'a> {
+/// Collecting reads the context; running borrows nothing from it.
+/// That split is the point: a caller can start a turn and then get on with
+/// other work, because the running half holds nothing belonging to whoever
+/// started it.
+pub(crate) struct TurnInputs {
     config: Arc<AppConfig>,
 
-    /// Borrowed, because the router owns the process-wide signal task and so
-    /// cannot be cloned.
-    signals: &'a SignalRouter,
+    /// A handle onto the process router, not a second router, so a handler this
+    /// turn pushes is one the signal task reaches.
+    signals: SignalRouter,
     mcp_client: jp_mcp::Client,
     root: Utf8PathBuf,
     is_tty: bool,
@@ -1091,12 +1092,12 @@ pub(crate) struct TurnInputs<'a> {
     mcp_servers: StartupSet,
 }
 
-impl<'a> TurnInputs<'a> {
+impl TurnInputs {
     /// Collect what a turn needs from the context.
     ///
     /// Deliberately does nothing slow.
     /// Everything that waits, MCP servers coming up and the provider, happens
-    /// in [`Self::run`], which reads no context.
+    /// in [`Self::run`], which borrows nothing from the context.
     /// A caller serving other work off the same task is blocked for exactly as
     /// long as this takes.
     ///
@@ -1109,7 +1110,7 @@ impl<'a> TurnInputs<'a> {
     /// elsewhere has no reader there, and a sink is how it stops writing into a
     /// session it does not belong to.
     pub(crate) async fn collect(
-        ctx: &'a Ctx,
+        ctx: &Ctx,
         config: Arc<AppConfig>,
         lock: &ConversationLock,
         chat_request: ChatRequest,
@@ -1134,7 +1135,7 @@ impl<'a> TurnInputs<'a> {
                 workspace_id: ctx.workspace.id().to_string(),
                 conversation_id: lock.id().to_string(),
             },
-            signals: &ctx.signals,
+            signals: ctx.signals.clone(),
             mcp_client: ctx.mcp_client.clone(),
             printer,
             is_tty: ctx.term.is_tty,
@@ -1149,8 +1150,8 @@ impl<'a> TurnInputs<'a> {
 
     /// Finish preparing, then run the turn.
     ///
-    /// Reads no context, so the waiting happens away from whoever assembled
-    /// this.
+    /// Borrows only the lock, which owns itself, so this can run on a task of
+    /// its own, which is where the waiting belongs.
     /// `stream` is the snapshot the thread is assembled from.
     pub(crate) async fn run(
         self,
@@ -1183,7 +1184,7 @@ impl<'a> TurnInputs<'a> {
 
         Query::run_turn(
             cfg,
-            self.signals,
+            &self.signals,
             &self.mcp_client,
             self.root,
             self.is_tty,
