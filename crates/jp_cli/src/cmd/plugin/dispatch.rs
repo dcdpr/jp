@@ -4,7 +4,7 @@
 //! the plugin sends `exit` or the process terminates.
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     fmt::Write as _,
     fs,
     io::{BufRead, BufReader, Write},
@@ -17,9 +17,14 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use jp_config::plugins::{
-    PluginsConfig,
-    command::{CommandPluginConfig, RunPolicy},
+use jp_config::{
+    AppConfig,
+    fs::user_global_config_dir,
+    plugins::{
+        PluginsConfig,
+        command::{CommandPluginConfig, RunPolicy},
+    },
+    util::list_configs_in_load_path,
 };
 use jp_conversation::ConversationId;
 use jp_editor::{EditOutcome, EditorBackend};
@@ -27,15 +32,16 @@ use jp_inquire::{InlineOption, InlineReply, InlineSelect, ReplyOutcome};
 use jp_plugin::{
     PROTOCOL_VERSION,
     message::{
-        ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigResponse,
-        ConversationSummary, ConversationsResponse, DescribeResponse, DoneResponse, DraftResponse,
-        ErrorResponse, EventsResponse, HostToPlugin, InitMessage, LogMessage, PathsInfo,
-        PluginToHost, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
+        ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigEntry, ConfigResponse,
+        ConfigsResponse, ConversationSummary, ConversationsResponse, DescribeResponse,
+        DoneResponse, DraftResponse, ErrorResponse, EventsResponse, HostToPlugin, InitMessage,
+        LogMessage, PathsInfo, PluginToHost, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
     },
 };
 use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
+use relative_path::RelativePath;
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 use tracing::{debug, error, trace, warn};
@@ -292,6 +298,7 @@ pub(crate) fn run_plugin(
         &composer,
         ctx.session.as_ref(),
         fs_backend.as_deref(),
+        &config,
     );
 
     // Always clean up, even on error.
@@ -414,6 +421,7 @@ fn message_loop(
     composer: &Composer<'_>,
     session: Option<&Session>,
     fs_backend: Option<&FsStorageBackend>,
+    config: &AppConfig,
 ) -> Result<(), cmd::Error> {
     for line in reader.lines() {
         let line =
@@ -452,6 +460,7 @@ fn message_loop(
             config_json,
             session,
             fs_backend,
+            config,
         )? == Flow::Stop
         {
             return Ok(());
@@ -490,6 +499,7 @@ fn handle_request(
     config_json: &Value,
     session: Option<&Session>,
     fs_backend: Option<&FsStorageBackend>,
+    config: &AppConfig,
 ) -> Result<Flow, cmd::Error> {
     match msg {
         PluginToHost::Ready(ready) => {
@@ -538,6 +548,11 @@ fn handle_request(
 
         PluginToHost::WriteDraft(req) => {
             let response = handle_write_draft(fs_backend, workspace, req);
+            write_message(writer, &response)?;
+        }
+
+        PluginToHost::ListConfigs(req) => {
+            let response = handle_list_configs(config, workspace, fs_backend, req.id);
             write_message(writer, &response)?;
         }
 
@@ -826,6 +841,59 @@ fn handle_write_draft(
         content: req.content,
         conflict: false,
     })
+}
+
+/// Every configuration a query can name, from the same roots `--cfg` searches.
+///
+/// Roots are searched independently, and a segment present in more than one is
+/// still one selectable thing, because naming it merges all of them.
+/// Sorted and deduplicated for that reason.
+fn handle_list_configs(
+    config: &AppConfig,
+    workspace: &Workspace,
+    fs_backend: Option<&FsStorageBackend>,
+    req_id: Option<String>,
+) -> HostToPlugin {
+    let mut roots: Vec<Utf8PathBuf> = Vec::new();
+
+    if let Some(dir) = user_global_config_dir(None) {
+        roots.push(dir);
+    }
+    roots.push(workspace.root().to_owned());
+    if let Some(path) =
+        fs_backend.and_then(|fs| fs.user_storage_with_path(RelativePath::new("config")))
+    {
+        roots.push(path);
+    }
+
+    let mut segments = BTreeSet::new();
+    for root in &roots {
+        for load_path in &config.config_load_paths {
+            let Ok(dir) = Utf8PathBuf::try_from(load_path.to_path(root)) else {
+                continue;
+            };
+
+            segments.extend(list_configs_in_load_path(&dir));
+        }
+    }
+
+    let data = segments
+        .into_iter()
+        .map(|segment| {
+            let (namespace, name) = match segment.rsplit_once('/') {
+                Some((namespace, name)) => (namespace.to_owned(), name.to_owned()),
+                None => (String::new(), segment.clone()),
+            };
+
+            ConfigEntry {
+                segment,
+                namespace,
+                name,
+            }
+        })
+        .collect();
+
+    HostToPlugin::Configs(ConfigsResponse { id: req_id, data })
 }
 
 fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> HostToPlugin {
