@@ -1,7 +1,15 @@
 //! Protocol constants and helpers.
 
 /// Current protocol version.
-pub const PROTOCOL_VERSION: u32 = 1;
+///
+/// Bumped whenever the host gains a message or a message variant a plugin might
+/// send.
+///
+/// | Version | Adds                                          |
+/// | ------- | --------------------------------------------- |
+/// | 1       | The initial protocol.                         |
+/// | 2       | `compose` / `composed`, for host-run prompts. |
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Errors that can occur during plugin protocol communication.
 #[derive(Debug, thiserror::Error)]
