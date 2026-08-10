@@ -577,6 +577,11 @@ pub(super) async fn run_turn_loop(
 
                             let is_finished = matches!(event, Event::Finished(_));
 
+                            // A `Flush` is the provider saying a content block is
+                            // final, which makes it the point where the stream is
+                            // consistent enough to persist.
+                            let commits_content = matches!(event, Event::Flush { .. });
+
                             // `handle_llm_event` returns turn control plus
                             // any newly committed event that needs immediate
                             // shell handling. We dispatch on the committed
@@ -591,6 +596,26 @@ pub(super) async fn run_turn_loop(
                                     &mut stream_retry,
                                 )
                             });
+
+                            // Persist each completed block and each tool call as it
+                            // lands, rather than once the phase ends.
+                            //
+                            // Durability is one reason: a process that dies mid-turn
+                            // keeps everything the assistant had finished saying,
+                            // instead of losing the whole phase. The other is that
+                            // anything reading the conversation from outside this
+                            // process sees the turn progress, which is what lets a
+                            // second frontend watch a turn rather than only its
+                            // result.
+                            //
+                            // A failed write is not fatal: the phase-end flush will
+                            // try again, and the in-memory stream is still correct.
+                            let commits = commits_content
+                                || matches!(committed, CommittedEvent::ToolCallRequest(_));
+                            if commits && let Err(error) = conv.flush() {
+                                warn!(%error, "Failed to persist mid-turn; will retry.");
+                            }
+
                             match action {
                                 LoopAction::Continue => {}
                                 LoopAction::Break => break,

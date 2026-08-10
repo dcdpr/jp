@@ -415,6 +415,97 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
 }
 
+/// A block the provider has finished is on disk before the turn ends.
+///
+/// Read while the turn is still running, which is the only window where this
+/// differs from persisting at the end of the phase: the provider commits a
+/// block, flushes it, and then parks, and the store is read at that point
+/// rather than afterwards.
+/// Anything watching the conversation from another process sees the same thing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_completed_block_is_persisted_before_the_turn_ends() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let config = AppConfig::new_test();
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+        let conv_id = lock.id();
+
+        let stalled = Arc::new(Notify::new());
+        let provider: Arc<dyn Provider> = Arc::new(
+            StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
+        );
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
+
+        // Stop, so the turn ends once the store has been read.
+        let backend = MockPromptBackend::new().with_inline_responses(['s']);
+
+        // The window: the stream has flushed its block and parked, and the turn
+        // has not ended. Read the store here, then let the turn finish.
+        let observer = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            let fs = Arc::clone(&fs);
+            async move {
+                stalled.notified().await;
+                let seen = fs.read_test_events_raw(&conv_id);
+                signals.interrupt().await;
+                seen
+            }
+        });
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false, // is_tty
+            &[],   // attachments
+            &lock,
+            ToolChoice::Auto,
+            &[], // tools
+            printer.clone(),
+            Arc::new(backend),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("What is 2+2?"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        let mid_turn = observer.await.unwrap();
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let mid_turn = mid_turn.expect("the store is written before the turn ends");
+        assert!(
+            mid_turn.contains("The answer is 4."),
+            "A flushed block should already be persisted while the turn runs.\nFile \
+             contents:\n{mid_turn}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
 /// Cancelling the streaming interrupt menu (a second Ctrl-C) escalates: the
 /// partial content is committed, a graceful shutdown begins, and the turn ends
 /// with the interrupt error.
