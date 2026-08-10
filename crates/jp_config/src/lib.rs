@@ -369,26 +369,28 @@ impl AppConfig {
     ///
     /// Returns an error if `default_values` fails, if the partial is missing
     /// required fields, or if the resolved configuration fails validation.
-    pub fn from_partial_with_defaults(mut partial: PartialAppConfig) -> Result<Self, ConfigError> {
-        // Inquiry settings inherit from the top-level assistant. This runs
-        // before the `#[setting(default)]` layer below, so an unset inquiry
-        // field takes the user's configured assistant value rather than the
-        // type's default.
-        partial.conversation.inquiry.assistant = partial
-            .conversation
-            .inquiry
-            .assistant
-            .inherit_from(partial.assistant.clone());
+    pub(crate) fn from_partial_with_defaults(
+    mut partial: PartialAppConfig,
+) -> Result<Self, ConfigError> {
+    // Inquiry settings inherit from the top-level assistant. This runs
+    // before the `#[setting(default)]` layer below, so an unset inquiry
+    // field takes the user's configured assistant value rather than the
+    // type's default.
+    partial.conversation.inquiry.assistant = partial
+        .conversation
+        .inquiry
+        .assistant
+        .inherit_from(partial.assistant.clone());
 
-        let partial = match PartialAppConfig::default_values(&())? {
-            Some(defaults) => partial.fill_from(defaults),
-            None => partial,
-        };
+    let partial = match PartialAppConfig::default_values(&())? {
+        Some(defaults) => partial.fill_from(defaults),
+        None => partial,
+    };
 
-        let config = Self::from_partial(partial, vec![])?;
-        config.validate()?;
-        Ok(config)
-    }
+    let config = Self::from_partial(partial, vec![])?;
+    config.validate()?;
+    Ok(config)
+}
 
     /// Return a default configuration for testing purposes.
     ///
@@ -469,39 +471,39 @@ impl AppConfig {
     /// `Option<T>` wraps a named union in a second union rather than merging
     /// into it, so this recurses through both levels.
     fn addressable(schema: Schema) -> Addressable {
-        let SchemaType::Union(union) = schema.ty else {
-            return match schema.ty {
-                SchemaType::Struct(_) => Addressable::Keys(schema),
-                _ => Addressable::Value,
-            };
-        };
-
-        // A union naming an expanded form describes one value written several
-        // ways: the shorthand goes at this path, and the expanded form names the
-        // keys. Both are writable, so both are reported.
-        if let Some(expanded) = union.expanded_variant() {
-            return match Self::addressable(expanded.clone()) {
-                Addressable::Keys(inner) | Addressable::ValueOrKeys(inner) => {
-                    Addressable::ValueOrKeys(inner)
-                }
-                Addressable::Value => Addressable::Value,
-            };
-        }
-
-        // Otherwise the variants are distinct values. Only `Option<T>` resolves
-        // to something addressable, since dropping null leaves one shape; a union
-        // of several real shapes has no single set of keys, and which keys apply
-        // depends on what the user wrote (`editor.cmd = "code"` has no `args`).
-        let mut variants = union
-            .variants_types
-            .into_iter()
-            .filter(|variant| !matches!(variant.ty, SchemaType::Null));
-
-        match (variants.next(), variants.next()) {
-            (Some(only), None) => Self::addressable(*only),
+    let SchemaType::Union(union) = schema.ty else {
+        return match schema.ty {
+            SchemaType::Struct(_) => Addressable::Keys(schema),
             _ => Addressable::Value,
-        }
+        };
+    };
+
+    // A union naming an expanded form describes one value written several
+    // ways: the shorthand goes at this path, and the expanded form names the
+    // keys. Both are writable, so both are reported.
+    if let Some(expanded) = union.expanded_variant() {
+        return match Self::addressable(expanded.clone()) {
+            Addressable::Keys(inner) | Addressable::ValueOrKeys(inner) => {
+                Addressable::ValueOrKeys(inner)
+            }
+            Addressable::Value => Addressable::Value,
+        };
     }
+
+    // Otherwise the variants are distinct values. Only `Option<T>` resolves
+    // to something addressable, since dropping null leaves one shape; a union
+    // of several real shapes has no single set of keys, and which keys apply
+    // depends on what the user wrote (`editor.cmd = "code"` has no `args`).
+    let mut variants = union
+        .variants_types
+        .into_iter()
+        .filter(|variant| !matches!(variant.ty, SchemaType::Null));
+
+    match (variants.next(), variants.next()) {
+        (Some(only), None) => Self::addressable(*only),
+        _ => Addressable::Value,
+    }
+}
 
     /// Return a list of all environment variable names in the configuration.
     ///
@@ -554,58 +556,58 @@ impl AppConfig {
     ///
     /// Returns an error if an alias cannot be resolved.
     pub fn resolve_aliases(&mut self) -> Result<(), Error> {
-        // Flatten the alias map to concrete model IDs, following alias-to-alias
-        // chains. This validates the whole map up front, so cycles and unknown
-        // targets surface during config load even for aliases that no field
-        // references, and leaves every entry as a concrete `Id`.
-        let resolved = self
-            .providers
-            .llm
-            .resolved_aliases()
-            .map_err(|e| Error::Custom(format!("providers.llm.aliases: {e}").into()))?;
-        self.providers.llm.aliases = resolved
-            .into_iter()
-            .map(|(name, id)| (name, model::id::ModelIdOrAliasConfig::Id(id)))
-            .collect();
+    // Flatten the alias map to concrete model IDs, following alias-to-alias
+    // chains. This validates the whole map up front, so cycles and unknown
+    // targets surface during config load even for aliases that no field
+    // references, and leaves every entry as a concrete `Id`.
+    let resolved = self
+        .providers
+        .llm
+        .resolved_aliases()
+        .map_err(|e| Error::Custom(format!("providers.llm.aliases: {e}").into()))?;
+    self.providers.llm.aliases = resolved
+        .into_iter()
+        .map(|(name, id)| (name, model::id::ModelIdOrAliasConfig::Id(id)))
+        .collect();
 
-        let aliases = &self.providers.llm.aliases;
+    let aliases = &self.providers.llm.aliases;
 
-        self.assistant
-            .model
-            .id
-            .resolve_in_place(aliases)
-            .map_err(|e| Error::Custom(format!("assistant.model.id: {e}").into()))?;
+    self.assistant
+        .model
+        .id
+        .resolve_in_place(aliases)
+        .map_err(|e| Error::Custom(format!("assistant.model.id: {e}").into()))?;
 
-        self.conversation
-            .inquiry
-            .assistant
-            .model
-            .id
-            .resolve_in_place(aliases)
-            .map_err(|e| {
-                Error::Custom(format!("conversation.inquiry.assistant.model.id: {e}").into())
-            })?;
+    self.conversation
+        .inquiry
+        .assistant
+        .model
+        .id
+        .resolve_in_place(aliases)
+        .map_err(|e| {
+            Error::Custom(format!("conversation.inquiry.assistant.model.id: {e}").into())
+        })?;
 
-        if let Some(ref mut model) = self.conversation.title.generate.model {
-            model.id.resolve_in_place(aliases).map_err(|e| {
-                Error::Custom(format!("conversation.title.generate.model.id: {e}").into())
-            })?;
-        }
-
-        for rule in &mut self.conversation.compaction.rules {
-            if let Some(summary) = rule.summary.as_mut()
-                && let Some(model) = summary.model.as_mut()
-            {
-                model.id.resolve_in_place(aliases).map_err(|e| {
-                    Error::Custom(
-                        format!("conversation.compaction.rules[].summary.model.id: {e}").into(),
-                    )
-                })?;
-            }
-        }
-
-        Ok(())
+    if let Some(ref mut model) = self.conversation.title.generate.model {
+        model.id.resolve_in_place(aliases).map_err(|e| {
+            Error::Custom(format!("conversation.title.generate.model.id: {e}").into())
+        })?;
     }
+
+    for rule in &mut self.conversation.compaction.rules {
+        if let Some(summary) = rule.summary.as_mut()
+            && let Some(model) = summary.model.as_mut()
+        {
+            model.id.resolve_in_place(aliases).map_err(|e| {
+                Error::Custom(
+                    format!("conversation.compaction.rules[].summary.model.id: {e}").into(),
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
 }
 
 impl Validator for AppConfig {
