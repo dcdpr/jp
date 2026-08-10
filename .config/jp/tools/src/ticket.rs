@@ -1,0 +1,285 @@
+//! The `ticket_*` tools: create, read, comment on, and close the work items
+//! under `docs/ticket/`.
+//!
+//! The format lives in the `ticket` crate; this module is the tool surface over
+//! it.
+//! Tickets the assistant writes are attributed to `jp`, and comments are
+//! rendered with their 1-based positions so a reply can name the comment it
+//! answers.
+
+// The leading `::` picks the crate over this module, which shares its name.
+use ::ticket::{Kind, ParseError, Status, Ticket, TicketId, store};
+use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{Local, SecondsFormat, Utc};
+use serde_json::Value;
+
+use crate::{
+    Context, Tool,
+    util::{ToolResult, error, unknown_tool},
+};
+
+/// The handle tickets and comments written by the assistant carry.
+const HANDLE: &str = "jp";
+
+#[expect(
+    clippy::needless_pass_by_value,
+    reason = "consistent with other module run fns"
+)]
+pub fn run(ctx: Context, t: Tool) -> ToolResult {
+    let root = ctx.root.as_path();
+
+    match t.name.trim_start_matches("ticket_") {
+        "create" => {
+            let Ok(kind) = t.req::<String>("kind")?.parse::<Kind>() else {
+                return error("`kind` must be one of: bug, feature, chore.");
+            };
+            create(
+                root,
+                kind,
+                &t.req::<String>("title")?,
+                t.opt::<String>("implements")?.as_deref(),
+                t.opt("body")?,
+            )
+        }
+
+        "comment" => {
+            let id = match id_arg(&t.req("id")?) {
+                Ok(id) => id,
+                Err(message) => return error(message),
+            };
+            comment(root, id, t.opt("re")?, &t.req::<String>("body")?)
+        }
+
+        "close" => match id_arg(&t.req("id")?) {
+            Ok(id) => close(root, id),
+            Err(message) => error(message),
+        },
+
+        "show" => match id_arg(&t.req("id")?) {
+            Ok(id) => show(root, id),
+            Err(message) => error(message),
+        },
+
+        "list" => {
+            let status = match t.opt::<String>("status")?.map(|s| s.parse::<Status>()) {
+                Some(Err(_)) => {
+                    return error("`status` must be one of: todo, in progress, done.");
+                }
+                Some(Ok(status)) => Some(status),
+                None => None,
+            };
+            let kind = match t.opt::<String>("kind")?.map(|k| k.parse::<Kind>()) {
+                Some(Err(_)) => return error("`kind` must be one of: bug, feature, chore."),
+                Some(Ok(kind)) => Some(kind),
+                None => None,
+            };
+            list(root, status, kind)
+        }
+
+        _ => unknown_tool(t),
+    }
+}
+
+fn create(
+    root: &Utf8Path,
+    kind: Kind,
+    title: &str,
+    implements: Option<&str>,
+    body: Option<String>,
+) -> ToolResult {
+    if title.trim().is_empty() {
+        return error("`title` must not be empty.");
+    }
+
+    let date = Local::now().format("%Y-%m-%d").to_string();
+    let (id, path) = store::create(
+        &dir(root),
+        kind,
+        title.trim(),
+        HANDLE,
+        &date,
+        implements,
+        &body.unwrap_or_default(),
+    )?;
+
+    Ok(format!("Created {id} at {}", relative(root, &path)).into())
+}
+
+fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> ToolResult {
+    if body.trim().is_empty() {
+        return error("`body` must not be empty.");
+    }
+
+    let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    match store::append_comment(&dir(root), id, HANDLE, &date, re, body.trim()) {
+        Ok(position) => Ok(format!("Added {id}#{position}").into()),
+        Err(store::Error::NoSuchTicket(_) | store::Error::NoSuchComment { .. }) => error(format!(
+            "No {id}, or no comment #{} on it.",
+            re.unwrap_or(0)
+        )),
+        Err(other) => Err(other.into()),
+    }
+}
+
+fn close(root: &Utf8Path, id: TicketId) -> ToolResult {
+    match store::close(&dir(root), id) {
+        Ok((_, Status::Done)) => Ok(format!("{id} was already Done.").into()),
+        Ok((_, previous)) => Ok(format!("{id}: {previous} -> Done").into()),
+        Err(store::Error::NoSuchTicket(id)) => error(format!("No {id}.")),
+        Err(other) => Err(other.into()),
+    }
+}
+
+fn show(root: &Utf8Path, id: TicketId) -> ToolResult {
+    let entries = store::list(&dir(root))?;
+    let Some(entry) = entries.into_iter().find(|entry| {
+        entry
+            .path
+            .file_name()
+            .is_some_and(|name| name.starts_with(&id.file_prefix()))
+    }) else {
+        return error(format!("No {id}."));
+    };
+
+    match entry.ticket {
+        Ok(ticket) => Ok(render_ticket(&ticket, &relative(root, &entry.path)).into()),
+        Err(problem) => error(format!("{id} is not a well-formed ticket: {problem}")),
+    }
+}
+
+fn list(root: &Utf8Path, status: Option<Status>, kind: Option<Kind>) -> ToolResult {
+    let entries = store::list(&dir(root))?;
+
+    let mut tickets = vec![];
+    let mut unreadable = vec![];
+    for entry in &entries {
+        match &entry.ticket {
+            Ok(ticket) => tickets.push(ticket),
+            Err(problem) => unreadable.push(format!("{}: {problem}", relative(root, &entry.path))),
+        }
+    }
+    tickets.retain(|ticket| {
+        status.is_none_or(|status| status == ticket.metadata.status)
+            && kind.is_none_or(|kind| kind == ticket.metadata.kind)
+    });
+
+    Ok(render_list(&tickets, &unreadable).into())
+}
+
+/// The ticket directory inside the workspace.
+fn dir(root: &Utf8Path) -> Utf8PathBuf {
+    root.join(store::DEFAULT_DIR)
+}
+
+/// A path the model can hand straight to `fs_read_file`.
+fn relative(root: &Utf8Path, path: &Utf8Path) -> String {
+    path.strip_prefix(root).unwrap_or(path).to_string()
+}
+
+/// Render the board as one line per ticket.
+fn render_list(tickets: &[&Ticket], unreadable: &[String]) -> String {
+    let mut out = String::new();
+
+    if tickets.is_empty() {
+        out.push_str("No tickets match.\n");
+    }
+    for ticket in tickets {
+        let id = ticket.id.to_string();
+        let status = ticket.metadata.status.to_string();
+        let kind = ticket.metadata.kind.to_string();
+        let comments = match ticket.comments.len() {
+            0 => String::new(),
+            count => format!(" ({count} comments)"),
+        };
+        let blocked = ticket
+            .metadata
+            .blocked_by
+            .as_deref()
+            .map_or_else(String::new, |by| format!(" [blocked by {by}]"));
+
+        out.push_str(&format!(
+            "{id:<6} {status:<12} {kind:<8} {}{blocked}{comments}\n",
+            ticket.title
+        ));
+    }
+
+    if !unreadable.is_empty() {
+        out.push_str("\nUnreadable ticket files:\n");
+        for problem in unreadable {
+            out.push_str(&format!("- {problem}\n"));
+        }
+    }
+
+    out
+}
+
+/// Render one ticket, numbering the comments so a reply can name its target.
+fn render_ticket(ticket: &Ticket, path: &str) -> String {
+    let metadata = &ticket.metadata;
+    let mut out = format!("# {}: {}\n\n", ticket.id, ticket.title);
+
+    out.push_str(&format!("- **Path**: {path}\n"));
+    out.push_str(&format!("- **Status**: {}\n", metadata.status));
+    out.push_str(&format!("- **Kind**: {}\n", metadata.kind));
+    out.push_str(&format!("- **Authors**: {}\n", metadata.authors));
+    out.push_str(&format!("- **Date**: {}\n", metadata.date));
+    for (label, value) in [
+        ("Blocked by", &metadata.blocked_by),
+        ("Implements", &metadata.implements),
+        ("Promoted to", &metadata.promoted_to),
+        ("GitHub", &metadata.github),
+    ] {
+        if let Some(value) = value {
+            out.push_str(&format!("- **{label}**: {value}\n"));
+        }
+    }
+
+    if !ticket.description.is_empty() {
+        out.push_str(&format!("\n{}\n", ticket.description));
+    }
+
+    if ticket.comments.is_empty() {
+        out.push_str("\nNo comments yet.\n");
+        return out;
+    }
+
+    out.push_str(&format!("\n## Comments ({})\n", ticket.comments.len()));
+    for (index, comment) in ticket.comments.iter().enumerate() {
+        let re = comment
+            .re
+            .as_deref()
+            .map_or_else(String::new, |re| format!(", replying to {re}"));
+
+        out.push_str(&format!(
+            "\n### {}#{} — {} at {}{re}\n\n{}\n",
+            ticket.id,
+            index + 1,
+            comment.from,
+            comment.date,
+            comment.body
+        ));
+    }
+
+    out
+}
+
+/// Read a ticket id from a tool argument.
+///
+/// Models pass ids both as strings (`"T0042"`) and as bare numbers, so both are
+/// accepted.
+fn id_arg(value: &Value) -> Result<TicketId, String> {
+    match value {
+        Value::String(id) => id.parse().map_err(|error: ParseError| error.to_string()),
+        Value::Number(number) => number
+            .as_u64()
+            .and_then(|number| u32::try_from(number).ok())
+            .filter(|number| *number > 0)
+            .map(TicketId::new)
+            .ok_or_else(|| format!("`{number}` is not a ticket id.")),
+        other => Err(format!("`{other}` is not a ticket id.")),
+    }
+}
+
+#[cfg(test)]
+#[path = "ticket_tests.rs"]
+mod tests;

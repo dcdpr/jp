@@ -1,67 +1,68 @@
 <script setup>
 import { useRoute } from 'vitepress'
 import { ref, watch, computed, onMounted } from 'vue'
-import { data as published } from '../../.vitepress/loaders/rfds.data.js'
-import { data as drafts } from '../../.vitepress/loaders/rfd-drafts.data.js'
+import { KINDS, describe, documentAt, originAt } from './documents.mjs'
 
 const route = useRoute()
 const trail = ref([])
+const origin = ref(null)
 
-// Published and drafts share one trail. Trail entries store `{ num, slug }`;
-// titles are looked up on render against the combined set.
-const data = [...published, ...drafts]
-const titleByNum = new Map(data.map(r => [r.num, r.title]))
-const tooltip = (num) => {
-    const t = titleByNum.get(num)
-    return t ? `RFD ${num}: ${t}` : null
-}
-
-const STORAGE_KEY = 'rfd-trail'
-
-// Drafts live one directory deeper (`/rfd/drafts/DNN-slug`), so the optional
-// `drafts/` segment is part of every match. `rfdSlug` keeps that segment so
-// `'/rfd/' + slug` resolves to the right page for both id spaces.
-function rfdNum(path) {
-    return path.match(/\/rfd\/(?:drafts\/)?(\d{3}|D\d{2})-/)?.[1] ?? null
-}
-
-function rfdSlug(path) {
-    return path.match(/\/rfd\/((?:drafts\/)?(?:\d{3}|D\d{2})-.+?)(?:\.html)?$/)?.[1] ?? null
-}
+// One trail across both kinds, so following an RFD link out of a ticket reads
+// `Tickets / T0001 / 042`. Entries store the path; everything else is looked up
+// on render.
+const STORAGE_KEY = 'doc-trail'
 
 function saveTrail() {
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(trail.value)) } catch {}
+    const state = { origin: origin.value, trail: trail.value }
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state)) } catch {}
 }
 
 function loadTrail() {
     try {
         const raw = sessionStorage.getItem(STORAGE_KEY)
-        if (raw) trail.value = JSON.parse(raw)
+        if (!raw) return
+        const state = JSON.parse(raw)
+        origin.value = state.origin ?? null
+        trail.value = state.trail ?? []
     } catch {}
 }
 
 function onNavigate(path) {
-    if (path === '/rfd/' || path === '/rfd'
-        || path === '/rfd/drafts/' || path === '/rfd/drafts') {
+    // Landing on an index or a board starts a fresh trail, rooted there.
+    const landed = originAt(path)
+    if (landed) {
+        origin.value = landed
         trail.value = []
         saveTrail()
         return
     }
 
-    const num = rfdNum(path)
-    const slug = rfdSlug(path)
-    if (!num || !slug) return
+    const entry = documentAt(path)
+    if (!entry) return
 
-    const idx = trail.value.findIndex(e => e.num === num)
-    if (idx !== -1) {
-        trail.value = trail.value.slice(0, idx + 1)
-    } else {
-        trail.value = [...trail.value, { num, slug }]
-    }
+    // Revisiting something already in the trail truncates back to it, rather
+    // than growing a loop.
+    const index = trail.value.findIndex(e => e.path === entry.path)
+    trail.value = index === -1
+        ? [...trail.value, { path: entry.path }]
+        : trail.value.slice(0, index + 1)
     saveTrail()
 }
 
-const visible = computed(() => /^\/rfd\/(?:drafts\/)?(\d{3}|D\d{2})-/.test(route.path))
+// The page the trail started from, or — for a cold link straight into a
+// document — that kind's index.
+const root = computed(() => {
+    if (origin.value) return origin.value
+
+    const first = trail.value[0] && documentAt(trail.value[0].path)
+
+    return KINDS[first?.kind ?? documentAt(route.path)?.kind ?? 'rfd']
+})
+
+const crumbs = computed(() =>
+    trail.value.map(e => documentAt(e.path)).filter(Boolean))
+
+const visible = computed(() => documentAt(route.path) !== null)
 
 onMounted(() => {
     loadTrail()
@@ -72,18 +73,18 @@ watch(() => route.path, onNavigate)
 </script>
 
 <template>
-    <nav v-if="visible" class="rfd-breadcrumb">
-        <a href="/rfd/">RFDs</a>
-        <template v-for="(entry, i) in trail" :key="entry.num">
-            <span class="rfd-breadcrumb-sep">/</span>
-            <a v-if="i < trail.length - 1" :href="'/rfd/' + entry.slug" :title="tooltip(entry.num)">{{ entry.num }}</a>
-            <span v-else class="rfd-breadcrumb-current">{{ entry.num }}</span>
+    <nav v-if="visible" class="doc-breadcrumb">
+        <a :href="root.path ?? root.root">{{ root.name }}</a>
+        <template v-for="(entry, i) in crumbs" :key="entry.path">
+            <span class="doc-breadcrumb-sep">/</span>
+            <a v-if="i < crumbs.length - 1" :href="entry.path" :title="describe(entry)">{{ entry.label }}</a>
+            <span v-else class="doc-breadcrumb-current">{{ entry.label }}</span>
         </template>
     </nav>
 </template>
 
 <style>
-.rfd-breadcrumb {
+.doc-breadcrumb {
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -91,17 +92,17 @@ watch(() => route.path, onNavigate)
     margin-bottom: 1rem;
     color: var(--vp-c-text-3);
 }
-.rfd-breadcrumb a {
+.doc-breadcrumb a {
     color: var(--vp-c-brand-1);
     text-decoration: none;
 }
-.rfd-breadcrumb a:hover {
+.doc-breadcrumb a:hover {
     text-decoration: underline;
 }
-.rfd-breadcrumb-sep {
+.doc-breadcrumb-sep {
     color: var(--vp-c-text-3);
 }
-.rfd-breadcrumb-current {
+.doc-breadcrumb-current {
     color: var(--vp-c-text-2);
 }
 </style>
