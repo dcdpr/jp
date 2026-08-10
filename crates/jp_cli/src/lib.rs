@@ -1126,7 +1126,10 @@ fn effective_cfg_overrides(globals: &Globals) -> Vec<KeyValueOrPath> {
 /// own (RFD 087).
 ///
 /// See: <https://jp.computer/configuration>
-fn load_base_partial(fs: Option<&FsStorageBackend>, cwd: Utf8PathBuf) -> Result<PartialAppConfig> {
+pub(crate) fn load_base_partial(
+    fs: Option<&FsStorageBackend>,
+    cwd: Utf8PathBuf,
+) -> Result<PartialAppConfig> {
     let partials = load_partial_configs_from_files(fs, Some(cwd))?;
     let partial = load_partials_with_inheritance(partials)?;
 
