@@ -69,6 +69,9 @@ pub enum HostToPlugin {
     /// Response to `read_draft` and `write_draft`.
     Draft(DraftResponse),
 
+    /// Response to `list_configs`.
+    Configs(ConfigsResponse),
+
     /// An error response to any plugin request.
     Error(ErrorResponse),
 
@@ -113,6 +116,9 @@ pub enum PluginToHost {
 
     /// Replace a conversation's query draft.
     WriteDraft(WriteDraftRequest),
+
+    /// List the configurations a query can name.
+    ListConfigs(OptionalId),
 
     /// Print user-facing output through JP's printer.
     Print(PrintMessage),
@@ -308,6 +314,31 @@ pub struct WriteDraftRequest {
     /// A mismatch against what is on disk is refused rather than overwritten.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
+}
+
+/// One configuration a query can name.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConfigEntry {
+    /// What to pass to select it, e.g. `skill/rfd`.
+    pub segment: String,
+
+    /// The directories above it, e.g. `skill`.
+    /// Empty at the top level.
+    pub namespace: String,
+
+    /// The last part of the segment, e.g. `rfd`.
+    pub name: String,
+}
+
+/// Response to `list_configs`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConfigsResponse {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// Every selectable configuration, sorted by segment.
+    pub data: Vec<ConfigEntry>,
 }
 
 /// An error response.

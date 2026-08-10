@@ -613,6 +613,59 @@ fn test_load_partial_at_path_recursive() {
     }
 }
 
+/// The inverse of `find_file_in_load_path`: every segment it could resolve.
+///
+/// Nested directories are part of the segment, since that is what selects the
+/// file, and non-config files are not selectable at all.
+#[test]
+fn test_list_configs_in_load_path() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    write_config(&root.join("default.toml"), "");
+    write_config(&root.join("skill/rfd.toml"), "");
+    write_config(&root.join("skill/web.yaml"), "");
+    write_config(&root.join("persona/deep/nested.json"), "");
+
+    // Neither is a configuration file, so neither is selectable.
+    fs::write(root.join("README.md"), "").unwrap();
+    fs::write(root.join("skill/notes.txt"), "").unwrap();
+
+    assert_eq!(list_configs_in_load_path(&root), vec![
+        "default".to_owned(),
+        "persona/deep/nested".to_owned(),
+        "skill/rfd".to_owned(),
+        "skill/web".to_owned(),
+    ]);
+}
+
+/// A load path that isn't there holds nothing, which is not an error: a
+/// workspace need not have every directory the load path names.
+#[test]
+fn test_list_configs_in_missing_load_path() {
+    let tmp = tempdir().unwrap();
+
+    assert!(list_configs_in_load_path(&tmp.path().join("absent")).is_empty());
+}
+
+/// Each segment is what `find_file_in_load_path` resolves back to the same
+/// file, which is the contract that makes a listed segment usable as `--cfg`.
+#[test]
+fn test_listed_segments_resolve_back_to_their_files() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    write_config(&root.join("default.toml"), "");
+    write_config(&root.join("skill/rfd.toml"), "");
+
+    for segment in list_configs_in_load_path(&root) {
+        assert!(
+            find_file_in_load_path(&segment, &root).is_some(),
+            "`{segment}` was listed but does not resolve"
+        );
+    }
+}
+
 #[test]
 fn test_load_partial_at_path_self_extending_cycle() {
     let tmp = tempdir().unwrap();
