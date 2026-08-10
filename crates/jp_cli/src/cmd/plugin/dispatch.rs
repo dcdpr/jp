@@ -19,6 +19,7 @@ use jp_config::plugins::{
     PluginsConfig,
     command::{CommandPluginConfig, RunPolicy},
 };
+use jp_conversation::ConversationId;
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{InlineOption, InlineReply, InlineSelect, ReplyOutcome};
 use jp_plugin::{
@@ -564,8 +565,7 @@ fn lock_for_action(
     session: Option<&Session>,
     conversation: &str,
 ) -> Result<ConversationLock, String> {
-    let id = jp_conversation::ConversationId::try_from_deciseconds_str(conversation)
-        .map_err(|error| format!("invalid conversation ID: {error}"))?;
+    let id = parse_conversation_id(conversation)?;
 
     let handle = workspace
         .acquire_conversation(&id)
@@ -626,11 +626,24 @@ fn handle_set_title(
     HostToPlugin::Done(DoneResponse { id: req.id })
 }
 
+/// Read a conversation named by a plugin.
+///
+/// The canonical spelling is the one JP prints and a user can paste back into
+/// it, `jp-c17000000000`.
+/// Bare deciseconds are accepted as well, since that is what the wire carried
+/// before the two agreed.
+fn parse_conversation_id(conversation: &str) -> Result<ConversationId, String> {
+    conversation
+        .parse()
+        .or_else(|_| ConversationId::try_from_deciseconds_str(conversation))
+        .map_err(|error| format!("invalid conversation ID `{conversation}`: {error}"))
+}
+
 fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> HostToPlugin {
     let data: Vec<ConversationSummary> = workspace
         .conversations()
         .map(|(id, meta)| ConversationSummary {
-            id: id.as_deciseconds().to_string(),
+            id: id.to_string(),
             title: meta.title.clone(),
             last_activated_at: meta.last_activated_at,
             events_count: meta.events_count,
@@ -645,13 +658,13 @@ fn handle_read_events(
     conversation_id: &str,
     req_id: Option<String>,
 ) -> HostToPlugin {
-    let conv_id = match jp_conversation::ConversationId::try_from_deciseconds_str(conversation_id) {
+    let conv_id = match parse_conversation_id(conversation_id) {
         Ok(id) => id,
-        Err(e) => {
+        Err(message) => {
             return HostToPlugin::Error(ErrorResponse {
                 id: req_id,
                 request: Some("read_events".to_owned()),
-                message: format!("invalid conversation ID: {e}"),
+                message,
             });
         }
     };
