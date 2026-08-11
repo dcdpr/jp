@@ -39,8 +39,9 @@ RFD 070 reached 11,671 words against a 2,000-word guideline.
 ## The Pipeline
 
 Five stages, each with one owner, and one loop back.
-Each stage gets only the write access it needs: the outline stage gets none, and
-the applier writes only the RFD.
+Each stage gets only the write access it needs.
+The outline stage writes nothing.
+The applier writes the RFD, and files a ticket at signoff.
 
 ### Outline
 
@@ -184,25 +185,32 @@ made an earlier conclusion false.
 A concern present in round 1 that went unraised is settled by omission.
 Progress is monotonic.
 
-Every review ends with `VERDICT: CLEAR` or `VERDICT: BLOCK` on its own final
-line.
+### Structured responses
 
-### Verdicts
+Each step answers under a schema, and the orchestrator reads typed fields.
+Every schema carries a prose `conclusion`, which is the part printed to the
+terminal.
 
-The triager rules `Accept`, `Amend`, `Decline`, `Dismiss`, `Defer`, or
-`Escalate` on each finding.
+State is derived from the data, never asserted alongside it.
+An empty `findings` array is how a review clears an RFD, so there is no verdict
+field that can contradict the findings it summarises.
+An empty `needs_author` array is how a signoff reports nothing outstanding.
+Tallies are counted from the rulings, and word counts come from `rfd-lint`.
 
-A `Decline` produces no edit to the RFD.
+### Rulings
+
+The triager rules `accept`, `amend`, `decline`, `dismiss`, `defer`, or
+`escalate` on each finding.
+
+A `decline` produces no edit to the RFD.
 Not a sentence in Risks, not a parenthetical, not a Non-Goal bullet.
 The triage conversation is the record, and it is durable and searchable.
 Storing rejected edge cases in the document is what turns a 1,200-word RFD into
 a 5,000-word one, one reasonable-looking sentence at a time.
 
-The triager reports the word delta of its edits before anything is applied.
-
 ### Escalation
 
-Two disagreements on the same item mark it `ESCALATE:` and remove it from the
+Two disagreements on the same item rule it `escalate`, which removes it from the
 cycle.
 Repeated disagreement is the signal that human judgment is required, and it is
 the only thing that interrupts an unattended run.
