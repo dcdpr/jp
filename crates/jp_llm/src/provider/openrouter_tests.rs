@@ -1,4 +1,5 @@
-use jp_config::providers::llm::LlmProviderConfig;
+use indexmap::IndexMap;
+use jp_config::{conversation::tool::ToolParameterConfig, providers::llm::LlmProviderConfig};
 use jp_test::{Result, function_name};
 
 use super::*;
@@ -33,6 +34,99 @@ async fn sub_provider_event_metadata(model: &str, test_name: &str) -> Result {
 
     run_test(test_name, requests).await?;
 
+    Ok(())
+}
+
+#[test]
+fn request_preserves_integer_tool_parameter_type() -> Result {
+    let request = TestRequest::chat(ProviderId::Openrouter)
+        .tool("fs_read_file", [("start_line", ToolParameterConfig {
+            kind: "integer".to_owned().into(),
+            required: false,
+            default: None,
+            summary: None,
+            description: None,
+            examples: None,
+            enumeration: vec![],
+            items: None,
+            properties: IndexMap::new(),
+        })])
+        .chat_request("Read README.md");
+    let TestRequest::Chat { model, query, .. } = request else {
+        unreachable!();
+    };
+
+    let (request, _) = create_request(&model, query)?;
+    let request = serde_json::to_value(request)?;
+
+    assert_eq!(
+        request["tools"][0]["function"],
+        serde_json::json!({
+            "name": "fs_read_file",
+            "strict": true,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_line": {"type": ["integer", "null"]}
+                },
+                "additionalProperties": false,
+                "required": ["start_line"]
+            }
+        })
+    );
+    Ok(())
+}
+
+/// A tool-call finish closes the provider stream without ending the Turn.
+#[test]
+fn tool_call_finish_is_a_clean_completion() -> Result {
+    let tool_call: response::Choice = serde_json::from_value(serde_json::json!({
+        "finish_reason": null,
+        "native_finish_reason": null,
+        "delta": {
+            "role": "assistant",
+            "content": null,
+            "reasoning": null,
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_1",
+                "function": {
+                    "name": "fs_read_file",
+                    "arguments": "{\"path\":\"README.md\",\"start_line\":\"1\"}"
+                }
+            }]
+        },
+        "error": null
+    }))?;
+    let finish: response::Choice = serde_json::from_value(serde_json::json!({
+        "finish_reason": "tool_calls",
+        "native_finish_reason": "tool_calls",
+        "delta": {
+            "role": null,
+            "content": null,
+            "reasoning": null,
+            "tool_calls": []
+        },
+        "error": null
+    }))?;
+    let mut state = AggregationState {
+        tool_call_indices: vec![],
+        aggregating_reasoning: false,
+        aggregating_message: false,
+        is_structured: false,
+    };
+
+    let events = map_event(tool_call, &mut state)
+        .into_iter()
+        .chain(map_event(finish, &mut state))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    assert_eq!(events, vec![
+        Event::tool_call_start(2, "call_1", "fs_read_file"),
+        Event::tool_call_args(2, r#"{"path":"README.md","start_line":"1"}"#),
+        Event::flush(2),
+        Event::Finished(event::FinishReason::Completed),
+    ]);
     Ok(())
 }
 

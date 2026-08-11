@@ -411,7 +411,7 @@ fn map_event(
         Some(FinishReason::Length) => {
             events.push(Ok(Event::Finished(event::FinishReason::MaxTokens)));
         }
-        Some(FinishReason::Stop) => {
+        Some(FinishReason::Stop | FinishReason::ToolCalls) => {
             events.push(Ok(Event::Finished(event::FinishReason::Completed)));
         }
         Some(FinishReason::Error) => {
