@@ -239,7 +239,8 @@ Useful when a round wants watching.
 
 `just rfd-draft CATEGORY TITLE` creates a blank draft from a template, for an
 RFD written without the pipeline.
-Everything after the draft still applies to it.
+Its author can use the review and signoff stages without adopting the pipeline's
+budgets or treating its checks as gates.
 
 The `rfd` skill is the other assistant path.
 Loaded into any conversation, it makes JP a collaborator on a document you are
@@ -256,6 +257,12 @@ working through rather than its author.
   so one filed mid-cycle sits uncommitted across every round after it.
   Deferrals reach the carry-over ledger, and signoff files them where the author
   sees the diff.
+- **Production-grade orchestration.** Rejected.
+  This is a lightweight authoring aid, not a transactional system.
+  It optimizes the happy path and can stop on provider, tool, or schema failures;
+  the contributor can rerun it.
+  It does not promise exact-once edits, transactional artifacts, or exhaustive
+  reconciliation between model responses.
 - **Automatic promotion after a clean signoff.** Rejected.
   Promotion is a one-way door and stays a deliberate act.
 - **The RFD lifecycle.** Rejected.
