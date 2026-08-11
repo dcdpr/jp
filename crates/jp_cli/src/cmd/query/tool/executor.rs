@@ -98,10 +98,11 @@ impl TerminalExecutorSource {
 impl ExecutorSource for TerminalExecutorSource {
     fn create(
         &self,
-        request: ToolCallRequest,
+        mut request: ToolCallRequest,
         config: ToolConfigWithDefaults,
     ) -> Option<Box<dyn Executor>> {
         let definition = self.definitions.get(&request.name)?.clone();
+        definition.coerce_arguments(&mut request.arguments);
 
         Some(Box::new(ToolExecutor::new(
             request,
