@@ -38,8 +38,8 @@ recognize a format can skip it.
 
 Terms this RFD borrows from the rest of the system:
 
-- **Address**: a reference naming a location in a conversation, defined by
-  [RFD D59].
+- **Address**: a reference naming a location in a conversation, defined by [RFD
+  D59].
 - **Thread**: the rendered form of a conversation sent to an LLM provider,
   assembled at query time from the event stream.
 - **Storage root**: either of the two directories a conversation is written to,
@@ -147,8 +147,8 @@ The file is a flat array, matching the shape of `events.json`:
 ]
 ```
 
-The second annotation covers a stretch of the conversation rather than a piece of
-text, so both of its endpoints name entries and stop there.
+The second annotation covers a stretch of the conversation rather than a piece
+of text, so both of its endpoints name entries and stop there.
 
 Flat rather than a map keyed by target, because a range address does not make a
 usable key, and because removing one annotation should not mean finding it
@@ -219,8 +219,8 @@ against the forked stream is dropped with them.
 
 ### Schemas in the workspace
 
-A `schema_id` may be a path relative to the workspace root, for a format local to
-one project:
+A `schema_id` may be a path relative to the workspace root, for a format local
+to one project:
 
 ```
 .jp/schemas/review-note/v1.json
@@ -264,9 +264,9 @@ then fail to match text that looks identical.
 
 **A fifth `EventPayload` variant in `events.json`.** RFD 097 makes every stream
 entry ID-addressable, so a new payload kind would fit.
-Rejected on two counts: annotating would change `stream_mtime` and reorder
-`jp conversation ls`, and it would put a concern the model never sees into the
-file the model's input is built from.
+Rejected on two counts: annotating would change `stream_mtime` and reorder `jp
+conversation ls`, and it would put a concern the model never sees into the file
+the model's input is built from.
 
 **A payload structured by JP.** Typed annotations with known fields would let JP
 render, search and validate them.
@@ -282,8 +282,9 @@ was wrong" is not.
 
 **Independently loadable annotations.** Loading and saving annotations on their
 own would let a long-running process write them without touching the stream.
-Rejected for now: it puts RFD 097's ambiguity signal out of scope and creates two
-writers over data that reference each other with no atomic write between them.
+Rejected for now: it puts RFD 097's ambiguity signal out of scope and creates
+two writers over data that reference each other with no atomic write between
+them.
 Worth revisiting if plugin or background writes arrive.
 
 ## Non-Goals
@@ -299,7 +300,8 @@ Worth revisiting if plugin or background writes arrive.
 ## Risks and Open Questions
 
 - **No atomic write spans the files.** The write order makes the worst case a
-  lost note rather than an annotation pointing at nothing, but the window exists.
+  lost note rather than an annotation pointing at nothing, but the window
+  exists.
 - **The annotation ID form is unsettled.** Following `EventId` (short, opaque,
   unique within its file, assigned on insertion) is the obvious answer and costs
   nothing to adopt, but it has not been decided.

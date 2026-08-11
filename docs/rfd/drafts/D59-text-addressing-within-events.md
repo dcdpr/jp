@@ -22,9 +22,9 @@
 A `jp://` URL names a conversation.
 This RFD extends it with a fragment that names a location inside one: a stream
 entry, a run of text within one, or a range between two points.
-Locations are anchored by quoted text, with an optional position that breaks ties
-between repeated matches, so an address either resolves to exactly one place or
-fails visibly.
+Locations are anchored by quoted text, with an optional position that breaks
+ties between repeated matches, so an address either resolves to exactly one
+place or fails visibly.
 
 ## Terminology
 
@@ -61,9 +61,8 @@ attach to.
 Quoting a passage from another conversation means attaching the whole message.
 A link into a rendered conversation cannot point at what it is about.
 
-In addition to addressing any quote, it should be possible to address
-objects like entire turns, or a compaction overlay with the same URI
-scheme.
+In addition to addressing any quote, it should be possible to address objects
+like entire turns, or a compaction overlay with the same URI scheme.
 
 [RFD 097] supplies half the answer by giving every stream entry a stable ID.
 What remains is naming a location inside an entry, and doing it in a way that
@@ -154,8 +153,8 @@ They carry the same information and convert both ways.
 One location is written flat and a range nests under `start` and `end`.
 The key that is present says which: `entry` means one location, `start` means a
 range.
-A range is a different thing from a location, so it gets a different shape rather
-than a `start` with nothing after it.
+A range is a different thing from a location, so it gets a different shape
+rather than a `start` with nothing after it.
 
 Text is written plainly here, not base64url encoded.
 Encoding exists to stop a quote colliding with the fragment's delimiters, and
@@ -172,8 +171,8 @@ text, a tool call's `arguments`, a tool response's `content` and the thinking
 signatures in an entry's `metadata` are all reached the same way.
 Adding a new event kind requires no change here.
 
-"Decoded" matters: `jp_conversation::storage` base64-encodes tool arguments, tool
-response content and metadata at rest.
+"Decoded" matters: `jp_conversation::storage` base64-encodes tool arguments,
+tool response content and metadata at rest.
 Pointers and offsets address the decoded values, never the stored encoding.
 
 This RFD addresses **any** stream entry, not only conversation events.
@@ -200,9 +199,8 @@ zero, sitting *between* characters.
 One number is enough because an anchor names a point, not a span.
 Position zero is before the first character.
 
-Offsets count code points rather than bytes, which differs from
-`jp conversation grep --json`, whose `submatches` are byte offsets mirroring
-`rg --json`.
+Offsets count code points rather than bytes, which differs from `jp conversation
+grep --json`, whose `submatches` are byte offsets mirroring `rg --json`.
 Those coordinates index a string emitted in the same document; these are durable
 addresses that people write by hand, and a byte offset can land mid-character.
 The library converts, so "grep, then annotate what I found" never asks a user to
@@ -225,8 +223,8 @@ special case.
 
 A range denotes a region of the stream, not a string.
 Config deltas and compactions may lie between its endpoints, so anything
-extracting content from a range receives a sequence of entries with partial ends,
-not a single run of text.
+extracting content from a range receives a sequence of entries with partial
+ends, not a single run of text.
 
 The extent of a range is the entries lying between its endpoints in array order.
 That part is not content-anchored, and RFD 097 forbids using entry IDs for
@@ -252,22 +250,23 @@ Within a string, the quote is the anchor of record and the offset breaks ties.
 ```
 
 Comparison is exact.
-No Unicode normalization is applied to either side, so a single coordinate system
-serves both quotes and offsets and nothing sits between the bytes on disk and
-what an address means.
+No Unicode normalization is applied to either side, so a single coordinate
+system serves both quotes and offsets and nothing sits between the bytes on disk
+and what an address means.
 The cost is that a quote captured from a differently normalized source fails to
 match text that looks identical, which is why RFD D52 has the library capture
 quotes from the stored entry.
 
 An offset must not win over a quote.
 An offset always resolves, and after an edit it resolves to the wrong place
-silently, which is the hazard RFD 097 exists to remove: a reference should become
-"a *detectable* mismatch, never a silent positional aliasing."
-Line 6 above is a deliberate exception with a stated property: an address with no
-quote is fragile by construction, useful for pointing at something now, wrong for
-anything durable.
+silently, which is the hazard RFD 097 exists to remove: a reference should
+become "a *detectable* mismatch, never a silent positional aliasing."
+Line 6 above is a deliberate exception with a stated property: an address with
+no quote is fragile by construction, useful for pointing at something now, wrong
+for anything durable.
 
-Used as a tie-break rather than an authority, an offset also degrades gracefully.
+Used as a tie-break rather than an authority, an offset also degrades
+gracefully.
 Small edits shift it, but the quote has already narrowed the field to real
 occurrences, so the nearest candidate is still the right one.
 
@@ -278,9 +277,10 @@ Quote text is base64url encoded without padding, using
 Its alphabet is `A-Za-z0-9-_`, all unreserved, so a fragment never needs
 percent-encoding and a quote can hold `#`, `&`, newlines or anything else.
 
-This differs deliberately from `jp_conversation::storage`, which uses `STANDARD`.
-That alphabet contains `+`, `/` and `=`, and `=` would collide with the
-grammar above.
+This differs deliberately from `jp_conversation::storage`, which uses
+`STANDARD`.
+That alphabet contains `+`, `/` and `=`, and `=` would collide with the grammar
+above.
 
 `exact`, `prefix` and `suffix` are encoded separately, so the delimiters between
 them stay visible.
@@ -302,8 +302,8 @@ Applied to an address, it intersects with the range:
   Absent means no filtering.
 - It is an error for the filter to exclude an entry that an endpoint names.
   The caller's own filter contradicting the location they asked for is a bad
-  request, distinct from an unresolved address, and the message should say which:
-  "select=a excludes k3m9x2a, where the range starts."
+  request, distinct from an unresolved address, and the message should say
+  which: "select=a excludes k3m9x2a, where the range starts."
 
 ### Where this differs from the Web Annotation Data Model
 
@@ -342,9 +342,9 @@ something is wrong with no signal.
 Determinism without correctness is worse than a visible failure.
 
 **Quotes only, no offsets.** Removes the fragile form entirely.
-Rejected because a repeated quote then has no tie-break short of
-extending prefix and suffix (which is also not guaranteed to resolve
-the problem), and because a short hand-written address has real value.
+Rejected because a repeated quote then has no tie-break short of extending
+prefix and suffix (which is also not guaranteed to resolve the problem), and
+because a short hand-written address has real value.
 
 **Content-addressed anchors, hashing the target text.** Precise and tamper
 evident, but any edit invalidates the anchor, which defeats the editing workflow
@@ -362,8 +362,8 @@ fragment for addressing within a resource.
   Offsets here count code points.
 - **Addressing rendered output.** Addresses name the stored text, not what a
   terminal or the web view drew.
-- **Stability across conversations.** Entry IDs are unique within one stream, per
-  RFD 097.
+- **Stability across conversations.** Entry IDs are unique within one stream,
+  per RFD 097.
 - **Rewriting addresses when content changes.** An address resolves or it does
   not.
 
@@ -371,8 +371,8 @@ fragment for addressing within a resource.
 
 - **The grammar is proposed, not settled.** Everything else here is decided; the
   syntax is the part that most needs review.
-- **A same-entry offset span has no short form.** `#e@/p:o=10..e@/p:o=20` repeats
-  the entry and pointer.
+- **A same-entry offset span has no short form.** `#e@/p:o=10..e@/p:o=20`
+  repeats the entry and pointer.
   A shorthand such as `o=10..20` would help, and is not specified.
 - **A lone offset anchor names a zero-width point.** Whether that is useful, or
   should be an error outside a range, is open.
@@ -392,7 +392,8 @@ Independent, mergeable on its own.
 
 ### Phase 2: parsing and formatting
 
-Fragment grammar to and from the address type, with base64url on the text fields.
+Fragment grammar to and from the address type, with base64url on the text
+fields.
 Tests: round-trip; quotes containing `#`, `&` and newlines survive; malformed
 fragments are rejected with a useful message.
 Depends on Phase 1.
@@ -401,8 +402,8 @@ Depends on Phase 1.
 
 The resolution ladder against a loaded stream, including the raw-entry view over
 all stream entries, JSON Pointer lookup, and the two range rules.
-Tests: each line of the ladder, including that a repeated quote with no offset is
-unresolved and that a reordered range is unresolved.
+Tests: each line of the ladder, including that a repeated quote with no offset
+is unresolved and that a reordered range is unresolved.
 Depends on Phase 2.
 
 ### Phase 4: `jp://` integration
@@ -414,10 +415,9 @@ Depends on Phase 3.
 
 ### Phase 5: documentation
 
-Add a character-offset section to
-`docs/architecture/indexing-conventions.md`, which currently covers turn
-positions only, recording that offsets are 0-based boundaries in code points and
-why that differs from `grep --json`.
+Add a character-offset section to `docs/architecture/indexing-conventions.md`,
+which currently covers turn positions only, recording that offsets are 0-based
+boundaries in code points and why that differs from `grep --json`.
 Update the `jp_attachment_internal` README.
 Depends on Phase 4.
 
