@@ -259,8 +259,8 @@ working through rather than its author.
   sees the diff.
 - **Production-grade orchestration.** Rejected.
   This is a lightweight authoring aid, not a transactional system.
-  It optimizes the happy path and can stop on provider, tool, or schema failures;
-  the contributor can rerun it.
+  It optimizes the happy path and can stop on provider, tool, or schema
+  failures; the contributor can rerun it.
   It does not promise exact-once edits, transactional artifacts, or exhaustive
   reconciliation between model responses.
 - **Automatic promotion after a clean signoff.** Rejected.
