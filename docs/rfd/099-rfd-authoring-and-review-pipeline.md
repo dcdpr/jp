@@ -70,7 +70,7 @@ It does not raise the total.
 
 `just rfd-cycle NNN [ROUNDS]` runs review, triage, apply, and lint without
 prompting, committing each round separately so the run reads as a diff.
-It stops on the first of: the reviewer returning `CLEAR`, either side raising
+It stops on the first of: the reviewer returning `CLEAR`, any stage raising
 `ESCALATE:`, or the round budget running out.
 
 Deciding and editing stay in separate turns.
@@ -212,8 +212,10 @@ a 5,000-word one, one reasonable-looking sentence at a time.
 
 Two disagreements on the same item rule it `escalate`, which removes it from the
 cycle.
-Repeated disagreement is the signal that human judgment is required, and it is
-the only thing that interrupts an unattended run.
+An accept the applier cannot apply escalates the same way: a decision nobody has
+made is not an edit.
+Escalation is the only thing that interrupts an unattended run, and it always
+means human judgment is required.
 
 ## Other Entry Points
 
