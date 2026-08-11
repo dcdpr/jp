@@ -1,10 +1,10 @@
-# RFD D59: RFD Authoring and Review Pipeline
+# RFD 099: RFD Authoring and Review Pipeline
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-07
-- **Extends**: [RFD 001]
+- **Extends**: [RFD 003]
 
 ## Summary
 
@@ -17,8 +17,8 @@ contributor's signoff is the terminal stage.
 ## Motivation
 
 RFDs pay for themselves at implementation time.
-Getting one to that point costs hours of back-and-forth that produce a longer
-document rather than a better one.
+Getting one to that point costs many rounds of back-and-forth that produce a
+longer document rather than a better one.
 
 Three mechanisms cause this, and they compound.
 
@@ -38,7 +38,7 @@ RFD 070 reached 11,671 words against a 2,000-word guideline.
 
 ## The Pipeline
 
-Five stages, each with one owner.
+Five stages, each with one owner, and one loop back.
 Each stage gets only the write access it needs: the outline stage gets none, and
 the applier writes only the RFD.
 
@@ -46,6 +46,8 @@ the applier writes only the RFD.
 
 The contributor discusses the problem until the design is settled, then runs
 `just rfd-this`.
+That forks the conversation before applying the author configuration, so the
+design conversation is a branch rather than a change to the one you were in.
 The author reads that discussion and emits an outline: category, summary, the
 one problem, the proposed shape, alternatives, Non-Goals, and a per-section word
 budget.
@@ -73,8 +75,8 @@ It stops on the first of: the reviewer returning `CLEAR`, either side raising
 Deciding and editing stay in separate turns.
 The triager rules on each finding and describes the edit.
 The applier makes only the edits ruled `Accept` or `Amend`.
-An agent that both decides and edits reasons its way into the acknowledgement
-sentences this pipeline exists to remove.
+An assistant that both decides and edits reasons its way into the
+acknowledgement sentences this pipeline exists to remove.
 
 The cycle snapshots every file except the RFD and stops if any of them changes.
 
@@ -86,6 +88,21 @@ Notes on either file go to the applier.
 A note on a deferred ledger line files the ticket the triage named, so the item
 leaves the cycle without entering the document.
 Leaving no notes is the verdict.
+
+### Check-in
+
+Some notes are questions, not instructions.
+The applier lists those instead of answering them, and signoff routes them to
+`just rfd-checkin`.
+
+That returns to the conversation that designed the RFD, carrying the document,
+the ledger, and the signoff round.
+Only that conversation holds the rejected options and the constraints found
+along the way, and an open question usually turns on exactly that.
+Settle it there, update the RFD, run the cycle again.
+
+This is the only backwards edge in the pipeline.
+It exists because acceptance keeps discovering that a decision was never made.
 
 ### Promote
 
@@ -190,6 +207,29 @@ cycle.
 Repeated disagreement is the signal that human judgment is required, and it is
 the only thing that interrupts an unattended run.
 
+## Other Entry Points
+
+The five stages are the default path.
+Three others exist.
+
+`just rfd-prose NNN` cuts words without changing content, in a single pass.
+It stays separate from review, because "is the design right" and "is the prose
+tight" are different questions that fight when asked in one conversation.
+Run it once, when the design has converged.
+
+`just rfd-review NNN` and `just rfd-triage NNN` drive one round by hand, with
+the same personas the cycle uses.
+Useful when a round wants watching.
+
+`just rfd-draft CATEGORY TITLE` creates a blank draft from a template, for an
+RFD written without the pipeline.
+Everything after the draft still applies to it.
+
+The `rfd` skill is the other assistant path.
+Loaded into any conversation, it makes JP a collaborator on a document you are
+working through rather than its author.
+[RFD 003] covers when each is appropriate and who is responsible for the result.
+
 ## Non-Goals
 
 - **Model-based checks in CI.** Rejected.
@@ -241,6 +281,6 @@ settles scope before prose exists.
 4. Update [RFD 002] and [RFD 003], which describe the assistant as a
    collaborator that does not produce the finished document.
 
-[RFD 001]: ../001-jp-rfd-process.md
-[RFD 002]: ../002-using-llms.md
-[RFD 003]: ../003-jp-assisted-rfds.md
+[RFD 001]: 001-jp-rfd-process.md
+[RFD 002]: 002-using-llms.md
+[RFD 003]: 003-jp-assisted-rfds.md

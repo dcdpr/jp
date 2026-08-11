@@ -10,7 +10,7 @@
 LLM usage is encouraged in the JP project.
 Contributors are free to use LLMs for reading, research, editing, debugging,
 code review, and code generation.
-All work product — code, prose, reviews, comments — is the responsibility of
+All work product, be it code, prose, reviews, or comments, is the responsibility of
 the person who submits it, regardless of how it was produced.
 
 ## The Core Principle
@@ -18,7 +18,7 @@ the person who submits it, regardless of how it was produced.
 **You own what you ship.** Every commit, comment, review, and message carries
 the name of the person who submitted it.
 That attribution is a statement of responsibility.
-If you use an LLM to help produce an artifact, the artifact is yours — you
+If you use an LLM to help produce an artifact, the artifact is yours: you
 reviewed it, you stand behind it, you will maintain it.
 "An LLM wrote it" is not a defense, an excuse, or a disclaimer.
 It is irrelevant.
@@ -38,8 +38,8 @@ Listed here in priority order:
   human.
   Contributors bear responsibility for the artifacts they create, whatever
   automation was employed to create them.
-  Human judgment remains firmly in the loop: even when an LLM generates an
-  artifact we will use (code, tests, documentation, prose), the output is the
+  Human judgment remains firmly in the loop.
+  Even when an LLM generates an artifact we use, the output is the
   responsibility of the human using it.
 
 - **Rigor**: LLMs are double-edged with respect to rigor.
@@ -50,16 +50,15 @@ Listed here in priority order:
 
 - **Empathy**: Be we readers or writers, there are humans on the other end of
   our communication.
-  As we use LLMs, we must keep in mind our empathy for that human — the one
+  As we use LLMs, we must keep in mind our empathy for that human, the one
   consuming our writing, reviewing our code, or reading our commit messages.
 
 - **Teamwork**: We are working together on a shared endeavor.
   LLM use must not undermine the trust we have in one another.
-  In some contexts, LLM usage is expected (using an LLM to help debug a tricky
-  issue is natural); in others, it can erode trust (submitting LLM-generated
-  code for review without having reviewed it yourself shifts the burden to your
-  reviewer).
-  The distinction is not about disclosure — it is about whether you have taken
+  In some contexts LLM usage is expected, as when debugging a tricky issue.
+  In others it erodes trust: submitting code for review without having read it
+  yourself shifts the burden to your reviewer.
+  The distinction is not about disclosure. It is about whether you have taken
   responsibility for the work.
 
 - **Urgency**: LLMs afford an opportunity to do work more quickly, but pace must
@@ -94,7 +93,7 @@ For more involved research, the quality of results can vary widely.
 One should be careful about drawing too much confidence from the lengthy,
 well-formatted nature of an LLM-powered report.
 Even if a report appears well-sourced, the sources themselves may be incorrect
-— a seemingly authoritative source found by an LLM may itself be an LLM
+A seemingly authoritative source found by an LLM may itself be an LLM
 hallucination.
 
 When engaging LLMs as researchers, follow citation links to learn from the
@@ -104,16 +103,16 @@ Treat LLM-researched content as a jumping-off point, not a finished product.
 ### LLMs as Editors
 
 LLMs can be excellent editors.
-Engaging an LLM late in the writing process — with a document already written
-and broadly polished — allows for helpful feedback on structure, phrasing, and
-consistency without danger of losing one's own voice.
+Engage one late in the writing process, with a document already written and
+broadly polished.
+It then gives useful feedback on structure, phrasing, and consistency without
+any danger of losing your own voice.
 
 A cautionary note: LLMs are infamous pleasers.
 The breathless praise from an LLM is often more sycophancy than analysis.
-This becomes more perilous the earlier one uses an LLM in the writing process:
-the less polish a document already has, the more likely the LLM will steer
-toward something wholly different — praising your genius while offering to
-rewrite it for you.
+This becomes more perilous the earlier one uses an LLM in the writing process.
+The less polish a document has, the more likely the LLM steers toward something
+wholly different, praising your genius while offering to rewrite it for you.
 
 ### LLMs as Writers
 
@@ -134,7 +133,7 @@ Generated prose fails in specific ways, and each has a countermeasure:
   Settle the scope in conversation before asking for a draft.
 - **It manufactures agreement.** A model will write "we chose X because Y" for
   an X nobody chose.
-  Read the result against what was actually discussed.
+  Read the result against what was discussed.
 - **It grows.** Every review round invites another caveat, and a long document
   is not evidence that anyone resolved the design.
   The prose budgets and the bounded review cycle in [RFD 001] exist for this.
@@ -168,14 +167,14 @@ LLM review is a supplement, not a substitute for human review.
 LLMs can be surprisingly helpful debugging problems.
 They serve as a kind of animatronic [rubber duck][rubber-duck], helping inspire
 the next questions to ask.
-When debugging a vexing problem, one has little to lose by consulting an LLM —
+When debugging a vexing problem, one has little to lose by consulting an LLM:
 provided it does not displace collaboration with colleagues.
 
 ### LLMs as Programmers
 
 LLMs are remarkably good at writing code.
 Unlike prose (which should be handed in polished form to an LLM to maximize its
-efficacy as an editor), LLMs can be quite effective writing code *de novo*.
+efficacy as an editor), LLMs can be effective writing code *de novo*.
 This is especially valuable for code that is experimental, auxiliary, or
 throwaway.
 
@@ -188,7 +187,7 @@ Where LLM-generated code is used, **self-review is essential**.
 LLM-generated code should not be submitted for peer review if the responsible
 engineer has not themselves reviewed it.
 Once in the loop of peer review, wholesale re-generation in response to review
-comments makes iterative review impossible — the reviewer cannot see what
+comments makes iterative review impossible, because the reviewer cannot see what
 changed.
 Address review comments with targeted edits, not by re-prompting.
 
@@ -211,7 +210,7 @@ We trust each other to choose the best tool for the job.
 
 Conversely, shaming others for using LLMs is equally unwelcome.
 As LLMs become the foundation for technologies like search and code completion,
-drawing a bright line of purity becomes increasingly impractical — and
+drawing a bright line of purity becomes increasingly impractical, and
 counterproductive.
 People will make different choices about when and how to use LLMs.
 That's fine.
@@ -221,9 +220,10 @@ That's fine.
 An LLM is not a person.
 It cannot be held accountable, cannot take responsibility, and cannot be a team
 member.
-Treating it as one — giving it a persona, referring to its "opinions,"
-deferring to its "judgment" — obscures the fact that a human is always
-responsible for what the LLM produces.
+Treating it as one obscures the fact that a human is always responsible for what
+it produces.
+That means giving it a persona, referring to its "opinions," or deferring to its
+"judgment."
 
 Yes, JP itself is an LLM-based tool with a name and a persona.
 The irony is not lost on us.
@@ -235,7 +235,7 @@ JP's output is the user's responsibility.
 Submitting large volumes of LLM-generated code or prose without review, then
 expecting others to debug, maintain, or untangle it, is a failure of
 responsibility.
-The problem is not that an LLM was used — it is that the submitter did not take
+The problem is not that an LLM was used. It is that the submitter did not take
 ownership of the output.
 The result is the same as submitting any other unreviewed work: it creates a
 burden for the team.
@@ -261,7 +261,7 @@ burden for the team.
 |                       | during review.                           |
 | Commit messages       | Fine. Review the output.                 |
 | Tests                 | Fine with care. Verify the tests         |
-|                       | actually test what they claim.           |
+|                       | test what they claim.                    |
 
 ## Determination
 
@@ -276,11 +276,11 @@ The quality and correctness of the result is your responsibility.
 
 ## References
 
-- [Oxide RFD 576: Using LLMs at Oxide][oxide-rfd-576] — the direct inspiration
+- [Oxide RFD 576: Using LLMs at Oxide][oxide-rfd-576], the direct inspiration
   for this document.
-- [RFC 3: Documentation Conventions][rfc-3] — the original spirit of writing
+- [RFC 3: Documentation Conventions][rfc-3], the original spirit of writing
   things down.
-- [RFD 001: The JP RFD Process] — how we write and manage RFDs.
+- [RFD 001: The JP RFD Process], how we write and manage RFDs.
 
 [RFD 001]: 001-jp-rfd-process.md
 [RFD 001: The JP RFD Process]: 001-jp-rfd-process.md
