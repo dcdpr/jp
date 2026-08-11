@@ -70,16 +70,18 @@ It does not raise the total.
 
 `just rfd-cycle NNN [ROUNDS]` runs review, triage, apply, and lint without
 prompting, committing each round separately so the run reads as a diff.
-It stops on the first of: the reviewer returning `CLEAR`, any stage raising
-`ESCALATE:`, or the round budget running out.
+It stops when the reviewer returns no findings, a stage escalates, or the round
+budget runs out.
 
 Deciding and editing stay in separate turns.
 The triager rules on each finding and describes the edit.
-The applier makes only the edits ruled `Accept` or `Amend`.
+The applier makes only the edits ruled `accept` or `amend`.
 An assistant that both decides and edits reasons its way into the
 acknowledgement sentences this pipeline exists to remove.
 
-The cycle snapshots every file except the RFD and stops if any of them changes.
+Each apply turn can modify only the target RFD.
+The cycle records other worktree changes for signoff without attributing them to
+the applier.
 
 ### Signoff
 
@@ -108,12 +110,13 @@ It exists because acceptance keeps discovering that a decision was never made.
 ### Promote
 
 `just rfd-promote NNN` advances the status.
-It refuses to advance an RFD that `just rfd-lint` reports errors on.
+The pipeline runs `just rfd-lint` before the contributor invokes it.
+A hand-written RFD can use the same command as an advisory check.
 
 ## Budgets and Writing Rules
 
-Every RFD has a prose budget in words, with fenced code blocks and the metadata
-header excluded.
+Every assistant-authored RFD has a prose budget in words, with fenced code
+blocks and the metadata header excluded.
 
 | Category | Target | Hard limit |
 | -------- | ------ | ---------- |
@@ -127,14 +130,15 @@ The gap to the hard limit belongs to the review cycle, which will surface things
 that genuinely need saying.
 An RFD that opens at the hard limit has nowhere to put them.
 
-The hard limit gates promotion.
-An author who needs the words passes a reason to `just rfd-promote`, which
-records it as `- **Over budget**: <reason>` in the metadata header where every
-reader sees it.
+The hard limit gates pipeline readiness.
+The cycle cannot declare an assistant-authored RFD ready while `just rfd-lint`
+reports a budget error.
 
 Four sentence-level rules come from ASD-STE100, the controlled English used in
 aircraft maintenance manuals.
-One sentence carries at most 25 words.
+Aim for 25 words per sentence.
+`just rfd-lint` warns above 30, leaving a small tolerance for prose that reads
+worse when split.
 One word keeps one meaning across the document.
 `can`, `will`, and `must` replace `should`, `would`, `may`, and `might`.
 Voice is active and tenses are simple.
@@ -190,6 +194,11 @@ Progress is monotonic.
 Each step answers under a schema, and the orchestrator reads typed fields.
 Every schema carries a prose `conclusion`, which is the part printed to the
 terminal.
+
+The orchestrator verifies that every finding ID has exactly one ruling before it
+passes work to the applier.
+It applies one ruling per turn and uses the file change itself as proof that the
+edit happened.
 
 State is derived from the data, never asserted alongside it.
 An empty `findings` array is how a review clears an RFD, so there is no verdict
@@ -266,10 +275,10 @@ of the separation that stops a declined finding from becoming a hedging
 sentence.
 The extra model call buys that guarantee.
 
-**Constrain every model turn with a JSON schema.** Machine-readable verdicts
-replace a regex on one token.
-The cost is the prose that the carry-over ledger and the signoff stage are built
-from.
+**Parse control state from model prose.** Footer tokens keep responses free-form,
+but the prose and token can contradict each other.
+Structured arrays carry the primary data, while their `conclusion` fields retain
+human-readable prose.
 
 **Adopt ASD-STE100 in full.** It bans the modal and hypothetical constructions
 that design rationale needs.
@@ -282,14 +291,11 @@ settles scope before prose exists.
 
 ## Implementation Plan
 
-1. Land the personas, `rfd-lint`, and the `just` recipes.
-2. Trial the cycle on in-flight drafts, and tune the finding budgets from what
-   the triage tallies show.
-3. Promote this RFD, then move the pipeline sections out of [RFD 001] and
-   cross-reference it.
-   [RFD 001] cannot link here until this document leaves Draft.
-4. Update [RFD 002] and [RFD 003], which describe the assistant as a
-   collaborator that does not produce the finished document.
+1. Land the schemas, personas, `rfd-lint`, and `just` recipes.
+2. Trial the cycle on in-flight RFDs, and tune the finding budgets from the
+   triage tallies.
+3. Keep [RFD 001], [RFD 002], and [RFD 003] aligned with the pipeline's scope
+   and the contributor's responsibility.
 
 [RFD 001]: 001-jp-rfd-process.md
 [RFD 002]: 002-using-llms.md
