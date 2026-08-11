@@ -79,9 +79,8 @@ The applier makes only the edits ruled `accept` or `amend`.
 An assistant that both decides and edits reasons its way into the
 acknowledgement sentences this pipeline exists to remove.
 
-Each apply turn can modify only the target RFD.
-The cycle records other worktree changes for signoff without attributing them to
-the applier.
+The cycle records worktree changes outside the target RFD for signoff without
+attributing them to the applier.
 
 ### Signoff
 
@@ -195,10 +194,8 @@ Each step answers under a schema, and the orchestrator reads typed fields.
 Every schema carries a prose `conclusion`, which is the part printed to the
 terminal.
 
-The orchestrator verifies that every finding ID has exactly one ruling before it
-passes work to the applier.
-It applies one ruling per turn and uses the file change itself as proof that the
-edit happened.
+If the applier returns without changing the RFD, the cycle asks it to apply the
+edits once more before carrying them to signoff.
 
 State is derived from the data, never asserted alongside it.
 An empty `findings` array is how a review clears an RFD, so there is no verdict
