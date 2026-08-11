@@ -272,8 +272,8 @@ of the separation that stops a declined finding from becoming a hedging
 sentence.
 The extra model call buys that guarantee.
 
-**Parse control state from model prose.** Footer tokens keep responses free-form,
-but the prose and token can contradict each other.
+**Parse control state from model prose.** Footer tokens keep responses
+free-form, but the prose and token can contradict each other.
 Structured arrays carry the primary data, while their `conclusion` fields retain
 human-readable prose.
 
