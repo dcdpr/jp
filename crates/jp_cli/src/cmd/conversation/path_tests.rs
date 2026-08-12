@@ -33,6 +33,7 @@ fn setup(id: ConversationId) -> (Ctx, SharedBuffer, Utf8TempDir) {
 
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
     let ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         Some(fs),
         Runtime::new().unwrap(),
