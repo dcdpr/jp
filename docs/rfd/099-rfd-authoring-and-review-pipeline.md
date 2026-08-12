@@ -194,8 +194,10 @@ Each step answers under a schema, and the orchestrator reads typed fields.
 Every schema carries a prose `conclusion`, which is the part printed to the
 terminal.
 
-If the applier returns without changing the RFD, the cycle asks it to apply the
-edits once more before carrying them to signoff.
+An apply turn with accepted work requires `fs_modify_file` for its first tool
+call.
+JP resets tool choice after that call, so the applier can inspect the result and
+finish normally.
 
 State is derived from the data, never asserted alongside it.
 An empty `findings` array is how a review clears an RFD, so there is no verdict
