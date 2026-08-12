@@ -246,7 +246,8 @@ fn cleanup_prunes_env_entries_whose_workspace_has_no_live_root() {
         .unwrap();
 
     let live: HashSet<Id> = [id("live1")].into();
-    t.store.cleanup(&|id| live.contains(id));
+    t.store
+        .cleanup(&|entry| entry.id().is_some_and(|id| live.contains(&id)));
 
     let mapping = t.store.load(&session).expect("record survives");
     assert_eq!(mapping.history.len(), 1);
@@ -273,6 +274,29 @@ fn cleanup_keeps_entries_of_a_live_workspace_even_when_its_recorded_root_died() 
     t.store.cleanup(&|_| true);
 
     assert_eq!(t.store.load(&session).unwrap().history.len(), 1);
+}
+
+#[test]
+fn cleanup_hands_the_whole_selection_to_the_liveness_check() {
+    let t = store();
+    let session = env_session("tab-1");
+
+    t.store
+        .record_selection(&session, &id("live1"), Utf8Path::new("/kept"), at(1_000))
+        .unwrap();
+    t.store
+        .record_selection(&session, &id("live1"), Utf8Path::new("/dropped"), at(2_000))
+        .unwrap();
+
+    // Both entries carry the same workspace ID and differ only by checkout, so
+    // a caller keying on the recorded root — the checkout a registry has not
+    // seen yet — can only express that if it receives the whole selection.
+    t.store
+        .cleanup(&|entry| entry.root == Utf8Path::new("/kept"));
+
+    let mapping = t.store.load(&session).expect("record survives");
+    assert_eq!(mapping.history.len(), 1);
+    assert_eq!(mapping.history[0].root, Utf8Path::new("/kept"));
 }
 
 #[test]

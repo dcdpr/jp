@@ -225,24 +225,25 @@ impl WorkspaceSessionStore {
     ///   removed only when the originating process is confirmed dead; a live
     ///   process keeps its record unconditionally.
     /// - **Env** (liveness unknown): existence-based across the whole history.
-    ///   An entry is pruned only when its workspace ID has no live root — not
-    ///   merely when its recorded root died, which is what lets missing-root
-    ///   recovery re-prompt among the ID's surviving checkouts.
-    ///   The record is removed only when no entry references a workspace ID
-    ///   with any live root.
+    ///   An entry is pruned only when nothing it names is live — not merely
+    ///   when its recorded root died, which is what lets missing-root recovery
+    ///   re-prompt among the workspace's surviving checkouts.
+    ///   The record is removed only when no entry survives.
     ///
-    /// `workspace_has_live_root` answers "does this workspace ID have at least
-    /// one live checkout?"; the caller supplies it so the store stays agnostic
-    /// of where roots registries live.
-    pub fn cleanup(&self, workspace_has_live_root: &dyn Fn(&Id) -> bool) {
+    /// `is_live` answers "does this selection still name something usable?";
+    /// the caller supplies it so the store stays agnostic of where roots
+    /// registries live.
+    /// It receives the whole selection rather than its workspace ID, so a
+    /// checkout that no registry lists yet can still count as live.
+    pub fn cleanup(&self, is_live: &dyn Fn(&WorkspaceSelection) -> bool) {
         for file in record_files(&self.dir) {
-            cleanup_record(&file, workspace_has_live_root);
+            cleanup_record(&file, is_live);
         }
     }
 }
 
 /// Evaluate a single session record file against the cleanup rules.
-fn cleanup_record(path: &Utf8Path, workspace_has_live_root: &dyn Fn(&Id) -> bool) {
+fn cleanup_record(path: &Utf8Path, is_live: &dyn Fn(&WorkspaceSelection) -> bool) {
     let mapping = match read_json::<WorkspaceSessionMapping>(path) {
         Ok(mapping) => mapping,
         Err(error) => {
@@ -269,7 +270,7 @@ fn cleanup_record(path: &Utf8Path, workspace_has_live_root: &dyn Fn(&Id) -> bool
             let live: Vec<_> = mapping
                 .history
                 .iter()
-                .filter(|entry| entry.id().is_some_and(|id| workspace_has_live_root(&id)))
+                .filter(|entry| is_live(entry))
                 .cloned()
                 .collect();
 

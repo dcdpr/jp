@@ -1,6 +1,7 @@
 use chrono::Utc;
 use crossterm::style::Stylize as _;
 use jp_printer::Printer;
+use tracing::warn;
 
 use crate::cmd::{
     Output,
@@ -22,8 +23,9 @@ pub(crate) struct Use {
     /// The workspace to select.
     /// See `jp w use help` for the grammar.
     ///
+    /// Also settable with the global `--workspace` flag, but not both at once.
     /// Defaults to the picker (`?`).
-    target: Option<WorkspaceTarget>,
+    pub(super) target: Option<WorkspaceTarget>,
 }
 
 impl Use {
@@ -89,6 +91,17 @@ impl Use {
                     )
                     .into());
                 };
+
+                // Announce the checkout before recording the selection: a
+                // later run resolves this selection from anywhere by ID, which
+                // only works once the roots registry knows the checkout. A
+                // freshly cloned workspace no command has run inside yet is
+                // exactly the case `use` has to cover.
+                if let Err(error) =
+                    crate::register_workspace_checkout(&env.workspaces_dir, &selected.root, &id)
+                {
+                    warn!(%error, root = %selected.root, "Failed to register the workspace checkout.");
+                }
 
                 if previous.as_ref().is_some_and(|entry| {
                     entry.id().is_some_and(|prev| prev == id) && entry.root == selected.root

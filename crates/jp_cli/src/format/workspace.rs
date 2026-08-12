@@ -203,10 +203,11 @@ impl fmt::Display for DetailsFmt {
 /// The terminal text is the path, marked `(active)` when the session's active
 /// selection points at this checkout.
 /// The JSON form carries the canonical `path`, the `active` flag, and the roots
-/// registry's `last_used` timestamp.
+/// registry's `last_used` timestamp — `null` for a checkout the registry does
+/// not list, which has no recorded use.
 pub(crate) fn checkout_detail_item(
     path: &Utf8Path,
-    last_used: DateTime<Utc>,
+    last_used: Option<DateTime<Utc>>,
     active: bool,
     pretty: bool,
 ) -> DetailItem {

@@ -92,6 +92,70 @@ fn explicit_id_reports_missing_live_checkouts() {
 }
 
 #[test]
+fn path_target_lists_an_unregistered_checkout() {
+    let tmp = tempdir().unwrap();
+    // A live checkout no workspace-loading command has run in, so the roots
+    // registry has never heard of it.
+    let root = make_workspace(tmp.path(), "proj", "ws123");
+    let env = env_at(tmp.path().to_owned(), tmp.path(), None);
+    let (printer, out, _err) = Printer::memory(OutputFormat::Json);
+
+    Show {
+        target: Some(WorkspaceTarget::Path(root.clone())),
+    }
+    .run(&printer, &env, false)
+    .unwrap();
+
+    let stdout = stdout_of(&printer, &out);
+    let json: serde_json::Value = serde_json::from_str(stdout.trim()).unwrap();
+    let checkouts = json["checkouts"].as_array().expect("checkouts array");
+
+    // Reporting `(no live checkouts)` for the path the user just named would
+    // contradict the target.
+    assert_eq!(
+        checkouts.len(),
+        1,
+        "the resolved checkout is listed: {stdout}"
+    );
+    assert_eq!(
+        checkouts[0]["path"],
+        serde_json::json!(root.canonicalize_utf8().unwrap().as_str())
+    );
+    // Unregistered: nothing has recorded a use of it, and `show` does not
+    // record one either.
+    assert_eq!(checkouts[0]["last_used"], serde_json::Value::Null);
+    assert!(
+        jp_workspace::roots::resolve_live_roots(
+            &env.workspaces_dir,
+            &Id::from_str("ws123").unwrap(),
+            crate::DEFAULT_STORAGE_DIR
+        )
+        .is_empty(),
+        "`show` must not register the checkout it reports on"
+    );
+}
+
+#[test]
+fn cwd_subject_lists_the_cwd_checkout() {
+    let tmp = tempdir().unwrap();
+    let root = make_workspace(tmp.path(), "proj", "ws123");
+    let env = env_at(root.clone(), tmp.path(), None);
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+
+    Show { target: None }.run(&printer, &env, false).unwrap();
+
+    let stdout = stdout_of(&printer, &out);
+    assert!(
+        stdout.contains(root.canonicalize_utf8().unwrap().as_str()),
+        "unexpected output: {stdout}"
+    );
+    assert!(
+        !stdout.contains("(no live checkouts)"),
+        "unexpected output: {stdout}"
+    );
+}
+
+#[test]
 fn ambiguous_fuzzy_match_errors_with_candidates() {
     let tmp = tempdir().unwrap();
     let env = env_at(tmp.path().to_owned(), tmp.path(), None);
@@ -201,5 +265,36 @@ fn session_active_subject_notes_cwd_precedence() {
     assert!(
         stdout.contains("prompt between"),
         "unexpected output: {stdout}"
+    );
+}
+
+#[test]
+fn json_output_stays_one_document_when_the_cwd_note_applies() {
+    let tmp = tempdir().unwrap();
+    // The same setup that prints the cwd-vs-active note in text mode.
+    let cwd_root = make_workspace(tmp.path(), "here", "ccc33");
+    let session = env_session();
+    let env = env_at(cwd_root, tmp.path(), Some(&session));
+    env.store
+        .record_selection(
+            &session,
+            &Id::from_str("aaa11").unwrap(),
+            &tmp.path().join("gone"),
+            Utc::now(),
+        )
+        .unwrap();
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::Json);
+    Show { target: None }.run(&printer, &env, false).unwrap();
+
+    // The note is prose for humans; appending it to machine output would leave
+    // a second document trailing the payload.
+    let stdout = stdout_of(&printer, &out);
+    let json: serde_json::Value = serde_json::from_str(stdout.trim())
+        .unwrap_or_else(|error| panic!("output is not a single JSON document ({error}): {stdout}"));
+    assert_eq!(json["id"], serde_json::json!("aaa11"));
+    assert!(
+        !stdout.contains("prompt between"),
+        "the note must not reach machine output: {stdout}"
     );
 }

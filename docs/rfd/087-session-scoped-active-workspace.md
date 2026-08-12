@@ -307,6 +307,10 @@ Examples below use `jp w` for brevity.
   `jp w use` is interactive-only in all forms — including `cwd` — because it
   mutates session state; scripts target with `jp -w` instead (see
   [Non-interactive mode](#precedence-and-the-cwd-vs-active-conflict)).
+  Selecting a checkout also registers it in the roots registry, so a workspace
+  selected by path before any command has run inside it is immediately
+  reachable by `<id>` from anywhere — which is what a session-scoped selection
+  promises.
 - `jp w use cwd` (short `.`): drop the session's active workspace and fall back
   to cwd resolution.
   This replaces a `--clear` flag — clearing is just selecting the cwd-derived
@@ -330,13 +334,27 @@ Examples below use `jp w` for brevity.
   accurate without paying a full workspace load per root.
   When the target resolves to a single concrete root — a path, or an `<id>`
   with one live root — the readout shows that root.
+  When the target names a checkout the roots registry has not seen yet, the
+  readout still lists it: resolution reached it directly, and reporting "no
+  live checkouts" for the path the user just named would contradict the target.
+  Such a checkout has no `last_used`, because `show` reports without
+  registering.
   When an `<id>` has several live roots, `jp w show` lists every live root and
   marks the session-active one (if any); it does not prompt, so `show` stays
   read-only and script-friendly.
+  Read-only is literal: inspecting a workspace creates no user-workspace
+  directory, runs no migration or import, writes no registry entry, and leaves
+  recency untouched, so `jp w show` can never change what `l` / `latest`
+  resolves to.
 - `jp -w <target>`: a per-command workspace override using the same targeting
   grammar.
   It selects the workspace for this invocation only — it does not change the
   session's active workspace.
+  On `jp w use` and `jp w show` the flag instead names the workspace the
+  subcommand acts on, so `jp -w foo w show` and `jp w show foo` are the same
+  command; giving both spellings at once is an error rather than a silent
+  precedence rule, and `jp w ls` rejects the flag outright since it lists every
+  workspace.
   A bare `<target>` is treated as a path if it resolves to an existing path,
   otherwise parsed as a workspace ID, so a local directory whose name matches a
   workspace ID shadows the ID.
@@ -388,6 +406,9 @@ workspace ID *plus* checkout root — not on the workspace ID alone.
 `s` restores the exact previously active checkout (`cd -` semantics), not the
 previous workspace re-resolved against its roots; multiple roots of the same ID
 are distinct history entries.
+When that exact checkout is gone, `s` fails rather than substituting a sibling,
+and points at the full picker (`?`) — not `?s`, which filters this session's
+history by the same exact-root rule and can therefore offer nothing.
 
 The picker and fuzzy free-text match display each workspace by its **slug** —
 the `<slug>` in the user-workspace directory `<slug>-<id>` (see [RFD 031]), the
@@ -512,14 +533,18 @@ The `sticky` field is the persisted `A` state from the precedence ladder.
 - **`Env` (including `$JP_SESSION`)**: process liveness is unknown, so cleanup
   is existence-based across the whole history, mirroring RFD 020's `Env` rule
   (which keeps a mapping while *any* referenced conversation still exists).
-  A history entry is pruned only when its `workspace_id` has no live root; the
-  whole mapping is removed only when no history entry references a workspace ID
-  with any live root.
+  A history entry is pruned only when nothing it names is live: neither its own
+  recorded checkout, nor any registered checkout of its `workspace_id`.
+  The whole mapping is removed only when no entry survives that test.
   Keying cleanup off the workspace ID rather than the single active root is what
   lets the missing-root recovery flow run: when the active root is gone but its
   `<id>` still has other live checkouts, the mapping survives so recovery can
   re-prompt among them (see [Reprompt on a missing active
   workspace](#reprompt-on-a-missing-active-workspace)).
+  Accepting the recorded checkout as evidence in its own right covers the
+  opposite case: a checkout that holds the workspace but has not reached the
+  roots registry yet is live regardless of what the registry knows, so a
+  just-recorded selection cannot be pruned by the same run that wrote it.
 - A sticky `A` choice has no process bound for `Env` sources, so it persists
   until its `workspace_id` has no live root — not merely until the active root
   dies.

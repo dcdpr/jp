@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::Printer;
@@ -30,8 +31,9 @@ pub(crate) struct Show {
     /// The workspace to show.
     /// See `jp w use help` for the grammar.
     ///
+    /// Also settable with the global `--workspace` flag, but not both at once.
     /// Defaults to the session's active workspace, then the cwd-derived one.
-    target: Option<WorkspaceTarget>,
+    pub(super) target: Option<WorkspaceTarget>,
 }
 
 /// What `show` reports on: a workspace and how it was reached.
@@ -39,9 +41,48 @@ struct Subject {
     id: Id,
     slug: Option<String>,
     /// Live checkouts, most recently used first.
-    roots: Vec<roots::RootEntry>,
+    roots: Vec<Checkout>,
     /// How the subject was resolved, for the readout.
     resolved: &'static str,
+}
+
+/// A live checkout of the subject workspace.
+struct Checkout {
+    /// The canonical checkout root.
+    path: Utf8PathBuf,
+
+    /// When a JP command last ran against this checkout, from the roots
+    /// registry.
+    ///
+    /// `None` for a checkout the registry does not list: nothing has recorded a
+    /// use of it.
+    last_used: Option<DateTime<Utc>>,
+}
+
+impl Subject {
+    /// Include a checkout the caller resolved directly, unless the roots
+    /// registry already lists it.
+    ///
+    /// A checkout only enters the registry when a workspace-loading command
+    /// runs from inside it, so a path or cwd target can name a live checkout
+    /// the registry has never seen.
+    /// Reporting that as `(no live checkouts)` contradicts the path the user
+    /// just named.
+    /// `root` must already be verified to hold this workspace.
+    fn including(mut self, root: &Utf8Path) -> Self {
+        // The registry stores canonical paths; match that spelling so a
+        // symlinked target does not read as a second checkout.
+        let path = root.canonicalize_utf8().unwrap_or_else(|_| root.to_owned());
+
+        if !self.roots.iter().any(|checkout| checkout.path == path) {
+            self.roots.push(Checkout {
+                path,
+                last_used: None,
+            });
+        }
+
+        self
+    }
 }
 
 impl Show {
@@ -88,9 +129,9 @@ impl Show {
             if let Some(id) = active.and_then(WorkspaceSelection::id) {
                 return Ok(Some(subject_for(env, id, "session-active")));
             }
-            return Ok(cwd_root
-                .and_then(root_id)
-                .map(|id| subject_for(env, id, "current directory")));
+            return Ok(cwd_root.and_then(|root| {
+                root_id(root).map(|id| subject_for(env, id, "current directory").including(root))
+            }));
         };
 
         match target {
@@ -109,12 +150,14 @@ impl Show {
                 let id = root_id(&root)
                     .ok_or_else(|| format!("`{root}` has no readable workspace ID."))?;
 
-                Ok(Some(subject_for(env, id, "explicit target")))
+                Ok(Some(
+                    subject_for(env, id, "explicit target").including(&root),
+                ))
             }
 
-            WorkspaceTarget::Cwd => Ok(cwd_root
-                .and_then(root_id)
-                .map(|id| subject_for(env, id, "current directory"))),
+            WorkspaceTarget::Cwd => Ok(cwd_root.and_then(|root| {
+                root_id(root).map(|id| subject_for(env, id, "current directory").including(root))
+            })),
 
             WorkspaceTarget::Session => {
                 let session = env.session.ok_or(
@@ -214,7 +257,13 @@ fn subject_for(env: &TargetEnv<'_>, id: Id, resolved: &'static str) -> Subject {
         .into_iter()
         .find(|workspace| workspace.id == id)
         .and_then(|workspace| workspace.slug);
-    let roots = roots::resolve_live_roots(&env.workspaces_dir, &id, DEFAULT_STORAGE_DIR);
+    let roots = roots::resolve_live_roots(&env.workspaces_dir, &id, DEFAULT_STORAGE_DIR)
+        .into_iter()
+        .map(|entry| Checkout {
+            path: entry.path,
+            last_used: Some(entry.last_used),
+        })
+        .collect();
 
     Subject {
         id,
@@ -255,9 +304,9 @@ fn render(
     let checkouts = subject
         .roots
         .iter()
-        .map(|entry| {
-            let is_active = active.is_some_and(|selection| selection.root == entry.path);
-            checkout_detail_item(&entry.path, entry.last_used, is_active, pretty)
+        .map(|checkout| {
+            let is_active = active.is_some_and(|selection| selection.root == checkout.path);
+            checkout_detail_item(&checkout.path, checkout.last_used, is_active, pretty)
         })
         .collect();
 
@@ -276,7 +325,12 @@ fn render(
     // The cwd-vs-active tension, surfaced instead of silently resolved (RFD
     // 087's precedence ladder): a sticky session keeps the active workspace;
     // otherwise commands prompt when the two disagree.
-    if subject_is_active
+    //
+    // Prose only: `println` wraps content in an NDJSON envelope, which would
+    // append a second document after the payload printed above and leave the
+    // output unparseable.
+    if !printer.format().is_json()
+        && subject_is_active
         && let Some(cwd_root) = cwd_root
         && active.is_some_and(|entry| entry.root != cwd_root)
     {
@@ -308,14 +362,18 @@ struct ConversationStats {
 /// merges the user-local durable store, so every sibling checkout can only add
 /// conversations that live in its own projection alone.
 /// Those are picked up with a bare directory scan per sibling — no workspace
-/// construction, no user-local re-merge, and no roots-registry writes, keeping
-/// `show` read-only for the checkouts it merely reports on.
+/// construction and no user-local re-merge.
+/// The one full load runs with [`LoadIntent::Inspect`], so reporting on a
+/// workspace writes nothing: no registry entry, no user-local setup, no recency
+/// change.
 ///
 /// Roots that fail to load are skipped with a warning; `None` when no root
 /// produced an index.
+///
+/// [`LoadIntent::Inspect`]: crate::LoadIntent::Inspect
 fn conversation_stats(
     env: &TargetEnv<'_>,
-    roots: &[roots::RootEntry],
+    roots: &[Checkout],
     persist: bool,
 ) -> Option<ConversationStats> {
     let mut ids: BTreeSet<ConversationId> = BTreeSet::new();
@@ -328,13 +386,14 @@ fn conversation_stats(
     let mut loaded_any = false;
     for entry in remaining.by_ref() {
         let root = &entry.path;
-        let (mut workspace, _backend) = match crate::load_workspace(root, persist) {
-            Ok(loaded) => loaded,
-            Err(error) => {
-                warn!(%error, %root, "Skipping unloadable checkout in the conversation count.");
-                continue;
-            }
-        };
+        let (mut workspace, _backend) =
+            match crate::load_workspace(root, persist, crate::LoadIntent::Inspect) {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    warn!(%error, %root, "Skipping unloadable checkout in the conversation count.");
+                    continue;
+                }
+            };
 
         workspace.load_conversation_index();
         ids.extend(workspace.conversations().map(|(id, _)| *id));

@@ -99,6 +99,24 @@ impl Storage {
         Ok(self)
     }
 
+    /// Attach the *existing* user-workspace directory for workspace `id`.
+    ///
+    /// Read-only counterpart of [`Self::with_user_storage`]: the directory is
+    /// located by the same ID-suffix rule, but nothing is created, no sibling
+    /// directories are merged, and no conversations are imported.
+    /// User storage stays disabled when the workspace has none yet, so reading
+    /// a workspace cannot mint user-local state for it.
+    #[must_use]
+    pub fn with_existing_user_storage(
+        mut self,
+        root: &Utf8Path,
+        slug: Option<&str>,
+        id: &str,
+    ) -> Self {
+        self.user = find_user_workspace_dir(root, slug, id).filter(|dir| dir.is_dir());
+        self
+    }
+
     /// Returns the path to the storage directory.
     #[must_use]
     pub fn path(&self) -> &Utf8Path {
@@ -573,9 +591,7 @@ fn resolve_user_workspace_dir(
     slug: Option<&str>,
     id: &str,
 ) -> (Utf8PathBuf, bool) {
-    if let Some(dir) =
-        choose_canonical_user_workspace_dir(&matching_user_workspace_dirs(root, id), slug, id)
-    {
+    if let Some(dir) = find_user_workspace_dir(root, slug, id) {
         return (dir, false);
     }
 
@@ -584,6 +600,21 @@ fn resolve_user_workspace_dir(
         None => id.to_owned(),
     };
     (root.join(name), true)
+}
+
+/// The existing user-workspace directory for workspace `id`, when there is one.
+///
+/// Applies the same ID-suffix location rule as [`Storage::with_user_storage`],
+/// and creates nothing: `None` means the workspace has no user-local state yet.
+/// `slug` only breaks ties between several existing directories (a legacy
+/// per-worktree layout), preferring an exact `<slug>-<id>` match.
+#[must_use]
+pub fn find_user_workspace_dir(
+    root: &Utf8Path,
+    slug: Option<&str>,
+    id: &str,
+) -> Option<Utf8PathBuf> {
+    choose_canonical_user_workspace_dir(&matching_user_workspace_dirs(root, id), slug, id)
 }
 
 /// List the user-workspace directories whose name resolves to workspace `id`.

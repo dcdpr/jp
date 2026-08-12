@@ -67,6 +67,19 @@ impl FsStorageBackend {
         })
     }
 
+    /// Attach the *existing* user-workspace directory for workspace `id`.
+    ///
+    /// Read-only counterpart of [`Self::with_user_storage`]: the directory is
+    /// located by the same ID-suffix rule, but nothing is created, merged, or
+    /// imported.
+    /// User storage stays disabled when the workspace has none yet.
+    #[must_use]
+    pub fn with_existing_user_storage(self, root: &Utf8Path, slug: Option<&str>, id: &str) -> Self {
+        Self {
+            storage: self.storage.with_existing_user_storage(root, slug, id),
+        }
+    }
+
     /// Returns the path to the storage root directory.
     #[must_use]
     pub fn storage_path(&self) -> &Utf8Path {

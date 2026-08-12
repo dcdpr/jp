@@ -121,6 +121,44 @@ fn selecting_a_path_records_the_selection() {
 }
 
 #[test]
+fn selecting_a_workspace_registers_its_checkout() {
+    let tmp = tempdir().unwrap();
+    let root = make_workspace(tmp.path(), "proj", "ws123");
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), true);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+
+    // A checkout no workspace-loading command has run in: nothing knows it
+    // yet.
+    let id = Id::from_str("ws123").unwrap();
+    assert!(
+        jp_workspace::roots::resolve_live_roots(
+            &env.workspaces_dir,
+            &id,
+            crate::DEFAULT_STORAGE_DIR
+        )
+        .is_empty()
+    );
+
+    Use {
+        target: Some(WorkspaceTarget::Path(root.clone())),
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    // Selecting it makes it reachable by ID from anywhere — and keeps the
+    // end-of-run cleanup pass, which prunes selections nothing vouches for,
+    // from dropping the record just written.
+    let roots = jp_workspace::roots::resolve_live_roots(
+        &env.workspaces_dir,
+        &id,
+        crate::DEFAULT_STORAGE_DIR,
+    );
+    assert_eq!(roots.len(), 1, "the selected checkout is registered");
+    assert_eq!(roots[0].path, root.canonicalize_utf8().unwrap());
+}
+
+#[test]
 fn reselecting_the_active_workspace_is_a_noop() {
     let tmp = tempdir().unwrap();
     let root = make_workspace(tmp.path(), "proj", "ws123");

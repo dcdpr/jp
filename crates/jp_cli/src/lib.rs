@@ -170,6 +170,9 @@ struct Globals {
     ///
     /// Selects the workspace for this invocation only; it does not change the
     /// session's active workspace (that is `jp w use`).
+    ///
+    /// On `jp workspace use` and `jp workspace show` it names the workspace the
+    /// subcommand acts on, as an alternative to their positional target.
     #[arg(short = 'w', long, global = true)]
     workspace: Option<WorkspaceTarget>,
 
@@ -477,8 +480,15 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         trace!("Resolving session identity.");
         let session = session::resolve();
 
+        // The global `--workspace` flag names the workspace `use` and `show`
+        // act on here, rather than the one the run operates from.
         let output = args
-            .run(&printer, session.as_ref(), cli.globals.persist)
+            .run(
+                &printer,
+                session.as_ref(),
+                cli.globals.persist,
+                cli.globals.workspace.as_ref(),
+            )
             .map_err(Into::into);
 
         // `jp w use` and friends mutate the user-global records, so they get
@@ -515,7 +525,8 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         "Bootstrapped workspace selection."
     );
 
-    let (mut workspace, fs_backend) = load_workspace(&exec.root, cli.globals.persist)?;
+    let (mut workspace, fs_backend) =
+        load_workspace(&exec.root, cli.globals.persist, LoadIntent::Run)?;
 
     // `Resolve` commands stop at a validated root; only `Load` commands pay
     // for sanitization and the conversation index.
@@ -627,17 +638,25 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
 
 /// Source-split cleanup of the user-global session → active-workspace store.
 ///
-/// A workspace ID counts as live while any registered checkout of it still
-/// resolves to a workspace with that ID; expanding an ID also prunes its dead
-/// registry entries opportunistically (RFD 087).
+/// A selection stays live while its own recorded checkout still holds the
+/// workspace, or while any registered checkout of that workspace ID does;
+/// expanding an ID also prunes its dead registry entries opportunistically (RFD
+/// 087).
+///
+/// Checking the recorded checkout directly is what keeps a selection of a
+/// checkout the roots registry has not seen yet from being pruned in the same
+/// invocation that wrote it.
 fn cleanup_workspace_session_records() {
     let Ok(data_dir) = user_data_dir() else {
         return;
     };
 
     let workspaces_dir = data_dir.join(USER_WORKSPACES_DIR);
-    WorkspaceSessionStore::at_user_data_dir(&data_dir).cleanup(&|id| {
-        !roots::resolve_live_roots(&workspaces_dir, id, DEFAULT_STORAGE_DIR).is_empty()
+    WorkspaceSessionStore::at_user_data_dir(&data_dir).cleanup(&|entry| {
+        entry.id().is_some_and(|id| {
+            roots::is_live(&entry.root, &id, DEFAULT_STORAGE_DIR)
+                || !roots::resolve_live_roots(&workspaces_dir, &id, DEFAULT_STORAGE_DIR).is_empty()
+        })
     });
 }
 
@@ -955,10 +974,39 @@ fn load_partial_configs_from_files(
     Ok(partials)
 }
 
+/// What a workspace load is allowed to change about the workspace it opens.
+///
+/// Opening a workspace is not free of side effects: user-local storage is
+/// materialized on first setup, and the checkout announces itself to the roots
+/// registry.
+/// Both are correct for the workspace a command *runs against*, and wrong for
+/// one it merely *reports on*.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoadIntent {
+    /// The workspace the command runs against.
+    ///
+    /// Materializes user-local storage (creating the user-workspace directory,
+    /// merging legacy siblings, importing conversations on first setup),
+    /// records the checkout in the roots registry, and repairs the stored
+    /// workspace ID.
+    Run,
+
+    /// A workspace the command only reads.
+    ///
+    /// Reuses an existing user-workspace directory read-only and writes
+    /// nothing: no directory creation, no migration, no import, no registry
+    /// entry, no ID write.
+    /// Inspecting a workspace therefore cannot change which checkout `latest`
+    /// resolves to, nor mint user-local state for a workspace the user never
+    /// ran a command in.
+    Inspect,
+}
+
 /// Construct the workspace at the given, bootstrap-selected checkout root.
 ///
 /// Root selection lives in [`bootstrap::resolve`]; this only builds the storage
 /// backend and [`Workspace`] on top of it.
+/// `intent` decides what the load may write — see [`LoadIntent`].
 ///
 /// When `persist` is `false` (`--no-persist`), the persist backend is swapped
 /// to [`NullPersistBackend`] and the lock backend to [`NullLockBackend`] so
@@ -967,9 +1015,10 @@ fn load_partial_configs_from_files(
 fn load_workspace(
     root: &Utf8Path,
     persist: bool,
+    intent: LoadIntent,
 ) -> Result<(Workspace, Option<Arc<FsStorageBackend>>)> {
     let storage = root.join(DEFAULT_STORAGE_DIR);
-    trace!(storage = %storage, "Initializing workspace storage.");
+    trace!(storage = %storage, ?intent, "Initializing workspace storage.");
 
     let id = jp_workspace::Id::load(&storage)
         .transpose()
@@ -981,24 +1030,17 @@ fn load_workspace(
 
     let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
 
-    let workspaces_dir = user_data_dir()?.join("workspace");
     // The workspace directory name slugs a freshly created user-workspace
     // directory so users can recognize it; an existing one is reused by ID
     // regardless of its slug.
     let slug = root.file_name();
-    let fs = fs
-        .with_user_storage(&workspaces_dir, slug, id.to_string())
-        .map_err(jp_workspace::Error::from)?;
-
-    // Register this checkout in the workspace's roots registry so `-w <id>`
-    // can target it from anywhere, folding in any pre-registry `storage`
-    // symlink first (see RFD 087).
-    if let Some(dir) = fs.user_storage_path() {
-        roots::migrate_legacy_symlink(dir, &id, DEFAULT_STORAGE_DIR);
-        if let Err(error) = roots::upsert_root(dir, root) {
-            warn!(%error, "Failed to record the checkout in the workspace roots registry.");
+    let workspaces_dir = user_data_dir()?.join(USER_WORKSPACES_DIR);
+    let fs = match intent {
+        LoadIntent::Run => register_checkout(fs, &workspaces_dir, root, slug, &id)?,
+        LoadIntent::Inspect => {
+            fs.with_existing_user_storage(&workspaces_dir, slug, &id.to_string())
         }
-    }
+    };
 
     let fs = Arc::new(fs);
     let mut workspace = Workspace::new_with_id(root.to_owned(), id).with_backend(fs.clone());
@@ -1009,9 +1051,56 @@ fn load_workspace(
     }
     info!(workspace = %workspace.root(), "Using existing workspace.");
 
-    workspace.id().store(&storage)?;
+    if intent == LoadIntent::Run {
+        workspace.id().store(&storage)?;
+    }
 
     Ok((workspace, Some(fs)))
+}
+
+/// Materialize user-local storage for `root` and announce the checkout.
+///
+/// Wires up the workspace's user-workspace directory (running the one-time
+/// setup migration), folds in any pre-registry `storage` symlink, and records
+/// the checkout in the roots registry so `-w <id>` and `jp w ls` can reach it
+/// from anywhere (RFD 087).
+fn register_checkout(
+    fs: FsStorageBackend,
+    workspaces_dir: &Utf8Path,
+    root: &Utf8Path,
+    slug: Option<&str>,
+    id: &jp_workspace::Id,
+) -> Result<FsStorageBackend> {
+    let fs = fs
+        .with_user_storage(workspaces_dir, slug, id.to_string())
+        .map_err(jp_workspace::Error::from)?;
+
+    if let Some(dir) = fs.user_storage_path() {
+        roots::migrate_legacy_symlink(dir, id, DEFAULT_STORAGE_DIR);
+        if let Err(error) = roots::upsert_root(dir, root) {
+            warn!(%error, "Failed to record the checkout in the workspace roots registry.");
+        }
+    }
+
+    Ok(fs)
+}
+
+/// Register a checkout without constructing a [`Workspace`].
+///
+/// `jp w use` records a selection that later runs resolve by ID from anywhere,
+/// which only works once the checkout is in the registry.
+/// Selecting a checkout no workspace-loading command has run inside yet is
+/// exactly the case that needs it.
+pub(crate) fn register_workspace_checkout(
+    workspaces_dir: &Utf8Path,
+    root: &Utf8Path,
+    id: &jp_workspace::Id,
+) -> Result<()> {
+    let storage = root.join(DEFAULT_STORAGE_DIR);
+    let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
+
+    register_checkout(fs, workspaces_dir, root, root.file_name(), id)?;
+    Ok(())
 }
 
 const JP_CRATES: &[&str] = &[

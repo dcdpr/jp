@@ -245,10 +245,13 @@ pub(crate) fn resolve(target: &WorkspaceTarget, env: &TargetEnv<'_>) -> Result<R
                 .id()
                 .filter(|id| roots::is_live(&entry.root, id, DEFAULT_STORAGE_DIR));
             let Some(id) = live else {
+                // `?s` filters this session's history by the same exact-root
+                // liveness rule, so it can offer nothing here; `?` spans every
+                // known workspace.
                 return Err(cmd::Error::from(format!(
                     "The previously active workspace checkout is gone ({}). Pick one with `{}`.",
                     entry.root,
-                    "jp w use '?s'".bold().yellow(),
+                    "jp w use '?'".bold().yellow(),
                 ))
                 .into());
             };
