@@ -208,6 +208,19 @@ rfd-write *ARGS: _install-jp _install-comfort
         printf "\nNo draft was created. Run 'just rfd-lint <id>' and 'just rfd-cycle <id>' once one exists.\n" >&2
     fi
 
+# Open a commit message in the editor, using Jean-Pierre.
+[group('jp')]
+[positional-arguments]
+commit-this *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    msg="I gave you the commit skill, use it to stage and commit all relevant changes part of our conversation."
+
+    args=$(just _shape-args "$msg" "$@")
+
+    jp query --cfg=skill/git-reading --cfg=skill/git-stage --cfg=skill/git-commit-writing $args
+
 # Review a GitHub pull request, queueing inline comments to a draft review.
 #
 # Each comment is added one at a time and prompts you to approve or reject
