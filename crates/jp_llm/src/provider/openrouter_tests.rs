@@ -1,6 +1,7 @@
+use std::iter;
+
 use indexmap::IndexMap;
 use jp_config::{conversation::tool::ToolParameterConfig, providers::llm::LlmProviderConfig};
-use std::iter;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_test::{Result, function_name};
 
