@@ -65,6 +65,15 @@ pub struct ChatCompletion {
 
     /// Usage statistics for the completion request.
     pub usage: Option<Usage>,
+
+    /// The error that terminated the response, if any.
+    ///
+    /// A request that fails once the response has been committed cannot change
+    /// its HTTP status, so the failure arrives as a regular chunk carrying this
+    /// field alongside a `choices` entry with `finish_reason: "error"` (or an
+    /// empty `choices` array).
+    /// Present only on such terminating chunks.
+    pub error: Option<ErrorResponse>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

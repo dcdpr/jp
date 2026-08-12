@@ -49,5 +49,6 @@ Ok(
                 total_tokens: 51,
             },
         ),
+        error: None,
     },
 )
