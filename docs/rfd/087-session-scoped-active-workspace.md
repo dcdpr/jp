@@ -308,9 +308,8 @@ Examples below use `jp w` for brevity.
   mutates session state; scripts target with `jp -w` instead (see
   [Non-interactive mode](#precedence-and-the-cwd-vs-active-conflict)).
   Selecting a checkout also registers it in the roots registry, so a workspace
-  selected by path before any command has run inside it is immediately
-  reachable by `<id>` from anywhere — which is what a session-scoped selection
-  promises.
+  selected by path before any command has run inside it is immediately reachable
+  by `<id>` from anywhere — which is what a session-scoped selection promises.
 - `jp w use cwd` (short `.`): drop the session's active workspace and fall back
   to cwd resolution.
   This replaces a `--clear` flag — clearing is just selecting the cwd-derived
@@ -335,8 +334,8 @@ Examples below use `jp w` for brevity.
   When the target resolves to a single concrete root — a path, or an `<id>`
   with one live root — the readout shows that root.
   When the target names a checkout the roots registry has not seen yet, the
-  readout still lists it: resolution reached it directly, and reporting "no
-  live checkouts" for the path the user just named would contradict the target.
+  readout still lists it: resolution reached it directly, and reporting "no live
+  checkouts" for the path the user just named would contradict the target.
   Such a checkout has no `last_used`, because `show` reports without
   registering.
   When an `<id>` has several live roots, `jp w show` lists every live root and
