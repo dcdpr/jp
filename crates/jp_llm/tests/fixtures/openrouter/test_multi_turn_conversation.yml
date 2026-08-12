@@ -83,9 +83,6 @@ when:
           ]
         },
         {
-          "role": "assistant"
-        },
-        {
           "role": "assistant",
           "content": [
             {
@@ -280,9 +277,6 @@ when:
           ]
         },
         {
-          "role": "assistant"
-        },
-        {
           "role": "assistant",
           "content": [
             {
@@ -299,9 +293,6 @@ when:
               "text": "Repeat my previous message"
             }
           ]
-        },
-        {
-          "role": "assistant"
         },
         {
           "role": "assistant",
@@ -434,9 +425,6 @@ when:
           ]
         },
         {
-          "role": "assistant"
-        },
-        {
           "role": "assistant",
           "content": [
             {
@@ -455,9 +443,6 @@ when:
           ]
         },
         {
-          "role": "assistant"
-        },
-        {
           "role": "assistant",
           "content": [
             {
@@ -474,9 +459,6 @@ when:
               "text": "Please run the tool, providing whatever arguments you want."
             }
           ]
-        },
-        {
-          "role": "assistant"
         },
         {
           "role": "assistant",
@@ -629,9 +611,6 @@ when:
           ]
         },
         {
-          "role": "assistant"
-        },
-        {
           "role": "assistant",
           "content": [
             {
@@ -648,9 +627,6 @@ when:
               "text": "Repeat my previous message"
             }
           ]
-        },
-        {
-          "role": "assistant"
         },
         {
           "role": "assistant",
@@ -671,9 +647,6 @@ when:
           ]
         },
         {
-          "role": "assistant"
-        },
-        {
           "role": "assistant",
           "tool_calls": [
             {
@@ -690,9 +663,6 @@ when:
           "role": "tool",
           "content": "The secret code is: 42",
           "tool_call_id": "call_9NiOxr9CbNNm4FD5cLEyiAkN"
-        },
-        {
-          "role": "assistant"
         },
         {
           "role": "assistant",

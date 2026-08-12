@@ -128,9 +128,6 @@ when:
           ]
         },
         {
-          "role": "assistant"
-        },
-        {
           "role": "assistant",
           "tool_calls": [
             {

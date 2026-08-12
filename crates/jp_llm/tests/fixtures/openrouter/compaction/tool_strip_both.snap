@@ -15,9 +15,6 @@ expression: request
       ]
     },
     {
-      "role": "assistant"
-    },
-    {
       "role": "assistant",
       "content": [
         {
