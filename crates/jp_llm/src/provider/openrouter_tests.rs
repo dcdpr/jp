@@ -1,5 +1,6 @@
 use indexmap::IndexMap;
 use jp_config::{conversation::tool::ToolParameterConfig, providers::llm::LlmProviderConfig};
+use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_test::{Result, function_name};
 
 use super::*;
@@ -127,6 +128,80 @@ fn tool_call_finish_is_a_clean_completion() -> Result {
         Event::flush(2),
         Event::Finished(event::FinishReason::Completed),
     ]);
+    Ok(())
+}
+
+#[test]
+fn parallel_tool_calls_share_one_assistant_message() -> Result {
+    let mut events = ConversationStream::new_test();
+    events.start_turn("Inspect the codebase");
+    events
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::reasoning(""))
+        .add_chat_response(ChatResponse::message("I'll inspect it."))
+        .add_tool_call_request(ToolCallRequest::new(
+            "call_1".to_owned(),
+            "fs_list_files".to_owned(),
+            Map::from_iter([("prefixes".to_owned(), serde_json::json!(["crates"]))]),
+        ))
+        .add_tool_call_request(ToolCallRequest::new(
+            "call_2".to_owned(),
+            "fs_grep_files".to_owned(),
+            Map::from_iter([("pattern".to_owned(), "hook".into())]),
+        ))
+        .add_tool_call_response(ToolCallResponse {
+            id: "call_1".to_owned(),
+            result: Ok("files".to_owned()),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "call_2".to_owned(),
+            result: Ok("matches".to_owned()),
+        })
+        .build()?;
+
+    let messages = serde_json::to_value(convert_events(events))?;
+
+    assert_eq!(
+        messages,
+        serde_json::json!([
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "Inspect the codebase"}]
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I'll inspect it."}],
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "index": 0,
+                        "function": {
+                            "name": "fs_list_files",
+                            "arguments": "{\"prefixes\":[\"crates\"]}"
+                        }
+                    },
+                    {
+                        "id": "call_2",
+                        "index": 1,
+                        "function": {
+                            "name": "fs_grep_files",
+                            "arguments": "{\"pattern\":\"hook\"}"
+                        }
+                    }
+                ]
+            },
+            {
+                "role": "tool",
+                "content": "files",
+                "tool_call_id": "call_1"
+            },
+            {
+                "role": "tool",
+                "content": "matches",
+                "tool_call_id": "call_2"
+            }
+        ])
+    );
     Ok(())
 }
 

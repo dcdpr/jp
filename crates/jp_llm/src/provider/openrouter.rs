@@ -805,7 +805,7 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
 /// Expects a pre-filtered stream (internal events already removed by
 /// [`Thread::into_parts`]).
 fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
-    events
+    let messages = events
         .into_iter()
         .flat_map(|event| match event.event.kind {
             EventKind::ChatRequest(request) => {
@@ -857,7 +857,50 @@ fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
             // an exhaustive match.
             _ => vec![],
         })
-        .collect()
+        .collect();
+
+    coalesce_assistant_messages(messages)
+}
+
+/// Combine the separately stored parts of one assistant response.
+///
+/// Chat Completions requests require content and parallel tool calls from one
+/// model response to share one assistant message.
+/// Consecutive assistant messages can be interpreted as a trailing prefill by
+/// Anthropic-compatible endpoints.
+fn coalesce_assistant_messages(messages: Vec<RequestMessage>) -> Vec<RequestMessage> {
+    messages
+        .into_iter()
+        .fold(Vec::new(), |mut messages, message| {
+            match (messages.last_mut(), message) {
+                (
+                    Some(RequestMessage::Assistant(previous)),
+                    RequestMessage::Assistant(mut next),
+                ) => {
+                    previous.content.append(&mut next.content);
+
+                    if let Some(reasoning) = next.reasoning {
+                        previous
+                            .reasoning
+                            .get_or_insert_default()
+                            .push_str(&reasoning);
+                    }
+
+                    let first_index = previous.tool_calls.len();
+                    previous
+                        .tool_calls
+                        .extend(next.tool_calls.into_iter().enumerate().map(
+                            |(offset, mut tool_call)| {
+                                tool_call.index = first_index + offset;
+                                tool_call
+                            },
+                        ));
+                }
+                (_, message) => messages.push(message),
+            }
+
+            messages
+        })
 }
 
 impl From<jp_openrouter::Error> for StreamError {
